@@ -1,35 +1,45 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
+import { Tabs, useRouter } from 'expo-router';
+import { useEffect } from 'react';
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { GinitTabBar } from '@/components/ginit';
+import { useUserSession } from '@/src/context/UserSessionContext';
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+/*
+ * === 백업: Firebase 익명 로그인 대기 후 탭 표시 ===
+ * import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+ * import { GinitTheme } from '@/constants/ginit-theme';
+ * import { getFirebaseAuth } from '@/src/lib/firebase';
+ * import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+ * const [firebaseReady, setFirebaseReady] = useState(false);
+ * useEffect(() => { ... signInAnonymously ... onAuthStateChanged ... }, [phoneUserId]);
+ * if (!firebaseReady) return <ActivityIndicator ... />;
+ */
+
+export default function TabsLayout() {
+  const router = useRouter();
+  const { phoneUserId, isHydrated } = useUserSession();
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!phoneUserId) {
+      router.replace('/');
+    }
+  }, [isHydrated, phoneUserId, router]);
+
+  if (!isHydrated || !phoneUserId) {
+    return null;
+  }
 
   return (
     <Tabs
+      tabBar={(props) => <GinitTabBar {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarButton: HapticTab,
       }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: '홈' }} />
+      <Tabs.Screen name="map" options={{ title: '지도' }} />
+      <Tabs.Screen name="chat" options={{ title: '채팅' }} />
+      <Tabs.Screen name="profile" options={{ title: '프로필' }} />
     </Tabs>
   );
 }

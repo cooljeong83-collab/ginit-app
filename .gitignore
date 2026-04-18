@@ -30,8 +30,21 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# 환경 변수·비밀 (예시·샘플·템플릿만 커밋)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.envrc
+.direnv/
+
+# 모바일 / 클라우드 자격 증명 파일 (저장소에 포함 금지)
+**/google-services.json
+**/GoogleService-Info.plist
+**/GoogleService-Info*.plist
+**/serviceAccountKey.json
+**/credentials.json
 
 # typescript
 *.tsbuildinfo

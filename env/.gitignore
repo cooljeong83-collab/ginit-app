@@ -1,0 +1,6 @@
+# 이 디렉터리에 두는 로컬 전용 파일은 깃에 올리지 않습니다.
+google-services.json
+GoogleService-Info.plist
+.env
+.env.*
+!.env.example

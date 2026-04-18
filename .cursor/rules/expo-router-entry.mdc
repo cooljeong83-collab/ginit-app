@@ -1,0 +1,11 @@
+---
+description: Expo Router 전용 엔트리 — AppEntry/App.tsx 금지
+alwaysApply: true
+---
+
+# Expo Router 프로젝트 규칙
+
+- **`package.json`에 반드시 `"main": "expo-router/entry"`**가 있어야 한다. 이 필드가 없으면 Metro가 `expo/AppEntry.js` → `../../App` 경로로 가며 오류가 난다.
+- 루트 **`App.tsx` / `App.js` / `index.js`(registerRootComponent)** 를 두지 않는다. 화면은 전부 **`app/`** 아래 파일 기반 라우트로만 만든다.
+- 지도 등 공용 화면은 **`components/`** 등에서 import해 `app/(tabs)/…`에서 쓴다.
+- 이상 동작 시 **`npm run start:clean`** (`expo start --clear`) 후 재시도한다.
