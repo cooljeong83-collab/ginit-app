@@ -1,14 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-
-/**
- * 전역 테스트 유저 (표시용 문자열). Firestore PK 등에는 정규화된 `phoneUserId`를 씁니다.
- */
-export const HARDCODED_TEST_USER_DISPLAY = '010-1234-5678';
-
-const HARDCODED_TEST_PHONE_USER_ID = normalizePhoneUserId('01012345678') ?? '+821012345678';
-
 type UserSessionContextValue = {
   /** 정규화된 전화번호 PK (예: +821012345678) */
   phoneUserId: string | null;
@@ -45,7 +36,7 @@ const UserSessionContext = createContext<UserSessionContextValue | null>(null);
  */
 
 export function UserSessionProvider({ children }: { children: ReactNode }) {
-  const [phoneUserId, setPhoneState] = useState<string | null>(() => HARDCODED_TEST_PHONE_USER_ID);
+  const [phoneUserId, setPhoneState] = useState<string | null>(null);
   const isHydrated = true;
 
   const setPhoneUserId = useCallback(async (id: string) => {

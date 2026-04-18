@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { onAuthStateChanged, type User } from 'firebase/auth';
@@ -36,11 +36,6 @@ import { registerPhoneIfNew } from '@/src/lib/phone-registry';
  * // import { getPhoneNumber } from 'react-native-device-info';
  * // import { fetchDeviceSimPhoneNumber } from '@/src/lib/device-sim-phone';
  */
-/** 전화번호 추출 없이 고정값만 사용 */
-const HARDCODED_PHONE_DIGITS = '01012345678';
-const _hardNorm = normalizePhoneUserId(HARDCODED_PHONE_DIGITS);
-const HARDCODED_PHONE_DISPLAY = _hardNorm ? formatNormalizedPhoneKrDisplay(_hardNorm) : '010-1234-5678';
-
 const UI_LOG = '[GinitAuth:UI]';
 
 function logUi(step: string, extra?: Record<string, unknown>) {
@@ -57,10 +52,11 @@ function isGoogleSignedUser(u: User | null): boolean {
 }
 
 export default function LoginScreen() {
+  const router = useRouter();
   const { phoneUserId, isHydrated, setPhoneUserId } = useUserSession();
-  const [phoneField, setPhoneField] = useState(HARDCODED_PHONE_DISPLAY);
+  const [phoneField, setPhoneField] = useState('');
   const [simBanner] = useState<string | null>(
-    '안전 모드: 기기 번호 자동 추출을 사용하지 않습니다. 테스트용 번호는 010-1234-5678로 고정되어 있습니다.',
+    '휴대폰 번호는 회원 고유 ID로만 쓰이며, 기기에서 자동으로 읽지 않습니다.',
   );
   const [busyLogin, setBusyLogin] = useState(false);
   const [busyGoogle, setBusyGoogle] = useState(false);
@@ -94,6 +90,7 @@ export default function LoginScreen() {
       if (n) {
         void setPhoneUserId(n).then(() => {
           googlePhonePromptedForUid.current = firebaseUser.uid;
+          setPhoneField(formatNormalizedPhoneKrDisplay(n));
         });
       }
       return;
@@ -101,7 +98,7 @@ export default function LoginScreen() {
     if (!loginNormalized) return;
     googlePhonePromptedForUid.current = firebaseUser.uid;
     setGooglePhoneModal(true);
-  }, [isHydrated, firebaseUser, phoneUserId, setPhoneUserId, loginNormalized]);
+  }, [isHydrated, firebaseUser, phoneUserId, setPhoneUserId, loginNormalized, setPhoneField]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -143,6 +140,7 @@ export default function LoginScreen() {
       const { isNew } = await registerPhoneIfNew(n);
       await setPhoneUserId(n);
       logUi(isNew ? '신규 회원 등록 후 로그인' : '기존 회원 로그인', { normalized: n });
+      router.replace('/(tabs)');
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
       setLoginError(msg);
@@ -150,7 +148,7 @@ export default function LoginScreen() {
     } finally {
       setBusyLogin(false);
     }
-  }, [phoneField, setPhoneUserId]);
+  }, [phoneField, router, setPhoneUserId]);
 
   const onGoogleContinue = useCallback(async () => {
     if (!normalizePhoneUserId(phoneField)) {
@@ -183,11 +181,12 @@ export default function LoginScreen() {
       await setPhoneUserId(n);
       logUi(isNew ? '구글 연동·신규 등록' : '구글 연동·기존 로그인', { normalized: n });
       setGooglePhoneModal(false);
+      router.replace('/(tabs)');
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
       Alert.alert('오류', msg);
     }
-  }, [phoneField, setPhoneUserId]);
+  }, [phoneField, router, setPhoneUserId]);
 
   const onCancelGooglePhone = useCallback(async () => {
     setGooglePhoneModal(false);
@@ -208,9 +207,10 @@ export default function LoginScreen() {
     );
   }
 
-  if (isHydrated && phoneUserId) {
-    return <Redirect href="/(tabs)" />;
-  }
+  // 테스트용 자동 탭 진입 비활성화 — `로그인 / 시작하기` 또는 구글 확인 후 `router.replace`만 사용합니다.
+  // if (isHydrated && phoneUserId) {
+  //   return <Redirect href="/(tabs)" />;
+  // }
 
   return (
     <View style={GinitStyles.screenRoot}>
@@ -219,7 +219,12 @@ export default function LoginScreen() {
         <View style={[StyleSheet.absoluteFill, GinitStyles.webVeil]} />
       ) : (
         <>
-          <BlurView pointerEvents="none" intensity={GinitTheme.glassModal.blurIntensity} tint="light" style={StyleSheet.absoluteFill} />
+          <BlurView
+            pointerEvents="none"
+            intensity={GinitTheme.blur.intensity}
+            tint="light"
+            style={StyleSheet.absoluteFill}
+          />
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, GinitStyles.frostVeil]} />
         </>
       )}
@@ -237,14 +242,13 @@ export default function LoginScreen() {
               ) : null}
 
               <Text style={styles.cardLabel}>전화번호</Text>
-              <Text style={styles.cardHint}>테스트용 기본값이 채워져 있습니다. 필요 시 번호를 바꿔 주세요.</Text>
+              <Text style={styles.cardHint}>하이픈 없이 입력해도 됩니다. 입력 후 아래에서 시작해 주세요.</Text>
               <TextInput
                 value={phoneField}
                 onChangeText={setPhoneField}
                 placeholder="010-1234-5678"
                 placeholderTextColor={GinitPlaceholderColor}
                 style={styles.phoneInput}
-                editable={true}
                 selectTextOnFocus={true}
                 keyboardType="phone-pad"
                 autoCapitalize="none"
@@ -348,15 +352,16 @@ const styles = StyleSheet.create({
   },
   glassCard: {
     borderRadius: GinitTheme.radius.card,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: 'rgba(255, 255, 255, 0.46)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.45)',
+    borderColor: 'rgba(255, 255, 255, 0.52)',
+    borderTopColor: 'rgba(255, 255, 255, 0.72)',
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
-    shadowRadius: 22,
-    elevation: 12,
+    shadowColor: '#0b1426',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.3,
+    shadowRadius: 28,
+    elevation: 18,
   },
   loadingText: {
     marginTop: 14,
@@ -432,21 +437,21 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   phoneInput: {
-    borderRadius: 14,
+    borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 17,
     fontWeight: '700',
     color: '#0f172a',
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    elevation: 8,
+    shadowColor: '#0b1426',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.26,
+    shadowRadius: 18,
+    elevation: 12,
   },
   phoneInputReadonly: {
     opacity: 0.95,
@@ -509,16 +514,17 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalCard: {
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: GinitTheme.radius.card,
+    backgroundColor: 'rgba(255, 255, 255, 0.52)',
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.25,
-    shadowRadius: 24,
-    elevation: 16,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    borderTopColor: 'rgba(255, 255, 255, 0.75)',
+    shadowColor: '#0b1426',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.32,
+    shadowRadius: 30,
+    elevation: 20,
   },
   modalTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
   modalBody: { fontSize: 14, fontWeight: '600', color: '#475569', lineHeight: 20, marginBottom: 14 },
