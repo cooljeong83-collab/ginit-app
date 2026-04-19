@@ -234,12 +234,10 @@ export type MovieSearchProps = {
   onChange: (next: SelectedMovieExtra[]) => void;
   /** 후보를 하나 추가했을 때 */
   onSelect?: (movie: SelectedMovieExtra) => void;
-  /** 후보가 1개 이상일 때 하단 주황 버튼(다음 단계) */
-  onContinue?: () => void;
   disabled?: boolean;
 };
 
-export function MovieSearch({ value, onChange, onSelect, onContinue, disabled }: MovieSearchProps) {
+export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearchProps) {
   const [query, setQuery] = useState('');
   const [addingMore, setAddingMore] = useState(false);
   const [pretendardFamily, setPretendardFamily] = useState<string | undefined>(undefined);
@@ -544,20 +542,6 @@ export function MovieSearch({ value, onChange, onSelect, onContinue, disabled }:
           {searchHeader}
           {listScroll}
         </View>
-      ) : null}
-
-      {onContinue && value.length >= 1 ? (
-        <Pressable
-          onPress={onContinue}
-          disabled={disabled}
-          style={({ pressed }) => [
-            S.movieProceedOrangeBtn,
-            pressed && S.movieProceedOrangeBtnPressed,
-            disabled && { opacity: 0.45 },
-          ]}
-          accessibilityRole="button">
-          <Text style={S.movieProceedOrangeBtnLabel}>이 후보들로 모임 만들기</Text>
-        </Pressable>
       ) : null}
     </View>
   );

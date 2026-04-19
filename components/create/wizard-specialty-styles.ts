@@ -454,30 +454,6 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     fontWeight: '800',
     color: 'rgba(191, 219, 254, 0.98)',
   },
-  movieProceedOrangeBtn: {
-    marginTop: 18,
-    paddingVertical: 15,
-    paddingHorizontal: 18,
-    borderRadius: 14,
-    backgroundColor: ENERGETIC_ORANGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.22)',
-    shadowColor: ENERGETIC_ORANGE,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  movieProceedOrangeBtnPressed: {
-    opacity: 0.92,
-  },
-  movieProceedOrangeBtnLabel: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#0f172a',
-  },
 });
 
 /**

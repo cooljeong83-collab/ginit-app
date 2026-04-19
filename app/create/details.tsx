@@ -1524,7 +1524,6 @@ export default function CreateDetailsScreen() {
                       <MovieSearch
                         value={movieCandidates}
                         onChange={setMovieCandidates}
-                        onContinue={onStep2SpecialtyNext}
                         disabled={busy}
                       />
                     ) : null}
@@ -1535,12 +1534,28 @@ export default function CreateDetailsScreen() {
                       <IntensityPicker value={sportIntensity} onChange={setSportIntensity} disabled={busy} />
                     ) : null}
                   </VoteCandidateCard>
-                  {currentStep === 2 && specialtyKind !== 'movie' ? (
+                  {currentStep === 2 ? (
                     <Pressable
                       onPress={onStep2SpecialtyNext}
-                      style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                      disabled={
+                        busy ||
+                        (specialtyKind === 'movie' && movieCandidates.length === 0)
+                      }
+                      style={({ pressed }) => [
+                        styles.wizardPrimaryBtn,
+                        specialtyKind === 'movie' &&
+                          movieCandidates.length === 0 &&
+                          styles.addCandidateBtnDisabled,
+                        pressed &&
+                          !(specialtyKind === 'movie' && movieCandidates.length === 0) &&
+                          styles.addCandidateBtnPressed,
+                      ]}
                       accessibilityRole="button">
-                      <Text style={styles.wizardPrimaryBtnLabel}>확인 · 기본 정보</Text>
+                      <Text style={styles.wizardPrimaryBtnLabel}>
+                        {specialtyKind === 'movie'
+                          ? '이 후보들로 모임 만들기'
+                          : '확인 · 기본 정보'}
+                      </Text>
                     </Pressable>
                   ) : null}
                 </View>
