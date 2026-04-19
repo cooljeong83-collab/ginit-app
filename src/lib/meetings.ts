@@ -15,12 +15,15 @@
  */
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   doc,
   getDoc,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   Timestamp,
   updateDoc,
@@ -31,8 +34,24 @@ import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './f
 import { getFirebaseFirestore } from './firebase';
 import type { MeetingExtraData } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
+import { normalizePhoneUserId } from './phone-user-id';
 
 export const MEETINGS_COLLECTION = 'meetings';
+
+/** 후보별 누적 투표 수(칩 id 키). 참여 시 선택한 항목마다 +1 */
+export type MeetingVoteTallies = {
+  dates?: Record<string, number>;
+  places?: Record<string, number>;
+  movies?: Record<string, number>;
+};
+
+/** 참여자별 마지막으로 반영된 투표(칩 id). 탈퇴·수정 시 집계에 사용 */
+export type ParticipantVoteSnapshot = {
+  userId: string;
+  dateChipIds: string[];
+  placeChipIds: string[];
+  movieChipIds: string[];
+};
 
 export type Meeting = {
   id: string;
@@ -68,6 +87,10 @@ export type Meeting = {
     latitude: number;
     longitude: number;
   }> | null;
+  /** 참여 확정 사용자 전화 PK(정규화). 주선자는 모임 생성 시 포함하는 것을 권장 */
+  participantIds?: string[] | null;
+  voteTallies?: MeetingVoteTallies | null;
+  participantVoteLog?: ParticipantVoteSnapshot[] | null;
 };
 
 export function getFirestoreDb() {
@@ -113,6 +136,91 @@ export function parseScheduleToTimestamp(dateStr: string, timeStr: string): Time
   return Timestamp.fromDate(dt);
 }
 
+function parseVoteIntMap(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n =
+      typeof v === 'number' && Number.isFinite(v)
+        ? Math.trunc(v)
+        : typeof v === 'string'
+          ? Number.parseInt(v, 10)
+          : NaN;
+    if (!Number.isFinite(n) || n < 0) continue;
+    out[k] = Math.min(n, 1_000_000);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function parseVoteTalliesField(data: Record<string, unknown>): MeetingVoteTallies | null {
+  const vt = data.voteTallies;
+  if (!vt || typeof vt !== 'object' || Array.isArray(vt)) return null;
+  const o = vt as Record<string, unknown>;
+  const dates = parseVoteIntMap(o.dates);
+  const places = parseVoteIntMap(o.places);
+  const movies = parseVoteIntMap(o.movies);
+  if (!dates && !places && !movies) return null;
+  return { dates, places, movies };
+}
+
+function mergeTallyIncrement(
+  prev: Record<string, number> | undefined,
+  ids: readonly string[],
+): Record<string, number> {
+  const out: Record<string, number> = { ...(prev ?? {}) };
+  for (const raw of ids) {
+    const k = raw.trim();
+    if (!k) continue;
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
+
+function mergeTallyDecrement(
+  prev: Record<string, number> | undefined,
+  ids: readonly string[],
+): Record<string, number> {
+  const out: Record<string, number> = { ...(prev ?? {}) };
+  for (const raw of ids) {
+    const k = raw.trim();
+    if (!k) continue;
+    const n = (out[k] ?? 0) - 1;
+    if (n <= 0) delete out[k];
+    else out[k] = n;
+  }
+  return out;
+}
+
+function parseParticipantVoteLog(data: Record<string, unknown>): ParticipantVoteSnapshot[] {
+  const raw = data.participantVoteLog;
+  if (!Array.isArray(raw)) return [];
+  const out: ParticipantVoteSnapshot[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const o = row as Record<string, unknown>;
+    const userId = typeof o.userId === 'string' ? o.userId.trim() : '';
+    if (!userId) continue;
+    const dateChipIds = Array.isArray(o.dateChipIds)
+      ? (o.dateChipIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      : [];
+    const placeChipIds = Array.isArray(o.placeChipIds)
+      ? (o.placeChipIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      : [];
+    const movieChipIds = Array.isArray(o.movieChipIds)
+      ? (o.movieChipIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      : [];
+    out.push({ userId, dateChipIds, placeChipIds, movieChipIds });
+  }
+  return out;
+}
+
+/** 내 투표 스냅샷(없으면 null — 구 데이터 등) */
+export function getParticipantVoteSnapshot(meeting: Meeting, phoneUserId: string): ParticipantVoteSnapshot | null {
+  const ns = normalizePhoneUserId(phoneUserId.trim()) ?? phoneUserId.trim();
+  const log = meeting.participantVoteLog ?? [];
+  return log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === ns) ?? null;
+}
+
 function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
   return {
     id,
@@ -142,6 +250,11 @@ function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meet
     placeCandidates: Array.isArray(data.placeCandidates)
       ? (data.placeCandidates as Meeting['placeCandidates'])
       : null,
+    participantIds: Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      : null,
+    voteTallies: parseVoteTalliesField(data),
+    participantVoteLog: parseParticipantVoteLog(data),
   };
 }
 
@@ -153,6 +266,33 @@ export async function getMeetingById(meetingId: string): Promise<Meeting | null>
   return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
 }
 
+/** 단일 모임 문서 실시간 구독(참여자 목록 갱신 등) */
+export function subscribeMeetingById(
+  meetingId: string,
+  onMeeting: (meeting: Meeting | null) => void,
+  onError?: (message: string) => void,
+): Unsubscribe {
+  const id = meetingId.trim();
+  if (!id) {
+    onMeeting(null);
+    return () => {};
+  }
+  const dRef = doc(getFirestoreDb(), MEETINGS_COLLECTION, id);
+  return onSnapshot(
+    dRef,
+    (snap) => {
+      if (!snap.exists()) {
+        onMeeting(null);
+        return;
+      }
+      onMeeting(mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>));
+    },
+    (err) => {
+      onError?.(err.message ?? 'Firestore 구독 오류');
+    },
+  );
+}
+
 /** 일시 후보만 갱신 (상세 화면 날짜 제안 등) */
 export async function updateMeetingDateCandidates(
   meetingId: string,
@@ -162,6 +302,175 @@ export async function updateMeetingDateCandidates(
   if (!id) return;
   await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
     dateCandidates: dateCandidates.length ? stripUndefinedDeep(dateCandidates) : null,
+  });
+}
+
+type PlaceCandidateDoc = NonNullable<Meeting['placeCandidates']>[number];
+
+/** 장소 후보만 갱신 (상세 화면 장소 제안 등) */
+export async function updateMeetingPlaceCandidates(
+  meetingId: string,
+  placeCandidates: PlaceCandidateDoc[],
+): Promise<void> {
+  const id = meetingId.trim();
+  if (!id) return;
+  await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
+    placeCandidates: placeCandidates.length ? stripUndefinedDeep(placeCandidates) : null,
+  });
+}
+
+/**
+ * 참여자 추가 + 선택한 투표 항목마다 득표 +1 (한 트랜잭션).
+ * 이미 동일 사용자가 참여 목록에 있으면 아무 것도 하지 않습니다.
+ */
+export async function joinMeeting(
+  meetingId: string,
+  phoneUserId: string,
+  votes: { dateChipIds: readonly string[]; placeChipIds: readonly string[]; movieChipIds: readonly string[] },
+): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = phoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const nsUid = normalizePhoneUserId(uid) ?? uid;
+
+  await runTransaction(getFirestoreDb(), async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+    const data = snap.data() as Record<string, unknown>;
+    const rawList = Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    const inList = rawList.some((x) => (normalizePhoneUserId(x) ?? x.trim()) === nsUid);
+    if (inList) {
+      return;
+    }
+    const prev = parseVoteTalliesField(data) ?? {};
+    const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
+    const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
+    const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
+
+    const log = parseParticipantVoteLog(data);
+    const filtered = log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid);
+    const nextLog: ParticipantVoteSnapshot[] = [
+      ...filtered,
+      {
+        userId: nsUid,
+        dateChipIds: [...votes.dateChipIds],
+        placeChipIds: [...votes.placeChipIds],
+        movieChipIds: [...votes.movieChipIds],
+      },
+    ];
+
+    transaction.update(ref, {
+      participantIds: arrayUnion(nsUid),
+      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+      participantVoteLog: stripUndefinedDeep(nextLog),
+    });
+  });
+}
+
+/** 참여자가 투표를 바꿀 때 집계·이력 갱신 */
+export async function updateParticipantVotes(
+  meetingId: string,
+  phoneUserId: string,
+  votes: { dateChipIds: readonly string[]; placeChipIds: readonly string[]; movieChipIds: readonly string[] },
+): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = phoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+
+  await runTransaction(getFirestoreDb(), async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+    const data = snap.data() as Record<string, unknown>;
+    const rawList = Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    const inList = rawList.some((x) => (normalizePhoneUserId(x) ?? x.trim()) === nsUid);
+    if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
+
+    const log = parseParticipantVoteLog(data);
+    const old = log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === nsUid);
+    if (!old) {
+      throw new Error(
+        '이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 아래 탈퇴 후 다시 참여해 주세요.',
+      );
+    }
+    const oldD = old.dateChipIds;
+    const oldP = old.placeChipIds;
+    const oldM = old.movieChipIds;
+
+    const vt = parseVoteTalliesField(data) ?? {};
+    let dates = mergeTallyDecrement({ ...vt.dates }, oldD);
+    let places = mergeTallyDecrement({ ...vt.places }, oldP);
+    let movies = mergeTallyDecrement({ ...vt.movies }, oldM);
+    dates = mergeTallyIncrement(dates, votes.dateChipIds);
+    places = mergeTallyIncrement(places, votes.placeChipIds);
+    movies = mergeTallyIncrement(movies, votes.movieChipIds);
+
+    const nextLog: ParticipantVoteSnapshot[] = [
+      ...log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid),
+      {
+        userId: nsUid,
+        dateChipIds: [...votes.dateChipIds],
+        placeChipIds: [...votes.placeChipIds],
+        movieChipIds: [...votes.movieChipIds],
+      },
+    ];
+
+    transaction.update(ref, {
+      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+      participantVoteLog: stripUndefinedDeep(nextLog),
+    });
+  });
+}
+
+/** 참여 취소: 참여자 제거 + 해당 사용자 투표 집계 롤백 */
+export async function leaveMeeting(meetingId: string, phoneUserId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = phoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+
+  await runTransaction(getFirestoreDb(), async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+    const data = snap.data() as Record<string, unknown>;
+    const rawList = Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    let removeToken: string | null = null;
+    for (const x of rawList) {
+      if ((normalizePhoneUserId(x) ?? x.trim()) === nsUid) {
+        removeToken = x;
+        break;
+      }
+    }
+
+    const log = parseParticipantVoteLog(data);
+    const old = log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === nsUid);
+    const oldD = old?.dateChipIds ?? [];
+    const oldP = old?.placeChipIds ?? [];
+    const oldM = old?.movieChipIds ?? [];
+
+    const vt = parseVoteTalliesField(data) ?? {};
+    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+    const nextLog = log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid);
+
+    const patch: Record<string, unknown> = {
+      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
+    };
+    if (removeToken) {
+      patch.participantIds = arrayRemove(removeToken);
+    }
+    transaction.update(ref, patch);
   });
 }
 
@@ -201,6 +510,7 @@ export async function addMeeting(input: CreateMeetingInput): Promise<void> {
       : null,
     dateCandidates: input.dateCandidates?.length ? stripUndefinedDeep(input.dateCandidates) : null,
     extraData: input.extraData != null ? stripUndefinedDeep(input.extraData) : null,
+    participantIds: input.createdBy?.trim() ? [input.createdBy.trim()] : [],
   };
 
   const cleaned = stripUndefinedDeep(docFields) as Record<string, unknown>;

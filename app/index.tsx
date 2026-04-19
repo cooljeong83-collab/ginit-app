@@ -30,6 +30,7 @@ import {
 } from '@/src/lib/google-sign-in';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { registerPhoneIfNew } from '@/src/lib/phone-registry';
+import { ensureUserProfile } from '@/src/lib/user-profile';
 
 /**
  * 안전 모드: `react-native-device-info` / SIM 자동 추출은 사용하지 않습니다.
@@ -88,9 +89,14 @@ export default function LoginScreen() {
     if (linked) {
       const n = normalizePhoneUserId(linked);
       if (n) {
-        void setPhoneUserId(n).then(() => {
+        void setPhoneUserId(n).then(async () => {
           googlePhonePromptedForUid.current = firebaseUser.uid;
           setPhoneField(formatNormalizedPhoneKrDisplay(n));
+          try {
+            await ensureUserProfile(n);
+          } catch {
+            /* Firestore 미설정 등 */
+          }
         });
       }
       return;
@@ -139,6 +145,7 @@ export default function LoginScreen() {
     try {
       const { isNew } = await registerPhoneIfNew(n);
       await setPhoneUserId(n);
+      await ensureUserProfile(n);
       logUi(isNew ? '신규 회원 등록 후 로그인' : '기존 회원 로그인', { normalized: n });
       router.replace('/(tabs)');
     } catch (e) {
@@ -179,6 +186,7 @@ export default function LoginScreen() {
     try {
       const { isNew } = await registerPhoneIfNew(n);
       await setPhoneUserId(n);
+      await ensureUserProfile(n);
       logUi(isNew ? '구글 연동·신규 등록' : '구글 연동·기존 로그인', { normalized: n });
       setGooglePhoneModal(false);
       router.replace('/(tabs)');

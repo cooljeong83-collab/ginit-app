@@ -318,6 +318,8 @@ export type VoteCandidatesFormHandle = {
   ensurePlacesForWizardFinalize: () => void;
   /** 일정 확정 시점의 일시·장소를 부모 상태와 동기화하기 위해 스냅샷(장소 없으면 플레이스홀더 포함) */
   captureWizardPayloadAfterSchedule: () => VoteCandidatesBuildResult;
+  /** 모임 상세「장소 제안」등 — 채워진 장소 행만 검증·스냅샷 (`dateCandidates`는 빈 배열) */
+  capturePlaceCandidatesOnly: () => VoteCandidatesBuildResult;
   /** 스냅샷을 폼 내부 상태에 반영 — 리마운트 없이 buildPayload와 일치시킴 */
   applyCapturedPayload: (p: VoteCandidatesPayload) => void;
 };
@@ -533,6 +535,24 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         }
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
+      },
+      capturePlaceCandidatesOnly: (): VoteCandidatesBuildResult => {
+        const rows = placeCandidatesRef.current;
+        const filledPlaces = rows.filter(isFilled);
+        if (filledPlaces.length === 0) {
+          return { ok: false, error: '장소 후보를 한 곳 이상 장소 선택 화면에서 골라 주세요.' };
+        }
+        const placeCandidatesOut = filledPlaces.map(
+          (r) =>
+            stripUndefinedDeep({
+              id: r.id,
+              placeName: r.placeName.trim(),
+              address: r.address.trim(),
+              latitude: Number(r.latitude),
+              longitude: Number(r.longitude),
+            }) as PlaceCandidate,
+        );
+        return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: [] } };
       },
       applyCapturedPayload: (p: VoteCandidatesPayload) => {
         const next = buildInitialEditorState(p, seedQ, seedDate, seedTime);
