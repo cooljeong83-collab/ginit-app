@@ -24,6 +24,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 
+import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
 import { getFirebaseFirestore } from './firebase';
 import type { MeetingExtraData } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
@@ -103,27 +104,47 @@ export function parseScheduleToTimestamp(dateStr: string, timeStr: string): Time
 export async function addMeeting(input: CreateMeetingInput): Promise<void> {
   const scheduledAt = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
-  await addDoc(ref, {
+
+  const capacity = toFiniteInt(input.capacity, 1);
+  const minParticipants =
+    input.minParticipants === undefined || input.minParticipants === null
+      ? null
+      : toFiniteInt(input.minParticipants, 1);
+
+  const lat = Number(input.latitude);
+  const lng = Number(input.longitude);
+
+  const docFields: Record<string, unknown> = {
     title: input.title.trim(),
     location: input.location.trim(),
     placeName: input.placeName.trim(),
     address: input.address.trim(),
-    latitude: input.latitude,
-    longitude: input.longitude,
+    latitude: Number.isFinite(lat) ? lat : 0,
+    longitude: Number.isFinite(lng) ? lng : 0,
     description: input.description.trim(),
-    capacity: input.capacity,
-    minParticipants: input.minParticipants ?? null,
-    createdBy: input.createdBy,
-    imageUrl: input.imageUrl?.trim() || null,
-    categoryId: input.categoryId,
+    capacity,
+    minParticipants,
+    createdBy: input.createdBy?.trim() ? input.createdBy.trim() : null,
+    imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+    categoryId: String(input.categoryId),
     categoryLabel: input.categoryLabel.trim(),
-    isPublic: input.isPublic,
+    isPublic: Boolean(input.isPublic),
     scheduleDate: input.scheduleDate.trim(),
     scheduleTime: input.scheduleTime.trim(),
-    scheduledAt,
-    placeCandidates: input.placeCandidates?.length ? input.placeCandidates : null,
-    dateCandidates: input.dateCandidates?.length ? input.dateCandidates : null,
-    extraData: input.extraData ?? null,
+    scheduledAt: scheduledAt ?? null,
+    placeCandidates: input.placeCandidates?.length
+      ? stripUndefinedDeep(input.placeCandidates)
+      : null,
+    dateCandidates: input.dateCandidates?.length ? stripUndefinedDeep(input.dateCandidates) : null,
+    extraData: input.extraData != null ? stripUndefinedDeep(input.extraData) : null,
+  };
+
+  const cleaned = stripUndefinedDeep(docFields) as Record<string, unknown>;
+
+  console.log('Final Firestore Payload:', toJsonSafeFirestorePreview({ ...cleaned, createdAt: '[serverTimestamp]' }));
+
+  await addDoc(ref, {
+    ...cleaned,
     createdAt: serverTimestamp(),
   });
 }

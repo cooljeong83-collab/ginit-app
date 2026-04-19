@@ -28,6 +28,19 @@ export type MeetingExtraData = {
   sportIntensity?: SportIntensityLevel | null;
 };
 
+/** Firestore에 undefined가 들어가지 않도록 영화 후보만 정제 */
+function sanitizeMovieForFirestore(m: SelectedMovieExtra): SelectedMovieExtra {
+  const id = String(m.id ?? '').trim() || 'movie';
+  const title = String(m.title ?? '').trim() || '제목 미정';
+  const out: SelectedMovieExtra = { id, title };
+  if (m.year != null && String(m.year).trim() !== '') out.year = String(m.year).trim();
+  if (m.info != null && String(m.info).trim() !== '') out.info = String(m.info).trim();
+  if (m.posterUrl != null && String(m.posterUrl).trim() !== '') out.posterUrl = String(m.posterUrl).trim();
+  if (m.rating != null && String(m.rating).trim() !== '') out.rating = String(m.rating).trim();
+  if (m.kobisRank != null && String(m.kobisRank).trim() !== '') out.kobisRank = String(m.kobisRank).trim();
+  return out;
+}
+
 export function buildMeetingExtraData(params: {
   kind: SpecialtyKind;
   /** 영화 카테고리일 때 후보 목록(순서 유지) */
@@ -37,16 +50,17 @@ export function buildMeetingExtraData(params: {
 }): MeetingExtraData {
   const { kind, movies, menuPreferences, sportIntensity } = params;
   if (kind === 'movie') {
-    const list = movies?.filter(Boolean) ?? [];
+    const raw = movies?.filter((x) => x != null && String(x.id ?? '').trim() !== '') ?? [];
+    const list = raw.map(sanitizeMovieForFirestore);
     const first = list[0] ?? null;
     return {
       specialtyKind: 'movie',
       movie: first,
-      movies: list.length ? [...list] : null,
+      movies: list.length > 0 ? list : null,
     };
   }
   if (kind === 'food') {
     return { specialtyKind: 'food', menuPreferences: menuPreferences.length ? [...menuPreferences] : null };
   }
-  return { specialtyKind: 'sports', sportIntensity };
+  return { specialtyKind: 'sports', sportIntensity: sportIntensity ?? 'normal' };
 }

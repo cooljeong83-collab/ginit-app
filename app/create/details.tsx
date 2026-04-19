@@ -1,7 +1,8 @@
 /**
  * 모임 등록 — `/create/details`: `currentStep >= n`으로 이전 단계 카드도 유지(한눈에 수정 가능).
  * 확인 버튼만 해당 단계 `currentStep === n`일 때 표시. 카테고리 변경 시 Step 1로 리셋·하위 카드 제거.
- * 1→2(특화 있을 때만)→3→4(일정)→5(장소)→6(상세·등록). 특화 없으면 1→3.
+ * 일정 확정(`scheduleStep`) 직후 장소 후보 단계 UI는 건너뛰고 상세·등록(`detailStep`)으로 이동.
+ * 단계 번호(표시): 영화 1→2→3→4(선행 장소)→5(일정)→7(상세). 비영화 1→2→3→4(일정)→6(상세).
  */
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
@@ -34,9 +35,10 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DateCandidateEditorCard, type DatePickerField } from '@/app/create/DateCandidateEditorCard';
+import { EarlyPlaceSearch } from '@/components/create/EarlyPlaceSearch';
 import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { IntensityPicker } from '@/components/create/IntensityPicker';
@@ -54,6 +56,7 @@ import {
   primaryScheduleFromDateCandidate,
   validateDateCandidate,
 } from '@/src/lib/date-candidate';
+import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
 import {
   buildMeetingExtraData,
   type SelectedMovieExtra,
@@ -66,10 +69,12 @@ import {
   consumePendingVotePlaceRow,
   setPendingVoteCandidates,
 } from '@/src/lib/meeting-place-bridge';
-import { generateSuggestedMeetingTitles } from '@/src/lib/meeting-title-suggestion';
+import {
+  generateAiMeetingDescription,
+  generateSuggestedMeetingTitles,
+} from '@/src/lib/meeting-title-suggestion';
 import { addMeeting } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { suggestPlaceSearchQueryFromCategory } from '@/src/lib/place-search-suggestion';
 
 /** 스펙: Trust Blue */
 const TRUST_BLUE = '#0052CC';
@@ -77,6 +82,9 @@ const TRUST_BLUE = '#0052CC';
 const SCREEN_BG = '#0F172A';
 /** 스펙: 플레이스홀더 */
 const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
+
+const FINAL_DESCRIPTION_PLACEHOLDER =
+  '영화 보고 나서 간단히 맥주 한 잔 하실 분? 지닛이 조율을 도와드릴게요!';
 
 /** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
 function animate() {
@@ -287,6 +295,8 @@ export type VoteCandidatesFormProps = {
   onPlacesBlockLayout?: (e: LayoutChangeEvent) => void;
   /** `wizardSegment`가 `places`일 때 장소 섹션 맨 위에 삽입(예: 단계 배지) */
   headerBeforePlaces?: ReactNode;
+  /** true면 일정 카드 목록만 표시(자연어 입력·일정 후보 추가 버튼 숨김) — 상세 단계에서 확정 목록 유지용 */
+  scheduleListOnly?: boolean;
 };
 
 export type VoteCandidatesBuildResult =
@@ -301,6 +311,14 @@ export type VoteCandidatesFormHandle = {
   validatePlacesStep: () => VoteCandidatesGateResult;
   /** 첫 장소 행에 검색어를 넣고 장소 검색 화면을 열어 자동 검색·포커스 */
   openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => void;
+  /** 장소 검색 대기 행·모달 등 파생 UI 정리 */
+  resetPlaceSearchSession: () => void;
+  /** 장소 후보가 비어 있으면 등록 가능한 플레이스홀더 1행 삽입(일정 확정 후 장소 단계 생략 시) */
+  ensurePlacesForWizardFinalize: () => void;
+  /** 일정 확정 시점의 일시·장소를 부모 상태와 동기화하기 위해 스냅샷(장소 없으면 플레이스홀더 포함) */
+  captureWizardPayloadAfterSchedule: () => VoteCandidatesBuildResult;
+  /** 스냅샷을 폼 내부 상태에 반영 — 리마운트 없이 buildPayload와 일치시킴 */
+  applyCapturedPayload: (p: VoteCandidatesPayload) => void;
 };
 
 export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandidatesFormProps>(function VoteCandidatesForm(
@@ -314,6 +332,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     wizardSegment = 'both',
     onPlacesBlockLayout,
     headerBeforePlaces,
+    scheduleListOnly = false,
   },
   ref,
 ) {
@@ -432,14 +451,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           const err = validateDateCandidate(dates[i], i);
           if (err) return { ok: false, error: err };
         }
-        const placeCandidatesOut: PlaceCandidate[] = filledPlaces.map((r) => ({
-          id: r.id,
-          placeName: r.placeName.trim(),
-          address: r.address.trim(),
-          latitude: r.latitude as number,
-          longitude: r.longitude as number,
-        }));
-        const dateCandidatesOut = dates.map((d) => ({ ...d }));
+        const placeCandidatesOut = filledPlaces.map(
+          (r) =>
+            stripUndefinedDeep({
+              id: r.id,
+              placeName: r.placeName.trim(),
+              address: r.address.trim(),
+              latitude: Number(r.latitude),
+              longitude: Number(r.longitude),
+            }) as PlaceCandidate,
+        );
+        const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
       },
       openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => {
@@ -461,8 +483,62 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           });
         });
       },
+      resetPlaceSearchSession: () => {
+        pendingEphemeralPlaceRowIdRef.current = null;
+        setPicker(null);
+      },
+      ensurePlacesForWizardFinalize: () => {
+        const rows = placeCandidatesRef.current;
+        if (rows.some(isFilled)) return;
+        const p: PlaceCandidate = {
+          id: newId('place'),
+          placeName: '장소 미정',
+          address: '모임 장소는 일정·장소 조율에서 정할 수 있어요.',
+          latitude: 37.5665,
+          longitude: 126.978,
+        };
+        setPlaceCandidates([placeRowFromCandidate(p)]);
+      },
+      captureWizardPayloadAfterSchedule: (): VoteCandidatesBuildResult => {
+        const dates = dateCandidatesRef.current;
+        for (let i = 0; i < dates.length; i += 1) {
+          const err = validateDateCandidate(dates[i], i);
+          if (err) return { ok: false, error: err };
+        }
+        const filled = placeCandidatesRef.current.filter(isFilled);
+        let placeCandidatesOut: PlaceCandidate[];
+        if (filled.length === 0) {
+          placeCandidatesOut = [
+            {
+              id: newId('place'),
+              placeName: '장소 미정',
+              address: '모임 장소는 일정·장소 조율에서 정할 수 있어요.',
+              latitude: 37.5665,
+              longitude: 126.978,
+            },
+          ];
+        } else {
+          placeCandidatesOut = filled.map(
+            (r) =>
+              stripUndefinedDeep({
+                id: r.id,
+                placeName: r.placeName.trim(),
+                address: r.address.trim(),
+                latitude: Number(r.latitude),
+                longitude: Number(r.longitude),
+              }) as PlaceCandidate,
+          );
+        }
+        const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
+        return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
+      },
+      applyCapturedPayload: (p: VoteCandidatesPayload) => {
+        const next = buildInitialEditorState(p, seedQ, seedDate, seedTime);
+        setPlaceCandidates(next.placeCandidates);
+        setDateCandidates(next.dateCandidates);
+      },
     }),
-    [router],
+    [router, seedQ, seedDate, seedTime],
   );
 
   const openPlaceSearch = useCallback(
@@ -614,36 +690,42 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>일시 후보</Text>
       </View>
-      <Text style={styles.sectionHint}>날짜·시간 후보를 추가하고 투표에서 고를 수 있어요.</Text>
+      <Text style={styles.sectionHint}>
+        {scheduleListOnly
+          ? '확정한 일시 후보예요. 필요하면 카드를 펼쳐 내용을 바꿀 수 있어요.'
+          : '날짜·시간 후보를 추가하고 투표에서 고를 수 있어요.'}
+      </Text>
 
-      <View style={styles.nlpSection}>
-        <Text style={styles.nlpLabel}>[말로 입력하세요]</Text>
-        <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffects} outerStyle={styles.nlpGlassOuter}>
-          <View style={styles.nlpGlassInner}>
-            <TextInput
-              value={nlpScheduleInput}
-              onChangeText={setNlpScheduleInput}
-              placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
-              placeholderTextColor={INPUT_PLACEHOLDER}
-              style={styles.nlpTextInput}
-              multiline={false}
-              returnKeyType="done"
-              autoCapitalize="none"
-              autoCorrect={false}
-              underlineColorAndroid="transparent"
-            />
-          </View>
-        </VoteCandidateCard>
-        {nlpParsed ? (
-          <Pressable
-            onPress={applyNlpSuggestion}
-            style={({ pressed }) => [styles.nlpChip, pressed && styles.nlpChipPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="자연어 일정 후보로 등록">
-            <Text style={styles.nlpChipText}>📅 {nlpParsed.summary} 등록하기</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      {!scheduleListOnly ? (
+        <View style={styles.nlpSection}>
+          <Text style={styles.nlpLabel}>[말로 입력하세요]</Text>
+          <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffects} outerStyle={styles.nlpGlassOuter}>
+            <View style={styles.nlpGlassInner}>
+              <TextInput
+                value={nlpScheduleInput}
+                onChangeText={setNlpScheduleInput}
+                placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                style={styles.nlpTextInput}
+                multiline={false}
+                returnKeyType="done"
+                autoCapitalize="none"
+                autoCorrect={false}
+                underlineColorAndroid="transparent"
+              />
+            </View>
+          </VoteCandidateCard>
+          {nlpParsed ? (
+            <Pressable
+              onPress={applyNlpSuggestion}
+              style={({ pressed }) => [styles.nlpChip, pressed && styles.nlpChipPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="자연어 일정 후보로 등록">
+              <Text style={styles.nlpChipText}>📅 {nlpParsed.summary} 등록하기</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       {dateCandidates.map((d, dateIndex) => (
         <DateCandidateEditorCard
@@ -655,7 +737,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             animate();
             setDateDetailExpanded((prev) => ({ ...prev, [d.id]: !prev[d.id] }));
           }}
-          canDelete={dateCandidates.length > 1}
+          canDelete={!scheduleListOnly && dateCandidates.length > 1}
           onRemove={() => removeDateRow(d.id)}
           onPatch={(patch) => updateDateRow(d.id, patch)}
           reduceHeavyEffects={reduceHeavyEffects}
@@ -664,9 +746,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         />
       ))}
 
-      <Pressable onPress={addDateRow} style={styles.addCandidateBtn} accessibilityRole="button">
-        <Text style={styles.addCandidateBtnLabel}>+ 일정 후보 추가</Text>
-      </Pressable>
+      {!scheduleListOnly ? (
+        <Pressable onPress={addDateRow} style={styles.addCandidateBtn} accessibilityRole="button">
+          <Text style={styles.addCandidateBtnLabel}>+ 일정 후보 추가</Text>
+        </Pressable>
+      ) : null}
     </>
   );
 
@@ -819,7 +903,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   );
 });
 
-type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
+type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const AI_TEMPLATES: { title: string; keywords: string[] }[] = [
   { title: '🔥 오늘 저녁 약속', keywords: ['레스토랑', '식사', '저녁'] },
@@ -838,6 +922,7 @@ function pickCategoryByKeywords(categories: Category[], keywords: string[]): Cat
 
 export default function CreateDetailsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { phoneUserId } = useUserSession();
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
@@ -927,10 +1012,13 @@ export default function CreateDetailsScreen() {
   }, [isPublicMeeting, maxParticipants, minParticipants]);
 
   const [description, setDescription] = useState('');
+  const [descFocused, setDescFocused] = useState(false);
   const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
   const [movieCandidates, setMovieCandidates] = useState<SelectedMovieExtra[]>([]);
+  /** 영화 모임: 일정 단계 이전 선행 장소 후보 */
+  const [earlyPlaceCandidates, setEarlyPlaceCandidates] = useState<PlaceCandidate[]>([]);
   const [menuPreferences, setMenuPreferences] = useState<string[]>([]);
   const [sportIntensity, setSportIntensity] = useState<SportIntensityLevel>('normal');
   const [busy, setBusy] = useState(false);
@@ -947,6 +1035,10 @@ export default function CreateDetailsScreen() {
     [selectedCategory?.label],
   );
   const needsSpecialty = specialtyKind != null;
+  const needsMovieEarlyPlaces = specialtyKind === 'movie';
+  const scheduleStep: WizardStep = needsMovieEarlyPlaces ? 5 : 4;
+  const placesStep: WizardStep = needsMovieEarlyPlaces ? 6 : 5;
+  const detailStep: WizardStep = needsMovieEarlyPlaces ? 7 : 6;
 
   const resetWizardState = useCallback(() => {
     setTitle('');
@@ -954,6 +1046,7 @@ export default function CreateDetailsScreen() {
     setMaxParticipants(4);
     setDescription('');
     setMovieCandidates([]);
+    setEarlyPlaceCandidates([]);
     setMenuPreferences([]);
     setSportIntensity('normal');
     setVotePayload(null);
@@ -991,7 +1084,7 @@ export default function CreateDetailsScreen() {
   );
 
   const screenTitle = useMemo(
-    () => (selectedCategory?.label ? `${selectedCategory.label} · 모임 만들기` : '모임 만들기'),
+    () => (selectedCategory?.label ? `${selectedCategory.label}  약속 잡기` : '약속 잡기'),
     [selectedCategory?.label],
   );
 
@@ -1119,27 +1212,33 @@ export default function CreateDetailsScreen() {
     stepPositions.current[s] = e.nativeEvent.layout.y;
   }, []);
 
-  const onPlacesBlockLayout = useCallback((e: LayoutChangeEvent) => {
-    const y4 = stepPositions.current[4];
-    if (y4 == null) return;
-    stepPositions.current[5] = y4 + formMountRelYRef.current + e.nativeEvent.layout.y;
-  }, []);
+  const onPlacesBlockLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const ySched = stepPositions.current[scheduleStep];
+      if (ySched == null) return;
+      stepPositions.current[placesStep] = ySched + formMountRelYRef.current + e.nativeEvent.layout.y;
+    },
+    [placesStep, scheduleStep],
+  );
 
   const voteWizardSegment = useMemo(() => {
-    if (currentStep < 4) return 'none' as const;
-    if (currentStep === 4) return 'schedule' as const;
+    if (currentStep >= detailStep) return 'schedule' as const;
+    if (currentStep < scheduleStep) return 'none' as const;
+    if (currentStep === scheduleStep) return 'schedule' as const;
     return 'both' as const;
-  }, [currentStep]);
+  }, [currentStep, detailStep, scheduleStep]);
 
   const headerBeforePlaces = useMemo(
     () =>
-      currentStep >= 5 ? (
+      currentStep >= placesStep ? (
         <View style={styles.placesStepHeader}>
-          <Text style={styles.wizardStepBadge}>5 · 장소 후보</Text>
+          <Text style={styles.wizardStepBadge}>
+            {placesStep} · 장소 후보
+          </Text>
           <Text style={styles.wizardLockedHint}>장소 행을 눌러 검색·선택하거나 후보를 추가하세요.</Text>
         </View>
       ) : null,
-    [currentStep],
+    [currentStep, placesStep],
   );
 
   const onMinParticipantsChange = useCallback((n: number) => {
@@ -1221,33 +1320,51 @@ export default function CreateDetailsScreen() {
     setCurrentStep(4);
   }, [isPublicMeeting, maxParticipants, minParticipants, title]);
 
-  const onStep4ScheduleConfirm = useCallback(() => {
+  const onEarlyPlacesFloatingConfirm = useCallback(() => {
+    setWizardError(null);
+    if (earlyPlaceCandidates.length === 0) {
+      setWizardError('장소 후보를 한 곳 이상 선택해 주세요.');
+      scrollToStep(4);
+      return;
+    }
+    animate();
+    setVotePayload({
+      placeCandidates: earlyPlaceCandidates.map((p) => ({
+        id: p.id,
+        placeName: p.placeName,
+        address: p.address,
+        latitude: p.latitude,
+        longitude: p.longitude,
+      })),
+      dateCandidates:
+        votePayload?.dateCandidates && votePayload.dateCandidates.length > 0
+          ? votePayload.dateCandidates.map((d) => ({ ...d }))
+          : [createPointCandidate(newId('date'), seedDate, seedTime)],
+    });
+    setVoteHydrateKey((k) => k + 1);
+    pendingScrollAfterStepRef.current = scheduleStep;
+    setCurrentStep(scheduleStep);
+  }, [earlyPlaceCandidates, scrollToStep, scheduleStep, seedDate, seedTime, votePayload?.dateCandidates]);
+
+  const handleConfirmSchedule = useCallback(() => {
     setWizardError(null);
     const r = voteFormRef.current?.validateScheduleStep();
     if (!r?.ok) {
       setWizardError(r?.error ?? '일정 후보를 확인해 주세요.');
       return;
     }
-    pendingScrollAfterStepRef.current = 5;
-    setCurrentStep(5);
-    const label = selectedCategory?.label?.trim() ?? '';
-    const q = suggestPlaceSearchQueryFromCategory(label);
-    const delay = Platform.OS === 'android' ? 320 : 220;
-    setTimeout(() => {
-      voteFormRef.current?.openFirstPlaceSearchWithSuggestedQuery(q);
-    }, delay);
-  }, [selectedCategory?.label]);
-
-  const onStep5PlacesNext = useCallback(() => {
-    setWizardError(null);
-    const r = voteFormRef.current?.validatePlacesStep();
-    if (!r?.ok) {
-      setWizardError(r?.error ?? '장소 후보를 확인해 주세요.');
+    const cap = voteFormRef.current?.captureWizardPayloadAfterSchedule();
+    if (!cap || !cap.ok) {
+      setWizardError(cap && !cap.ok ? cap.error : '일정·장소 데이터를 저장하지 못했어요.');
       return;
     }
-    pendingScrollAfterStepRef.current = 6;
-    setCurrentStep(6);
-  }, []);
+    voteFormRef.current?.applyCapturedPayload(cap.payload);
+    setVotePayload(cap.payload);
+    setPlaceSearchSeed('');
+    voteFormRef.current?.resetPlaceSearchSession();
+    pendingScrollAfterStepRef.current = detailStep;
+    setCurrentStep(detailStep);
+  }, [detailStep]);
 
   const handleBack = useCallback(() => {
     const r = voteFormRef.current?.buildPayload();
@@ -1325,6 +1442,20 @@ export default function CreateDetailsScreen() {
     const p0 = vote.placeCandidates[0];
     const primary = primaryScheduleFromDateCandidate(vote.dateCandidates[0]);
 
+    const descTrim = description.trim();
+    const descriptionForSave =
+      descTrim.length > 0
+        ? descTrim
+        : generateAiMeetingDescription({
+            categoryLabel: clabel,
+            meetingTitle: title.trim(),
+            placeName: p0.placeName.trim(),
+            scheduleDate: primary.scheduleDate.trim(),
+            scheduleTime: primary.scheduleTime.trim(),
+            movieTitles: specialtyKind === 'movie' ? movieCandidates.map((m) => m.title) : undefined,
+            isPublic: isPublicMeeting,
+          });
+
     const extraData =
       specialtyKind != null
         ? buildMeetingExtraData({
@@ -1335,6 +1466,11 @@ export default function CreateDetailsScreen() {
           })
         : null;
 
+    const lat = Number(p0.latitude);
+    const lng = Number(p0.longitude);
+    const cap = toFiniteInt(maxParticipants, 1);
+    const minP = toFiniteInt(minParticipants, 1);
+
     setBusy(true);
     try {
       await addMeeting({
@@ -1342,11 +1478,11 @@ export default function CreateDetailsScreen() {
         location: p0.placeName.trim(),
         placeName: p0.placeName.trim(),
         address: p0.address.trim(),
-        latitude: p0.latitude,
-        longitude: p0.longitude,
-        description: description.trim(),
-        capacity: maxParticipants,
-        minParticipants,
+        latitude: Number.isFinite(lat) ? lat : 0,
+        longitude: Number.isFinite(lng) ? lng : 0,
+        description: descriptionForSave,
+        capacity: cap,
+        minParticipants: minP,
         createdBy: phoneUserId.trim(),
         categoryId: cid,
         categoryLabel: clabel,
@@ -1381,6 +1517,7 @@ export default function CreateDetailsScreen() {
     title,
   ]);
 
+  /** 등록 버튼: 로딩 중만 비활성화. 상세 설명 길이는 눌렀을 때 검증(짧으면 안내). */
   const finalDisabled = busy;
 
   return (
@@ -1414,7 +1551,13 @@ export default function CreateDetailsScreen() {
               mainScrollYRef.current = e.nativeEvent.contentOffset.y;
             }}
             decelerationRate="normal"
-            contentContainerStyle={[styles.scrollContent, styles.wizardScrollPad]}>
+            contentContainerStyle={[
+              styles.scrollContent,
+              styles.wizardScrollPad,
+              needsMovieEarlyPlaces &&
+                currentStep === 4 && { paddingBottom: 110 + insets.bottom },
+              currentStep === detailStep && { paddingBottom: 108 + insets.bottom },
+            ]}>
             <View collapsable={false}>
               <View
                 renderToHardwareTextureAndroid
@@ -1642,7 +1785,9 @@ export default function CreateDetailsScreen() {
                       onPress={onStep3BasicNext}
                       style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                       accessibilityRole="button">
-                      <Text style={styles.wizardPrimaryBtnLabel}>확인 · 일정 설정</Text>
+                      <Text style={styles.wizardPrimaryBtnLabel}>
+                        {needsMovieEarlyPlaces ? '확인 · 장소 선택' : '확인 · 일정 설정'}
+                      </Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -1650,97 +1795,175 @@ export default function CreateDetailsScreen() {
 
               {currentStep >= 4 ? (
                 <>
+                  {needsMovieEarlyPlaces ? (
+                    <View
+                      renderToHardwareTextureAndroid
+                      style={styles.wizardStepShell}
+                      onLayout={(e) => captureStepPosition(4, e)}>
+                      <Text style={styles.wizardStepBadge}>4 · 장소 선택</Text>
+                      <Text style={styles.wizardLockedHint}>
+                        모임 장소 후보를 검색해 추가하세요. 영화 모임은 주변 멀티플렉스를 먼저 보여 드려요.
+                      </Text>
+                      <VoteCandidateCard
+                        reduceHeavyEffects={false}
+                        outerStyle={[styles.wizardGlassCard, styles.earlyPlaceCardClip]}>
+                        <View style={styles.earlyPlaceSearchMount}>
+                          <EarlyPlaceSearch
+                            value={earlyPlaceCandidates}
+                            onChange={setEarlyPlaceCandidates}
+                            showCinemaPicks
+                            disabled={busy}
+                            parentScrollRef={mainScrollRef}
+                            parentScrollYRef={mainScrollYRef}
+                          />
+                        </View>
+                      </VoteCandidateCard>
+                    </View>
+                  ) : null}
+
                   <View
                     renderToHardwareTextureAndroid
                     style={styles.wizardStepShell}
-                    onLayout={(e) => captureStepPosition(4, e)}>
-                    <View style={styles.scheduleStepHeader}>
-                      <Text style={styles.wizardStepBadge}>4 · 일정 설정</Text>
+                    onLayout={(e) => captureStepPosition(scheduleStep, e)}>
+                    <View
+                      style={[
+                        styles.scheduleStepHeader,
+                        needsMovieEarlyPlaces &&
+                          currentStep < scheduleStep &&
+                          styles.wizardFormHidden,
+                      ]}>
+                      <Text style={styles.wizardStepBadge}>
+                        {scheduleStep} · 일정 설정
+                      </Text>
                       <Text style={styles.wizardLockedHint}>
                         말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.
                       </Text>
                     </View>
 
                     <View
-                      style={styles.wizardFormMount}
+                      style={[
+                        styles.wizardFormMount,
+                        needsMovieEarlyPlaces &&
+                          currentStep < scheduleStep &&
+                          styles.wizardFormHidden,
+                      ]}
                       onLayout={(e) => {
                         formMountRelYRef.current = e.nativeEvent.layout.y;
                       }}>
                       <VoteCandidatesForm
                         ref={voteFormRef}
-                        key={`wiz-${voteHydrateKey}-${seedQ}-${seedDate}-${seedTime}`}
+                        key={`wiz-${voteHydrateKey}`}
                         seedPlaceQuery={seedQ}
                         seedScheduleDate={seedDate}
                         seedScheduleTime={seedTime}
                         initialPayload={votePayload}
                         bare
                         wizardSegment={voteWizardSegment}
+                        scheduleListOnly={currentStep >= detailStep}
                         onPlacesBlockLayout={onPlacesBlockLayout}
                         headerBeforePlaces={headerBeforePlaces}
                       />
                     </View>
 
-                    {currentStep === 4 ? (
+                    {currentStep === scheduleStep ? (
                       <Pressable
-                        onPress={onStep4ScheduleConfirm}
+                        onPress={handleConfirmSchedule}
                         style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                         accessibilityRole="button">
                         <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
                       </Pressable>
                     ) : null}
-                    {currentStep === 5 ? (
-                      <Pressable
-                        onPress={onStep5PlacesNext}
-                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
-                        accessibilityRole="button">
-                        <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 정보</Text>
-                      </Pressable>
-                    ) : null}
                   </View>
 
-                  {currentStep >= 6 ? (
+                  {currentStep >= detailStep ? (
                     <View
                       renderToHardwareTextureAndroid
                       style={styles.wizardStepShell}
-                      onLayout={(e) => captureStepPosition(6, e)}>
-                      <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>6 · 상세 정보 (선택)</Text>
-                      <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
-                        <Text style={styles.wizardOptionalTag}>설명 추가하기 (선택)</Text>
-                        <Text style={styles.wizardFieldHint}>입력하지 않아도 모임 등록이 가능해요.</Text>
+                      onLayout={(e) => captureStepPosition(detailStep, e)}>
+                      <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>
+                        {detailStep} · 상세 설명 (선택)
+                      </Text>
+                      <Text style={styles.wizardLockedHint}>
+                        위에서 확정한 일정을 확인한 뒤 등록해 주세요. 소개를 비워 두면 지닛이 맞춤 소개글을
+                        자동으로 넣어 드려요.
+                      </Text>
+
+                      <VoteCandidateCard
+                        reduceHeavyEffects={false}
+                        outerStyle={[styles.wizardGlassCard, styles.finalRegistrationGlass]}>
+                        <Text style={styles.wizardFieldLabel}>모임 상세 설명 (선택)</Text>
+                        <Text style={styles.wizardFieldHint}>
+                          직접 적지 않아도 돼요. 비어 있으면 등록 시 AI가 한 줄 소개를 만들어요.
+                        </Text>
                         <TextInput
                           value={description}
                           onChangeText={setDescription}
-                          placeholder="모임 소개, 진행 방식, 준비물 등"
+                          placeholder={FINAL_DESCRIPTION_PLACEHOLDER}
                           placeholderTextColor={INPUT_PLACEHOLDER}
-                          style={[styles.wizardTextInput, styles.wizardTextInputMultiline]}
+                          style={[styles.finalDescriptionInput, descFocused && styles.finalDescriptionInputFocused]}
                           multiline
                           textAlignVertical="top"
                           editable={!busy}
+                          onFocus={() => setDescFocused(true)}
+                          onBlur={() => setDescFocused(false)}
                         />
                       </VoteCandidateCard>
-                      {currentStep === 6 ? (
-                        <>
-                          <Pressable
-                            onPress={onFinalRegister}
-                            disabled={finalDisabled}
-                            style={({ pressed }) => [
-                              styles.wizardFinalBtn,
-                              finalDisabled && styles.addCandidateBtnDisabled,
-                              pressed && !finalDisabled && styles.addCandidateBtnPressed,
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityState={{ disabled: finalDisabled }}>
-                            <Text style={styles.wizardFinalBtnLabel}>{busy ? '등록 중…' : '모임 등록'}</Text>
-                          </Pressable>
-                          {busy ? <ActivityIndicator color="#F8FAFC" style={{ marginTop: 12 }} /> : null}
-                        </>
-                      ) : null}
                     </View>
                   ) : null}
                 </>
               ) : null}
             </View>
           </ScrollView>
+
+          {needsMovieEarlyPlaces && currentStep === 4 ? (
+            <Pressable
+              onPress={onEarlyPlacesFloatingConfirm}
+              disabled={earlyPlaceCandidates.length === 0 || busy}
+              style={({ pressed }) => [
+                styles.earlyPlaceFloatingBtn,
+                {
+                  bottom: (wizardError ? 88 : 28) + insets.bottom,
+                },
+                (earlyPlaceCandidates.length === 0 || busy) && styles.addCandidateBtnDisabled,
+                pressed &&
+                  earlyPlaceCandidates.length > 0 &&
+                  !busy &&
+                  styles.addCandidateBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{
+                disabled: earlyPlaceCandidates.length === 0 || busy,
+              }}>
+              <Text style={styles.wizardPrimaryBtnLabel}>
+                {earlyPlaceCandidates.length}개의 장소로 일정 정하기
+              </Text>
+            </Pressable>
+          ) : null}
+
+          {currentStep === detailStep ? (
+            <Pressable
+              onPress={onFinalRegister}
+              disabled={finalDisabled}
+              style={({ pressed }) => [
+                styles.detailFinalFloatingBtn,
+                {
+                  bottom: (wizardError ? 88 : 28) + insets.bottom,
+                },
+                finalDisabled && styles.addCandidateBtnDisabled,
+                pressed && !finalDisabled && styles.addCandidateBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: finalDisabled }}>
+              {busy ? (
+                <View style={styles.detailFinalFloatingInner}>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.detailFinalFloatingLabel}>등록 중…</Text>
+                </View>
+              ) : (
+                <Text style={styles.detailFinalFloatingLabel}>지닛 모임 등록 완료</Text>
+              )}
+            </Pressable>
+          ) : null}
 
           {wizardError ? <Text style={styles.wizardFloatingError}>{wizardError}</Text> : null}
         </SafeAreaView>
@@ -2184,12 +2407,6 @@ const styles = StyleSheet.create({
     color: 'rgba(248, 250, 252, 0.5)',
     marginBottom: 10,
   },
-  wizardOptionalTag: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: TRUST_BLUE,
-    marginBottom: 6,
-  },
   wizardTextInput: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: 14,
@@ -2224,28 +2441,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
-  wizardFinalBtn: {
-    alignSelf: 'stretch',
-    marginTop: 16,
-    backgroundColor: TRUST_BLUE,
-    borderRadius: 18,
-    paddingVertical: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.55)',
-    shadowColor: TRUST_BLUE,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.55,
-    shadowRadius: 22,
-    elevation: 12,
-  },
-  wizardFinalBtnLabel: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '900',
-    letterSpacing: -0.2,
-  },
   wizardLockedHint: {
     fontSize: 13,
     fontWeight: '600',
@@ -2263,6 +2458,17 @@ const styles = StyleSheet.create({
   wizardFormMount: {
     marginTop: 4,
     marginBottom: 4,
+  },
+  /** 장소 단계: 페이지 스크롤과 중첩 스크롤 분리(flex 자식 shrink) */
+  earlyPlaceCardClip: {
+    minHeight: 0,
+    maxWidth: '100%',
+  },
+  earlyPlaceSearchMount: {
+    minHeight: 0,
+    flexShrink: 1,
+    alignSelf: 'stretch',
+    width: '100%',
   },
   wizardFormHidden: {
     height: 0,
@@ -2310,11 +2516,89 @@ const styles = StyleSheet.create({
     color: 'rgba(248, 250, 252, 0.95)',
     maxWidth: '100%',
   },
+  earlyPlaceFloatingBtn: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    zIndex: 50,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: TRUST_BLUE,
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.45)',
+    shadowColor: TRUST_BLUE,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  finalRegistrationGlass: {
+    paddingVertical: 6,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.38)',
+  },
+  finalDescriptionInput: {
+    marginTop: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#F8FAFC',
+    minHeight: 160,
+    textAlignVertical: 'top',
+  },
+  finalDescriptionInputFocused: {
+    borderColor: TRUST_BLUE,
+    shadowColor: TRUST_BLUE,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  detailFinalFloatingBtn: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    zIndex: 100,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: TRUST_BLUE,
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.55)',
+    shadowColor: TRUST_BLUE,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 22,
+    elevation: 14,
+  },
+  detailFinalFloatingLabel: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.35,
+  },
+  detailFinalFloatingInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   wizardFloatingError: {
     position: 'absolute',
     left: 20,
     right: 20,
     bottom: 24,
+    zIndex: 35,
     padding: 12,
     borderRadius: 12,
     backgroundColor: 'rgba(220, 38, 38, 0.92)',

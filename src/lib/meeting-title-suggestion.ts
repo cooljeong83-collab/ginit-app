@@ -118,3 +118,35 @@ export function generateSuggestedMeetingTitles(
   }
   return out.slice(0, count);
 }
+
+/**
+ * 모임 상세 설명 자동 초안 — 네트워크 없이 제목·카테고리·일정·장소 등을 조합 (지닛 AI 스타일).
+ * 사용자가 설명을 비워 둔 경우 등록 시 채워 넣기 위해 사용합니다.
+ */
+export function generateAiMeetingDescription(input: {
+  categoryLabel: string;
+  meetingTitle: string;
+  placeName: string;
+  scheduleDate: string;
+  scheduleTime: string;
+  /** 영화 모임이면 후보 제목(일부) */
+  movieTitles?: string[];
+  isPublic: boolean;
+}): string {
+  const cat = input.categoryLabel.trim() || '모임';
+  const title = input.meetingTitle.trim() || '모임';
+  const where = input.placeName.trim() || '장소 미정';
+  const when = `${input.scheduleDate.trim()} ${input.scheduleTime.trim()}`.trim();
+  const vis = input.isPublic
+    ? '공개 모임으로, 지역에서 함께할 분을 찾고 있어요.'
+    : '비공개 모임으로, 초대를 통해 참여할 분을 모으고 있어요.';
+
+  const movies = input.movieTitles?.map((s) => s.trim()).filter(Boolean) ?? [];
+  if (movies.length > 0) {
+    const head = movies.slice(0, 3).join(', ');
+    const tail = movies.length > 3 ? ` 외 ${movies.length - 3}편` : '';
+    return `「${title}」 영화 모임이에요. 후보로 ${head}${tail}을(를) 두었고, 함께 볼 작품은 모임에서 정하면 돼요. 일정은 ${when} 전후로 잡아 두었고 장소는 ${where}예요. ${vis} 지닛이 시간·장소 조율을 도와드릴게요!`;
+  }
+
+  return `「${title}」(${cat}) 모임이에요. ${when}에 ${where}에서 만나려고 해요. ${vis} 편하게 참여해 주시고, 지닛이 일정·장소 맞추기를 도와드릴게요!`;
+}
