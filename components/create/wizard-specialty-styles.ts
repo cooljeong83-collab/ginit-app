@@ -399,6 +399,85 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     fontWeight: '900',
     color: 'rgba(248, 250, 252, 0.95)',
   },
+  /** 다중 후보: 세로 스택(웹 포함 전체 너비) */
+  movieCandidatesColumn: {
+    flexDirection: 'column',
+    gap: 12,
+    width: Platform.OS === 'web' ? ('100%' as const) : undefined,
+    alignSelf: 'stretch',
+  },
+  movieConfirmedCard: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingRight: 40,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.55)',
+    backgroundColor: 'rgba(0, 82, 204, 0.16)',
+    overflow: 'hidden',
+  },
+  movieConfirmedRemoveHit: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  movieAddOutlineBtn: {
+    marginTop: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: TRUST_BLUE,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  movieAddOutlineBtnPressed: {
+    opacity: 0.88,
+    backgroundColor: 'rgba(0, 82, 204, 0.12)',
+  },
+  movieAddOutlineBtnLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: 'rgba(191, 219, 254, 0.98)',
+  },
+  movieProceedOrangeBtn: {
+    marginTop: 18,
+    paddingVertical: 15,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    backgroundColor: ENERGETIC_ORANGE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    shadowColor: ENERGETIC_ORANGE,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  movieProceedOrangeBtnPressed: {
+    opacity: 0.92,
+  },
+  movieProceedOrangeBtnLabel: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
 });
 
 /**
@@ -413,6 +492,16 @@ export const movieListRowWebGlassStyle: ViewStyle =
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.2)',
         borderStyle: 'solid',
+      } as ViewStyle)
+    : ({} as ViewStyle);
+
+/** 웹: 후보 추가 버튼에 얇은 글래스 느낌 */
+export const movieAddOutlineBtnWebStyle: ViewStyle =
+  Platform.OS === 'web'
+    ? ({
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
       } as ViewStyle)
     : ({} as ViewStyle);
 

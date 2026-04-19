@@ -928,7 +928,7 @@ export default function CreateDetailsScreen() {
   const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
-  const [pickedMovie, setPickedMovie] = useState<SelectedMovieExtra | null>(null);
+  const [movieCandidates, setMovieCandidates] = useState<SelectedMovieExtra[]>([]);
   const [menuPreferences, setMenuPreferences] = useState<string[]>([]);
   const [sportIntensity, setSportIntensity] = useState<SportIntensityLevel>('normal');
   const [busy, setBusy] = useState(false);
@@ -951,7 +951,7 @@ export default function CreateDetailsScreen() {
     setMinParticipants(1);
     setMaxParticipants(4);
     setDescription('');
-    setPickedMovie(null);
+    setMovieCandidates([]);
     setMenuPreferences([]);
     setSportIntensity('normal');
     setVotePayload(null);
@@ -1171,8 +1171,8 @@ export default function CreateDetailsScreen() {
 
   const onStep2SpecialtyNext = useCallback(() => {
     setWizardError(null);
-    if (specialtyKind === 'movie' && !pickedMovie) {
-      setWizardError('영화를 목록에서 선택해 주세요.');
+    if (specialtyKind === 'movie' && movieCandidates.length === 0) {
+      setWizardError('영화 후보를 한 개 이상 선택해 주세요.');
       return;
     }
     if (specialtyKind === 'food' && menuPreferences.length === 0) {
@@ -1181,7 +1181,7 @@ export default function CreateDetailsScreen() {
     }
     pendingScrollAfterStepRef.current = 3;
     setCurrentStep(3);
-  }, [menuPreferences.length, pickedMovie, specialtyKind]);
+  }, [menuPreferences.length, movieCandidates.length, specialtyKind]);
 
   const onStep3BasicNext = useCallback(() => {
     setWizardError(null);
@@ -1297,9 +1297,9 @@ export default function CreateDetailsScreen() {
         return;
       }
     }
-    if (specialtyKind === 'movie' && !pickedMovie) {
-      setWizardError('영화를 목록에서 선택해 주세요.');
-      Alert.alert('입력 확인', '영화를 목록에서 선택해 주세요.');
+    if (specialtyKind === 'movie' && movieCandidates.length === 0) {
+      setWizardError('영화 후보를 한 개 이상 선택해 주세요.');
+      Alert.alert('입력 확인', '영화 후보를 한 개 이상 선택해 주세요.');
       return;
     }
     if (specialtyKind === 'food' && menuPreferences.length === 0) {
@@ -1327,7 +1327,7 @@ export default function CreateDetailsScreen() {
       specialtyKind != null
         ? buildMeetingExtraData({
             kind: specialtyKind,
-            movie: pickedMovie,
+            movies: movieCandidates,
             menuPreferences,
             sportIntensity,
           })
@@ -1373,7 +1373,7 @@ export default function CreateDetailsScreen() {
     selectedCategory?.id,
     selectedCategory?.label,
     specialtyKind,
-    pickedMovie,
+    movieCandidates,
     menuPreferences,
     sportIntensity,
     title,
@@ -1522,9 +1522,9 @@ export default function CreateDetailsScreen() {
                   <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
                     {specialtyKind === 'movie' ? (
                       <MovieSearch
-                        value={pickedMovie}
-                        onChange={setPickedMovie}
-                        onSelect={() => scrollToStep(3)}
+                        value={movieCandidates}
+                        onChange={setMovieCandidates}
+                        onContinue={onStep2SpecialtyNext}
                         disabled={busy}
                       />
                     ) : null}
@@ -1535,7 +1535,7 @@ export default function CreateDetailsScreen() {
                       <IntensityPicker value={sportIntensity} onChange={setSportIntensity} disabled={busy} />
                     ) : null}
                   </VoteCandidateCard>
-                  {currentStep === 2 ? (
+                  {currentStep === 2 && specialtyKind !== 'movie' ? (
                     <Pressable
                       onPress={onStep2SpecialtyNext}
                       style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}

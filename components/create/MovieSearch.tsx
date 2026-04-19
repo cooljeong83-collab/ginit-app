@@ -15,7 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
@@ -24,6 +24,7 @@ import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/t
 
 import {
   INPUT_PLACEHOLDER,
+  movieAddOutlineBtnWebStyle,
   movieListRowWebGlassStyle,
   wizardSpecialtyStyles as S,
 } from './wizard-specialty-styles';
@@ -228,15 +229,19 @@ function MoviePosterFill({ item, recyclingKey, iconSize }: { item: SelectedMovie
 }
 
 export type MovieSearchProps = {
-  value: SelectedMovieExtra | null;
-  onChange: (next: SelectedMovieExtra | null) => void;
-  /** 영화를 고른 직후(상위에서 스크롤 등) */
+  /** 확정된 영화 후보(순서대로 누적) */
+  value: SelectedMovieExtra[];
+  onChange: (next: SelectedMovieExtra[]) => void;
+  /** 후보를 하나 추가했을 때 */
   onSelect?: (movie: SelectedMovieExtra) => void;
+  /** 후보가 1개 이상일 때 하단 주황 버튼(다음 단계) */
+  onContinue?: () => void;
   disabled?: boolean;
 };
 
-export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearchProps) {
+export function MovieSearch({ value, onChange, onSelect, onContinue, disabled }: MovieSearchProps) {
   const [query, setQuery] = useState('');
+  const [addingMore, setAddingMore] = useState(false);
   const [pretendardFamily, setPretendardFamily] = useState<string | undefined>(undefined);
   const [rankRows, setRankRows] = useState<SelectedMovieExtra[]>([]);
   const [rankReady, setRankReady] = useState(false);
@@ -257,8 +262,16 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
     };
   }, []);
 
+  const pickerOpen = value.length === 0 || addingMore;
+
   useEffect(() => {
-    if (value != null) return;
+    if (value.length === 0) {
+      setAddingMore(false);
+    }
+  }, [value.length]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
     let alive = true;
     setRankReady(false);
     setRankErr(null);
@@ -279,7 +292,7 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
     return () => {
       alive = false;
     };
-  }, [value]);
+  }, [pickerOpen]);
 
   const searchCatalog = useMemo(() => {
     const map = new Map<string, SelectedMovieExtra>();
@@ -288,7 +301,10 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
   }, [rankRows]);
 
   const windowH = Dimensions.get('window').height;
-  const heroMinH = Math.round(windowH * 0.7);
+  const heroMinH = useMemo(() => {
+    const ratio = value.length > 0 && addingMore ? 0.44 : 0.7;
+    return Math.round(windowH * ratio);
+  }, [addingMore, value.length, windowH]);
 
   const isRankingView = query.trim().length === 0;
 
@@ -313,163 +329,236 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
 
   const onPick = useCallback(
     (m: SelectedMovieExtra) => {
+      if (value.some((x) => x.id === m.id)) {
+        layoutAnimateEaseInEaseOut();
+        setQuery('');
+        setAddingMore(false);
+        return;
+      }
       layoutAnimateEaseInEaseOut();
-      onChange(m);
+      onChange([...value, m]);
       setQuery('');
+      setAddingMore(false);
       onSelect?.(m);
     },
-    [onChange, onSelect],
+    [onChange, onSelect, value],
   );
 
-  const onClear = useCallback(() => {
-    layoutAnimateEaseInEaseOut();
-    onChange(null);
-  }, [onChange]);
+  const removeCandidate = useCallback(
+    (id: string) => {
+      layoutAnimateEaseInEaseOut();
+      onChange(value.filter((x) => x.id !== id));
+    },
+    [onChange, value],
+  );
 
-  if (value) {
-    return (
-      <View>
-        <Text style={S.fieldLabel}>선택한 영화</Text>
-        <View style={S.movieCompactRow}>
-          <View style={S.movieCompactPoster}>
-            <View style={StyleSheet.absoluteFillObject}>
-              <MoviePosterFill item={value} recyclingKey={`compact-${value.id}`} iconSize={22} />
-            </View>
-          </View>
-          <View style={S.movieCompactTextCol}>
-            <Text style={[S.movieCompactTitle, titleFontStyle]} numberOfLines={2}>
-              {value.title}
-            </Text>
-            {value.year ? <Text style={S.movieCompactMeta}>{value.year}</Text> : null}
-            {value.rating ? (
-              <View style={[S.movieRatingRow, { marginTop: 4 }]}>
-                {value.rating.includes('%') ? (
-                  <Text style={S.movieRatingNumber}>매출 {value.rating}</Text>
-                ) : (
-                  <>
-                    <Text style={S.movieStarIcon}>★</Text>
-                    <Text style={S.movieRatingNumber}>{value.rating}</Text>
-                  </>
-                )}
-              </View>
-            ) : null}
-            {value.info ? (
-              <Text style={S.movieCompactMeta} numberOfLines={2}>
-                {value.info}
-              </Text>
-            ) : null}
-          </View>
-          <Pressable
-            onPress={onClear}
-            disabled={disabled}
-            style={S.clearLink}
-            accessibilityRole="button">
-            <Text style={S.clearLinkText}>다시 선택</Text>
-          </Pressable>
+  const onToggleAddMore = useCallback(() => {
+    layoutAnimateEaseInEaseOut();
+    setAddingMore((prev) => !prev);
+    setQuery('');
+  }, []);
+
+  const listScroll = (
+    <ScrollView
+      style={S.movieListScroll}
+      contentContainerStyle={[
+        S.movieListStack,
+        Platform.OS === 'web' && ({ width: '100%', maxWidth: '100%', flexDirection: 'column' } as const),
+      ]}
+      nestedScrollEnabled
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      showsVerticalScrollIndicator={false}>
+      {isRankingView && !rankReady ? (
+        <View style={{ paddingVertical: 28, alignItems: 'center', gap: 12 }}>
+          <ActivityIndicator size="large" color="#0052CC" />
+          <Text style={S.resultMeta}>목록을 불러오는 중이에요…</Text>
         </View>
+      ) : rows.length === 0 ? (
+        <View style={{ paddingVertical: 16 }}>
+          <Text style={S.resultMeta}>
+            {isRankingView
+              ? rankErr || '목록이 비어 있어요.'
+              : '검색 결과가 없어요. 다른 키워드를 써 보세요.'}
+          </Text>
+        </View>
+      ) : (
+        rows.map((item, index) => (
+          <Animated.View
+            key={`${query}-${item.id}`}
+            style={S.movieListItemOuter}
+            entering={FadeInDown.duration(360).delay(Math.min(index * 52, 480))}>
+            <Pressable
+              onPress={() => onPick(item)}
+              disabled={disabled}
+              style={Platform.OS === 'web' ? ({ width: '100%' } as const) : undefined}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isRankingView ? `${item.kobisRank ?? index + 1}위 ${item.title}` : item.title
+              }>
+              {({ pressed }) => (
+                <MovieGlassListRow pressed={pressed}>
+                  <View style={S.movieListPosterWrap}>
+                    {isRankingView ? (
+                      <View style={S.movieRankBadge} pointerEvents="none">
+                        <Text style={S.movieRankBadgeText}>{item.kobisRank ?? index + 1}</Text>
+                      </View>
+                    ) : null}
+                    <View style={S.movieListPosterImg}>
+                      <MoviePosterFill item={item} recyclingKey={item.id} />
+                    </View>
+                  </View>
+                  <View style={S.movieRightCol}>
+                    <View style={S.movieTitleGlass}>
+                      <Text style={[S.movieListTitle, titleFontStyle]} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      {item.year ? <Text style={S.movieYearUnderTitle}>{item.year}</Text> : null}
+                    </View>
+                    {item.rating ? (
+                      <View style={S.movieRatingRow}>
+                        {item.rating.includes('%') ? (
+                          <Text style={S.movieRatingNumber}>매출 {item.rating}</Text>
+                        ) : (
+                          <>
+                            <Text style={S.movieStarIcon}>★</Text>
+                            <Text style={S.movieRatingNumber}>{item.rating}</Text>
+                          </>
+                        )}
+                      </View>
+                    ) : null}
+                    {item.info ? (
+                      <Text style={S.movieSynopsis} numberOfLines={3} ellipsizeMode="tail">
+                        {item.info}
+                      </Text>
+                    ) : null}
+                  </View>
+                </MovieGlassListRow>
+              )}
+            </Pressable>
+          </Animated.View>
+        ))
+      )}
+    </ScrollView>
+  );
+
+  const searchHeader = (
+    <View>
+      <Text style={S.fieldLabel}>영화 검색</Text>
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder="제목 검색…"
+        placeholderTextColor={INPUT_PLACEHOLDER}
+        style={[S.textInput, { marginTop: 4 }]}
+        editable={!disabled}
+        returnKeyType="search"
+        autoCapitalize="none"
+        autoCorrect={false}
+        {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
+      />
+    </View>
+  );
+
+  if (value.length === 0) {
+    return (
+      <View style={[S.movieHeroShell, { height: heroMinH }]}>
+        {searchHeader}
+        {listScroll}
       </View>
     );
   }
 
   return (
-    <View style={[S.movieHeroShell, { height: heroMinH }]}>
-      <View>
-        <Text style={S.fieldLabel}>영화 검색</Text>
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="제목 검색…"
-          placeholderTextColor={INPUT_PLACEHOLDER}
-          style={[S.textInput, { marginTop: 4 }]}
-          editable={!disabled}
-          returnKeyType="search"
-          autoCapitalize="none"
-          autoCorrect={false}
-          {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
-        />
-      </View>
-
-      <ScrollView
-        style={S.movieListScroll}
-        contentContainerStyle={[
-          S.movieListStack,
-          Platform.OS === 'web' && ({ width: '100%', maxWidth: '100%' } as const),
-        ]}
-        nestedScrollEnabled
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        showsVerticalScrollIndicator={false}>
-        {isRankingView && !rankReady ? (
-          <View style={{ paddingVertical: 28, alignItems: 'center', gap: 12 }}>
-            <ActivityIndicator size="large" color="#0052CC" />
-            <Text style={S.resultMeta}>목록을 불러오는 중이에요…</Text>
-          </View>
-        ) : rows.length === 0 ? (
-          <View style={{ paddingVertical: 16 }}>
-            <Text style={S.resultMeta}>
-              {isRankingView
-                ? rankErr || '목록이 비어 있어요.'
-                : '검색 결과가 없어요. 다른 키워드를 써 보세요.'}
-            </Text>
-          </View>
-        ) : (
-          rows.map((item, index) => (
-            <Animated.View
-              key={`${query}-${item.id}`}
-              style={S.movieListItemOuter}
-              entering={FadeInDown.duration(360).delay(Math.min(index * 52, 480))}>
+    <View style={Platform.OS === 'web' ? ({ width: '100%', flexDirection: 'column' } as const) : undefined}>
+      <Text style={S.fieldLabel}>확정된 영화 후보</Text>
+      <Animated.View
+        layout={LinearTransition.springify().damping(18).stiffness(220)}
+        style={S.movieCandidatesColumn}>
+        {value.map((item, index) => (
+          <Animated.View
+            key={item.id}
+            layout={LinearTransition.springify().damping(18).stiffness(220)}
+            entering={FadeInDown.duration(420).delay(Math.min(index * 72, 280))}>
+            <View style={S.movieConfirmedCard}>
               <Pressable
-                onPress={() => onPick(item)}
+                onPress={() => removeCandidate(item.id)}
                 disabled={disabled}
-                style={Platform.OS === 'web' ? ({ width: '100%' } as const) : undefined}
+                style={({ pressed }) => [S.movieConfirmedRemoveHit, pressed && { opacity: 0.85 }]}
                 accessibilityRole="button"
-                accessibilityLabel={
-                  isRankingView ? `${item.kobisRank ?? index + 1}위 ${item.title}` : item.title
-                }>
-                {({ pressed }) => (
-                  <MovieGlassListRow pressed={pressed}>
-                    <View style={S.movieListPosterWrap}>
-                      {isRankingView ? (
-                        <View style={S.movieRankBadge} pointerEvents="none">
-                          <Text style={S.movieRankBadgeText}>{item.kobisRank ?? index + 1}</Text>
-                        </View>
-                      ) : null}
-                      <View style={S.movieListPosterImg}>
-                        <MoviePosterFill item={item} recyclingKey={item.id} />
-                      </View>
-                    </View>
-                    <View style={S.movieRightCol}>
-                      <View style={S.movieTitleGlass}>
-                        <Text style={[S.movieListTitle, titleFontStyle]} numberOfLines={2}>
-                          {item.title}
-                        </Text>
-                        {item.year ? <Text style={S.movieYearUnderTitle}>{item.year}</Text> : null}
-                      </View>
-                      {item.rating ? (
-                        <View style={S.movieRatingRow}>
-                          {item.rating.includes('%') ? (
-                            <Text style={S.movieRatingNumber}>매출 {item.rating}</Text>
-                          ) : (
-                            <>
-                              <Text style={S.movieStarIcon}>★</Text>
-                              <Text style={S.movieRatingNumber}>{item.rating}</Text>
-                            </>
-                          )}
-                        </View>
-                      ) : null}
-                      {item.info ? (
-                        <Text style={S.movieSynopsis} numberOfLines={3} ellipsizeMode="tail">
-                          {item.info}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </MovieGlassListRow>
-                )}
+                accessibilityLabel={`${item.title} 후보에서 제거`}>
+                <Ionicons name="close" size={18} color="rgba(248, 250, 252, 0.92)" />
               </Pressable>
-            </Animated.View>
-          ))
-        )}
-      </ScrollView>
+              <View style={S.movieListPosterWrap}>
+                <View style={S.movieListPosterImg}>
+                  <MoviePosterFill item={item} recyclingKey={`pick-${item.id}`} />
+                </View>
+              </View>
+              <View style={S.movieRightCol}>
+                <View style={S.movieTitleGlass}>
+                  <Text style={[S.movieListTitle, titleFontStyle]} numberOfLines={2}>
+                    {item.title}
+                  </Text>
+                  {item.year ? <Text style={S.movieYearUnderTitle}>{item.year}</Text> : null}
+                </View>
+                {item.rating ? (
+                  <View style={S.movieRatingRow}>
+                    {item.rating.includes('%') ? (
+                      <Text style={S.movieRatingNumber}>매출 {item.rating}</Text>
+                    ) : (
+                      <>
+                        <Text style={S.movieStarIcon}>★</Text>
+                        <Text style={S.movieRatingNumber}>{item.rating}</Text>
+                      </>
+                    )}
+                  </View>
+                ) : null}
+                {item.info ? (
+                  <Text style={S.movieSynopsis} numberOfLines={3} ellipsizeMode="tail">
+                    {item.info}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </Animated.View>
+        ))}
+      </Animated.View>
+
+      <Pressable
+        onPress={onToggleAddMore}
+        disabled={disabled}
+        style={({ pressed }) => [
+          S.movieAddOutlineBtn,
+          Platform.OS === 'web' && movieAddOutlineBtnWebStyle,
+          pressed && S.movieAddOutlineBtnPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={addingMore ? '영화 검색 접기' : '다른 영화 후보 추가'}>
+        <Text style={S.movieAddOutlineBtnLabel}>
+          {addingMore ? '검색 닫기' : '+ 다른 후보 추가하기'}
+        </Text>
+      </Pressable>
+
+      {addingMore ? (
+        <View style={[S.movieHeroShell, { marginTop: 12, height: heroMinH }]}>
+          {searchHeader}
+          {listScroll}
+        </View>
+      ) : null}
+
+      {onContinue && value.length >= 1 ? (
+        <Pressable
+          onPress={onContinue}
+          disabled={disabled}
+          style={({ pressed }) => [
+            S.movieProceedOrangeBtn,
+            pressed && S.movieProceedOrangeBtnPressed,
+            disabled && { opacity: 0.45 },
+          ]}
+          accessibilityRole="button">
+          <Text style={S.movieProceedOrangeBtnLabel}>이 후보들로 모임 만들기</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

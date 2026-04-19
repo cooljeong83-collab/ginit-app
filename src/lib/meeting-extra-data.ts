@@ -20,20 +20,30 @@ export type SelectedMovieExtra = {
  */
 export type MeetingExtraData = {
   specialtyKind: SpecialtyKind;
+  /** 첫 번째 후보(이전 단일 선택 필드와의 호환) */
   movie?: SelectedMovieExtra | null;
+  /** 영화 모임 후보 전체 */
+  movies?: SelectedMovieExtra[] | null;
   menuPreferences?: string[] | null;
   sportIntensity?: SportIntensityLevel | null;
 };
 
 export function buildMeetingExtraData(params: {
   kind: SpecialtyKind;
-  movie: SelectedMovieExtra | null;
+  /** 영화 카테고리일 때 후보 목록(순서 유지) */
+  movies?: SelectedMovieExtra[];
   menuPreferences: string[];
   sportIntensity: SportIntensityLevel;
 }): MeetingExtraData {
-  const { kind, movie, menuPreferences, sportIntensity } = params;
+  const { kind, movies, menuPreferences, sportIntensity } = params;
   if (kind === 'movie') {
-    return { specialtyKind: 'movie', movie: movie ?? null };
+    const list = movies?.filter(Boolean) ?? [];
+    const first = list[0] ?? null;
+    return {
+      specialtyKind: 'movie',
+      movie: first,
+      movies: list.length ? [...list] : null,
+    };
   }
   if (kind === 'food') {
     return { specialtyKind: 'food', menuPreferences: menuPreferences.length ? [...menuPreferences] : null };
