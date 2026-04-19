@@ -2113,7 +2113,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  /** 장소검색 인라인 지도와 동일 — 스크롤 비활성 MapView 위 탭만 네이버 지도로 연결 */
+  /** 장소검색 인라인 미리보기와 동일 — 지도 위 탭 시 네이버 지도 앱/웹으로 연결 */
   confirmedMapTapOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 2,

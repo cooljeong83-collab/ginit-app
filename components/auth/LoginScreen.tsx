@@ -1,8 +1,8 @@
-import { useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
+import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import Constants from 'expo-constants';
+import { useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -26,15 +26,15 @@ import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { getFirebaseAuth } from '@/src/lib/firebase';
+import { fetchGooglePeopleExtras, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
 import {
   consumeGoogleRedirectResultWithMeta,
   REDIRECT_STARTED,
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
-import { fetchGooglePeopleExtras, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
 import { fetchAndroidPhoneHint } from '@/src/lib/phone-hint';
-import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
+import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname } from '@/src/lib/user-profile';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
@@ -514,11 +514,15 @@ export default function LoginScreen() {
                     onChangeText={setPhoneField}
                     placeholder="010-1234-5678"
                     placeholderTextColor={GinitPlaceholderColor}
-                    style={[styles.phoneInput, Platform.OS === 'android' && styles.phoneInputReadonly]}
+                    style={[styles.phoneInput, 
+                      Platform.OS === 'android' && styles.phoneInputReadonly
+                      ]}
                     selectTextOnFocus={Platform.OS !== 'android'}
                     keyboardType="phone-pad"
                     autoCapitalize="none"
-                    editable={Platform.OS !== 'android' && !busyAutoLogin}
+                    //테스트 완료 후 주석 제거 예정
+                    //editable={Platform.OS !== 'android' && !busyAutoLogin}
+                    editable={true} // 항상 편집 가능하게
                   />
 
                   {showSignupComplete ? (

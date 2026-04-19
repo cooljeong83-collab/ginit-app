@@ -7,10 +7,7 @@ type Props = {
   borderRadius?: number;
 };
 
-/**
- * 웹 번들에는 `react-native-maps`를 넣지 않습니다(네이티브 전용 codegen).
- * 미리보기는 iOS·Android에서만 제공합니다.
- */
+/** 웹에서는 네이버 지도 네이티브 뷰 대신 안내 문구만 표시합니다. */
 export function GooglePlacePreviewMap({ height = 180, borderRadius = 15 }: Props) {
   return (
     <View

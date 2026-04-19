@@ -17,9 +17,7 @@ type Props = {
 
 /**
  * 모임 등록 등에서 좌표 미리보기.
- * 좌표는 네이버 검색·NCP 지오코딩으로 확보하고, 지도 타일은 `react-native-maps`(PROVIDER_GOOGLE)로 렌더합니다.
- *
- * @mj-studio/react-native-naver-map 네이티브 뷰는 제거(미사용)했습니다. 패키지·app.config 플러그인은 유지합니다.
+ * 좌표는 네이버 검색·NCP 지오코딩으로 확보하고, 지도는 `@mj-studio/react-native-naver-map`으로 렌더합니다.
  */
 export function PlacePreviewMap({
   latitude,

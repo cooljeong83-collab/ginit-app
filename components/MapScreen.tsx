@@ -17,8 +17,8 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { NaverMapMarkerOverlay, NaverMapView } from '@mj-studio/react-native-naver-map';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -38,6 +38,7 @@ import {
 } from '@/src/lib/feed-meeting-utils';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
+import { centerRegionToNaverRegion, type CenterLatLngRegion } from '@/src/lib/naver-map-region';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
@@ -85,7 +86,7 @@ function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
   }
 }
 
-function computeMapRegion(meetings: Meeting[], userCoords: LatLng | null): Region {
+function computeMapRegion(meetings: Meeting[], userCoords: LatLng | null): CenterLatLngRegion {
   const fallbackLat = userCoords?.latitude ?? 37.5665;
   const fallbackLng = userCoords?.longitude ?? 126.978;
   const withCoords = meetings.filter(
@@ -121,7 +122,6 @@ function computeMapRegion(meetings: Meeting[], userCoords: LatLng | null): Regio
 export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<MapView>(null);
   const meetingListRef = useRef<FlatList<Meeting>>(null);
   const listScrollY = useRef(0);
   const listContentH = useRef(0);
@@ -266,13 +266,6 @@ export default function MapScreen() {
     [sortedFilteredMeetings, userCoords],
   );
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      mapRef.current?.animateToRegion(mapRegion, 450);
-    }, 120);
-    return () => clearTimeout(t);
-  }, [mapRegion]);
-
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
   const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
   const pickRegion = useCallback((shortLabel: string) => {
@@ -383,27 +376,39 @@ export default function MapScreen() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <View style={styles.mapWrap}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
+        <NaverMapView
           style={StyleSheet.absoluteFillObject}
-          initialRegion={mapRegion}
-          showsUserLocation={!!userCoords}
-          showsMyLocationButton={false}
-          mapType="standard"
+          region={centerRegionToNaverRegion(mapRegion)}
+          animationDuration={450}
+          locale="ko"
+          isExtentBoundedInKorea
+          isShowLocationButton={false}
+          isShowZoomControls={false}
+          isShowCompass={false}
+          isShowScaleBar={false}
+          locationOverlay={
+            userCoords
+              ? {
+                  isVisible: true,
+                  position: { latitude: userCoords.latitude, longitude: userCoords.longitude },
+                }
+              : { isVisible: false }
+          }
+          {...(Platform.OS === 'android' ? { isUseTextureViewAndroid: true } : {})}
           accessibilityLabel="모임 지도">
           {meetingsOnMap.map((m) => {
             const selected = m.id === selectedMeetingId;
             return (
-              <Marker
+              <NaverMapMarkerOverlay
                 key={m.id}
-                coordinate={{ latitude: m.latitude as number, longitude: m.longitude as number }}
-                pinColor={selected ? GinitTheme.trustBlue : GinitTheme.pointOrange}
-                onPress={() => onMeetingMarkerPress(m.id)}
+                latitude={m.latitude as number}
+                longitude={m.longitude as number}
+                tintColor={selected ? GinitTheme.trustBlue : GinitTheme.pointOrange}
+                onTap={() => onMeetingMarkerPress(m.id)}
               />
             );
           })}
-        </MapView>
+        </NaverMapView>
 
         <View style={[styles.searchBarWrap, { paddingTop: insets.top + 8 }]}>
           <Pressable

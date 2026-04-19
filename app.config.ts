@@ -80,12 +80,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const naverClientId =
     process.env.NAVER_MAP_CLIENT_ID ?? process.env.EXPO_PUBLIC_NAVER_MAP_CLIENT_ID ?? '';
 
-  /** Google Maps SDK (Android / iOS) — `react-native-maps` + `PROVIDER_GOOGLE` 용. 스토어 빌드 시 필수. */
-  const googleMapsApiKey =
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ||
-    process.env.GOOGLE_MAPS_API_KEY?.trim() ||
-    '';
-
   const plugins = (config.plugins ?? []).filter((entry) => {
     if (entry === 'expo-build-properties') return false;
     if (Array.isArray(entry) && entry[0] === 'expo-build-properties') return false;
@@ -104,14 +98,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       ...config.ios,
       bundleIdentifier: 'com.ginit.app',
-      ...(googleMapsApiKey
-        ? {
-            config: {
-              ...(config.ios as { config?: Record<string, unknown> } | undefined)?.config,
-              googleMapsApiKey,
-            },
-          }
-        : {}),
     },
     android: {
       ...config.android,
@@ -122,18 +108,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'android.permission.READ_PHONE_STATE',
         'android.permission.READ_PHONE_NUMBERS',
       ],
-      ...(googleMapsApiKey
-        ? {
-            config: {
-              ...(config.android as { config?: { googleMaps?: Record<string, unknown> } } | undefined)?.config,
-              googleMaps: {
-                ...((config.android as { config?: { googleMaps?: Record<string, unknown> } } | undefined)?.config
-                  ?.googleMaps ?? {}),
-                apiKey: googleMapsApiKey,
-              },
-            },
-          }
-        : {}),
     },
     plugins: [
       ...plugins,

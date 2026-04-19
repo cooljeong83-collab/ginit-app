@@ -37,8 +37,8 @@ function pickParam(v: string | string[] | undefined): string | undefined {
 }
 
 export type PlaceSearchScreenProps = {
-  /** `/create/details`에서만 켜서, 선택한 행 바로 아래에 Google 지도(MapView) 인라인 표시 */
-  useGoogleMapsPreview?: boolean;
+  /** `/create/details` 진입 시 — 선택 행 아래에 네이버 지도 인라인 미리보기 */
+  useInlineMapPreview?: boolean;
   /**
    * 모임 등록에서 이미 선택된 상호명 — 화면 진입 시 검색창 초기값·자동 네이버 검색에 사용.
    * (`/create/details`에서 `router.push` params로 전달)
@@ -48,7 +48,7 @@ export type PlaceSearchScreenProps = {
   voteRowId?: string;
 };
 
-function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, voteRowId }: PlaceSearchScreenProps) {
+function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, voteRowId }: PlaceSearchScreenProps) {
   const router = useRouter();
   const searchInputRef = useRef<TextInput>(null);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -87,7 +87,7 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
         if (opts?.signal?.aborted) return;
         setHasSearched(true);
         setResults(list);
-        if (useGoogleMapsPreview) {
+        if (useInlineMapPreview) {
           InteractionManager.runAfterInteractions(() => animateListLayout());
         }
         setSelected(null);
@@ -101,7 +101,7 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
         setLoading(false);
       }
     },
-    [useGoogleMapsPreview],
+    [useInlineMapPreview],
   );
 
   const onSearchPress = useCallback(() => {
@@ -142,7 +142,7 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
   const onSelectPlace = useCallback(
     async (item: NaverLocalPlace) => {
       Keyboard.dismiss();
-      if (useGoogleMapsPreview) {
+      if (useInlineMapPreview) {
         InteractionManager.runAfterInteractions(() => animateListLayout());
       }
       setError(null);
@@ -150,7 +150,7 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
       setResolving(true);
       try {
         const resolved = await resolveNaverPlaceCoordinates(item);
-        if (useGoogleMapsPreview) {
+        if (useInlineMapPreview) {
           InteractionManager.runAfterInteractions(() => animateListLayout());
         }
         setSelected(resolved);
@@ -162,7 +162,7 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
         setResolving(false);
       }
     },
-    [useGoogleMapsPreview],
+    [useInlineMapPreview],
   );
 
   const onConfirm = useCallback(() => {
@@ -278,7 +278,7 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
                 const lat = item.latitude;
                 const lng = item.longitude;
                 const showInlineMap =
-                  useGoogleMapsPreview && active && lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+                  useInlineMapPreview && active && lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
 
                 return (
                   <View style={GinitStyles.itemWrap}>
@@ -353,7 +353,7 @@ export default function PlaceSearchRoute() {
   }>();
   return (
     <PlaceSearchScreen
-      useGoogleMapsPreview
+      useInlineMapPreview
       initialQuery={pickParam(initialQuery)?.trim()}
       voteRowId={pickParam(voteRowId)?.trim()}
     />

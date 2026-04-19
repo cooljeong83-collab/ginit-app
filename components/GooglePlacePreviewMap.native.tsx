@@ -1,6 +1,8 @@
+import { NaverMapMarkerOverlay, NaverMapView, type Region } from '@mj-studio/react-native-naver-map';
 import { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { Platform, StyleSheet, View } from 'react-native';
+
+import { centerRegionToNaverRegion, type CenterLatLngRegion } from '@/src/lib/naver-map-region';
 
 type Props = {
   latitude: number;
@@ -14,32 +16,37 @@ type Props = {
 const DEFAULT_DELTA = 0.007;
 
 export function GooglePlacePreviewMap({ latitude, longitude, height = 180, borderRadius = 15 }: Props) {
-  const region = useMemo(
-    () => ({
+  const initialRegion = useMemo((): Region => {
+    const center: CenterLatLngRegion = {
       latitude,
       longitude,
       latitudeDelta: DEFAULT_DELTA,
       longitudeDelta: DEFAULT_DELTA,
-    }),
-    [latitude, longitude],
-  );
+    };
+    return centerRegionToNaverRegion(center);
+  }, [latitude, longitude]);
 
   return (
     <View style={[styles.box, { height, borderRadius }]} collapsable={false}>
-      <MapView
+      <NaverMapView
         key={`${latitude.toFixed(6)}-${longitude.toFixed(6)}`}
-        provider={PROVIDER_GOOGLE}
         style={[styles.map, { borderRadius }]}
-        initialRegion={region}
-        scrollEnabled={false}
-        zoomEnabled={false}
-        pitchEnabled={false}
-        rotateEnabled={false}
-        toolbarEnabled={false}
-        mapType="standard"
+        initialRegion={initialRegion}
+        isScrollGesturesEnabled={false}
+        isZoomGesturesEnabled={false}
+        isTiltGesturesEnabled={false}
+        isRotateGesturesEnabled={false}
+        isShowZoomControls={false}
+        isShowCompass={false}
+        isShowScaleBar={false}
+        isShowLocationButton={false}
+        isLiteModeEnabled
+        isExtentBoundedInKorea
+        locale="ko"
+        {...(Platform.OS === 'android' ? { isUseTextureViewAndroid: true } : {})}
         accessibilityLabel="선택한 장소 위치">
-        <Marker coordinate={{ latitude, longitude }} />
-      </MapView>
+        <NaverMapMarkerOverlay latitude={latitude} longitude={longitude} />
+      </NaverMapView>
     </View>
   );
 }
