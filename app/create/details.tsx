@@ -1,8 +1,8 @@
 /**
  * 모임 등록 — `/create/details`: `currentStep >= n`으로 이전 단계 카드도 유지(한눈에 수정 가능).
  * 확인 버튼만 해당 단계 `currentStep === n`일 때 표시. 카테고리 변경 시 Step 1로 리셋·하위 카드 제거.
- * 일정 확정(`scheduleStep`) 직후 장소 후보 단계 UI는 건너뛰고 상세·등록(`detailStep`)으로 이동.
- * 단계 번호(표시): 영화 1→2→3→4(선행 장소)→5(일정)→7(상세). 비영화 1→2→3→4(일정)→6(상세).
+ * 일정 확정(`scheduleStep`) 후 `placesStep`에서 장소 후보 카드를 채운 뒤 상세·등록(`detailStep`)으로 이동.
+ * 단계 번호(표시): 영화 …→5(일정)→6(장소)→7(상세). 비영화 …→4(일정)→5(장소)→6(상세).
  */
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
@@ -72,6 +72,7 @@ import {
 import {
   generateAiMeetingDescription,
   generateSuggestedMeetingTitles,
+  getFinalDescriptionPlaceholder,
 } from '@/src/lib/meeting-title-suggestion';
 import { addMeeting } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
@@ -82,9 +83,6 @@ const TRUST_BLUE = '#0052CC';
 const SCREEN_BG = '#0F172A';
 /** 스펙: 플레이스홀더 */
 const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
-
-const FINAL_DESCRIPTION_PLACEHOLDER =
-  '영화 보고 나서 간단히 맥주 한 잔 하실 분? 지닛이 조율을 도와드릴게요!';
 
 /** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
 function animate() {
@@ -297,6 +295,8 @@ export type VoteCandidatesFormProps = {
   headerBeforePlaces?: ReactNode;
   /** true면 일정 카드 목록만 표시(자연어 입력·일정 후보 추가 버튼 숨김) — 상세 단계에서 확정 목록 유지용 */
   scheduleListOnly?: boolean;
+  /** true면 장소 후보 카드는 유지하고 추가·삭제(행 2개 이상일 때)만 숨김 — 상세 단계에서 확정 장소 유지용 */
+  placesListOnly?: boolean;
 };
 
 export type VoteCandidatesBuildResult =
@@ -333,6 +333,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     onPlacesBlockLayout,
     headerBeforePlaces,
     scheduleListOnly = false,
+    placesListOnly = false,
   },
   ref,
 ) {
@@ -760,12 +761,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <View style={[styles.sectionHeader, wizardSegment === 'places' ? undefined : styles.sectionGap]}>
         <Text style={styles.sectionTitle}>장소 후보</Text>
       </View>
-      <Text style={styles.sectionHint}>각 카드에서 장소 검색 화면으로 이동해 후보를 채워 주세요.</Text>
+      <Text style={styles.sectionHint}>
+        {placesListOnly
+          ? '확정한 장소 후보예요. 필요하면 카드를 탭해 장소를 다시 고를 수 있어요.'
+          : '각 카드에서 장소 검색 화면으로 이동해 후보를 채워 주세요.'}
+      </Text>
 
       {placeCandidates.map((row, placeIndex) => (
         <VoteCandidateCard key={row.id} reduceHeavyEffects={reduceHeavyEffects}>
           <View style={styles.glassCardInner}>
-            {placeCandidates.length > 1 ? (
+            {placeCandidates.length > 1 && !placesListOnly ? (
               <Pressable
                 onPress={() => removePlaceCandidate(row.id)}
                 style={styles.deleteIconBtn}
@@ -775,7 +780,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               </Pressable>
             ) : null}
             <Text
-              style={[styles.cardFieldTitle, placeCandidates.length <= 1 && styles.cardFieldTitleNoDeleteOffset]}>
+              style={[
+                styles.cardFieldTitle,
+                (placeCandidates.length <= 1 || placesListOnly) && styles.cardFieldTitleNoDeleteOffset,
+              ]}>
               장소 후보 {placeIndex + 1}
             </Text>
             {isFilled(row) ? (
@@ -787,7 +795,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 <Text style={styles.placeAddrText} numberOfLines={4}>
                   {row.address}
                 </Text>
-                <Text style={styles.placeHint}>탭하여 장소 선택 화면에서 바꾸기</Text>
+                <Text style={styles.placeHint}>
+                  {placesListOnly ? '탭하면 장소를 바꿀 수 있어요.' : '탭하여 장소 선택 화면에서 바꾸기'}
+                </Text>
               </Pressable>
             ) : (
               <View style={styles.fieldRecess}>
@@ -807,18 +817,20 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </VoteCandidateCard>
       ))}
 
-      <Pressable
-        onPress={addPlaceCandidate}
-        disabled={!canAddPlaceCandidate}
-        style={({ pressed }) => [
-          styles.addCandidateBtn,
-          !canAddPlaceCandidate && styles.addCandidateBtnDisabled,
-          pressed && canAddPlaceCandidate && styles.addCandidateBtnPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !canAddPlaceCandidate }}>
-        <Text style={styles.addCandidateBtnLabel}>+ 장소 후보 추가</Text>
-      </Pressable>
+      {!placesListOnly ? (
+        <Pressable
+          onPress={addPlaceCandidate}
+          disabled={!canAddPlaceCandidate}
+          style={({ pressed }) => [
+            styles.addCandidateBtn,
+            !canAddPlaceCandidate && styles.addCandidateBtnDisabled,
+            pressed && canAddPlaceCandidate && styles.addCandidateBtnPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canAddPlaceCandidate }}>
+          <Text style={styles.addCandidateBtnLabel}>+ 장소 후보 추가</Text>
+        </Pressable>
+      ) : null}
     </>
   );
 
@@ -904,21 +916,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 });
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
-
-const AI_TEMPLATES: { title: string; keywords: string[] }[] = [
-  { title: '🔥 오늘 저녁 약속', keywords: ['레스토랑', '식사', '저녁'] },
-  { title: '☕️ 가벼운 커피', keywords: ['커피'] },
-  { title: '🗓️ 팀 싱크 회의', keywords: ['회의', '미팅', '워크'] },
-  { title: '🎂 생일 파티 계획', keywords: ['파티', '생일'] },
-];
-
-function pickCategoryByKeywords(categories: Category[], keywords: string[]): Category | null {
-  for (const kw of keywords) {
-    const hit = categories.find((c) => c.label.includes(kw));
-    if (hit) return hit;
-  }
-  return categories[0] ?? null;
-}
 
 export default function CreateDetailsScreen() {
   const router = useRouter();
@@ -1034,6 +1031,14 @@ export default function CreateDetailsScreen() {
     () => (selectedCategory?.label ? resolveSpecialtyKind(selectedCategory.label) : null),
     [selectedCategory?.label],
   );
+  const descriptionPlaceholder = useMemo(
+    () =>
+      getFinalDescriptionPlaceholder({
+        categoryLabel: (selectedCategory?.label ?? paramCategoryLabel).trim(),
+        specialtyKind,
+      }),
+    [paramCategoryLabel, selectedCategory?.label, specialtyKind],
+  );
   const needsSpecialty = specialtyKind != null;
   const needsMovieEarlyPlaces = specialtyKind === 'movie';
   const scheduleStep: WizardStep = needsMovieEarlyPlaces ? 5 : 4;
@@ -1111,9 +1116,7 @@ export default function CreateDetailsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      requestAnimationFrame(() => {
-        mainScrollRef.current?.scrollTo({ y: 0, animated: false });
-      });
+      // 포커스마다 scrollTo(0) 하지 않음 — 장소 검색(`/place-search`)에서 돌아올 때 스크롤 위치 유지
       const mp = consumePendingMeetingPlace();
       if (mp?.placeName?.trim()) {
         setPlaceSearchSeed(mp.placeName.trim());
@@ -1134,14 +1137,6 @@ export default function CreateDetailsScreen() {
       setAiTitleSuggestions([]);
     }
   }, [paramCategoryLabel, selectedCategory?.label]);
-
-  const onTemplatePress = useCallback(
-    (keywords: string[]) => {
-      const cat = pickCategoryByKeywords(categories, keywords);
-      if (cat) requestCategorySelect(cat.id);
-    },
-    [categories, requestCategorySelect],
-  );
 
   /**
    * 레이아웃 변화(LayoutAnimation)와 스크롤을 다른 프레임으로 분리.
@@ -1222,9 +1217,12 @@ export default function CreateDetailsScreen() {
   );
 
   const voteWizardSegment = useMemo(() => {
-    if (currentStep >= detailStep) return 'schedule' as const;
+    // 상세 단계에서도 일정·장소 후보 카드는 함께 보여 주고, 편집 범위는 scheduleListOnly / placesListOnly로 제한.
+    if (currentStep >= detailStep) return 'both' as const;
     if (currentStep < scheduleStep) return 'none' as const;
+    // 일정 단계: 일정만 편집. 장소 카드는「일정 확정」이후 placesStep에서 표시.
     if (currentStep === scheduleStep) return 'schedule' as const;
+    // placesStep: 일정 요약 + 장소 후보
     return 'both' as const;
   }, [currentStep, detailStep, scheduleStep]);
 
@@ -1235,10 +1233,14 @@ export default function CreateDetailsScreen() {
           <Text style={styles.wizardStepBadge}>
             {placesStep} · 장소 후보
           </Text>
-          <Text style={styles.wizardLockedHint}>장소 행을 눌러 검색·선택하거나 후보를 추가하세요.</Text>
+          <Text style={styles.wizardLockedHint}>
+            {currentStep >= detailStep
+              ? '확정한 장소 후보예요. 필요하면 카드를 탭해 바꿀 수 있어요.'
+              : '장소 행을 눌러 검색·선택하거나 후보를 추가하세요.'}
+          </Text>
         </View>
       ) : null,
-    [currentStep, placesStep],
+    [currentStep, detailStep, placesStep],
   );
 
   const onMinParticipantsChange = useCallback((n: number) => {
@@ -1362,6 +1364,17 @@ export default function CreateDetailsScreen() {
     setVotePayload(cap.payload);
     setPlaceSearchSeed('');
     voteFormRef.current?.resetPlaceSearchSession();
+    pendingScrollAfterStepRef.current = placesStep;
+    setCurrentStep(placesStep);
+  }, [placesStep]);
+
+  const onPlacesStepConfirm = useCallback(() => {
+    setWizardError(null);
+    const r = voteFormRef.current?.validatePlacesStep();
+    if (!r?.ok) {
+      setWizardError(r?.error ?? '장소 후보를 확인해 주세요.');
+      return;
+    }
     pendingScrollAfterStepRef.current = detailStep;
     setCurrentStep(detailStep);
   }, [detailStep]);
@@ -1565,24 +1578,6 @@ export default function CreateDetailsScreen() {
                 onLayout={(e) => captureStepPosition(1, e)}>
                 <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
                 <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
-
-                <Text style={[styles.wizardFieldLabel, { marginTop: 10 }]}>AI 빠른 템플릿</Text>
-                <ScrollView
-                  horizontal
-                  nestedScrollEnabled
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.templateRow}
-                  keyboardShouldPersistTaps="handled">
-                  {AI_TEMPLATES.map((t) => (
-                    <Pressable
-                      key={t.title}
-                      onPress={() => onTemplatePress(t.keywords)}
-                      style={({ pressed }) => [styles.glassChip, pressed && styles.glassChipPressed]}
-                      accessibilityRole="button">
-                      <Text style={styles.glassChipText}>{t.title}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
 
                 {catLoading ? (
                   <View style={styles.centerRow}>
@@ -1860,6 +1855,7 @@ export default function CreateDetailsScreen() {
                         bare
                         wizardSegment={voteWizardSegment}
                         scheduleListOnly={currentStep >= detailStep}
+                        placesListOnly={currentStep >= detailStep}
                         onPlacesBlockLayout={onPlacesBlockLayout}
                         headerBeforePlaces={headerBeforePlaces}
                       />
@@ -1871,6 +1867,14 @@ export default function CreateDetailsScreen() {
                         style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                         accessibilityRole="button">
                         <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
+                      </Pressable>
+                    ) : null}
+                    {currentStep === placesStep ? (
+                      <Pressable
+                        onPress={onPlacesStepConfirm}
+                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                        accessibilityRole="button">
+                        <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 설명</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -1891,14 +1895,11 @@ export default function CreateDetailsScreen() {
                       <VoteCandidateCard
                         reduceHeavyEffects={false}
                         outerStyle={[styles.wizardGlassCard, styles.finalRegistrationGlass]}>
-                        <Text style={styles.wizardFieldLabel}>모임 상세 설명 (선택)</Text>
-                        <Text style={styles.wizardFieldHint}>
-                          직접 적지 않아도 돼요. 비어 있으면 등록 시 AI가 한 줄 소개를 만들어요.
-                        </Text>
+                        
                         <TextInput
                           value={description}
                           onChangeText={setDescription}
-                          placeholder={FINAL_DESCRIPTION_PLACEHOLDER}
+                          placeholder={descriptionPlaceholder}
                           placeholderTextColor={INPUT_PLACEHOLDER}
                           style={[styles.finalDescriptionInput, descFocused && styles.finalDescriptionInputFocused]}
                           multiline
@@ -2245,42 +2246,21 @@ const styles = StyleSheet.create({
     color: 'rgba(248, 250, 252, 0.55)',
     lineHeight: 20,
   },
-  templateRow: {
-    gap: 10,
-    paddingVertical: 6,
-    paddingRight: 8,
-  },
-  glassChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    marginRight: 4,
-  },
-  glassChipPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.99 }],
-  },
-  glassChipText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: 'rgba(248, 250, 252, 0.92)',
-  },
   catGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
+    marginTop: 10,
   },
   catTile: {
-    width: '30%',
-    flexGrow: 1,
-    minWidth: '28%',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
+    /** 한 줄에 더 많이 들어가도록 작은 박스 (카테고리 증가 대비) */
+    width: '23%',
+    flexGrow: 0,
+    minWidth: '22%',
+    maxWidth: '25%',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderWidth: 1,
@@ -2290,25 +2270,27 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(147, 197, 253, 0.75)',
     backgroundColor: 'rgba(0, 82, 204, 0.22)',
     shadowColor: TRUST_BLUE,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   catTilePressed: {
     opacity: 0.9,
     transform: [{ scale: 0.98 }],
   },
   catEmoji: {
-    fontSize: 26,
-    marginBottom: 6,
+    fontSize: 18,
+    lineHeight: 22,
+    marginBottom: 4,
   },
   catLabel: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 10,
+    fontWeight: '700',
     color: 'rgba(248, 250, 252, 0.9)',
     textAlign: 'center',
-    letterSpacing: -0.2,
+    letterSpacing: -0.15,
+    lineHeight: 13,
   },
   segmentRow: {
     flexDirection: 'row',
