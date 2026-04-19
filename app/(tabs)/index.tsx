@@ -132,7 +132,7 @@ export default function FeedScreen() {
   const [regionModalOpen, setRegionModalOpen] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
-  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
+  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);

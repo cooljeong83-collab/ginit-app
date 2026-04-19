@@ -24,6 +24,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 
 function animateListLayout() {
@@ -81,7 +82,8 @@ function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, vo
       setError(null);
       setLoading(true);
       try {
-        const list = await searchNaverLocalPlaces(trimmed);
+        const { bias } = await ensureNearbySearchBias();
+        const list = await searchNaverLocalPlaces(trimmed, { locationBias: bias });
         if (opts?.signal?.aborted) return;
         setHasSearched(true);
         setResults(list);

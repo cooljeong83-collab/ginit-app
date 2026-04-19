@@ -71,6 +71,7 @@ import {
 } from '@/src/lib/meeting-place-bridge';
 import {
   generateAiMeetingDescription,
+  generateSuggestedMeetingTitle,
   generateSuggestedMeetingTitles,
   getFinalDescriptionPlaceholder,
 } from '@/src/lib/meeting-title-suggestion';
@@ -1138,6 +1139,16 @@ export default function CreateDetailsScreen() {
     }
   }, [paramCategoryLabel, selectedCategory?.label]);
 
+  /** 직접 입력이 없으면 AI 추천 첫 항목 → 없으면 카테고리 기반 한 줄 생성 */
+  const effectiveMeetingTitle = useMemo(() => {
+    const manual = title.trim();
+    if (manual.length > 0) return manual;
+    const firstAi = aiTitleSuggestions[0]?.trim() ?? '';
+    if (firstAi.length > 0) return firstAi;
+    const label = (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임';
+    return generateSuggestedMeetingTitle(label, new Date(), 0);
+  }, [title, aiTitleSuggestions, selectedCategory?.label, paramCategoryLabel]);
+
   /**
    * 레이아웃 변화(LayoutAnimation)와 스크롤을 다른 프레임으로 분리.
    */
@@ -1289,8 +1300,7 @@ export default function CreateDetailsScreen() {
   const onStep3BasicNext = useCallback(() => {
     setWizardError(null);
     if (!title.trim()) {
-      setWizardError('모임 이름을 입력해 주세요.');
-      return;
+      setTitle(effectiveMeetingTitle);
     }
     if (isPublicMeeting) {
       if (!Number.isFinite(minParticipants) || minParticipants < 1 || minParticipants > 100) {
@@ -1320,7 +1330,7 @@ export default function CreateDetailsScreen() {
     }
     pendingScrollAfterStepRef.current = 4;
     setCurrentStep(4);
-  }, [isPublicMeeting, maxParticipants, minParticipants, title]);
+  }, [effectiveMeetingTitle, isPublicMeeting, maxParticipants, minParticipants, title]);
 
   const onEarlyPlacesFloatingConfirm = useCallback(() => {
     setWizardError(null);
@@ -1395,11 +1405,6 @@ export default function CreateDetailsScreen() {
       Alert.alert('오류', '카테고리를 선택해 주세요.');
       return;
     }
-    if (!title.trim()) {
-      setWizardError('모임 이름을 입력해 주세요.');
-      Alert.alert('입력 확인', '모임 이름을 입력해 주세요.');
-      return;
-    }
     if (isPublicMeeting) {
       if (!Number.isFinite(minParticipants) || minParticipants < 1 || minParticipants > 100) {
         setWizardError('최소 인원을 선택해 주세요.');
@@ -1455,13 +1460,14 @@ export default function CreateDetailsScreen() {
     const p0 = vote.placeCandidates[0];
     const primary = primaryScheduleFromDateCandidate(vote.dateCandidates[0]);
 
+    const meetingTitleForSave = effectiveMeetingTitle.trim();
     const descTrim = description.trim();
     const descriptionForSave =
       descTrim.length > 0
         ? descTrim
         : generateAiMeetingDescription({
             categoryLabel: clabel,
-            meetingTitle: title.trim(),
+            meetingTitle: meetingTitleForSave,
             placeName: p0.placeName.trim(),
             scheduleDate: primary.scheduleDate.trim(),
             scheduleTime: primary.scheduleTime.trim(),
@@ -1487,7 +1493,7 @@ export default function CreateDetailsScreen() {
     setBusy(true);
     try {
       await addMeeting({
-        title: title.trim(),
+        title: meetingTitleForSave,
         location: p0.placeName.trim(),
         placeName: p0.placeName.trim(),
         address: p0.address.trim(),
@@ -1516,6 +1522,7 @@ export default function CreateDetailsScreen() {
     }
   }, [
     description,
+    effectiveMeetingTitle,
     isPublicMeeting,
     maxParticipants,
     minParticipants,
@@ -1527,7 +1534,6 @@ export default function CreateDetailsScreen() {
     movieCandidates,
     menuPreferences,
     sportIntensity,
-    title,
   ]);
 
   /** 등록 버튼: 로딩 중만 비활성화. 상세 설명 길이는 눌렀을 때 검증(짧으면 안내). */
@@ -1726,6 +1732,9 @@ export default function CreateDetailsScreen() {
                       style={styles.wizardTextInput}
                       editable={!busy}
                     />
+                    <Text style={[styles.wizardFieldHint, { marginTop: 6 }]}>
+                      비워 두면 AI 추천(또는 자동 생성) 제목이 등록됩니다.
+                    </Text>
                     {aiTitleSuggestions.length > 0 ? (
                       <View style={styles.aiTitlePickBlock}>
                         <Text style={styles.wizardFieldHint}>✨ AI 추천 — 탭하면 이름에 넣어요</Text>

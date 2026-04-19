@@ -13,60 +13,44 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useUserSession } from '@/src/context/UserSessionContext';
 import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingById } from '@/src/lib/meetings';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 
-const MOCK_VOTE_NAMES = [
-  'Sarah (호스트), Alex, Maria',
-  'Ken, Chris',
-  'Alex, Ken',
-  'Maria',
-];
-
-function formatDateCandidateLine(dc: DateCandidate): string {
-  const parts = dc.startDate.split('-').map((n) => Number(n));
+/** 칩 한 줄 — 날짜 + (선택) 시간 (`startDate` 누락·레거시 문서 대비) */
+function formatDateCandidateTitle(dc: DateCandidate): string {
+  const raw = typeof dc.startDate === 'string' ? dc.startDate.trim() : '';
+  if (!raw) {
+    return dc.textLabel?.trim() || '일정 후보';
+  }
+  const parts = raw.split('-').map((n) => Number(n));
   if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-    return dc.textLabel?.trim() || dc.startDate;
+    return dc.textLabel?.trim() || raw;
   }
   const [y, mo, d] = parts;
   const date = new Date(y, mo - 1, d);
   const w = WEEK_KO[date.getDay()] ?? '';
-  const timePart = dc.startTime?.trim() ? ` ${dc.startTime.trim()}` : '';
-  return `${mo}월 ${d}일 (${w})${timePart}`;
+  return `${mo}월 ${d}일 (${w})`;
 }
 
-type VoteSlot = { id: string; label: string; votes: number; names: string; leading: boolean };
+type DateChip = { id: string; title: string; sub?: string };
 
-function buildDateVoteSlots(meeting: Meeting): VoteSlot[] {
+function buildDateChips(meeting: Meeting): DateChip[] {
   const list = meeting.dateCandidates ?? [];
   if (list.length > 0) {
-    const maxVotes = Math.max(3, list.length);
     return list.map((dc, i) => ({
-      id: dc.id,
-      label: formatDateCandidateLine(dc),
-      votes: maxVotes - i,
-      names: MOCK_VOTE_NAMES[i % MOCK_VOTE_NAMES.length] ?? '—',
-      leading: i === 0,
+      id: dc.id?.trim() || `dc-${i}`,
+      title: formatDateCandidateTitle(dc),
+      sub: dc.startTime?.trim() || undefined,
     }));
   }
   return [
-    {
-      id: 'mock-1',
-      label: '4월 16일 (목) 14:00',
-      votes: 3,
-      names: 'Sarah (호스트), Alex, Maria',
-      leading: true,
-    },
-    {
-      id: 'mock-2',
-      label: '4월 17일 (금) 14:00',
-      votes: 2,
-      names: 'Ken, Chris',
-      leading: false,
-    },
+    { id: 'mock-1', title: '4월 16일 (목)', sub: '14:00' },
+    { id: 'mock-2', title: '4월 17일 (금)', sub: '14:00' },
   ];
 }
 
@@ -78,14 +62,28 @@ const MOCK_PARTICIPANTS = [
   { id: '5', label: 'Ken', initial: 'K' },
 ] as const;
 
+/** 세션 전화 PK와 모임 `createdBy`(정규화된 전화 PK)가 같으면 주선자 */
+function isMeetingHost(sessionPhone: string | null, createdBy: string | null | undefined): boolean {
+  const s = sessionPhone?.trim() ?? '';
+  const c = createdBy?.trim() ?? '';
+  if (!s || !c) return false;
+  if (s === c) return true;
+  const ns = normalizePhoneUserId(s) ?? s;
+  const nc = normalizePhoneUserId(c) ?? c;
+  return ns === nc;
+}
+
 export default function MeetingDetailScreen() {
   const router = useRouter();
+  const { phoneUserId } = useUserSession();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
 
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** 일시 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
+  const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     if (!id?.trim()) {
@@ -111,8 +109,19 @@ export default function MeetingDetailScreen() {
     void load();
   }, [load]);
 
-  const voteSlots = useMemo(() => (meeting ? buildDateVoteSlots(meeting) : []), [meeting]);
-  const maxVotes = useMemo(() => Math.max(1, ...voteSlots.map((s) => s.votes)), [voteSlots]);
+  useEffect(() => {
+    setSelectedDateIds([]);
+  }, [meeting?.id]);
+
+  const dateChips = useMemo(() => (meeting ? buildDateChips(meeting) : []), [meeting]);
+
+  const toggleDateSelection = useCallback((chipId: string) => {
+    setSelectedDateIds((prev) =>
+      prev.includes(chipId) ? prev.filter((x) => x !== chipId) : [...prev, chipId],
+    );
+  }, []);
+
+  const isHost = useMemo(() => (meeting ? isMeetingHost(phoneUserId, meeting.createdBy) : false), [meeting, phoneUserId]);
 
   const placeTitle = meeting
     ? meeting.placeCandidates?.[0]?.placeName ?? meeting.placeName?.trim() ?? meeting.location
@@ -180,31 +189,46 @@ export default function MeetingDetailScreen() {
               </Text>
             </View>
 
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>일시 투표 ({voteSlots.length}건)</Text>
-              <View style={styles.calIcons}>
-                {[0, 1, 2, 3].map((i) => (
-                  <Ionicons key={i} name="calendar-outline" size={16} color={GinitTheme.trustBlue} style={{ opacity: 0.35 + i * 0.15 }} />
-                ))}
-              </View>
+            <View style={styles.dateVoteHeaderBlock}>
+              <Text style={styles.sectionTitle}>일시 투표 ({dateChips.length}건)</Text>
+              <Text style={styles.dateVoteSub}>가능한 날짜를 가로로 스크롤하며 여러 개 선택할 수 있어요.</Text>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
-              {voteSlots.map((slot) => (
-                <View key={slot.id} style={[styles.voteCard, slot.leading && styles.voteCardLead]}>
-                  <Text style={styles.voteCardDate}>{slot.label}</Text>
-                  <Text style={[styles.voteCount, slot.leading ? styles.voteCountLead : styles.voteCountMuted]}>
-                    {slot.votes}표
-                  </Text>
-                  <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${Math.round((slot.votes / maxVotes) * 100)}%` }, slot.leading ? styles.progressLead : styles.progressMuted]} />
-                  </View>
-                  <Text style={styles.voterNames} numberOfLines={2}>
-                    {slot.names}
-                  </Text>
-                </View>
-              ))}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
+              {dateChips.map((chip) => {
+                const selected = selectedDateIds.includes(chip.id);
+                return (
+                  <Pressable
+                    key={chip.id}
+                    onPress={() => toggleDateSelection(chip.id)}
+                    style={({ pressed }) => [
+                      styles.dateChip,
+                      selected ? styles.dateChipSelected : null,
+                      pressed ? styles.dateChipPressed : null,
+                    ]}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected }}
+                    accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${selected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                    {selected ? (
+                      <View style={styles.dateChipCheckWrap} pointerEvents="none">
+                        <Ionicons name="checkmark-circle" size={20} color={GinitTheme.trustBlue} />
+                      </View>
+                    ) : null}
+                    <Text style={[styles.dateChipTitle, selected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                      {chip.title}
+                    </Text>
+                    {chip.sub ? (
+                      <Text style={[styles.dateChipSub, selected && styles.dateChipSubSelected]} numberOfLines={1}>
+                        {chip.sub}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
             </ScrollView>
+            <Text style={selectedDateIds.length > 0 ? styles.dateSelectionHint : styles.dateSelectionHintMuted}>
+              {selectedDateIds.length > 0 ? `${selectedDateIds.length}개 선택됨` : '아직 선택한 일정이 없어요'}
+            </Text>
 
             <Pressable style={styles.addOutlineBtn} accessibilityRole="button">
               <Ionicons name="add" size={20} color="#5C6570" />
@@ -266,18 +290,39 @@ export default function MeetingDetailScreen() {
 
         {!loading && !loadError && meeting !== null ? (
           <View style={styles.bottomBar}>
-            <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button">
-              <Ionicons name="construct-outline" size={18} color="#fff" />
-              <Text style={styles.pillText}>수정</Text>
-            </Pressable>
-            <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button">
-              <Ionicons name="mail-outline" size={18} color="#fff" />
-              <Text style={styles.pillText}>초대</Text>
-            </Pressable>
-            <Pressable style={[styles.bottomPill, styles.pillOrange]} accessibilityRole="button">
-              <Ionicons name="checkmark-circle" size={18} color="#fff" />
-              <Text style={styles.pillText}>확정</Text>
-            </Pressable>
+            {isHost ? (
+              <>
+                <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="모임 수정">
+                  <Ionicons name="construct-outline" size={18} color="#fff" />
+                  <Text style={styles.pillText}>수정</Text>
+                </Pressable>
+                <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="초대">
+                  <Ionicons name="mail-outline" size={18} color="#fff" />
+                  <Text style={styles.pillText}>초대</Text>
+                </Pressable>
+                <Pressable style={[styles.bottomPill, styles.pillOrange]} accessibilityRole="button" accessibilityLabel="일정 확정">
+                  <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                  <Text style={styles.pillText}>확정</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Pressable
+                  style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                  accessibilityRole="button"
+                  accessibilityLabel="초대">
+                  <Ionicons name="mail-outline" size={18} color="#fff" />
+                  <Text style={styles.pillText}>초대</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.bottomPill, styles.pillOrange, styles.bottomPillFlex]}
+                  accessibilityRole="button"
+                  accessibilityLabel="모임 참여">
+                  <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                  <Text style={styles.pillText}>참여</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         ) : null}
       </SafeAreaView>
@@ -344,37 +389,37 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
   sectionSpaced: { marginTop: 20, marginBottom: 10 },
-  calIcons: { flexDirection: 'row', gap: 4 },
-  hScroll: { gap: 12, paddingBottom: 4 },
-  voteCard: {
-    width: 200,
+  dateVoteHeaderBlock: { marginBottom: 10, gap: 4 },
+  dateVoteSub: { fontSize: 12, color: '#5C6570', lineHeight: 17 },
+  dateChipScroll: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
+  dateChip: {
+    minWidth: 112,
+    maxWidth: 140,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-    shadowColor: 'rgba(0,0,0,0.08)',
-    shadowOffset: { width: 0, height: 4 },
+    borderWidth: 2,
+    borderColor: '#E4E9EF',
+    position: 'relative',
+    shadowColor: 'rgba(15, 23, 42, 0.06)',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
-    shadowRadius: 10,
+    shadowRadius: 8,
     elevation: 2,
   },
-  voteCardLead: { borderColor: 'rgba(0, 82, 204, 0.35)' },
-  voteCardDate: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 },
-  voteCount: { fontSize: 14, fontWeight: '700', marginBottom: 6 },
-  voteCountLead: { color: GinitTheme.trustBlue },
-  voteCountMuted: { color: '#8B95A1' },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#E8ECF0',
-    overflow: 'hidden',
-    marginBottom: 8,
+  dateChipSelected: {
+    borderColor: GinitTheme.trustBlue,
+    backgroundColor: 'rgba(0, 82, 204, 0.07)',
   },
-  progressFill: { height: '100%', borderRadius: 3 },
-  progressLead: { backgroundColor: GinitTheme.trustBlue },
-  progressMuted: { backgroundColor: '#B8C0C8' },
-  voterNames: { fontSize: 12, color: '#5C6570', lineHeight: 17 },
+  dateChipPressed: { opacity: 0.9 },
+  dateChipCheckWrap: { position: 'absolute', top: 6, right: 6 },
+  dateChipTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
+  dateChipTitleSelected: { color: GinitTheme.trustBlue },
+  dateChipSub: { fontSize: 13, fontWeight: '600', color: '#5C6570', textAlign: 'center', marginTop: 6 },
+  dateChipSubSelected: { color: GinitTheme.trustBlue },
+  dateSelectionHint: { fontSize: 13, color: GinitTheme.trustBlue, fontWeight: '600', marginTop: 8 },
+  dateSelectionHintMuted: { fontSize: 12, color: '#8B95A1', marginTop: 8 },
   addOutlineBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -460,11 +505,14 @@ const styles = StyleSheet.create({
   bottomPill: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 22,
   },
+  /** 게스트 2버튼일 때 가로 폭 균등 */
+  bottomPillFlex: { flex: 1, minWidth: 0 },
   pillBlue: { backgroundColor: GinitTheme.trustBlue },
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillText: { color: '#fff', fontWeight: '700', fontSize: 14 },

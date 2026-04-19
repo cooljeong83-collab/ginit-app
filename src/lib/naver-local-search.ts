@@ -186,13 +186,33 @@ export async function resolveNaverPlaceCoordinates(place: NaverLocalPlace): Prom
   };
 }
 
+export type SearchNaverLocalPlacesOptions = {
+  /**
+   * 역지오로 얻은 구·동 등. 있으면 지역 검색·지오코딩 폴백 쿼리 끝에 붙여 **내 주변** 결과를 유도합니다.
+   * (네이버 Local API는 좌표 파라미터가 없어 쿼리 보강으로 처리)
+   */
+  locationBias?: string | null;
+};
+
+function applyLocationBiasToQuery(trimmed: string, bias: string | null | undefined): string {
+  const b = bias?.trim();
+  if (!b) return trimmed;
+  if (trimmed.includes(b)) return trimmed;
+  return `${trimmed} ${b}`;
+}
+
 /**
  * 1) Search API 지역 검색 (openapi, X-Naver-*).
  * 2) 결과가 없으면 NCP Geocoding으로 쿼리 자체를 주소처럼 조회.
  */
-export async function searchNaverLocalPlaces(query: string): Promise<NaverLocalPlace[]> {
-  const q = query.trim();
-  if (!q) return [];
+export async function searchNaverLocalPlaces(
+  query: string,
+  options?: SearchNaverLocalPlacesOptions,
+): Promise<NaverLocalPlace[]> {
+  const q0 = query.trim();
+  if (!q0) return [];
+
+  const q = applyLocationBiasToQuery(q0, options?.locationBias);
 
   const hasSearchKeys = Boolean(
     publicEnv.naverSearchClientId?.trim() && publicEnv.naverSearchClientSecret?.trim(),

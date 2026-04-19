@@ -26,7 +26,9 @@ import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 
@@ -146,6 +148,10 @@ export function EarlyPlaceSearch({
   const [err, setErr] = useState<string | null>(null);
   const [fontBold, setFontBold] = useState<string | undefined>(undefined);
   const [fontRegular, setFontRegular] = useState<string | undefined>(undefined);
+  /** GPS 확보 시 영화관 시드 정렬·검색 재실행용 */
+  const [userCoords, setUserCoords] = useState<LatLng | null>(null);
+  const [nearbyHint, setNearbyHint] = useState<string | null>(null);
+  const [locationReady, setLocationReady] = useState(false);
   const expandedPickerRef = useRef<View>(null);
 
   /** 웹: 얇은 Trust Blue 톤 스크롤바 (::webkit-scrollbar) */
@@ -196,6 +202,29 @@ export function EarlyPlaceSearch({
   useEffect(() => {
     if (value.length === 0) setAddingMore(false);
   }, [value.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ensureNearbySearchBias().then(({ bias, coords }) => {
+      if (cancelled) return;
+      setUserCoords(coords);
+      setNearbyHint(bias);
+      setLocationReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const cinemaSeedsOrdered = useMemo(() => {
+    if (!userCoords) return [...NEARBY_CINEMA_SEEDS];
+    return [...NEARBY_CINEMA_SEEDS].sort((a, b) => {
+      const da = haversineDistanceMeters(userCoords, { latitude: a.latitude, longitude: a.longitude });
+      const db = haversineDistanceMeters(userCoords, { latitude: b.latitude, longitude: b.longitude });
+      if (da !== db) return da - db;
+      return a.placeName.localeCompare(b.placeName, 'ko');
+    });
+  }, [userCoords]);
 
   useEffect(() => {
     if (!addingMore || value.length === 0) return;
@@ -291,7 +320,9 @@ export function EarlyPlaceSearch({
     const t = setTimeout(() => {
       void (async () => {
         try {
-          const list = await searchNaverLocalPlaces(qTrim);
+          const { bias } = await ensureNearbySearchBias();
+          if (!alive) return;
+          const list = await searchNaverLocalPlaces(qTrim, { locationBias: bias });
           if (!alive) return;
           setRows(list);
         } catch (e) {
@@ -307,7 +338,7 @@ export function EarlyPlaceSearch({
       alive = false;
       clearTimeout(t);
     };
-  }, [pickerOpen, qTrim]);
+  }, [pickerOpen, qTrim, locationReady]);
 
   const titleStyle = useMemo(
     () => [styles.placeTitle, fontBold ? { fontFamily: fontBold } : { fontWeight: '700' as const }],
@@ -389,6 +420,15 @@ export function EarlyPlaceSearch({
         autoCorrect={false}
         {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
       />
+      {nearbyHint ? (
+        <Text style={[S.fieldHint, { marginTop: 6 }]}>{`「${nearbyHint}」 근처로 검색해요`}</Text>
+      ) : locationReady ? (
+        <Text style={[S.fieldHint, { marginTop: 6 }]}>
+          위치를 쓰지 못했어요. 검색어에 동·구 이름을 넣으면 더 잘 찾아요.
+        </Text>
+      ) : (
+        <Text style={[S.fieldHint, { marginTop: 6 }]}>내 위치를 불러오는 중…</Text>
+      )}
     </View>
   );
 
@@ -452,24 +492,39 @@ export function EarlyPlaceSearch({
   const cinemaScrollBlock =
     showCinemaBlock ? (
       <View style={styles.cinemaSection}>
-        <Text style={S.fieldHint}>내 주변 영화관 (CGV · 롯데시네마 · 메가박스 등)</Text>
-        <View style={styles.cinemaListShell}>
-          <ScrollView
-            {...webScrollClassProps}
-            style={cinemaScrollStyle}
-            contentContainerStyle={styles.cinemaScrollContent}
-            nestedScrollEnabled
-            overScrollMode="never"
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}>
-            {NEARBY_CINEMA_SEEDS.map((c) =>
-              renderPickRow(`cinema-${c.id}`, c.placeName, c.address, () =>
-                onPickCandidate({ ...c, id: newPlaceId() }),
-              ),
-            )}
-          </ScrollView>
-        </View>
+        {!locationReady ? (
+          <View style={styles.cinemaLoadingWrap} accessibilityLabel="내 위치 확인 중">
+            <ActivityIndicator color={TRUST_BLUE} />
+            <Text style={[S.fieldHint, styles.cinemaLoadingHint]}>
+              내 위치를 확인한 뒤, 가까운 영화관부터 순서대로 보여 드려요
+            </Text>
+          </View>
+        ) : (
+          <>
+            <Text style={S.fieldHint}>
+              {userCoords
+                ? '내 위치에서 가까운 순 — CGV · 롯데시네마 · 메가박스 등'
+                : '영화관 빠른 선택 — 위치를 허용하면 가까운 순으로 정렬돼요'}
+            </Text>
+            <View style={styles.cinemaListShell}>
+              <ScrollView
+                {...webScrollClassProps}
+                style={cinemaScrollStyle}
+                contentContainerStyle={styles.cinemaScrollContent}
+                nestedScrollEnabled
+                overScrollMode="never"
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                showsVerticalScrollIndicator={false}>
+                {cinemaSeedsOrdered.map((c) =>
+                  renderPickRow(`cinema-${c.id}`, c.placeName, c.address, () =>
+                    onPickCandidate({ ...c, id: newPlaceId() }),
+                  ),
+                )}
+              </ScrollView>
+            </View>
+          </>
+        )}
       </View>
     ) : null;
 
@@ -492,7 +547,13 @@ export function EarlyPlaceSearch({
           })
         )
       ) : showCinemaBlock ? null : (
-        <Text style={S.resultMeta}>검색어를 입력하면 주변 장소를 찾아요.</Text>
+        <Text style={S.resultMeta}>
+          {nearbyHint
+            ? '검색어를 입력하면 이 근처 장소를 찾아요.'
+            : locationReady
+              ? '검색어를 입력하면 장소를 찾아요.'
+              : '검색어를 입력하면 주변 장소를 찾아요.'}
+        </Text>
       )}
     </>
   );
@@ -640,6 +701,18 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     flexShrink: 0,
     alignSelf: 'stretch',
+  },
+  cinemaLoadingWrap: {
+    minHeight: CINEMA_SCROLL_MAX,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+  },
+  cinemaLoadingHint: {
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   cinemaListShell: {
     marginTop: 6,
