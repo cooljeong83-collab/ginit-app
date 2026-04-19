@@ -2,7 +2,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -47,10 +47,17 @@ export type PlaceSearchScreenProps = {
   voteRowId?: string;
 };
 
-export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, voteRowId }: PlaceSearchScreenProps) {
+function PlaceSearchScreenInner({ useGoogleMapsPreview = false, initialQuery, voteRowId }: PlaceSearchScreenProps) {
   const router = useRouter();
   const searchInputRef = useRef<TextInput>(null);
   const [searchFocused, setSearchFocused] = useState(false);
+  /** 첫 프레임은 BlurView 없이 정적 레이어로 그려 전환 직후 프레임 드랍을 줄입니다. */
+  const [nativeDecorReady, setNativeDecorReady] = useState(Platform.OS === 'web');
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    const id = requestAnimationFrame(() => setNativeDecorReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +85,9 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
         if (opts?.signal?.aborted) return;
         setHasSearched(true);
         setResults(list);
-        if (useGoogleMapsPreview) animateListLayout();
+        if (useGoogleMapsPreview) {
+          InteractionManager.runAfterInteractions(() => animateListLayout());
+        }
         setSelected(null);
       } catch (e) {
         if (opts?.signal?.aborted) return;
@@ -131,13 +140,17 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
   const onSelectPlace = useCallback(
     async (item: NaverLocalPlace) => {
       Keyboard.dismiss();
-      if (useGoogleMapsPreview) animateListLayout();
+      if (useGoogleMapsPreview) {
+        InteractionManager.runAfterInteractions(() => animateListLayout());
+      }
       setError(null);
       setSelected(item);
       setResolving(true);
       try {
         const resolved = await resolveNaverPlaceCoordinates(item);
-        if (useGoogleMapsPreview) animateListLayout();
+        if (useGoogleMapsPreview) {
+          InteractionManager.runAfterInteractions(() => animateListLayout());
+        }
         setSelected(resolved);
         setResults((prev) => prev.map((p) => (p.id === item.id ? resolved : p)));
       } catch (e) {
@@ -175,7 +188,7 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
       <LinearGradient colors={['#DCEEFF', '#EEF6FF', '#FFF4ED']} locations={[0, 0.45, 1]} style={StyleSheet.absoluteFill} />
       {Platform.OS === 'web' ? (
         <View style={[StyleSheet.absoluteFill, GinitStyles.webVeil]} />
-      ) : (
+      ) : nativeDecorReady ? (
         <>
           <BlurView
             pointerEvents="none"
@@ -185,6 +198,8 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
           />
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, GinitStyles.frostVeil]} />
         </>
+      ) : (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.enteringStaticVeil]} />
       )}
       <KeyboardAvoidingView
         style={GinitStyles.flexFill}
@@ -240,6 +255,10 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
               keyExtractor={(item) => item.id}
               extraData={`${selected?.id ?? ''}:${String(selected?.latitude)}:${String(selected?.longitude)}:${resolving ? '1' : '0'}`}
               keyboardShouldPersistTaps="handled"
+              initialNumToRender={8}
+              maxToRenderPerBatch={10}
+              windowSize={7}
+              removeClippedSubviews={Platform.OS === 'android'}
               contentContainerStyle={GinitStyles.listContent}
               ListEmptyComponent={
                 loading || error ? null : !hasSearched ? (
@@ -316,6 +335,14 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
     </View>
   );
 }
+
+export const PlaceSearchScreen = memo(PlaceSearchScreenInner);
+
+const styles = StyleSheet.create({
+  enteringStaticVeil: {
+    backgroundColor: '#E8EEF8',
+  },
+});
 
 export default function PlaceSearchRoute() {
   const { initialQuery, voteRowId } = useLocalSearchParams<{

@@ -4,10 +4,10 @@
  * 완료 시 `setPendingVoteCandidates`로 2단계로 전달합니다.
  */
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
   InteractionManager,
@@ -37,6 +37,24 @@ const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
 
 function animate() {
   layoutAnimateEaseInEaseOut();
+}
+
+/** 스택 전환 중에는 BlurView 대신 정적 View로 GPU 부하를 줄입니다. */
+function VoteCandidateCard({
+  reduceHeavyEffects,
+  children,
+}: {
+  reduceHeavyEffects: boolean;
+  children: ReactNode;
+}) {
+  if (reduceHeavyEffects || Platform.OS === 'web') {
+    return <View style={styles.glassCardBlur}>{children}</View>;
+  }
+  return (
+    <BlurView tint="dark" intensity={40} style={styles.glassCardBlur} experimentalBlurMethod="dimezisBlurView">
+      {children}
+    </BlurView>
+  );
 }
 
 function pickParam(v: string | string[] | undefined): string | undefined {
@@ -176,6 +194,28 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   /** `+ 장소 후보 추가` 직후 열린 검색에서 선택 없이 돌아오면 이 행 ID를 제거합니다. */
   const pendingEphemeralPlaceRowIdRef = useRef<string | null>(null);
 
+  const isFocused = useIsFocused();
+  const navigation = useNavigation();
+  const [stackTransitionCoversScreen, setStackTransitionCoversScreen] = useState(false);
+  useEffect(() => {
+    type TransitionNav = {
+      addListener: (event: string, cb: (e: { data?: { closing?: boolean } }) => void) => () => void;
+    };
+    const nav = navigation as unknown as TransitionNav;
+    const onStart = nav.addListener('transitionStart', (e) => {
+      if (e.data?.closing) setStackTransitionCoversScreen(true);
+    });
+    const onEnd = nav.addListener('transitionEnd', () => {
+      setStackTransitionCoversScreen(false);
+    });
+    return () => {
+      onStart();
+      onEnd();
+    };
+  }, [navigation]);
+
+  const reduceHeavyEffects = !isFocused || stackTransitionCoversScreen;
+
   useImperativeHandle(
     ref,
     () => ({
@@ -211,13 +251,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const openPlaceSearch = useCallback(
     (row: PlaceRowModel) => {
       const q = row.query.trim() || row.placeName.trim();
-      InteractionManager.runAfterInteractions(() => {
-        router.push({
-          pathname: '/place-search',
-          params: {
-            initialQuery: q,
-            voteRowId: row.id,
-          },
+      requestAnimationFrame(() => {
+        InteractionManager.runAfterInteractions(() => {
+          router.push({
+            pathname: '/place-search',
+            params: {
+              initialQuery: q,
+              voteRowId: row.id,
+            },
+          });
         });
       });
     },
@@ -232,7 +274,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         setPlaceCandidates((prev) => {
           const hit = prev.some((r) => r.id === sel.rowId);
           if (!hit) return prev;
-          animate();
           return prev.map((r) =>
             r.id === sel.rowId
               ? {
@@ -246,6 +287,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               : r,
           );
         });
+        InteractionManager.runAfterInteractions(() => animate());
         return;
       }
 
@@ -256,12 +298,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       setPlaceCandidates((prev) => {
         const row = prev.find((r) => r.id === ephemeralId);
         if (!row || isFilled(row)) return prev;
-        animate();
         if (prev.length <= 1) {
           return [emptyPlaceRow()];
         }
         return prev.filter((r) => r.id !== ephemeralId);
       });
+      InteractionManager.runAfterInteractions(() => animate());
     }, []),
   );
 
@@ -269,14 +311,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const row = emptyPlaceRow();
     pendingEphemeralPlaceRowIdRef.current = row.id;
     setPlaceCandidates((prev) => [...prev, row]);
-    /** LayoutAnimation과 push가 겹치면 잔상·끊김이 나므로, 전환은 인터랙션 이후에만 실행 */
-    InteractionManager.runAfterInteractions(() => {
-      router.push({
-        pathname: '/place-search',
-        params: {
-          initialQuery: row.query.trim(),
-          voteRowId: row.id,
-        },
+    requestAnimationFrame(() => {
+      InteractionManager.runAfterInteractions(() => {
+        router.push({
+          pathname: '/place-search',
+          params: {
+            initialQuery: row.query.trim(),
+            voteRowId: row.id,
+          },
+        });
       });
     });
   }, [router]);
@@ -329,6 +372,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     setPicker(null);
   }, [iosDraft, picker, updateDateRow]);
 
+  const lastPlaceCandidate = placeCandidates[placeCandidates.length - 1];
+  const canAddPlaceCandidate =
+    lastPlaceCandidate != null &&
+    lastPlaceCandidate.latitude != null &&
+    lastPlaceCandidate.longitude != null;
+
   const formBody = (
     <>
       <View style={styles.sectionHeader}>
@@ -337,22 +386,21 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <Text style={styles.sectionHint}>날짜·시간 후보를 추가하고 투표에서 고를 수 있어요.</Text>
 
       {dateCandidates.map((d, dateIndex) => (
-        <BlurView
-          key={d.id}
-          tint="dark"
-          intensity={40}
-          style={styles.glassCardBlur}
-          experimentalBlurMethod="dimezisBlurView">
+        <VoteCandidateCard key={d.id} reduceHeavyEffects={reduceHeavyEffects}>
           <View style={styles.glassCardInner}>
-            <Pressable
-              onPress={() => (dateCandidates.length > 1 ? removeDateRow(d.id) : undefined)}
-              disabled={dateCandidates.length <= 1}
-              style={[styles.deleteIconBtn, dateCandidates.length <= 1 && styles.deleteIconBtnDisabled]}
-              accessibilityRole="button"
-              accessibilityLabel="일시 후보 삭제">
-              <Text style={styles.deleteIconText}>✕</Text>
-            </Pressable>
-            <Text style={styles.cardFieldTitle}>일정 후보 {dateIndex + 1}</Text>
+            {dateCandidates.length > 1 ? (
+              <Pressable
+                onPress={() => removeDateRow(d.id)}
+                style={styles.deleteIconBtn}
+                accessibilityRole="button"
+                accessibilityLabel="일시 후보 삭제">
+                <Text style={styles.deleteIconText}>✕</Text>
+              </Pressable>
+            ) : null}
+            <Text
+              style={[styles.cardFieldTitle, dateCandidates.length <= 1 && styles.cardFieldTitleNoDeleteOffset]}>
+              일정 후보 {dateIndex + 1}
+            </Text>
             {Platform.OS === 'web' ? (
               <View style={styles.row2}>
                 <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
@@ -399,7 +447,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               </View>
             )}
           </View>
-        </BlurView>
+        </VoteCandidateCard>
       ))}
 
       <Pressable onPress={addDateRow} style={styles.addCandidateBtn} accessibilityRole="button">
@@ -412,21 +460,21 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <Text style={styles.sectionHint}>각 카드에서 장소 검색 화면으로 이동해 후보를 채워 주세요.</Text>
 
       {placeCandidates.map((row, placeIndex) => (
-        <BlurView
-          key={row.id}
-          tint="dark"
-          intensity={40}
-          style={styles.glassCardBlur}
-          experimentalBlurMethod="dimezisBlurView">
+        <VoteCandidateCard key={row.id} reduceHeavyEffects={reduceHeavyEffects}>
           <View style={styles.glassCardInner}>
-            <Pressable
-              onPress={() => removePlaceCandidate(row.id)}
-              style={styles.deleteIconBtn}
-              accessibilityRole="button"
-              accessibilityLabel="장소 후보 삭제">
-              <Text style={styles.deleteIconText}>✕</Text>
-            </Pressable>
-            <Text style={styles.cardFieldTitle}>장소 후보 {placeIndex + 1}</Text>
+            {placeCandidates.length > 1 ? (
+              <Pressable
+                onPress={() => removePlaceCandidate(row.id)}
+                style={styles.deleteIconBtn}
+                accessibilityRole="button"
+                accessibilityLabel="장소 후보 삭제">
+                <Text style={styles.deleteIconText}>✕</Text>
+              </Pressable>
+            ) : null}
+            <Text
+              style={[styles.cardFieldTitle, placeCandidates.length <= 1 && styles.cardFieldTitleNoDeleteOffset]}>
+              장소 후보 {placeIndex + 1}
+            </Text>
             {isFilled(row) ? (
               <Pressable onPress={() => openPlaceSearch(row)} accessibilityRole="button" accessibilityLabel="장소 다시 선택">
                 <Text style={styles.placeEmoji}>📍</Text>
@@ -453,10 +501,19 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               </View>
             )}
           </View>
-        </BlurView>
+        </VoteCandidateCard>
       ))}
 
-      <Pressable onPress={addPlaceCandidate} style={styles.addCandidateBtn} accessibilityRole="button">
+      <Pressable
+        onPress={addPlaceCandidate}
+        disabled={!canAddPlaceCandidate}
+        style={({ pressed }) => [
+          styles.addCandidateBtn,
+          !canAddPlaceCandidate && styles.addCandidateBtnDisabled,
+          pressed && canAddPlaceCandidate && styles.addCandidateBtnPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canAddPlaceCandidate }}>
         <Text style={styles.addCandidateBtnLabel}>+ 장소 후보 추가</Text>
       </Pressable>
     </>
@@ -680,8 +737,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 2,
   },
-  deleteIconBtnDisabled: {
-    opacity: 0.35,
+  cardFieldTitleNoDeleteOffset: {
+    paddingRight: 0,
   },
   deleteIconText: {
     color: '#FFFFFF',
@@ -780,5 +837,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  addCandidateBtnDisabled: {
+    opacity: 0.5,
+  },
+  addCandidateBtnPressed: {
+    opacity: 0.92,
   },
 });
