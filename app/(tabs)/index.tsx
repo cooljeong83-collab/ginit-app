@@ -27,11 +27,9 @@ import {
 } from '@/src/lib/feed-display-location';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
+import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetings } from '@/src/lib/meetings';
-
-const DEFAULT_THUMB =
-  'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&h=400&fit=crop&q=80';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
 const MOCK_REGION_ROWS = [
@@ -460,7 +458,7 @@ export default function FeedScreen() {
           {sortedFilteredMeetings.map((m) => (
             <Pressable key={m.id} style={styles.meetRow} accessibilityRole="button">
               <Image
-                source={{ uri: m.imageUrl?.trim() ? m.imageUrl.trim() : DEFAULT_THUMB }}
+                source={{ uri: resolveMeetingListThumbnailUri(m) }}
                 style={styles.thumb}
                 contentFit="cover"
               />
