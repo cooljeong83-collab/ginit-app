@@ -105,6 +105,15 @@ export type Meeting = {
   confirmedMovieChipId?: string | null;
 };
 
+/** 표시용 참여 인원 수(주관자 + `participantIds`, 중복 제거). */
+export function meetingParticipantCount(m: Meeting): number {
+  const ids = m.participantIds ?? [];
+  const set = new Set(ids.map((x) => normalizePhoneUserId(String(x)) ?? String(x).trim()).filter(Boolean));
+  const host = m.createdBy?.trim() ? normalizePhoneUserId(m.createdBy) ?? m.createdBy.trim() : '';
+  if (host) set.add(host);
+  return Math.max(set.size, ids.length > 0 ? ids.length : host ? 1 : 0);
+}
+
 export function getFirestoreDb() {
   return getFirebaseFirestore();
 }

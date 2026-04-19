@@ -13,7 +13,17 @@
  *
  * 참가자만 쓰기·읽기를 엄격히 제한하려면 Cloud Function으로 검증하거나,
  * `participantIds` 배열과 토큰 클레임을 맞춰 규칙을 작성하세요.
+ *
+ * Storage(채팅 이미지) 예시 — 앱은 전화 로그인 시 **익명 Firebase Auth**로 토큰을 받으므로 `request.auth`가 채워집니다.
+ * ```
+ * match /meetings/{meetingId}/chatImages/{fileName} {
+ *   allow read: if request.auth != null;
+ *   allow write: if request.auth != null && request.resource.size < 5 * 1024 * 1024;
+ * }
+ * ```
  */
+import * as ImageManipulator from 'expo-image-manipulator';
+import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
 import {
   addDoc,
   collection,
@@ -25,20 +35,25 @@ import {
   type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { getDownloadURL, ref } from 'firebase/storage';
 
+import { publicEnv } from '@/src/config/public-env';
+import { ensureFirebaseAuthUserForStorage, getFirebaseAuth, getFirebaseStorage } from '@/src/lib/firebase';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirestoreDb, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 export const MEETING_MESSAGES_SUBCOLLECTION = 'messages';
 
-export type MeetingChatMessageKind = 'text' | 'system';
+export type MeetingChatMessageKind = 'text' | 'system' | 'image';
 
 export type MeetingChatMessage = {
   id: string;
   senderId: string | null;
   text: string;
   kind: MeetingChatMessageKind;
+  /** `kind === 'image'`일 때 다운로드 URL */
+  imageUrl: string | null;
   createdAt: Timestamp | null;
 };
 
@@ -49,9 +64,14 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
   const senderId =
     typeof senderRaw === 'string' && senderRaw.trim() ? senderRaw.trim() : null;
   const text = typeof data.text === 'string' ? data.text : '';
-  const kind: MeetingChatMessageKind = data.kind === 'system' ? 'system' : 'text';
+  const kindRaw = data.kind;
+  const kind: MeetingChatMessageKind =
+    kindRaw === 'system' ? 'system' : kindRaw === 'image' ? 'image' : 'text';
+  const imageRaw = data.imageUrl;
+  const imageUrl =
+    typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
-  return { id, senderId, text, kind, createdAt };
+  return { id, senderId, text, kind, imageUrl, createdAt };
 }
 
 /**
@@ -82,6 +102,39 @@ export function subscribeMeetingChatMessages(
   );
 }
 
+const LATEST_PREVIEW_LIMIT = 1;
+
+/**
+ * 채팅 탭 목록용 — 해당 모임의 **가장 최근 메시지 1건**만 구독합니다.
+ */
+export function subscribeMeetingChatLatestMessage(
+  meetingId: string,
+  onLatest: (message: MeetingChatMessage | null) => void,
+  onError?: (message: string) => void,
+): Unsubscribe {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) {
+    onLatest(null);
+    return () => {};
+  }
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(LATEST_PREVIEW_LIMIT));
+  return onSnapshot(
+    q,
+    (snap) => {
+      if (snap.empty) {
+        onLatest(null);
+        return;
+      }
+      const d = snap.docs[0]!;
+      onLatest(mapMessageDoc(d.id, d.data() as Record<string, unknown>));
+    },
+    (err) => {
+      onError?.(err.message ?? '채팅 미리보기를 불러오지 못했어요.');
+    },
+  );
+}
+
 export async function sendMeetingChatTextMessage(
   meetingId: string,
   senderPhoneUserId: string,
@@ -102,6 +155,158 @@ export async function sendMeetingChatTextMessage(
       senderId,
       text,
       kind: 'text' as const,
+      createdAt: serverTimestamp(),
+    }) as Record<string, unknown>,
+  );
+}
+
+const CHAT_IMAGE_MAX_WIDTH = 1280;
+const CHAT_IMAGE_JPEG_QUALITY = 0.68;
+
+/** RN `Blob`이 `Uint8Array`를 못 받아 Storage JS SDK 업로드가 실패하므로, SDK와 동일한 **resumable** REST 흐름을 씁니다. (`uploadType=media`는 이 API에서 404가 납니다.) */
+function base64ToUint8Array(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
+function readStorageErrorDetail(res: Response, text: string): string {
+  let detail = `${res.status} ${res.statusText}`;
+  try {
+    const errJson = JSON.parse(text) as { error?: { message?: string } };
+    if (errJson.error?.message) detail = errJson.error.message;
+  } catch {
+    if (text?.trim()) detail = text.trim().slice(0, 200);
+  }
+  return detail;
+}
+
+async function uploadJpegViaFirebaseStorageRest(objectPath: string, bytes: Uint8Array): Promise<void> {
+  await ensureFirebaseAuthUserForStorage();
+  const user = getFirebaseAuth().currentUser;
+  if (!user) {
+    throw new Error('인증 준비에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+  const idToken = await user.getIdToken();
+  const rawBucket = publicEnv.firebaseStorageBucket?.trim().replace(/^gs:\/\//, '') ?? '';
+  if (!rawBucket) {
+    throw new Error('Storage 버킷(EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET)이 설정되어 있지 않습니다.');
+  }
+
+  const bucketEnc = encodeURIComponent(rawBucket);
+  const nameEnc = encodeURIComponent(objectPath);
+  const startUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketEnc}/o?name=${nameEnc}`;
+
+  const metaBody = JSON.stringify({
+    name: objectPath,
+    contentType: 'image/jpeg',
+  });
+
+  const startRes = await fetch(startUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'X-Goog-Upload-Protocol': 'resumable',
+      'X-Goog-Upload-Command': 'start',
+      'X-Goog-Upload-Header-Content-Length': String(bytes.length),
+      'X-Goog-Upload-Header-Content-Type': 'image/jpeg',
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: metaBody,
+  });
+
+  if (!startRes.ok) {
+    const t = await startRes.text();
+    throw new Error(`Storage 업로드 실패: ${readStorageErrorDetail(startRes, t)}`);
+  }
+
+  const uploadUrl =
+    startRes.headers.get('x-goog-upload-url') ?? startRes.headers.get('X-Goog-Upload-URL') ?? '';
+  if (!uploadUrl.trim()) {
+    throw new Error('Storage 업로드 URL을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+
+  const upRes = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'X-Goog-Upload-Command': 'upload, finalize',
+      'X-Goog-Upload-Offset': '0',
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+    },
+    body: bytes as unknown as BodyInit,
+  });
+
+  if (!upRes.ok) {
+    const t = await upRes.text();
+    throw new Error(`Storage 업로드 실패: ${readStorageErrorDetail(upRes, t)}`);
+  }
+}
+
+export type SendMeetingChatImageExtras = {
+  /** 이미지 아래에 붙는 짧은 설명(선택) */
+  caption?: string;
+  /** 피커가 알려 주면, 가로가 이 값보다 클 때만 너비를 줄여 업스케일을 피합니다. */
+  naturalWidth?: number;
+};
+
+/**
+ * 로컬 사진을 리사이즈·JPEG 압축한 뒤 Storage에 올리고, `kind: 'image'` 메시지를 추가합니다.
+ */
+export async function sendMeetingChatImageMessage(
+  meetingId: string,
+  senderPhoneUserId: string,
+  localImageUri: string,
+  extras?: SendMeetingChatImageExtras,
+): Promise<void> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const uid = typeof senderPhoneUserId === 'string' ? senderPhoneUserId.trim() : String(senderPhoneUserId ?? '').trim();
+  const uri = typeof localImageUri === 'string' ? localImageUri.trim() : '';
+  if (!mid) throw new Error('모임 정보가 없습니다.');
+  if (!uid) throw new Error('로그인이 필요합니다.');
+  if (!uri) throw new Error('이미지를 선택해 주세요.');
+
+  const senderId = normalizePhoneUserId(uid) ?? uid;
+  const cap = (extras?.caption ?? '').trim().slice(0, 500);
+  const naturalWidth = extras?.naturalWidth;
+
+  const actions: ImageManipulator.Action[] = [];
+  if (typeof naturalWidth === 'number' && naturalWidth > CHAT_IMAGE_MAX_WIDTH) {
+    actions.push({ resize: { width: CHAT_IMAGE_MAX_WIDTH } });
+  }
+
+  const manipulated = await ImageManipulator.manipulateAsync(
+    uri,
+    actions,
+    {
+      compress: CHAT_IMAGE_JPEG_QUALITY,
+      format: ImageManipulator.SaveFormat.JPEG,
+    },
+  );
+
+  const base64 = await readAsStringAsync(manipulated.uri, { encoding: EncodingType.Base64 });
+  if (!base64?.length) {
+    throw new Error('압축된 이미지를 읽지 못했습니다. 다시 선택해 주세요.');
+  }
+  const bytes = base64ToUint8Array(base64);
+
+  const rand = Math.random().toString(36).slice(2, 10);
+  const objectPath = `meetings/${mid}/chatImages/${Date.now()}_${rand}.jpg`;
+  const storageRef = ref(getFirebaseStorage(), objectPath);
+  await uploadJpegViaFirebaseStorageRest(objectPath, bytes);
+  const imageUrl = await getDownloadURL(storageRef);
+
+  const msgRef = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  await addDoc(
+    msgRef,
+    stripUndefinedDeep({
+      senderId,
+      text: cap,
+      kind: 'image' as const,
+      imageUrl,
       createdAt: serverTimestamp(),
     }) as Record<string, unknown>,
   );

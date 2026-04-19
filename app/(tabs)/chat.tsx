@@ -16,8 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
-import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
@@ -32,9 +32,28 @@ import {
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
+import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce, subscribeMeetings } from '@/src/lib/meetings';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import type { UserProfile } from '@/src/lib/user-profile';
+import { getUserProfilesForIds } from '@/src/lib/user-profile';
 import { useUserSession } from '@/src/context/UserSessionContext';
+
+function profileForCreatedBy(
+  map: Map<string, UserProfile>,
+  createdBy: string | null | undefined,
+): UserProfile | undefined {
+  if (!createdBy?.trim()) return undefined;
+  const n = normalizePhoneUserId(createdBy) ?? createdBy.trim();
+  const hit = map.get(createdBy) ?? map.get(n);
+  if (hit) return hit;
+  for (const [k, v] of map) {
+    if ((normalizePhoneUserId(k) ?? k.trim()) === n) return v;
+  }
+  return undefined;
+}
 
 export default function ChatTab() {
   const router = useRouter();
@@ -53,6 +72,10 @@ export default function ChatTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [chipsMoreRight, setChipsMoreRight] = useState(false);
+  const [latestByMeetingId, setLatestByMeetingId] = useState<
+    Record<string, MeetingChatMessage | null | undefined>
+  >({});
+  const [hostProfiles, setHostProfiles] = useState<Map<string, UserProfile>>(new Map());
   const chipsOffsetXRef = useRef(0);
   const chipsLayoutWRef = useRef(0);
   const chipsContentWRef = useRef(0);
@@ -151,6 +174,54 @@ export default function ChatTab() {
     [filteredMeetings, listSortMode, userCoords],
   );
 
+  const signedIn = Boolean(phoneUserId?.trim());
+
+  const chatRowMeetingKey = useMemo(
+    () => sortedFilteredMeetings.map((m) => m.id).join('\u0001'),
+    [sortedFilteredMeetings],
+  );
+
+  useEffect(() => {
+    if (!signedIn || sortedFilteredMeetings.length === 0) {
+      return () => {};
+    }
+    const unsubs = sortedFilteredMeetings.map((m) =>
+      subscribeMeetingChatLatestMessage(
+        m.id,
+        (msg) => {
+          setLatestByMeetingId((p) => ({ ...p, [m.id]: msg }));
+        },
+        () => {
+          setLatestByMeetingId((p) => ({ ...p, [m.id]: null }));
+        },
+      ),
+    );
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [chatRowMeetingKey, signedIn]);
+
+  useEffect(() => {
+    const hosts = [
+      ...new Set(
+        sortedFilteredMeetings
+          .map((me) => (me.createdBy?.trim() ? normalizePhoneUserId(me.createdBy) ?? me.createdBy.trim() : ''))
+          .filter(Boolean),
+      ),
+    ] as string[];
+    if (hosts.length === 0) {
+      setHostProfiles(new Map());
+      return;
+    }
+    let cancelled = false;
+    void getUserProfilesForIds(hosts).then((map) => {
+      if (!cancelled) setHostProfiles(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatRowMeetingKey]);
+
   const selectedFilterLabel = useMemo(() => {
     if (selectedCategoryId == null) return null;
     return categories.find((c) => c.id === selectedCategoryId)?.label ?? null;
@@ -175,8 +246,6 @@ export default function ChatTab() {
       setRefreshing(false);
     }
   }, []);
-
-  const signedIn = Boolean(phoneUserId?.trim());
 
   return (
     <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
@@ -307,14 +376,23 @@ export default function ChatTab() {
             </Text>
           ) : null}
 
-          {sortedFilteredMeetings.map((m) => (
-            <MeetingFeedRow
-              key={m.id}
-              meeting={m}
-              userCoords={userCoords}
-              onPress={() => router.push(`/meeting-chat/${m.id}`)}
-            />
-          ))}
+          {sortedFilteredMeetings.length > 0 ? (
+            <View style={styles.chatListBleed}>
+              {sortedFilteredMeetings.map((m) => {
+                const host = profileForCreatedBy(hostProfiles, m.createdBy);
+                return (
+                  <ChatMeetingListRow
+                    key={m.id}
+                    meeting={m}
+                    hostPhotoUrl={host?.photoUrl ?? null}
+                    hostNickname={host?.nickname ?? '주관자'}
+                    latestMessage={latestByMeetingId[m.id]}
+                    onPress={() => router.push(`/meeting-chat/${m.id}`)}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
         </ScrollView>
 
         <Modal
@@ -519,6 +597,12 @@ const styles = StyleSheet.create({
     color: '#64748b',
     lineHeight: 20,
     marginBottom: 12,
+  },
+  chatListBleed: {
+    marginHorizontal: -20,
+    backgroundColor: '#fff',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e8eaed',
   },
   modalRoot: {
     flex: 1,

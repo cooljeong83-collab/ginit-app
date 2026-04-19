@@ -29,6 +29,13 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "채팅에 보낼 사진을 선택하기 위해 사진 라이브러리에 접근합니다.",
+          "cameraPermission": "채팅에 보낼 사진을 촬영하기 위해 카메라에 접근합니다."
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "지닛이 주변 모임을 보여 주기 위해 현재 위치를 사용합니다.",

@@ -1,6 +1,7 @@
 import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
+import { getAuth, signInAnonymously, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 import { publicEnv } from '@/src/config/public-env';
 
@@ -16,6 +17,7 @@ const firebaseConfig = {
 let app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 let firestore: Firestore | undefined;
+let storage: FirebaseStorage | undefined;
 
 /**
  * Firebase JS SDK 초기화 (Expo 권장 경로).
@@ -48,9 +50,46 @@ export function getFirebaseAuth(): Auth {
   return auth;
 }
 
+/**
+ * 전화번호만 로그인한 경우 `currentUser`가 없어 Storage 토큰을 못 씁니다.
+ * 이때 한 번 `signInAnonymously`로 ID 토큰을 만듭니다.
+ *
+ * Firebase 콘솔 → Authentication → 로그인 제공업체 → **익명** 사용 설정이 필요합니다.
+ */
+export async function ensureFirebaseAuthUserForStorage(): Promise<void> {
+  const a = getFirebaseAuth();
+  if (a.currentUser) return;
+  try {
+    await signInAnonymously(a);
+  } catch (e) {
+    const code =
+      typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: unknown }).code) : '';
+    if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+      throw new Error(
+        '채팅 사진 업로드에는 Firebase「익명」로그인이 필요합니다. Firebase 콘솔 → Authentication → 로그인 제공업체에서 익명을 켠 뒤 다시 시도해 주세요.',
+      );
+    }
+    throw e instanceof Error ? e : new Error(String(e));
+  }
+}
+
 /** Cloud Firestore */
 export function getFirebaseFirestore(): Firestore {
   if (firestore) return firestore;
   firestore = getFirestore(getFirebaseApp());
   return firestore;
+}
+
+/** Firebase Storage (채팅 이미지 등) — 버킷 문자열이 있으면 `gs://`로 명시(빈 문자열·캐시 앱 불일치 방지). */
+export function getFirebaseStorage(): FirebaseStorage {
+  if (storage) return storage;
+  const firebaseApp = getFirebaseApp();
+  const raw = publicEnv.firebaseStorageBucket?.trim();
+  if (raw) {
+    const bucketUrl = raw.startsWith('gs://') ? raw : `gs://${raw}`;
+    storage = getStorage(firebaseApp, bucketUrl);
+  } else {
+    storage = getStorage(firebaseApp);
+  }
+  return storage;
 }

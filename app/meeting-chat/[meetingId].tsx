@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,13 +20,21 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
+import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
+import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
-import { sendMeetingChatTextMessage, subscribeMeetingChatMessages } from '@/src/lib/meeting-chat';
+import {
+  sendMeetingChatImageMessage,
+  sendMeetingChatTextMessage,
+  subscribeMeetingChatMessages,
+} from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, subscribeMeetingById } from '@/src/lib/meetings';
+import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
@@ -53,34 +62,6 @@ function formatChatTime(ts: Timestamp | null | undefined): string {
   }
 }
 
-function participantCount(m: Meeting): number {
-  const ids = m.participantIds ?? [];
-  const set = new Set(ids.map((x) => normalizePhoneUserId(String(x)) ?? String(x).trim()).filter(Boolean));
-  const host = m.createdBy?.trim() ? normalizePhoneUserId(m.createdBy) ?? m.createdBy.trim() : '';
-  if (host) set.add(host);
-  return Math.max(set.size, ids.length > 0 ? ids.length : host ? 1 : 0);
-}
-
-function scheduleSummary(m: Meeting): string {
-  if (m.scheduleDate?.trim() && m.scheduleTime?.trim()) {
-    return `${m.scheduleDate} ${m.scheduleTime}`;
-  }
-  if (m.scheduleDate?.trim()) return m.scheduleDate;
-  return '일정 미정';
-}
-
-function voteSummary(m: Meeting): string {
-  const phase = getMeetingRecruitmentPhase(m);
-  if (m.scheduleConfirmed) return '일정 확정됨';
-  if (phase === 'full') return '모집 완료';
-  return '투표·조율 중';
-}
-
-function placeOneLine(m: Meeting): string {
-  const p = m.placeName?.trim() || m.location?.trim() || m.address?.trim();
-  return p || '장소 미정';
-}
-
 export default function MeetingChatRoomScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -99,10 +80,14 @@ export default function MeetingChatRoomScreen() {
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const [meetingInfoExpanded, setMeetingInfoExpanded] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   /** 키보드 본체 + IME 상단(이모지/툴바 등)까지 포함해 입력창을 올리기 위한 하단 여백 */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
+  const [userCoords, setUserCoords] = useState<LatLng | null>(null);
+  /** Android 삼성 등: IME `defaultInputmode=emoji` — 토글 후 포커스 */
+  const [androidEmojiIme, setAndroidEmojiIme] = useState(false);
   const listRef = useRef<FlatList<MeetingChatMessage>>(null);
+  const messageInputRef = useRef<TextInput>(null);
 
   const myId = useMemo(() => (phoneUserId?.trim() ? normalizePhoneUserId(phoneUserId) ?? phoneUserId.trim() : ''), [
     phoneUserId,
@@ -162,6 +147,26 @@ export default function MeetingChatRoomScreen() {
   }, [messages.length, scrollToBottom]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cached = await loadFeedLocationCache();
+      if (cancelled) return;
+      let coordsForDistance = null as LatLng | null;
+      if (cached?.coords) {
+        coordsForDistance = cached.coords;
+        setUserCoords(coordsForDistance);
+      }
+      const ctx = await resolveFeedLocationContext();
+      if (cancelled) return;
+      coordsForDistance = ctx.coords ?? coordsForDistance;
+      setUserCoords(coordsForDistance);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     /** 키보드 바로 위에 살짝만 띄우기: 기본은 `height` + 작은 slack, IME가 더 크게 잡힐 때만 `screenY` 반영 */
     const slack = Platform.select({ ios: 8, android: 10, default: 8 });
     const apply = (e: KeyboardEvent) => {
@@ -195,14 +200,14 @@ export default function MeetingChatRoomScreen() {
     router.push(`/meeting/${meetingId}`);
   }, [router, meetingId]);
 
-  const meetingInfoSummaryLine = useMemo(() => {
-    if (!meeting) return '';
-    const cat = meeting.categoryLabel?.trim();
-    const sched = scheduleSummary(meeting);
-    const place = placeOneLine(meeting);
-    const status = `${voteSummary(meeting)} · 참가 ${participantCount(meeting)}명`;
-    return [cat, sched, place, status].filter(Boolean).join(' · ');
-  }, [meeting]);
+  const onEmojiToolbarPress = useCallback(() => {
+    if (Platform.OS === 'android') {
+      setAndroidEmojiIme((v) => !v);
+    }
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+    });
+  }, []);
 
   const onSend = useCallback(async () => {
     if (!meetingId || !phoneUserId?.trim()) {
@@ -210,7 +215,7 @@ export default function MeetingChatRoomScreen() {
       return;
     }
     const body = draft.trim();
-    if (!body || sending) return;
+    if (!body || sending || uploadingImage) return;
     setSending(true);
     try {
       await sendMeetingChatTextMessage(meetingId, phoneUserId, body);
@@ -220,7 +225,41 @@ export default function MeetingChatRoomScreen() {
     } finally {
       setSending(false);
     }
-  }, [meetingId, phoneUserId, draft, sending]);
+  }, [meetingId, phoneUserId, draft, sending, uploadingImage]);
+
+  const onPickImage = useCallback(async () => {
+    if (!meetingId || !phoneUserId?.trim()) {
+      Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
+      return;
+    }
+    if (uploadingImage) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('권한 필요', '사진을내려면 사진 라이브러리 접근을 허용해 주세요.');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: false,
+      quality: 1,
+    });
+    if (picked.canceled) return;
+    const asset = picked.assets[0];
+    if (!asset?.uri) return;
+    setUploadingImage(true);
+    try {
+      const caption = draft.trim();
+      await sendMeetingChatImageMessage(meetingId, phoneUserId, asset.uri, {
+        caption: caption || undefined,
+        naturalWidth: typeof asset.width === 'number' && asset.width > 0 ? asset.width : undefined,
+      });
+      if (caption) setDraft('');
+    } catch (e) {
+      Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+    } finally {
+      setUploadingImage(false);
+    }
+  }, [meetingId, phoneUserId, draft, uploadingImage]);
 
   const hostNorm = meeting?.createdBy?.trim()
     ? normalizePhoneUserId(meeting.createdBy) ?? meeting.createdBy.trim()
@@ -238,25 +277,35 @@ export default function MeetingChatRoomScreen() {
       const sid = item.senderId?.trim() ? normalizePhoneUserId(item.senderId) ?? item.senderId.trim() : '';
       const isMine = Boolean(myId && sid && sid === myId);
       const prev = index > 0 ? messages[index - 1] : null;
-      const showAvatar =
-        !isMine &&
-        sid &&
-        (index === 0 ||
-          !prev ||
-          prev.kind === 'system' ||
-          (prev.kind === 'text' &&
-            (normalizePhoneUserId(prev.senderId ?? '') ?? prev.senderId) !== sid));
+      const prevSid =
+        prev && prev.kind !== 'system'
+          ? normalizePhoneUserId(prev.senderId ?? '') ?? prev.senderId?.trim() ?? ''
+          : '';
+      const sameSenderAsPrev = Boolean(sid && prevSid && prevSid === sid);
+      const showAvatar = !isMine && sid && (index === 0 || !prev || prev.kind === 'system' || !sameSenderAsPrev);
 
       const prof = sid ? profileForSender(profiles, sid) : undefined;
       const nick = prof?.nickname ?? '회원';
       const isHost = Boolean(hostNorm && sid && sid === hostNorm);
 
+      const isImage = item.kind === 'image';
+      const caption = item.text?.trim();
+
       if (isMine) {
         return (
           <View style={styles.rowMine}>
             <Text style={styles.timeMine}>{formatChatTime(item.createdAt)}</Text>
-            <View style={styles.bubbleMine}>
-              <Text style={styles.bubbleMineText}>{item.text}</Text>
+            <View style={[styles.bubbleMine, isImage && styles.bubbleMineMedia]}>
+              {isImage ? (
+                item.imageUrl ? (
+                  <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                ) : (
+                  <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
+                )
+              ) : (
+                <Text style={styles.bubbleMineText}>{item.text}</Text>
+              )}
+              {isImage && caption ? <Text style={styles.imageCaptionMine}>{caption}</Text> : null}
             </View>
           </View>
         );
@@ -287,8 +336,17 @@ export default function MeetingChatRoomScreen() {
               </View>
             ) : null}
             <View style={styles.bubbleOtherWrap}>
-              <View style={styles.bubbleOther}>
-                <Text style={styles.bubbleOtherText}>{item.text}</Text>
+              <View style={[styles.bubbleOther, isImage && styles.bubbleOtherMedia]}>
+                {isImage ? (
+                  item.imageUrl ? (
+                    <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                  ) : (
+                    <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
+                  )
+                ) : (
+                  <Text style={styles.bubbleOtherText}>{item.text}</Text>
+                )}
+                {isImage && caption ? <Text style={styles.imageCaptionOther}>{caption}</Text> : null}
               </View>
               <Text style={styles.timeOther}>{formatChatTime(item.createdAt)}</Text>
             </View>
@@ -342,7 +400,7 @@ export default function MeetingChatRoomScreen() {
   }
 
   const title = meeting.title?.trim() || '모임 채팅';
-  const pCount = participantCount(meeting);
+  const pCount = meetingParticipantCount(meeting);
 
   const composerBottomPad = keyboardBottomInset > 0 ? keyboardBottomInset : Math.max(insets.bottom, 8);
 
@@ -385,93 +443,7 @@ export default function MeetingChatRoomScreen() {
         </View>
 
         <View style={styles.meetingInfoOuter}>
-          <View style={[styles.meetingInfoCard, !meetingInfoExpanded && styles.meetingInfoCardCollapsed]}>
-            <View style={styles.meetingInfoCardHeader}>
-              <Text style={styles.meetingInfoTitle}>모임 정보</Text>
-              <Pressable
-                onPress={goMeetingDetail}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="모임 상세로 이동">
-                <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-              </Pressable>
-            </View>
-
-            {!meetingInfoExpanded ? (
-              <>
-                <Pressable
-                  onPress={goMeetingDetail}
-                  style={({ pressed }) => [
-                    styles.meetingInfoCollapsedTap,
-                    pressed && styles.meetingInfoCollapsedTapPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="모임 요약. 탭하면 모임 상세로 이동">
-                  <Text style={styles.meetingInfoDesc} numberOfLines={1} ellipsizeMode="tail">
-                    {meetingInfoSummaryLine}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setMeetingInfoExpanded(true)}
-                  style={styles.meetingInfoSheetHandleHit}
-                  accessibilityRole="button"
-                  accessibilityLabel="모임 정보 펼치기"
-                  accessibilityHint="지도 목록과 같이 탭하면 전체 정보를 볼 수 있어요">
-                  <View style={styles.meetingInfoSheetHandle} />
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Pressable
-                  onPress={goMeetingDetail}
-                  style={({ pressed }) => [
-                    styles.meetingInfoExpandedTap,
-                    pressed && styles.meetingInfoExpandedTapPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="모임 정보. 탭하면 모임 상세로 이동">
-                  {meeting.description?.trim() ? (
-                    <Text style={styles.meetingInfoDesc}>{meeting.description.trim()}</Text>
-                  ) : (
-                    <Text style={styles.meetingInfoDescMuted}>등록된 소개가 없어요.</Text>
-                  )}
-                  <View style={styles.meetingInfoDivider} />
-                  <View style={styles.meetingInfoLine}>
-                    <Text style={styles.meetingInfoMetaLabel}>카테고리</Text>
-                    <Text style={styles.meetingInfoMetaValue} numberOfLines={1}>
-                      {meeting.categoryLabel?.trim() || '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.meetingInfoLine}>
-                    <Text style={styles.meetingInfoMetaLabel}>일정</Text>
-                    <Text style={styles.meetingInfoMetaValue} numberOfLines={2}>
-                      {scheduleSummary(meeting)}
-                    </Text>
-                  </View>
-                  <View style={styles.meetingInfoLine}>
-                    <Text style={styles.meetingInfoMetaLabel}>장소</Text>
-                    <Text style={styles.meetingInfoMetaValue} numberOfLines={2}>
-                      {placeOneLine(meeting)}
-                    </Text>
-                  </View>
-                  <View style={styles.meetingInfoLine}>
-                    <Text style={styles.meetingInfoMetaLabel}>상태</Text>
-                    <Text style={styles.meetingInfoMetaValue} numberOfLines={1}>
-                      {voteSummary(meeting)} · 참가 {pCount}명
-                    </Text>
-                  </View>
-                </Pressable>
-                <Pressable
-                  onPress={() => setMeetingInfoExpanded(false)}
-                  style={styles.meetingInfoSheetHandleHit}
-                  accessibilityRole="button"
-                  accessibilityLabel="모임 정보 접기"
-                  accessibilityHint="지도 목록과 같이 탭하면 요약만 표시돼요">
-                  <View style={styles.meetingInfoSheetHandle} />
-                </Pressable>
-              </>
-            )}
-          </View>
+          <MeetingFeedRow meeting={meeting} userCoords={userCoords} onPress={goMeetingDetail} />
         </View>
 
         <View style={styles.listWrap}>
@@ -505,13 +477,19 @@ export default function MeetingChatRoomScreen() {
           <View style={styles.composer}>
             <Pressable
               style={styles.plusBtn}
-              onPress={() => Alert.alert('안내', '사진·파일 첨부는 곧 제공됩니다.')}
+              onPress={() => void onPickImage()}
+              disabled={uploadingImage}
               accessibilityRole="button"
-              accessibilityLabel="첨부">
-              <Ionicons name="add" size={28} color="#475569" />
+              accessibilityLabel="사진 보내기">
+              {uploadingImage ? (
+                <ActivityIndicator size="small" color="#475569" />
+              ) : (
+                <Ionicons name="add" size={28} color="#475569" />
+              )}
             </Pressable>
             <View style={styles.inputShell}>
               <TextInput
+                ref={messageInputRef}
                 style={styles.input}
                 placeholder="메시지 보내기"
                 placeholderTextColor="#94a3b8"
@@ -519,23 +497,43 @@ export default function MeetingChatRoomScreen() {
                 onChangeText={setDraft}
                 multiline
                 maxLength={4000}
-                editable={!sending}
+                editable={!sending && !uploadingImage}
+                {...(Platform.OS === 'android'
+                  ? ({
+                      privateImeOptions: androidEmojiIme ? 'defaultInputmode=emoji' : undefined,
+                    } as Record<string, unknown>)
+                  : {})}
               />
               <Pressable
                 style={styles.emojiBtn}
-                onPress={() => Alert.alert('안내', '이모지 피커는 곧 연결됩니다.')}
+                onPress={onEmojiToolbarPress}
                 accessibilityRole="button"
-                accessibilityLabel="이모지">
-                <Ionicons name="happy-outline" size={22} color="#64748b" />
+                accessibilityLabel={
+                  Platform.OS === 'android' && androidEmojiIme
+                    ? '글자 키보드로 전환'
+                    : '이모지 키보드'
+                }
+                accessibilityHint={
+                  Platform.OS === 'android'
+                    ? androidEmojiIme
+                      ? '한글·영문 입력으로 돌아갑니다.'
+                      : '삼성 키보드 이모지 입력으로 전환합니다.'
+                    : undefined
+                }>
+                <Ionicons
+                  name={Platform.OS === 'android' && androidEmojiIme ? 'keypad-outline' : 'happy-outline'}
+                  size={22}
+                  color={Platform.OS === 'android' && androidEmojiIme ? GinitTheme.trustBlue : '#64748b'}
+                />
               </Pressable>
             </View>
             <Pressable
               onPress={() => void onSend()}
-              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-              disabled={sending || !draft.trim()}
+              style={[styles.sendBtn, (sending || uploadingImage) && styles.sendBtnDisabled]}
+              disabled={sending || uploadingImage || !draft.trim()}
               accessibilityRole="button"
               accessibilityLabel="보내기">
-              {sending ? (
+              {sending || uploadingImage ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Ionicons name="send" size={20} color="#fff" />
@@ -609,96 +607,10 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   meetingInfoOuter: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 4,
     backgroundColor: '#ECEFF1',
-  },
-  meetingInfoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
-    gap: 8,
-  },
-  meetingInfoCardCollapsed: {
-    paddingVertical: 8,
-    gap: 4,
-  },
-  meetingInfoCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  meetingInfoTitle: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  meetingInfoCollapsedTap: {
-    paddingVertical: 2,
-  },
-  meetingInfoCollapsedTapPressed: {
-    opacity: 0.85,
-  },
-  meetingInfoExpandedTap: {
-    gap: 8,
-  },
-  meetingInfoExpandedTapPressed: {
-    opacity: 0.92,
-  },
-  /** `MapScreen` `sheetHandleHit` / `sheetHandle` 과 동일 계열 — 하단 목록 확장 핸들 */
-  meetingInfoSheetHandleHit: {
-    alignSelf: 'stretch',
-    paddingTop: 4,
-    paddingBottom: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  meetingInfoSheetHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(15, 23, 42, 0.15)',
-  },
-  meetingInfoDesc: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#334155',
-  },
-  meetingInfoDescMuted: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#94a3b8',
-  },
-  meetingInfoDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(15, 23, 42, 0.08)',
-    marginVertical: 2,
-  },
-  meetingInfoLine: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  meetingInfoMetaLabel: {
-    width: 56,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748b',
-    paddingTop: 1,
-  },
-  meetingInfoMetaValue: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0f172a',
-    lineHeight: 18,
   },
   listWrap: {
     flex: 1,
@@ -765,10 +677,27 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(0, 82, 204, 0.2)',
   },
+  bubbleMineMedia: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+  },
   bubbleMineText: {
     fontSize: 15,
     color: '#0f172a',
     lineHeight: 20,
+  },
+  chatImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: '#e2e8f0',
+  },
+  imageCaptionMine: {
+    marginTop: 6,
+    paddingHorizontal: 6,
+    fontSize: 14,
+    color: '#0f172a',
+    lineHeight: 19,
   },
   timeMine: {
     fontSize: 11,
@@ -839,10 +768,21 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
   },
+  bubbleOtherMedia: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+  },
   bubbleOtherText: {
     fontSize: 15,
     color: '#0f172a',
     lineHeight: 20,
+  },
+  imageCaptionOther: {
+    marginTop: 6,
+    paddingHorizontal: 6,
+    fontSize: 14,
+    color: '#0f172a',
+    lineHeight: 19,
   },
   timeOther: {
     fontSize: 11,
