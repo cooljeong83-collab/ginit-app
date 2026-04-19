@@ -1,6 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,7 +6,6 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -19,6 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
+import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitCard } from '@/components/ginit';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
@@ -35,9 +34,8 @@ import {
   sortMeetingsForFeed,
 } from '@/src/lib/feed-meeting-utils';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
-import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
-import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
+import type { LatLng } from '@/src/lib/geo-distance';
+import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce, getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
@@ -47,84 +45,6 @@ const MOCK_REGION_ROWS = [
   { id: 'songpa', label: '송파구' },
   { id: 'ydp', label: '영등포구' },
 ] as const;
-
-function GlassCategoryChip({
-  label,
-  active,
-  onPress,
-  maxLabelWidth,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  maxLabelWidth: number;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${label} 카테고리 필터`}
-      accessibilityState={{ selected: active }}
-      style={({ pressed }) => [
-        styles.chipPressable,
-        { maxWidth: maxLabelWidth },
-        pressed && !active && styles.chipPressed,
-      ]}>
-      <View style={[styles.chipClip, active && styles.chipClipActive]}>
-        {!active ? (
-          <>
-            {Platform.OS === 'android' ? (
-              <View style={[StyleSheet.absoluteFillObject, styles.chipAndroidFrost]} />
-            ) : Platform.OS === 'web' ? (
-              <View style={[StyleSheet.absoluteFillObject, styles.chipWebFrost]} />
-            ) : (
-              <BlurView
-                intensity={GinitTheme.glassModal.blurIntensity}
-                tint="light"
-                style={StyleSheet.absoluteFillObject}
-                experimentalBlurMethod="dimezisBlurView"
-              />
-            )}
-            <View style={[StyleSheet.absoluteFillObject, styles.chipVeil]} pointerEvents="none" />
-            <View style={[StyleSheet.absoluteFillObject, styles.chipInnerBorder]} pointerEvents="none" />
-          </>
-        ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: GinitTheme.trustBlue }]} />
-        )}
-        <View style={styles.chipLabelRow}>
-          <Text
-            style={[styles.chipGlassLabel, active && styles.chipGlassLabelActive, { maxWidth: maxLabelWidth - 28 }]}
-            numberOfLines={1}>
-            {label}
-          </Text>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
-  switch (phase) {
-    case 'confirmed':
-      return {
-        label: '확정',
-        wrap: [styles.progressBadge, styles.progressBadgeBlack],
-        text: [styles.progressBadgeText, styles.progressBadgeTextLight],
-      };
-    case 'full':
-      return {
-        label: '모집 완료',
-        wrap: [styles.progressBadge, styles.progressBadgeYellow],
-        text: [styles.progressBadgeText, styles.progressBadgeTextOnYellow],
-      };
-    default:
-      return {
-        label: '모집중',
-        wrap: [styles.progressBadge, styles.progressBadgeGreen],
-        text: [styles.progressBadgeText, styles.progressBadgeTextLight],
-      };
-  }
-}
 
 export default function FeedScreen() {
   const router = useRouter();
@@ -463,69 +383,14 @@ export default function FeedScreen() {
             </Text>
           ) : null}
 
-          {sortedFilteredMeetings.map((m) => {
-            const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
-            return (
-            <Pressable
+          {sortedFilteredMeetings.map((m) => (
+            <MeetingFeedRow
               key={m.id}
-              style={styles.meetRow}
-              accessibilityRole="button"
+              meeting={m}
+              userCoords={userCoords}
               onPress={() => router.push(`/meeting/${m.id}`)}
-              accessibilityHint="모임 상세로 이동">
-              <Image
-                source={{ uri: resolveMeetingListThumbnailUri(m) }}
-                style={styles.thumb}
-                contentFit="cover"
-              />
-              <View style={styles.meetBody}>
-                <View style={styles.meetTitleRow}>
-                  <View style={styles.meetTitleBlock}>
-                    <Text style={styles.meetTitle} numberOfLines={1}>
-                      {m.title}
-                    </Text>
-                    {(m.address?.trim() || m.location) ? (
-                      <Text style={styles.meetAddrLine} numberOfLines={1}>
-                        {m.address?.trim() || m.location}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View style={progressPill.wrap} accessibilityLabel={`진행 ${progressPill.label}`}>
-                    <Text style={progressPill.text} numberOfLines={1}>
-                      {progressPill.label}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.tagRow}>
-                  <View
-                    style={styles.meetDistChip}
-                    accessibilityLabel={`내 위치에서 ${formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}`}>
-                    <Text style={styles.meetDistChipText}>
-                      {formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}
-                    </Text>
-                  </View>
-                  <View style={styles.tagPill}>
-                    <Text style={styles.tagText} numberOfLines={1}>
-                      {[m.categoryLabel, `최대 ${m.capacity}명`].filter(Boolean).join(' · ')}
-                    </Text>
-                  </View>
-                  {m.isPublic === false ? (
-                    <View style={styles.lockPill}>
-                      <Text style={styles.lockPillText}>비공개</Text>
-                    </View>
-                  ) : null}
-                </View>
-                {m.scheduleDate && m.scheduleTime ? (
-                  <Text style={styles.schedule} numberOfLines={1}>
-                    {m.scheduleDate} {m.scheduleTime}
-                  </Text>
-                ) : null}
-                <Text style={styles.price} numberOfLines={2}>
-                  {m.description}
-                </Text>
-              </View>
-            </Pressable>
-            );
-          })}
+            />
+          ))}
         </ScrollView>
 
         <Modal
@@ -702,64 +567,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 28,
   },
-  chipPressable: {
-    borderRadius: 20,
-    minWidth: 72,
-  },
-  chipPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.98 }],
-  },
-  chipClip: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    justifyContent: 'center',
-    minHeight: 32,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  chipClipActive: {
-    borderColor: GinitTheme.trustBlue,
-    shadowColor: GinitTheme.trustBlue,
-    shadowOpacity: 0.22,
-  },
-  chipAndroidFrost: {
-    backgroundColor: 'rgba(255, 255, 255, 0.78)',
-  },
-  chipWebFrost: {
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-  },
-  chipVeil: {
-    backgroundColor: GinitTheme.glass.overlayLight,
-  },
-  chipInnerBorder: {
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.45)',
-    borderRadius: 16,
-  },
-  chipLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    maxWidth: '100%',
-  },
-  chipGlassLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0f172a',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  chipGlassLabelActive: {
-    color: '#FFFFFF',
-  },
   heroCard: {
     marginBottom: 22,
     borderColor: 'rgba(255, 255, 255, 0.55)',
@@ -915,125 +722,6 @@ const styles = StyleSheet.create({
     color: '#64748b',
     lineHeight: 20,
     marginBottom: 12,
-  },
-  meetRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderRadius: 20,
-    padding: 12,
-    marginBottom: 14,
-    gap: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    elevation: 3,
-  },
-  thumb: {
-    width: 88,
-    height: 88,
-    borderRadius: 16,
-    backgroundColor: '#e2e8f0',
-  },
-  meetBody: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: 6,
-  },
-  meetTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    minWidth: 0,
-  },
-  meetTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'column',
-    gap: 2,
-  },
-  progressBadge: {
-    flexShrink: 0,
-    maxWidth: 88,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  progressBadgeGreen: { backgroundColor: '#16A34A' },
-  progressBadgeYellow: { backgroundColor: '#FACC15' },
-  progressBadgeBlack: { backgroundColor: '#171717' },
-  progressBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  progressBadgeTextLight: { color: '#fff' },
-  progressBadgeTextOnYellow: { color: '#422006' },
-  meetTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  meetAddrLine: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  meetDistChip: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0, 82, 204, 0.1)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0, 82, 204, 0.2)',
-  },
-  meetDistChipText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: GinitTheme.trustBlue,
-  },
-  tagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  tagPill: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  tagText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  lockPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0, 82, 204, 0.1)',
-  },
-  lockPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: GinitTheme.trustBlue,
-  },
-  schedule: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748b',
-  },
-  price: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#334155',
-    lineHeight: 18,
   },
   modalRoot: {
     flex: 1,

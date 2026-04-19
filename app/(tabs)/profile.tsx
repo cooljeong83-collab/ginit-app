@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,10 +12,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
+import { JoinedMeetingDashboardCard } from '@/components/joined-meetings/JoinedMeetingDashboardCard';
+import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getFirebaseAuth } from '@/src/lib/firebase';
+import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import type { Meeting } from '@/src/lib/meetings';
+import { subscribeMeetings } from '@/src/lib/meetings';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
 export default function ProfileTab() {
@@ -26,6 +33,9 @@ export default function ProfileTab() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [meetingsLoading, setMeetingsLoading] = useState(true);
+  const [meetingsError, setMeetingsError] = useState<string | null>(null);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -33,6 +43,22 @@ export default function ProfileTab() {
       setUser(u);
       setLoading(false);
     });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    setMeetingsLoading(true);
+    const unsub = subscribeMeetings(
+      (list) => {
+        setMeetings(list);
+        setMeetingsError(null);
+        setMeetingsLoading(false);
+      },
+      (msg) => {
+        setMeetingsError(msg);
+        setMeetingsLoading(false);
+      },
+    );
     return unsub;
   }, []);
 
@@ -56,6 +82,11 @@ export default function ProfileTab() {
       cancelled = true;
     };
   }, [phoneUserId]);
+
+  const joinedMeetings = useMemo(
+    () => filterJoinedMeetings(meetings, phoneUserId),
+    [meetings, phoneUserId],
+  );
 
   const onSaveProfile = useCallback(async () => {
     if (!phoneUserId?.trim()) {
@@ -94,75 +125,140 @@ export default function ProfileTab() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator />
+        <ActivityIndicator color="#0052CC" />
       </View>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-      <GinitCard>
-        <Text style={styles.title}>계정 · 프로필</Text>
-        <Text style={styles.hint}>
-          전화번호로 가입하면 닉네임이 자동으로 만들어져요. 아래에서 닉네임과 프로필 사진(이미지 주소)을 바꿀 수 있어요.
-        </Text>
+    <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ScrollView
+          contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <Text style={styles.screenTitle}>프로필</Text>
 
-        <Text style={styles.label}>회원 ID (전화번호)</Text>
-        <Text style={styles.phone}>{phoneUserId ?? '(없음)'}</Text>
+          <Text style={HomeGlassStyles.sectionLabel}>참가 모임</Text>
+          {meetingsLoading ? (
+            <View style={styles.centerRow}>
+              <ActivityIndicator color="#0052CC" />
+              <Text style={styles.muted}>모임 목록 불러오는 중…</Text>
+            </View>
+          ) : meetingsError ? (
+            <Text style={styles.errorText}>{meetingsError}</Text>
+          ) : joinedMeetings.length === 0 ? (
+            <Text style={styles.emptyMeetings}>
+              아직 참여 중인 모임이 없어요. 홈에서 모임에 참여하면 여기에 표시돼요.
+            </Text>
+          ) : (
+            joinedMeetings.map((m) => <JoinedMeetingDashboardCard key={m.id} meeting={m} />)
+          )}
 
-        <Text style={styles.label}>닉네임</Text>
-        <TextInput
-          value={nickname}
-          onChangeText={setNickname}
-          placeholder="모임에서 보이는 이름"
-          placeholderTextColor="#94a3b8"
-          style={styles.input}
-          autoCapitalize="none"
-          autoCorrect={false}
-          maxLength={24}
-        />
+          <GinitCard appearance="light" style={styles.profileCard}>
+            <Text style={styles.title}>계정 · 프로필</Text>
+            <Text style={styles.hint}>
+              전화번호로 가입하면 닉네임이 자동으로 만들어져요. 아래에서 닉네임과 프로필 사진(이미지 주소)을 바꿀 수 있어요.
+            </Text>
 
-        <Text style={styles.label}>프로필 사진 URL (선택)</Text>
-        <Text style={styles.subHint}>HTTPS 이미지 주소를 넣으면 모임 참여자 목록에 표시돼요.</Text>
-        <TextInput
-          value={photoUrl}
-          onChangeText={setPhotoUrl}
-          placeholder="https://…"
-          placeholderTextColor="#94a3b8"
-          style={styles.input}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-        />
-        {photoUrl.trim() ? (
-          <View style={styles.previewWrap}>
-            <Image source={{ uri: photoUrl.trim() }} style={styles.preview} contentFit="cover" />
-          </View>
-        ) : null}
+            <Text style={styles.label}>회원 ID (전화번호)</Text>
+            <Text style={styles.phone}>{phoneUserId ?? '(없음)'}</Text>
 
-        <GinitButton title="프로필 저장" variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
+            <Text style={styles.label}>닉네임</Text>
+            <TextInput
+              value={nickname}
+              onChangeText={setNickname}
+              placeholder="모임에서 보이는 이름"
+              placeholderTextColor="#94a3b8"
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={24}
+            />
 
-        <Text style={[styles.label, styles.divider]}>Firebase</Text>
-        <Text style={styles.line}>이메일: {user?.email ?? '(없음)'}</Text>
-        <Text style={styles.line}>UID: {user?.uid ?? ''}</Text>
-        <Text style={styles.line}>익명: {user?.isAnonymous ? '예' : '아니오'}</Text>
-        <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy} />
-      </GinitCard>
-    </ScrollView>
+            <Text style={styles.label}>프로필 사진 URL (선택)</Text>
+            <Text style={styles.subHint}>HTTPS 이미지 주소를 넣으면 모임 참여자 목록에 표시돼요.</Text>
+            <TextInput
+              value={photoUrl}
+              onChangeText={setPhotoUrl}
+              placeholder="https://…"
+              placeholderTextColor="#94a3b8"
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            {photoUrl.trim() ? (
+              <View style={styles.previewWrap}>
+                <Image source={{ uri: photoUrl.trim() }} style={styles.preview} contentFit="cover" />
+              </View>
+            ) : null}
+
+            <GinitButton title="프로필 저장" variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
+
+            <Text style={[styles.label, styles.divider]}>Firebase</Text>
+            <Text style={styles.line}>이메일: {user?.email ?? '(없음)'}</Text>
+            <Text style={styles.line}>UID: {user?.uid ?? ''}</Text>
+            <Text style={styles.line}>익명: {user?.isAnonymous ? '예' : '아니오'}</Text>
+            <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy} />
+          </GinitCard>
+        </ScrollView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+  },
+  safe: {
+    flex: 1,
+  },
+  scrollBottom: {
+    paddingTop: 8,
+    paddingBottom: 32,
+  },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F1F5F9',
   },
-  scroll: {
-    padding: 24,
-    paddingTop: 56,
-    backgroundColor: '#F1F5F9',
+  screenTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#0f172a',
+    marginBottom: 16,
+    letterSpacing: -0.4,
+    textShadowColor: 'rgba(255, 255, 255, 0.7)',
+    textShadowOffset: { width: 0, height: 0.5 },
+    textShadowRadius: 2,
+  },
+  centerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  muted: {
+    fontSize: 14,
+    color: '#64748b',
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#b91c1c',
+    marginBottom: 14,
+  },
+  emptyMeetings: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#64748b',
+    marginBottom: 16,
+  },
+  profileCard: {
+    marginTop: 8,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
   },
   title: {
     fontSize: 20,
