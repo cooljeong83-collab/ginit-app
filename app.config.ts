@@ -117,7 +117,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.android,
       package: 'com.ginit.app',
       googleServicesFile: './env/google-services.json',
-      permissions: [...((config.android as { permissions?: string[] } | undefined)?.permissions ?? [])],
+      permissions: [
+        ...((config.android as { permissions?: string[] } | undefined)?.permissions ?? []),
+        'android.permission.READ_PHONE_STATE',
+        'android.permission.READ_PHONE_NUMBERS',
+      ],
       ...(googleMapsApiKey
         ? {
             config: {

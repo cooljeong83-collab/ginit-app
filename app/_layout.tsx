@@ -10,7 +10,7 @@ import { UserSessionProvider } from '@/src/context/UserSessionContext';
  * - 루트 렌더 경로의 `getFirebaseAuth()` 등 Firebase 초기화
  * - `react-native-device-info` 등 기기 식별 네이티브 호출
  *
- * 전역 유저는 `UserSessionContext`의 하드코딩 테스트 값으로 즉시 제공됩니다.
+ * 전역 유저는 `UserSessionContext`(전화 PK, 구글 프로필 스냅샷)로 제공됩니다.
  * (복구 시 참고용 백업)
  *
  * ```tsx

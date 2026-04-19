@@ -1,13 +1,16 @@
 import {
   GoogleAuthProvider,
   getRedirectResult,
+  OAuthCredential,
   signInWithPopup,
   signInWithRedirect,
   signOut,
   type User,
+  type UserCredential,
 } from 'firebase/auth';
 
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
+import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 import { getFirebaseAuth } from './firebase';
 
 const REDIRECT_STARTED = 'auth/redirect-started';
@@ -117,7 +120,7 @@ export async function consumeGoogleRedirectResult(): Promise<User | null> {
   return null;
 }
 
-export async function signInWithGoogle(): Promise<User> {
+export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promise<GoogleSignInResult> {
   log('signInWithGoogle → start (handleLogin equivalent on web)', {
     isBrowser: isBrowser(),
     isMobileUserAgent: isMobileUserAgent(),
@@ -133,6 +136,10 @@ export async function signInWithGoogle(): Promise<User> {
   const auth = getFirebaseAuth();
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
+  if (options?.forRegistration) {
+    provider.addScope('https://www.googleapis.com/auth/user.birthday.read');
+    provider.addScope('https://www.googleapis.com/auth/user.gender.read');
+  }
 
   if (isMobileUserAgent()) {
     log('Auth Step 1 → about to open redirect flow (signInWithRedirect)', {
@@ -159,13 +166,16 @@ export async function signInWithGoogle(): Promise<User> {
   log('Auth Step 1 → about to open popup (signInWithPopup)');
   logCurrentAuth('signInWithGoogle:before signInWithPopup');
   try {
-    const { user } = await signInWithPopup(auth, provider);
+    const result = (await signInWithPopup(auth, provider)) as UserCredential;
+    const { user } = result;
+    const oauth = GoogleAuthProvider.credentialFromResult(result) as OAuthCredential | null;
+    const googleAccessToken = oauth?.accessToken ?? null;
     log('Auth Step 2: Result Received (popup success)', {
       uid: user.uid,
       email: user.email ?? null,
     });
     logCurrentAuth('signInWithGoogle:after popup success');
-    return user;
+    return { user, googleAccessToken };
   } catch (e) {
     const { code, message } = pickErr(e);
     log('Error:signInWithPopup', { code: code ?? '(no code)', message });

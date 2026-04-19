@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { getUserProfile } from '@/src/lib/user-profile';
+
 /** 로컬에 등록된 전화 PK 목록 (서버 대체 — 보안 가이드상 기기 번호 기반 자동 가입) */
 const REGISTRY_KEY = 'ginit.phoneRegistry.v1';
 
@@ -11,6 +13,27 @@ async function readList(): Promise<string[]> {
     return Array.isArray(list) ? (list as string[]) : [];
   } catch {
     return [];
+  }
+}
+
+/** AsyncStorage 목록에 이미 있는지(가입 완료로 기록된 번호) */
+export async function isPhoneRegisteredLocally(normalizedPhone: string): Promise<boolean> {
+  const list = await readList();
+  return list.includes(normalizedPhone);
+}
+
+/**
+ * 가입된 회원으로 본다: 로컬 등록 목록 또는 Firestore `users/{전화}` 문서 존재.
+ */
+export async function isPhoneRegistered(normalizedPhone: string): Promise<boolean> {
+  const id = normalizedPhone.trim();
+  if (!id) return false;
+  if (await isPhoneRegisteredLocally(id)) return true;
+  try {
+    const p = await getUserProfile(id);
+    return p !== null;
+  } catch {
+    return false;
   }
 }
 

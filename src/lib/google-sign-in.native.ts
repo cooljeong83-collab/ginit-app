@@ -4,6 +4,7 @@ import { GoogleAuthProvider, signInWithCredential, signOut, type User } from 'fi
 import { publicEnv } from '@/src/config/public-env';
 
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
+import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 import { getFirebaseAuth } from './firebase';
 
 export const REDIRECT_STARTED = 'auth/redirect-started';
@@ -56,7 +57,8 @@ function logCurrentAuth(prefix: string) {
 type GoogleSigninApi = typeof import('@react-native-google-signin/google-signin').GoogleSignin;
 
 let googleSignin: GoogleSigninApi | null = null;
-let configured = false;
+let configureSignature = '';
+
 
 function requireGoogleSignin(): GoogleSigninApi {
   if (googleSignin) return googleSignin;
@@ -84,19 +86,30 @@ function isExpoGo(): boolean {
   }
 }
 
-function ensureConfigured(gs: GoogleSigninApi) {
-  if (configured) return;
+function ensureConfigured(gs: GoogleSigninApi, options?: SignInWithGoogleOptions) {
   const webClientId = publicEnv.googleWebClientId?.trim();
   if (!webClientId) {
     throw new Error(
       'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID(웹 OAuth 클라이언트 ID)가 비어 있습니다. env/.env에 넣고 Metro를 재시작하세요.',
     );
   }
-  gs.configure({ webClientId });
-  configured = true;
+  const scopes: string[] = [
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+  ];
+  if (options?.forRegistration) {
+    scopes.push(
+      'https://www.googleapis.com/auth/user.birthday.read',
+      'https://www.googleapis.com/auth/user.gender.read',
+    );
+  }
+  const sig = `${webClientId}|${scopes.join(',')}`;
+  if (configureSignature === sig) return;
+  gs.configure({ webClientId, scopes });
+  configureSignature = sig;
 }
 
-export async function signInWithGoogle(): Promise<User> {
+export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promise<GoogleSignInResult> {
   log('signInWithGoogle → start (handleLogin equivalent on native)', { expoGo: isExpoGo() });
   logCurrentAuth('signInWithGoogle:start');
 
@@ -110,7 +123,7 @@ export async function signInWithGoogle(): Promise<User> {
 
   log('Auth Step 1 → require GoogleSignin module & configure');
   const GoogleSignin = requireGoogleSignin();
-  ensureConfigured(GoogleSignin);
+  ensureConfigured(GoogleSignin, options);
   logCurrentAuth('signInWithGoogle:after configure');
 
   try {
@@ -133,6 +146,13 @@ export async function signInWithGoogle(): Promise<User> {
     const { code, message } = pickErr(e);
     log('Error:GoogleSignin.signIn', { code: code ?? '(no code)', message });
     logCurrentAuth('signInWithGoogle:after signIn error');
+    const isDeveloperError =
+      message.includes('DEVELOPER_ERROR') || code === '10' || code === 'DEVELOPER_ERROR';
+    if (isDeveloperError) {
+      throw new Error(
+        'Google Android 로그인 설정 오류(DEVELOPER_ERROR). 다음을 확인하세요: (1) Firebase 콘솔 → 프로젝트 설정 → 내 Android 앱에 디버그·릴리스 SHA-1 등록 (2) 등록 후 `google-services.json`을 다시 내려받아 `env/google-services.json`과 `android/app/google-services.json`에 반영 — `oauth_client` 배열이 비어 있으면 아직 SHA가 반영되지 않은 것입니다 (3) `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`는 이 Firebase 프로젝트와 연결된 Google Cloud의 「OAuth 2.0 웹 클라이언트」ID여야 합니다(다른 GCP 프로젝트의 클라이언트 ID면 실패합니다). SHA 확인: `cd android && ./gradlew signingReport`',
+      );
+    }
     throw new Error(`Google 로그인 UI 실패: ${message}`);
   }
 
@@ -157,7 +177,14 @@ export async function signInWithGoogle(): Promise<User> {
       email: user.email ?? null,
     });
     logCurrentAuth('signInWithGoogle:after credential success');
-    return user;
+    let googleAccessToken: string | null = null;
+    try {
+      const t = await GoogleSignin.getTokens();
+      googleAccessToken = t.accessToken ?? null;
+    } catch {
+      googleAccessToken = null;
+    }
+    return { user, googleAccessToken };
   } catch (e) {
     const { code, message } = pickErr(e);
     log('Error:signInWithCredential', { code: code ?? '(no code)', message });

@@ -13,6 +13,13 @@ export type UserProfile = {
   nickname: string;
   /** HTTPS 등 원격 프로필 이미지 URL (없으면 이니셜 아바타) */
   photoUrl: string | null;
+  email?: string | null;
+  displayName?: string | null;
+  gender?: string | null;
+  birthYear?: number | null;
+  birthMonth?: number | null;
+  birthDay?: number | null;
+  firebaseUid?: string | null;
 };
 
 const ADJECTIVES = ['즐거운', '든든한', '반짝', '포근한', '상큼한', '느긋한', '산뜻한', '따스한', '멋진', '기분좋은'] as const;
@@ -43,9 +50,23 @@ export function generateRandomNickname(): string {
 function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const nick = typeof data.nickname === 'string' ? data.nickname.trim() : '';
   const photo = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
+  const email = typeof data.email === 'string' ? data.email.trim() : '';
+  const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
+  const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
+  const birthYear = typeof data.birthYear === 'number' ? data.birthYear : null;
+  const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
+  const birthDay = typeof data.birthDay === 'number' ? data.birthDay : null;
+  const firebaseUid = typeof data.firebaseUid === 'string' ? data.firebaseUid.trim() : '';
   return {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
+    email: email || null,
+    displayName: displayName || null,
+    gender: gender || null,
+    birthYear,
+    birthMonth,
+    birthDay,
+    firebaseUid: firebaseUid || null,
   };
 }
 
@@ -82,6 +103,45 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
     createdAt: serverTimestamp(),
   });
   return { nickname, photoUrl: null };
+}
+
+/** 구글 가입 직후: Firestore 사용자 문서에 계정·People API 정보 병합(신규는 생성). */
+export async function applyGoogleSignupProfile(
+  phoneUserId: string,
+  patch: {
+    nickname: string;
+    photoUrl: string | null;
+    email?: string | null;
+    displayName?: string | null;
+    gender?: string | null;
+    birthYear?: number | null;
+    birthMonth?: number | null;
+    birthDay?: number | null;
+    firebaseUid?: string | null;
+  },
+): Promise<UserProfile> {
+  const id = phoneUserId.trim();
+  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
+  const snap = await getDoc(dRef);
+  const payload: Record<string, unknown> = {
+    nickname: patch.nickname.trim() || generateRandomNickname(),
+    photoUrl: patch.photoUrl,
+    updatedAt: serverTimestamp(),
+  };
+  if (patch.email !== undefined) payload.email = patch.email;
+  if (patch.displayName !== undefined) payload.displayName = patch.displayName;
+  if (patch.gender !== undefined) payload.gender = patch.gender;
+  if (patch.birthYear !== undefined) payload.birthYear = patch.birthYear;
+  if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
+  if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
+  if (patch.firebaseUid !== undefined) payload.firebaseUid = patch.firebaseUid;
+  if (!snap.exists()) {
+    payload.createdAt = serverTimestamp();
+  }
+  await setDoc(dRef, stripUndefinedDeep(payload) as Record<string, unknown>, { merge: true });
+  const after = await getDoc(dRef);
+  return mapUserDoc((after.data() ?? {}) as Record<string, unknown>);
 }
 
 export async function updateUserProfile(

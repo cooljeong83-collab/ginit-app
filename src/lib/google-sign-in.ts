@@ -3,6 +3,7 @@
  * TypeScript는 이 파일을 통해 동일 시그니처를 인식합니다.
  */
 export type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
+export type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 export {
   consumeGoogleRedirectResult,
   consumeGoogleRedirectResultWithMeta,
