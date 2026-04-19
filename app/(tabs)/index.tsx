@@ -23,8 +23,10 @@ import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
-  resolveFeedHeaderLocationLabel,
+  resolveFeedLocationContext,
 } from '@/src/lib/feed-display-location';
+import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
+import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetings } from '@/src/lib/meetings';
 
@@ -40,6 +42,16 @@ const MOCK_REGION_ROWS = [
 ] as const;
 
 type FeedChip = { filterId: string | null; label: string };
+
+type MeetingListSortMode = 'distance' | 'latest';
+
+function meetingCreatedAtMs(m: Meeting): number {
+  const t = m.createdAt;
+  if (t && typeof (t as { toMillis?: () => number }).toMillis === 'function') {
+    return (t as { toMillis: () => number }).toMillis();
+  }
+  return 0;
+}
 
 function GlassCategoryChip({
   label,
@@ -113,10 +125,14 @@ export default function FeedScreen() {
   const categoryChipMaxWidth = Math.min(200, Math.max(100, windowWidth * 0.42));
 
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
-  const [locationResolving, setLocationResolving] = useState(true);
+  const regionLabelRef = useRef(FEED_LOCATION_FALLBACK_SHORT);
   const manualRegionPickRef = useRef(false);
+  /** 거리·거리순 정렬에 쓰는 기준점: 캐시 좌표 → GPS로 갱신(실패 시 캐시 유지) */
+  const userCoordsRef = useRef<LatLng | null>(null);
   const [regionModalOpen, setRegionModalOpen] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [userCoords, setUserCoords] = useState<LatLng | null>(null);
+  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -139,6 +155,14 @@ export default function FeedScreen() {
     setChipsMoreRight(more);
   }, []);
 
+  useEffect(() => {
+    regionLabelRef.current = regionLabel;
+  }, [regionLabel]);
+
+  useEffect(() => {
+    userCoordsRef.current = userCoords;
+  }, [userCoords]);
+
   const onCategoryChipsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     chipsOffsetXRef.current = contentOffset.x;
@@ -153,15 +177,26 @@ export default function FeedScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLocationResolving(true);
-      const label = await resolveFeedHeaderLocationLabel();
+      const cached = await loadFeedLocationCache();
       if (cancelled) return;
-      if (manualRegionPickRef.current) {
-        setLocationResolving(false);
-        return;
+
+      let coordsForDistance = null as LatLng | null;
+      if (cached) {
+        setRegionLabel(cached.label);
+        coordsForDistance = cached.coords;
+        setUserCoords(coordsForDistance);
       }
-      setRegionLabel(label);
-      setLocationResolving(false);
+
+      const ctx = await resolveFeedLocationContext();
+      if (cancelled) return;
+      if (!manualRegionPickRef.current) {
+        setRegionLabel(ctx.labelShort);
+      }
+      coordsForDistance = ctx.coords ?? coordsForDistance;
+      setUserCoords(coordsForDistance);
+
+      const labelToSave = manualRegionPickRef.current ? regionLabelRef.current : ctx.labelShort;
+      await saveFeedLocationCache(labelToSave, coordsForDistance);
     })();
     return () => {
       cancelled = true;
@@ -233,21 +268,42 @@ export default function FeedScreen() {
     [meetings, selectedCategoryId, categories],
   );
 
+  const sortedFilteredMeetings = useMemo(() => {
+    const list = [...filteredMeetings];
+    if (listSortMode === 'latest') {
+      list.sort((a, b) => {
+        const tb = meetingCreatedAtMs(b);
+        const ta = meetingCreatedAtMs(a);
+        if (tb !== ta) return tb - ta;
+        return a.title.localeCompare(b.title, 'ko');
+      });
+      return list;
+    }
+    list.sort((a, b) => {
+      const da = meetingDistanceMetersFromUser(a, userCoords);
+      const db = meetingDistanceMetersFromUser(b, userCoords);
+      const sa = da ?? Number.POSITIVE_INFINITY;
+      const sb = db ?? Number.POSITIVE_INFINITY;
+      if (sa !== sb) return sa - sb;
+      return a.title.localeCompare(b.title, 'ko');
+    });
+    return list;
+  }, [filteredMeetings, listSortMode, userCoords]);
+
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
   const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
   const pickRegion = useCallback((shortLabel: string) => {
     manualRegionPickRef.current = true;
+    regionLabelRef.current = shortLabel;
     setRegionLabel(shortLabel);
-    setLocationResolving(false);
     setRegionModalOpen(false);
+    void saveFeedLocationCache(shortLabel, userCoordsRef.current);
   }, []);
 
   const selectedFilterLabel = useMemo(() => {
     if (selectedCategoryId == null) return null;
     return categories.find((c) => c.id === selectedCategoryId)?.label ?? null;
   }, [categories, selectedCategoryId]);
-
-  const regionDisplayShort = locationResolving ? '위치 확인 중…' : regionLabel;
 
   return (
     <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
@@ -258,16 +314,19 @@ export default function FeedScreen() {
           keyboardShouldPersistTaps="handled">
           <View style={styles.feedHeader}>
             <View style={styles.feedHeaderTopRow}>
-              <Pressable
-                onPress={openRegionModal}
-                style={styles.locationRow}
-                accessibilityRole="button"
-                accessibilityLabel={`현재 위치 ${regionDisplayShort}, 지역 설정`}>
-                <Text style={styles.locationText} numberOfLines={1}>
-                  {regionDisplayShort}
+              <View style={styles.locationCluster}>
+                <Text style={styles.locationText} numberOfLines={1} accessibilityLabel={`현재 표시 지역 ${regionLabel}`}>
+                  {regionLabel}
                 </Text>
-                <Ionicons name="chevron-down" size={18} color={GinitTheme.trustBlue} />
-              </Pressable>
+                <Pressable
+                  onPress={openRegionModal}
+                  style={styles.locationExpandBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="지역 설정 열기"
+                  hitSlop={8}>
+                  <Ionicons name="chevron-down" size={20} color={GinitTheme.trustBlue} />
+                </Pressable>
+              </View>
               <View style={styles.headerActions}>
                 <Pressable accessibilityRole="button" hitSlop={10}>
                   <Ionicons name="search-outline" size={24} color="#0f172a" />
@@ -334,7 +393,7 @@ export default function FeedScreen() {
                 <View style={styles.heroCopy}>
                   <Text style={styles.heroTitle}>AI가 제안하는 완벽한 모임!</Text>
                   <Text style={styles.heroDesc}>
-                    오늘 저녁, {locationResolving ? '내 주변' : `${regionLabel} 근처`}에서 새로운 모임을 찾아보세요. 바로
+                    오늘 저녁, {userCoords ? `${regionLabel} 근처` : '내 주변'}에서 새로운 모임을 찾아보세요. 바로
                     참여해 보세요.
                   </Text>
                 </View>
@@ -346,9 +405,31 @@ export default function FeedScreen() {
             </View>
           </GinitCard>
 
-          <Text style={styles.sectionLabel}>
-            모임{selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}
-          </Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>
+              모임{selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}
+            </Text>
+            <View style={styles.sortToggle} accessibilityRole="tablist">
+              <Pressable
+                onPress={() => setListSortMode('distance')}
+                style={[styles.sortPill, listSortMode === 'distance' && styles.sortPillActive]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: listSortMode === 'distance' }}>
+                <Text style={[styles.sortPillLabel, listSortMode === 'distance' && styles.sortPillLabelActive]}>
+                  거리순
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setListSortMode('latest')}
+                style={[styles.sortPill, listSortMode === 'latest' && styles.sortPillActive]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: listSortMode === 'latest' }}>
+                <Text style={[styles.sortPillLabel, listSortMode === 'latest' && styles.sortPillLabelActive]}>
+                  최신순
+                </Text>
+              </Pressable>
+            </View>
+          </View>
 
           {loading ? (
             <View style={styles.centerRow}>
@@ -376,7 +457,7 @@ export default function FeedScreen() {
             </Text>
           ) : null}
 
-          {filteredMeetings.map((m) => (
+          {sortedFilteredMeetings.map((m) => (
             <Pressable key={m.id} style={styles.meetRow} accessibilityRole="button">
               <Image
                 source={{ uri: m.imageUrl?.trim() ? m.imageUrl.trim() : DEFAULT_THUMB }}
@@ -384,15 +465,24 @@ export default function FeedScreen() {
                 contentFit="cover"
               />
               <View style={styles.meetBody}>
-                <View style={styles.meetTop}>
+                <View style={styles.meetTitleBlock}>
                   <Text style={styles.meetTitle} numberOfLines={1}>
                     {m.title}
                   </Text>
-                  <Text style={styles.distance} numberOfLines={2}>
-                    {m.address?.trim() || m.location}
-                  </Text>
+                  {(m.address?.trim() || m.location) ? (
+                    <Text style={styles.meetAddrLine} numberOfLines={1}>
+                      {m.address?.trim() || m.location}
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={styles.tagRow}>
+                  <View
+                    style={styles.meetDistChip}
+                    accessibilityLabel={`내 위치에서 ${formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}`}>
+                    <Text style={styles.meetDistChipText}>
+                      {formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}
+                    </Text>
+                  </View>
                   <View style={styles.tagPill}>
                     <Text style={styles.tagText} numberOfLines={1}>
                       {[m.categoryLabel, `최대 ${m.capacity}명`].filter(Boolean).join(' · ')}
@@ -479,19 +569,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-  locationRow: {
+  locationCluster: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
     minWidth: 0,
+    gap: 2,
   },
   locationText: {
     flex: 1,
+    flexShrink: 1,
     fontSize: 20,
     fontWeight: '700',
     color: GinitTheme.trustBlue,
     minWidth: 0,
+  },
+  locationExpandBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    flexShrink: 0,
   },
   headerActions: {
     flexDirection: 'row',
@@ -649,11 +746,46 @@ const styles = StyleSheet.create({
     right: 8,
     fontSize: 14,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
   sectionLabel: {
+    flex: 1,
+    minWidth: 120,
     fontSize: 16,
     fontWeight: '700',
     color: '#0f172a',
-    marginBottom: 12,
+  },
+  sortToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  sortPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
+  },
+  sortPillActive: {
+    backgroundColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.trustBlue,
+  },
+  sortPillLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  sortPillLabelActive: {
+    color: '#FFFFFF',
   },
   centerRow: {
     flexDirection: 'row',
@@ -716,24 +848,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  meetTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
+  meetTitleBlock: {
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: 2,
   },
   meetTitle: {
-    flex: 1,
     fontSize: 16,
     fontWeight: '800',
     color: '#0f172a',
   },
-  distance: {
-    maxWidth: '40%',
+  meetAddrLine: {
     fontSize: 12,
     fontWeight: '600',
     color: '#64748b',
-    textAlign: 'right',
+  },
+  meetDistChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 82, 204, 0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0, 82, 204, 0.2)',
+  },
+  meetDistChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.trustBlue,
   },
   tagRow: {
     flexDirection: 'row',

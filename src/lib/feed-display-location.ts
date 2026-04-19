@@ -53,28 +53,46 @@ export function guOnlyLabelFromGeocode(a: LocationGeocodedAddress): string {
  * 현재 좌표를 받아 역지오코딩한 뒤 **구** 단위 라벨을 반환합니다.
  * 실패 시 `FEED_LOCATION_FALLBACK_SHORT`.
  */
-export async function resolveFeedHeaderLocationLabel(): Promise<string> {
+export type FeedLocationContext = {
+  /** 피드 상단 구 이름 */
+  labelShort: string;
+  /** 거리 계산용 (권한·좌표 실패 시 null) */
+  coords: { latitude: number; longitude: number } | null;
+};
+
+/**
+ * 위치 권한 한 번으로 좌표 + 구 라벨을 함께 반환합니다.
+ */
+export async function resolveFeedLocationContext(): Promise<FeedLocationContext> {
   try {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
-      return FEED_LOCATION_FALLBACK_SHORT;
+      return { labelShort: FEED_LOCATION_FALLBACK_SHORT, coords: null };
     }
 
     const pos = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
     });
 
-    const results = await Location.reverseGeocodeAsync({
+    const coords = {
       latitude: pos.coords.latitude,
       longitude: pos.coords.longitude,
-    });
+    };
 
+    const results = await Location.reverseGeocodeAsync(coords);
     const first = results[0];
-    if (!first) return FEED_LOCATION_FALLBACK_SHORT;
+    const label = first ? guOnlyLabelFromGeocode(first).trim() : '';
 
-    const label = guOnlyLabelFromGeocode(first).trim();
-    return label || FEED_LOCATION_FALLBACK_SHORT;
+    return {
+      labelShort: label || FEED_LOCATION_FALLBACK_SHORT,
+      coords,
+    };
   } catch {
-    return FEED_LOCATION_FALLBACK_SHORT;
+    return { labelShort: FEED_LOCATION_FALLBACK_SHORT, coords: null };
   }
+}
+
+export async function resolveFeedHeaderLocationLabel(): Promise<string> {
+  const { labelShort } = await resolveFeedLocationContext();
+  return labelShort;
 }
