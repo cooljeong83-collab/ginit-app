@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  AppState,
+  type AppStateStatus,
   FlatList,
   Modal,
   Platform,
@@ -95,6 +97,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
+  const phoneUserIdRef = useRef(phoneUserId);
+  phoneUserIdRef.current = phoneUserId;
 
   /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
   const pushDedupeRef = useRef<Set<string>>(new Set());
@@ -210,17 +214,37 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     });
   }, [persistReady, meetings, phoneUserId, readState.meetingAckFingerprint]);
 
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * `setItem` 완료까지 await — `void`만 호출하면 저장 전에 프로세스가 끊겨 재실행 시 알람이 복구되는 경우가 있습니다.
+   * (디버그/릴리스 공통)
+   */
   useEffect(() => {
     if (!persistReady || !phoneUserId?.trim()) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      void saveInAppAlarmReadState(phoneUserId, readStateRef.current);
-    }, 450);
+    const uid = phoneUserId.trim();
+    const snapshot = readState;
+    let cancelled = false;
+    void (async () => {
+      await saveInAppAlarmReadState(uid, snapshot);
+      if (cancelled) return;
+    })();
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      cancelled = true;
     };
   }, [readState, persistReady, phoneUserId]);
+
+  useEffect(() => {
+    if (!persistReady) return;
+    const flush = (status: AppStateStatus) => {
+      if (status !== 'inactive' && status !== 'background') return;
+      const uid = phoneUserIdRef.current?.trim();
+      if (!uid) return;
+      void (async () => {
+        await saveInAppAlarmReadState(uid, readStateRef.current);
+      })();
+    };
+    const sub = AppState.addEventListener('change', flush);
+    return () => sub.remove();
+  }, [persistReady]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -339,6 +363,26 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const openAlarmPanel = useCallback(() => setPanelOpen(true), []);
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
+  const markAllAlarmsAsRead = useCallback(() => {
+    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const meetingById = new Map(meetings.map((m) => [m.id, m]));
+    setReadState((prev) => {
+      const chatReadMessageId = { ...prev.chatReadMessageId };
+      const meetingAckFingerprint = { ...prev.meetingAckFingerprint };
+      for (const j of joined) {
+        const mid = j.id;
+        const m = meetingById.get(mid);
+        if (!m) continue;
+        meetingAckFingerprint[mid] = meetingChangeFingerprint(m);
+        if (mid in latestById) {
+          const latest = latestById[mid];
+          chatReadMessageId[mid] = latest?.id ?? '';
+        }
+      }
+      return { chatReadMessageId, meetingAckFingerprint };
+    });
+  }, [meetings, phoneUserId, latestById]);
+
   const onPressAlarmRow = useCallback(
     (row: InAppAlarmRow) => {
       if (row.kind === 'chat') {
@@ -398,6 +442,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                 <Ionicons name="close" size={26} color="#475569" />
               </Pressable>
             </View>
+            {alarms.length > 0 ? (
+              <View style={styles.markAllRow}>
+                <Pressable
+                  onPress={markAllAlarmsAsRead}
+                  hitSlop={{ top: 6, bottom: 10, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="모두 읽음 처리"
+                  style={({ pressed }) => [styles.markAllBtn, pressed && styles.markAllBtnPressed]}>
+                  <Text style={styles.markAllBtnText}>모두 읽음 처리</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {alarms.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Text style={styles.emptyText}>확인하지 않은 새 소식이 없어요.</Text>
@@ -469,6 +525,26 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: '#0f172a',
+  },
+  markAllRow: {
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 10,
+    alignItems: 'flex-end',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  markAllBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  markAllBtnPressed: {
+    opacity: 0.72,
+  },
+  markAllBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GinitTheme.trustBlue,
   },
   listContent: {
     paddingVertical: 6,

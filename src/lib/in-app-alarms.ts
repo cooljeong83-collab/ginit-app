@@ -47,6 +47,24 @@ function stableSortedParticipantLine(ids: string[] | null | undefined): string {
     .join('|');
 }
 
+/**
+ * Firestore에서 내려온 객체 키 순서가 달라져도 동일한 값이면 같은 문자열이 되도록 직렬화합니다.
+ * (앱 재시작마다 `JSON.stringify` 순서만 바뀌어 미확인 모임 알람이 다시 뜨는 현상 방지)
+ */
+export function stableJsonForFingerprint(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  const t = typeof value;
+  if (t === 'string' || t === 'number' || t === 'boolean') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJsonForFingerprint(item)).join(',')}]`;
+  }
+  if (t !== 'object') return JSON.stringify(String(value));
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJsonForFingerprint(obj[k])}`).join(',')}}`;
+}
+
 /** 참여 모임의 일정·장소·참여·투표 등 변동을 감지하기 위한 안정 지문 */
 export function meetingChangeFingerprint(m: Meeting): string {
   const parts = [
@@ -62,10 +80,10 @@ export function meetingChangeFingerprint(m: Meeting): string {
     m.placeName ?? '',
     m.address ?? '',
     m.location ?? '',
-    JSON.stringify(m.dateCandidates ?? null),
-    JSON.stringify(m.placeCandidates ?? null),
-    JSON.stringify(m.voteTallies ?? null),
-    JSON.stringify(m.participantVoteLog ?? null),
+    stableJsonForFingerprint(m.dateCandidates ?? null),
+    stableJsonForFingerprint(m.placeCandidates ?? null),
+    stableJsonForFingerprint(m.voteTallies ?? null),
+    stableJsonForFingerprint(m.participantVoteLog ?? null),
   ];
   return parts.join('\u001f');
 }
