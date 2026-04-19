@@ -1,9 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -19,19 +19,19 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
-import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
+import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import type { Meeting } from '@/src/lib/meetings';
 import {
-  confirmMeetingSchedule,
-  unconfirmMeetingSchedule,
   computeMeetingConfirmAnalysis,
+  confirmMeetingSchedule,
+  deleteMeetingByHost,
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
@@ -39,13 +39,14 @@ import {
   leaveMeeting,
   resolveVoteTopTies,
   subscribeMeetingById,
+  unconfirmMeetingSchedule,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
   updateParticipantVotes,
 } from '@/src/lib/meetings';
-import { ensureUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { ensureUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 
@@ -307,6 +308,7 @@ function isMeetingHost(sessionPhone: string | null, createdBy: string | null | u
 export default function MeetingDetailScreen() {
   const router = useRouter();
   const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { phoneUserId } = useUserSession();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
@@ -339,6 +341,7 @@ export default function MeetingDetailScreen() {
   const [joinBusy, setJoinBusy] = useState(false);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
+  const [deleteMeetingBusy, setDeleteMeetingBusy] = useState(false);
   const [hostTieDateId, setHostTieDateId] = useState<string | null>(null);
   const [hostTiePlaceId, setHostTiePlaceId] = useState<string | null>(null);
   const [hostTieMovieId, setHostTieMovieId] = useState<string | null>(null);
@@ -1045,6 +1048,38 @@ export default function MeetingDetailScreen() {
     );
   }, [meeting, phoneUserId, hostTiePicks, scrollToVoteBlock]);
 
+  const handleDeleteMeeting = useCallback(() => {
+    if (!meeting || !phoneUserId?.trim()) {
+      Alert.alert('안내', '로그인한 주관자만 삭제할 수 있어요.');
+      return;
+    }
+    if (meeting.scheduleConfirmed === true) return;
+    Alert.alert(
+      '모임 삭제',
+      '이 모임을 삭제하면 참여자·투표 등 모든 정보가 사라지며 되돌릴 수 없습니다. 삭제할까요?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDeleteMeetingBusy(true);
+              try {
+                await deleteMeetingByHost(meeting.id, phoneUserId.trim());
+                router.back();
+              } catch (e) {
+                Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+              } finally {
+                setDeleteMeetingBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [meeting, phoneUserId, router]);
+
   const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
     if (!meeting || !confirmedPlaceCoords) return;
     const name =
@@ -1622,42 +1657,70 @@ export default function MeetingDetailScreen() {
         ) : null}
 
         {!loading && !loadError && meeting !== null ? (
-          <View style={styles.bottomBar}>
+          <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
             {isHost ? (
-              <>
-                {recruitmentPhase !== 'confirmed' ? (
+              <View style={styles.bottomBarEqualRow}>
+                {recruitmentPhase === 'recruiting' || recruitmentPhase === 'full' ? (
                   <Pressable
-                    style={[
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      recruitmentPhase === 'full' && styles.bottomPillFlex,
-                    ]}
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
                     accessibilityLabel="모임 수정">
                     <Ionicons name="construct-outline" size={18} color="#fff" />
-                    <Text style={styles.pillText}>수정</Text>
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      수정
+                    </Text>
                   </Pressable>
                 ) : null}
                 {recruitmentPhase === 'recruiting' ? (
-                  <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="초대">
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="초대">
                     <Ionicons name="mail-outline" size={18} color="#fff" />
-                    <Text style={styles.pillText}>초대</Text>
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      초대
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {meeting.scheduleConfirmed !== true ? (
+                  <Pressable
+                    onPress={handleDeleteMeeting}
+                    disabled={deleteMeetingBusy || confirmScheduleBusy}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillDanger,
+                      styles.bottomPillFlex,
+                      (deleteMeetingBusy || confirmScheduleBusy) && { opacity: 0.75 },
+                      pressed && !deleteMeetingBusy && !confirmScheduleBusy && { opacity: 0.9 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="모임 삭제">
+                    {deleteMeetingBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="trash-outline" size={18} color="#fff" />
+                    )}
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      삭제
+                    </Text>
                   </Pressable>
                 ) : null}
                 <Pressable
                   onPress={
                     meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
                   }
-                  disabled={confirmScheduleBusy}
+                  disabled={confirmScheduleBusy || deleteMeetingBusy}
                   style={({ pressed }) => [
                     styles.bottomPill,
                     meeting.scheduleConfirmed === true ? styles.pillDanger : styles.pillOrange,
-                    (recruitmentPhase === 'full' || recruitmentPhase === 'confirmed') && styles.bottomPillFlex,
-                    confirmScheduleBusy && { opacity: 0.75 },
-                    pressed && !confirmScheduleBusy && { opacity: 0.9 },
+                    styles.bottomPillFlex,
+                    (confirmScheduleBusy || deleteMeetingBusy) && { opacity: 0.75 },
+                    pressed && !confirmScheduleBusy && !deleteMeetingBusy && { opacity: 0.9 },
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel={meeting.scheduleConfirmed === true ? '일정 확정 취소' : '일정 확정'}>
+                  accessibilityLabel={
+                    meeting.scheduleConfirmed === true ? '일정 확정 취소' : '모집 일정 확정'
+                  }>
                   {confirmScheduleBusy ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
@@ -1667,20 +1730,25 @@ export default function MeetingDetailScreen() {
                       color="#fff"
                     />
                   )}
-                  <Text style={styles.pillText}>
-                    {meeting.scheduleConfirmed === true ? '확정 취소' : '확정'}
+                  <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    {meeting.scheduleConfirmed === true ? '취소' : '확정'}
                   </Text>
                 </Pressable>
-              </>
+              </View>
             ) : alreadyJoinedMeeting ? (
-              <>
+              <View style={styles.bottomBarEqualRow}>
                 {recruitmentPhase === 'recruiting' ? (
                   <Pressable
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
                     accessibilityLabel="초대">
                     <Ionicons name="mail-outline" size={16} color="#fff" />
-                    <Text style={[styles.pillText, styles.pillTextCompact]}>초대</Text>
+                    <Text
+                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
+                      초대
+                    </Text>
                   </Pressable>
                 ) : null}
                 {meeting.scheduleConfirmed !== true ? (
@@ -1701,7 +1769,12 @@ export default function MeetingDetailScreen() {
                     ) : (
                       <Ionicons name="save-outline" size={16} color="#fff" />
                     )}
-                    <Text style={[styles.pillText, styles.pillTextCompact]}>수정</Text>
+                    <Text
+                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
+                      수정
+                    </Text>
                   </Pressable>
                 ) : null}
                 <Pressable
@@ -1717,18 +1790,25 @@ export default function MeetingDetailScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="모임 탈퇴">
                   <Ionicons name="exit-outline" size={16} color="#fff" />
-                  <Text style={[styles.pillText, styles.pillTextCompact]}>탈퇴</Text>
+                  <Text
+                    style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail">
+                    탈퇴
+                  </Text>
                 </Pressable>
-              </>
+              </View>
             ) : (
-              <>
+              <View style={styles.bottomBarEqualRow}>
                 {recruitmentPhase === 'recruiting' ? (
                   <Pressable
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
                     accessibilityLabel="초대">
                     <Ionicons name="mail-outline" size={18} color="#fff" />
-                    <Text style={styles.pillText}>초대</Text>
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      초대
+                    </Text>
                   </Pressable>
                 ) : null}
                 <Pressable
@@ -1748,9 +1828,11 @@ export default function MeetingDetailScreen() {
                   ) : (
                     <Ionicons name="hand-right-outline" size={18} color="#fff" />
                   )}
-                  <Text style={styles.pillText}>참여</Text>
+                  <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    참여
+                  </Text>
                 </Pressable>
-              </>
+              </View>
             )}
           </View>
         ) : null}
@@ -2276,12 +2358,25 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
     gap: 10,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    paddingBottom: 20,
+    paddingTop: 12,
     backgroundColor: 'transparent',
+  },
+  /** 보이는 버튼만큼 동일 비율(flex 1)로 화면 너비 분배 */
+  bottomBarEqualRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+    minWidth: 0,
+  },
+  bottomPillLabel: {
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: 'center',
   },
   bottomPill: {
     flexDirection: 'row',

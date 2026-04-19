@@ -18,6 +18,7 @@ import {
   arrayRemove,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -718,6 +719,27 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
     confirmedPlaceChipId: null,
     confirmedMovieChipId: null,
   });
+}
+
+/** 주관자가 미확정 모임 문서를 삭제합니다. */
+export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = hostPhoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+  const data = snap.data() as Record<string, unknown>;
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsHost = normalizePhoneUserId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) {
+    throw new Error('모임 주관자만 삭제할 수 있어요.');
+  }
+  if (data.scheduleConfirmed === true) {
+    throw new Error('일정이 확정된 모임은 먼저 확정을 취소한 뒤 삭제할 수 있어요.');
+  }
+  await deleteDoc(ref);
 }
 
 export async function addMeeting(input: CreateMeetingInput): Promise<void> {
