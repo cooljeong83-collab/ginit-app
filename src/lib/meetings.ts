@@ -21,6 +21,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -790,6 +791,22 @@ export async function addMeeting(input: CreateMeetingInput): Promise<void> {
     ...cleaned,
     createdAt: serverTimestamp(),
   });
+}
+
+/** 모임 목록 일회 조회(당겨서 새로고침 등). `subscribeMeetings`와 동일 쿼리·매핑. */
+export async function fetchMeetingsOnce(): Promise<{ ok: true; meetings: Meeting[] } | { ok: false; message: string }> {
+  try {
+    const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
+    const q = query(ref, orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    const list: Meeting[] = snap.docs.map((d) =>
+      mapFirestoreMeetingDoc(d.id, d.data() as Record<string, unknown>),
+    );
+    return { ok: true, meetings: list };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Firestore 조회 오류';
+    return { ok: false, message };
+  }
 }
 
 export function subscribeMeetings(

@@ -10,6 +10,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,7 +38,7 @@ import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-loc
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
+import { fetchMeetingsOnce, getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
 const MOCK_REGION_ROWS = [
@@ -147,6 +148,7 @@ export default function FeedScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [chipsMoreRight, setChipsMoreRight] = useState(false);
   const chipsOffsetXRef = useRef(0);
@@ -281,13 +283,36 @@ export default function FeedScreen() {
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
 
+  const onPullRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const result = await fetchMeetingsOnce();
+      if (result.ok) {
+        setMeetings(result.meetings);
+        setListError(null);
+      } else {
+        setListError(result.message);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
   return (
     <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onPullRefresh}
+              tintColor={GinitTheme.trustBlue}
+              colors={[GinitTheme.trustBlue]}
+            />
+          }>
           <View style={styles.feedHeader}>
             <View style={styles.feedHeaderTopRow}>
               <View style={styles.locationCluster}>

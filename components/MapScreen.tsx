@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
+  FlatList,
+  InteractionManager,
   Modal,
   Platform,
   Pressable,
@@ -12,8 +14,12 @@ import {
   StyleSheet,
   Text,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -44,7 +50,17 @@ const MOCK_REGION_ROWS = [
 ] as const;
 
 const { height: WINDOW_H } = Dimensions.get('window');
-const SHEET_HEIGHT = Math.min(440, Math.round(WINDOW_H * 0.42));
+
+const SPRING = { damping: 22, stiffness: 260, mass: 0.85 };
+
+/** 카드 고정 높이(118) + 아래 여백(10) — getItemLayout·스크롤 오프셋과 일치 */
+const LIST_CARD_HEIGHT = 118;
+const LIST_CARD_GAP = 10;
+const LIST_ITEM_STRIDE = LIST_CARD_HEIGHT + LIST_CARD_GAP;
+
+function easeOutCubic(t: number): number {
+  return 1 - (1 - t) ** 3;
+}
 
 function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
   switch (phase) {
@@ -106,6 +122,47 @@ export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
+  const meetingListRef = useRef<FlatList<Meeting>>(null);
+  const listScrollY = useRef(0);
+  const listContentH = useRef(0);
+  const listLayoutH = useRef(0);
+  const listScrollRaf = useRef<number | null>(null);
+
+  const sheetExpanded = useMemo(() => Math.min(440, Math.round(WINDOW_H * 0.42)), []);
+  const sheetCollapsed = useMemo(() => {
+    const peek = Math.round(108 + Math.max(insets.bottom, 10));
+    const maxPeek = sheetExpanded - 72;
+    return Math.max(96, Math.min(peek, maxPeek));
+  }, [insets.bottom, sheetExpanded]);
+
+  const sheetHeight = useSharedValue(sheetExpanded);
+  const dragStartHeight = useSharedValue(sheetExpanded);
+
+  const animatedSheetStyle = useAnimatedStyle(() => ({
+    height: sheetHeight.value,
+  }));
+
+  const sheetPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-10, 10])
+        .failOffsetX([-28, 28])
+        .onBegin(() => {
+          dragStartHeight.value = sheetHeight.value;
+        })
+        .onUpdate((e) => {
+          const next = dragStartHeight.value - e.translationY;
+          sheetHeight.value = Math.min(sheetExpanded, Math.max(sheetCollapsed, next));
+        })
+        .onEnd(() => {
+          const mid = (sheetExpanded + sheetCollapsed) / 2;
+          sheetHeight.value = withSpring(
+            sheetHeight.value < mid ? sheetCollapsed : sheetExpanded,
+            SPRING,
+          );
+        }),
+    [sheetCollapsed, sheetExpanded],
+  );
 
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
   const regionLabelRef = useRef(FEED_LOCATION_FALLBACK_SHORT);
@@ -243,6 +300,74 @@ export default function MapScreen() {
     [sortedFilteredMeetings],
   );
 
+  useEffect(() => {
+    return () => {
+      if (listScrollRaf.current != null) {
+        cancelAnimationFrame(listScrollRaf.current);
+        listScrollRaf.current = null;
+      }
+    };
+  }, []);
+
+  const smoothScrollListToY = useCallback((targetY: number, durationMs = 480) => {
+    const list = meetingListRef.current;
+    if (!list) return;
+    if (listScrollRaf.current != null) {
+      cancelAnimationFrame(listScrollRaf.current);
+      listScrollRaf.current = null;
+    }
+    const maxScroll = Math.max(0, listContentH.current - listLayoutH.current);
+    const to = Math.min(maxScroll, Math.max(0, targetY));
+    const from = listScrollY.current;
+    if (Math.abs(to - from) < 3) return;
+
+    const start = Date.now();
+    const step = () => {
+      const elapsed = Date.now() - start;
+      const t = Math.min(1, elapsed / durationMs);
+      const y = from + (to - from) * easeOutCubic(t);
+      list.scrollToOffset({ offset: y, animated: false });
+      if (t < 1) {
+        listScrollRaf.current = requestAnimationFrame(step);
+      } else {
+        listScrollRaf.current = null;
+        listScrollY.current = to;
+      }
+    };
+    listScrollRaf.current = requestAnimationFrame(step);
+  }, []);
+
+  const scrollListToMeetingId = useCallback(
+    (meetingId: string) => {
+      const idx = sortedFilteredMeetings.findIndex((m) => m.id === meetingId);
+      if (idx < 0) return;
+      const lead = 10;
+      smoothScrollListToY(idx * LIST_ITEM_STRIDE - lead);
+    },
+    [sortedFilteredMeetings, smoothScrollListToY],
+  );
+
+  const onMeetingListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    listScrollY.current = e.nativeEvent.contentOffset.y;
+  }, []);
+
+  useEffect(() => {
+    if (!selectedMeetingId) return;
+    if (!sortedFilteredMeetings.some((m) => m.id === selectedMeetingId)) {
+      setSelectedMeetingId(null);
+    }
+  }, [sortedFilteredMeetings, selectedMeetingId]);
+
+  const onMeetingMarkerPress = useCallback(
+    (meetingId: string) => {
+      setSelectedMeetingId(meetingId);
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => scrollListToMeetingId(meetingId), 56);
+      });
+    },
+    [scrollListToMeetingId],
+  );
+
   if (Platform.OS === 'web') {
     return (
       <View style={styles.webRoot}>
@@ -256,7 +381,7 @@ export default function MapScreen() {
   }
 
   return (
-    <View style={styles.root}>
+    <GestureHandlerRootView style={styles.root}>
       <View style={styles.mapWrap}>
         <MapView
           ref={mapRef}
@@ -274,7 +399,7 @@ export default function MapScreen() {
                 key={m.id}
                 coordinate={{ latitude: m.latitude as number, longitude: m.longitude as number }}
                 pinColor={selected ? GinitTheme.trustBlue : GinitTheme.pointOrange}
-                onPress={() => setSelectedMeetingId(m.id)}
+                onPress={() => onMeetingMarkerPress(m.id)}
               />
             );
           })}
@@ -301,8 +426,21 @@ export default function MapScreen() {
         </View>
       </View>
 
-      <View style={[styles.sheet, { height: SHEET_HEIGHT, paddingBottom: Math.max(insets.bottom, 10) }]}>
-        <View style={styles.sheetHandle} accessibilityLabel="목록 패널" />
+      <Animated.View
+        style={[
+          styles.sheet,
+          animatedSheetStyle,
+          { paddingBottom: Math.max(insets.bottom, 10) },
+        ]}>
+        <GestureDetector gesture={sheetPanGesture}>
+          <View
+            style={styles.sheetHandleHit}
+            accessibilityRole="adjustable"
+            accessibilityLabel="목록 패널 크기"
+            accessibilityHint="위아래로 드래그하면 지도와 목록 영역 크기를 바꿀 수 있어요">
+            <View style={styles.sheetHandle} />
+          </View>
+        </GestureDetector>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -367,17 +505,32 @@ export default function MapScreen() {
           </Text>
         ) : null}
 
-        <ScrollView
+        <FlatList
+          ref={meetingListRef}
+          data={sortedFilteredMeetings}
+          keyExtractor={(m) => m.id}
           style={styles.listScroll}
           contentContainerStyle={styles.listScrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
-          {sortedFilteredMeetings.map((m) => {
+          keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
+          onScroll={onMeetingListScroll}
+          onContentSizeChange={(_, h) => {
+            listContentH.current = h;
+          }}
+          onLayout={(e) => {
+            listLayoutH.current = e.nativeEvent.layout.height;
+          }}
+          getItemLayout={(_data, index) => ({
+            length: LIST_ITEM_STRIDE,
+            offset: LIST_ITEM_STRIDE * index,
+            index,
+          })}
+          renderItem={({ item: m }) => {
             const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
             const selected = m.id === selectedMeetingId;
             return (
               <Pressable
-                key={m.id}
                 onPress={() => {
                   setSelectedMeetingId(m.id);
                   router.push(`/meeting/${m.id}`);
@@ -414,9 +567,9 @@ export default function MapScreen() {
                 </View>
               </Pressable>
             );
-          })}
-        </ScrollView>
-      </View>
+          }}
+        />
+      </Animated.View>
 
       <Modal
         visible={sortFilterModalOpen}
@@ -493,7 +646,7 @@ export default function MapScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -562,6 +715,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
+    overflow: 'hidden',
     paddingHorizontal: 16,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -573,6 +727,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 12,
     elevation: 12,
+  },
+  sheetHandleHit: {
+    alignSelf: 'stretch',
+    paddingTop: 4,
+    paddingBottom: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sheetHandle: {
     alignSelf: 'center',
@@ -689,10 +850,11 @@ const styles = StyleSheet.create({
   },
   listScrollContent: {
     paddingBottom: 12,
-    gap: 10,
   },
   listCard: {
     flexDirection: 'row',
+    height: LIST_CARD_HEIGHT,
+    marginBottom: LIST_CARD_GAP,
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 10,
