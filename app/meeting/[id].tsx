@@ -28,7 +28,9 @@ import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src
 import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  confirmMeetingSchedule,
   getMeetingById,
+  getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
   joinMeeting,
   leaveMeeting,
@@ -329,6 +331,7 @@ export default function MeetingDetailScreen() {
   >({});
   const [joinBusy, setJoinBusy] = useState(false);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
+  const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
 
   useEffect(() => {
     if (!id.trim()) {
@@ -784,6 +787,49 @@ export default function MeetingDetailScreen() {
     );
   }, [meeting, sessionPk, router]);
 
+  const recruitmentPhase = useMemo(
+    () => (meeting ? getMeetingRecruitmentPhase(meeting) : null),
+    [meeting],
+  );
+
+  const recruitmentBadge = useMemo(() => {
+    if (!recruitmentPhase) return null;
+    switch (recruitmentPhase) {
+      case 'confirmed':
+        return { label: '확정', wrap: styles.statusBadgeBlack, text: styles.statusBadgeTextLight };
+      case 'full':
+        return { label: '모집 완료', wrap: styles.statusBadgeYellow, text: styles.statusBadgeTextOnYellow };
+      default:
+        return { label: '모집중', wrap: styles.statusBadgeGreen, text: styles.statusBadgeTextLight };
+    }
+  }, [recruitmentPhase]);
+
+  const handleConfirmSchedule = useCallback(() => {
+    if (!meeting || !phoneUserId?.trim()) {
+      Alert.alert('안내', '로그인한 주관자만 확정할 수 있어요.');
+      return;
+    }
+    if (meeting.scheduleConfirmed === true) return;
+    Alert.alert('일정 확정', '모임을 확정 상태로 바꿀까요? 이후 우측 상단에는「확정」으로 표시됩니다.', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '확정',
+        onPress: () => {
+          void (async () => {
+            setConfirmScheduleBusy(true);
+            try {
+              await confirmMeetingSchedule(meeting.id, phoneUserId.trim());
+            } catch (e) {
+              Alert.alert('확정 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+            } finally {
+              setConfirmScheduleBusy(false);
+            }
+          })();
+        },
+      },
+    ]);
+  }, [meeting, phoneUserId]);
+
   const notFound = !loading && !loadError && meeting === null;
 
   return (
@@ -798,9 +844,13 @@ export default function MeetingDetailScreen() {
             <Ionicons name="chevron-back" size={26} color="#1A1A1A" />
           </Pressable>
           <Text style={styles.topTitle}>모임 상세</Text>
-          <View style={styles.badgeOrange}>
-            <Text style={styles.badgeOrangeText}>투표 진행 중</Text>
-          </View>
+          {recruitmentBadge ? (
+            <View style={[styles.statusBadge, recruitmentBadge.wrap]}>
+              <Text style={[styles.statusBadgeText, recruitmentBadge.text]}>{recruitmentBadge.label}</Text>
+            </View>
+          ) : (
+            <View style={styles.statusBadgePlaceholder} />
+          )}
         </View>
 
         {loading ? (
@@ -1118,9 +1168,11 @@ export default function MeetingDetailScreen() {
                     </View>
                   );
                 })}
-                <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
-                  <Ionicons name="add" size={26} color={GinitTheme.trustBlue} />
-                </Pressable>
+                {recruitmentPhase !== 'full' ? (
+                  <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
+                    <Ionicons name="add" size={26} color={GinitTheme.trustBlue} />
+                  </Pressable>
+                ) : null}
               </ScrollView>
             )}
 
@@ -1158,28 +1210,54 @@ export default function MeetingDetailScreen() {
           <View style={styles.bottomBar}>
             {isHost ? (
               <>
-                <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="모임 수정">
+                <Pressable
+                  style={[
+                    styles.bottomPill,
+                    styles.pillBlue,
+                    recruitmentPhase === 'full' && styles.bottomPillFlex,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="모임 수정">
                   <Ionicons name="construct-outline" size={18} color="#fff" />
                   <Text style={styles.pillText}>수정</Text>
                 </Pressable>
-                <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="초대">
-                  <Ionicons name="mail-outline" size={18} color="#fff" />
-                  <Text style={styles.pillText}>초대</Text>
-                </Pressable>
-                <Pressable style={[styles.bottomPill, styles.pillOrange]} accessibilityRole="button" accessibilityLabel="일정 확정">
-                  <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                  <Text style={styles.pillText}>확정</Text>
+                {recruitmentPhase !== 'full' ? (
+                  <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="초대">
+                    <Ionicons name="mail-outline" size={18} color="#fff" />
+                    <Text style={styles.pillText}>초대</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  onPress={handleConfirmSchedule}
+                  disabled={confirmScheduleBusy || meeting.scheduleConfirmed === true}
+                  style={({ pressed }) => [
+                    styles.bottomPill,
+                    styles.pillOrange,
+                    recruitmentPhase === 'full' && styles.bottomPillFlex,
+                    (confirmScheduleBusy || meeting.scheduleConfirmed === true) && { opacity: 0.75 },
+                    pressed && !confirmScheduleBusy && meeting.scheduleConfirmed !== true && { opacity: 0.9 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="일정 확정">
+                  {confirmScheduleBusy ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                  )}
+                  <Text style={styles.pillText}>{meeting.scheduleConfirmed === true ? '확정됨' : '확정'}</Text>
                 </Pressable>
               </>
             ) : alreadyJoinedMeeting ? (
               <>
-                <Pressable
-                  style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                  accessibilityRole="button"
-                  accessibilityLabel="초대">
-                  <Ionicons name="mail-outline" size={16} color="#fff" />
-                  <Text style={[styles.pillText, styles.pillTextCompact]}>초대</Text>
-                </Pressable>
+                {recruitmentPhase !== 'full' ? (
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="초대">
+                    <Ionicons name="mail-outline" size={16} color="#fff" />
+                    <Text style={[styles.pillText, styles.pillTextCompact]}>초대</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={() => void handleSaveParticipantVotes()}
                   disabled={participantSaveDisabled}
@@ -1217,13 +1295,15 @@ export default function MeetingDetailScreen() {
               </>
             ) : (
               <>
-                <Pressable
-                  style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                  accessibilityRole="button"
-                  accessibilityLabel="초대">
-                  <Ionicons name="mail-outline" size={18} color="#fff" />
-                  <Text style={styles.pillText}>초대</Text>
-                </Pressable>
+                {recruitmentPhase !== 'full' ? (
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="초대">
+                    <Ionicons name="mail-outline" size={18} color="#fff" />
+                    <Text style={styles.pillText}>초대</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={() => void handleJoinMeeting()}
                   disabled={joinBusy || !guestVotesReady}
@@ -1393,14 +1473,20 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 8, borderRadius: 12 },
   pressed: { opacity: 0.7 },
   topTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
-  badgeOrange: {
-    backgroundColor: GinitTheme.pointOrange,
+  statusBadgePlaceholder: { minWidth: 72, height: 30, marginRight: 4 },
+  statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
     marginRight: 4,
+    maxWidth: 120,
   },
-  badgeOrangeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  statusBadgeGreen: { backgroundColor: '#16A34A' },
+  statusBadgeYellow: { backgroundColor: '#FACC15' },
+  statusBadgeBlack: { backgroundColor: '#171717' },
+  statusBadgeText: { fontSize: 12, fontWeight: '700' },
+  statusBadgeTextLight: { color: '#fff' },
+  statusBadgeTextOnYellow: { color: '#422006' },
   centerFill: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, padding: 24 },
   muted: { color: '#5C6570', fontSize: 14 },
   errorTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },

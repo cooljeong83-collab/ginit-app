@@ -38,6 +38,9 @@ import { normalizePhoneUserId } from './phone-user-id';
 
 export const MEETINGS_COLLECTION = 'meetings';
 
+/** `GlassDualCapacityWheel` 의 무제한 정원 값(999)과 동일해야 합니다. */
+export const MEETING_CAPACITY_UNLIMITED = 999;
+
 /** 후보별 누적 투표 수(칩 id 키). 참여 시 선택한 항목마다 +1 */
 export type MeetingVoteTallies = {
   dates?: Record<string, number>;
@@ -91,6 +94,8 @@ export type Meeting = {
   participantIds?: string[] | null;
   voteTallies?: MeetingVoteTallies | null;
   participantVoteLog?: ParticipantVoteSnapshot[] | null;
+  /** 모임 주관자가 일정 확정 시 true */
+  scheduleConfirmed?: boolean | null;
 };
 
 export function getFirestoreDb() {
@@ -221,6 +226,32 @@ export function getParticipantVoteSnapshot(meeting: Meeting, phoneUserId: string
   return log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === ns) ?? null;
 }
 
+function countDistinctMeetingParticipants(m: Meeting): number {
+  const hostRaw = m.createdBy?.trim() ?? '';
+  const host = hostRaw ? normalizePhoneUserId(hostRaw) ?? hostRaw : '';
+  const listRaw = m.participantIds ?? [];
+  const seen = new Set<string>();
+  if (host) seen.add(host);
+  for (const x of listRaw) {
+    const id = normalizePhoneUserId(String(x)) ?? String(x).trim();
+    if (id) seen.add(id);
+  }
+  return seen.size;
+}
+
+/** 상단 배지: 모집중 → 모집 완료(정원 도달) → 확정(주관자 확정) */
+export type MeetingRecruitmentPhase = 'recruiting' | 'full' | 'confirmed';
+
+export function getMeetingRecruitmentPhase(m: Meeting): MeetingRecruitmentPhase {
+  if (m.scheduleConfirmed === true) return 'confirmed';
+  const cap = m.capacity;
+  if (cap > 0 && cap < MEETING_CAPACITY_UNLIMITED) {
+    const n = countDistinctMeetingParticipants(m);
+    if (n >= cap) return 'full';
+  }
+  return 'recruiting';
+}
+
 function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
   return {
     id,
@@ -255,6 +286,7 @@ function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meet
       : null,
     voteTallies: parseVoteTalliesField(data),
     participantVoteLog: parseParticipantVoteLog(data),
+    scheduleConfirmed: data.scheduleConfirmed === true,
   };
 }
 
@@ -474,6 +506,24 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
   });
 }
 
+/** 모임 주관자가 일정·모집 상태를 확정 처리 */
+export async function confirmMeetingSchedule(meetingId: string, hostPhoneUserId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = hostPhoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+  const data = snap.data() as Record<string, unknown>;
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsHost = normalizePhoneUserId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) {
+    throw new Error('모임 주관자만 일정을 확정할 수 있어요.');
+  }
+  await updateDoc(ref, { scheduleConfirmed: true });
+}
+
 export async function addMeeting(input: CreateMeetingInput): Promise<void> {
   const scheduledAt = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
@@ -511,6 +561,7 @@ export async function addMeeting(input: CreateMeetingInput): Promise<void> {
     dateCandidates: input.dateCandidates?.length ? stripUndefinedDeep(input.dateCandidates) : null,
     extraData: input.extraData != null ? stripUndefinedDeep(input.extraData) : null,
     participantIds: input.createdBy?.trim() ? [input.createdBy.trim()] : [],
+    scheduleConfirmed: false,
   };
 
   const cleaned = stripUndefinedDeep(docFields) as Record<string, unknown>;
