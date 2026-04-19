@@ -52,8 +52,17 @@ import {
 } from '@/src/lib/date-candidate';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { IntensityPicker } from '@/components/create/IntensityPicker';
+import { MenuPreference } from '@/components/create/MenuPreference';
+import { MovieSearch } from '@/components/create/MovieSearch';
 import { addMeeting } from '@/src/lib/meetings';
-import { generateSuggestedMeetingTitle } from '@/src/lib/meeting-title-suggestion';
+import { resolveSpecialtyKind, specialtyStepBadge } from '@/src/lib/category-specialty';
+import {
+  buildMeetingExtraData,
+  type SelectedMovieExtra,
+  type SportIntensityLevel,
+} from '@/src/lib/meeting-extra-data';
+import { generateSuggestedMeetingTitles } from '@/src/lib/meeting-title-suggestion';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 
@@ -784,7 +793,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   );
 });
 
-type WizardStep = 1 | 2 | 3 | 4 | 5;
+type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
 const AI_TEMPLATES: { title: string; keywords: string[] }[] = [
   { title: '🔥 오늘 저녁 약속', keywords: ['레스토랑', '식사', '저녁'] },
@@ -821,9 +830,12 @@ export default function CreateDetailsScreen() {
   /** Step 3 셸 내부에서 투표 폼 래퍼의 상대 y */
   const formMountRelYRef = useRef(0);
   /** 일정 확정 직후, 장소 블록 onLayout에서 한 번만 스크롤 */
-  const pendingScrollToStep4Ref = useRef(false);
+  const pendingScrollToPlacesStepRef = useRef(false);
   /** 단계 증가 직후 해당 스텝이 마운트·onLayout 된 뒤 스크롤 */
   const pendingScrollAfterStepRef = useRef<WizardStep | null>(null);
+  /** 연속 scrollToStep 호출 시 이전 rAF·타이머 취소 */
+  const scrollToStepRafRef = useRef<number | null>(null);
+  const scrollToStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     initialQuery: initialQueryParam,
@@ -859,10 +871,13 @@ export default function CreateDetailsScreen() {
   const [title, setTitle] = useState('');
   const [maxParticipantsText, setMaxParticipantsText] = useState('4');
   const [description, setDescription] = useState('');
-  const [aiTitleHint, setAiTitleHint] = useState('');
+  const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
-  const [gates, setGates] = useState({ s1: false, s2: false, s3: false, s4: false });
+  const [gates, setGates] = useState({ s1: false, s2: false, sSpecial: false, s3: false, s4: false });
+  const [pickedMovie, setPickedMovie] = useState<SelectedMovieExtra | null>(null);
+  const [menuPreferences, setMenuPreferences] = useState<string[]>([]);
+  const [sportIntensity, setSportIntensity] = useState<SportIntensityLevel>('normal');
   const [busy, setBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
 
@@ -870,6 +885,18 @@ export default function CreateDetailsScreen() {
     () => categories.find((c) => c.id === selectedCategoryId) ?? null,
     [categories, selectedCategoryId],
   );
+
+  const specialtyKind = useMemo(
+    () => (selectedCategory?.label ? resolveSpecialtyKind(selectedCategory.label) : null),
+    [selectedCategory?.label],
+  );
+  const needsSpecialty = specialtyKind != null;
+
+  useEffect(() => {
+    setPickedMovie(null);
+    setMenuPreferences([]);
+    setSportIntensity('normal');
+  }, [specialtyKind, selectedCategoryId]);
 
   const screenTitle = useMemo(
     () => (selectedCategory?.label ? `${selectedCategory.label} · 모임 만들기` : '모임 만들기'),
@@ -917,9 +944,9 @@ export default function CreateDetailsScreen() {
   useEffect(() => {
     const label = selectedCategory?.label?.trim() ?? paramCategoryLabel.trim();
     if (label) {
-      setAiTitleHint(generateSuggestedMeetingTitle(label, new Date()));
+      setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5));
     } else {
-      setAiTitleHint('');
+      setAiTitleSuggestions([]);
     }
   }, [paramCategoryLabel, selectedCategory?.label, currentStep]);
 
@@ -931,15 +958,33 @@ export default function CreateDetailsScreen() {
     [categories],
   );
 
+  /**
+   * 레이아웃 변화(LayoutAnimation)와 스크롤을 다른 프레임으로 분리.
+   * `setCurrentStep`은 onConfirm에서 이미 반영된 뒤 호출되는 것을 전제로, 여기서는 스크롤만 수행.
+   */
   const scrollToStep = useCallback((s: WizardStep) => {
-    requestAnimationFrame(() => {
-      InteractionManager.runAfterInteractions(() => {
-        const y = stepPositions.current[s];
-        if (y == null) return;
-        const targetY = Math.max(0, y - 20);
-        layoutAnimateEaseInEaseOut();
-        mainScrollRef.current?.scrollTo({ x: 0, y: targetY, animated: true });
-      });
+    const y = stepPositions.current[s];
+    if (y == null || !mainScrollRef.current) return;
+    const targetY = Math.max(0, y - 20);
+
+    if (scrollToStepRafRef.current != null) {
+      cancelAnimationFrame(scrollToStepRafRef.current);
+      scrollToStepRafRef.current = null;
+    }
+    if (scrollToStepTimerRef.current) {
+      clearTimeout(scrollToStepTimerRef.current);
+      scrollToStepTimerRef.current = null;
+    }
+
+    layoutAnimateEaseInEaseOut();
+
+    scrollToStepRafRef.current = requestAnimationFrame(() => {
+      scrollToStepRafRef.current = null;
+      const postFrameMs = Platform.OS === 'android' ? 100 : 48;
+      scrollToStepTimerRef.current = setTimeout(() => {
+        scrollToStepTimerRef.current = null;
+        mainScrollRef.current?.scrollTo({ y: targetY, animated: true });
+      }, postFrameMs);
     });
   }, []);
 
@@ -948,12 +993,24 @@ export default function CreateDetailsScreen() {
     if (target == null || target !== currentStep) return;
     pendingScrollAfterStepRef.current = null;
     const t = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        scrollToStep(target);
-      });
-    }, 20);
+      scrollToStep(target);
+    }, 48);
     return () => clearTimeout(t);
   }, [currentStep, scrollToStep]);
+
+  useEffect(
+    () => () => {
+      if (scrollToStepRafRef.current != null) {
+        cancelAnimationFrame(scrollToStepRafRef.current);
+        scrollToStepRafRef.current = null;
+      }
+      if (scrollToStepTimerRef.current) {
+        clearTimeout(scrollToStepTimerRef.current);
+        scrollToStepTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   const captureStepPosition = useCallback((s: WizardStep, e: LayoutChangeEvent) => {
     stepPositions.current[s] = e.nativeEvent.layout.y;
@@ -961,16 +1018,14 @@ export default function CreateDetailsScreen() {
 
   const onPlacesBlockLayout = useCallback(
     (e: LayoutChangeEvent) => {
-      const y3 = stepPositions.current[3];
-      if (y3 == null) return;
-      stepPositions.current[4] = y3 + formMountRelYRef.current + e.nativeEvent.layout.y;
-      if (pendingScrollToStep4Ref.current) {
-        pendingScrollToStep4Ref.current = false;
-        requestAnimationFrame(() => {
-          InteractionManager.runAfterInteractions(() => {
-            scrollToStep(4);
-          });
-        });
+      const y4 = stepPositions.current[4];
+      if (y4 == null) return;
+      stepPositions.current[5] = y4 + formMountRelYRef.current + e.nativeEvent.layout.y;
+      if (pendingScrollToPlacesStepRef.current) {
+        pendingScrollToPlacesStepRef.current = false;
+        setTimeout(() => {
+          scrollToStep(5);
+        }, 48);
       }
     },
     [scrollToStep],
@@ -982,7 +1037,6 @@ export default function CreateDetailsScreen() {
       setWizardError('카테고리를 선택해 주세요.');
       return;
     }
-    animate();
     setGates((g) => ({ ...g, s1: true }));
     pendingScrollAfterStepRef.current = 2;
     setCurrentStep(2);
@@ -999,49 +1053,71 @@ export default function CreateDetailsScreen() {
       setWizardError('인원수는 1 이상의 숫자로 입력해 주세요.');
       return;
     }
-    animate();
-    setGates((g) => ({ ...g, s2: true }));
-    pendingScrollAfterStepRef.current = 3;
-    setCurrentStep(3);
-  }, [maxParticipantsText, title]);
+    setGates((g) => ({
+      ...g,
+      s2: true,
+      ...(needsSpecialty ? {} : { sSpecial: true }),
+    }));
+    if (needsSpecialty) {
+      pendingScrollAfterStepRef.current = 3;
+      setCurrentStep(3);
+    } else {
+      pendingScrollAfterStepRef.current = 4;
+      setCurrentStep(4);
+    }
+  }, [maxParticipantsText, needsSpecialty, title]);
 
-  const onConfirmStep3 = useCallback(() => {
+  const onConfirmSpecialtyStep = useCallback(() => {
+    setWizardError(null);
+    if (!specialtyKind) return;
+    if (specialtyKind === 'movie' && !pickedMovie) {
+      setWizardError('영화를 목록에서 선택해 주세요.');
+      return;
+    }
+    if (specialtyKind === 'food' && menuPreferences.length === 0) {
+      setWizardError('메뉴 성향을 한 가지 이상 선택해 주세요.');
+      return;
+    }
+    setGates((g) => ({ ...g, sSpecial: true }));
+    pendingScrollAfterStepRef.current = 4;
+    setCurrentStep(4);
+  }, [menuPreferences.length, pickedMovie, specialtyKind]);
+
+  const onConfirmScheduleStep = useCallback(() => {
     setWizardError(null);
     const r = voteFormRef.current?.validateScheduleStep();
     if (!r?.ok) {
       setWizardError(r?.error ?? '일정 후보를 확인해 주세요.');
       return;
     }
-    animate();
     setGates((g) => ({ ...g, s3: true }));
-    pendingScrollToStep4Ref.current = true;
-    setCurrentStep(4);
+    pendingScrollToPlacesStepRef.current = true;
+    setCurrentStep(5);
   }, []);
 
-  const onConfirmStep4 = useCallback(() => {
+  const onConfirmPlacesStep = useCallback(() => {
     setWizardError(null);
     const r = voteFormRef.current?.validatePlacesStep();
     if (!r?.ok) {
       setWizardError(r?.error ?? '장소 후보를 확인해 주세요.');
       return;
     }
-    animate();
     setGates((g) => ({ ...g, s4: true }));
-    pendingScrollAfterStepRef.current = 5;
-    setCurrentStep(5);
+    pendingScrollAfterStepRef.current = 6;
+    setCurrentStep(6);
   }, []);
 
   const wizardSegment = useMemo(() => {
-    if (currentStep === 3) return 'schedule' as const;
-    if (currentStep === 4) return 'places' as const;
+    if (currentStep === 4) return 'schedule' as const;
+    if (currentStep === 5) return 'places' as const;
     return 'none' as const;
   }, [currentStep]);
 
   const headerBeforePlaces = useMemo(
     () =>
-      currentStep >= 4 ? (
-        <View style={[styles.placesStepHeader, currentStep > 4 && styles.wizardStepPast, currentStep > 4 && styles.wizardStepPastWeb]}>
-          <Text style={styles.wizardStepBadge}>4 · 장소 설정</Text>
+      currentStep >= 5 ? (
+        <View style={[styles.placesStepHeader, currentStep > 5 && styles.wizardStepPast, currentStep > 5 && styles.wizardStepPastWeb]}>
+          <Text style={styles.wizardStepBadge}>5 · 장소 설정</Text>
           <Text style={styles.wizardLockedHint}>장소 행을 눌러 검색·선택하거나 후보를 추가하세요.</Text>
         </View>
       ) : null,
@@ -1064,7 +1140,7 @@ export default function CreateDetailsScreen() {
       Alert.alert('오류', '카테고리를 선택해 주세요.');
       return;
     }
-    if (!gates.s1 || !gates.s2 || !gates.s3 || !gates.s4) {
+    if (!gates.s1 || !gates.s2 || !gates.sSpecial || !gates.s3 || !gates.s4) {
       setWizardError('모든 필수 단계를 완료해 주세요.');
       return;
     }
@@ -1089,6 +1165,16 @@ export default function CreateDetailsScreen() {
     const p0 = vote.placeCandidates[0];
     const primary = primaryScheduleFromDateCandidate(vote.dateCandidates[0]);
 
+    const extraData =
+      specialtyKind != null
+        ? buildMeetingExtraData({
+            kind: specialtyKind,
+            movie: pickedMovie,
+            menuPreferences,
+            sportIntensity,
+          })
+        : null;
+
     setBusy(true);
     try {
       await addMeeting({
@@ -1108,6 +1194,7 @@ export default function CreateDetailsScreen() {
         scheduleTime: primary.scheduleTime.trim(),
         placeCandidates: vote.placeCandidates,
         dateCandidates: vote.dateCandidates,
+        extraData,
       });
       router.back();
     } catch (e) {
@@ -1121,6 +1208,7 @@ export default function CreateDetailsScreen() {
     description,
     gates.s1,
     gates.s2,
+    gates.sSpecial,
     gates.s3,
     gates.s4,
     isPublicMeeting,
@@ -1129,10 +1217,15 @@ export default function CreateDetailsScreen() {
     router,
     selectedCategory?.id,
     selectedCategory?.label,
+    specialtyKind,
+    pickedMovie,
+    menuPreferences,
+    sportIntensity,
     title,
   ]);
 
-  const finalDisabled = !gates.s1 || !gates.s2 || !gates.s3 || !gates.s4 || busy;
+  const finalDisabled =
+    !gates.s1 || !gates.s2 || !gates.sSpecial || !gates.s3 || !gates.s4 || busy;
 
   return (
     <View style={styles.screenRoot}>
@@ -1154,14 +1247,19 @@ export default function CreateDetailsScreen() {
           <ScrollView
             ref={mainScrollRef}
             style={GinitStyles.flexFill}
+            scrollEnabled
+            nestedScrollEnabled
+            overScrollMode="never"
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            scrollEventThrottle={16}
+            removeClippedSubviews={false}
+            scrollEventThrottle={1}
             decelerationRate="normal"
             contentContainerStyle={[styles.scrollContent, styles.wizardScrollPad]}>
             <View collapsable={false}>
               {currentStep >= 1 ? (
                 <View
+                  renderToHardwareTextureAndroid
                   style={[styles.wizardStepShell, pastStepShell(currentStep, 1)]}
                   onLayout={(e) => captureStepPosition(1, e)}>
                   <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
@@ -1262,6 +1360,7 @@ export default function CreateDetailsScreen() {
 
               {currentStep >= 2 ? (
                 <View
+                  renderToHardwareTextureAndroid
                   style={[styles.wizardStepShell, pastStepShell(currentStep, 2)]}
                   onLayout={(e) => captureStepPosition(2, e)}>
                   <Text style={styles.wizardStepBadge}>2 · 기본 정보</Text>
@@ -1270,20 +1369,41 @@ export default function CreateDetailsScreen() {
                     <TextInput
                       value={title}
                       onChangeText={setTitle}
-                      placeholder={aiTitleHint ? `예: ${aiTitleHint}` : '모임 이름을 입력하세요'}
+                      placeholder={
+                        aiTitleSuggestions[0]
+                          ? `예: ${aiTitleSuggestions[0]}`
+                          : '모임 이름을 입력하세요'
+                      }
                       placeholderTextColor={INPUT_PLACEHOLDER}
                       style={styles.wizardTextInput}
                       editable={!busy}
                     />
-                    {!title.trim() && aiTitleHint ? (
-                      <Pressable
-                        onPress={() => setTitle(aiTitleHint)}
-                        style={({ pressed }) => [styles.aiTitleChip, pressed && styles.aiTitleChipPressed]}
-                        accessibilityRole="button">
-                        <Text style={styles.aiTitleChipText} numberOfLines={2}>
-                          ✨ AI 추천: 「{aiTitleHint}」
-                        </Text>
-                      </Pressable>
+                    {aiTitleSuggestions.length > 0 ? (
+                      <View style={styles.aiTitlePickBlock}>
+                        <Text style={styles.wizardFieldHint}>✨ AI 추천 — 탭하면 이름에 넣어요</Text>
+                        <ScrollView
+                          horizontal
+                          nestedScrollEnabled
+                          showsHorizontalScrollIndicator={false}
+                          keyboardShouldPersistTaps="handled"
+                          contentContainerStyle={styles.aiTitlePickRow}>
+                          {aiTitleSuggestions.map((hint) => (
+                            <Pressable
+                              key={hint}
+                              onPress={() => setTitle(hint)}
+                              style={({ pressed }) => [
+                                styles.aiTitleChip,
+                                styles.aiTitlePickChip,
+                                pressed && styles.aiTitleChipPressed,
+                              ]}
+                              accessibilityRole="button">
+                              <Text style={styles.aiTitleChipText} numberOfLines={2}>
+                                「{hint}」
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
                     ) : null}
                     <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>최대 인원</Text>
                     <TextInput
@@ -1307,21 +1427,68 @@ export default function CreateDetailsScreen() {
                 </View>
               ) : null}
 
-              {currentStep >= 3 ? (
+              {needsSpecialty && currentStep >= 3 && specialtyKind ? (
                 <View
+                  renderToHardwareTextureAndroid
                   style={[styles.wizardStepShell, pastStepShell(currentStep, 3)]}
                   onLayout={(e) => captureStepPosition(3, e)}>
+                  <Text style={styles.wizardStepBadge}>{specialtyStepBadge(specialtyKind)}</Text>
+                  <Text style={styles.wizardLockedHint}>
+                    모임에 맞는 정보를 입력한 뒤 확인을 누르면 일정 단계로 이동해요.
+                  </Text>
+                  <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                    {specialtyKind === 'movie' ? (
+                      <MovieSearch
+                        value={pickedMovie}
+                        onChange={setPickedMovie}
+                        disabled={busy || currentStep > 3}
+                      />
+                    ) : null}
+                    {specialtyKind === 'food' ? (
+                      <MenuPreference
+                        value={menuPreferences}
+                        onChange={setMenuPreferences}
+                        disabled={busy || currentStep > 3}
+                      />
+                    ) : null}
+                    {specialtyKind === 'sports' ? (
+                      <IntensityPicker
+                        value={sportIntensity}
+                        onChange={setSportIntensity}
+                        disabled={busy || currentStep > 3}
+                      />
+                    ) : null}
+                  </VoteCandidateCard>
+                  {currentStep === 3 ? (
+                    <Pressable
+                      onPress={onConfirmSpecialtyStep}
+                      style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                      accessibilityRole="button">
+                      <Text style={styles.wizardPrimaryBtnLabel}>확인 · 일정 설정으로</Text>
+                    </Pressable>
+                  ) : null}
+                  {currentStep > 3 ? (
+                    <Text style={styles.wizardDoneHint}>✓ 카테고리 추가 정보를 확정했어요.</Text>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {currentStep >= 4 ? (
+                <View
+                  renderToHardwareTextureAndroid
+                  style={[styles.wizardStepShell, pastStepShell(currentStep, 4)]}
+                  onLayout={(e) => captureStepPosition(4, e)}>
                   <View
                     style={[
                       styles.scheduleStepHeader,
-                      currentStep > 3 && styles.wizardStepPast,
-                      currentStep > 3 && styles.wizardStepPastWeb,
+                      currentStep > 4 && styles.wizardStepPast,
+                      currentStep > 4 && styles.wizardStepPastWeb,
                     ]}>
-                    <Text style={styles.wizardStepBadge}>3 · 일정 설정</Text>
+                    <Text style={styles.wizardStepBadge}>4 · 일정 설정</Text>
                     <Text style={styles.wizardLockedHint}>말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.</Text>
                   </View>
                   <View
-                    style={[styles.wizardFormMount, currentStep === 5 && styles.wizardFormHidden]}
+                    style={[styles.wizardFormMount, currentStep === 6 && styles.wizardFormHidden]}
                     onLayout={(e) => {
                       formMountRelYRef.current = e.nativeEvent.layout.y;
                     }}>
@@ -1338,32 +1505,33 @@ export default function CreateDetailsScreen() {
                       headerBeforePlaces={headerBeforePlaces}
                     />
                   </View>
-                  {currentStep === 3 ? (
+                  {currentStep === 4 ? (
                     <Pressable
-                      onPress={onConfirmStep3}
+                      onPress={onConfirmScheduleStep}
                       style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                       accessibilityRole="button">
                       <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
                     </Pressable>
                   ) : null}
-                  {currentStep > 3 ? <Text style={styles.wizardDoneHint}>✓ 일정 후보를 확정했어요.</Text> : null}
-                  {currentStep === 4 ? (
+                  {currentStep > 4 ? <Text style={styles.wizardDoneHint}>✓ 일정 후보를 확정했어요.</Text> : null}
+                  {currentStep === 5 ? (
                     <Pressable
-                      onPress={onConfirmStep4}
+                      onPress={onConfirmPlacesStep}
                       style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                       accessibilityRole="button">
                       <Text style={styles.wizardPrimaryBtnLabel}>장소 선택 완료</Text>
                     </Pressable>
                   ) : null}
-                  {currentStep > 4 ? <Text style={styles.wizardDoneHint}>✓ 장소 후보를 확정했어요.</Text> : null}
+                  {currentStep > 5 ? <Text style={styles.wizardDoneHint}>✓ 장소 후보를 확정했어요.</Text> : null}
                 </View>
               ) : null}
 
-              {currentStep >= 5 ? (
+              {currentStep >= 6 ? (
                 <View
-                  style={[styles.wizardStepShell, pastStepShell(currentStep, 5)]}
-                  onLayout={(e) => captureStepPosition(5, e)}>
-                  <Text style={styles.wizardStepBadge}>5 · 상세 정보 (선택)</Text>
+                  renderToHardwareTextureAndroid
+                  style={[styles.wizardStepShell, pastStepShell(currentStep, 6)]}
+                  onLayout={(e) => captureStepPosition(6, e)}>
+                  <Text style={styles.wizardStepBadge}>6 · 상세 정보 (선택)</Text>
                   <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
                     <Text style={styles.wizardOptionalTag}>설명 추가하기 (선택)</Text>
                     <Text style={styles.wizardFieldHint}>입력하지 않아도 모임 등록이 가능해요.</Text>
@@ -1925,6 +2093,20 @@ const styles = StyleSheet.create({
     pointerEvents: 'none',
     marginTop: 0,
     marginBottom: 0,
+  },
+  aiTitlePickBlock: {
+    marginTop: 10,
+  },
+  aiTitlePickRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+    paddingVertical: 2,
+    paddingRight: 4,
+  },
+  aiTitlePickChip: {
+    marginTop: 0,
+    maxWidth: 240,
   },
   aiTitleChip: {
     alignSelf: 'flex-start',

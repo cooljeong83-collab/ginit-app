@@ -25,6 +25,7 @@ import {
 } from 'firebase/firestore';
 
 import { getFirebaseFirestore } from './firebase';
+import type { MeetingExtraData } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
 
 export const MEETINGS_COLLECTION = 'meetings';
@@ -50,6 +51,8 @@ export type Meeting = {
   address?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** 카테고리 특화 폼(영화·메뉴·운동 강도 등) */
+  extraData?: MeetingExtraData | Record<string, unknown> | null;
 };
 
 export function getFirestoreDb() {
@@ -77,6 +80,7 @@ export type CreateMeetingInput = {
   imageUrl?: string | null;
   placeCandidates?: PlaceCandidateLike[] | null;
   dateCandidates?: DateCandidate[] | null;
+  extraData?: MeetingExtraData | null;
 };
 
 /** `YYYY-MM-DD` + `H:mm` 또는 `HH:mm` → Firestore Timestamp (파싱 실패 시 null). */
@@ -115,6 +119,7 @@ export async function addMeeting(input: CreateMeetingInput): Promise<void> {
     scheduledAt,
     placeCandidates: input.placeCandidates?.length ? input.placeCandidates : null,
     dateCandidates: input.dateCandidates?.length ? input.dateCandidates : null,
+    extraData: input.extraData ?? null,
     createdAt: serverTimestamp(),
   });
 }
@@ -149,6 +154,7 @@ export function subscribeMeetings(
           address: typeof data.address === 'string' ? data.address : null,
           latitude: typeof data.latitude === 'number' && Number.isFinite(data.latitude) ? data.latitude : null,
           longitude: typeof data.longitude === 'number' && Number.isFinite(data.longitude) ? data.longitude : null,
+          extraData: (data.extraData as Meeting['extraData']) ?? null,
         };
       });
       onData(list);

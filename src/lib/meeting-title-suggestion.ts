@@ -33,8 +33,13 @@ function pick<T>(arr: readonly T[], salt: number): T {
 
 /**
  * `categoryLabel`(Firestore 카테고리 표시명)과 `now`로 한 줄 추천 제목을 만듭니다.
+ * `variantSalt`가 다르면 같은 시각·카테고리에서도 다른 문구가 나오도록 시드를 바꿉니다.
  */
-export function generateSuggestedMeetingTitle(categoryLabel: string, now: Date = new Date()): string {
+export function generateSuggestedMeetingTitle(
+  categoryLabel: string,
+  now: Date = new Date(),
+  variantSalt = 0,
+): string {
   const label = categoryLabel.trim() || '모임';
   const cat = resolveCategoryBundle(label);
   const h = now.getHours();
@@ -45,7 +50,8 @@ export function generateSuggestedMeetingTitle(categoryLabel: string, now: Date =
     now.getDate() +
     now.getHours() * 60 +
     now.getMinutes() +
-    label.length * 997;
+    label.length * 997 +
+    variantSalt * 7919;
 
   const slotWord =
     h >= 5 && h < 11 ? '아침' : h >= 11 && h < 14 ? '점심' : h >= 14 && h < 17 ? '오후' : h >= 17 && h < 22 ? '저녁' : '밤';
@@ -78,4 +84,37 @@ export function generateSuggestedMeetingTitle(categoryLabel: string, now: Date =
   }
   const mood = h >= 6 && h < 14 ? morningMood : eveningMood;
   return `${dayName} ${mood} ${cat.noun} ${catKw}`;
+}
+
+const TITLE_VARIANT_PRIMES = [0, 17, 41, 73, 101, 137, 163] as const;
+
+/**
+ * 같은 카테고리·시각 기준으로 서로 다른 추천 제목을 여러 개 만듭니다 (중복 제거).
+ */
+export function generateSuggestedMeetingTitles(
+  categoryLabel: string,
+  now: Date = new Date(),
+  count = 4,
+): string[] {
+  const label = categoryLabel.trim();
+  if (!label) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const salt of TITLE_VARIANT_PRIMES) {
+    if (out.length >= count) break;
+    const t = generateSuggestedMeetingTitle(label, now, salt).trim();
+    if (t.length === 0 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  let extra = 200;
+  while (out.length < count && extra < 5000) {
+    const t = generateSuggestedMeetingTitle(label, now, extra).trim();
+    if (t.length > 0 && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+    extra += 31;
+  }
+  return out.slice(0, count);
 }
