@@ -36,6 +36,21 @@ export function tmdbPosterUrlFromPath(posterPath: string | null | undefined): st
   return `${TMDB_POSTER_W500_BASE}${posterPath}`;
 }
 
+/**
+ * 저장·응답에 `poster_path`만 있거나 `w185` 등 다른 폭이 섞여 있어도 항상 `w500` 절대 URL로 맞춤.
+ */
+export function normalizeTmdbPosterUrl(input: string | null | undefined): string | undefined {
+  if (input == null) return undefined;
+  const u = String(input).trim();
+  if (!u) return undefined;
+  if (u.startsWith('/')) return `${TMDB_POSTER_W500_BASE}${u}`;
+  if (/^https?:\/\/image\.tmdb\.org\/t\/p\/w\d+\//i.test(u)) {
+    return u.replace(/\/t\/p\/w\d+\//i, '/t/p/w500/');
+  }
+  if (u.startsWith('http')) return u;
+  return undefined;
+}
+
 async function searchTmdbMovies(
   key: string,
   query: string,
@@ -113,7 +128,8 @@ export async function enrichMoviesWithTmdbPosters(movies: SelectedMovieExtra[]):
   return Promise.all(
     movies.map(async (m) => {
       const posterUrl = await fetchTmdbPosterUrl(m.title, m.year);
-      return posterUrl ? { ...m, posterUrl } : m;
+      const normalized = normalizeTmdbPosterUrl(posterUrl);
+      return normalized ? { ...m, posterUrl: normalized } : m;
     }),
   );
 }

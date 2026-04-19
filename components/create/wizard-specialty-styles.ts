@@ -1,6 +1,8 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet, type ViewStyle } from 'react-native';
 
 const TRUST_BLUE = '#0052CC';
+/** 영화 리스트 포스터 고정 너비 (80~100px 명세 중간값) */
+export const MOVIE_LIST_POSTER_WIDTH = 92;
 const ENERGETIC_ORANGE = '#FF8A00';
 const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
 
@@ -169,6 +171,10 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingBottom: 12,
     paddingTop: 6,
   },
+  movieListItemOuter: {
+    width: Platform.OS === 'web' ? ('100%' as const) : undefined,
+    alignSelf: 'stretch',
+  },
   /** Blur 없는 환경(web 등)용 글래스 대체 */
   movieListRowCardFallback: {
     borderRadius: 16,
@@ -195,15 +201,19 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     elevation: 10,
   },
   movieListRowInner: {
+    display: 'flex',
     flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 14,
+    flexWrap: 'nowrap' as const,
+    alignItems: 'flex-start',
+    width: '100%',
+    gap: 16,
     paddingVertical: 12,
     paddingHorizontal: 12,
     zIndex: 1,
   },
   movieListPosterWrap: {
-    width: 92,
+    width: MOVIE_LIST_POSTER_WIDTH,
+    flexShrink: 0,
     alignSelf: 'flex-start',
     borderRadius: 12,
     overflow: 'hidden',
@@ -212,8 +222,9 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   movieListPosterImg: {
-    width: 92,
+    width: MOVIE_LIST_POSTER_WIDTH,
     aspectRatio: 2 / 3,
+    flexShrink: 0,
     position: 'relative' as const,
   },
   moviePosterSkeleton: {
@@ -260,8 +271,10 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieRightCol: {
     flex: 1,
+    flexShrink: 1,
     minWidth: 0,
-    justifyContent: 'center',
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
     gap: 8,
   },
   movieTitleGlass: {
@@ -387,5 +400,20 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     color: 'rgba(248, 250, 252, 0.95)',
   },
 });
+
+/**
+ * 웹 전용: `backdrop-filter` + 반투명 면 + 얇은 테두리 (react-native-web DOM)
+ */
+export const movieListRowWebGlassStyle: ViewStyle =
+  Platform.OS === 'web'
+    ? ({
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        borderStyle: 'solid',
+      } as ViewStyle)
+    : ({} as ViewStyle);
 
 export { INPUT_PLACEHOLDER };

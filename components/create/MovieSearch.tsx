@@ -1,7 +1,9 @@
+import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as Font from 'expo-font';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -18,9 +20,15 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
-import { enrichMoviesWithTmdbPosters } from '@/src/lib/tmdb-movie-poster';
+import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/tmdb-movie-poster';
 
-import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
+import {
+  INPUT_PLACEHOLDER,
+  movieListRowWebGlassStyle,
+  wizardSpecialtyStyles as S,
+} from './wizard-specialty-styles';
+
+const TRUST_BLUE = '#0052CC';
 
 const PRETENDARD_BOLD_URI =
   'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf';
@@ -133,16 +141,19 @@ const SEARCH_EXTRA: SelectedMovieExtra[] = [
   },
 ];
 
-function posterUri(m: SelectedMovieExtra): string {
-  return m.posterUrl ?? demoPosterUrl(m.title);
-}
-
 const SEARCH_LIMIT = 24;
 
 function MovieGlassListRow({ children, pressed }: { children: ReactNode; pressed: boolean }) {
   if (Platform.OS === 'web') {
     return (
-      <View style={[S.movieListRowCardFallback, pressed && S.movieListRowPressedOrange]}>{children}</View>
+      <View
+        style={[
+          S.movieListRowCardFallback,
+          movieListRowWebGlassStyle,
+          pressed && S.movieListRowPressedOrange,
+        ]}>
+        <View style={S.movieListRowInner}>{children}</View>
+      </View>
     );
   }
   return (
@@ -158,28 +169,49 @@ function MovieGlassListRow({ children, pressed }: { children: ReactNode; pressed
   );
 }
 
-function initialPosterUri(m: SelectedMovieExtra): string {
-  const u = posterUri(m);
-  return u.startsWith('http') ? u : demoPosterUrl(m.title);
+/** TMDB `w500` 절대 URL 우선, 그 외 HTTPS는 그대로, 없으면 폴백 단계에서 그라데이션 */
+function resolveDisplayPosterUrl(m: SelectedMovieExtra): string | undefined {
+  const n = normalizeTmdbPosterUrl(m.posterUrl);
+  if (n) return n;
+  const raw = m.posterUrl?.trim();
+  if (raw?.startsWith('http')) return raw;
+  return undefined;
 }
 
-/** TMDB/원격 실패 시에도 스켈레톤·플레이스홀더로 깨짐 방지 */
-function MoviePosterFill({ item, recyclingKey }: { item: SelectedMovieExtra; recyclingKey: string }) {
-  const [uri, setUri] = useState(() => initialPosterUri(item));
+function PosterTrustBlueFallback({ iconSize = 28 }: { iconSize?: number }) {
+  return (
+    <LinearGradient
+      colors={['#010b22', TRUST_BLUE, '#1e40af']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={StyleSheet.absoluteFillObject}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name="film" size={iconSize} color="rgba(248, 250, 252, 0.92)" />
+      </View>
+    </LinearGradient>
+  );
+}
+
+/** 원격 포스터 로딩·실패 시 Trust Blue 그라데이션 + 아이콘 */
+function MoviePosterFill({ item, recyclingKey, iconSize }: { item: SelectedMovieExtra; recyclingKey: string; iconSize?: number }) {
+  const uri = useMemo(() => resolveDisplayPosterUrl(item), [item.id, item.posterUrl]);
+  const [fatal, setFatal] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const triedFallback = useRef(false);
 
   useEffect(() => {
-    triedFallback.current = false;
-    setUri(initialPosterUri(item));
+    setFatal(false);
     setLoaded(false);
-  }, [item.id, item.posterUrl, item.title]);
+  }, [uri, item.id]);
+
+  if (!uri || fatal) {
+    return <PosterTrustBlueFallback iconSize={iconSize ?? 28} />;
+  }
 
   return (
     <>
       {!loaded ? (
         <View style={S.moviePosterSkeleton} pointerEvents="none">
-          <ActivityIndicator size="small" color="#0052CC" />
+          <ActivityIndicator size="small" color={TRUST_BLUE} />
         </View>
       ) : null}
       <Image
@@ -189,15 +221,7 @@ function MoviePosterFill({ item, recyclingKey }: { item: SelectedMovieExtra; rec
         contentFit="cover"
         recyclingKey={recyclingKey}
         onLoad={() => setLoaded(true)}
-        onError={() => {
-          if (!triedFallback.current) {
-            triedFallback.current = true;
-            setUri(demoPosterUrl(item.title));
-            setLoaded(false);
-          } else {
-            setLoaded(true);
-          }
-        }}
+        onError={() => setFatal(true)}
       />
     </>
   );
@@ -309,7 +333,7 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
         <View style={S.movieCompactRow}>
           <View style={S.movieCompactPoster}>
             <View style={StyleSheet.absoluteFillObject}>
-              <MoviePosterFill item={value} recyclingKey={`compact-${value.id}`} />
+              <MoviePosterFill item={value} recyclingKey={`compact-${value.id}`} iconSize={22} />
             </View>
           </View>
           <View style={S.movieCompactTextCol}>
@@ -367,7 +391,10 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
 
       <ScrollView
         style={S.movieListScroll}
-        contentContainerStyle={S.movieListStack}
+        contentContainerStyle={[
+          S.movieListStack,
+          Platform.OS === 'web' && ({ width: '100%', maxWidth: '100%' } as const),
+        ]}
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -389,10 +416,12 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
           rows.map((item, index) => (
             <Animated.View
               key={`${query}-${item.id}`}
+              style={S.movieListItemOuter}
               entering={FadeInDown.duration(360).delay(Math.min(index * 52, 480))}>
               <Pressable
                 onPress={() => onPick(item)}
                 disabled={disabled}
+                style={Platform.OS === 'web' ? ({ width: '100%' } as const) : undefined}
                 accessibilityRole="button"
                 accessibilityLabel={
                   isRankingView ? `${item.kobisRank ?? index + 1}위 ${item.title}` : item.title
