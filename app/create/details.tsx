@@ -38,7 +38,12 @@ import { GinitStyles } from '@/constants/GinitStyles';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { DateCandidateEditorCard, type DatePickerField } from '@/app/create/DateCandidateEditorCard';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
-import { consumePendingVoteCandidates, consumePendingVotePlaceRow, setPendingVoteCandidates } from '@/src/lib/meeting-place-bridge';
+import {
+  consumePendingMeetingPlace,
+  consumePendingVoteCandidates,
+  consumePendingVotePlaceRow,
+  setPendingVoteCandidates,
+} from '@/src/lib/meeting-place-bridge';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -59,6 +64,7 @@ const SCREEN_BG = '#0F172A';
 /** 스펙: 플레이스홀더 */
 const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
 
+/** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
 function animate() {
   layoutAnimateEaseInEaseOut();
 }
@@ -795,8 +801,8 @@ function pickCategoryByKeywords(categories: Category[], keywords: string[]): Cat
   return categories[0] ?? null;
 }
 
-function pastStepShell(wizardStep: WizardStep, step: WizardStep): StyleProp<ViewStyle> {
-  const past = wizardStep > step;
+function pastStepShell(currentStep: WizardStep, step: WizardStep): StyleProp<ViewStyle> {
+  const past = currentStep > step;
   if (!past) return undefined;
   const base: ViewStyle[] = [styles.wizardStepPast];
   if (Platform.OS === 'web') {
@@ -816,6 +822,8 @@ export default function CreateDetailsScreen() {
   const formMountRelYRef = useRef(0);
   /** 일정 확정 직후, 장소 블록 onLayout에서 한 번만 스크롤 */
   const pendingScrollToStep4Ref = useRef(false);
+  /** 단계 증가 직후 해당 스텝이 마운트·onLayout 된 뒤 스크롤 */
+  const pendingScrollAfterStepRef = useRef<WizardStep | null>(null);
 
   const {
     initialQuery: initialQueryParam,
@@ -833,7 +841,9 @@ export default function CreateDetailsScreen() {
     isPublic?: string | string[];
   }>();
 
-  const seedQ = pickParam(initialQueryParam)?.trim() ?? '';
+  const routeSeedQ = pickParam(initialQueryParam)?.trim() ?? '';
+  const [placeSearchSeed, setPlaceSearchSeed] = useState('');
+  const seedQ = (placeSearchSeed.trim() || routeSeedQ).trim();
   const seedDate = pickParam(scheduleDateParam)?.trim() || fmtDate(new Date());
   const seedTime = pickParam(scheduleTimeParam)?.trim() || '15:00';
   const paramCategoryId = pickParam(categoryIdParam)?.trim() ?? '';
@@ -845,7 +855,7 @@ export default function CreateDetailsScreen() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [isPublicMeeting, setIsPublicMeeting] = useState(pickParam(isPublicParam) !== '0');
 
-  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+  const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   const [title, setTitle] = useState('');
   const [maxParticipantsText, setMaxParticipantsText] = useState('4');
   const [description, setDescription] = useState('');
@@ -892,6 +902,10 @@ export default function CreateDetailsScreen() {
       requestAnimationFrame(() => {
         mainScrollRef.current?.scrollTo({ y: 0, animated: false });
       });
+      const mp = consumePendingMeetingPlace();
+      if (mp?.placeName?.trim()) {
+        setPlaceSearchSeed(mp.placeName.trim());
+      }
       const v = consumePendingVoteCandidates();
       if (v) {
         setVotePayload(v);
@@ -907,7 +921,7 @@ export default function CreateDetailsScreen() {
     } else {
       setAiTitleHint('');
     }
-  }, [paramCategoryLabel, selectedCategory?.label]);
+  }, [paramCategoryLabel, selectedCategory?.label, currentStep]);
 
   const onTemplatePress = useCallback(
     (keywords: string[]) => {
@@ -922,10 +936,24 @@ export default function CreateDetailsScreen() {
       InteractionManager.runAfterInteractions(() => {
         const y = stepPositions.current[s];
         if (y == null) return;
-        mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 10), animated: true });
+        const targetY = Math.max(0, y - 20);
+        layoutAnimateEaseInEaseOut();
+        mainScrollRef.current?.scrollTo({ x: 0, y: targetY, animated: true });
       });
     });
   }, []);
+
+  useEffect(() => {
+    const target = pendingScrollAfterStepRef.current;
+    if (target == null || target !== currentStep) return;
+    pendingScrollAfterStepRef.current = null;
+    const t = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        scrollToStep(target);
+      });
+    }, 20);
+    return () => clearTimeout(t);
+  }, [currentStep, scrollToStep]);
 
   const captureStepPosition = useCallback((s: WizardStep, e: LayoutChangeEvent) => {
     stepPositions.current[s] = e.nativeEvent.layout.y;
@@ -956,9 +984,9 @@ export default function CreateDetailsScreen() {
     }
     animate();
     setGates((g) => ({ ...g, s1: true }));
-    setWizardStep(2);
-    scrollToStep(2);
-  }, [scrollToStep, selectedCategory, selectedCategoryId]);
+    pendingScrollAfterStepRef.current = 2;
+    setCurrentStep(2);
+  }, [selectedCategory, selectedCategoryId]);
 
   const onConfirmStep2 = useCallback(() => {
     setWizardError(null);
@@ -973,9 +1001,9 @@ export default function CreateDetailsScreen() {
     }
     animate();
     setGates((g) => ({ ...g, s2: true }));
-    setWizardStep(3);
-    scrollToStep(3);
-  }, [maxParticipantsText, scrollToStep, title]);
+    pendingScrollAfterStepRef.current = 3;
+    setCurrentStep(3);
+  }, [maxParticipantsText, title]);
 
   const onConfirmStep3 = useCallback(() => {
     setWizardError(null);
@@ -987,7 +1015,7 @@ export default function CreateDetailsScreen() {
     animate();
     setGates((g) => ({ ...g, s3: true }));
     pendingScrollToStep4Ref.current = true;
-    setWizardStep(4);
+    setCurrentStep(4);
   }, []);
 
   const onConfirmStep4 = useCallback(() => {
@@ -999,25 +1027,25 @@ export default function CreateDetailsScreen() {
     }
     animate();
     setGates((g) => ({ ...g, s4: true }));
-    setWizardStep(5);
-    scrollToStep(5);
-  }, [scrollToStep]);
+    pendingScrollAfterStepRef.current = 5;
+    setCurrentStep(5);
+  }, []);
 
   const wizardSegment = useMemo(() => {
-    if (wizardStep === 3) return 'schedule' as const;
-    if (wizardStep === 4) return 'places' as const;
+    if (currentStep === 3) return 'schedule' as const;
+    if (currentStep === 4) return 'places' as const;
     return 'none' as const;
-  }, [wizardStep]);
+  }, [currentStep]);
 
   const headerBeforePlaces = useMemo(
     () =>
-      wizardStep >= 4 ? (
-        <View style={[styles.placesStepHeader, wizardStep > 4 && styles.wizardStepPast, wizardStep > 4 && styles.wizardStepPastWeb]}>
+      currentStep >= 4 ? (
+        <View style={[styles.placesStepHeader, currentStep > 4 && styles.wizardStepPast, currentStep > 4 && styles.wizardStepPastWeb]}>
           <Text style={styles.wizardStepBadge}>4 · 장소 설정</Text>
           <Text style={styles.wizardLockedHint}>장소 행을 눌러 검색·선택하거나 후보를 추가하세요.</Text>
         </View>
       ) : null,
-    [wizardStep],
+    [currentStep],
   );
 
   const handleBack = useCallback(() => {
@@ -1128,252 +1156,243 @@ export default function CreateDetailsScreen() {
             style={GinitStyles.flexFill}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            scrollEventThrottle={16}
+            decelerationRate="normal"
             contentContainerStyle={[styles.scrollContent, styles.wizardScrollPad]}>
             <View collapsable={false}>
-              <View
-                style={[styles.wizardStepShell, pastStepShell(wizardStep, 1)]}
-                onLayout={(e) => captureStepPosition(1, e)}>
-                <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
-                <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
+              {currentStep >= 1 ? (
+                <View
+                  style={[styles.wizardStepShell, pastStepShell(currentStep, 1)]}
+                  onLayout={(e) => captureStepPosition(1, e)}>
+                  <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
+                  <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
 
-                <Text style={[styles.wizardFieldLabel, { marginTop: 10 }]}>AI 빠른 템플릿</Text>
-                <ScrollView
-                  horizontal
-                  nestedScrollEnabled
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.templateRow}
-                  keyboardShouldPersistTaps="handled">
-                  {AI_TEMPLATES.map((t) => (
-                    <Pressable
-                      key={t.title}
-                      onPress={() => onTemplatePress(t.keywords)}
-                      style={({ pressed }) => [styles.glassChip, pressed && styles.glassChipPressed]}
-                      accessibilityRole="button">
-                      <Text style={styles.glassChipText}>{t.title}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-
-                {catLoading ? (
-                  <View style={styles.centerRow}>
-                    <ActivityIndicator color="#93C5FD" />
-                    <Text style={styles.wizardMuted}>카테고리 불러오는 중…</Text>
-                  </View>
-                ) : null}
-                {catError ? (
-                  <View style={styles.warnBox}>
-                    <Text style={styles.warnTitle}>카테고리를 불러오지 못했어요</Text>
-                    <Text style={styles.warnBody}>{catError}</Text>
-                  </View>
-                ) : null}
-                {!catLoading && !catError && categories.length === 0 ? (
-                  <Text style={styles.wizardMuted}>등록된 카테고리가 없습니다. Firestore `categories`를 확인해 주세요.</Text>
-                ) : null}
-
-                <View style={styles.catGrid}>
-                  {categories.map((c) => {
-                    const active = c.id === selectedCategoryId;
-                    return (
+                  <Text style={[styles.wizardFieldLabel, { marginTop: 10 }]}>AI 빠른 템플릿</Text>
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.templateRow}
+                    keyboardShouldPersistTaps="handled">
+                    {AI_TEMPLATES.map((t) => (
                       <Pressable
-                        key={c.id}
-                        onPress={() => setSelectedCategoryId(c.id)}
-                        style={({ pressed }) => [
-                          styles.catTile,
-                          active && styles.catTileActive,
-                          pressed && styles.catTilePressed,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: active }}>
-                        <Text style={styles.catEmoji}>{c.emoji}</Text>
-                        <Text style={styles.catLabel} numberOfLines={2}>
-                          {c.label}
-                        </Text>
+                        key={t.title}
+                        onPress={() => onTemplatePress(t.keywords)}
+                        style={({ pressed }) => [styles.glassChip, pressed && styles.glassChipPressed]}
+                        accessibilityRole="button">
+                        <Text style={styles.glassChipText}>{t.title}</Text>
                       </Pressable>
-                    );
-                  })}
-                </View>
+                    ))}
+                  </ScrollView>
 
-                <Text style={[styles.wizardFieldLabel, { marginTop: 18 }]}>공개 / 비공개</Text>
-                <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
-                  <View style={styles.segmentRow}>
-                    <Pressable
-                      onPress={() => setIsPublicMeeting(false)}
-                      style={[styles.segmentHalf, !isPublicMeeting && styles.segmentHalfOnPrivate]}
-                      accessibilityRole="button">
-                      <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
-                      <Text style={styles.segmentSub}>(초대만)</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setIsPublicMeeting(true)}
-                      style={[styles.segmentHalf, isPublicMeeting && styles.segmentHalfOnPublic]}
-                      accessibilityRole="button">
-                      <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
-                      <Text style={styles.segmentSub}>(지역 검색)</Text>
-                    </Pressable>
-                  </View>
-                </VoteCandidateCard>
+                  {catLoading ? (
+                    <View style={styles.centerRow}>
+                      <ActivityIndicator color="#93C5FD" />
+                      <Text style={styles.wizardMuted}>카테고리 불러오는 중…</Text>
+                    </View>
+                  ) : null}
+                  {catError ? (
+                    <View style={styles.warnBox}>
+                      <Text style={styles.warnTitle}>카테고리를 불러오지 못했어요</Text>
+                      <Text style={styles.warnBody}>{catError}</Text>
+                    </View>
+                  ) : null}
+                  {!catLoading && !catError && categories.length === 0 ? (
+                    <Text style={styles.wizardMuted}>등록된 카테고리가 없습니다. Firestore `categories`를 확인해 주세요.</Text>
+                  ) : null}
 
-                {wizardStep === 1 ? (
-                  <Pressable
-                    onPress={onConfirmStep1}
-                    disabled={!selectedCategoryId || categories.length === 0}
-                    style={({ pressed }) => [
-                      styles.wizardPrimaryBtn,
-                      (!selectedCategoryId || categories.length === 0) && styles.addCandidateBtnDisabled,
-                      pressed && selectedCategoryId && categories.length > 0 && styles.addCandidateBtnPressed,
-                    ]}
-                    accessibilityRole="button">
-                    <Text style={styles.wizardPrimaryBtnLabel}>이 성격으로 시작하기</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <View
-                style={[styles.wizardStepShell, pastStepShell(wizardStep, 2)]}
-                onLayout={(e) => captureStepPosition(2, e)}>
-                <Text style={styles.wizardStepBadge}>2 · 기본 정보</Text>
-                {wizardStep < 2 ? (
-                  <Text style={styles.wizardLockedHint}>1단계를 완료하면 이름과 인원을 정할 수 있어요.</Text>
-                ) : (
-                  <>
-                    <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
-                      <Text style={styles.wizardFieldLabel}>모임 이름</Text>
-                      <TextInput
-                        value={title}
-                        onChangeText={setTitle}
-                        placeholder={aiTitleHint ? `예: ${aiTitleHint}` : '모임 이름을 입력하세요'}
-                        placeholderTextColor={INPUT_PLACEHOLDER}
-                        style={styles.wizardTextInput}
-                        editable={!busy}
-                      />
-                      {!title.trim() && aiTitleHint ? (
+                  <View style={styles.catGrid}>
+                    {categories.map((c) => {
+                      const active = c.id === selectedCategoryId;
+                      return (
                         <Pressable
-                          onPress={() => setTitle(aiTitleHint)}
-                          style={({ pressed }) => [styles.aiTitleChip, pressed && styles.aiTitleChipPressed]}
-                          accessibilityRole="button">
-                          <Text style={styles.aiTitleChipText} numberOfLines={2}>
-                            ✨ AI 추천: 「{aiTitleHint}」
+                          key={c.id}
+                          onPress={() => setSelectedCategoryId(c.id)}
+                          style={({ pressed }) => [
+                            styles.catTile,
+                            active && styles.catTileActive,
+                            pressed && styles.catTilePressed,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}>
+                          <Text style={styles.catEmoji}>{c.emoji}</Text>
+                          <Text style={styles.catLabel} numberOfLines={2}>
+                            {c.label}
                           </Text>
                         </Pressable>
-                      ) : null}
-                      <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>최대 인원</Text>
-                      <TextInput
-                        value={maxParticipantsText}
-                        onChangeText={setMaxParticipantsText}
-                        placeholder="4"
-                        placeholderTextColor={INPUT_PLACEHOLDER}
-                        style={styles.wizardTextInput}
-                        keyboardType="number-pad"
-                        editable={!busy}
-                      />
-                    </VoteCandidateCard>
-                    {wizardStep === 2 ? (
-                      <Pressable
-                        onPress={onConfirmStep2}
-                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
-                        accessibilityRole="button">
-                        <Text style={styles.wizardPrimaryBtnLabel}>이 이름과 인원으로 결정</Text>
-                      </Pressable>
-                    ) : null}
-                  </>
-                )}
-              </View>
+                      );
+                    })}
+                  </View>
 
-              <View
-                style={[styles.wizardStepShell, pastStepShell(wizardStep, 3)]}
-                onLayout={(e) => captureStepPosition(3, e)}>
-                <View
-                  style={[
-                    styles.scheduleStepHeader,
-                    wizardStep > 3 && styles.wizardStepPast,
-                    wizardStep > 3 && styles.wizardStepPastWeb,
-                  ]}>
-                  <Text style={styles.wizardStepBadge}>3 · 일정 설정</Text>
-                  <Text style={styles.wizardLockedHint}>말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.</Text>
-                </View>
-                {wizardStep < 3 ? (
-                  <Text style={styles.wizardLockedHint}>2단계를 완료하면 일정을 잡을 수 있어요.</Text>
-                ) : null}
-                <View
-                  style={[styles.wizardFormMount, (wizardStep === 1 || wizardStep === 2 || wizardStep === 5) && styles.wizardFormHidden]}
-                  onLayout={(e) => {
-                    formMountRelYRef.current = e.nativeEvent.layout.y;
-                  }}>
-                  <VoteCandidatesForm
-                    ref={voteFormRef}
-                    key={`wiz-${voteHydrateKey}-${seedQ}-${seedDate}-${seedTime}`}
-                    seedPlaceQuery={seedQ}
-                    seedScheduleDate={seedDate}
-                    seedScheduleTime={seedTime}
-                    initialPayload={votePayload}
-                    bare
-                    wizardSegment={wizardSegment}
-                    onPlacesBlockLayout={onPlacesBlockLayout}
-                    headerBeforePlaces={headerBeforePlaces}
-                  />
-                </View>
-                {wizardStep >= 3 ? (
-                  <>
-                    {wizardStep === 3 ? (
+                  <Text style={[styles.wizardFieldLabel, { marginTop: 18 }]}>공개 / 비공개</Text>
+                  <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                    <View style={styles.segmentRow}>
                       <Pressable
-                        onPress={onConfirmStep3}
-                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                        onPress={() => setIsPublicMeeting(false)}
+                        style={[styles.segmentHalf, !isPublicMeeting && styles.segmentHalfOnPrivate]}
                         accessibilityRole="button">
-                        <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
+                        <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
+                        <Text style={styles.segmentSub}>(초대만)</Text>
                       </Pressable>
-                    ) : null}
-                    {wizardStep > 3 ? <Text style={styles.wizardDoneHint}>✓ 일정 후보를 확정했어요.</Text> : null}
-                    {wizardStep === 4 ? (
                       <Pressable
-                        onPress={onConfirmStep4}
-                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                        onPress={() => setIsPublicMeeting(true)}
+                        style={[styles.segmentHalf, isPublicMeeting && styles.segmentHalfOnPublic]}
                         accessibilityRole="button">
-                        <Text style={styles.wizardPrimaryBtnLabel}>장소 선택 완료</Text>
+                        <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
+                        <Text style={styles.segmentSub}>(지역 검색)</Text>
                       </Pressable>
-                    ) : null}
-                    {wizardStep > 4 ? <Text style={styles.wizardDoneHint}>✓ 장소 후보를 확정했어요.</Text> : null}
-                  </>
-                ) : null}
-              </View>
+                    </View>
+                  </VoteCandidateCard>
 
-              <View
-                style={[styles.wizardStepShell, pastStepShell(wizardStep, 5)]}
-                onLayout={(e) => captureStepPosition(5, e)}>
-                <Text style={styles.wizardStepBadge}>5 · 상세 정보 (선택)</Text>
-                {wizardStep >= 5 ? (
-                  <>
-                    <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
-                      <Text style={styles.wizardOptionalTag}>설명 추가하기 (선택)</Text>
-                      <Text style={styles.wizardFieldHint}>입력하지 않아도 모임 등록이 가능해요.</Text>
-                      <TextInput
-                        value={description}
-                        onChangeText={setDescription}
-                        placeholder="모임 소개, 진행 방식, 준비물 등"
-                        placeholderTextColor={INPUT_PLACEHOLDER}
-                        style={[styles.wizardTextInput, styles.wizardTextInputMultiline]}
-                        multiline
-                        textAlignVertical="top"
-                        editable={!busy}
-                      />
-                    </VoteCandidateCard>
+                  {currentStep === 1 ? (
                     <Pressable
-                      onPress={onFinalRegister}
-                      disabled={finalDisabled}
+                      onPress={onConfirmStep1}
+                      disabled={!selectedCategoryId || categories.length === 0}
                       style={({ pressed }) => [
-                        styles.wizardFinalBtn,
-                        finalDisabled && styles.addCandidateBtnDisabled,
-                        pressed && !finalDisabled && styles.addCandidateBtnPressed,
+                        styles.wizardPrimaryBtn,
+                        (!selectedCategoryId || categories.length === 0) && styles.addCandidateBtnDisabled,
+                        pressed && selectedCategoryId && categories.length > 0 && styles.addCandidateBtnPressed,
                       ]}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: finalDisabled }}>
-                      <Text style={styles.wizardFinalBtnLabel}>{busy ? '등록 중…' : '모임 등록'}</Text>
+                      accessibilityRole="button">
+                      <Text style={styles.wizardPrimaryBtnLabel}>이 성격으로 시작하기</Text>
                     </Pressable>
-                    {busy ? <ActivityIndicator color="#F8FAFC" style={{ marginTop: 12 }} /> : null}
-                  </>
-                ) : (
-                  <Text style={styles.wizardLockedHint}>장소를 확정하면 설명을 적고 등록할 수 있어요.</Text>
-                )}
-              </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {currentStep >= 2 ? (
+                <View
+                  style={[styles.wizardStepShell, pastStepShell(currentStep, 2)]}
+                  onLayout={(e) => captureStepPosition(2, e)}>
+                  <Text style={styles.wizardStepBadge}>2 · 기본 정보</Text>
+                  <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                    <Text style={styles.wizardFieldLabel}>모임 이름</Text>
+                    <TextInput
+                      value={title}
+                      onChangeText={setTitle}
+                      placeholder={aiTitleHint ? `예: ${aiTitleHint}` : '모임 이름을 입력하세요'}
+                      placeholderTextColor={INPUT_PLACEHOLDER}
+                      style={styles.wizardTextInput}
+                      editable={!busy}
+                    />
+                    {!title.trim() && aiTitleHint ? (
+                      <Pressable
+                        onPress={() => setTitle(aiTitleHint)}
+                        style={({ pressed }) => [styles.aiTitleChip, pressed && styles.aiTitleChipPressed]}
+                        accessibilityRole="button">
+                        <Text style={styles.aiTitleChipText} numberOfLines={2}>
+                          ✨ AI 추천: 「{aiTitleHint}」
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>최대 인원</Text>
+                    <TextInput
+                      value={maxParticipantsText}
+                      onChangeText={setMaxParticipantsText}
+                      placeholder="4"
+                      placeholderTextColor={INPUT_PLACEHOLDER}
+                      style={styles.wizardTextInput}
+                      keyboardType="number-pad"
+                      editable={!busy}
+                    />
+                  </VoteCandidateCard>
+                  {currentStep === 2 ? (
+                    <Pressable
+                      onPress={onConfirmStep2}
+                      style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                      accessibilityRole="button">
+                      <Text style={styles.wizardPrimaryBtnLabel}>이 이름과 인원으로 결정</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {currentStep >= 3 ? (
+                <View
+                  style={[styles.wizardStepShell, pastStepShell(currentStep, 3)]}
+                  onLayout={(e) => captureStepPosition(3, e)}>
+                  <View
+                    style={[
+                      styles.scheduleStepHeader,
+                      currentStep > 3 && styles.wizardStepPast,
+                      currentStep > 3 && styles.wizardStepPastWeb,
+                    ]}>
+                    <Text style={styles.wizardStepBadge}>3 · 일정 설정</Text>
+                    <Text style={styles.wizardLockedHint}>말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.</Text>
+                  </View>
+                  <View
+                    style={[styles.wizardFormMount, currentStep === 5 && styles.wizardFormHidden]}
+                    onLayout={(e) => {
+                      formMountRelYRef.current = e.nativeEvent.layout.y;
+                    }}>
+                    <VoteCandidatesForm
+                      ref={voteFormRef}
+                      key={`wiz-${voteHydrateKey}-${seedQ}-${seedDate}-${seedTime}`}
+                      seedPlaceQuery={seedQ}
+                      seedScheduleDate={seedDate}
+                      seedScheduleTime={seedTime}
+                      initialPayload={votePayload}
+                      bare
+                      wizardSegment={wizardSegment}
+                      onPlacesBlockLayout={onPlacesBlockLayout}
+                      headerBeforePlaces={headerBeforePlaces}
+                    />
+                  </View>
+                  {currentStep === 3 ? (
+                    <Pressable
+                      onPress={onConfirmStep3}
+                      style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                      accessibilityRole="button">
+                      <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
+                    </Pressable>
+                  ) : null}
+                  {currentStep > 3 ? <Text style={styles.wizardDoneHint}>✓ 일정 후보를 확정했어요.</Text> : null}
+                  {currentStep === 4 ? (
+                    <Pressable
+                      onPress={onConfirmStep4}
+                      style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                      accessibilityRole="button">
+                      <Text style={styles.wizardPrimaryBtnLabel}>장소 선택 완료</Text>
+                    </Pressable>
+                  ) : null}
+                  {currentStep > 4 ? <Text style={styles.wizardDoneHint}>✓ 장소 후보를 확정했어요.</Text> : null}
+                </View>
+              ) : null}
+
+              {currentStep >= 5 ? (
+                <View
+                  style={[styles.wizardStepShell, pastStepShell(currentStep, 5)]}
+                  onLayout={(e) => captureStepPosition(5, e)}>
+                  <Text style={styles.wizardStepBadge}>5 · 상세 정보 (선택)</Text>
+                  <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                    <Text style={styles.wizardOptionalTag}>설명 추가하기 (선택)</Text>
+                    <Text style={styles.wizardFieldHint}>입력하지 않아도 모임 등록이 가능해요.</Text>
+                    <TextInput
+                      value={description}
+                      onChangeText={setDescription}
+                      placeholder="모임 소개, 진행 방식, 준비물 등"
+                      placeholderTextColor={INPUT_PLACEHOLDER}
+                      style={[styles.wizardTextInput, styles.wizardTextInputMultiline]}
+                      multiline
+                      textAlignVertical="top"
+                      editable={!busy}
+                    />
+                  </VoteCandidateCard>
+                  <Pressable
+                    onPress={onFinalRegister}
+                    disabled={finalDisabled}
+                    style={({ pressed }) => [
+                      styles.wizardFinalBtn,
+                      finalDisabled && styles.addCandidateBtnDisabled,
+                      pressed && !finalDisabled && styles.addCandidateBtnPressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: finalDisabled }}>
+                    <Text style={styles.wizardFinalBtnLabel}>{busy ? '등록 중…' : '모임 등록'}</Text>
+                  </Pressable>
+                  {busy ? <ActivityIndicator color="#F8FAFC" style={{ marginTop: 12 }} /> : null}
+                </View>
+              ) : null}
             </View>
           </ScrollView>
 

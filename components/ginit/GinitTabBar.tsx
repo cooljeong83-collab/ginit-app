@@ -50,7 +50,12 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     if (Platform.OS !== 'web') {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    router.push('/create');
+    const d = new Date();
+    const scheduleDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    router.push({
+      pathname: '/create/details',
+      params: { scheduleDate, scheduleTime: '15:00' },
+    });
   };
 
   return (
