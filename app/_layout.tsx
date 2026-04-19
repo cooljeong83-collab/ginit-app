@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { Platform } from 'react-native';
 
+import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
 /**
@@ -26,6 +27,7 @@ import { UserSessionProvider } from '@/src/context/UserSessionContext';
 export default function RootLayout() {
   return (
     <UserSessionProvider>
+      <PushNotificationBootstrap />
       <Stack
         screenOptions={{
           headerShown: false,

@@ -34,6 +34,7 @@ import {
 
 import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
 import { getFirebaseFirestore } from './firebase';
+import { notifyMeetingParticipantsOfHostActionFireAndForget } from './meeting-host-push-notify';
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
 import { normalizePhoneUserId } from './phone-user-id';
@@ -492,6 +493,10 @@ export async function updateMeetingDateCandidates(
   await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
     dateCandidates: dateCandidates.length ? stripUndefinedDeep(dateCandidates) : null,
   });
+  const after = await getMeetingById(id);
+  if (after?.createdBy?.trim()) {
+    notifyMeetingParticipantsOfHostActionFireAndForget(after, 'dates_updated', after.createdBy.trim());
+  }
 }
 
 type PlaceCandidateDoc = NonNullable<Meeting['placeCandidates']>[number];
@@ -506,6 +511,10 @@ export async function updateMeetingPlaceCandidates(
   await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
     placeCandidates: placeCandidates.length ? stripUndefinedDeep(placeCandidates) : null,
   });
+  const after = await getMeetingById(id);
+  if (after?.createdBy?.trim()) {
+    notifyMeetingParticipantsOfHostActionFireAndForget(after, 'places_updated', after.createdBy.trim());
+  }
 }
 
 /**
@@ -694,6 +703,7 @@ export async function confirmMeetingSchedule(
     confirmedPlaceChipId: rp.placeChipId,
     confirmedMovieChipId: rp.movieChipId,
   });
+  notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
 }
 
 /** 주관자가 일정 확정을 되돌려 투표·확정 전 상태로 복구합니다. */
@@ -714,12 +724,14 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
   if (data.scheduleConfirmed !== true) {
     throw new Error('확정된 모임만 확정을 취소할 수 있어요.');
   }
+  const m = mapFirestoreMeetingDoc(snap.id, data);
   await updateDoc(ref, {
     scheduleConfirmed: false,
     confirmedDateChipId: null,
     confirmedPlaceChipId: null,
     confirmedMovieChipId: null,
   });
+  notifyMeetingParticipantsOfHostActionFireAndForget(m, 'unconfirmed', uid);
 }
 
 /** 주관자가 미확정 모임 문서를 삭제합니다. */
@@ -740,6 +752,8 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   if (data.scheduleConfirmed === true) {
     throw new Error('일정이 확정된 모임은 먼저 확정을 취소한 뒤 삭제할 수 있어요.');
   }
+  const m = mapFirestoreMeetingDoc(snap.id, data);
+  notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
   await deleteDoc(ref);
 }
 

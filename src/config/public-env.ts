@@ -40,6 +40,9 @@ type Extra = {
   kobisKey?: string;
   /** TMDB v3 API 키 — 제목 검색으로 포스터 URL */
   tmdbApiKey?: string;
+  /** Expo Push 전송용(클라이언트는 개발만 권장). 프로덕션은 서버에서 전송하세요. */
+  expoAccessToken?: string;
+  easProjectId?: string;
 };
 
 function extra(): Extra {
@@ -85,4 +88,6 @@ export const publicEnv = {
   googleWebClientId: e.googleWebClientId ?? process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
   kobisKey: e.kobisKey ?? process.env.EXPO_PUBLIC_KOBIS_KEY ?? process.env.KOBIS_KEY ?? '',
   tmdbApiKey: e.tmdbApiKey ?? process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY ?? '',
+  expoAccessToken: e.expoAccessToken ?? process.env.EXPO_PUBLIC_EXPO_ACCESS_TOKEN ?? '',
+  easProjectId: e.easProjectId ?? process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? process.env.EAS_PROJECT_ID ?? '',
 };

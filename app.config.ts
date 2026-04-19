@@ -70,6 +70,8 @@ function pickExtra(): Record<string, string> {
   );
   set('kobisKey', process.env.EXPO_PUBLIC_KOBIS_KEY ?? process.env.KOBIS_KEY);
   set('tmdbApiKey', process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY);
+  set('expoAccessToken', process.env.EXPO_PUBLIC_EXPO_ACCESS_TOKEN ?? process.env.EXPO_ACCESS_TOKEN);
+  set('easProjectId', process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? process.env.EAS_PROJECT_ID);
 
   return out;
 }
@@ -147,10 +149,32 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           },
         },
       ],
+      [
+        'expo-notifications',
+        {
+          icon: './assets/images/icon.png',
+          color: '#0052CC',
+          sounds: [],
+        },
+      ],
     ],
     extra: {
       ...baseExtra,
       ...pickExtra(),
+      eas: {
+        ...(typeof baseExtra.eas === 'object' && baseExtra.eas !== null && !Array.isArray(baseExtra.eas)
+          ? (baseExtra.eas as Record<string, unknown>)
+          : {}),
+        projectId:
+          process.env.EXPO_PUBLIC_EAS_PROJECT_ID ??
+          process.env.EAS_PROJECT_ID ??
+          (typeof baseExtra.eas === 'object' &&
+          baseExtra.eas !== null &&
+          !Array.isArray(baseExtra.eas) &&
+          typeof (baseExtra.eas as { projectId?: string }).projectId === 'string'
+            ? (baseExtra.eas as { projectId: string }).projectId
+            : undefined),
+      },
     },
   };
 };
