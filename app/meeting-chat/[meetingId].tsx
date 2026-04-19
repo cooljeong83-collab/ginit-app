@@ -91,6 +91,7 @@ export default function MeetingChatRoomScreen() {
   const listRef = useRef<FlatList<MeetingChatMessage>>(null);
   const messageInputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MeetingChatMessage[]>([]);
+  const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
   const { markChatReadUpTo } = useInAppAlarms();
 
   const myId = useMemo(() => (phoneUserId?.trim() ? normalizePhoneUserId(phoneUserId) ?? phoneUserId.trim() : ''), [
@@ -98,17 +99,6 @@ export default function MeetingChatRoomScreen() {
   ]);
 
   messagesRef.current = messages;
-
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        if (!meetingId) return;
-        const list = messagesRef.current;
-        const last = list[list.length - 1];
-        markChatReadUpTo(meetingId, last?.id);
-      };
-    }, [meetingId, markChatReadUpTo]),
-  );
 
   useEffect(() => {
     if (!meetingId) {
@@ -131,6 +121,35 @@ export default function MeetingChatRoomScreen() {
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, phoneUserId);
   }, [meeting, phoneUserId]);
+
+  useEffect(() => {
+    lastMarkedReadRef.current = null;
+  }, [meetingId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (allowed !== true) {
+        return () => {};
+      }
+      return () => {
+        if (!meetingId) return;
+        const list = messagesRef.current;
+        const last = list[list.length - 1];
+        if (!last?.id) return;
+        markChatReadUpTo(meetingId, last.id);
+      };
+    }, [allowed, meetingId, markChatReadUpTo]),
+  );
+
+  useEffect(() => {
+    if (allowed !== true || !meetingId) return;
+    const last = messages[messages.length - 1];
+    if (!last?.id) return;
+    const prev = lastMarkedReadRef.current;
+    if (prev && prev.meetingId === meetingId && prev.messageId === last.id) return;
+    lastMarkedReadRef.current = { meetingId, messageId: last.id };
+    markChatReadUpTo(meetingId, last.id);
+  }, [allowed, meetingId, messages, markChatReadUpTo]);
 
   useEffect(() => {
     if (!meetingId || allowed !== true) return;

@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import { saveUserExpoPushToken } from '@/src/lib/user-expo-push-token';
 
 Notifications.setNotificationHandler({
@@ -25,7 +26,15 @@ function navigateFromPushData(
 ): void {
   if (!data || typeof data !== 'object') return;
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
-  const action = typeof data.action === 'string' ? data.action : '';
+  const action = typeof data.action === 'string' ? data.action.trim() : '';
+  if (meetingId && action === 'in_app_chat') {
+    router.push(`/meeting-chat/${meetingId}`);
+    return;
+  }
+  if (meetingId && action === 'in_app_meeting') {
+    router.push(`/meeting/${meetingId}`);
+    return;
+  }
   if (!meetingId) {
     const url = typeof data.url === 'string' ? data.url.trim() : '';
     if (url) void Linking.openURL(url);
@@ -66,6 +75,7 @@ export function PushNotificationBootstrap() {
           name: 'default',
           importance: Notifications.AndroidImportance.DEFAULT,
         });
+        await ensureGinitInAppAndroidChannel();
       }
 
       const projectId =

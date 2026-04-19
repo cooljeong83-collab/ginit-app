@@ -13,6 +13,7 @@ import {
 import {
   FlatList,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -30,12 +31,14 @@ import {
   type InAppAlarmRow,
   meetingChangeFingerprint,
 } from '@/src/lib/in-app-alarms';
+import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetings } from '@/src/lib/meetings';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -93,6 +96,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
 
+  /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
+  const pushDedupeRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!phoneUserId?.trim()) {
       setPersistReady(false);
@@ -101,6 +107,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       setReadState(defaultInAppAlarmReadState());
       setMeetingAlarmSinceMs({});
       setPanelOpen(false);
+      pushDedupeRef.current = new Set();
       return;
     }
     let cancelled = false;
@@ -215,6 +222,58 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     };
   }, [readState, persistReady, phoneUserId]);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!persistReady || !phoneUserId?.trim()) return;
+
+    const myPk = normalizePhoneUserId(phoneUserId.trim()) ?? phoneUserId.trim();
+    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const meetingById = new Map(meetings.map((m) => [m.id, m]));
+
+    for (const j of joined) {
+      const mid = j.id;
+      const m = meetingById.get(mid);
+      if (!m) continue;
+      if (!(mid in latestById)) continue;
+      const latest = latestById[mid];
+      const readChatId = readState.chatReadMessageId[mid] ?? '';
+      const latestId = latest?.id ?? '';
+
+      if (latestId && latestId !== readChatId) {
+        const senderRaw = latest?.senderId?.trim() ?? '';
+        const senderPk = senderRaw ? normalizePhoneUserId(senderRaw) ?? senderRaw : '';
+        if (senderPk && senderPk === myPk) continue;
+
+        const dedupeKey = `c:${mid}:${latestId}`;
+        if (pushDedupeRef.current.has(dedupeKey)) continue;
+        pushDedupeRef.current.add(dedupeKey);
+
+        notifyInAppAlarmHeadsUpFireAndForget({
+          phoneUserId,
+          kind: 'chat',
+          meetingId: mid,
+          meetingTitle: m.title?.trim() || '모임',
+          preview: latest ? previewLine(latest) : undefined,
+        });
+      }
+
+      const fp = meetingChangeFingerprint(m);
+      const ack = readState.meetingAckFingerprint[mid];
+      if (ack !== undefined && fp !== ack) {
+        const dedupeKey = `m:${mid}:${fp}`;
+        if (pushDedupeRef.current.has(dedupeKey)) continue;
+        pushDedupeRef.current.add(dedupeKey);
+
+        notifyInAppAlarmHeadsUpFireAndForget({
+          phoneUserId,
+          kind: 'meeting_change',
+          meetingId: mid,
+          meetingTitle: m.title?.trim() || '모임',
+        });
+      }
+    }
+  }, [persistReady, phoneUserId, meetings, latestById, readState.chatReadMessageId, readState.meetingAckFingerprint]);
+
   const alarms = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, phoneUserId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
@@ -225,7 +284,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       if (!m) continue;
       if (!(mid in latestById)) continue;
       const latest = latestById[mid];
-      const readChatId = readState.chatReadMessageId[mid];
+      const readChatId = readState.chatReadMessageId[mid] ?? '';
       const latestId = latest?.id ?? '';
       if (latestId && latestId !== readChatId) {
         const chatTs = chatMessageTimeMs(latest ?? null);
@@ -259,7 +318,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const markChatReadUpTo = useCallback((meetingId: string, messageId: string | undefined) => {
     const mid = meetingId.trim();
     if (!mid) return;
-    const id = messageId?.trim() ?? '';
+    const id = messageId?.trim();
+    if (!id) return;
     setReadState((p) => ({
       ...p,
       chatReadMessageId: { ...p.chatReadMessageId, [mid]: id },

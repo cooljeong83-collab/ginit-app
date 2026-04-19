@@ -7,6 +7,10 @@ export type ExpoPushMessage = {
   sound?: 'default' | null;
   data?: Record<string, unknown>;
   channelId?: string;
+  /** Android/iOS 배너·헤드업 우선순위 */
+  priority?: 'default' | 'normal' | 'high';
+  /** iOS: 제목 아래 보조 한 줄 */
+  subtitle?: string;
 };
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';

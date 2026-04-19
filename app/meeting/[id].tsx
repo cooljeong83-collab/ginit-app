@@ -4,7 +4,7 @@ import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -314,6 +314,7 @@ export default function MeetingDetailScreen() {
   const insets = useSafeAreaInsets();
   const { phoneUserId } = useUserSession();
   const { syncMeetingAckFromMeeting } = useInAppAlarms();
+  const isFocused = useIsFocused();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
 
@@ -380,13 +381,11 @@ export default function MeetingDetailScreen() {
     };
   }, [id, retryNonce]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!meeting || !phoneUserId?.trim()) return;
-      if (!isUserJoinedMeeting(meeting, phoneUserId)) return;
-      syncMeetingAckFromMeeting(meeting);
-    }, [meeting, phoneUserId, syncMeetingAckFromMeeting]),
-  );
+  useEffect(() => {
+    if (!isFocused || !meeting || !phoneUserId?.trim()) return;
+    if (!isUserJoinedMeeting(meeting, phoneUserId)) return;
+    syncMeetingAckFromMeeting(meeting);
+  }, [isFocused, meeting, phoneUserId, syncMeetingAckFromMeeting]);
 
   useEffect(() => {
     if (!meeting) {
