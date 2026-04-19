@@ -16,6 +16,8 @@
 import {
   addDoc,
   collection,
+  doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -56,6 +58,15 @@ export type Meeting = {
   longitude?: number | null;
   /** 카테고리 특화 폼(영화·메뉴·운동 강도 등) */
   extraData?: MeetingExtraData | Record<string, unknown> | null;
+  /** 등록 시 저장된 일정·장소 후보(상세·투표 UI용) */
+  dateCandidates?: DateCandidate[] | null;
+  placeCandidates?: Array<{
+    id: string;
+    placeName: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+  }> | null;
 };
 
 export function getFirestoreDb() {
@@ -99,6 +110,46 @@ export function parseScheduleToTimestamp(dateStr: string, timeStr: string): Time
   const dt = new Date(`${d}T${hh}:${mm}:00`);
   if (Number.isNaN(dt.getTime())) return null;
   return Timestamp.fromDate(dt);
+}
+
+function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
+  return {
+    id,
+    title: typeof data.title === 'string' ? data.title : '',
+    location: typeof data.location === 'string' ? data.location : '',
+    description: typeof data.description === 'string' ? data.description : '',
+    capacity: typeof data.capacity === 'number' && Number.isFinite(data.capacity) ? data.capacity : 0,
+    minParticipants:
+      typeof data.minParticipants === 'number' && Number.isFinite(data.minParticipants)
+        ? data.minParticipants
+        : null,
+    createdAt: (data.createdAt as Meeting['createdAt']) ?? null,
+    createdBy: typeof data.createdBy === 'string' ? data.createdBy : null,
+    imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : null,
+    categoryId: typeof data.categoryId === 'string' ? data.categoryId : null,
+    categoryLabel: typeof data.categoryLabel === 'string' ? data.categoryLabel : null,
+    isPublic: typeof data.isPublic === 'boolean' ? data.isPublic : null,
+    scheduleDate: typeof data.scheduleDate === 'string' ? data.scheduleDate : null,
+    scheduleTime: typeof data.scheduleTime === 'string' ? data.scheduleTime : null,
+    scheduledAt: (data.scheduledAt as Meeting['scheduledAt']) ?? null,
+    placeName: typeof data.placeName === 'string' ? data.placeName : null,
+    address: typeof data.address === 'string' ? data.address : null,
+    latitude: typeof data.latitude === 'number' && Number.isFinite(data.latitude) ? data.latitude : null,
+    longitude: typeof data.longitude === 'number' && Number.isFinite(data.longitude) ? data.longitude : null,
+    extraData: (data.extraData as Meeting['extraData']) ?? null,
+    dateCandidates: Array.isArray(data.dateCandidates) ? (data.dateCandidates as DateCandidate[]) : null,
+    placeCandidates: Array.isArray(data.placeCandidates)
+      ? (data.placeCandidates as Meeting['placeCandidates'])
+      : null,
+  };
+}
+
+export async function getMeetingById(meetingId: string): Promise<Meeting | null> {
+  const id = meetingId.trim();
+  if (!id) return null;
+  const snap = await getDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id));
+  if (!snap.exists()) return null;
+  return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
 }
 
 export async function addMeeting(input: CreateMeetingInput): Promise<void> {
@@ -158,34 +209,9 @@ export function subscribeMeetings(
   return onSnapshot(
     q,
     (snap) => {
-      const list: Meeting[] = snap.docs.map((d) => {
-        const data = d.data() as Omit<Meeting, 'id'>;
-        return {
-          id: d.id,
-          title: typeof data.title === 'string' ? data.title : '',
-          location: typeof data.location === 'string' ? data.location : '',
-          description: typeof data.description === 'string' ? data.description : '',
-          capacity: typeof data.capacity === 'number' && Number.isFinite(data.capacity) ? data.capacity : 0,
-          minParticipants:
-            typeof data.minParticipants === 'number' && Number.isFinite(data.minParticipants)
-              ? data.minParticipants
-              : null,
-          createdAt: data.createdAt ?? null,
-          createdBy: typeof data.createdBy === 'string' ? data.createdBy : null,
-          imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : null,
-          categoryId: typeof data.categoryId === 'string' ? data.categoryId : null,
-          categoryLabel: typeof data.categoryLabel === 'string' ? data.categoryLabel : null,
-          isPublic: typeof data.isPublic === 'boolean' ? data.isPublic : null,
-          scheduleDate: typeof data.scheduleDate === 'string' ? data.scheduleDate : null,
-          scheduleTime: typeof data.scheduleTime === 'string' ? data.scheduleTime : null,
-          scheduledAt: data.scheduledAt ?? null,
-          placeName: typeof data.placeName === 'string' ? data.placeName : null,
-          address: typeof data.address === 'string' ? data.address : null,
-          latitude: typeof data.latitude === 'number' && Number.isFinite(data.latitude) ? data.latitude : null,
-          longitude: typeof data.longitude === 'number' && Number.isFinite(data.longitude) ? data.longitude : null,
-          extraData: (data.extraData as Meeting['extraData']) ?? null,
-        };
-      });
+      const list: Meeting[] = snap.docs.map((d) =>
+        mapFirestoreMeetingDoc(d.id, d.data() as Record<string, unknown>),
+      );
       onData(list);
     },
     (err) => {

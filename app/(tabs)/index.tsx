@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
@@ -118,6 +119,7 @@ function meetingMatchesCategoryFilter(m: Meeting, filterId: string | null, categ
 }
 
 export default function FeedScreen() {
+  const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
   /** 가로 칩이 화면에 맞게 읽히도록 최대 너비 (패딩·여백 반영) */
   const categoryChipMaxWidth = Math.min(200, Math.max(100, windowWidth * 0.42));
@@ -456,7 +458,12 @@ export default function FeedScreen() {
           ) : null}
 
           {sortedFilteredMeetings.map((m) => (
-            <Pressable key={m.id} style={styles.meetRow} accessibilityRole="button">
+            <Pressable
+              key={m.id}
+              style={styles.meetRow}
+              accessibilityRole="button"
+              onPress={() => router.push(`/meeting/${m.id}`)}
+              accessibilityHint="모임 상세로 이동">
               <Image
                 source={{ uri: resolveMeetingListThumbnailUri(m) }}
                 style={styles.thumb}
