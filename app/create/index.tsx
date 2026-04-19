@@ -23,6 +23,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { primaryScheduleFromDateCandidate } from '@/src/lib/date-candidate';
 import type { VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import { consumePendingMeetingPlace, consumePendingVoteCandidates } from '@/src/lib/meeting-place-bridge';
 import { addMeeting } from '@/src/lib/meetings';
@@ -122,8 +123,9 @@ export default function CreateMeetingScreen() {
         }
         if (vote.dateCandidates.length > 0) {
           const d0 = vote.dateCandidates[0];
-          setScheduleDate(d0.scheduleDate);
-          setScheduleTime(d0.scheduleTime);
+          const primary = primaryScheduleFromDateCandidate(d0);
+          setScheduleDate(primary.scheduleDate);
+          setScheduleTime(primary.scheduleTime);
         }
         return;
       }
@@ -228,8 +230,9 @@ export default function CreateMeetingScreen() {
     const primaryAddress = p0.address.trim();
     const primaryLat = p0.latitude;
     const primaryLng = p0.longitude;
-    const primaryDate = d0.scheduleDate.trim();
-    const primaryTime = d0.scheduleTime.trim();
+    const primary = primaryScheduleFromDateCandidate(d0);
+    const primaryDate = primary.scheduleDate.trim();
+    const primaryTime = primary.scheduleTime.trim();
 
     setBusy(true);
     try {

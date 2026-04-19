@@ -42,10 +42,26 @@ export type PlaceCandidate = {
   longitude: number;
 };
 
+export type DateCandidateType =
+  | 'point'
+  | 'date-range'
+  | 'datetime-range'
+  | 'recurring'
+  | 'multi'
+  | 'flexible'
+  | 'tbd'
+  | 'deadline';
+
 export type DateCandidate = {
   id: string;
-  scheduleDate: string;
-  scheduleTime: string;
+  type: DateCandidateType;
+  subType?: 'daily' | 'weekly' | 'monthly';
+  startDate: string;
+  startTime?: string;
+  endDate?: string;
+  endTime?: string;
+  textLabel?: string;
+  isDeadlineSet?: boolean;
 };
 
 export type VoteCandidatesPayload = {

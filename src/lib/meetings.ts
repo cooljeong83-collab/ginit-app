@@ -25,6 +25,7 @@ import {
 } from 'firebase/firestore';
 
 import { getFirebaseFirestore } from './firebase';
+import type { DateCandidate } from './meeting-place-bridge';
 
 export const MEETINGS_COLLECTION = 'meetings';
 
@@ -56,7 +57,6 @@ export function getFirestoreDb() {
 }
 
 type PlaceCandidateLike = { id: string; placeName: string; address: string; latitude: number; longitude: number };
-type DateCandidateLike = { id: string; scheduleDate: string; scheduleTime: string };
 
 export type CreateMeetingInput = {
   title: string;
@@ -76,7 +76,7 @@ export type CreateMeetingInput = {
   scheduleTime: string;
   imageUrl?: string | null;
   placeCandidates?: PlaceCandidateLike[] | null;
-  dateCandidates?: DateCandidateLike[] | null;
+  dateCandidates?: DateCandidate[] | null;
 };
 
 /** `YYYY-MM-DD` + `H:mm` 또는 `HH:mm` → Firestore Timestamp (파싱 실패 시 null). */

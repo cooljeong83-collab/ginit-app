@@ -20,13 +20,22 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitStyles } from '@/constants/GinitStyles';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import { DateCandidateEditorCard, type DatePickerField } from '@/app/create/DateCandidateEditorCard';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import { consumePendingVotePlaceRow, setPendingVoteCandidates } from '@/src/lib/meeting-place-bridge';
+import {
+  coerceDateCandidate,
+  createPointCandidate,
+  validateDateCandidate,
+} from '@/src/lib/date-candidate';
+import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 
 /** 스펙: Trust Blue */
 const TRUST_BLUE = '#0052CC';
@@ -43,15 +52,21 @@ function animate() {
 function VoteCandidateCard({
   reduceHeavyEffects,
   children,
+  outerStyle,
 }: {
   reduceHeavyEffects: boolean;
   children: ReactNode;
+  outerStyle?: StyleProp<ViewStyle>;
 }) {
   if (reduceHeavyEffects || Platform.OS === 'web') {
-    return <View style={styles.glassCardBlur}>{children}</View>;
+    return <View style={[styles.glassCardBlur, outerStyle]}>{children}</View>;
   }
   return (
-    <BlurView tint="dark" intensity={40} style={styles.glassCardBlur} experimentalBlurMethod="dimezisBlurView">
+    <BlurView
+      tint="dark"
+      intensity={40}
+      style={[styles.glassCardBlur, outerStyle]}
+      experimentalBlurMethod="dimezisBlurView">
       {children}
     </BlurView>
   );
@@ -93,6 +108,30 @@ function parseDateTimeStrings(dateStr: string, timeStr: string): Date {
     mm = Number(tm[2]);
   }
   return new Date(y, mo, day, hh, mm, 0, 0);
+}
+
+function getPickerDraft(row: DateCandidate, field: DatePickerField): Date {
+  switch (field) {
+    case 'startDate':
+    case 'startTime':
+      return parseDateTimeStrings(row.startDate, row.startTime ?? '12:00');
+    case 'endDate':
+    case 'endTime':
+      return parseDateTimeStrings(row.endDate ?? row.startDate, row.endTime ?? '12:00');
+  }
+}
+
+function pickerFieldLabel(field: DatePickerField): string {
+  switch (field) {
+    case 'startDate':
+      return '시작 날짜';
+    case 'startTime':
+      return '시작 시간';
+    case 'endDate':
+      return '종료 날짜';
+    case 'endTime':
+      return '종료 시간';
+  }
 }
 
 type PlaceRowModel = {
@@ -139,10 +178,15 @@ function buildInitialEditorState(
   const hasPayload =
     (initialPayload?.placeCandidates?.length ?? 0) > 0 || (initialPayload?.dateCandidates?.length ?? 0) > 0;
   if (hasPayload && initialPayload) {
-    const dateCandidates =
+    const dateCandidates: DateCandidate[] =
       initialPayload.dateCandidates.length > 0
-        ? initialPayload.dateCandidates.map((d) => ({ ...d }))
-        : [{ id: newId('date'), scheduleDate: seedDate, scheduleTime: seedTime }];
+        ? initialPayload.dateCandidates.map((d) => {
+            const c = coerceDateCandidate(d, { startDate: seedDate, startTime: seedTime });
+            const raw = d as { id?: string };
+            const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : newId('date');
+            return { ...c, id };
+          })
+        : [createPointCandidate(newId('date'), seedDate, seedTime)];
     const placeCandidates =
       initialPayload.placeCandidates.length > 0
         ? initialPayload.placeCandidates.map(placeRowFromCandidate)
@@ -151,7 +195,46 @@ function buildInitialEditorState(
   }
   return {
     placeCandidates: [emptyPlaceRow(seedQ)],
-    dateCandidates: [{ id: newId('date'), scheduleDate: seedDate, scheduleTime: seedTime }],
+    dateCandidates: [createPointCandidate(newId('date'), seedDate, seedTime)],
+  };
+}
+
+/** 후보 1이 시드 기본 point 그대로인지 (NLP가 첫 카드를 교체해도 되는지). */
+function isInitialState(d: DateCandidate, seedDate: string, seedTime: string): boolean {
+  if (d.type !== 'point') return false;
+  if (d.startDate.trim() !== seedDate.trim()) return false;
+  if ((d.startTime ?? '').trim() !== seedTime.trim()) return false;
+  if (d.endDate?.trim() || d.endTime?.trim()) return false;
+  if (d.textLabel?.trim()) return false;
+  if (d.subType) return false;
+  if (d.isDeadlineSet) return false;
+  return true;
+}
+
+type NlpApplyResult = {
+  next: DateCandidate[];
+  expandRowId: string | null;
+  shouldAutoExpand: boolean;
+  didAppend: boolean;
+};
+
+function computeNlpApply(prev: DateCandidate[], nlp: SmartNlpResult, seedDate: string, seedTime: string): NlpApplyResult {
+  const first = prev[0];
+  if (prev.length === 1 && first && isInitialState(first, seedDate, seedTime)) {
+    const row: DateCandidate = { ...nlp.candidate, id: first.id };
+    return {
+      next: [row],
+      expandRowId: first.id,
+      shouldAutoExpand: nlp.candidate.type !== 'point',
+      didAppend: false,
+    };
+  }
+  const nid = newId('date');
+  return {
+    next: [...prev, { ...nlp.candidate, id: nid }],
+    expandRowId: nid,
+    shouldAutoExpand: nlp.candidate.type !== 'point',
+    didAppend: true,
   };
 }
 
@@ -184,8 +267,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [placeCandidates, setPlaceCandidates] = useState<PlaceRowModel[]>(() => init.placeCandidates);
   const [dateCandidates, setDateCandidates] = useState<DateCandidate[]>(() => init.dateCandidates);
 
-  const [picker, setPicker] = useState<{ rowId: string; mode: 'date' | 'time' } | null>(null);
+  const [picker, setPicker] = useState<{ rowId: string; field: DatePickerField } | null>(null);
   const [iosDraft, setIosDraft] = useState(() => new Date());
+  const [nlpScheduleInput, setNlpScheduleInput] = useState('');
+  const [nlpParsed, setNlpParsed] = useState<SmartNlpResult | null>(null);
+  const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
+  const [deadlineTick, setDeadlineTick] = useState(0);
+  const dateScrollRef = useRef<ScrollView>(null);
 
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
@@ -216,6 +304,45 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const reduceHeavyEffects = !isFocused || stackTransitionCoversScreen;
 
+  const hasDeadlineRow = useMemo(() => dateCandidates.some((d) => d.type === 'deadline'), [dateCandidates]);
+  useEffect(() => {
+    if (!hasDeadlineRow) return undefined;
+    const i = setInterval(() => setDeadlineTick((x) => x + 1), 1000);
+    return () => clearInterval(i);
+  }, [hasDeadlineRow]);
+
+  useEffect(() => {
+    const trimmed = nlpScheduleInput.trim();
+    if (!trimmed) {
+      setNlpParsed(null);
+      return undefined;
+    }
+    const t = setTimeout(() => {
+      setNlpParsed(parseSmartNaturalSchedule(trimmed, new Date()));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [nlpScheduleInput]);
+
+  const applyNlpSuggestion = useCallback(() => {
+    if (!nlpParsed) return;
+    animate();
+    const prev = dateCandidatesRef.current;
+    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, nlpParsed, seedDate, seedTime);
+    setDateCandidates(next);
+    if (shouldAutoExpand && expandRowId) {
+      setDateDetailExpanded((ex) => ({ ...ex, [expandRowId]: true }));
+    }
+    setNlpScheduleInput('');
+    setNlpParsed(null);
+    if (didAppend && !embedded) {
+      requestAnimationFrame(() => {
+        InteractionManager.runAfterInteractions(() => {
+          dateScrollRef.current?.scrollToEnd({ animated: true });
+        });
+      });
+    }
+  }, [embedded, nlpParsed, seedDate, seedTime]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -226,13 +353,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         if (filledPlaces.length === 0) {
           return { ok: false, error: '장소 후보를 한 곳 이상 장소 선택 화면에서 골라 주세요.' };
         }
-        for (const d of dates) {
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(d.scheduleDate.trim())) {
-            return { ok: false, error: '일시 후보의 날짜는 YYYY-MM-DD 형식이어야 합니다.' };
-          }
-          if (!/^\d{1,2}:\d{2}$/.test(d.scheduleTime.trim())) {
-            return { ok: false, error: '일시 후보의 시간은 HH:mm 형식이어야 합니다.' };
-          }
+        for (let i = 0; i < dates.length; i += 1) {
+          const err = validateDateCandidate(dates[i], i);
+          if (err) return { ok: false, error: err };
         }
         const placeCandidatesOut: PlaceCandidate[] = filledPlaces.map((r) => ({
           id: r.id,
@@ -336,11 +459,21 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const addDateRow = useCallback(() => {
     animate();
-    setDateCandidates((prev) => [
-      ...prev,
-      { id: newId('date'), scheduleDate: fmtDate(new Date()), scheduleTime: '15:00' },
-    ]);
-  }, []);
+    const nid = newId('date');
+    setDateCandidates((prev) => {
+      const last = prev[prev.length - 1];
+      const row: DateCandidate = last ? { ...last, id: nid } : createPointCandidate(nid, fmtDate(new Date()), '15:00');
+      return [...prev, row];
+    });
+    setDateDetailExpanded((ex) => ({ ...ex, [nid]: true }));
+    if (!embedded) {
+      requestAnimationFrame(() => {
+        InteractionManager.runAfterInteractions(() => {
+          dateScrollRef.current?.scrollToEnd({ animated: true });
+        });
+      });
+    }
+  }, [embedded]);
 
   const removeDateRow = useCallback((id: string) => {
     animate();
@@ -352,23 +485,24 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   }, []);
 
   const openPicker = useCallback(
-    (rowId: string, mode: 'date' | 'time') => {
+    (rowId: string, field: DatePickerField) => {
       const row = dateCandidates.find((d) => d.id === rowId);
       if (!row) return;
-      setIosDraft(parseDateTimeStrings(row.scheduleDate, row.scheduleTime));
-      setPicker({ rowId, mode });
+      setIosDraft(getPickerDraft(row, field));
+      setPicker({ rowId, field });
     },
     [dateCandidates],
   );
 
   const applyIosPicker = useCallback(() => {
     if (!picker) return;
-    const { rowId, mode } = picker;
-    if (mode === 'date') {
-      updateDateRow(rowId, { scheduleDate: fmtDate(iosDraft) });
-    } else {
-      updateDateRow(rowId, { scheduleTime: fmtTime(iosDraft) });
-    }
+    const { rowId, field } = picker;
+    const ymd = fmtDate(iosDraft);
+    const hm = fmtTime(iosDraft);
+    if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
+    else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
+    else if (field === 'endDate') updateDateRow(rowId, { endDate: ymd });
+    else updateDateRow(rowId, { endTime: hm });
     setPicker(null);
   }, [iosDraft, picker, updateDateRow]);
 
@@ -385,69 +519,52 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       </View>
       <Text style={styles.sectionHint}>날짜·시간 후보를 추가하고 투표에서 고를 수 있어요.</Text>
 
-      {dateCandidates.map((d, dateIndex) => (
-        <VoteCandidateCard key={d.id} reduceHeavyEffects={reduceHeavyEffects}>
-          <View style={styles.glassCardInner}>
-            {dateCandidates.length > 1 ? (
-              <Pressable
-                onPress={() => removeDateRow(d.id)}
-                style={styles.deleteIconBtn}
-                accessibilityRole="button"
-                accessibilityLabel="일시 후보 삭제">
-                <Text style={styles.deleteIconText}>✕</Text>
-              </Pressable>
-            ) : null}
-            <Text
-              style={[styles.cardFieldTitle, dateCandidates.length <= 1 && styles.cardFieldTitleNoDeleteOffset]}>
-              일정 후보 {dateIndex + 1}
-            </Text>
-            {Platform.OS === 'web' ? (
-              <View style={styles.row2}>
-                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
-                  <TextInput
-                    value={d.scheduleDate}
-                    onChangeText={(t) => updateDateRow(d.id, { scheduleDate: t })}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={INPUT_PLACEHOLDER}
-                    style={styles.textInputBare}
-                    autoCapitalize="none"
-                  />
-                </View>
-                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
-                  <TextInput
-                    value={d.scheduleTime}
-                    onChangeText={(t) => updateDateRow(d.id, { scheduleTime: t })}
-                    placeholder="HH:mm"
-                    placeholderTextColor={INPUT_PLACEHOLDER}
-                    style={styles.textInputBare}
-                    autoCapitalize="none"
-                  />
-                </View>
-              </View>
-            ) : (
-              <View style={styles.row2}>
-                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
-                  <Pressable
-                    onPress={() => openPicker(d.id, 'date')}
-                    style={styles.dateTimePressable}
-                    accessibilityRole="button">
-                    <Text style={styles.dateTimeLabel}>날짜</Text>
-                    <Text style={styles.dateTimeValue}>{d.scheduleDate}</Text>
-                  </Pressable>
-                </View>
-                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
-                  <Pressable
-                    onPress={() => openPicker(d.id, 'time')}
-                    style={styles.dateTimePressable}
-                    accessibilityRole="button">
-                    <Text style={styles.dateTimeLabel}>시간</Text>
-                    <Text style={styles.dateTimeValue}>{d.scheduleTime}</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
+      <View style={styles.nlpSection}>
+        <Text style={styles.nlpLabel}>[말로 입력하세요]</Text>
+        <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffects} outerStyle={styles.nlpGlassOuter}>
+          <View style={styles.nlpGlassInner}>
+            <TextInput
+              value={nlpScheduleInput}
+              onChangeText={setNlpScheduleInput}
+              placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
+              placeholderTextColor={INPUT_PLACEHOLDER}
+              style={styles.nlpTextInput}
+              multiline={false}
+              returnKeyType="done"
+              autoCapitalize="none"
+              autoCorrect={false}
+              underlineColorAndroid="transparent"
+            />
           </View>
         </VoteCandidateCard>
+        {nlpParsed ? (
+          <Pressable
+            onPress={applyNlpSuggestion}
+            style={({ pressed }) => [styles.nlpChip, pressed && styles.nlpChipPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="자연어 일정 후보로 등록">
+            <Text style={styles.nlpChipText}>📅 {nlpParsed.summary} 등록하기</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      {dateCandidates.map((d, dateIndex) => (
+        <DateCandidateEditorCard
+          key={d.id}
+          d={d}
+          dateIndex={dateIndex}
+          expanded={!!dateDetailExpanded[d.id]}
+          onToggleExpanded={() => {
+            animate();
+            setDateDetailExpanded((prev) => ({ ...prev, [d.id]: !prev[d.id] }));
+          }}
+          canDelete={dateCandidates.length > 1}
+          onRemove={() => removeDateRow(d.id)}
+          onPatch={(patch) => updateDateRow(d.id, patch)}
+          reduceHeavyEffects={reduceHeavyEffects}
+          onOpenPicker={(field) => openPicker(d.id, field)}
+          deadlineTick={deadlineTick}
+        />
       ))}
 
       <Pressable onPress={addDateRow} style={styles.addCandidateBtn} accessibilityRole="button">
@@ -525,6 +642,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <View style={styles.scrollContent}>{formBody}</View>
       ) : (
         <ScrollView
+          ref={dateScrollRef}
           style={GinitStyles.flexFill}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -542,15 +660,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 <Pressable onPress={() => setPicker(null)} hitSlop={10}>
                   <Text style={GinitStyles.modalCancel}>취소</Text>
                 </Pressable>
-                <Text style={GinitStyles.modalTitle}>{picker.mode === 'date' ? '날짜 선택' : '시간 선택'}</Text>
+                <Text style={GinitStyles.modalTitle}>{pickerFieldLabel(picker.field)}</Text>
                 <Pressable onPress={applyIosPicker} hitSlop={10}>
                   <Text style={GinitStyles.modalDone}>완료</Text>
                 </Pressable>
               </View>
               <DateTimePicker
                 value={iosDraft}
-                mode={picker.mode}
-                display={picker.mode === 'date' ? 'inline' : 'spinner'}
+                mode={picker.field === 'startDate' || picker.field === 'endDate' ? 'date' : 'time'}
+                display={picker.field === 'startDate' || picker.field === 'endDate' ? 'inline' : 'spinner'}
                 onChange={(_, date) => {
                   if (date) setIosDraft(date);
                 }}
@@ -565,18 +683,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {picker && Platform.OS === 'android' ? (
         <DateTimePicker
           value={iosDraft}
-          mode={picker.mode}
-          display={picker.mode === 'time' ? 'spinner' : 'default'}
+          mode={picker.field === 'startDate' || picker.field === 'endDate' ? 'date' : 'time'}
+          display={picker.field === 'startTime' || picker.field === 'endTime' ? 'spinner' : 'default'}
           onChange={(event: DateTimePickerEvent, date) => {
-            const mode = picker.mode;
-            const rowId = picker.rowId;
+            const { rowId, field } = picker;
             setPicker(null);
             if (event.type === 'dismissed' || !date) return;
-            if (mode === 'date') {
-              updateDateRow(rowId, { scheduleDate: fmtDate(date) });
-            } else {
-              updateDateRow(rowId, { scheduleTime: fmtTime(date) });
-            }
+            const ymd = fmtDate(date);
+            const hm = fmtTime(date);
+            if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
+            else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
+            else if (field === 'endDate') updateDateRow(rowId, { endDate: ymd });
+            else updateDateRow(rowId, { endTime: hm });
           }}
         />
       ) : null}
@@ -703,6 +821,68 @@ const styles = StyleSheet.create({
     color: '#475569',
     lineHeight: 19,
     marginBottom: 14,
+  },
+  /** 자연어 일정 입력 — 리스트 상단 */
+  nlpSection: {
+    marginBottom: 6,
+  },
+  nlpLabel: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 2,
+    color: 'rgba(255, 255, 255, 0.45)',
+    marginBottom: 10,
+  },
+  /** 카드 루트에 합쳐짐: 다크 글로우 + 거의 투명 글래스 배경 */
+  nlpGlassOuter: {
+    marginBottom: 10,
+    padding: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.42)',
+    borderColor: 'rgba(0, 82, 204, 0.45)',
+    borderWidth: 1.5,
+    shadowColor: TRUST_BLUE,
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.88,
+    shadowRadius: 36,
+    elevation: 26,
+  },
+  nlpGlassInner: {
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  nlpTextInput: {
+    backgroundColor: 'transparent',
+    color: 'rgba(255, 255, 255, 0.96)',
+    fontSize: 16,
+    fontWeight: '600',
+    padding: 0,
+    margin: 0,
+    minHeight: 22,
+  },
+  nlpChip: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    marginBottom: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 82, 204, 0.38)',
+    borderWidth: 1,
+    borderColor: 'rgba(147, 197, 253, 0.55)',
+  },
+  nlpChipPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.98 }],
+  },
+  nlpChipText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    letterSpacing: -0.2,
   },
   sectionGap: {
     marginTop: 26,
