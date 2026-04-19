@@ -30,7 +30,7 @@ import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-loc
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, parseScheduleToTimestamp, subscribeMeetings } from '@/src/lib/meetings';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
 const MOCK_REGION_ROWS = [
@@ -42,7 +42,7 @@ const MOCK_REGION_ROWS = [
 
 type FeedChip = { filterId: string | null; label: string };
 
-type MeetingListSortMode = 'distance' | 'latest';
+type MeetingListSortMode = 'distance' | 'latest' | 'soon';
 
 function meetingCreatedAtMs(m: Meeting): number {
   const t = m.createdAt;
@@ -50,6 +50,19 @@ function meetingCreatedAtMs(m: Meeting): number {
     return (t as { toMillis: () => number }).toMillis();
   }
   return 0;
+}
+
+/** 약속 시작 시각(ms). 없거나 파싱 불가면 null (임박순에서 맨 뒤로). */
+function meetingScheduleStartMs(m: Meeting): number | null {
+  const sa = m.scheduledAt;
+  if (sa && typeof (sa as { toMillis?: () => number }).toMillis === 'function') {
+    return (sa as { toMillis: () => number }).toMillis();
+  }
+  const d = m.scheduleDate?.trim() ?? '';
+  const t = m.scheduleTime?.trim() ?? '';
+  if (!d || !t) return null;
+  const ts = parseScheduleToTimestamp(d, t);
+  return ts ? ts.toMillis() : null;
 }
 
 function GlassCategoryChip({
@@ -141,6 +154,17 @@ function meetingMatchesCategoryFilter(m: Meeting, filterId: string | null, categ
   return false;
 }
 
+function listSortModeLabel(mode: MeetingListSortMode): string {
+  switch (mode) {
+    case 'distance':
+      return '거리순';
+    case 'soon':
+      return '임박순';
+    default:
+      return '등록순';
+  }
+}
+
 export default function FeedScreen() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
@@ -153,9 +177,12 @@ export default function FeedScreen() {
   /** 거리·거리순 정렬에 쓰는 기준점: 캐시 좌표 → GPS로 갱신(실패 시 캐시 유지) */
   const userCoordsRef = useRef<LatLng | null>(null);
   const [regionModalOpen, setRegionModalOpen] = useState(false);
+  const [sortFilterModalOpen, setSortFilterModalOpen] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
+  /** true면 모집중(정원 미달·미확정) 모임만 표시. 기본값 on */
+  const [recruitingOnly, setRecruitingOnly] = useState(true);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -286,10 +313,13 @@ export default function FeedScreen() {
     return [{ filterId: null, label: '전체' }, ...sorted.map((c) => ({ filterId: c.id, label: c.label }))];
   }, [categories, meetings]);
 
-  const filteredMeetings = useMemo(
-    () => meetings.filter((m) => meetingMatchesCategoryFilter(m, selectedCategoryId, categories)),
-    [meetings, selectedCategoryId, categories],
-  );
+  const filteredMeetings = useMemo(() => {
+    return meetings.filter((m) => {
+      if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
+      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
+      return true;
+    });
+  }, [meetings, selectedCategoryId, categories, recruitingOnly]);
 
   const sortedFilteredMeetings = useMemo(() => {
     const list = [...filteredMeetings];
@@ -298,6 +328,17 @@ export default function FeedScreen() {
         const tb = meetingCreatedAtMs(b);
         const ta = meetingCreatedAtMs(a);
         if (tb !== ta) return tb - ta;
+        return a.title.localeCompare(b.title, 'ko');
+      });
+      return list;
+    }
+    if (listSortMode === 'soon') {
+      list.sort((a, b) => {
+        const ta = meetingScheduleStartMs(a);
+        const tb = meetingScheduleStartMs(b);
+        const ia = ta ?? Number.POSITIVE_INFINITY;
+        const ib = tb ?? Number.POSITIVE_INFINITY;
+        if (ia !== ib) return ia - ib;
         return a.title.localeCompare(b.title, 'ko');
       });
       return list;
@@ -327,6 +368,11 @@ export default function FeedScreen() {
     if (selectedCategoryId == null) return null;
     return categories.find((c) => c.id === selectedCategoryId)?.label ?? null;
   }, [categories, selectedCategoryId]);
+
+  const sortComboLabel = useMemo(() => listSortModeLabel(listSortMode), [listSortMode]);
+
+  const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
+  const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
 
   return (
     <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
@@ -432,24 +478,27 @@ export default function FeedScreen() {
             <Text style={styles.sectionLabel}>
               모임{selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}
             </Text>
-            <View style={styles.sortToggle} accessibilityRole="tablist">
+            <View style={styles.sectionHeaderControls}>
               <Pressable
-                onPress={() => setListSortMode('distance')}
-                style={[styles.sortPill, listSortMode === 'distance' && styles.sortPillActive]}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: listSortMode === 'distance' }}>
-                <Text style={[styles.sortPillLabel, listSortMode === 'distance' && styles.sortPillLabelActive]}>
-                  거리순
+                onPress={() => setRecruitingOnly((v) => !v)}
+                style={[styles.recruitTogglePill, recruitingOnly && styles.recruitTogglePillOn]}
+                accessibilityRole="button"
+                accessibilityLabel="모집중만 보기"
+                accessibilityState={{ selected: recruitingOnly }}>
+                <Text style={[styles.recruitTogglePillLabel, recruitingOnly && styles.recruitTogglePillLabelOn]}>
+                  모집중
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => setListSortMode('latest')}
-                style={[styles.sortPill, listSortMode === 'latest' && styles.sortPillActive]}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: listSortMode === 'latest' }}>
-                <Text style={[styles.sortPillLabel, listSortMode === 'latest' && styles.sortPillLabelActive]}>
-                  최신순
+                onPress={openSortFilterModal}
+                style={({ pressed }) => [styles.sortComboTrigger, pressed && styles.sortComboTriggerPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`정렬, 현재 ${sortComboLabel}`}
+                accessibilityHint="탭하면 정렬 방식을 바꿀 수 있어요">
+                <Text style={styles.sortComboTriggerText} numberOfLines={1} ellipsizeMode="tail">
+                  {sortComboLabel}
                 </Text>
+                <Ionicons name="chevron-down" size={18} color="#475569" />
               </Pressable>
             </View>
           </View>
@@ -476,7 +525,9 @@ export default function FeedScreen() {
             <Text style={styles.empty}>
               {selectedFilterLabel
                 ? `「${selectedFilterLabel}」 카테고리 모임이 아직 없어요. 다른 칩을 선택해 보세요.`
-                : '조건에 맞는 모임이 없어요.'}
+                : recruitingOnly
+                  ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 모집 완료·확정 모임도 볼 수 있어요.'
+                  : '조건에 맞는 모임이 없어요.'}
             </Text>
           ) : null}
 
@@ -544,6 +595,50 @@ export default function FeedScreen() {
             );
           })}
         </ScrollView>
+
+        <Modal
+          visible={sortFilterModalOpen}
+          animationType="fade"
+          transparent
+          onRequestClose={closeSortFilterModal}>
+          <View style={styles.modalRoot}>
+            <Pressable
+              style={StyleSheet.absoluteFillObject}
+              onPress={closeSortFilterModal}
+              accessibilityRole="button"
+              accessibilityLabel="정렬 닫기"
+            />
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>정렬</Text>
+              <Text style={styles.modalHint}>목록을 어떤 순서로 보여줄지 선택하세요.</Text>
+              {(['distance', 'latest', 'soon'] as const).map((mode) => {
+                const selected = listSortMode === mode;
+                const label = listSortModeLabel(mode);
+                return (
+                  <Pressable
+                    key={mode}
+                    onPress={() => {
+                      setListSortMode(mode);
+                      closeSortFilterModal();
+                    }}
+                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}>
+                    <Text style={styles.modalRowLabel}>{label}</Text>
+                    {selected ? (
+                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
+                    ) : (
+                      <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
+                    )}
+                  </Pressable>
+                );
+              })}
+              <Pressable onPress={closeSortFilterModal} style={styles.modalCloseBtn} accessibilityRole="button">
+                <Text style={styles.modalCloseLabel}>닫기</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
 
         <Modal
           visible={regionModalOpen}
@@ -799,13 +894,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
   },
-  sortToggle: {
+  sectionHeaderControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
+    gap: 8,
+    flexShrink: 1,
+    minWidth: 0,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
-  sortPill: {
+  sortComboTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: 220,
+    minWidth: 120,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  sortComboTriggerPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderColor: 'rgba(0, 82, 204, 0.25)',
+  },
+  sortComboTriggerText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  /** 정렬 콤보 옆 — 모집중만 표시 토글(기존 pill과 동일 크기·초록 on) */
+  recruitTogglePill: {
+    flexShrink: 0,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
@@ -813,16 +937,16 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.1)',
   },
-  sortPillActive: {
-    backgroundColor: GinitTheme.trustBlue,
-    borderColor: GinitTheme.trustBlue,
+  recruitTogglePillOn: {
+    backgroundColor: '#16A34A',
+    borderColor: '#16A34A',
   },
-  sortPillLabel: {
+  recruitTogglePillLabel: {
     fontSize: 12,
     fontWeight: '700',
     color: '#475569',
   },
-  sortPillLabelActive: {
+  recruitTogglePillLabelOn: {
     color: '#FFFFFF',
   },
   centerRow: {
