@@ -26,11 +26,18 @@ import {
   FEED_LOCATION_FALLBACK_SHORT,
   resolveFeedLocationContext,
 } from '@/src/lib/feed-display-location';
+import {
+  buildFeedChips,
+  listSortModeLabel,
+  meetingMatchesCategoryFilter,
+  type MeetingListSortMode,
+  sortMeetingsForFeed,
+} from '@/src/lib/feed-meeting-utils';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, parseScheduleToTimestamp, subscribeMeetings } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
 const MOCK_REGION_ROWS = [
@@ -39,31 +46,6 @@ const MOCK_REGION_ROWS = [
   { id: 'songpa', label: '송파구' },
   { id: 'ydp', label: '영등포구' },
 ] as const;
-
-type FeedChip = { filterId: string | null; label: string };
-
-type MeetingListSortMode = 'distance' | 'latest' | 'soon';
-
-function meetingCreatedAtMs(m: Meeting): number {
-  const t = m.createdAt;
-  if (t && typeof (t as { toMillis?: () => number }).toMillis === 'function') {
-    return (t as { toMillis: () => number }).toMillis();
-  }
-  return 0;
-}
-
-/** 약속 시작 시각(ms). 없거나 파싱 불가면 null (임박순에서 맨 뒤로). */
-function meetingScheduleStartMs(m: Meeting): number | null {
-  const sa = m.scheduledAt;
-  if (sa && typeof (sa as { toMillis?: () => number }).toMillis === 'function') {
-    return (sa as { toMillis: () => number }).toMillis();
-  }
-  const d = m.scheduleDate?.trim() ?? '';
-  const t = m.scheduleTime?.trim() ?? '';
-  if (!d || !t) return null;
-  const ts = parseScheduleToTimestamp(d, t);
-  return ts ? ts.toMillis() : null;
-}
 
 function GlassCategoryChip({
   label,
@@ -140,28 +122,6 @@ function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
         wrap: [styles.progressBadge, styles.progressBadgeGreen],
         text: [styles.progressBadgeText, styles.progressBadgeTextLight],
       };
-  }
-}
-
-function meetingMatchesCategoryFilter(m: Meeting, filterId: string | null, categories: Category[]): boolean {
-  if (filterId == null) return true;
-  const selected = categories.find((c) => c.id === filterId);
-  const selectedLabel = selected?.label?.trim() ?? '';
-  const mid = m.categoryId?.trim();
-  if (mid && mid === filterId) return true;
-  const ml = (m.categoryLabel ?? '').trim();
-  if (ml && selectedLabel && ml === selectedLabel) return true;
-  return false;
-}
-
-function listSortModeLabel(mode: MeetingListSortMode): string {
-  switch (mode) {
-    case 'distance':
-      return '거리순';
-    case 'soon':
-      return '임박순';
-    default:
-      return '등록순';
   }
 }
 
@@ -286,32 +246,7 @@ export default function FeedScreen() {
     }
   }, [categories, selectedCategoryId]);
 
-  const feedChips: FeedChip[] = useMemo(() => {
-    const countByCategoryId = new Map<string, number>();
-    for (const m of meetings) {
-      const cid = m.categoryId?.trim();
-      if (cid) {
-        countByCategoryId.set(cid, (countByCategoryId.get(cid) ?? 0) + 1);
-        continue;
-      }
-      const lab = m.categoryLabel?.trim();
-      if (!lab) continue;
-      const matched = categories.find((c) => c.label.trim() === lab);
-      if (matched) {
-        countByCategoryId.set(matched.id, (countByCategoryId.get(matched.id) ?? 0) + 1);
-      }
-    }
-
-    const sorted = [...categories].sort((a, b) => {
-      const na = countByCategoryId.get(a.id) ?? 0;
-      const nb = countByCategoryId.get(b.id) ?? 0;
-      if (nb !== na) return nb - na;
-      if (a.order !== b.order) return a.order - b.order;
-      return a.label.localeCompare(b.label, 'ko');
-    });
-
-    return [{ filterId: null, label: '전체' }, ...sorted.map((c) => ({ filterId: c.id, label: c.label }))];
-  }, [categories, meetings]);
+  const feedChips = useMemo(() => buildFeedChips(meetings, categories), [categories, meetings]);
 
   const filteredMeetings = useMemo(() => {
     return meetings.filter((m) => {
@@ -321,38 +256,10 @@ export default function FeedScreen() {
     });
   }, [meetings, selectedCategoryId, categories, recruitingOnly]);
 
-  const sortedFilteredMeetings = useMemo(() => {
-    const list = [...filteredMeetings];
-    if (listSortMode === 'latest') {
-      list.sort((a, b) => {
-        const tb = meetingCreatedAtMs(b);
-        const ta = meetingCreatedAtMs(a);
-        if (tb !== ta) return tb - ta;
-        return a.title.localeCompare(b.title, 'ko');
-      });
-      return list;
-    }
-    if (listSortMode === 'soon') {
-      list.sort((a, b) => {
-        const ta = meetingScheduleStartMs(a);
-        const tb = meetingScheduleStartMs(b);
-        const ia = ta ?? Number.POSITIVE_INFINITY;
-        const ib = tb ?? Number.POSITIVE_INFINITY;
-        if (ia !== ib) return ia - ib;
-        return a.title.localeCompare(b.title, 'ko');
-      });
-      return list;
-    }
-    list.sort((a, b) => {
-      const da = meetingDistanceMetersFromUser(a, userCoords);
-      const db = meetingDistanceMetersFromUser(b, userCoords);
-      const sa = da ?? Number.POSITIVE_INFINITY;
-      const sb = db ?? Number.POSITIVE_INFINITY;
-      if (sa !== sb) return sa - sb;
-      return a.title.localeCompare(b.title, 'ko');
-    });
-    return list;
-  }, [filteredMeetings, listSortMode, userCoords]);
+  const sortedFilteredMeetings = useMemo(
+    () => sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords),
+    [filteredMeetings, listSortMode, userCoords],
+  );
 
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
   const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
