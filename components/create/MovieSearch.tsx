@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 
 import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
+
+const DISPLAY_LIMIT = 6;
 
 const CATALOG: SelectedMovieExtra[] = [
   { id: 'parasite', title: '기생충', year: '2019', info: '봉준호 감독, 칸 황금종려상·아카데미 작품상.' },
@@ -21,30 +23,55 @@ const CATALOG: SelectedMovieExtra[] = [
 export type MovieSearchProps = {
   value: SelectedMovieExtra | null;
   onChange: (next: SelectedMovieExtra | null) => void;
+  /** 영화를 고른 직후(상위에서 스크롤 등) */
+  onSelect?: (movie: SelectedMovieExtra) => void;
   disabled?: boolean;
 };
 
-export function MovieSearch({ value, onChange, disabled }: MovieSearchProps) {
+export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearchProps) {
   const [query, setQuery] = useState('');
 
-  const filtered = useMemo(() => {
+  const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return CATALOG.slice(0, 6);
-    return CATALOG.filter(
-      (m) =>
-        m.title.toLowerCase().includes(q) ||
-        (m.info && m.info.toLowerCase().includes(q)) ||
-        (m.year && m.year.includes(q)),
-    ).slice(0, 12);
+    const list = !q
+      ? CATALOG
+      : CATALOG.filter(
+          (m) =>
+            m.title.toLowerCase().includes(q) ||
+            (m.info && m.info.toLowerCase().includes(q)) ||
+            (m.year && m.year.includes(q)),
+        );
+    return list.slice(0, DISPLAY_LIMIT);
   }, [query]);
 
   const onPick = useCallback(
     (m: SelectedMovieExtra) => {
       onChange(m);
       setQuery('');
+      onSelect?.(m);
     },
-    [onChange],
+    [onChange, onSelect],
   );
+
+  if (value) {
+    return (
+      <View>
+        <Text style={S.fieldLabel}>선택한 영화</Text>
+        <View style={[S.pickedBlock, { marginTop: 8 }]}>
+          <Text style={S.pickedTitle}>{value.title}</Text>
+          {value.year ? <Text style={S.resultMeta}>{value.year}</Text> : null}
+          {value.info ? <Text style={S.pickedSub}>{value.info}</Text> : null}
+          <Pressable
+            onPress={() => onChange(null)}
+            disabled={disabled}
+            style={S.clearLink}
+            accessibilityRole="button">
+            <Text style={S.clearLinkText}>다시 선택</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -59,47 +86,32 @@ export function MovieSearch({ value, onChange, disabled }: MovieSearchProps) {
         editable={!disabled}
       />
 
-      {!value ? (
-        <View style={S.resultsBox}>
-          <FlatList
-            data={filtered}
-            keyExtractor={(item) => item.id}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            renderItem={({ item }) => (
-              <Pressable
-                onPress={() => onPick(item)}
-                disabled={disabled}
-                style={({ pressed }) => [S.resultRow, pressed && { opacity: 0.85 }]}
-                accessibilityRole="button">
-                <Text style={S.resultTitle}>{item.title}</Text>
-                <Text style={S.resultMeta}>
-                  {item.year ? `${item.year} · ` : ''}
-                  {item.info}
-                </Text>
-              </Pressable>
-            )}
-            ListEmptyComponent={
-              <View style={[S.resultRow, { borderBottomWidth: 0 }]}>
-                <Text style={S.resultMeta}>검색 결과가 없어요. 다른 키워드를 써 보세요.</Text>
-              </View>
-            }
-          />
-        </View>
-      ) : (
-        <View style={S.pickedBlock}>
-          <Text style={S.pickedTitle}>{value.title}</Text>
-          {value.year ? <Text style={S.resultMeta}>{value.year}</Text> : null}
-          {value.info ? <Text style={S.pickedSub}>{value.info}</Text> : null}
-          <Pressable
-            onPress={() => onChange(null)}
-            disabled={disabled}
-            style={S.clearLink}
-            accessibilityRole="button">
-            <Text style={S.clearLinkText}>다시 선택</Text>
-          </Pressable>
-        </View>
-      )}
+      <View style={S.resultsBox}>
+        {rows.length === 0 ? (
+          <View style={[S.resultRow, { borderBottomWidth: 0 }]}>
+            <Text style={S.resultMeta}>검색 결과가 없어요. 다른 키워드를 써 보세요.</Text>
+          </View>
+        ) : (
+          rows.map((item, index) => (
+            <Pressable
+              key={item.id}
+              onPress={() => onPick(item)}
+              disabled={disabled}
+              style={({ pressed }) => [
+                S.resultRow,
+                index === rows.length - 1 && { borderBottomWidth: 0 },
+                pressed && { opacity: 0.88 },
+              ]}
+              accessibilityRole="button">
+              <Text style={S.resultTitle}>{item.title}</Text>
+              <Text style={S.resultMeta}>
+                {item.year ? `${item.year} · ` : ''}
+                {item.info}
+              </Text>
+            </Pressable>
+          ))
+        )}
+      </View>
     </View>
   );
 }

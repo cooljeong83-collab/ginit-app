@@ -28,8 +28,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     color: '#F8FAFC',
   },
   resultsBox: {
-    marginTop: 10,
-    maxHeight: 200,
+    marginTop: 12,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
