@@ -6,6 +6,7 @@ import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -63,6 +64,7 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
 
   const runSearch = useCallback(
     async (raw: string, opts?: { signal?: AbortSignal }) => {
+      Keyboard.dismiss();
       const trimmed = raw.trim();
       if (!trimmed) {
         setError('검색어를 입력하고 검색을 눌러 주세요.');
@@ -102,27 +104,28 @@ export function PlaceSearchScreen({ useGoogleMapsPreview = false, initialQuery, 
 
       const ac = new AbortController();
       let focusTimer: ReturnType<typeof setTimeout> | undefined;
-
-      void (async () => {
-        setSelected(null);
-        setError(null);
-        if (useGoogleMapsPreview) animateListLayout();
-        await runSearch(seed, { signal: ac.signal });
-        if (ac.signal.aborted) return;
-        focusTimer = setTimeout(() => {
-          searchInputRef.current?.focus();
-          const len = seed.length;
-          searchInputRef.current?.setNativeProps({
-            selection: { start: len, end: len },
-          });
-        }, 140);
-      })();
+      const interaction = InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          setSelected(null);
+          setError(null);
+          await runSearch(seed, { signal: ac.signal });
+          if (ac.signal.aborted) return;
+          focusTimer = setTimeout(() => {
+            searchInputRef.current?.focus();
+            const len = seed.length;
+            searchInputRef.current?.setNativeProps({
+              selection: { start: len, end: len },
+            });
+          }, 140);
+        })();
+      });
 
       return () => {
         ac.abort();
+        interaction.cancel?.();
         if (focusTimer) clearTimeout(focusTimer);
       };
-    }, [initialQuery, runSearch, useGoogleMapsPreview]),
+    }, [initialQuery, runSearch]),
   );
 
   const onSelectPlace = useCallback(
@@ -321,6 +324,7 @@ export default function PlaceSearchRoute() {
   }>();
   return (
     <PlaceSearchScreen
+      useGoogleMapsPreview
       initialQuery={pickParam(initialQuery)?.trim()}
       voteRowId={pickParam(voteRowId)?.trim()}
     />

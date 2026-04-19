@@ -25,7 +25,14 @@ import { UserSessionProvider } from '@/src/context/UserSessionContext';
 export default function RootLayout() {
   return (
     <UserSessionProvider>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          /** 전환 중 이전 화면·카드가 비쳐 보이는 현상 완화 */
+          contentStyle: { backgroundColor: '#F0F6FF' },
+          freezeOnBlur: true,
+        }}
+      />
     </UserSessionProvider>
   );
 }

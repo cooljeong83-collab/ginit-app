@@ -3,14 +3,14 @@
  * `dateCandidates[]` · `placeCandidates[]` 다이나믹 폼, LayoutAnimation, 지도 미리보기 없음.
  * 완료 시 `setPendingVoteCandidates`로 2단계로 전달합니다.
  */
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect } from '@react-navigation/native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { useFocusEffect } from '@react-navigation/native';
+import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -23,11 +23,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
-import { GinitTheme } from '@/constants/ginit-theme';
-import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import { GinitStyles } from '@/constants/GinitStyles';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import { consumePendingVotePlaceRow, setPendingVoteCandidates } from '@/src/lib/meeting-place-bridge';
+
+/** 스펙: Trust Blue */
+const TRUST_BLUE = '#0052CC';
+/** 스펙: 화면 전체 배경 (다크 네이비) */
+const SCREEN_BG = '#0F172A';
+/** 스펙: 플레이스홀더 */
+const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
 
 function animate() {
   layoutAnimateEaseInEaseOut();
@@ -135,9 +141,7 @@ export type VoteCandidatesFormProps = {
   seedPlaceQuery?: string;
   seedScheduleDate: string;
   seedScheduleTime: string;
-  /** `consumePendingVoteCandidates` 등 외부에서 넣은 후보로 폼을 채울 때 */
   initialPayload?: VoteCandidatesPayload | null;
-  /** true면 부모 `ScrollView` 안에 넣기 위해 내부 스크롤을 쓰지 않습니다. */
   embedded?: boolean;
 };
 
@@ -146,7 +150,6 @@ export type VoteCandidatesBuildResult =
   | { ok: false; error: string };
 
 export type VoteCandidatesFormHandle = {
-  /** 현재 폼 상태로 투표 후보 페이로드를 만듭니다. 장소·일시 검증 실패 시 `ok: false`. */
   buildPayload: () => VoteCandidatesBuildResult;
 };
 
@@ -170,6 +173,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   placeCandidatesRef.current = placeCandidates;
   const dateCandidatesRef = useRef(dateCandidates);
   dateCandidatesRef.current = dateCandidates;
+  /** `+ 장소 후보 추가` 직후 열린 검색에서 선택 없이 돌아오면 이 행 ID를 제거합니다. */
+  const pendingEphemeralPlaceRowIdRef = useRef<string | null>(null);
 
   useImperativeHandle(
     ref,
@@ -189,7 +194,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             return { ok: false, error: '일시 후보의 시간은 HH:mm 형식이어야 합니다.' };
           }
         }
-        const placeCandidates: PlaceCandidate[] = filledPlaces.map((r) => ({
+        const placeCandidatesOut: PlaceCandidate[] = filledPlaces.map((r) => ({
           id: r.id,
           placeName: r.placeName.trim(),
           address: r.address.trim(),
@@ -197,7 +202,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           longitude: r.longitude as number,
         }));
         const dateCandidatesOut = dates.map((d) => ({ ...d }));
-        return { ok: true, payload: { placeCandidates, dateCandidates: dateCandidatesOut } };
+        return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
       },
     }),
     [],
@@ -206,12 +211,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const openPlaceSearch = useCallback(
     (row: PlaceRowModel) => {
       const q = row.query.trim() || row.placeName.trim();
-      router.push({
-        pathname: '/place-search',
-        params: {
-          initialQuery: q,
-          voteRowId: row.id,
-        },
+      InteractionManager.runAfterInteractions(() => {
+        router.push({
+          pathname: '/place-search',
+          params: {
+            initialQuery: q,
+            voteRowId: row.id,
+          },
+        });
       });
     },
     [router],
@@ -220,31 +227,59 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   useFocusEffect(
     useCallback(() => {
       const sel = consumePendingVotePlaceRow();
-      if (!sel) return;
+      if (sel) {
+        pendingEphemeralPlaceRowIdRef.current = null;
+        setPlaceCandidates((prev) => {
+          const hit = prev.some((r) => r.id === sel.rowId);
+          if (!hit) return prev;
+          animate();
+          return prev.map((r) =>
+            r.id === sel.rowId
+              ? {
+                  ...r,
+                  query: sel.placeName,
+                  placeName: sel.placeName,
+                  address: sel.address,
+                  latitude: sel.latitude,
+                  longitude: sel.longitude,
+                }
+              : r,
+          );
+        });
+        return;
+      }
+
+      const ephemeralId = pendingEphemeralPlaceRowIdRef.current;
+      pendingEphemeralPlaceRowIdRef.current = null;
+      if (!ephemeralId) return;
+
       setPlaceCandidates((prev) => {
-        const hit = prev.some((r) => r.id === sel.rowId);
-        if (!hit) return prev;
+        const row = prev.find((r) => r.id === ephemeralId);
+        if (!row || isFilled(row)) return prev;
         animate();
-        return prev.map((r) =>
-          r.id === sel.rowId
-            ? {
-                ...r,
-                query: sel.placeName,
-                placeName: sel.placeName,
-                address: sel.address,
-                latitude: sel.latitude,
-                longitude: sel.longitude,
-              }
-            : r,
-        );
+        if (prev.length <= 1) {
+          return [emptyPlaceRow()];
+        }
+        return prev.filter((r) => r.id !== ephemeralId);
       });
     }, []),
   );
 
   const addPlaceCandidate = useCallback(() => {
-    animate();
-    setPlaceCandidates((prev) => [...prev, emptyPlaceRow()]);
-  }, []);
+    const row = emptyPlaceRow();
+    pendingEphemeralPlaceRowIdRef.current = row.id;
+    setPlaceCandidates((prev) => [...prev, row]);
+    /** LayoutAnimation과 push가 겹치면 잔상·끊김이 나므로, 전환은 인터랙션 이후에만 실행 */
+    InteractionManager.runAfterInteractions(() => {
+      router.push({
+        pathname: '/place-search',
+        params: {
+          initialQuery: row.query.trim(),
+          voteRowId: row.id,
+        },
+      });
+    });
+  }, [router]);
 
   const removePlaceCandidate = useCallback((id: string) => {
     animate();
@@ -273,12 +308,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     setDateCandidates((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
 
-  const openPicker = useCallback((rowId: string, mode: 'date' | 'time') => {
-    const row = dateCandidates.find((d) => d.id === rowId);
-    if (!row) return;
-    setIosDraft(parseDateTimeStrings(row.scheduleDate, row.scheduleTime));
-    setPicker({ rowId, mode });
-  }, [dateCandidates]);
+  const openPicker = useCallback(
+    (rowId: string, mode: 'date' | 'time') => {
+      const row = dateCandidates.find((d) => d.id === rowId);
+      if (!row) return;
+      setIosDraft(parseDateTimeStrings(row.scheduleDate, row.scheduleTime));
+      setPicker({ rowId, mode });
+    },
+    [dateCandidates],
+  );
 
   const applyIosPicker = useCallback(() => {
     if (!picker) return;
@@ -294,120 +332,132 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const formBody = (
     <>
       <View style={styles.sectionHeader}>
-        <View style={styles.sectionAccent} />
         <Text style={styles.sectionTitle}>일시 후보</Text>
       </View>
       <Text style={styles.sectionHint}>날짜·시간 후보를 추가하고 투표에서 고를 수 있어요.</Text>
 
-      {dateCandidates.map((d) => (
-        <View key={d.id} style={[styles.floatGlass, styles.dateCard]}>
-          {Platform.OS === 'web' ? (
-            <View style={GinitStyles.row2}>
-              <TextInput
-                value={d.scheduleDate}
-                onChangeText={(t) => updateDateRow(d.id, { scheduleDate: t })}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={GinitPlaceholderColor}
-                style={[GinitStyles.glassInput, GinitStyles.glassInputHalf, GinitStyles.detailFormText]}
-                autoCapitalize="none"
-              />
-              <TextInput
-                value={d.scheduleTime}
-                onChangeText={(t) => updateDateRow(d.id, { scheduleTime: t })}
-                placeholder="HH:mm"
-                placeholderTextColor={GinitPlaceholderColor}
-                style={[GinitStyles.glassInput, GinitStyles.glassInputHalf, GinitStyles.detailFormText]}
-                autoCapitalize="none"
-              />
-            </View>
-          ) : (
-            <View style={GinitStyles.row2}>
-              <Pressable
-                onPress={() => openPicker(d.id, 'date')}
-                style={[GinitStyles.glassInput, GinitStyles.glassInputHalf, GinitStyles.inputPressable]}
-                accessibilityRole="button">
-                <Text style={GinitStyles.inputPressableLabel}>날짜</Text>
-                <Text style={GinitStyles.inputPressableValue}>{d.scheduleDate}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => openPicker(d.id, 'time')}
-                style={[GinitStyles.glassInput, GinitStyles.glassInputHalf, GinitStyles.inputPressable]}
-                accessibilityRole="button">
-                <Text style={GinitStyles.inputPressableLabel}>시간</Text>
-                <Text style={GinitStyles.inputPressableValue}>{d.scheduleTime}</Text>
-              </Pressable>
-            </View>
-          )}
-          <Pressable
-            onPress={() => (dateCandidates.length > 1 ? removeDateRow(d.id) : null)}
-            disabled={dateCandidates.length <= 1}
-            style={styles.deleteTextWrap}
-            accessibilityRole="button"
-            accessibilityLabel="일시 후보 삭제">
-            <Text style={[styles.deleteText, dateCandidates.length <= 1 && styles.deleteTextDisabled]}>[삭제]</Text>
-          </Pressable>
-        </View>
+      {dateCandidates.map((d, dateIndex) => (
+        <BlurView
+          key={d.id}
+          tint="dark"
+          intensity={40}
+          style={styles.glassCardBlur}
+          experimentalBlurMethod="dimezisBlurView">
+          <View style={styles.glassCardInner}>
+            <Pressable
+              onPress={() => (dateCandidates.length > 1 ? removeDateRow(d.id) : undefined)}
+              disabled={dateCandidates.length <= 1}
+              style={[styles.deleteIconBtn, dateCandidates.length <= 1 && styles.deleteIconBtnDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="일시 후보 삭제">
+              <Text style={styles.deleteIconText}>✕</Text>
+            </Pressable>
+            <Text style={styles.cardFieldTitle}>일정 후보 {dateIndex + 1}</Text>
+            {Platform.OS === 'web' ? (
+              <View style={styles.row2}>
+                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
+                  <TextInput
+                    value={d.scheduleDate}
+                    onChangeText={(t) => updateDateRow(d.id, { scheduleDate: t })}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={INPUT_PLACEHOLDER}
+                    style={styles.textInputBare}
+                    autoCapitalize="none"
+                  />
+                </View>
+                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
+                  <TextInput
+                    value={d.scheduleTime}
+                    onChangeText={(t) => updateDateRow(d.id, { scheduleTime: t })}
+                    placeholder="HH:mm"
+                    placeholderTextColor={INPUT_PLACEHOLDER}
+                    style={styles.textInputBare}
+                    autoCapitalize="none"
+                  />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.row2}>
+                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
+                  <Pressable
+                    onPress={() => openPicker(d.id, 'date')}
+                    style={styles.dateTimePressable}
+                    accessibilityRole="button">
+                    <Text style={styles.dateTimeLabel}>날짜</Text>
+                    <Text style={styles.dateTimeValue}>{d.scheduleDate}</Text>
+                  </Pressable>
+                </View>
+                <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
+                  <Pressable
+                    onPress={() => openPicker(d.id, 'time')}
+                    style={styles.dateTimePressable}
+                    accessibilityRole="button">
+                    <Text style={styles.dateTimeLabel}>시간</Text>
+                    <Text style={styles.dateTimeValue}>{d.scheduleTime}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </View>
+        </BlurView>
       ))}
 
-      <Pressable onPress={addDateRow} style={styles.addPrimaryBtn} accessibilityRole="button">
-        <Text style={styles.addPrimaryBtnLabel}>+ 일정 후보 추가</Text>
+      <Pressable onPress={addDateRow} style={styles.addCandidateBtn} accessibilityRole="button">
+        <Text style={styles.addCandidateBtnLabel}>+ 일정 후보 추가</Text>
       </Pressable>
 
       <View style={[styles.sectionHeader, styles.sectionGap]}>
-        <View style={styles.sectionAccent} />
         <Text style={styles.sectionTitle}>장소 후보</Text>
       </View>
       <Text style={styles.sectionHint}>각 카드에서 장소 검색 화면으로 이동해 후보를 채워 주세요.</Text>
 
-      {placeCandidates.map((row) => (
-        <View key={row.id} style={styles.cardWrap}>
-          {isFilled(row) ? (
-            <View style={[styles.floatGlass, styles.placeCard]}>
+      {placeCandidates.map((row, placeIndex) => (
+        <BlurView
+          key={row.id}
+          tint="dark"
+          intensity={40}
+          style={styles.glassCardBlur}
+          experimentalBlurMethod="dimezisBlurView">
+          <View style={styles.glassCardInner}>
+            <Pressable
+              onPress={() => removePlaceCandidate(row.id)}
+              style={styles.deleteIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="장소 후보 삭제">
+              <Text style={styles.deleteIconText}>✕</Text>
+            </Pressable>
+            <Text style={styles.cardFieldTitle}>장소 후보 {placeIndex + 1}</Text>
+            {isFilled(row) ? (
               <Pressable onPress={() => openPlaceSearch(row)} accessibilityRole="button" accessibilityLabel="장소 다시 선택">
-                <Text style={styles.filledPin}>📍</Text>
-                <Text style={styles.filledTitle} numberOfLines={2}>
+                <Text style={styles.placeEmoji}>📍</Text>
+                <Text style={styles.placeNameText} numberOfLines={2}>
                   {row.placeName}
                 </Text>
-                <Text style={styles.filledAddr} numberOfLines={4}>
+                <Text style={styles.placeAddrText} numberOfLines={4}>
                   {row.address}
                 </Text>
-                <Text style={styles.placeSearchHint}>탭하여 장소 선택 화면에서 바꾸기</Text>
+                <Text style={styles.placeHint}>탭하여 장소 선택 화면에서 바꾸기</Text>
               </Pressable>
-              <Pressable
-                onPress={() => removePlaceCandidate(row.id)}
-                style={styles.deleteTextWrap}
-                accessibilityRole="button"
-                accessibilityLabel="장소 후보 삭제">
-                <Text style={styles.deleteText}>[삭제]</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={[styles.floatGlass, styles.placeCard]}>
-              <Pressable
-                onPress={() => openPlaceSearch(row)}
-                style={[GinitStyles.glassInput, styles.placeSearchPressable]}
-                accessibilityRole="button"
-                accessibilityLabel="장소 검색 화면으로 이동">
-                <Text
-                  style={[GinitStyles.detailFormText, !row.query.trim() && styles.placeSearchPlaceholder]}
-                  numberOfLines={2}>
-                  {row.query.trim() || '가게 이름 · 주소 검색 (탭하면 장소 선택 화면)'}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => removePlaceCandidate(row.id)}
-                style={styles.deleteTextWrap}
-                accessibilityRole="button"
-                accessibilityLabel="장소 후보 삭제">
-                <Text style={styles.deleteText}>[삭제]</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
+            ) : (
+              <View style={styles.fieldRecess}>
+                <Pressable
+                  onPress={() => openPlaceSearch(row)}
+                  style={styles.placeSearchPressable}
+                  accessibilityRole="button"
+                  accessibilityLabel="장소 검색 화면으로 이동">
+                  <Text 
+                    style={[   styles.placeDraftText,     { color: '#0F172A' }, !row.query.trim() && { color: 'rgba(15, 23, 42, 0.35)' }   ]} numberOfLines={2}>
+                    {row.query.trim() || '가게 이름 · 주소 검색 (탭하면 장소 선택 화면)'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        </BlurView>
       ))}
 
-      <Pressable onPress={addPlaceCandidate} style={styles.addPrimaryBtn} accessibilityRole="button">
-        <Text style={styles.addPrimaryBtnLabel}>+ 장소 후보 추가</Text>
+      <Pressable onPress={addPlaceCandidate} style={styles.addCandidateBtn} accessibilityRole="button">
+        <Text style={styles.addCandidateBtnLabel}>+ 장소 후보 추가</Text>
       </Pressable>
     </>
   );
@@ -448,7 +498,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   if (date) setIosDraft(date);
                 }}
                 locale="ko-KR"
-                themeVariant="light"
+                themeVariant="dark"
               />
             </View>
           </View>
@@ -515,31 +565,17 @@ export default function CreateDetailsScreen() {
   }, [router]);
 
   return (
-    <View style={GinitStyles.screenRoot}>
-      <LinearGradient colors={['#DCEEFF', '#EEF6FF', '#FFF4ED']} locations={[0, 0.45, 1]} style={StyleSheet.absoluteFill} />
-      {Platform.OS === 'web' ? (
-        <View style={[StyleSheet.absoluteFill, GinitStyles.webVeil]} />
-      ) : (
-        <>
-          <BlurView
-            pointerEvents="none"
-            intensity={GinitTheme.glassModal.blurIntensity}
-            tint="light"
-            style={StyleSheet.absoluteFill}
-          />
-          <View pointerEvents="none" style={[StyleSheet.absoluteFill, GinitStyles.frostVeil]} />
-        </>
-      )}
+    <View style={styles.screenRoot}>
       <KeyboardAvoidingView
         style={GinitStyles.flexFill}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
-        <SafeAreaView style={GinitStyles.safeAreaPadded} edges={['top', 'bottom']}>
-          <View style={GinitStyles.topBarRow}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+          <View style={styles.topBarRow}>
             <Pressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
-              <Text style={GinitStyles.backLink}>← 닫기</Text>
+              <Text style={styles.backLink}>← 닫기</Text>
             </Pressable>
-            <Text style={GinitStyles.screenTitleLarge} numberOfLines={1}>
+            <Text style={styles.screenTitle} numberOfLines={1}>
               {screenTitle}
             </Text>
             <View style={{ width: 56 }} />
@@ -561,27 +597,47 @@ export default function CreateDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  scrollContent: {
+  screenRoot: {
+    flex: 1,
+    backgroundColor: SCREEN_BG,
+  },
+  safeArea: {
+    flex: 1,
+    backgroundColor: SCREEN_BG,
     paddingHorizontal: 20,
+  },
+  topBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 8,
+  },
+  backLink: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.85)',
+    minWidth: 56,
+  },
+  screenTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '900',
+    color: 'rgba(255, 255, 255, 0.95)',
+    letterSpacing: -0.3,
+  },
+  scrollContent: {
     paddingTop: 8,
     paddingBottom: 40,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
     marginBottom: 6,
-  },
-  sectionAccent: {
-    width: 4,
-    height: 18,
-    borderRadius: 2,
-    backgroundColor: GinitTheme.trustBlue,
   },
   sectionTitle: {
     fontSize: 17,
-    fontWeight: '900',
-    color: '#0f172a',
+    fontWeight: '800',
+    color: '#0F172A',
     letterSpacing: -0.35,
   },
   sectionHint: {
@@ -594,96 +650,135 @@ const styles = StyleSheet.create({
   sectionGap: {
     marginTop: 26,
   },
-  /** 다크 글로우 + 반투명 글래스 — 카드가 배경에서 떠 있는 느낌 */
-  floatGlass: {
-    backgroundColor: 'rgba(255, 255, 255, 0.46)',
-    borderRadius: GinitTheme.radius.card,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.52)',
-    borderTopColor: 'rgba(255, 255, 255, 0.72)',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    marginBottom: 14,
-    shadowColor: '#0b1426',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.32,
-    shadowRadius: 28,
-    elevation: 18,
-    overflow: 'visible',
+  /** 글래스 카드: BlurView 루트 — 스펙 수치 그대로 */
+  glassCardBlur: {
+    marginBottom: 16,
+    borderRadius: 24,
+    padding: 20,
+    backgroundColor: 'rgb(255, 255, 255)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    overflow: 'hidden',
+    shadowColor: TRUST_BLUE,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 15,
   },
-  dateCard: {
-    gap: 12,
+  glassCardInner: {
+    position: 'relative',
   },
-  placeCard: {
-    gap: 12,
+  deleteIconBtn: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.67)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
-  cardWrap: {
-    marginBottom: 0,
+  deleteIconBtnDisabled: {
+    opacity: 0.35,
   },
-  deleteTextWrap: {
-    alignSelf: 'flex-end',
-    paddingVertical: 4,
-    paddingHorizontal: 2,
-  },
-  deleteText: {
+  deleteIconText: {
+    color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '800',
-    color: '#B91C1C',
+    fontWeight: '700',
+    lineHeight: 16,
   },
-  deleteTextDisabled: {
-    color: '#94a3b8',
+  /** 카드 안 제목 (일정 후보 1 등) */
+  cardFieldTitle: {
+    color: 'rgb(0, 0, 0)',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+    paddingRight: 40,
   },
-  filledPin: {
+  row2: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  /** 음각 필드 래퍼 */
+  fieldRecess: {
+    backgroundColor: 'rgba(255, 255, 255, 0.72)', // 흰색 반투명 (Line 229)
+    borderColor: 'rgba(0, 0, 0, 0.93)', // 아주 연한 테두리 추가
+    borderRadius: 12,
+    padding: 16,
+  },
+  fieldRecessHalf: {
+    flex: 1,
+    minWidth: 0,
+  },
+  textInputBare: {
+    backgroundColor: 'transparent',
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '600',
+    padding: 0,
+    margin: 0,
+  },
+  dateTimePressable: {
+    gap: 4,
+  },
+  dateTimeLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(0, 0, 0, 0.62)',
+  },
+  dateTimeValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  placeEmoji: {
     fontSize: 20,
     marginBottom: 6,
   },
-  filledTitle: {
+  placeNameText: {
     fontSize: 17,
-    fontWeight: '900',
-    color: '#0f172a',
+    fontWeight: '800',
+    color: '#000000',
     marginBottom: 6,
+    paddingRight: 36,
   },
-  filledAddr: {
+  placeAddrText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#334155',
+    color: 'rgba(0, 0, 0, 0.75)',
     lineHeight: 20,
   },
-  placeSearchPressable: {
-    minHeight: 52,
-    justifyContent: 'center',
-    borderRadius: GinitTheme.radius.button,
-  },
-  placeSearchPlaceholder: {
-    color: GinitPlaceholderColor,
-  },
-  placeSearchHint: {
+  placeHint: {
     marginTop: 10,
     fontSize: 12,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
-    opacity: 0.85,
+    color: 'rgba(0, 0, 0, 0.5)',
   },
-  addPrimaryBtn: {
+  placeSearchPressable: {
+    minHeight: 24,
+    justifyContent: 'center',
+  },
+  placeDraftText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  /** + 후보 추가 — 스펙 */
+  addCandidateBtn: {
     alignSelf: 'stretch',
     marginBottom: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: GinitTheme.radius.button,
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(0, 82, 204, 0.35)',
-    shadowColor: '#001a4d',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: TRUST_BLUE,
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addPrimaryBtnLabel: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: GinitTheme.trustBlue,
+  addCandidateBtnLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
     textAlign: 'center',
-    letterSpacing: -0.2,
   },
 });
