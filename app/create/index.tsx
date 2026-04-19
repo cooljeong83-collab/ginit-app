@@ -27,8 +27,11 @@ import { primaryScheduleFromDateCandidate } from '@/src/lib/date-candidate';
 import type { VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import { consumePendingMeetingPlace, consumePendingVoteCandidates } from '@/src/lib/meeting-place-bridge';
 import { addMeeting } from '@/src/lib/meetings';
+import { generateSuggestedMeetingTitle } from '@/src/lib/meeting-title-suggestion';
 
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from './details';
+
+const TRUST_BLUE = '#0052CC';
 
 type Step = 1 | 2;
 
@@ -107,6 +110,7 @@ export default function CreateMeetingScreen() {
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
+  const [aiTitleSuggestion, setAiTitleSuggestion] = useState('');
 
   useFocusEffect(
     useCallback(() => {
@@ -163,6 +167,14 @@ export default function CreateMeetingScreen() {
     () => categories.find((c) => c.id === selectedCategoryId) ?? null,
     [categories, selectedCategoryId],
   );
+
+  useEffect(() => {
+    if (step !== 2 || !selectedCategory?.label?.trim()) {
+      setAiTitleSuggestion('');
+      return;
+    }
+    setAiTitleSuggestion(generateSuggestedMeetingTitle(selectedCategory.label, new Date()));
+  }, [step, selectedCategory?.label]);
 
   const onTemplatePress = useCallback(
     (keywords: string[]) => {
@@ -406,6 +418,18 @@ export default function CreateMeetingScreen() {
                     onBlur={() => setFocusedStep2Field(null)}
                   />
 
+                  {!title.trim() && aiTitleSuggestion ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`AI 추천 모임 이름: ${aiTitleSuggestion}`}
+                      onPress={() => setTitle(aiTitleSuggestion)}
+                      style={({ pressed }) => [titleSuggestStyles.chip, pressed && titleSuggestStyles.chipPressed]}>
+                      <Text style={titleSuggestStyles.chipText} numberOfLines={2}>
+                        ✨ AI 추천: 「{aiTitleSuggestion}」
+                      </Text>
+                    </Pressable>
+                  ) : null}
+
                   <Text style={[GinitStyles.fieldLabel, GinitStyles.fieldLabelSpaced]}>일시·장소 후보</Text>
                   <Text style={GinitStyles.hintSmall}>
                     + 버튼으로 후보 카드를 추가하세요. 장소 행을 누르면 장소 선택 화면으로 이동합니다. 「모임 등록」 시 아래 후보가 함께 저장됩니다.
@@ -486,3 +510,32 @@ export default function CreateMeetingScreen() {
   );
 }
 
+const titleSuggestStyles = StyleSheet.create({
+  chip: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    marginBottom: 2,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 82, 204, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.42)',
+    shadowColor: TRUST_BLUE,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  chipPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.99 }],
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: TRUST_BLUE,
+    letterSpacing: -0.2,
+    maxWidth: '100%',
+  },
+});
