@@ -3,7 +3,15 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as Font from 'expo-font';
 import { LinearGradient } from 'expo-linear-gradient';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -235,11 +243,23 @@ export type MovieSearchProps = {
   /** 후보를 하나 추가했을 때 */
   onSelect?: (movie: SelectedMovieExtra) => void;
   disabled?: boolean;
+  /** 「다른 후보 추가」로 검색 패널을 열 때 스크롤 정렬(모임 만들기 마법사 등) */
+  parentScrollRef?: RefObject<ScrollView | null>;
+  /** 부모 ScrollView의 `contentOffset.y` — `onScroll`에서 갱신 */
+  parentScrollYRef?: RefObject<number>;
 };
 
-export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearchProps) {
+export function MovieSearch({
+  value,
+  onChange,
+  onSelect,
+  disabled,
+  parentScrollRef,
+  parentScrollYRef,
+}: MovieSearchProps) {
   const [query, setQuery] = useState('');
   const [addingMore, setAddingMore] = useState(false);
+  const expandedPickerRef = useRef<View>(null);
   const [pretendardFamily, setPretendardFamily] = useState<string | undefined>(undefined);
   const [rankRows, setRankRows] = useState<SelectedMovieExtra[]>([]);
   const [rankReady, setRankReady] = useState(false);
@@ -267,6 +287,49 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
       setAddingMore(false);
     }
   }, [value.length]);
+
+  /** 후보가 있을 때만: 검색 패널을 펼치면 스크롤을 올려 검색이 화면 상단에 오도록 */
+  useEffect(() => {
+    if (!addingMore || value.length === 0) return;
+    if (!parentScrollRef?.current || !parentScrollYRef) return;
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let timeoutId2: ReturnType<typeof setTimeout> | null = null;
+
+    const alignPickerToTop = () => {
+      if (cancelled) return;
+      const scrollView = parentScrollRef.current;
+      const anchor = expandedPickerRef.current;
+      if (!scrollView || !anchor) return;
+      anchor.measureInWindow((hx: number, hy: number, _hw: number, _hh: number) => {
+        if (cancelled) return;
+        const scrollHost = scrollView as unknown as View;
+        scrollHost.measureInWindow((sx: number, sy: number, _sw: number, _sh: number) => {
+          if (cancelled) return;
+          const scrollY = parentScrollYRef.current;
+          const pad = 12;
+          const nextY = scrollY + (hy - sy) - pad;
+          scrollView.scrollTo({ y: Math.max(0, nextY), animated: true });
+        });
+      });
+    };
+
+    const raf = requestAnimationFrame(() => {
+      if (cancelled) return;
+      const delay1 = Platform.OS === 'android' ? 120 : 72;
+      const delay2 = Platform.OS === 'android' ? 280 : 220;
+      timeoutId = setTimeout(alignPickerToTop, delay1);
+      timeoutId2 = setTimeout(alignPickerToTop, delay2);
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      if (timeoutId) clearTimeout(timeoutId);
+      if (timeoutId2) clearTimeout(timeoutId2);
+    };
+  }, [addingMore, parentScrollRef, parentScrollYRef, value.length]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -538,7 +601,10 @@ export function MovieSearch({ value, onChange, onSelect, disabled }: MovieSearch
       </Pressable>
 
       {addingMore ? (
-        <View style={[S.movieHeroShell, { marginTop: 12, height: heroMinH }]}>
+        <View
+          ref={expandedPickerRef}
+          collapsable={false}
+          style={[S.movieHeroShell, { marginTop: 12, height: heroMinH }]}>
           {searchHeader}
           {listScroll}
         </View>

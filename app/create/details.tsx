@@ -841,6 +841,8 @@ export default function CreateDetailsScreen() {
   const { phoneUserId } = useUserSession();
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
+  /** 메인 스크롤 세로 오프셋 — 영화 검색 패널 열 때 정렬에 사용 */
+  const mainScrollYRef = useRef(0);
   /** ScrollView 콘텐츠 기준 각 스텝 카드 상단 y (onLayout으로만 갱신) */
   const stepPositions = useRef<Partial<Record<WizardStep, number>>>({});
   /** 일정·장소 폼 래퍼의 상대 y (장소 구간 스크롤 앵커) */
@@ -1408,6 +1410,9 @@ export default function CreateDetailsScreen() {
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={false}
             scrollEventThrottle={1}
+            onScroll={(e) => {
+              mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+            }}
             decelerationRate="normal"
             contentContainerStyle={[styles.scrollContent, styles.wizardScrollPad]}>
             <View collapsable={false}>
@@ -1525,6 +1530,8 @@ export default function CreateDetailsScreen() {
                         value={movieCandidates}
                         onChange={setMovieCandidates}
                         disabled={busy}
+                        parentScrollRef={mainScrollRef}
+                        parentScrollYRef={mainScrollYRef}
                       />
                     ) : null}
                     {specialtyKind === 'food' ? (
