@@ -312,7 +312,7 @@ export default function ChatTab() {
               key={m.id}
               meeting={m}
               userCoords={userCoords}
-              onPress={() => router.push(`/meeting/${m.id}`)}
+              onPress={() => router.push(`/meeting-chat/${m.id}`)}
             />
           ))}
         </ScrollView>

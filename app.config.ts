@@ -101,6 +101,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     android: {
       ...config.android,
+      /** 키보드가 올라올 때 입력창이 가려지지 않도록(채팅 등) — app.json과 동일 권장값 */
+      softwareKeyboardLayoutMode: 'resize',
       package: 'com.ginit.app',
       googleServicesFile: './env/google-services.json',
       permissions: [

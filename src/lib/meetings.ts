@@ -462,7 +462,7 @@ export function subscribeMeetingById(
   onMeeting: (meeting: Meeting | null) => void,
   onError?: (message: string) => void,
 ): Unsubscribe {
-  const id = meetingId.trim();
+  const id = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!id) {
     onMeeting(null);
     return () => {};
