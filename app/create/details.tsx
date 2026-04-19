@@ -14,12 +14,10 @@ import {
   useRef,
   useState,
   type ReactNode,
-  type RefObject,
 } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  findNodeHandle,
   InteractionManager,
   KeyboardAvoidingView,
   Modal,
@@ -265,8 +263,8 @@ export type VoteCandidatesFormProps = {
   bare?: boolean;
   /** 마법사 단계별로 일정/장소 블록만 표시 (`none` = UI 없이 상태만 유지) */
   wizardSegment?: 'both' | 'schedule' | 'places' | 'none';
-  /** 부모에서 `measureLayout`으로 장소 단계 시작 y를 잡을 때 사용 */
-  placesBlockRef?: RefObject<View | null>;
+  /** 장소 블록 레이아웃(스크롤 앵커 등) — `layout.y`는 일정·장소 공통 래퍼 기준 */
+  onPlacesBlockLayout?: (e: LayoutChangeEvent) => void;
   /** `wizardSegment`가 `places`일 때 장소 섹션 맨 위에 삽입(예: 단계 배지) */
   headerBeforePlaces?: ReactNode;
 };
@@ -292,7 +290,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     embedded = false,
     bare = false,
     wizardSegment = 'both',
-    placesBlockRef,
+    onPlacesBlockLayout,
     headerBeforePlaces,
   },
   ref,
@@ -699,12 +697,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     </>
   );
 
-  const placesSection = placesBlockRef ? (
-    <View ref={placesBlockRef} collapsable={false}>
+  const placesSection = (
+    <View collapsable={false} onLayout={onPlacesBlockLayout}>
       {placesInner}
     </View>
-  ) : (
-    <>{placesInner}</>
   );
 
   const formBody = (
@@ -814,13 +810,12 @@ export default function CreateDetailsScreen() {
   const { phoneUserId } = useUserSession();
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
-  const contentWrapRef = useRef<View>(null);
-  const step1Ref = useRef<View>(null);
-  const step2Ref = useRef<View>(null);
-  const step3Ref = useRef<View>(null);
-  const placesBlockRef = useRef<View>(null);
-  const step5Ref = useRef<View>(null);
-  const stepYRef = useRef<Partial<Record<WizardStep, number>>>({});
+  /** ScrollView 콘텐츠 기준 각 스텝 카드 상단 y (onLayout으로만 갱신) */
+  const stepPositions = useRef<Partial<Record<WizardStep, number>>>({});
+  /** Step 3 셸 내부에서 투표 폼 래퍼의 상대 y */
+  const formMountRelYRef = useRef(0);
+  /** 일정 확정 직후, 장소 블록 onLayout에서 한 번만 스크롤 */
+  const pendingScrollToStep4Ref = useRef(false);
 
   const {
     initialQuery: initialQueryParam,
@@ -925,35 +920,33 @@ export default function CreateDetailsScreen() {
   const scrollToStep = useCallback((s: WizardStep) => {
     requestAnimationFrame(() => {
       InteractionManager.runAfterInteractions(() => {
-        const wrap = contentWrapRef.current;
-        const wrapHandle = wrap ? findNodeHandle(wrap) : null;
-        const targetRef =
-          s === 1 ? step1Ref : s === 2 ? step2Ref : s === 3 ? step3Ref : s === 4 ? placesBlockRef : step5Ref;
-        const node = targetRef.current;
-        const fallbackY = stepYRef.current[s];
-        const scrollFallback = () => {
-          if (fallbackY != null) {
-            mainScrollRef.current?.scrollTo({ y: Math.max(0, fallbackY - 12), animated: true });
-          }
-        };
-        if (wrapHandle && node) {
-          node.measureLayout(
-            wrapHandle as unknown as number,
-            (_x: number, y: number) => {
-              mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
-            },
-            scrollFallback,
-          );
-        } else {
-          scrollFallback();
-        }
+        const y = stepPositions.current[s];
+        if (y == null) return;
+        mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 10), animated: true });
       });
     });
   }, []);
 
-  const captureStepLayout = useCallback((s: WizardStep, e: LayoutChangeEvent) => {
-    stepYRef.current[s] = e.nativeEvent.layout.y;
+  const captureStepPosition = useCallback((s: WizardStep, e: LayoutChangeEvent) => {
+    stepPositions.current[s] = e.nativeEvent.layout.y;
   }, []);
+
+  const onPlacesBlockLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const y3 = stepPositions.current[3];
+      if (y3 == null) return;
+      stepPositions.current[4] = y3 + formMountRelYRef.current + e.nativeEvent.layout.y;
+      if (pendingScrollToStep4Ref.current) {
+        pendingScrollToStep4Ref.current = false;
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            scrollToStep(4);
+          });
+        });
+      }
+    },
+    [scrollToStep],
+  );
 
   const onConfirmStep1 = useCallback(() => {
     setWizardError(null);
@@ -993,10 +986,9 @@ export default function CreateDetailsScreen() {
     }
     animate();
     setGates((g) => ({ ...g, s3: true }));
+    pendingScrollToStep4Ref.current = true;
     setWizardStep(4);
-    // 장소 블록이 마운트된 뒤 measureLayout이 안정적으로 동작하도록 한 틱 뒤 스크롤
-    setTimeout(() => scrollToStep(4), 96);
-  }, [scrollToStep]);
+  }, []);
 
   const onConfirmStep4 = useCallback(() => {
     setWizardError(null);
@@ -1137,11 +1129,10 @@ export default function CreateDetailsScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.scrollContent, styles.wizardScrollPad]}>
-            <View ref={contentWrapRef} collapsable={false}>
+            <View collapsable={false}>
               <View
-                ref={step1Ref}
                 style={[styles.wizardStepShell, pastStepShell(wizardStep, 1)]}
-                onLayout={(e) => captureStepLayout(1, e)}>
+                onLayout={(e) => captureStepPosition(1, e)}>
                 <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
                 <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
 
@@ -1238,9 +1229,8 @@ export default function CreateDetailsScreen() {
               </View>
 
               <View
-                ref={step2Ref}
                 style={[styles.wizardStepShell, pastStepShell(wizardStep, 2)]}
-                onLayout={(e) => captureStepLayout(2, e)}>
+                onLayout={(e) => captureStepPosition(2, e)}>
                 <Text style={styles.wizardStepBadge}>2 · 기본 정보</Text>
                 {wizardStep < 2 ? (
                   <Text style={styles.wizardLockedHint}>1단계를 완료하면 이름과 인원을 정할 수 있어요.</Text>
@@ -1290,9 +1280,8 @@ export default function CreateDetailsScreen() {
               </View>
 
               <View
-                ref={step3Ref}
                 style={[styles.wizardStepShell, pastStepShell(wizardStep, 3)]}
-                onLayout={(e) => captureStepLayout(3, e)}>
+                onLayout={(e) => captureStepPosition(3, e)}>
                 <View
                   style={[
                     styles.scheduleStepHeader,
@@ -1305,7 +1294,11 @@ export default function CreateDetailsScreen() {
                 {wizardStep < 3 ? (
                   <Text style={styles.wizardLockedHint}>2단계를 완료하면 일정을 잡을 수 있어요.</Text>
                 ) : null}
-                <View style={[styles.wizardFormMount, (wizardStep === 1 || wizardStep === 2 || wizardStep === 5) && styles.wizardFormHidden]}>
+                <View
+                  style={[styles.wizardFormMount, (wizardStep === 1 || wizardStep === 2 || wizardStep === 5) && styles.wizardFormHidden]}
+                  onLayout={(e) => {
+                    formMountRelYRef.current = e.nativeEvent.layout.y;
+                  }}>
                   <VoteCandidatesForm
                     ref={voteFormRef}
                     key={`wiz-${voteHydrateKey}-${seedQ}-${seedDate}-${seedTime}`}
@@ -1315,7 +1308,7 @@ export default function CreateDetailsScreen() {
                     initialPayload={votePayload}
                     bare
                     wizardSegment={wizardSegment}
-                    placesBlockRef={placesBlockRef}
+                    onPlacesBlockLayout={onPlacesBlockLayout}
                     headerBeforePlaces={headerBeforePlaces}
                   />
                 </View>
@@ -1344,9 +1337,8 @@ export default function CreateDetailsScreen() {
               </View>
 
               <View
-                ref={step5Ref}
                 style={[styles.wizardStepShell, pastStepShell(wizardStep, 5)]}
-                onLayout={(e) => captureStepLayout(5, e)}>
+                onLayout={(e) => captureStepPosition(5, e)}>
                 <Text style={styles.wizardStepBadge}>5 · 상세 정보 (선택)</Text>
                 {wizardStep >= 5 ? (
                   <>
