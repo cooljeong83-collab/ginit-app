@@ -3,7 +3,7 @@ import type { Category } from '@/src/lib/categories';
 export type SpecialtyKind = 'movie' | 'food' | 'sports';
 
 /**
- * Firestore 카테고리 `label` 기준으로 Step 2~3 사이 특화 카드 종류를 결정합니다.
+ * Firestore 카테고리 `label` 기준으로 Step 2 특화 카드 종류를 결정합니다.
  * (우선순위: 영화 → 맛집/카페 → 운동)
  */
 export function resolveSpecialtyKind(label: string): SpecialtyKind | null {
@@ -25,12 +25,12 @@ export function categoryNeedsSpecialty(category: Category | null): boolean {
 export function specialtyStepBadge(kind: SpecialtyKind): string {
   switch (kind) {
     case 'movie':
-      return '3 · 영화 선택';
+      return '2 · 영화 선택';
     case 'food':
-      return '3 · 메뉴 성향';
+      return '2 · 메뉴 성향';
     case 'sports':
-      return '3 · 운동 강도';
+      return '2 · 운동 강도';
     default:
-      return '3 · 추가 정보';
+      return '2 · 추가 정보';
   }
 }

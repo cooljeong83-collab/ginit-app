@@ -37,6 +37,8 @@ export type Meeting = {
   location: string;
   description: string;
   capacity: number;
+  /** 최소 인원(듀얼 휠). 없으면 기존 문서와 동일하게 `capacity`만 사용 */
+  minParticipants?: number | null;
   /** Firestore 서버 타임스탬프 */
   createdAt?: Timestamp | null;
   createdBy?: string | null;
@@ -71,6 +73,7 @@ export type CreateMeetingInput = {
   longitude: number;
   description: string;
   capacity: number;
+  minParticipants?: number | null;
   createdBy: string | null;
   categoryId: string;
   categoryLabel: string;
@@ -109,6 +112,7 @@ export async function addMeeting(input: CreateMeetingInput): Promise<void> {
     longitude: input.longitude,
     description: input.description.trim(),
     capacity: input.capacity,
+    minParticipants: input.minParticipants ?? null,
     createdBy: input.createdBy,
     imageUrl: input.imageUrl?.trim() || null,
     categoryId: input.categoryId,
@@ -141,6 +145,10 @@ export function subscribeMeetings(
           location: typeof data.location === 'string' ? data.location : '',
           description: typeof data.description === 'string' ? data.description : '',
           capacity: typeof data.capacity === 'number' && Number.isFinite(data.capacity) ? data.capacity : 0,
+          minParticipants:
+            typeof data.minParticipants === 'number' && Number.isFinite(data.minParticipants)
+              ? data.minParticipants
+              : null,
           createdAt: data.createdAt ?? null,
           createdBy: typeof data.createdBy === 'string' ? data.createdBy : null,
           imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : null,
