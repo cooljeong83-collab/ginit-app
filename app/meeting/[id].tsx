@@ -1,22 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
+import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
+import type { DateCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingById } from '@/src/lib/meetings';
+import { getMeetingById, updateMeetingDateCandidates } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
@@ -39,19 +46,56 @@ function formatDateCandidateTitle(dc: DateCandidate): string {
 
 type DateChip = { id: string; title: string; sub?: string };
 
-function buildDateChips(meeting: Meeting): DateChip[] {
-  const list = meeting.dateCandidates ?? [];
+/** 투표 칩·선택 상태와 동일한 id (후보에 id 없을 때 인덱스 fallback) */
+function dateCandidateChipId(d: DateCandidate, index: number): string {
+  return d.id?.trim() || `dc-${index}`;
+}
+
+function buildDateChipsFromCandidates(list: DateCandidate[]): DateChip[] {
   if (list.length > 0) {
     return list.map((dc, i) => ({
-      id: dc.id?.trim() || `dc-${i}`,
+      id: dateCandidateChipId(dc, i),
       title: formatDateCandidateTitle(dc),
-      sub: dc.startTime?.trim() || undefined,
+      sub: dc.startTime?.trim() ? normalizeTimeInput(dc.startTime) : undefined,
     }));
   }
   return [
     { id: 'mock-1', title: '4월 16일 (목)', sub: '14:00' },
     { id: 'mock-2', title: '4월 17일 (금)', sub: '14:00' },
   ];
+}
+
+function newDateCandidateId(): string {
+  return `date-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** `startDate` + 정규화 시간 기준으로 기존 후보와 동일한 일시인지 판별 */
+function dateCandidateTimeKey(d: DateCandidate): string {
+  const t = normalizeTimeInput(d.startTime ?? '') || '15:00';
+  return `${(typeof d.startDate === 'string' ? d.startDate : '').trim()}|${t}`;
+}
+
+/**
+ * 폼에서 넘어온 일시 후보 중, 기존 문서 후보와 **같은 날짜·시간**인 것은 제외하고 뒤에 이어붙입니다.
+ * 폼 안에서 서로 같은 일시가 여러 번 나와도 한 번만 추가합니다.
+ */
+function mergeAppendNewDateCandidatesWithoutDup(
+  existing: DateCandidate[],
+  fromForm: DateCandidate[],
+): { merged: DateCandidate[]; additions: DateCandidate[] } {
+  const mergedKeys = new Set(existing.map(dateCandidateTimeKey));
+  const additions: DateCandidate[] = [];
+  for (const d of fromForm) {
+    const k = dateCandidateTimeKey(d);
+    if (mergedKeys.has(k)) continue;
+    mergedKeys.add(k);
+    additions.push({
+      ...d,
+      id: d.id?.trim() || newDateCandidateId(),
+    });
+  }
+  const merged = [...existing.map((x) => ({ ...x })), ...additions];
+  return { merged, additions };
 }
 
 const MOCK_PARTICIPANTS = [
@@ -75,6 +119,7 @@ function isMeetingHost(sessionPhone: string | null, createdBy: string | null | u
 
 export default function MeetingDetailScreen() {
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
   const { phoneUserId } = useUserSession();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
@@ -84,6 +129,10 @@ export default function MeetingDetailScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 일시 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
+  const [proposeOpen, setProposeOpen] = useState(false);
+  const [proposeFormKey, setProposeFormKey] = useState(0);
+  const [proposeSaving, setProposeSaving] = useState(false);
+  const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
 
   const load = useCallback(async () => {
     if (!id?.trim()) {
@@ -113,7 +162,84 @@ export default function MeetingDetailScreen() {
     setSelectedDateIds([]);
   }, [meeting?.id]);
 
-  const dateChips = useMemo(() => (meeting ? buildDateChips(meeting) : []), [meeting]);
+  const storedDateCandidates = meeting?.dateCandidates ?? [];
+  const dateChips = useMemo(() => {
+    if (!meeting) return [];
+    const list = meeting.dateCandidates ?? [];
+    return buildDateChipsFromCandidates(list);
+  }, [meeting]);
+
+  /** 날짜 제안 모달 — 기존 후보 목록 없이 새 행만: 기본값은 모임 상단 일정 또는 오늘 */
+  const insertModalSchedule = useMemo(() => {
+    const sd = meeting?.scheduleDate?.trim();
+    const st = meeting?.scheduleTime?.trim();
+    if (sd && st) return { scheduleDate: sd, scheduleTime: st };
+    return { scheduleDate: fmtDateYmd(new Date()), scheduleTime: '15:00' };
+  }, [meeting?.scheduleDate, meeting?.scheduleTime]);
+
+  const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
+    if (!meeting || !proposeOpen) return null;
+    const dates = [
+      createPointCandidate(
+        newDateCandidateId(),
+        insertModalSchedule.scheduleDate,
+        insertModalSchedule.scheduleTime,
+      ),
+    ];
+    const places = meeting.placeCandidates?.length ? meeting.placeCandidates.map((p) => ({ ...p })) : [];
+    return { dateCandidates: dates, placeCandidates: places };
+  }, [meeting, insertModalSchedule, proposeOpen, proposeFormKey]);
+
+  const openDateProposeModal = useCallback(() => {
+    setProposeFormKey((k) => k + 1);
+    setProposeOpen(true);
+  }, []);
+
+  const confirmDateProposals = useCallback(async () => {
+    if (!meeting) return;
+    const cap = voteFormRef.current?.captureWizardPayloadAfterSchedule();
+    if (!cap?.ok) {
+      Alert.alert('확인', cap?.error ?? '일정 후보를 확인해 주세요.');
+      return;
+    }
+    const existing = meeting.dateCandidates ?? [];
+    const fromForm = cap.payload.dateCandidates;
+    const { merged, additions } = mergeAppendNewDateCandidatesWithoutDup(existing, fromForm);
+
+    if (additions.length === 0) {
+      Alert.alert('알림', '기존 일시와 겹치는 날짜만 있어 추가된 항목이 없습니다.');
+      setProposeOpen(false);
+      return;
+    }
+
+    setProposeSaving(true);
+    try {
+      await updateMeetingDateCandidates(meeting.id, merged);
+      let refreshed: Meeting | null = null;
+      try {
+        refreshed = await getMeetingById(meeting.id);
+      } catch {
+        refreshed = null;
+      }
+      const dates =
+        refreshed?.dateCandidates != null && refreshed.dateCandidates.length > 0
+          ? refreshed.dateCandidates
+          : merged;
+      setMeeting((prev) => {
+        if (!prev) return prev;
+        if (refreshed) {
+          return { ...refreshed, dateCandidates: dates.map((d) => ({ ...d })) };
+        }
+        return { ...prev, dateCandidates: dates.map((d) => ({ ...d })) };
+      });
+      setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
+      setProposeOpen(false);
+    } catch (e) {
+      Alert.alert('저장 실패', e instanceof Error ? e.message : '일정 후보를 저장하지 못했습니다.');
+    } finally {
+      setProposeSaving(false);
+    }
+  }, [meeting]);
 
   const toggleDateSelection = useCallback((chipId: string) => {
     setSelectedDateIds((prev) =>
@@ -190,7 +316,9 @@ export default function MeetingDetailScreen() {
             </View>
 
             <View style={styles.dateVoteHeaderBlock}>
-              <Text style={styles.sectionTitle}>일시 투표 ({dateChips.length}건)</Text>
+              <Text style={styles.sectionTitle}>
+                일시 투표 ({storedDateCandidates.length > 0 ? storedDateCandidates.length : dateChips.length}건)
+              </Text>
               <Text style={styles.dateVoteSub}>가능한 날짜를 가로로 스크롤하며 여러 개 선택할 수 있어요.</Text>
             </View>
 
@@ -230,9 +358,13 @@ export default function MeetingDetailScreen() {
               {selectedDateIds.length > 0 ? `${selectedDateIds.length}개 선택됨` : '아직 선택한 일정이 없어요'}
             </Text>
 
-            <Pressable style={styles.addOutlineBtn} accessibilityRole="button">
-              <Ionicons name="add" size={20} color="#5C6570" />
-              <Text style={styles.addOutlineText}>후보 추가</Text>
+            <Pressable
+              style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="날짜 제안"
+              onPress={openDateProposeModal}>
+              <Ionicons name="calendar-outline" size={20} color={GinitTheme.trustBlue} />
+              <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
 
             <Text style={[styles.sectionTitle, styles.sectionSpaced]}>장소</Text>
@@ -325,6 +457,70 @@ export default function MeetingDetailScreen() {
             )}
           </View>
         ) : null}
+
+        <Modal
+          visible={proposeOpen}
+          animationType="fade"
+          transparent
+          onRequestClose={() => !proposeSaving && setProposeOpen(false)}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalRoot}>
+            <Pressable
+              style={styles.modalBackdrop}
+              onPress={() => !proposeSaving && setProposeOpen(false)}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+            />
+            <View style={[styles.modalSheetDark, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+              <Text style={styles.modalTitleLight}>날짜 제안</Text>
+              <Text style={styles.modalSubLight}>
+                기존 일정 목록은 여기서 바꾸지 않아요. 새로 넣을 일시만 추가하면 기존 후보 뒤에 붙습니다.
+              </Text>
+              {proposeInitialPayload ? (
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={styles.modalFormScroll}
+                  contentContainerStyle={styles.modalFormScrollContent}>
+                  <VoteCandidatesForm
+                    key={proposeFormKey}
+                    ref={voteFormRef}
+                    seedPlaceQuery=""
+                    seedScheduleDate={insertModalSchedule.scheduleDate}
+                    seedScheduleTime={insertModalSchedule.scheduleTime}
+                    initialPayload={proposeInitialPayload}
+                    bare
+                    wizardSegment="schedule"
+                  />
+                </ScrollView>
+              ) : null}
+              <View style={styles.modalActions}>
+                <Pressable
+                  onPress={() => !proposeSaving && setProposeOpen(false)}
+                  style={({ pressed }) => [styles.modalBtnGhostDark, pressed && styles.dateChipPressed]}
+                  accessibilityRole="button">
+                  <Text style={styles.modalBtnGhostTextLight}>취소</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void confirmDateProposals()}
+                  disabled={proposeSaving}
+                  style={({ pressed }) => [
+                    styles.modalBtnPrimary,
+                    (pressed || proposeSaving) && { opacity: proposeSaving ? 0.7 : 0.9 },
+                  ]}
+                  accessibilityRole="button">
+                  {proposeSaving ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.modalBtnPrimaryText}>후보 저장</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -433,6 +629,61 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.65)',
   },
   addOutlineText: { fontSize: 15, fontWeight: '600', color: '#5C6570' },
+  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: GinitTheme.trustBlue },
+  modalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 12 },
+  modalBackdrop: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  modalSheetDark: {
+    zIndex: 2,
+    backgroundColor: '#0F172A',
+    borderRadius: 18,
+    padding: 16,
+    maxWidth: 440,
+    width: '100%',
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalTitleLight: { fontSize: 18, fontWeight: '700', color: '#F8FAFC', marginBottom: 6 },
+  modalSubLight: { fontSize: 13, color: 'rgba(248, 250, 252, 0.72)', lineHeight: 19, marginBottom: 8 },
+  modalFormScroll: { flexGrow: 0 },
+  modalFormScrollContent: { paddingBottom: 12 },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  modalBtnGhostDark: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  modalBtnGhostTextLight: { fontSize: 15, fontWeight: '600', color: 'rgba(248, 250, 252, 0.85)' },
+  modalBtnPrimary: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: GinitTheme.trustBlue,
+    minWidth: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   placeCard: {
     flexDirection: 'row',
     alignItems: 'center',

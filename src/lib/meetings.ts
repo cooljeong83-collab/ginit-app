@@ -23,6 +23,7 @@ import {
   query,
   serverTimestamp,
   Timestamp,
+  updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
 
@@ -150,6 +151,18 @@ export async function getMeetingById(meetingId: string): Promise<Meeting | null>
   const snap = await getDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id));
   if (!snap.exists()) return null;
   return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
+}
+
+/** 일시 후보만 갱신 (상세 화면 날짜 제안 등) */
+export async function updateMeetingDateCandidates(
+  meetingId: string,
+  dateCandidates: DateCandidate[],
+): Promise<void> {
+  const id = meetingId.trim();
+  if (!id) return;
+  await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
+    dateCandidates: dateCandidates.length ? stripUndefinedDeep(dateCandidates) : null,
+  });
 }
 
 export async function addMeeting(input: CreateMeetingInput): Promise<void> {
