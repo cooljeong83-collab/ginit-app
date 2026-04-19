@@ -28,6 +28,13 @@
     "plugins": [
       "expo-router",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "지닛이 주변 모임을 보여 주기 위해 현재 위치를 사용합니다.",
+          "locationAlwaysAndWhenInUsePermission": "지닛이 주변 모임을 보여 주기 위해 현재 위치를 사용합니다."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
