@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
+import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -29,11 +30,14 @@ import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '
 import type { Meeting } from '@/src/lib/meetings';
 import {
   confirmMeetingSchedule,
+  unconfirmMeetingSchedule,
+  computeMeetingConfirmAnalysis,
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
   joinMeeting,
   leaveMeeting,
+  resolveVoteTopTies,
   subscribeMeetingById,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
@@ -41,6 +45,7 @@ import {
 } from '@/src/lib/meetings';
 import { ensureUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { openNaverMapAt } from '@/src/lib/open-naver-map';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 
@@ -319,6 +324,8 @@ export default function MeetingDetailScreen() {
   const [proposeFormKey, setProposeFormKey] = useState(0);
   const [proposeSaving, setProposeSaving] = useState(false);
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
+  const mainScrollRef = useRef<ScrollView>(null);
+  const voteSectionScrollYs = useRef({ date: 0, movie: 0, place: 0 });
 
   const [placeProposeOpen, setPlaceProposeOpen] = useState(false);
   const [placeProposeFormKey, setPlaceProposeFormKey] = useState(0);
@@ -332,6 +339,9 @@ export default function MeetingDetailScreen() {
   const [joinBusy, setJoinBusy] = useState(false);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
+  const [hostTieDateId, setHostTieDateId] = useState<string | null>(null);
+  const [hostTiePlaceId, setHostTiePlaceId] = useState<string | null>(null);
+  const [hostTieMovieId, setHostTieMovieId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id.trim()) {
@@ -391,6 +401,9 @@ export default function MeetingDetailScreen() {
     setSelectedDateIds([]);
     setSelectedPlaceIds([]);
     setSelectedMovieIds([]);
+    setHostTieDateId(null);
+    setHostTiePlaceId(null);
+    setHostTieMovieId(null);
   }, [meeting?.id]);
 
   const storedDateCandidates = meeting?.dateCandidates ?? [];
@@ -445,11 +458,64 @@ export default function MeetingDetailScreen() {
       return a.mi - b.mi;
     });
   }, [meeting?.voteTallies?.movies, extraMovies]);
+
+  const isScheduleConfirmed = meeting?.scheduleConfirmed === true;
+
+  const confirmedDateChipResolved = useMemo(() => {
+    if (!isScheduleConfirmed || !meeting?.confirmedDateChipId?.trim()) return null;
+    const id = meeting.confirmedDateChipId.trim();
+    return dateChips.find((c) => c.id === id) ?? null;
+  }, [isScheduleConfirmed, meeting?.confirmedDateChipId, dateChips]);
+
+  const confirmedPlaceChipResolved = useMemo(() => {
+    if (!isScheduleConfirmed || !meeting?.confirmedPlaceChipId?.trim()) return null;
+    const id = meeting.confirmedPlaceChipId.trim();
+    return placeChips.find((c) => c.id === id) ?? null;
+  }, [isScheduleConfirmed, meeting?.confirmedPlaceChipId, placeChips]);
+
+  const confirmedPlaceCoords = useMemo(() => {
+    if (!isScheduleConfirmed || !meeting?.confirmedPlaceChipId?.trim()) return null;
+    const rawId = meeting.confirmedPlaceChipId.trim();
+    const cands = meeting.placeCandidates ?? [];
+    for (let i = 0; i < cands.length; i++) {
+      if (placeCandidateChipId(cands[i], i) === rawId) {
+        const lat = cands[i].latitude;
+        const lng = cands[i].longitude;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) return { latitude: lat, longitude: lng };
+        return null;
+      }
+    }
+    if (rawId === 'legacy-place') {
+      const lat = meeting.latitude;
+      const lng = meeting.longitude;
+      if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { latitude: lat, longitude: lng };
+      }
+    }
+    return null;
+  }, [
+    isScheduleConfirmed,
+    meeting?.confirmedPlaceChipId,
+    meeting?.placeCandidates,
+    meeting?.latitude,
+    meeting?.longitude,
+  ]);
+
+  const confirmedMovieResolved = useMemo(() => {
+    if (!isScheduleConfirmed || !meeting?.confirmedMovieChipId?.trim()) return null;
+    const id = meeting.confirmedMovieChipId.trim();
+    for (let mi = 0; mi < extraMovies.length; mi++) {
+      if (movieCandidateChipId(extraMovies[mi], mi) === id) return extraMovies[mi];
+    }
+    return null;
+  }, [isScheduleConfirmed, meeting?.confirmedMovieChipId, extraMovies]);
+
   const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
   const extraSport = useMemo(() => (meeting ? extractSportIntensity(meeting.extraData) : null), [meeting?.extraData]);
 
   const representativeScheduleText = useMemo(() => {
     if (!meeting) return null;
+    if (meeting.scheduleConfirmed === true) return null;
     return formatTopScheduleLine(meeting);
   }, [meeting]);
 
@@ -621,11 +687,13 @@ export default function MeetingDetailScreen() {
     (specialtyKind === 'movie' || extraMovies.length > 0) && extraMovies.length > 0;
 
   const guestVotesReady = useMemo(() => {
+    if (meeting?.scheduleConfirmed === true) return true;
     if (needsDatePick && selectedDateIds.length === 0) return false;
     if (needsPlacePick && selectedPlaceIds.length === 0) return false;
     if (needsMoviePick && selectedMovieIds.length === 0) return false;
     return true;
   }, [
+    meeting?.scheduleConfirmed,
     needsDatePick,
     needsPlacePick,
     needsMoviePick,
@@ -658,6 +726,49 @@ export default function MeetingDetailScreen() {
   const participantSaveDisabled =
     participantVoteBusy || !guestVotesReady || participantVoteLogMissing;
 
+  const hostTiePicks = useMemo(
+    () => ({ dateChipId: hostTieDateId, placeChipId: hostTiePlaceId, movieChipId: hostTieMovieId }),
+    [hostTieDateId, hostTiePlaceId, hostTieMovieId],
+  );
+
+  const confirmAnalysis = useMemo(
+    () => (meeting ? computeMeetingConfirmAnalysis(meeting, hostTiePicks) : null),
+    [meeting, hostTiePicks],
+  );
+
+  /** 화면에 그린 칩 id 기준 집계 동점(서버 분석과 불일치 시에도 UI 단일 선택 보장) */
+  const dateTallyTopIds = useMemo(
+    () => resolveVoteTopTies(sortedDateChips.map((c) => c.id), meeting?.voteTallies?.dates).topIds,
+    [sortedDateChips, meeting?.voteTallies?.dates],
+  );
+  const placeTallyTopIds = useMemo(
+    () => resolveVoteTopTies(sortedPlaceChips.map((c) => c.id), meeting?.voteTallies?.places).topIds,
+    [sortedPlaceChips, meeting?.voteTallies?.places],
+  );
+  const movieTallyTopIds = useMemo(
+    () => resolveVoteTopTies(sortedMovieVoteRows.map((r) => r.chipId), meeting?.voteTallies?.movies).topIds,
+    [sortedMovieVoteRows, meeting?.voteTallies?.movies],
+  );
+
+  const dateHostPickMode = Boolean(isHost && dateTallyTopIds.length > 1);
+  const placeHostPickMode = Boolean(isHost && placeTallyTopIds.length > 1);
+  const movieHostPickMode = Boolean(isHost && movieTallyTopIds.length > 1);
+
+  const dateChipsShown = useMemo(() => {
+    if (!dateHostPickMode) return sortedDateChips;
+    return sortedDateChips.filter((c) => dateTallyTopIds.includes(c.id));
+  }, [dateHostPickMode, dateTallyTopIds, sortedDateChips]);
+
+  const placeChipsShown = useMemo(() => {
+    if (!placeHostPickMode) return sortedPlaceChips;
+    return sortedPlaceChips.filter((c) => placeTallyTopIds.includes(c.id));
+  }, [placeHostPickMode, placeTallyTopIds, sortedPlaceChips]);
+
+  const movieRowsShown = useMemo(() => {
+    if (!movieHostPickMode) return sortedMovieVoteRows;
+    return sortedMovieVoteRows.filter((r) => movieTallyTopIds.includes(r.chipId));
+  }, [movieHostPickMode, movieTallyTopIds, sortedMovieVoteRows]);
+
   const handleJoinMeeting = useCallback(async () => {
     if (!meeting) return;
     if (!sessionPk) {
@@ -680,11 +791,15 @@ export default function MeetingDetailScreen() {
     setJoinBusy(true);
     try {
       await ensureUserProfile(sessionPk);
-      await joinMeeting(meeting.id, sessionPk, {
-        dateChipIds: selectedDateIds,
-        placeChipIds: selectedPlaceIds,
-        movieChipIds: selectedMovieIds,
-      });
+      const joinVotes =
+        meeting.scheduleConfirmed === true
+          ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }
+          : {
+              dateChipIds: selectedDateIds,
+              placeChipIds: selectedPlaceIds,
+              movieChipIds: selectedMovieIds,
+            };
+      await joinMeeting(meeting.id, sessionPk, joinVotes);
       router.replace('/(tabs)');
     } catch (e) {
       Alert.alert('참여 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
@@ -696,6 +811,7 @@ export default function MeetingDetailScreen() {
     meeting,
     sessionPk,
     guestVotesReady,
+    meeting?.scheduleConfirmed,
     needsDatePick,
     needsPlacePick,
     needsMoviePick,
@@ -804,31 +920,141 @@ export default function MeetingDetailScreen() {
     }
   }, [recruitmentPhase]);
 
+  const scrollToVoteBlock = useCallback((section: 'date' | 'movie' | 'place') => {
+    const y = voteSectionScrollYs.current[section];
+    mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  }, []);
+
+  const onDateChipPress = useCallback(
+    (chipId: string) => {
+      if (!meeting) {
+        toggleDateSelection(chipId);
+        return;
+      }
+      const tops = resolveVoteTopTies(sortedDateChips.map((c) => c.id), meeting.voteTallies?.dates).topIds;
+      if (isHost && tops.length > 1 && tops.includes(chipId)) {
+        setHostTieDateId(chipId);
+        return;
+      }
+      toggleDateSelection(chipId);
+    },
+    [meeting, isHost, sortedDateChips, toggleDateSelection],
+  );
+
+  const onPlaceChipPress = useCallback(
+    (chipId: string) => {
+      if (!meeting) {
+        togglePlaceSelection(chipId);
+        return;
+      }
+      const tops = resolveVoteTopTies(sortedPlaceChips.map((c) => c.id), meeting.voteTallies?.places).topIds;
+      if (isHost && tops.length > 1 && tops.includes(chipId)) {
+        setHostTiePlaceId(chipId);
+        return;
+      }
+      togglePlaceSelection(chipId);
+    },
+    [meeting, isHost, sortedPlaceChips, togglePlaceSelection],
+  );
+
+  const onMovieChipPress = useCallback(
+    (chipId: string) => {
+      if (!meeting) {
+        toggleMovieSelection(chipId);
+        return;
+      }
+      const tops = resolveVoteTopTies(
+        sortedMovieVoteRows.map((r) => r.chipId),
+        meeting.voteTallies?.movies,
+      ).topIds;
+      if (isHost && tops.length > 1 && tops.includes(chipId)) {
+        setHostTieMovieId(chipId);
+        return;
+      }
+      toggleMovieSelection(chipId);
+    },
+    [meeting, isHost, sortedMovieVoteRows, toggleMovieSelection],
+  );
+
+  const handleUnconfirmMeetingSchedule = useCallback(() => {
+    if (!meeting || !phoneUserId?.trim()) {
+      Alert.alert('안내', '로그인한 주관자만 확정을 취소할 수 있어요.');
+      return;
+    }
+    if (meeting.scheduleConfirmed !== true) return;
+    Alert.alert(
+      '확정 취소',
+      '일정 확정을 되돌리면 다시 투표·확정 절차를 진행할 수 있는 상태로 바뀝니다. 취소할까요?',
+      [
+        { text: '닫기', style: 'cancel' },
+        {
+          text: '확정 취소',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setConfirmScheduleBusy(true);
+              try {
+                await unconfirmMeetingSchedule(meeting.id, phoneUserId.trim());
+              } catch (e) {
+                Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+              } finally {
+                setConfirmScheduleBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [meeting, phoneUserId]);
+
   const handleConfirmSchedule = useCallback(() => {
     if (!meeting || !phoneUserId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 확정할 수 있어요.');
       return;
     }
     if (meeting.scheduleConfirmed === true) return;
-    Alert.alert('일정 확정', '모임을 확정 상태로 바꿀까요? 이후 우측 상단에는「확정」으로 표시됩니다.', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '확정',
-        onPress: () => {
-          void (async () => {
-            setConfirmScheduleBusy(true);
-            try {
-              await confirmMeetingSchedule(meeting.id, phoneUserId.trim());
-            } catch (e) {
-              Alert.alert('확정 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-            } finally {
-              setConfirmScheduleBusy(false);
-            }
-          })();
+    const analysis = computeMeetingConfirmAnalysis(meeting, hostTiePicks);
+    if (!analysis.allReady && analysis.firstBlock) {
+      const { section, message } = analysis.firstBlock;
+      Alert.alert('동점 후보 선택 필요', message, [
+        { text: '확인', onPress: () => scrollToVoteBlock(section) },
+      ]);
+      return;
+    }
+    Alert.alert(
+      '일정 확정',
+      '집계된 투표를 반영해 모임을 확정할까요? 이후 우측 상단에는「확정」으로 표시됩니다.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '확정',
+          onPress: () => {
+            void (async () => {
+              setConfirmScheduleBusy(true);
+              try {
+                await confirmMeetingSchedule(meeting.id, phoneUserId.trim(), hostTiePicks);
+              } catch (e) {
+                Alert.alert('확정 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+              } finally {
+                setConfirmScheduleBusy(false);
+              }
+            })();
+          },
         },
-      },
-    ]);
-  }, [meeting, phoneUserId]);
+      ],
+    );
+  }, [meeting, phoneUserId, hostTiePicks, scrollToVoteBlock]);
+
+  const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
+    if (!meeting || !confirmedPlaceCoords) return;
+    const name =
+      confirmedPlaceChipResolved?.title?.trim() ||
+      meeting.placeName?.trim() ||
+      meeting.location?.trim();
+    void openNaverMapAt(confirmedPlaceCoords.latitude, confirmedPlaceCoords.longitude, name).then((ok) => {
+      if (!ok) Alert.alert('안내', '네이버 지도를 열 수 없어요.');
+    });
+  }, [meeting, confirmedPlaceCoords, confirmedPlaceChipResolved?.title]);
 
   const notFound = !loading && !loadError && meeting === null;
 
@@ -881,6 +1107,7 @@ export default function MeetingDetailScreen() {
 
         {!loading && !loadError && meeting !== null ? (
           <ScrollView
+            ref={mainScrollRef}
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
@@ -946,42 +1173,148 @@ export default function MeetingDetailScreen() {
               )}
             </View>
 
-            <View style={styles.dateVoteHeaderBlock}>
-              <Text style={styles.sectionTitle}>
-                일시 투표 ({storedDateCandidates.length > 0 ? storedDateCandidates.length : dateChips.length}건)
+            {isScheduleConfirmed ? (
+              <View style={styles.infoCard}>
+                <Text style={styles.infoCardTitle}>확정된 일정</Text>
+                <Text style={styles.infoSectionLabel}>일시</Text>
+                {confirmedDateChipResolved ? (
+                  <>
+                    <Text style={styles.infoRow}>{confirmedDateChipResolved.title}</Text>
+                    {confirmedDateChipResolved.sub ? (
+                      <Text style={styles.infoRowMuted}>{confirmedDateChipResolved.sub}</Text>
+                    ) : null}
+                  </>
+                ) : (
+                  <Text style={styles.infoRowMuted}>저장된 확정 일시가 없어요.</Text>
+                )}
+                <Text style={styles.infoSectionLabel}>장소</Text>
+                {confirmedPlaceChipResolved ? (
+                  <>
+                    <Text style={styles.infoRow}>{confirmedPlaceChipResolved.title}</Text>
+                    {confirmedPlaceChipResolved.sub ? (
+                      <Text style={styles.infoRowMuted}>{confirmedPlaceChipResolved.sub}</Text>
+                    ) : null}
+                  </>
+                ) : placeChips.length === 0 ? (
+                  <Text style={styles.infoRowMuted}>등록된 장소 후보가 없었어요.</Text>
+                ) : (
+                  <Text style={styles.infoRowMuted}>저장된 확정 장소가 없어요.</Text>
+                )}
+                {confirmedPlaceCoords ? (
+                  <View style={styles.confirmedMapPress}>
+                    <View style={styles.confirmedMapPreviewBox}>
+                      <GooglePlacePreviewMap
+                        latitude={confirmedPlaceCoords.latitude}
+                        longitude={confirmedPlaceCoords.longitude}
+                        height={200}
+                        borderRadius={12}
+                      />
+                      <Pressable
+                        onPress={() => void onOpenConfirmedPlaceInNaverMap()}
+                        style={({ pressed }) => [
+                          styles.confirmedMapTapOverlay,
+                          pressed && styles.confirmedMapTapOverlayPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="네이버 지도에서 이 장소 보기">
+                        <View style={StyleSheet.absoluteFillObject} collapsable={false} />
+                      </Pressable>
+                      <View style={styles.confirmedMapBadge} pointerEvents="none">
+                        <Ionicons name="navigate-outline" size={14} color="#fff" />
+                        <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : confirmedPlaceChipResolved ? (
+                  <Text style={[styles.infoRowMuted, styles.confirmedMapMissing]}>
+                    저장된 좌표가 없어 지도를 표시할 수 없어요.
+                  </Text>
+                ) : null}
+                {(specialtyKind === 'movie' || extraMovies.length > 0) && (
+                  <>
+                    <Text style={styles.infoSectionLabel}>영화</Text>
+                    {confirmedMovieResolved ? (
+                      <View style={styles.confirmedMovieRow}>
+                        {confirmedMovieResolved.posterUrl?.trim() ? (
+                          <Image
+                            source={{ uri: confirmedMovieResolved.posterUrl.trim() }}
+                            style={styles.confirmedMoviePoster}
+                            contentFit="cover"
+                            transition={120}
+                          />
+                        ) : (
+                          <View style={[styles.confirmedMoviePoster, styles.moviePosterPlaceholder]}>
+                            <Ionicons name="film-outline" size={28} color="#94A3B8" />
+                          </View>
+                        )}
+                        <View style={styles.confirmedMovieTextCol}>
+                          <Text style={styles.infoRow} numberOfLines={3}>
+                            {confirmedMovieResolved.title}
+                            {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : extraMovies.length > 0 ? (
+                      <Text style={styles.infoRowMuted}>저장된 확정 영화가 없어요.</Text>
+                    ) : (
+                      <Text style={styles.infoRowMuted}>등록된 영화 후보가 없었어요.</Text>
+                    )}
+                  </>
+                )}
+                <Text style={[styles.placePayNote, styles.confirmedPayNoteSpacer]}>결제: 💵 1/N 정산 (안내)</Text>
+              </View>
+            ) : (
+              <>
+                <View
+                  collapsable={false}
+                  onLayout={(e) => {
+                    voteSectionScrollYs.current.date = e.nativeEvent.layout.y;
+                  }}>
+                  <View style={styles.dateVoteHeaderBlock}>
+                    <Text style={styles.sectionTitle}>
+                      일시 투표 ({storedDateCandidates.length > 0 ? storedDateCandidates.length : dateChips.length}건)
+                    </Text>
+              <Text style={styles.dateVoteSub}>
+                {dateHostPickMode
+                  ? '동점 후보만 표시됩니다. 한 곳만 탭해 확정할 일시를 고르세요. (집계 표 숫자에는 반영되지 않아요.)'
+                  : '가능한 날짜를 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
               </Text>
-              <Text style={styles.dateVoteSub}>가능한 날짜를 가로로 스크롤하며 여러 개 선택할 수 있어요.</Text>
+              {dateHostPickMode ? (
+                <Text style={styles.tieHostHint}>
+                  확정용 선택은 투표 참여 내역과 별도이며, <Text style={styles.tieHostHintEm}>득표 수는 변하지 않습니다.</Text>
+                </Text>
+              ) : null}
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
-              {sortedDateChips.map((chip) => {
-                const selected = selectedDateIds.includes(chip.id);
+              {dateChipsShown.map((chip) => {
+                const chipSelected = dateHostPickMode ? hostTieDateId === chip.id : selectedDateIds.includes(chip.id);
                 const tally = meeting.voteTallies?.dates?.[chip.id] ?? 0;
                 return (
                   <Pressable
                     key={chip.id}
-                    onPress={() => toggleDateSelection(chip.id)}
+                    onPress={() => onDateChipPress(chip.id)}
                     style={({ pressed }) => [
                       styles.dateChip,
-                      selected ? styles.dateChipSelected : null,
+                      chipSelected ? styles.dateChipSelected : null,
                       pressed ? styles.dateChipPressed : null,
                     ]}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: selected }}
-                    accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${selected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                    accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
                     <View style={styles.voteTallyBadge} pointerEvents="none">
                       <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                     </View>
-                    {selected ? (
+                    {chipSelected ? (
                       <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
                         <Ionicons name="checkmark-circle" size={20} color={GinitTheme.trustBlue} />
                       </View>
                     ) : null}
-                    <Text style={[styles.dateChipTitle, selected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                    <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
                       {chip.title}
                     </Text>
                     {chip.sub ? (
-                      <Text style={[styles.dateChipSub, selected && styles.dateChipSubSelected]} numberOfLines={1}>
+                      <Text style={[styles.dateChipSub, chipSelected && styles.dateChipSubSelected]} numberOfLines={1}>
                         {chip.sub}
                       </Text>
                     ) : null}
@@ -989,8 +1322,23 @@ export default function MeetingDetailScreen() {
                 );
               })}
             </ScrollView>
-            <Text style={selectedDateIds.length > 0 ? styles.dateSelectionHint : styles.dateSelectionHintMuted}>
-              {selectedDateIds.length > 0 ? `${selectedDateIds.length}개 선택됨` : '아직 선택한 일정이 없어요'}
+            <Text
+              style={
+                dateHostPickMode
+                  ? hostTieDateId
+                    ? styles.dateSelectionHint
+                    : styles.dateSelectionHintMuted
+                  : selectedDateIds.length > 0
+                    ? styles.dateSelectionHint
+                    : styles.dateSelectionHintMuted
+              }>
+              {dateHostPickMode
+                ? hostTieDateId
+                  ? '확정용 1곳 선택됨 · 집계 표에는 반영되지 않아요'
+                  : '확정할 일시를 한 곳만 탭해 주세요'
+                : selectedDateIds.length > 0
+                  ? `${selectedDateIds.length}개 선택됨`
+                  : '아직 선택한 일정이 없어요'}
             </Text>
 
             <Pressable
@@ -1001,14 +1349,28 @@ export default function MeetingDetailScreen() {
               <Ionicons name="calendar-outline" size={20} color={GinitTheme.trustBlue} />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
+            </View>
 
             {(specialtyKind === 'movie' || extraMovies.length > 0) && (
-              <>
+              <View
+                collapsable={false}
+                onLayout={(e) => {
+                  voteSectionScrollYs.current.movie = e.nativeEvent.layout.y;
+                }}>
                 <View style={styles.dateVoteHeaderBlock}>
                   <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                     영화 투표 ({extraMovies.length}건)
                   </Text>
-                  <Text style={styles.dateVoteSub}>포스터를 눌러 보고 싶은 작품을 가로로 스크롤하며 여러 개 선택할 수 있어요.</Text>
+                  <Text style={styles.dateVoteSub}>
+                    {movieHostPickMode
+                      ? '동점 작품만 표시됩니다. 한 곳만 탭하세요. (집계 표 숫자에는 반영되지 않아요.)'
+                      : '포스터를 눌러 보고 싶은 작품을 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
+                  </Text>
+                  {movieHostPickMode ? (
+                    <Text style={styles.tieHostHint}>
+                      확정용 선택은 투표 참여 내역과 별도이며, <Text style={styles.tieHostHintEm}>득표 수는 변하지 않습니다.</Text>
+                    </Text>
+                  ) : null}
                 </View>
                 {extraMovies.length > 0 ? (
                   <>
@@ -1016,25 +1378,27 @@ export default function MeetingDetailScreen() {
                       horizontal
                       showsHorizontalScrollIndicator={false}
                       contentContainerStyle={styles.movieScrollContent}>
-                      {sortedMovieVoteRows.map(({ mv, chipId }) => {
-                        const selected = selectedMovieIds.includes(chipId);
+                      {movieRowsShown.map(({ mv, chipId }) => {
+                        const chipSelected = movieHostPickMode
+                          ? hostTieMovieId === chipId
+                          : selectedMovieIds.includes(chipId);
                         const tally = meeting.voteTallies?.movies?.[chipId] ?? 0;
                         return (
                           <Pressable
                             key={chipId}
-                            onPress={() => toggleMovieSelection(chipId)}
+                            onPress={() => onMovieChipPress(chipId)}
                             style={({ pressed }) => [
                               styles.movieVoteCard,
-                              selected ? styles.movieVoteCardSelected : null,
+                              chipSelected ? styles.movieVoteCardSelected : null,
                               pressed ? styles.dateChipPressed : null,
                             ]}
-                            accessibilityRole="checkbox"
-                            accessibilityState={{ checked: selected }}
-                            accessibilityLabel={`${mv.title}${selected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                            accessibilityRole="radio"
+                            accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                            accessibilityLabel={`${mv.title}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
                             <View style={[styles.voteTallyBadge, styles.voteTallyBadgeMovie]} pointerEvents="none">
                               <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                             </View>
-                            {selected ? (
+                            {chipSelected ? (
                               <View style={styles.movieVoteCheckWrapLeft} pointerEvents="none">
                                 <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
                               </View>
@@ -1051,7 +1415,7 @@ export default function MeetingDetailScreen() {
                                 <Ionicons name="film-outline" size={28} color="#94A3B8" />
                               </View>
                             )}
-                            <Text style={[styles.moviePosterTitle, selected && styles.moviePosterTitleSelected]} numberOfLines={2}>
+                            <Text style={[styles.moviePosterTitle, chipSelected && styles.moviePosterTitleSelected]} numberOfLines={2}>
                               {mv.title}
                               {mv.year ? ` (${mv.year})` : ''}
                             </Text>
@@ -1059,56 +1423,85 @@ export default function MeetingDetailScreen() {
                         );
                       })}
                     </ScrollView>
-                    <Text style={selectedMovieIds.length > 0 ? styles.dateSelectionHint : styles.dateSelectionHintMuted}>
-                      {selectedMovieIds.length > 0
-                        ? `${selectedMovieIds.length}편 선택됨`
-                        : '아직 선택한 영화가 없어요'}
+                    <Text
+                      style={
+                        movieHostPickMode
+                          ? hostTieMovieId
+                            ? styles.dateSelectionHint
+                            : styles.dateSelectionHintMuted
+                          : selectedMovieIds.length > 0
+                            ? styles.dateSelectionHint
+                            : styles.dateSelectionHintMuted
+                      }>
+                      {movieHostPickMode
+                        ? hostTieMovieId
+                          ? '확정용 1편 선택됨 · 집계 표에는 반영되지 않아요'
+                          : '확정할 작품을 한 곳만 탭해 주세요'
+                        : selectedMovieIds.length > 0
+                          ? `${selectedMovieIds.length}편 선택됨`
+                          : '아직 선택한 영화가 없어요'}
                     </Text>
                   </>
                 ) : (
                   <Text style={styles.infoRowMuted}>등록된 영화 후보가 없어요.</Text>
                 )}
-              </>
+              </View>
             )}
 
+            <View
+              collapsable={false}
+              onLayout={(e) => {
+                voteSectionScrollYs.current.place = e.nativeEvent.layout.y;
+              }}>
             <View style={styles.dateVoteHeaderBlock}>
               <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                 장소 투표 ({placeChips.length > 0 ? placeChips.length : 0}건)
               </Text>
-              <Text style={styles.dateVoteSub}>가능한 장소를 가로로 스크롤하며 여러 개 선택할 수 있어요.</Text>
+              <Text style={styles.dateVoteSub}>
+                {placeHostPickMode
+                  ? '동점 장소만 표시됩니다. 한 곳만 탭하세요. (집계 표 숫자에는 반영되지 않아요.)'
+                  : '가능한 장소를 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
+              </Text>
+              {placeHostPickMode ? (
+                <Text style={styles.tieHostHint}>
+                  확정용 선택은 투표 참여 내역과 별도이며, <Text style={styles.tieHostHintEm}>득표 수는 변하지 않습니다.</Text>
+                </Text>
+              ) : null}
             </View>
             {placeChips.length > 0 ? (
               <>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
-                  {sortedPlaceChips.map((chip) => {
-                    const selected = selectedPlaceIds.includes(chip.id);
+                  {placeChipsShown.map((chip) => {
+                    const chipSelected = placeHostPickMode
+                      ? hostTiePlaceId === chip.id
+                      : selectedPlaceIds.includes(chip.id);
                     const tally = meeting.voteTallies?.places?.[chip.id] ?? 0;
                     return (
                       <Pressable
                         key={chip.id}
-                        onPress={() => togglePlaceSelection(chip.id)}
+                        onPress={() => onPlaceChipPress(chip.id)}
                         style={({ pressed }) => [
                           styles.dateChip,
                           styles.placeVoteChip,
-                          selected ? styles.dateChipSelected : null,
+                          chipSelected ? styles.dateChipSelected : null,
                           pressed ? styles.dateChipPressed : null,
                         ]}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: selected }}
-                        accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${selected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                        accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
                         <View style={styles.voteTallyBadge} pointerEvents="none">
                           <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                         </View>
-                        {selected ? (
+                        {chipSelected ? (
                           <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
                             <Ionicons name="checkmark-circle" size={20} color={GinitTheme.trustBlue} />
                           </View>
                         ) : null}
-                        <Text style={[styles.dateChipTitle, selected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                        <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
                           {chip.title}
                         </Text>
                         {chip.sub ? (
-                          <Text style={[styles.dateChipSub, selected && styles.dateChipSubSelected]} numberOfLines={2}>
+                          <Text style={[styles.dateChipSub, chipSelected && styles.dateChipSubSelected]} numberOfLines={2}>
                             {chip.sub}
                           </Text>
                         ) : null}
@@ -1116,8 +1509,23 @@ export default function MeetingDetailScreen() {
                     );
                   })}
                 </ScrollView>
-                <Text style={selectedPlaceIds.length > 0 ? styles.dateSelectionHint : styles.dateSelectionHintMuted}>
-                  {selectedPlaceIds.length > 0 ? `${selectedPlaceIds.length}개 선택됨` : '아직 선택한 장소가 없어요'}
+                <Text
+                  style={
+                    placeHostPickMode
+                      ? hostTiePlaceId
+                        ? styles.dateSelectionHint
+                        : styles.dateSelectionHintMuted
+                      : selectedPlaceIds.length > 0
+                        ? styles.dateSelectionHint
+                        : styles.dateSelectionHintMuted
+                  }>
+                  {placeHostPickMode
+                    ? hostTiePlaceId
+                      ? '확정용 1곳 선택됨 · 집계 표에는 반영되지 않아요'
+                      : '확정할 장소를 한 곳만 탭해 주세요'
+                    : selectedPlaceIds.length > 0
+                      ? `${selectedPlaceIds.length}개 선택됨`
+                      : '아직 선택한 장소가 없어요'}
                 </Text>
               </>
             ) : (
@@ -1137,6 +1545,9 @@ export default function MeetingDetailScreen() {
               <Ionicons name="location-outline" size={20} color={GinitTheme.trustBlue} />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
             </Pressable>
+                </View>
+              </>
+            )}
 
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>참여자 ({orderedParticipantIdsList.length}명)</Text>
@@ -1168,7 +1579,7 @@ export default function MeetingDetailScreen() {
                     </View>
                   );
                 })}
-                {recruitmentPhase !== 'full' ? (
+                {recruitmentPhase === 'recruiting' ? (
                   <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
                     <Ionicons name="add" size={26} color={GinitTheme.trustBlue} />
                   </Pressable>
@@ -1184,16 +1595,20 @@ export default function MeetingDetailScreen() {
           <View style={styles.guestJoinHintWrap}>
             {!alreadyJoinedMeeting ? (
               <Text style={guestVotesReady ? styles.guestJoinHintDone : styles.guestJoinHintPending}>
-                {guestVotesReady
-                  ? '투표를 모두 골랐어요. 아래 참여를 눌러 주세요.'
-                  : '참여하려면 일시·장소' +
-                      (needsMoviePick ? '·영화' : '') +
-                      ' 투표에서 각각 최소 한 가지 이상 선택해 주세요.'}
+                {meeting.scheduleConfirmed === true
+                  ? '일정이 확정되었어요. 아래 참여를 눌러 주세요.'
+                  : guestVotesReady
+                    ? '투표를 모두 골랐어요. 아래 참여를 눌러 주세요.'
+                    : '참여하려면 일시·장소' +
+                        (needsMoviePick ? '·영화' : '') +
+                        ' 투표에서 각각 최소 한 가지 이상 선택해 주세요.'}
               </Text>
             ) : participantVoteLogMissing ? (
               <Text style={styles.guestJoinHintPending}>
                 이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 탈퇴 후 다시 참여해 주세요.
               </Text>
+            ) : meeting.scheduleConfirmed === true ? (
+              <Text style={styles.guestJoinHintDone}>일정이 확정된 모임이에요.</Text>
             ) : (
               <Text style={guestVotesReady ? styles.guestJoinHintDone : styles.guestJoinHintPending}>
                 {guestVotesReady
@@ -1210,46 +1625,56 @@ export default function MeetingDetailScreen() {
           <View style={styles.bottomBar}>
             {isHost ? (
               <>
-                <Pressable
-                  style={[
-                    styles.bottomPill,
-                    styles.pillBlue,
-                    recruitmentPhase === 'full' && styles.bottomPillFlex,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="모임 수정">
-                  <Ionicons name="construct-outline" size={18} color="#fff" />
-                  <Text style={styles.pillText}>수정</Text>
-                </Pressable>
-                {recruitmentPhase !== 'full' ? (
+                {recruitmentPhase !== 'confirmed' ? (
+                  <Pressable
+                    style={[
+                      styles.bottomPill,
+                      styles.pillBlue,
+                      recruitmentPhase === 'full' && styles.bottomPillFlex,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="모임 수정">
+                    <Ionicons name="construct-outline" size={18} color="#fff" />
+                    <Text style={styles.pillText}>수정</Text>
+                  </Pressable>
+                ) : null}
+                {recruitmentPhase === 'recruiting' ? (
                   <Pressable style={[styles.bottomPill, styles.pillBlue]} accessibilityRole="button" accessibilityLabel="초대">
                     <Ionicons name="mail-outline" size={18} color="#fff" />
                     <Text style={styles.pillText}>초대</Text>
                   </Pressable>
                 ) : null}
                 <Pressable
-                  onPress={handleConfirmSchedule}
-                  disabled={confirmScheduleBusy || meeting.scheduleConfirmed === true}
+                  onPress={
+                    meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
+                  }
+                  disabled={confirmScheduleBusy}
                   style={({ pressed }) => [
                     styles.bottomPill,
-                    styles.pillOrange,
-                    recruitmentPhase === 'full' && styles.bottomPillFlex,
-                    (confirmScheduleBusy || meeting.scheduleConfirmed === true) && { opacity: 0.75 },
-                    pressed && !confirmScheduleBusy && meeting.scheduleConfirmed !== true && { opacity: 0.9 },
+                    meeting.scheduleConfirmed === true ? styles.pillDanger : styles.pillOrange,
+                    (recruitmentPhase === 'full' || recruitmentPhase === 'confirmed') && styles.bottomPillFlex,
+                    confirmScheduleBusy && { opacity: 0.75 },
+                    pressed && !confirmScheduleBusy && { opacity: 0.9 },
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="일정 확정">
+                  accessibilityLabel={meeting.scheduleConfirmed === true ? '일정 확정 취소' : '일정 확정'}>
                   {confirmScheduleBusy ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                    <Ionicons
+                      name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
+                      size={18}
+                      color="#fff"
+                    />
                   )}
-                  <Text style={styles.pillText}>{meeting.scheduleConfirmed === true ? '확정됨' : '확정'}</Text>
+                  <Text style={styles.pillText}>
+                    {meeting.scheduleConfirmed === true ? '확정 취소' : '확정'}
+                  </Text>
                 </Pressable>
               </>
             ) : alreadyJoinedMeeting ? (
               <>
-                {recruitmentPhase !== 'full' ? (
+                {recruitmentPhase === 'recruiting' ? (
                   <Pressable
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
@@ -1258,25 +1683,27 @@ export default function MeetingDetailScreen() {
                     <Text style={[styles.pillText, styles.pillTextCompact]}>초대</Text>
                   </Pressable>
                 ) : null}
-                <Pressable
-                  onPress={() => void handleSaveParticipantVotes()}
-                  disabled={participantSaveDisabled}
-                  style={({ pressed }) => [
-                    styles.bottomPill,
-                    styles.pillBlue,
-                    styles.bottomPillFlex,
-                    participantSaveDisabled && { opacity: 0.75 },
-                    pressed && !participantSaveDisabled && { opacity: 0.9 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="투표 수정 저장">
-                  {participantVoteBusy ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Ionicons name="save-outline" size={16} color="#fff" />
-                  )}
-                  <Text style={[styles.pillText, styles.pillTextCompact]}>수정</Text>
-                </Pressable>
+                {meeting.scheduleConfirmed !== true ? (
+                  <Pressable
+                    onPress={() => void handleSaveParticipantVotes()}
+                    disabled={participantSaveDisabled}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillBlue,
+                      styles.bottomPillFlex,
+                      participantSaveDisabled && { opacity: 0.75 },
+                      pressed && !participantSaveDisabled && { opacity: 0.9 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="투표 수정 저장">
+                    {participantVoteBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="save-outline" size={16} color="#fff" />
+                    )}
+                    <Text style={[styles.pillText, styles.pillTextCompact]}>수정</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={handleLeaveParticipant}
                   disabled={participantVoteBusy}
@@ -1295,7 +1722,7 @@ export default function MeetingDetailScreen() {
               </>
             ) : (
               <>
-                {recruitmentPhase !== 'full' ? (
+                {recruitmentPhase === 'recruiting' ? (
                   <Pressable
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
@@ -1580,6 +2007,54 @@ const styles = StyleSheet.create({
   moviePosterPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   moviePosterTitle: { fontSize: 12, fontWeight: '600', color: '#334155', marginTop: 8, lineHeight: 16 },
   moviePosterTitleSelected: { color: GinitTheme.trustBlue },
+  confirmedMovieRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  confirmedMoviePoster: {
+    width: 72,
+    height: 106,
+    borderRadius: 10,
+    backgroundColor: '#E2E8F0',
+  },
+  confirmedMovieTextCol: { flex: 1, minWidth: 0 },
+  confirmedPayNoteSpacer: { marginTop: 12 },
+  confirmedMapPress: {
+    marginTop: 10,
+    alignSelf: 'stretch',
+  },
+  confirmedMapPreviewBox: {
+    position: 'relative',
+    alignSelf: 'stretch',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  /** 장소검색 인라인 지도와 동일 — 스크롤 비활성 MapView 위 탭만 네이버 지도로 연결 */
+  confirmedMapTapOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    borderRadius: 12,
+  },
+  confirmedMapTapOverlayPressed: {
+    backgroundColor: 'rgba(15, 23, 42, 0.07)',
+  },
+  confirmedMapBadge: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    zIndex: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+  },
+  confirmedMapBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  confirmedMapMissing: { marginTop: 8 },
   menuChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   menuChipRead: {
     paddingVertical: 6,
@@ -1592,6 +2067,14 @@ const styles = StyleSheet.create({
   menuChipReadText: { fontSize: 12, fontWeight: '600', color: '#C2410C' },
   dateVoteHeaderBlock: { marginBottom: 10, gap: 4 },
   dateVoteSub: { fontSize: 12, color: '#5C6570', lineHeight: 17 },
+  tieHostHint: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#92400e',
+    lineHeight: 19,
+  },
+  tieHostHintEm: { fontWeight: '800', color: '#b45309' },
   dateChipScroll: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
   placeVoteChip: { minWidth: 148, maxWidth: 220 },
   dateChip: {

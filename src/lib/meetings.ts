@@ -32,7 +32,7 @@ import {
 
 import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
 import { getFirebaseFirestore } from './firebase';
-import type { MeetingExtraData } from './meeting-extra-data';
+import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
 import { normalizePhoneUserId } from './phone-user-id';
 
@@ -96,6 +96,10 @@ export type Meeting = {
   participantVoteLog?: ParticipantVoteSnapshot[] | null;
   /** 모임 주관자가 일정 확정 시 true */
   scheduleConfirmed?: boolean | null;
+  /** 확정 시 선택된 일시·장소·영화 칩 id (집계·동점 처리 결과) */
+  confirmedDateChipId?: string | null;
+  confirmedPlaceChipId?: string | null;
+  confirmedMovieChipId?: string | null;
 };
 
 export function getFirestoreDb() {
@@ -252,6 +256,145 @@ export function getMeetingRecruitmentPhase(m: Meeting): MeetingRecruitmentPhase 
   return 'recruiting';
 }
 
+/** 동일 최다 득표를 받은 칩 id 목록(0표면 전원 동점으로 간주) */
+export function resolveVoteTopTies(
+  chipIds: readonly string[],
+  tallyMap: Record<string, number> | undefined,
+): { maxVotes: number; topIds: string[] } {
+  const map = tallyMap ?? {};
+  if (chipIds.length === 0) return { maxVotes: 0, topIds: [] };
+  const maxVotes = Math.max(...chipIds.map((id) => map[id] ?? 0));
+  const topIds = chipIds.filter((id) => (map[id] ?? 0) === maxVotes);
+  return { maxVotes, topIds };
+}
+
+function extractMovieExtrasForVote(extra: Meeting['extraData']): SelectedMovieExtra[] {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
+  const e = extra as MeetingExtraData;
+  if (Array.isArray(e.movies) && e.movies.length > 0) {
+    return e.movies.filter((x): x is SelectedMovieExtra => x != null && String(x.title ?? '').trim() !== '');
+  }
+  if (e.movie != null && typeof e.movie === 'object' && String((e.movie as SelectedMovieExtra).title ?? '').trim() !== '') {
+    return [e.movie as SelectedMovieExtra];
+  }
+  return [];
+}
+
+/** `app/meeting/[id].tsx` `buildDateChipsFromCandidates` 빈 목록 mock 과 동일 */
+const EMPTY_DATE_VOTE_FALLBACK_CHIP_IDS = ['mock-1', 'mock-2'] as const;
+
+/** 상세 화면 투표 칩 id와 동일한 규칙으로 후보별 id 목록을 만듭니다. */
+export function buildMeetingVoteChipLists(m: Meeting): {
+  dateChipIds: string[];
+  placeChipIds: string[];
+  movieChipIds: string[];
+} {
+  const dateList = m.dateCandidates ?? [];
+  const dateChipIds =
+    dateList.length > 0
+      ? dateList.map((d, i) => {
+          const id = typeof d.id === 'string' ? d.id.trim() : '';
+          return id || `dc-${i}`;
+        })
+      : [...EMPTY_DATE_VOTE_FALLBACK_CHIP_IDS];
+
+  const places = m.placeCandidates ?? [];
+  let placeChipIds = places.map((p, i) => {
+    const pid = typeof p.id === 'string' ? p.id.trim() : '';
+    return pid || `pc-${i}`;
+  });
+  if (placeChipIds.length === 0) {
+    const name = m.placeName?.trim() || m.location?.trim();
+    const addr = m.address?.trim();
+    if (name || addr) {
+      placeChipIds = ['legacy-place'];
+    }
+  }
+  const movies = extractMovieExtrasForVote(m.extraData);
+  const movieChipIds =
+    movies.length > 0
+      ? movies.map((mv, i) => {
+          const mid = String(mv.id ?? '').trim();
+          return mid ? `${mid}#${i}` : `movie-${i}`;
+        })
+      : [];
+  return { dateChipIds, placeChipIds, movieChipIds };
+}
+
+export type ConfirmVoteCategoryState =
+  | { mode: 'none' }
+  | { mode: 'ready'; chosenChipId: string }
+  | { mode: 'tieNeedsPick'; topChipIds: string[] };
+
+/** 주관자가 동점일 때 택한 칩 id (해당 구역만) */
+export type ConfirmMeetingHostTiePicks = {
+  dateChipId?: string | null;
+  placeChipId?: string | null;
+  movieChipId?: string | null;
+};
+
+function classifyVoteCategory(
+  chipIds: readonly string[],
+  tallyMap: Record<string, number> | undefined,
+  hostPick: string | null | undefined,
+): ConfirmVoteCategoryState {
+  if (chipIds.length === 0) return { mode: 'none' };
+  const { topIds } = resolveVoteTopTies(chipIds, tallyMap);
+  if (topIds.length <= 1) {
+    return { mode: 'ready', chosenChipId: topIds[0]! };
+  }
+  const p = (hostPick ?? '').trim();
+  if (p && topIds.includes(p)) {
+    return { mode: 'ready', chosenChipId: p };
+  }
+  return { mode: 'tieNeedsPick', topChipIds: topIds };
+}
+
+export function computeMeetingConfirmAnalysis(
+  m: Meeting,
+  hostTiePicks: ConfirmMeetingHostTiePicks,
+): {
+  date: ConfirmVoteCategoryState;
+  place: ConfirmVoteCategoryState;
+  movie: ConfirmVoteCategoryState;
+  allReady: boolean;
+  firstBlock: { section: 'date' | 'place' | 'movie'; message: string } | null;
+  resolvedPicks: { dateChipId: string | null; placeChipId: string | null; movieChipId: string | null };
+} {
+  const lists = buildMeetingVoteChipLists(m);
+  const vt = m.voteTallies ?? {};
+  const date = classifyVoteCategory(lists.dateChipIds, vt.dates, hostTiePicks.dateChipId);
+  const place = classifyVoteCategory(lists.placeChipIds, vt.places, hostTiePicks.placeChipId);
+  const movie = classifyVoteCategory(lists.movieChipIds, vt.movies, hostTiePicks.movieChipId);
+
+  const tieMessage =
+    '표 수가 같은 후보가 있어요. 동점인 항목 중 하나를 탭으로 선택한 뒤 다시 확정해 주세요.';
+
+  let firstBlock: { section: 'date' | 'place' | 'movie'; message: string } | null = null;
+  if (date.mode === 'tieNeedsPick') firstBlock = { section: 'date', message: tieMessage };
+  else if (movie.mode === 'tieNeedsPick') firstBlock = { section: 'movie', message: tieMessage };
+  else if (place.mode === 'tieNeedsPick') firstBlock = { section: 'place', message: tieMessage };
+
+  const allReady =
+    date.mode !== 'tieNeedsPick' && place.mode !== 'tieNeedsPick' && movie.mode !== 'tieNeedsPick';
+
+  const pick = (s: ConfirmVoteCategoryState): string | null =>
+    s.mode === 'ready' ? s.chosenChipId : null;
+
+  return {
+    date,
+    place,
+    movie,
+    allReady,
+    firstBlock,
+    resolvedPicks: {
+      dateChipId: pick(date),
+      placeChipId: pick(place),
+      movieChipId: pick(movie),
+    },
+  };
+}
+
 function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
   return {
     id,
@@ -287,6 +430,18 @@ function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meet
     voteTallies: parseVoteTalliesField(data),
     participantVoteLog: parseParticipantVoteLog(data),
     scheduleConfirmed: data.scheduleConfirmed === true,
+    confirmedDateChipId:
+      typeof data.confirmedDateChipId === 'string' && data.confirmedDateChipId.trim()
+        ? data.confirmedDateChipId.trim()
+        : null,
+    confirmedPlaceChipId:
+      typeof data.confirmedPlaceChipId === 'string' && data.confirmedPlaceChipId.trim()
+        ? data.confirmedPlaceChipId.trim()
+        : null,
+    confirmedMovieChipId:
+      typeof data.confirmedMovieChipId === 'string' && data.confirmedMovieChipId.trim()
+        ? data.confirmedMovieChipId.trim()
+        : null,
   };
 }
 
@@ -506,8 +661,12 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
   });
 }
 
-/** 모임 주관자가 일정·모집 상태를 확정 처리 */
-export async function confirmMeetingSchedule(meetingId: string, hostPhoneUserId: string): Promise<void> {
+/** 모임 주관자가 집계 투표(+동점 시 주관자 선택)로 일정·모집 확정 */
+export async function confirmMeetingSchedule(
+  meetingId: string,
+  hostPhoneUserId: string,
+  hostTiePicks: ConfirmMeetingHostTiePicks,
+): Promise<void> {
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
@@ -521,7 +680,44 @@ export async function confirmMeetingSchedule(meetingId: string, hostPhoneUserId:
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 일정을 확정할 수 있어요.');
   }
-  await updateDoc(ref, { scheduleConfirmed: true });
+  const m = mapFirestoreMeetingDoc(snap.id, data);
+  const analysis = computeMeetingConfirmAnalysis(m, hostTiePicks);
+  if (!analysis.allReady) {
+    throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
+  }
+  const rp = analysis.resolvedPicks;
+  await updateDoc(ref, {
+    scheduleConfirmed: true,
+    confirmedDateChipId: rp.dateChipId,
+    confirmedPlaceChipId: rp.placeChipId,
+    confirmedMovieChipId: rp.movieChipId,
+  });
+}
+
+/** 주관자가 일정 확정을 되돌려 투표·확정 전 상태로 복구합니다. */
+export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = hostPhoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+  const data = snap.data() as Record<string, unknown>;
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsHost = normalizePhoneUserId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) {
+    throw new Error('모임 주관자만 확정을 취소할 수 있어요.');
+  }
+  if (data.scheduleConfirmed !== true) {
+    throw new Error('확정된 모임만 확정을 취소할 수 있어요.');
+  }
+  await updateDoc(ref, {
+    scheduleConfirmed: false,
+    confirmedDateChipId: null,
+    confirmedPlaceChipId: null,
+    confirmedMovieChipId: null,
+  });
 }
 
 export async function addMeeting(input: CreateMeetingInput): Promise<void> {

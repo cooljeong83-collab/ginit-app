@@ -29,8 +29,8 @@ import {
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
-import type { Meeting } from '@/src/lib/meetings';
-import { subscribeMeetings } from '@/src/lib/meetings';
+import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
 const MOCK_REGION_ROWS = [
@@ -105,6 +105,29 @@ function GlassCategoryChip({
       </View>
     </Pressable>
   );
+}
+
+function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
+  switch (phase) {
+    case 'confirmed':
+      return {
+        label: '확정',
+        wrap: [styles.progressBadge, styles.progressBadgeBlack],
+        text: [styles.progressBadgeText, styles.progressBadgeTextLight],
+      };
+    case 'full':
+      return {
+        label: '모집 완료',
+        wrap: [styles.progressBadge, styles.progressBadgeYellow],
+        text: [styles.progressBadgeText, styles.progressBadgeTextOnYellow],
+      };
+    default:
+      return {
+        label: '모집중',
+        wrap: [styles.progressBadge, styles.progressBadgeGreen],
+        text: [styles.progressBadgeText, styles.progressBadgeTextLight],
+      };
+  }
 }
 
 function meetingMatchesCategoryFilter(m: Meeting, filterId: string | null, categories: Category[]): boolean {
@@ -457,7 +480,9 @@ export default function FeedScreen() {
             </Text>
           ) : null}
 
-          {sortedFilteredMeetings.map((m) => (
+          {sortedFilteredMeetings.map((m) => {
+            const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
+            return (
             <Pressable
               key={m.id}
               style={styles.meetRow}
@@ -470,15 +495,22 @@ export default function FeedScreen() {
                 contentFit="cover"
               />
               <View style={styles.meetBody}>
-                <View style={styles.meetTitleBlock}>
-                  <Text style={styles.meetTitle} numberOfLines={1}>
-                    {m.title}
-                  </Text>
-                  {(m.address?.trim() || m.location) ? (
-                    <Text style={styles.meetAddrLine} numberOfLines={1}>
-                      {m.address?.trim() || m.location}
+                <View style={styles.meetTitleRow}>
+                  <View style={styles.meetTitleBlock}>
+                    <Text style={styles.meetTitle} numberOfLines={1}>
+                      {m.title}
                     </Text>
-                  ) : null}
+                    {(m.address?.trim() || m.location) ? (
+                      <Text style={styles.meetAddrLine} numberOfLines={1}>
+                        {m.address?.trim() || m.location}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={progressPill.wrap} accessibilityLabel={`진행 ${progressPill.label}`}>
+                    <Text style={progressPill.text} numberOfLines={1}>
+                      {progressPill.label}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.tagRow}>
                   <View
@@ -509,7 +541,8 @@ export default function FeedScreen() {
                 </Text>
               </View>
             </Pressable>
-          ))}
+            );
+          })}
         </ScrollView>
 
         <Modal
@@ -853,11 +886,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
+  meetTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    minWidth: 0,
+  },
   meetTitleBlock: {
+    flex: 1,
     minWidth: 0,
     flexDirection: 'column',
     gap: 2,
   },
+  progressBadge: {
+    flexShrink: 0,
+    maxWidth: 88,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  progressBadgeGreen: { backgroundColor: '#16A34A' },
+  progressBadgeYellow: { backgroundColor: '#FACC15' },
+  progressBadgeBlack: { backgroundColor: '#171717' },
+  progressBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  progressBadgeTextLight: { color: '#fff' },
+  progressBadgeTextOnYellow: { color: '#422006' },
   meetTitle: {
     fontSize: 16,
     fontWeight: '800',
