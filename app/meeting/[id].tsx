@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
+import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -20,8 +22,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import type { DateCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingById, updateMeetingDateCandidates } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -63,6 +67,106 @@ function buildDateChipsFromCandidates(list: DateCandidate[]): DateChip[] {
     { id: 'mock-1', title: '4월 16일 (목)', sub: '14:00' },
     { id: 'mock-2', title: '4월 17일 (금)', sub: '14:00' },
   ];
+}
+
+type PlaceChip = { id: string; title: string; sub?: string };
+
+function getExtraDataSpecialtyKind(meeting: Meeting): SpecialtyKind | null {
+  const raw = meeting.extraData;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const k = (raw as { specialtyKind?: unknown }).specialtyKind;
+    if (k === 'movie' || k === 'food' || k === 'sports') return k;
+  }
+  const label = meeting.categoryLabel?.trim() ?? '';
+  return label ? resolveSpecialtyKind(label) : null;
+}
+
+function sportIntensityKo(level: SportIntensityLevel | null | undefined): string {
+  switch (level) {
+    case 'easy':
+      return '가볍게';
+    case 'hard':
+      return '강하게';
+    case 'normal':
+    default:
+      return '보통';
+  }
+}
+
+function formatCapacityLine(m: Meeting): string {
+  const max = m.capacity;
+  const min = m.minParticipants ?? null;
+  const maxUnlimited = max === CAPACITY_UNLIMITED;
+  const maxPart = maxUnlimited ? '무제한' : `최대 ${max}명`;
+  if (min != null && min > 0 && !maxUnlimited && min !== max) {
+    return `${min}명 ~ ${maxPart}`;
+  }
+  return maxPart;
+}
+
+function extractMoviesFromExtra(extra: Meeting['extraData']): SelectedMovieExtra[] {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
+  const e = extra as MeetingExtraData;
+  if (Array.isArray(e.movies) && e.movies.length > 0) {
+    return e.movies.filter((x): x is SelectedMovieExtra => x != null && String(x.title ?? '').trim() !== '');
+  }
+  if (e.movie && typeof e.movie === 'object' && String(e.movie.title ?? '').trim() !== '') {
+    return [e.movie];
+  }
+  return [];
+}
+
+function extractMenuPreferences(extra: Meeting['extraData']): string[] {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
+  const prefs = (extra as MeetingExtraData).menuPreferences;
+  if (!Array.isArray(prefs)) return [];
+  return prefs.map((s) => String(s).trim()).filter(Boolean);
+}
+
+function extractSportIntensity(extra: Meeting['extraData']): SportIntensityLevel | null {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return null;
+  const v = (extra as MeetingExtraData).sportIntensity;
+  if (v === 'easy' || v === 'normal' || v === 'hard') return v;
+  return null;
+}
+
+function placeCandidateChipId(p: { id?: string }, index: number): string {
+  const pid = typeof p.id === 'string' ? p.id.trim() : '';
+  return pid || `pc-${index}`;
+}
+
+/** 동일 id 중복·빈 id 대비: 목록 인덱스를 포함해 투표 칩 id를 고정합니다. */
+function movieCandidateChipId(mv: SelectedMovieExtra, index: number): string {
+  const mid = String(mv.id ?? '').trim();
+  if (mid) return `${mid}#${index}`;
+  return `movie-${index}`;
+}
+
+function buildPlaceChipsFromMeeting(m: Meeting): PlaceChip[] {
+  const list = m.placeCandidates ?? [];
+  if (list.length > 0) {
+    return list.map((p, i) => ({
+      id: placeCandidateChipId(p, i),
+      title: p.placeName?.trim() || '장소',
+      sub: p.address?.trim() || undefined,
+    }));
+  }
+  const name = m.placeName?.trim() || m.location?.trim();
+  const addr = m.address?.trim();
+  if (name || addr) {
+    return [{ id: 'legacy-place', title: name || '장소', sub: addr || undefined }];
+  }
+  return [];
+}
+
+function formatTopScheduleLine(m: Meeting): string | null {
+  const d = m.scheduleDate?.trim();
+  const t = m.scheduleTime?.trim();
+  if (!d && !t) return null;
+  const timeDisp = t ? normalizeTimeInput(t) || t : '';
+  if (d && timeDisp) return `대표 일정: ${d} · ${timeDisp}`;
+  if (d) return `대표 일정: ${d}`;
+  return `대표 시간: ${timeDisp}`;
 }
 
 function newDateCandidateId(): string {
@@ -129,6 +233,10 @@ export default function MeetingDetailScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 일시 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
+  /** 장소 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
+  const [selectedPlaceIds, setSelectedPlaceIds] = useState<string[]>([]);
+  /** 영화 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
+  const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
   const [proposeOpen, setProposeOpen] = useState(false);
   const [proposeFormKey, setProposeFormKey] = useState(0);
   const [proposeSaving, setProposeSaving] = useState(false);
@@ -160,6 +268,8 @@ export default function MeetingDetailScreen() {
 
   useEffect(() => {
     setSelectedDateIds([]);
+    setSelectedPlaceIds([]);
+    setSelectedMovieIds([]);
   }, [meeting?.id]);
 
   const storedDateCandidates = meeting?.dateCandidates ?? [];
@@ -167,6 +277,18 @@ export default function MeetingDetailScreen() {
     if (!meeting) return [];
     const list = meeting.dateCandidates ?? [];
     return buildDateChipsFromCandidates(list);
+  }, [meeting]);
+
+  const placeChips = useMemo(() => (meeting ? buildPlaceChipsFromMeeting(meeting) : []), [meeting]);
+
+  const specialtyKind = useMemo(() => (meeting ? getExtraDataSpecialtyKind(meeting) : null), [meeting]);
+  const extraMovies = useMemo(() => (meeting ? extractMoviesFromExtra(meeting.extraData) : []), [meeting?.extraData]);
+  const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
+  const extraSport = useMemo(() => (meeting ? extractSportIntensity(meeting.extraData) : null), [meeting?.extraData]);
+
+  const representativeScheduleText = useMemo(() => {
+    if (!meeting) return null;
+    return formatTopScheduleLine(meeting);
   }, [meeting]);
 
   /** 날짜 제안 모달 — 기존 후보 목록 없이 새 행만: 기본값은 모임 상단 일정 또는 오늘 */
@@ -247,12 +369,19 @@ export default function MeetingDetailScreen() {
     );
   }, []);
 
-  const isHost = useMemo(() => (meeting ? isMeetingHost(phoneUserId, meeting.createdBy) : false), [meeting, phoneUserId]);
+  const togglePlaceSelection = useCallback((chipId: string) => {
+    setSelectedPlaceIds((prev) =>
+      prev.includes(chipId) ? prev.filter((x) => x !== chipId) : [...prev, chipId],
+    );
+  }, []);
 
-  const placeTitle = meeting
-    ? meeting.placeCandidates?.[0]?.placeName ?? meeting.placeName?.trim() ?? meeting.location
-    : '';
-  const placeAddr = meeting ? meeting.placeCandidates?.[0]?.address ?? meeting.address?.trim() ?? '' : '';
+  const toggleMovieSelection = useCallback((chipId: string) => {
+    setSelectedMovieIds((prev) =>
+      prev.includes(chipId) ? prev.filter((x) => x !== chipId) : [...prev, chipId],
+    );
+  }, []);
+
+  const isHost = useMemo(() => (meeting ? isMeetingHost(phoneUserId, meeting.createdBy) : false), [meeting, phoneUserId]);
 
   const notFound = !loading && !loadError && meeting === null;
 
@@ -315,6 +444,119 @@ export default function MeetingDetailScreen() {
               </Text>
             </View>
 
+            <View style={styles.infoCard}>
+              <Text style={styles.infoCardTitle}>모임 등록 정보</Text>
+              <Text style={styles.infoRow}>
+                <Text style={styles.infoLabel}>카테고리 </Text>
+                {meeting.categoryLabel?.trim() || '—'}
+              </Text>
+              <View style={styles.publicBadgeRow}>
+                <View style={[styles.miniBadge, meeting.isPublic === false && styles.miniBadgeMuted]}>
+                  <Text style={[styles.miniBadgeText, meeting.isPublic === false && styles.miniBadgeTextMuted]}>
+                    {meeting.isPublic === false ? '비공개' : '공개 모집'}
+                  </Text>
+                </View>
+                <View style={styles.miniBadge}>
+                  <Text style={styles.miniBadgeText}>인원 {formatCapacityLine(meeting)}</Text>
+                </View>
+              </View>
+              {representativeScheduleText ? (
+                <Text style={styles.infoRowMuted}>{representativeScheduleText}</Text>
+              ) : null}
+              <Text style={styles.infoSectionLabel}>소개</Text>
+              {meeting.description?.trim() ? (
+                <Text style={styles.infoDescription}>{meeting.description.trim()}</Text>
+              ) : (
+                <Text style={styles.infoRowMuted}>등록된 소개가 없어요.</Text>
+              )}
+
+              {(specialtyKind === 'movie' || extraMovies.length > 0) && (
+                <>
+                  <Text style={styles.infoSectionLabel}>영화 후보 (투표)</Text>
+                  <Text style={styles.dateVoteSub}>포스터를 눌러 보고 싶은 작품을 여러 개 선택할 수 있어요.</Text>
+                  {extraMovies.length > 0 ? (
+                    <>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.movieScrollContent}>
+                        {extraMovies.map((mv, mi) => {
+                          const chipId = movieCandidateChipId(mv, mi);
+                          const selected = selectedMovieIds.includes(chipId);
+                          return (
+                            <Pressable
+                              key={chipId}
+                              onPress={() => toggleMovieSelection(chipId)}
+                              style={({ pressed }) => [
+                                styles.movieVoteCard,
+                                selected ? styles.movieVoteCardSelected : null,
+                                pressed ? styles.dateChipPressed : null,
+                              ]}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: selected }}
+                              accessibilityLabel={`${mv.title}${selected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                              {selected ? (
+                                <View style={styles.movieVoteCheckWrap} pointerEvents="none">
+                                  <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
+                                </View>
+                              ) : null}
+                              {mv.posterUrl?.trim() ? (
+                                <Image
+                                  source={{ uri: mv.posterUrl.trim() }}
+                                  style={styles.moviePoster}
+                                  contentFit="cover"
+                                  transition={120}
+                                />
+                              ) : (
+                                <View style={[styles.moviePoster, styles.moviePosterPlaceholder]}>
+                                  <Ionicons name="film-outline" size={28} color="#94A3B8" />
+                                </View>
+                              )}
+                              <Text style={[styles.moviePosterTitle, selected && styles.moviePosterTitleSelected]} numberOfLines={2}>
+                                {mv.title}
+                                {mv.year ? ` (${mv.year})` : ''}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                      <Text style={selectedMovieIds.length > 0 ? styles.dateSelectionHint : styles.dateSelectionHintMuted}>
+                        {selectedMovieIds.length > 0
+                          ? `${selectedMovieIds.length}편 선택됨`
+                          : '아직 선택한 영화가 없어요'}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.infoRowMuted}>등록된 영화 후보가 없어요.</Text>
+                  )}
+                </>
+              )}
+
+              {(specialtyKind === 'food' || extraMenus.length > 0) && (
+                <>
+                  <Text style={styles.infoSectionLabel}>메뉴·성향</Text>
+                  {extraMenus.length > 0 ? (
+                    <View style={styles.menuChipWrap}>
+                      {extraMenus.map((label, mi) => (
+                        <View key={`${label}-${mi}`} style={styles.menuChipRead}>
+                          <Text style={styles.menuChipReadText}>{label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.infoRowMuted}>등록된 메뉴 성향이 없어요.</Text>
+                  )}
+                </>
+              )}
+
+              {(specialtyKind === 'sports' || extraSport != null) && (
+                <>
+                  <Text style={styles.infoSectionLabel}>운동 강도</Text>
+                  <Text style={styles.infoRow}>{sportIntensityKo(extraSport ?? 'normal')}</Text>
+                </>
+              )}
+            </View>
+
             <View style={styles.dateVoteHeaderBlock}>
               <Text style={styles.sectionTitle}>
                 일시 투표 ({storedDateCandidates.length > 0 ? storedDateCandidates.length : dateChips.length}건)
@@ -367,27 +609,59 @@ export default function MeetingDetailScreen() {
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
 
-            <Text style={[styles.sectionTitle, styles.sectionSpaced]}>장소</Text>
-            <View style={styles.placeCard}>
-              <View style={styles.mapThumb}>
-                <Ionicons name="map" size={22} color={GinitTheme.trustBlue} />
-                <Ionicons name="location" size={14} color={GinitTheme.pointOrange} style={styles.pinOnMap} />
-              </View>
-              <View style={styles.placeBody}>
-                <Text style={styles.placeName} numberOfLines={2}>
-                  {placeTitle || '장소 미정'}
-                </Text>
-                {placeAddr ? (
-                  <Text style={styles.placeAddr} numberOfLines={2}>
-                    {placeAddr}
-                  </Text>
-                ) : null}
-                <Text style={styles.placePay}>결제: 💵 1/N 정산</Text>
-              </View>
-              <Pressable style={styles.pencilPlace} accessibilityRole="button" accessibilityLabel="장소 수정">
-                <Ionicons name="pencil" size={18} color={GinitTheme.trustBlue} />
-              </Pressable>
+            <View style={styles.dateVoteHeaderBlock}>
+              <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
+                장소 투표 ({placeChips.length > 0 ? placeChips.length : 0}건)
+              </Text>
+              <Text style={styles.dateVoteSub}>가능한 장소를 가로로 스크롤하며 여러 개 선택할 수 있어요.</Text>
             </View>
+            {placeChips.length > 0 ? (
+              <>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
+                  {placeChips.map((chip) => {
+                    const selected = selectedPlaceIds.includes(chip.id);
+                    return (
+                      <Pressable
+                        key={chip.id}
+                        onPress={() => togglePlaceSelection(chip.id)}
+                        style={({ pressed }) => [
+                          styles.dateChip,
+                          styles.placeVoteChip,
+                          selected ? styles.dateChipSelected : null,
+                          pressed ? styles.dateChipPressed : null,
+                        ]}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: selected }}
+                        accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${selected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                        {selected ? (
+                          <View style={styles.dateChipCheckWrap} pointerEvents="none">
+                            <Ionicons name="checkmark-circle" size={20} color={GinitTheme.trustBlue} />
+                          </View>
+                        ) : null}
+                        <Text style={[styles.dateChipTitle, selected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                          {chip.title}
+                        </Text>
+                        {chip.sub ? (
+                          <Text style={[styles.dateChipSub, selected && styles.dateChipSubSelected]} numberOfLines={2}>
+                            {chip.sub}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                <Text style={selectedPlaceIds.length > 0 ? styles.dateSelectionHint : styles.dateSelectionHintMuted}>
+                  {selectedPlaceIds.length > 0 ? `${selectedPlaceIds.length}개 선택됨` : '아직 선택한 장소가 없어요'}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.infoRowMuted}>등록된 장소 후보가 없어요.</Text>
+            )}
+            <Text style={styles.placePayNote}>결제: 💵 1/N 정산 (안내)</Text>
+            <Pressable style={styles.pencilPlaceRow} accessibilityRole="button" accessibilityLabel="장소 수정">
+              <Ionicons name="pencil" size={18} color={GinitTheme.trustBlue} />
+              <Text style={styles.pencilPlaceRowText}>장소 편집</Text>
+            </Pressable>
 
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>참여자 (5명)</Text>
@@ -585,9 +859,74 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
   sectionSpaced: { marginTop: 20, marginBottom: 10 },
+  sectionSpacedTight: { marginTop: 4, marginBottom: 0 },
+  infoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 20,
+    gap: 6,
+    shadowColor: 'rgba(15, 23, 42, 0.08)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  infoCardTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+  infoLabel: { fontWeight: '700', color: '#64748B' },
+  infoRow: { fontSize: 14, color: '#1A1A1A', lineHeight: 21 },
+  infoRowMuted: { fontSize: 13, color: '#8B95A1', lineHeight: 19 },
+  infoSectionLabel: { fontSize: 12, fontWeight: '700', color: '#8B95A1', marginTop: 10 },
+  infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22 },
+  publicBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  miniBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 82, 204, 0.1)',
+  },
+  miniBadgeMuted: { backgroundColor: '#F1F5F9' },
+  miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.trustBlue },
+  miniBadgeTextMuted: { color: '#64748B' },
+  movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
+  movieVoteCard: {
+    width: 108,
+    padding: 4,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#E4E9EF',
+    backgroundColor: '#fff',
+    position: 'relative',
+    shadowColor: 'rgba(15, 23, 42, 0.06)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  movieVoteCardSelected: {
+    borderColor: GinitTheme.trustBlue,
+    backgroundColor: 'rgba(0, 82, 204, 0.07)',
+  },
+  movieVoteCheckWrap: { position: 'absolute', top: 8, right: 8, zIndex: 2 },
+  moviePoster: { width: 100, height: 148, borderRadius: 10, backgroundColor: '#E2E8F0', alignSelf: 'center' },
+  moviePosterPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  moviePosterTitle: { fontSize: 12, fontWeight: '600', color: '#334155', marginTop: 8, lineHeight: 16 },
+  moviePosterTitleSelected: { color: GinitTheme.trustBlue },
+  menuChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  menuChipRead: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: '#FFF5EB',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 138, 61, 0.28)',
+  },
+  menuChipReadText: { fontSize: 12, fontWeight: '600', color: '#C2410C' },
   dateVoteHeaderBlock: { marginBottom: 10, gap: 4 },
   dateVoteSub: { fontSize: 12, color: '#5C6570', lineHeight: 17 },
   dateChipScroll: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
+  placeVoteChip: { minWidth: 148, maxWidth: 220 },
   dateChip: {
     minWidth: 112,
     maxWidth: 140,
@@ -684,34 +1023,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  placeCard: {
+  placePayNote: { fontSize: 12, color: '#5C6570', marginTop: 10 },
+  pencilPlaceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 12,
-    gap: 12,
-    shadowColor: 'rgba(15, 23, 42, 0.08)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 3,
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
-  mapThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: 10,
-    backgroundColor: '#E8F2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  pinOnMap: { position: 'absolute', bottom: 8 },
-  placeBody: { flex: 1, minWidth: 0 },
-  placeName: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-  placeAddr: { fontSize: 13, color: '#5C6570', marginTop: 4 },
-  placePay: { fontSize: 12, color: '#5C6570', marginTop: 6 },
-  pencilPlace: { padding: 6 },
+  pencilPlaceRowText: { fontSize: 14, fontWeight: '600', color: GinitTheme.trustBlue },
   avatarRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 4 },
   avatarCol: { width: 64, alignItems: 'center' },
   avatarCircle: {
