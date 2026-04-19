@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { Platform } from 'react-native';
 
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
+import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
 /**
@@ -27,8 +28,9 @@ import { UserSessionProvider } from '@/src/context/UserSessionContext';
 export default function RootLayout() {
   return (
     <UserSessionProvider>
-      <PushNotificationBootstrap />
-      <Stack
+      <InAppAlarmsProvider>
+        <PushNotificationBootstrap />
+        <Stack
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: '#F0F6FF' },
@@ -39,6 +41,7 @@ export default function RootLayout() {
           ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
         }}
       />
+      </InAppAlarmsProvider>
     </UserSessionProvider>
   );
 }

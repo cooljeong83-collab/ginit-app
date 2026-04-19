@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitCard } from '@/components/ginit';
@@ -252,10 +253,7 @@ export default function FeedScreen() {
                 <Pressable accessibilityRole="button" hitSlop={10}>
                   <Ionicons name="search-outline" size={24} color="#0f172a" />
                 </Pressable>
-                <Pressable accessibilityRole="button" hitSlop={10} style={styles.bellWrap}>
-                  <Ionicons name="notifications-outline" size={24} color="#0f172a" />
-                  <View style={styles.badge} />
-                </Pressable>
+                <InAppAlarmsBellButton />
               </View>
             </View>
             <View style={styles.chipsFullBleed}>
@@ -530,20 +528,6 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginHorizontal: -20,
     paddingHorizontal: 20,
-  },
-  bellWrap: {
-    position: 'relative',
-  },
-  badge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: GinitTheme.pointOrange,
-    borderWidth: 1,
-    borderColor: '#fff',
   },
   chipsStripWrap: {
     position: 'relative',

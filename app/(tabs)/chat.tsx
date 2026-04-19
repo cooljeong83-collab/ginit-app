@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
+import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
@@ -268,10 +269,7 @@ export default function ChatTab() {
                 채팅
               </Text>
               <View style={styles.headerActions}>
-                <Pressable accessibilityRole="button" hitSlop={10} style={styles.bellWrap}>
-                  <Ionicons name="notifications-outline" size={24} color="#0f172a" />
-                  <View style={styles.badge} />
-                </Pressable>
+                <InAppAlarmsBellButton />
                 <Pressable accessibilityRole="button" hitSlop={10} accessibilityLabel="채팅 설정">
                   <Ionicons name="settings-outline" size={24} color="#0f172a" />
                 </Pressable>
@@ -475,20 +473,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     flexShrink: 0,
-  },
-  bellWrap: {
-    position: 'relative',
-  },
-  badge: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: GinitTheme.pointOrange,
-    borderWidth: 1,
-    borderColor: '#fff',
   },
   chipsFullBleed: {
     alignSelf: 'stretch',

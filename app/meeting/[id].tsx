@@ -4,6 +4,7 @@ import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -22,6 +23,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
@@ -44,6 +46,7 @@ import {
   updateMeetingPlaceCandidates,
   updateParticipantVotes,
 } from '@/src/lib/meetings';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { ensureUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
@@ -310,6 +313,7 @@ export default function MeetingDetailScreen() {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { phoneUserId } = useUserSession();
+  const { syncMeetingAckFromMeeting } = useInAppAlarms();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
 
@@ -375,6 +379,14 @@ export default function MeetingDetailScreen() {
       unsub();
     };
   }, [id, retryNonce]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!meeting || !phoneUserId?.trim()) return;
+      if (!isUserJoinedMeeting(meeting, phoneUserId)) return;
+      syncMeetingAckFromMeeting(meeting);
+    }, [meeting, phoneUserId, syncMeetingAckFromMeeting]),
+  );
 
   useEffect(() => {
     if (!meeting) {

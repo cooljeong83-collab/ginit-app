@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,6 +23,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
@@ -88,10 +90,25 @@ export default function MeetingChatRoomScreen() {
   const [androidEmojiIme, setAndroidEmojiIme] = useState(false);
   const listRef = useRef<FlatList<MeetingChatMessage>>(null);
   const messageInputRef = useRef<TextInput>(null);
+  const messagesRef = useRef<MeetingChatMessage[]>([]);
+  const { markChatReadUpTo } = useInAppAlarms();
 
   const myId = useMemo(() => (phoneUserId?.trim() ? normalizePhoneUserId(phoneUserId) ?? phoneUserId.trim() : ''), [
     phoneUserId,
   ]);
+
+  messagesRef.current = messages;
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (!meetingId) return;
+        const list = messagesRef.current;
+        const last = list[list.length - 1];
+        markChatReadUpTo(meetingId, last?.id);
+      };
+    }, [meetingId, markChatReadUpTo]),
+  );
 
   useEffect(() => {
     if (!meetingId) {
