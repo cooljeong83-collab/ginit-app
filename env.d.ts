@@ -19,5 +19,11 @@ declare namespace NodeJS {
     EXPO_PUBLIC_FIREBASE_APP_ID?: string;
     WEB_CLIENT_ID?: string;
     EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?: string;
+    /** KOBIS 오픈API (kobis.or.kr 발급) */
+    EXPO_PUBLIC_KOBIS_KEY?: string;
+    KOBIS_KEY?: string;
+    /** TMDB v3 (themoviedb.org) */
+    EXPO_PUBLIC_TMDB_API_KEY?: string;
+    TMDB_API_KEY?: string;
   }
 }

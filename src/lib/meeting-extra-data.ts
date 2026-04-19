@@ -7,6 +7,12 @@ export type SelectedMovieExtra = {
   title: string;
   year?: string;
   info?: string;
+  /** 포스터(표시용, TMDB 등 HTTPS URL) */
+  posterUrl?: string;
+  /** 평점·관객수 등 짧은 뱃지 텍스트 */
+  rating?: string;
+  /** KOBIS 일별 박스오피스 `rank` (1~10 등) */
+  kobisRank?: string;
 };
 
 /**

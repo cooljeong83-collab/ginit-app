@@ -36,6 +36,10 @@ type Extra = {
   naverSearchClientId?: string;
   naverSearchClientSecret?: string;
   googleWebClientId?: string;
+  /** KOBIS(영화진흥위원회) 오픈API 키 — 일별 박스오피스 등 */
+  kobisKey?: string;
+  /** TMDB v3 API 키 — 제목 검색으로 포스터 URL */
+  tmdbApiKey?: string;
 };
 
 function extra(): Extra {
@@ -79,4 +83,6 @@ export const publicEnv = {
   naverSearchClientSecret:
     e.naverSearchClientSecret ?? process.env.EXPO_PUBLIC_NAVER_SEARCH_CLIENT_SECRET ?? '',
   googleWebClientId: e.googleWebClientId ?? process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
+  kobisKey: e.kobisKey ?? process.env.EXPO_PUBLIC_KOBIS_KEY ?? process.env.KOBIS_KEY ?? '',
+  tmdbApiKey: e.tmdbApiKey ?? process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY ?? '',
 };

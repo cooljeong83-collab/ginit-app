@@ -36,9 +36,29 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GinitStyles } from '@/constants/GinitStyles';
-import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { DateCandidateEditorCard, type DatePickerField } from '@/app/create/DateCandidateEditorCard';
+import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
+import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
+import { IntensityPicker } from '@/components/create/IntensityPicker';
+import { MenuPreference } from '@/components/create/MenuPreference';
+import { MovieSearch } from '@/components/create/MovieSearch';
+import { GinitStyles } from '@/constants/GinitStyles';
+import { useUserSession } from '@/src/context/UserSessionContext';
+import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import type { Category } from '@/src/lib/categories';
+import { subscribeCategories } from '@/src/lib/categories';
+import { resolveSpecialtyKind, specialtyStepBadge } from '@/src/lib/category-specialty';
+import {
+  coerceDateCandidate,
+  createPointCandidate,
+  primaryScheduleFromDateCandidate,
+  validateDateCandidate,
+} from '@/src/lib/date-candidate';
+import {
+  buildMeetingExtraData,
+  type SelectedMovieExtra,
+  type SportIntensityLevel,
+} from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   consumePendingMeetingPlace,
@@ -46,30 +66,10 @@ import {
   consumePendingVotePlaceRow,
   setPendingVoteCandidates,
 } from '@/src/lib/meeting-place-bridge';
-import {
-  coerceDateCandidate,
-  createPointCandidate,
-  primaryScheduleFromDateCandidate,
-  validateDateCandidate,
-} from '@/src/lib/date-candidate';
-import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { useUserSession } from '@/src/context/UserSessionContext';
-import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
-import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
-import { IntensityPicker } from '@/components/create/IntensityPicker';
-import { MenuPreference } from '@/components/create/MenuPreference';
-import { MovieSearch } from '@/components/create/MovieSearch';
-import { suggestPlaceSearchQueryFromCategory } from '@/src/lib/place-search-suggestion';
-import { addMeeting } from '@/src/lib/meetings';
-import { resolveSpecialtyKind, specialtyStepBadge } from '@/src/lib/category-specialty';
-import {
-  buildMeetingExtraData,
-  type SelectedMovieExtra,
-  type SportIntensityLevel,
-} from '@/src/lib/meeting-extra-data';
 import { generateSuggestedMeetingTitles } from '@/src/lib/meeting-title-suggestion';
-import type { Category } from '@/src/lib/categories';
-import { subscribeCategories } from '@/src/lib/categories';
+import { addMeeting } from '@/src/lib/meetings';
+import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
+import { suggestPlaceSearchQueryFromCategory } from '@/src/lib/place-search-suggestion';
 
 /** 스펙: Trust Blue */
 const TRUST_BLUE = '#0052CC';
@@ -1506,7 +1506,7 @@ export default function CreateDetailsScreen() {
                     ]}
                     accessibilityRole="button">
                     <Text style={styles.wizardPrimaryBtnLabel}>
-                      {needsSpecialty ? '확인 · 맞춤 정보' : '확인 · 기본 정보'}
+                      {needsSpecialty ? '확인' : '확인'}
                     </Text>
                   </Pressable>
                 ) : null}

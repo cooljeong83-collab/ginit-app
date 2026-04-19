@@ -68,6 +68,8 @@ function pickExtra(): Record<string, string> {
       process.env.EXPO_PUBLIC_WEB_CLIENT_ID ??
       process.env.WEB_CLIENT_ID,
   );
+  set('kobisKey', process.env.EXPO_PUBLIC_KOBIS_KEY ?? process.env.KOBIS_KEY);
+  set('tmdbApiKey', process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY);
 
   return out;
 }
