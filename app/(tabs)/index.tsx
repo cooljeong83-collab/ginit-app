@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -306,7 +307,13 @@ export default function FeedScreen() {
                   </Text>
                 </View>
                 <View style={styles.heroArt} accessibilityLabel="AI 추천">
-                  <Text style={styles.heroEmoji}>🤖</Text>
+                  <View style={styles.heroLogoWrap} pointerEvents="none">
+                    <Image
+                      source={require('@/assets/images/icon.png')}
+                      style={styles.heroLogo}
+                      contentFit="contain"
+                    />
+                  </View>
                   <Text style={styles.heroSparkle}>✨</Text>
                 </View>
               </View>
@@ -584,6 +591,25 @@ const styles = StyleSheet.create({
   },
   heroEmoji: {
     fontSize: 36,
+  },
+  heroLogo: {
+    width: 46,
+    height: 46,
+  },
+  heroLogoWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.86)',
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'rgba(15, 23, 42, 0.12)',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 3,
   },
   heroSparkle: {
     position: 'absolute',

@@ -93,7 +93,9 @@ export function InProgressMeetingsStrip({ meetings, onOpenMeeting }: Props) {
       </ScrollView>
       <View style={styles.bubbleCol}>
         <View style={styles.heroArtSmall} accessibilityLabel="지닛 안내">
-          <Text style={styles.heroEmojiSmall}>🤖</Text>
+          <View style={styles.heroLogoSmallWrap} pointerEvents="none">
+            <Image source={require('@/assets/images/logo-symbol.png')} style={styles.heroLogoSmall} contentFit="contain" />
+          </View>
         </View>
         <View style={HomeGlassStyles.agentBubble}>
           <Text style={HomeGlassStyles.agentBubbleText}>{agentLine}</Text>
@@ -129,6 +131,25 @@ const styles = StyleSheet.create({
   },
   heroEmojiSmall: {
     fontSize: 24,
+  },
+  heroLogoSmall: {
+    width: 22,
+    height: 22,
+  },
+  heroLogoSmallWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'rgba(15, 23, 42, 0.12)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 2,
   },
   emptyStrip: {
     marginBottom: 16,

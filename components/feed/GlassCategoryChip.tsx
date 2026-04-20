@@ -1,4 +1,5 @@
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View, Platform } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -44,7 +45,18 @@ export function GlassCategoryChip({ label, active, onPress, maxLabelWidth }: Pro
             <View style={[StyleSheet.absoluteFillObject, styles.chipInnerBorder]} pointerEvents="none" />
           </>
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: GinitTheme.trustBlue }]} />
+          <>
+            <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+              <LinearGradient
+                colors={GinitTheme.colors.ctaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFillObject}
+              />
+            </View>
+            <View style={[StyleSheet.absoluteFillObject, styles.chipActiveVeil]} pointerEvents="none" />
+            <View style={[StyleSheet.absoluteFillObject, styles.chipInnerBorder]} pointerEvents="none" />
+          </>
         )}
         <View style={styles.chipLabelRow}>
           <Text
@@ -83,8 +95,8 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   chipClipActive: {
-    borderColor: GinitTheme.trustBlue,
-    shadowColor: GinitTheme.trustBlue,
+    borderColor: 'rgba(134, 211, 183, 0.75)',
+    shadowColor: 'rgba(115, 199, 255, 0.55)',
     shadowOpacity: 0.22,
   },
   chipAndroidFrost: {
@@ -95,6 +107,9 @@ const styles = StyleSheet.create({
   },
   chipVeil: {
     backgroundColor: GinitTheme.glass.overlayLight,
+  },
+  chipActiveVeil: {
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
   },
   chipInnerBorder: {
     borderWidth: 1,

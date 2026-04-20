@@ -32,6 +32,8 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const routes = ORDER.map((name) => state.routes.find((r) => r.name === name)).filter(Boolean) as (typeof state.routes)[number][];
+  const leftRoutes = routes.slice(0, 2);
+  const rightRoutes = routes.slice(2);
 
   const onTabPress = (route: (typeof state.routes)[number], routeIndex: number) => {
     const event = navigation.emit({
@@ -62,44 +64,86 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
       <View style={styles.row}>
-        {routes.map((route) => {
-          const originalIndex = state.routes.findIndex((r) => r.key === route.key);
-          const focused = state.index === originalIndex;
-          const { options } = descriptors[route.key];
-          const rawLabel = options.tabBarLabel;
-          const label =
-            typeof rawLabel === 'string'
-              ? rawLabel
-              : typeof options.title === 'string'
-                ? options.title
-                : route.name === 'index'
-                  ? '홈'
-                  : route.name === 'map'
-                    ? '지도'
-                    : route.name === 'chat'
-                      ? '채팅'
-                      : '프로필';
+        <View style={styles.sideGroup}>
+          {leftRoutes.map((route) => {
+            const originalIndex = state.routes.findIndex((r) => r.key === route.key);
+            const focused = state.index === originalIndex;
+            const { options } = descriptors[route.key];
+            const rawLabel = options.tabBarLabel;
+            const label =
+              typeof rawLabel === 'string'
+                ? rawLabel
+                : typeof options.title === 'string'
+                  ? options.title
+                  : route.name === 'index'
+                    ? '홈'
+                    : route.name === 'map'
+                      ? '지도'
+                      : route.name === 'chat'
+                        ? '채팅'
+                        : '프로필';
 
-          const isLeftPair = route.name === 'index' || route.name === 'map';
+            return (
+              <Pressable
+                key={route.key}
+                accessibilityRole="button"
+                accessibilityState={focused ? { selected: true } : {}}
+                onPress={() => onTabPress(route, originalIndex)}
+                style={styles.tab}>
+                <Ionicons
+                  name={iconFor(route.name, focused)}
+                  size={24}
+                  color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
+                />
+                <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-          return (
-            <Pressable
-              key={route.key}
-              accessibilityRole="button"
-              accessibilityState={focused ? { selected: true } : {}}
-              onPress={() => onTabPress(route, originalIndex)}
-              style={[styles.tab, isLeftPair ? styles.tabLeft : styles.tabRight]}>
-              <Ionicons
-                name={iconFor(route.name, focused)}
-                size={24}
-                color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
-              />
-              <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {/* 중앙 FAB 고정 공간: 버튼 크기 기준으로 시각적 균형 */}
+        <View pointerEvents="none" style={styles.centerGap} />
+
+        <View style={styles.sideGroup}>
+          {rightRoutes.map((route) => {
+            const originalIndex = state.routes.findIndex((r) => r.key === route.key);
+            const focused = state.index === originalIndex;
+            const { options } = descriptors[route.key];
+            const rawLabel = options.tabBarLabel;
+            const label =
+              typeof rawLabel === 'string'
+                ? rawLabel
+                : typeof options.title === 'string'
+                  ? options.title
+                  : route.name === 'index'
+                    ? '홈'
+                    : route.name === 'map'
+                      ? '지도'
+                      : route.name === 'chat'
+                        ? '채팅'
+                        : '프로필';
+
+            return (
+              <Pressable
+                key={route.key}
+                accessibilityRole="button"
+                accessibilityState={focused ? { selected: true } : {}}
+                onPress={() => onTabPress(route, originalIndex)}
+                style={styles.tab}>
+                <Ionicons
+                  name={iconFor(route.name, focused)}
+                  size={24}
+                  color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
+                />
+                <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       <Pressable
@@ -141,22 +185,26 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
     paddingTop: 8,
     minHeight: 52,
   },
-  tab: {
+  sideGroup: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+  },
+  tab: {
+    flexGrow: 0,
+    minWidth: 72,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
-  tabLeft: {
-    marginRight: 20,
-  },
-  tabRight: {
-    marginLeft: 20,
+  centerGap: {
+    width: 84,
   },
   tabLabel: {
     fontSize: 11,

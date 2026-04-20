@@ -343,7 +343,7 @@ export default function MeetingDetailScreen() {
 
   const [retryNonce, setRetryNonce] = useState(0);
   const [participantProfiles, setParticipantProfiles] = useState<
-    Record<string, { nickname: string; photoUrl: string | null }>
+    Record<string, { nickname: string; photoUrl: string | null; gender?: string | null }>
   >({});
   const [joinBusy, setJoinBusy] = useState(false);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
@@ -402,7 +402,7 @@ export default function MeetingDetailScreen() {
     let cancelled = false;
     void getUserProfilesForIds(ids).then((map) => {
       if (cancelled) return;
-      const rec: Record<string, { nickname: string; photoUrl: string | null }> = {};
+      const rec: Record<string, { nickname: string; photoUrl: string | null; gender?: string | null }> = {};
       map.forEach((v, k) => {
         rec[k] = v;
       });
@@ -412,6 +412,19 @@ export default function MeetingDetailScreen() {
       cancelled = true;
     };
   }, [meeting]);
+
+  const normalizeGender = useCallback((raw: string | null | undefined): 'male' | 'female' | null => {
+    const v = String(raw ?? '').trim().toLowerCase();
+    if (!v) return null;
+    if (v === 'male' || v === 'man' || v === 'm' || v === '남' || v === '남자') return 'male';
+    if (v === 'female' || v === 'woman' || v === 'f' || v === '여' || v === '여자') return 'female';
+    // Google People API가 주는 값(예: "male", "female", "unspecified") 외에도, 한글/약어 혼재 대비
+    if (v.includes('male') || v.includes('man')) return 'male';
+    if (v.includes('female') || v.includes('woman')) return 'female';
+    if (v.includes('남')) return 'male';
+    if (v.includes('여')) return 'female';
+    return null;
+  }, []);
 
   useEffect(() => {
     setSelectedDateIds([]);
@@ -855,6 +868,33 @@ export default function MeetingDetailScreen() {
     () => ({ dateChipId: hostTieDateId, placeChipId: hostTiePlaceId, movieChipId: hostTieMovieId }),
     [hostTieDateId, hostTiePlaceId, hostTieMovieId],
   );
+
+  const participantGenderCounts = useMemo(() => {
+    let male = 0;
+    let female = 0;
+    let unknown = 0;
+    let missingProfile = 0;
+    for (const userId of orderedParticipantIdsList) {
+      const prof = participantProfiles[userId];
+      if (!prof) {
+        missingProfile += 1;
+        continue;
+      }
+      const g = normalizeGender(prof.gender);
+      if (g === 'male') male += 1;
+      else if (g === 'female') female += 1;
+      else unknown += 1;
+    }
+    return { male, female, unknown, missingProfile };
+  }, [orderedParticipantIdsList, participantProfiles, normalizeGender]);
+
+  const genderCountLabel = useMemo(() => {
+    if (orderedParticipantIdsList.length === 0) return '';
+    if (participantGenderCounts.missingProfile > 0) return '성별 집계 중…';
+    // 성별 정보가 없는 참여자는 unknown으로 남기되, 남/여 집계는 실제 값만 표시
+    const base = `남자 ${participantGenderCounts.male}명 · 여자 ${participantGenderCounts.female}명`;
+    return participantGenderCounts.unknown > 0 ? `${base} · 미상 ${participantGenderCounts.unknown}명` : base;
+  }, [orderedParticipantIdsList.length, participantGenderCounts]);
 
   const confirmAnalysis = useMemo(
     () => (meeting ? computeMeetingConfirmAnalysis(meeting, hostTiePicks) : null),
@@ -1357,9 +1397,9 @@ export default function MeetingDetailScreen() {
                 <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
               <Text style={styles.titleCardText}>{meeting.title || '제목 없음'}</Text>
-              <Text style={styles.mascotPeek} accessibilityElementsHidden>
-                🤖
-              </Text>
+              <View style={styles.mascotLogoWrap} pointerEvents="none" accessibilityElementsHidden>
+                <Image source={require('@/assets/images/logo-symbol.png')} style={styles.mascotLogo} contentFit="contain" />
+              </View>
             </View>
 
             <View style={styles.infoCard}>
@@ -1410,6 +1450,29 @@ export default function MeetingDetailScreen() {
                   <Text style={styles.infoSectionLabel}>운동 강도</Text>
                   <Text style={styles.infoRow}>{sportIntensityKo(extraSport ?? 'normal')}</Text>
                 </>
+              )}
+
+              <Text style={styles.infoSectionLabel}>현재 참여자</Text>
+              {orderedParticipantIdsList.length > 0 ? (
+                <View style={styles.publicBadgeRow}>
+                  <View style={[styles.miniBadge, styles.miniBadgeMale]}>
+                    <Text style={styles.miniBadgeMaleText}>남자 {participantGenderCounts.male}명</Text>
+                  </View>
+                  <View style={[styles.miniBadge, styles.miniBadgeFemale]}>
+                    <Text style={styles.miniBadgeFemaleText}>여자 {participantGenderCounts.female}명</Text>
+                  </View>
+                  {participantGenderCounts.missingProfile > 0 ? (
+                    <View style={[styles.miniBadge, styles.miniBadgeUnknown]}>
+                      <Text style={styles.miniBadgeUnknownText}>미상 …</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.miniBadge, styles.miniBadgeUnknown]}>
+                      <Text style={styles.miniBadgeUnknownText}>미상 {participantGenderCounts.unknown}명</Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
               )}
             </View>
 
@@ -1510,6 +1573,7 @@ export default function MeetingDetailScreen() {
                   onLayout={(e) => {
                     voteSectionScrollYs.current.date = e.nativeEvent.layout.y;
                   }}>
+                  <View style={styles.infoCard}>
                   <View style={styles.dateVoteHeaderBlock}>
                     <Text style={styles.sectionTitle}>
                       일시 투표 ({storedDateCandidates.length > 0 ? storedDateCandidates.length : dateChips.length}건)
@@ -1599,6 +1663,7 @@ export default function MeetingDetailScreen() {
               <Ionicons name="calendar-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
+                  </View>
             </View>
 
             {(specialtyKind === 'movie' || extraMovies.length > 0) && (
@@ -1607,6 +1672,7 @@ export default function MeetingDetailScreen() {
                 onLayout={(e) => {
                   voteSectionScrollYs.current.movie = e.nativeEvent.layout.y;
                 }}>
+                <View style={styles.infoCard}>
                 <View style={styles.dateVoteHeaderBlock}>
                   <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                     영화 투표 ({extraMovies.length}건)
@@ -1719,6 +1785,7 @@ export default function MeetingDetailScreen() {
                 ) : (
                   <Text style={styles.infoRowMuted}>등록된 영화 후보가 없어요.</Text>
                 )}
+                </View>
               </View>
             )}
 
@@ -1727,6 +1794,7 @@ export default function MeetingDetailScreen() {
               onLayout={(e) => {
                 voteSectionScrollYs.current.place = e.nativeEvent.layout.y;
               }}>
+              <View style={styles.infoCard}>
             <View style={styles.dateVoteHeaderBlock}>
               <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                 장소 투표 ({placeChips.length > 0 ? placeChips.length : 0}건)
@@ -1837,47 +1905,52 @@ export default function MeetingDetailScreen() {
               <Ionicons name="location-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
             </Pressable>
+              </View>
                 </View>
               </>
             )}
 
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>참여자 ({orderedParticipantIdsList.length}명)</Text>
-            </View>
-            {orderedParticipantIdsList.length === 0 ? (
-              <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
-            ) : (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
-                {orderedParticipantIdsList.map((userId) => {
-                  const prof = participantProfiles[userId];
-                  const nickname = prof?.nickname ?? '…';
-                  const hostPk = meeting.createdBy?.trim()
-                    ? normalizeParticipantId(meeting.createdBy)
-                    : '';
-                  const isHostUser = Boolean(hostPk && hostPk === userId);
-                  const photo = prof?.photoUrl?.trim();
-                  return (
-                    <View key={userId} style={styles.avatarCol}>
-                      <View style={styles.avatarCircle}>
-                        {photo ? (
-                          <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
-                        ) : (
-                          <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
-                        )}
+            <View style={styles.infoCard}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>참여자 ({orderedParticipantIdsList.length}명)</Text>
+                {genderCountLabel ? <Text style={styles.genderCountText}>{genderCountLabel}</Text> : null}
+              </View>
+              {orderedParticipantIdsList.length === 0 ? (
+                <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
+                  {orderedParticipantIdsList.map((userId) => {
+                    const prof = participantProfiles[userId];
+                    const nickname = prof?.nickname ?? '…';
+                    const g = normalizeGender(prof?.gender);
+                    const hostPk = meeting.createdBy?.trim()
+                      ? normalizeParticipantId(meeting.createdBy)
+                      : '';
+                    const isHostUser = Boolean(hostPk && hostPk === userId);
+                    const photo = prof?.photoUrl?.trim();
+                    return (
+                      <View key={userId} style={styles.avatarCol}>
+                        <View style={[styles.avatarCircle, g === 'male' ? styles.avatarCircleMale : null, g === 'female' ? styles.avatarCircleFemale : null]}>
+                          {photo ? (
+                            <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
+                          ) : (
+                            <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
+                          )}
+                        </View>
+                        <Text style={styles.avatarLabel} numberOfLines={2}>
+                          {isHostUser ? `${nickname}\n(호스트)` : nickname}
+                        </Text>
                       </View>
-                      <Text style={styles.avatarLabel} numberOfLines={2}>
-                        {isHostUser ? `${nickname}\n(호스트)` : nickname}
-                      </Text>
-                    </View>
-                  );
-                })}
-                {recruitmentPhase === 'recruiting' ? (
-                  <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
-                    <Ionicons name="add" size={26} color={GinitTheme.colors.primary} />
-                  </Pressable>
-                ) : null}
-              </ScrollView>
-            )}
+                    );
+                  })}
+                  {recruitmentPhase === 'recruiting' ? (
+                    <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
+                      <Ionicons name="add" size={26} color={GinitTheme.colors.primary} />
+                    </Pressable>
+                  ) : null}
+                </ScrollView>
+              )}
+            </View>
 
             <View style={styles.bottomSpacer} />
           </ScrollView>
@@ -1951,6 +2024,30 @@ export default function MeetingDetailScreen() {
                     </Text>
                   </Pressable>
                 ) : null}
+                {recruitmentPhase === 'recruiting' || recruitmentPhase === 'full' ? (
+                  <Pressable
+                    onPress={() => void handleSaveHostVotes()}
+                    disabled={hostSaveDisabled}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillOrange,
+                      styles.bottomPillFlex,
+                      hostSaveDisabled && { opacity: 0.75 },
+                      pressed && !hostSaveDisabled && { opacity: 0.9 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="투표 저장">
+                    {participantVoteBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="save-outline" size={18} color="#fff" />
+                    )}
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      저장
+                    </Text>
+                  </Pressable>
+                ) : null}
+
                 {orderedParticipantIdsList.length >= 2 ? (
                   <Pressable
                     onPress={
@@ -1979,30 +2076,6 @@ export default function MeetingDetailScreen() {
                     )}
                     <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                       {meeting.scheduleConfirmed === true ? '취소' : '확정'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-
-                {recruitmentPhase === 'recruiting' || recruitmentPhase === 'full' ? (
-                  <Pressable
-                    onPress={() => void handleSaveHostVotes()}
-                    disabled={hostSaveDisabled}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillOrange,
-                      styles.bottomPillFlex,
-                      hostSaveDisabled && { opacity: 0.75 },
-                      pressed && !hostSaveDisabled && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="투표 저장">
-                    {participantVoteBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="save-outline" size={18} color="#fff" />
-                    )}
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      저장
                     </Text>
                   </Pressable>
                 ) : null}
@@ -2320,7 +2393,25 @@ const styles = StyleSheet.create({
   },
   pencilAbs: { position: 'absolute', top: 14, right: 14, zIndex: 2, padding: 4 },
   titleCardText: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', lineHeight: 26 },
-  mascotPeek: { position: 'absolute', right: 4, bottom: -4, fontSize: 36 },
+  mascotLogoWrap: {
+    position: 'absolute',
+    right: 8,
+    bottom: -4,
+    width: 48,
+    height: 48,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'rgba(15, 23, 42, 0.14)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  mascotLogo: { width: 38, height: 38, opacity: 0.96 },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2359,6 +2450,12 @@ const styles = StyleSheet.create({
   miniBadgeMuted: { backgroundColor: '#F1F5F9' },
   miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.primary },
   miniBadgeTextMuted: { color: '#64748B' },
+  miniBadgeMale: { backgroundColor: 'rgba(115, 199, 255, 0.18)' },
+  miniBadgeMaleText: { fontSize: 12, fontWeight: '800', color: '#0369A1' },
+  miniBadgeFemale: { backgroundColor: 'rgba(255, 140, 198, 0.16)' },
+  miniBadgeFemaleText: { fontSize: 12, fontWeight: '800', color: '#BE185D' },
+  miniBadgeUnknown: { backgroundColor: 'rgba(100, 116, 139, 0.14)' },
+  miniBadgeUnknownText: { fontSize: 12, fontWeight: '800', color: '#475569' },
   movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
   movieVoteCard: {
     width: 108,
@@ -2621,9 +2718,16 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  avatarCircleMale: {
+    borderColor: 'rgba(115, 199, 255, 0.95)',
+  },
+  avatarCircleFemale: {
+    borderColor: 'rgba(255, 140, 198, 0.95)',
+  },
   avatarPhoto: { width: 52, height: 52, borderRadius: 26 },
   avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.colors.primary },
   avatarLabel: { marginTop: 6, fontSize: 11, color: '#333', textAlign: 'center', lineHeight: 14 },
+  genderCountText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted },
   avatarAdd: {
     width: 52,
     height: 52,
