@@ -24,6 +24,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
+import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
   resolveFeedLocationContext,
@@ -223,6 +224,11 @@ export default function FeedScreen() {
     }
   }, []);
 
+  const onMainScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    emitTabBarFabDocked(y > 6);
+  }, []);
+
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -230,6 +236,8 @@ export default function FeedScreen() {
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScroll={onMainScroll}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
