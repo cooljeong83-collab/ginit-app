@@ -281,11 +281,11 @@ function buildInitialEditorState(
     const placeCandidates =
       initialPayload.placeCandidates.length > 0
         ? initialPayload.placeCandidates.map(placeRowFromCandidate)
-        : [emptyPlaceRow(seedQ)];
+        : [];
     return { placeCandidates, dateCandidates };
   }
   return {
-    placeCandidates: [emptyPlaceRow(seedQ)],
+    placeCandidates: [],
     dateCandidates: [createPointCandidate(newId('date'), seedDate, seedTime)],
   };
 }
@@ -543,14 +543,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       ensurePlacesForWizardFinalize: () => {
         const rows = placeCandidatesRef.current;
         if (rows.some(isFilled)) return;
-        const p: PlaceCandidate = {
-          id: newId('place'),
-          placeName: '장소 미정',
-          address: '모임 장소는 일정·장소 조율에서 정할 수 있어요.',
-          latitude: 37.5665,
-          longitude: 126.978,
-        };
-        setPlaceCandidates([placeRowFromCandidate(p)]);
+        // 초기 상태는 "장소 후보 0개"를 허용하고, 사용자가 `+ 장소 후보 추가`로만 추가하도록 유지합니다.
       },
       captureWizardPayloadAfterSchedule: (): VoteCandidatesBuildResult => {
         const dates = dateCandidatesRef.current;
@@ -559,29 +552,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           if (err) return { ok: false, error: err };
         }
         const filled = placeCandidatesRef.current.filter(isFilled);
-        let placeCandidatesOut: PlaceCandidate[];
-        if (filled.length === 0) {
-          placeCandidatesOut = [
-            {
-              id: newId('place'),
-              placeName: '장소 미정',
-              address: '모임 장소는 일정·장소 조율에서 정할 수 있어요.',
-              latitude: 37.5665,
-              longitude: 126.978,
-            },
-          ];
-        } else {
-          placeCandidatesOut = filled.map(
-            (r) =>
-              stripUndefinedDeep({
-                id: r.id,
-                placeName: r.placeName.trim(),
-                address: r.address.trim(),
-                latitude: Number(r.latitude),
-                longitude: Number(r.longitude),
-              }) as PlaceCandidate,
-          );
-        }
+        // 일정 확정 단계에서는 "장소 후보 0개"를 허용합니다.
+        // (다음 단계인 장소 후보 단계에서 사용자가 `+ 장소 후보 추가`로 선택하도록)
+        const placeCandidatesOut = filled.map(
+          (r) =>
+            stripUndefinedDeep({
+              id: r.id,
+              placeName: r.placeName.trim(),
+              address: r.address.trim(),
+              latitude: Number(r.latitude),
+              longitude: Number(r.longitude),
+            }) as PlaceCandidate,
+        );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
       },
@@ -662,9 +644,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       setPlaceCandidates((prev) => {
         const row = prev.find((r) => r.id === ephemeralId);
         if (!row || isFilled(row)) return prev;
-        if (prev.length <= 1) {
-          return [emptyPlaceRow()];
-        }
         return prev.filter((r) => r.id !== ephemeralId);
       });
       InteractionManager.runAfterInteractions(() => animate());
@@ -690,12 +669,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const removePlaceCandidate = useCallback((id: string) => {
     animate();
-    setPlaceCandidates((prev) => {
-      if (prev.length <= 1) {
-        return [emptyPlaceRow()];
-      }
-      return prev.filter((r) => r.id !== id);
-    });
+    setPlaceCandidates((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
   const addDateRow = useCallback(() => {
@@ -749,9 +723,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const lastPlaceCandidate = placeCandidates[placeCandidates.length - 1];
   const canAddPlaceCandidate =
-    lastPlaceCandidate != null &&
-    lastPlaceCandidate.latitude != null &&
-    lastPlaceCandidate.longitude != null;
+    placeCandidates.length === 0 ||
+    (lastPlaceCandidate != null &&
+      lastPlaceCandidate.latitude != null &&
+      lastPlaceCandidate.longitude != null);
 
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
@@ -782,8 +757,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
                 placeholderTextColor={INPUT_PLACEHOLDER}
                 style={styles.aiQuickInitInput}
-                multiline
-                textAlignVertical="top"
+                //multiline
+                //textAlignVertical="top"
                 returnKeyType="done"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -864,7 +839,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const placesInner = (
     <>
-      {headerBeforePlaces}
       <View style={[styles.sectionHeader, wizardSegment === 'places' ? undefined : styles.sectionGap]}>
         <Text style={styles.sectionTitle}>장소 후보</Text>
       </View>
@@ -875,52 +849,54 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       </Text>
 
       {placeCandidates.map((row, placeIndex) => (
-        <VoteCandidateCard key={row.id} reduceHeavyEffects={reduceHeavyEffects}>
-          <View style={styles.glassCardInner}>
-            {placeCandidates.length > 1 && !placesListOnly ? (
+        <VoteCandidateCard
+          key={row.id}
+          reduceHeavyEffects={reduceHeavyEffects}
+          outerStyle={styles.placeCardOuter}>
+          {placeCandidates.length > 0 && !placesListOnly ? (
+            <Pressable
+              onPress={() => removePlaceCandidate(row.id)}
+              style={styles.deleteIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="장소 후보 삭제">
+              <Text style={styles.deleteIconText}>✕</Text>
+            </Pressable>
+          ) : null}
+          <Text style={[styles.cardFieldTitle, placesListOnly && styles.cardFieldTitleNoDeleteOffset]}>
+            장소 후보 {placeIndex + 1}
+          </Text>
+          {isFilled(row) ? (
+            <Pressable onPress={() => openPlaceSearch(row)} accessibilityRole="button" accessibilityLabel="장소 다시 선택">
+              <Text style={styles.placeEmoji}>📍</Text>
+              <Text style={styles.placeNameText} numberOfLines={1}>
+                {row.placeName}
+              </Text>
+              <Text style={styles.placeAddrText} numberOfLines={2}>
+                {row.address}
+              </Text>
+              <Text style={styles.placeHint} numberOfLines={1}>
+                {placesListOnly ? '탭하면 장소를 바꿀 수 있어요.' : '탭하여 장소 선택 화면에서 바꾸기'}
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={styles.placeFieldRecess}>
               <Pressable
-                onPress={() => removePlaceCandidate(row.id)}
-                style={styles.deleteIconBtn}
+                onPress={() => openPlaceSearch(row)}
+                style={styles.placeSearchPressable}
                 accessibilityRole="button"
-                accessibilityLabel="장소 후보 삭제">
-                <Text style={styles.deleteIconText}>✕</Text>
-              </Pressable>
-            ) : null}
-            <Text
-              style={[
-                styles.cardFieldTitle,
-                (placeCandidates.length <= 1 || placesListOnly) && styles.cardFieldTitleNoDeleteOffset,
-              ]}>
-              장소 후보 {placeIndex + 1}
-            </Text>
-            {isFilled(row) ? (
-              <Pressable onPress={() => openPlaceSearch(row)} accessibilityRole="button" accessibilityLabel="장소 다시 선택">
-                <Text style={styles.placeEmoji}>📍</Text>
-                <Text style={styles.placeNameText} numberOfLines={2}>
-                  {row.placeName}
-                </Text>
-                <Text style={styles.placeAddrText} numberOfLines={4}>
-                  {row.address}
-                </Text>
-                <Text style={styles.placeHint}>
-                  {placesListOnly ? '탭하면 장소를 바꿀 수 있어요.' : '탭하여 장소 선택 화면에서 바꾸기'}
+                accessibilityLabel="장소 검색 화면으로 이동">
+                <Text
+                  style={[
+                    styles.placeDraftText,
+                    { color: GinitTheme.colors.text },
+                    !row.query.trim() && { color: GinitTheme.colors.textMuted },
+                  ]}
+                  numberOfLines={2}>
+                  {row.query.trim() || '가게 이름 · 주소 검색 (탭하면 장소 선택 화면)'}
                 </Text>
               </Pressable>
-            ) : (
-              <View style={styles.fieldRecess}>
-                <Pressable
-                  onPress={() => openPlaceSearch(row)}
-                  style={styles.placeSearchPressable}
-                  accessibilityRole="button"
-                  accessibilityLabel="장소 검색 화면으로 이동">
-                  <Text 
-                    style={[   styles.placeDraftText,     { color: '#0F172A' }, !row.query.trim() && { color: 'rgba(15, 23, 42, 0.35)' }   ]} numberOfLines={2}>
-                    {row.query.trim() || '가게 이름 · 주소 검색 (탭하면 장소 선택 화면)'}
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
+            </View>
+          )}
         </VoteCandidateCard>
       ))}
 
@@ -1031,7 +1007,8 @@ export default function CreateDetailsScreen() {
   // Android에서 BlurView(특히 experimental blur)가 children 업데이트를 늦게 반영하는 케이스가 있어
   // 즉시 피드백이 중요한 "선택 UI"는 정적 View 렌더링을 우선합니다.
   const reduceHeavyEffectsUI = Platform.OS === 'android';
-  const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
+  const scheduleFormRef = useRef<VoteCandidatesFormHandle>(null);
+  const placesFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
   /** 메인 스크롤 세로 오프셋 — 영화 검색 패널 열 때 정렬에 사용 */
   const mainScrollYRef = useRef(0);
@@ -1471,27 +1448,27 @@ export default function CreateDetailsScreen() {
 
   const handleConfirmSchedule = useCallback(() => {
     setWizardError(null);
-    const r = voteFormRef.current?.validateScheduleStep();
+    const r = scheduleFormRef.current?.validateScheduleStep();
     if (!r?.ok) {
       setWizardError(r?.error ?? '일정 후보를 확인해 주세요.');
       return;
     }
-    const cap = voteFormRef.current?.captureWizardPayloadAfterSchedule();
+    const cap = scheduleFormRef.current?.captureWizardPayloadAfterSchedule();
     if (!cap || !cap.ok) {
       setWizardError(cap && !cap.ok ? cap.error : '일정·장소 데이터를 저장하지 못했어요.');
       return;
     }
-    voteFormRef.current?.applyCapturedPayload(cap.payload);
+    scheduleFormRef.current?.applyCapturedPayload(cap.payload);
     setVotePayload(cap.payload);
     setPlaceSearchSeed('');
-    voteFormRef.current?.resetPlaceSearchSession();
+    scheduleFormRef.current?.resetPlaceSearchSession();
     pendingScrollAfterStepRef.current = placesStep;
     setCurrentStep(placesStep);
   }, [placesStep]);
 
   const onPlacesStepConfirm = useCallback(() => {
     setWizardError(null);
-    const r = voteFormRef.current?.validatePlacesStep();
+    const r = placesFormRef.current?.validatePlacesStep();
     if (!r?.ok) {
       setWizardError(r?.error ?? '장소 후보를 확인해 주세요.');
       return;
@@ -1501,7 +1478,7 @@ export default function CreateDetailsScreen() {
   }, [detailStep]);
 
   const handleBack = useCallback(() => {
-    const r = voteFormRef.current?.buildPayload();
+    const r = (placesFormRef.current ?? scheduleFormRef.current)?.buildPayload();
     if (r?.ok) {
       setPendingVoteCandidates(r.payload);
     }
@@ -1555,7 +1532,7 @@ export default function CreateDetailsScreen() {
       Alert.alert('입력 확인', '메뉴 성향을 한 가지 이상 선택해 주세요.');
       return;
     }
-    const built = voteFormRef.current?.buildPayload();
+    const built = (placesFormRef.current ?? scheduleFormRef.current)?.buildPayload();
     if (!built?.ok) {
       setWizardError(built?.error ?? '일시·장소 후보를 확인해 주세요.');
       Alert.alert('입력 확인', built?.error ?? '일시·장소 후보를 확인해 주세요.');
@@ -1838,18 +1815,27 @@ export default function CreateDetailsScreen() {
                   <Text style={styles.wizardStepBadge}>3 · 기본 정보</Text>
                   <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                     <Text style={styles.wizardFieldLabel}>모임 이름</Text>
-                    <TextInput
-                      value={title}
-                      onChangeText={setTitle}
-                      placeholder={
-                        aiTitleSuggestions[0]
-                          ? `예: ${aiTitleSuggestions[0]}`
-                          : '모임 이름을 입력하세요'
-                      }
-                      placeholderTextColor={INPUT_PLACEHOLDER}
-                      style={styles.wizardTextInput}
-                      editable={!busy}
-                    />
+                    <LinearGradient
+                      colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[styles.aiQuickInitBorder, { marginBottom: 0 }]}>
+                      <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
+                        <TextInput
+                          value={title}
+                          onChangeText={setTitle}
+                          placeholder={
+                            aiTitleSuggestions[0] ? `예: ${aiTitleSuggestions[0]}` : '모임 이름을 입력하세요'
+                          }
+                          placeholderTextColor={INPUT_PLACEHOLDER}
+                          style={[styles.aiQuickInitInput, { minHeight: 0 }]}
+                          editable={!busy}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          underlineColorAndroid="transparent"
+                        />
+                      </View>
+                    </LinearGradient>
                     <Text style={[styles.wizardFieldHint, { marginTop: 6 }]}>
                       비워 두면 AI 추천(또는 자동 생성) 제목이 등록됩니다.
                     </Text>
@@ -1950,83 +1936,124 @@ export default function CreateDetailsScreen() {
                     </View>
                   ) : null}
 
-                  <View
-                    style={styles.wizardStepShell}
-                    onLayout={(e) => captureStepPosition(scheduleStep, e)}>
-                    <View
-                      style={[
-                        styles.scheduleStepHeader,
-                        needsMovieEarlyPlaces &&
-                          currentStep < scheduleStep &&
-                          styles.wizardFormHidden,
-                      ]}>
-                      <Text style={styles.wizardStepBadge}>
-                        {scheduleStep} · 일정 설정
-                      </Text>
-                      <Text style={styles.wizardLockedHint}>
-                        말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.
-                      </Text>
-                    </View>
+                  {currentStep >= scheduleStep ? (
+                    <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(scheduleStep, e)}>
+                      <View
+                        style={[
+                          styles.scheduleStepHeader,
+                          needsMovieEarlyPlaces && currentStep < scheduleStep && styles.wizardFormHidden,
+                        ]}>
+                        <Text style={styles.wizardStepBadge}>{scheduleStep} · 일정 설정</Text>
+                        <Text style={styles.wizardLockedHint}>
+                          {currentStep === scheduleStep
+                            ? '말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.'
+                            : '확정한 일시 후보예요. 필요하면 이전 단계로 돌아가 수정할 수 있어요.'}
+                        </Text>
+                      </View>
 
-                    <View
-                      style={[
-                        styles.wizardFormMount,
-                        needsMovieEarlyPlaces &&
-                          currentStep < scheduleStep &&
-                          styles.wizardFormHidden,
-                      ]}
-                      onLayout={(e) => {
-                        formMountRelYRef.current = e.nativeEvent.layout.y;
-                      }}>
-                      <VoteCandidatesForm
-                        ref={voteFormRef}
-                        key={`wiz-${voteHydrateKey}`}
-                        seedPlaceQuery={seedQ}
-                        seedScheduleDate={seedDate}
-                        seedScheduleTime={seedTime}
-                        initialPayload={votePayload}
-                        bare
-                        wizardSegment={voteWizardSegment}
-                        scheduleListOnly={currentStep >= detailStep}
-                        placesListOnly={currentStep >= detailStep}
-                        onPlacesBlockLayout={onPlacesBlockLayout}
-                        headerBeforePlaces={headerBeforePlaces}
-                      />
-                    </View>
+                      {currentStep === scheduleStep ? (
+                        <>
+                          <View
+                            style={[
+                              styles.wizardFormMount,
+                              needsMovieEarlyPlaces && currentStep < scheduleStep && styles.wizardFormHidden,
+                            ]}
+                            onLayout={(e) => {
+                              formMountRelYRef.current = e.nativeEvent.layout.y;
+                            }}>
+                            <VoteCandidatesForm
+                              ref={scheduleFormRef}
+                              key={`wiz-schedule-${voteHydrateKey}`}
+                              seedPlaceQuery={seedQ}
+                              seedScheduleDate={seedDate}
+                              seedScheduleTime={seedTime}
+                              initialPayload={votePayload}
+                              bare
+                              wizardSegment="schedule"
+                              scheduleListOnly={false}
+                              placesListOnly={currentStep >= detailStep}
+                              onPlacesBlockLayout={onPlacesBlockLayout}
+                            />
+                          </View>
 
-                    {currentStep === scheduleStep ? (
-                      <Pressable
-                        onPress={handleConfirmSchedule}
-                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
-                        accessibilityRole="button">
-                        <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
-                          <LinearGradient
-                            colors={GinitTheme.colors.ctaGradient}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={StyleSheet.absoluteFillObject}
+                          <Pressable
+                            onPress={handleConfirmSchedule}
+                            style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                            accessibilityRole="button">
+                            <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                              <LinearGradient
+                                colors={GinitTheme.colors.ctaGradient}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={StyleSheet.absoluteFillObject}
+                              />
+                            </View>
+                            <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
+                          </Pressable>
+                        </>
+                      ) : currentStep > scheduleStep ? (
+                        <View style={styles.wizardFormMount}>
+                          <VoteCandidatesForm
+                            key={`wiz-schedule-summary-${voteHydrateKey}`}
+                            seedPlaceQuery={seedQ}
+                            seedScheduleDate={seedDate}
+                            seedScheduleTime={seedTime}
+                            initialPayload={votePayload}
+                            bare
+                            wizardSegment="schedule"
+                            scheduleListOnly
+                            placesListOnly
                           />
                         </View>
-                        <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
-                      </Pressable>
-                    ) : null}
-                    {currentStep === placesStep ? (
-                      <Pressable
-                        onPress={onPlacesStepConfirm}
-                        style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
-                        accessibilityRole="button">
-                        <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
-                          <LinearGradient
-                            colors={GinitTheme.colors.ctaGradient}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={StyleSheet.absoluteFillObject}
-                          />
-                        </View>
-                        <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 설명</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {currentStep >= placesStep ? (
+                    <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(placesStep, e)}>
+                      <View style={styles.placesStepHeader}>
+                        <Text style={styles.wizardStepBadge}>{placesStep} · 장소 후보</Text>
+                        <Text style={styles.wizardLockedHint}>
+                          {currentStep >= detailStep
+                            ? '확정한 장소 후보예요. 필요하면 카드를 탭해 바꿀 수 있어요.'
+                            : '장소 행을 눌러 검색·선택하거나 후보를 추가하세요.'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.wizardFormMount}>
+                        <VoteCandidatesForm
+                          ref={placesFormRef}
+                          key={`wiz-places-${voteHydrateKey}`}
+                          seedPlaceQuery={seedQ}
+                          seedScheduleDate={seedDate}
+                          seedScheduleTime={seedTime}
+                          initialPayload={votePayload}
+                          bare
+                          wizardSegment="places"
+                          scheduleListOnly={true}
+                          placesListOnly={currentStep >= detailStep}
+                          onPlacesBlockLayout={onPlacesBlockLayout}
+                        />
+                      </View>
+
+                      {currentStep === placesStep ? (
+                        <Pressable
+                          onPress={onPlacesStepConfirm}
+                          style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                          accessibilityRole="button">
+                          <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                            <LinearGradient
+                              colors={GinitTheme.colors.ctaGradient}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={StyleSheet.absoluteFillObject}
+                            />
+                          </View>
+                          <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 설명</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : null}
 
                   {currentStep >= detailStep ? (
                     <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(detailStep, e)}>
@@ -2213,10 +2240,10 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    minHeight: 110,
+    minHeight: 20,
   },
   aiQuickInitInput: {
-    minHeight: 86,
+    minHeight: 20,
     fontSize: 16,
     fontWeight: '700',
     color: GinitTheme.colors.text,
@@ -2357,6 +2384,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  /** 장소 후보 카드 전용(컴팩트) — 너무 큰 박스 방지 */
+  placeCardOuter: {
+    padding: 12,
+  },
   deleteIconBtn: {
     position: 'absolute',
     top: 0,
@@ -2397,6 +2428,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
   },
+  placeFieldRecess: {
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderColor: GinitTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
   fieldRecessHalf: {
     flex: 1,
     minWidth: 0,
@@ -2423,36 +2462,36 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   placeEmoji: {
-    fontSize: 20,
-    marginBottom: 6,
+    fontSize: 16,
+    marginBottom: 4,
   },
   placeNameText: {
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '800',
-    color: '#000000',
-    marginBottom: 6,
+    color: GinitTheme.colors.text,
+    marginBottom: 4,
     paddingRight: 36,
   },
   placeAddrText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(0, 0, 0, 0.75)',
-    lineHeight: 20,
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 17,
   },
   placeHint: {
-    marginTop: 10,
-    fontSize: 12,
+    marginTop: 6,
+    fontSize: 11,
     fontWeight: '700',
-    color: 'rgba(0, 0, 0, 0.5)',
+    color: GinitTheme.colors.textMuted,
   },
   placeSearchPressable: {
     minHeight: 24,
     justifyContent: 'center',
   },
   placeDraftText: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#0F172A',
+    color: GinitTheme.colors.text,
   },
   /** + 후보 추가 — 스펙 */
   addCandidateBtn: {
