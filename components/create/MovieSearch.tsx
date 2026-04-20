@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 
+import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
@@ -37,7 +38,7 @@ import {
   wizardSpecialtyStyles as S,
 } from './wizard-specialty-styles';
 
-const TRUST_BLUE = '#0052CC';
+const TRUST_BLUE = GinitTheme.colors.primary;
 
 const PRETENDARD_BOLD_URI =
   'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf';
@@ -171,7 +172,7 @@ function MovieGlassListRow({ children, pressed }: { children: ReactNode; pressed
     <View style={S.movieListRowWrap}>
       <View style={[S.movieListRowOuter, pressed && S.movieListRowPressedOrange]}>
         <BlurView
-          tint="dark"
+          tint="light"
           intensity={26}
           style={StyleSheet.absoluteFill}
           experimentalBlurMethod="dimezisBlurView"
@@ -194,12 +195,12 @@ function resolveDisplayPosterUrl(m: SelectedMovieExtra): string | undefined {
 function PosterTrustBlueFallback({ iconSize = 28 }: { iconSize?: number }) {
   return (
     <LinearGradient
-      colors={['#010b22', TRUST_BLUE, '#1e40af']}
+      colors={[GinitTheme.colors.surfaceStrong, 'rgba(220, 238, 255, 0.9)', 'rgba(239, 255, 250, 0.9)']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={StyleSheet.absoluteFillObject}>
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name="film" size={iconSize} color="rgba(248, 250, 252, 0.92)" />
+        <Ionicons name="film" size={iconSize} color={GinitTheme.colors.primary} />
       </View>
     </LinearGradient>
   );
@@ -552,7 +553,7 @@ export function MovieSearch({
                 style={({ pressed }) => [S.movieConfirmedRemoveHit, pressed && { opacity: 0.85 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`${item.title} 후보에서 제거`}>
-                <Ionicons name="close" size={18} color="rgba(248, 250, 252, 0.92)" />
+                <Ionicons name="close" size={18} color={GinitTheme.colors.text} />
               </Pressable>
               <View style={S.movieListPosterWrap}>
                 <View style={S.movieListPosterImg}>

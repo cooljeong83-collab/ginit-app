@@ -218,9 +218,9 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: GinitTheme.colors.border,
   },
   movieListPosterImg: {
     width: MOVIE_LIST_POSTER_WIDTH,
@@ -230,7 +230,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   moviePosterSkeleton: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    backgroundColor: GinitTheme.colors.bgAlt,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
@@ -244,11 +244,6 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieListRowPressedOrange: {
     borderColor: 'rgba(255, 138, 0, 0.75)',
     backgroundColor: 'rgba(255, 138, 0, 0.1)',
-    shadowColor: ENERGETIC_ORANGE,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
-    elevation: 10,
   },
   movieRankBadge: {
     position: 'absolute',
@@ -282,21 +277,21 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: GinitTheme.colors.border,
   },
   movieYearUnderTitle: {
     marginTop: 5,
     fontSize: 12,
     fontWeight: '700',
-    color: 'rgba(147, 197, 253, 0.88)',
+    color: GinitTheme.colors.textMuted,
   },
   /** Pretendard Bold 스펙 — `PretendardBold` 폰트 로드 시 fontFamily 적용 */
   movieListTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.35,
     lineHeight: 23,
   },
@@ -320,7 +315,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieSynopsis: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.68)',
+    color: GinitTheme.colors.textMuted,
     lineHeight: 19,
   },
   movieRatingBadge: {
@@ -331,16 +326,11 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     backgroundColor: 'rgba(0, 82, 204, 0.28)',
     borderWidth: 1,
     borderColor: 'rgba(147, 197, 253, 0.55)',
-    shadowColor: TRUST_BLUE,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 3,
   },
   movieRatingBadgeText: {
     fontSize: 11,
     fontWeight: '900',
-    color: 'rgba(248, 250, 252, 0.95)',
+    color: GinitTheme.colors.text,
   },
   moviePosterImg: {
     width: '100%',
@@ -357,11 +347,6 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0, 82, 204, 0.45)',
     backgroundColor: 'rgba(0, 82, 204, 0.18)',
-    shadowColor: TRUST_BLUE,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 4,
   },
   movieCompactPoster: {
     width: 44,
@@ -379,13 +364,13 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieCompactTitle: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.text,
   },
   movieCompactMeta: {
     marginTop: 2,
     fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(147, 197, 253, 0.85)',
+    color: GinitTheme.colors.textMuted,
   },
   movieCompactBadge: {
     paddingHorizontal: 8,
@@ -398,7 +383,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieCompactBadgeText: {
     fontSize: 11,
     fontWeight: '900',
-    color: 'rgba(248, 250, 252, 0.95)',
+    color: GinitTheme.colors.text,
   },
   /** 다중 후보: 세로 스택(웹 포함 전체 너비) */
   movieCandidatesColumn: {
@@ -431,9 +416,9 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: GinitTheme.colors.border,
   },
   movieAddOutlineBtn: {
     marginTop: 4,
@@ -453,7 +438,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieAddOutlineBtnLabel: {
     fontSize: 15,
     fontWeight: '800',
-    color: 'rgba(191, 219, 254, 0.98)',
+    color: GinitTheme.colors.primary,
   },
 });
 

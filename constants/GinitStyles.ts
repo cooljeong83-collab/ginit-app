@@ -380,18 +380,18 @@ export const GinitStyles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 14,
     borderRadius: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
   },
 
   // 장소검색 - 선택된 결과 행
   glassListRowSelected: {
-    borderColor: 'rgba(255, 138, 0, 0.65)',
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    shadowColor: GinitTheme.pointOrange,
-    shadowOpacity: 0.22,
+    borderColor: GinitTheme.colors.accent,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    shadowColor: GinitTheme.colors.accent,
+    shadowOpacity: 0.18,
   },
 
   listRowInner: {
@@ -535,12 +535,12 @@ export const GinitStyles = StyleSheet.create({
     width: '48%',
     aspectRatio: 1,
     borderRadius: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: GinitTheme.colors.border,
     shadowColor: 'rgba(15, 23, 42, 0.06)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -551,8 +551,8 @@ export const GinitStyles = StyleSheet.create({
   },
 
   glassGridCardActive: {
-    borderColor: GinitTheme.trustBlue,
-    backgroundColor: 'rgba(0, 82, 204, 0.08)',
+    borderColor: GinitTheme.colors.accent,
+    backgroundColor: GinitTheme.colors.primarySoft,
   },
 
   gridEmoji: {
@@ -563,7 +563,7 @@ export const GinitStyles = StyleSheet.create({
   gridLabel: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#333333',
+    color: GinitTheme.colors.text,
   },
 
   // 모임등록 - 마스코트 플로팅 박스

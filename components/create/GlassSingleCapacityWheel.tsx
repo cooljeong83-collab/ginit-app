@@ -9,7 +9,9 @@ import {
   View,
 } from 'react-native';
 
-const TRUST_BLUE = '#0052CC';
+import { GinitTheme } from '@/constants/ginit-theme';
+
+const TRUST_BLUE = GinitTheme.colors.primary;
 
 const ITEM_HEIGHT = 28;
 const WHEEL_HEIGHT = 84;
@@ -138,8 +140,8 @@ const col = StyleSheet.create({
     height: ITEM_HEIGHT,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.5)',
-    backgroundColor: 'rgba(0, 82, 204, 0.1)',
+    borderColor: 'rgba(134, 211, 183, 0.65)',
+    backgroundColor: 'rgba(134, 211, 183, 0.16)',
     zIndex: 1,
   },
   scrollContent: {
@@ -153,14 +155,14 @@ const col = StyleSheet.create({
   itemText: {
     fontSize: 14,
     fontWeight: '700',
-    color: 'rgba(248, 250, 252, 0.5)',
+    color: GinitTheme.colors.textMuted,
   },
   itemTextSelected: {
     color: TRUST_BLUE,
     fontWeight: '900',
     ...Platform.select({
       ios: {
-        textShadowColor: 'rgba(0, 82, 204, 0.9)',
+        textShadowColor: 'rgba(134, 211, 183, 0.85)',
         textShadowOffset: { width: 0, height: 0 },
         textShadowRadius: 8,
       },
@@ -194,8 +196,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.28)',
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     paddingVertical: 6,
     paddingHorizontal: 8,
     overflow: 'hidden',
