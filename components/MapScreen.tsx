@@ -361,18 +361,6 @@ export default function MapScreen() {
     [scrollListToMeetingId],
   );
 
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.webRoot}>
-        <View style={styles.webOuter}>
-          <View style={styles.webBox}>
-            <Text style={styles.webText}>지도 보기는 모바일 앱에서만 제공됩니다.</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <GestureHandlerRootView style={styles.root}>
       <View style={styles.mapWrap}>
@@ -994,31 +982,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: GinitTheme.trustBlue,
-  },
-  webRoot: {
-    flex: 1,
-  },
-  webOuter: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  webBox: {
-    paddingVertical: 28,
-    paddingHorizontal: 22,
-    borderRadius: 18,
-    backgroundColor: 'rgba(15, 23, 42, 0.78)',
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    maxWidth: 440,
-    width: '100%',
-    alignSelf: 'center',
-  },
-  webText: {
-    color: '#f1f5f9',
-    fontSize: 17,
-    lineHeight: 26,
-    textAlign: 'center',
-    fontWeight: '600',
   },
 });

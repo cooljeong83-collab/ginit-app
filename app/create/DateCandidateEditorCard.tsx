@@ -34,6 +34,16 @@ const TYPE_OPTIONS: { type: DateCandidateType; label: string }[] = [
   { type: 'deadline', label: '마감' },
 ];
 
+/**
+ * NOTE:
+ * 이 파일은 `/app` 아래에 위치해 Expo Router가 route로 인식합니다.
+ * 실제로는 화면이 아니라 내부 컴포넌트이므로, 라우터 경고를 막기 위해
+ * 빈 default export를 제공합니다. (추후 `components/`로 이동 권장)
+ */
+export default function _DateCandidateEditorCardRoute() {
+  return null;
+}
+
 function VoteGlassShell({
   reduceHeavyEffects,
   children,

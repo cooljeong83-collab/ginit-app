@@ -33,11 +33,13 @@ function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
 type Props = {
   meeting: Meeting;
   userCoords: LatLng | null;
+  /** 내가 참여 중인 모임이면 파란 「참여중」 뱃지 표시 */
+  joined?: boolean;
   onPress: () => void;
 };
 
 /** 홈 피드와 동일한 모임 한 줄 카드 */
-export function MeetingFeedRow({ meeting: m, userCoords, onPress }: Props) {
+export function MeetingFeedRow({ meeting: m, userCoords, joined = false, onPress }: Props) {
   const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
   return (
     <Pressable
@@ -58,10 +60,21 @@ export function MeetingFeedRow({ meeting: m, userCoords, onPress }: Props) {
               </Text>
             ) : null}
           </View>
-          <View style={progressPill.wrap} accessibilityLabel={`진행 ${progressPill.label}`}>
-            <Text style={progressPill.text} numberOfLines={1}>
-              {progressPill.label}
-            </Text>
+          <View style={rowStyles.pillsStack}>
+            <View style={progressPill.wrap} accessibilityLabel={`진행 ${progressPill.label}`}>
+              <Text style={progressPill.text} numberOfLines={1}>
+                {progressPill.label}
+              </Text>
+            </View>
+            {joined ? (
+              <View
+                style={[rowStyles.progressBadge, rowStyles.progressBadgeBlue]}
+                accessibilityLabel="참여 중인 모임">
+                <Text style={[rowStyles.progressBadgeText, rowStyles.progressBadgeTextLight]} numberOfLines={1}>
+                  참여중
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
         <View style={rowStyles.tagRow}>
@@ -135,6 +148,12 @@ const rowStyles = StyleSheet.create({
     flexDirection: 'column',
     gap: 2,
   },
+  pillsStack: {
+    flexShrink: 0,
+    alignItems: 'flex-end',
+    gap: 4,
+    maxWidth: 88,
+  },
   progressBadge: {
     flexShrink: 0,
     maxWidth: 88,
@@ -143,6 +162,7 @@ const rowStyles = StyleSheet.create({
     borderRadius: 12,
   },
   progressBadgeGreen: { backgroundColor: '#16A34A' },
+  progressBadgeBlue: { backgroundColor: GinitTheme.trustBlue },
   progressBadgeYellow: { backgroundColor: '#FACC15' },
   progressBadgeBlack: { backgroundColor: '#171717' },
   progressBadgeText: {

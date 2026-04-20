@@ -13,7 +13,7 @@ export const GinitStyles = StyleSheet.create({
   // 장소검색/모임등록 - 스크린 루트(그라데이션 아래 기본 배경)
   screenRoot: {
     flex: 1,
-    backgroundColor: '#F0F6FF',
+    backgroundColor: GinitTheme.colors.bg,
   },
 
   // 장소검색/모임등록 - 네이티브 블러 위 반투명 흰색 베일
@@ -28,30 +28,30 @@ export const GinitStyles = StyleSheet.create({
 
   // 공통/장소검색/모임등록 - 밝은 투명 글래스 카드(컨테이너·패널)
   glassCard: {
-    borderRadius: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    borderRadius: GinitTheme.radius.card,
+    backgroundColor: GinitTheme.colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    padding: 14,
-    shadowColor: GinitTheme.glass.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 10,
-    elevation: 2,
+    borderColor: GinitTheme.colors.border,
+    padding: GinitTheme.spacing.md,
+    shadowColor: GinitTheme.shadow.card.shadowColor,
+    shadowOffset: GinitTheme.shadow.card.shadowOffset,
+    shadowOpacity: GinitTheme.shadow.card.shadowOpacity,
+    shadowRadius: GinitTheme.shadow.card.shadowRadius,
+    elevation: GinitTheme.shadow.card.elevation,
   },
 
   // 모임등록상세 - 베이스 카드 셸(GinitCard, padding 없음 — 선택/다크와 무관 항상 밝음)
   fixedGlassCard: {
-    borderRadius: 15,
+    borderRadius: GinitTheme.radius.card,
     backgroundColor: GinitTheme.fixedGlassCard.fill,
     borderWidth: 1,
     borderColor: GinitTheme.fixedGlassCard.border,
     overflow: 'hidden',
-    shadowColor: 'rgba(15, 23, 42, 0.08)',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 4,
+    shadowColor: 'rgba(15, 23, 42, 0.10)',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 10,
   },
 
   // 모임등록상세 - 폼 본문 텍스트 색 고정(가독성)
@@ -96,14 +96,14 @@ export const GinitStyles = StyleSheet.create({
   backLink: {
     fontSize: 16,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
   },
 
   // 장소검색 - 화면 제목(장소 검색)
   screenTitleLarge: {
     fontSize: 18,
     fontWeight: '900',
-    color: '#1A1A1A',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.3,
   },
 
@@ -111,7 +111,7 @@ export const GinitStyles = StyleSheet.create({
   screenTitle: {
     fontSize: 17,
     fontWeight: '900',
-    color: '#1A1A1A',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
 
@@ -119,7 +119,7 @@ export const GinitStyles = StyleSheet.create({
   stepBadge: {
     fontSize: 13,
     fontWeight: '700',
-    color: GinitTheme.glassModal.textMuted,
+    color: GinitTheme.colors.textMuted,
   },
 
   // 장소검색 - 검색어 + 검색 버튼 한 줄
@@ -131,20 +131,20 @@ export const GinitStyles = StyleSheet.create({
 
   // 장소검색/모임등록상세 - 글래스 입력 필드 기본
   glassInput: {
-    borderRadius: 15,
+    borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.13)',
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    paddingHorizontal: 14,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: GinitTheme.colors.surface,
+    paddingHorizontal: GinitTheme.spacing.md,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#333333',
+    color: GinitTheme.colors.textSub,
     fontWeight: '600',
-    shadowColor: GinitTheme.glass.shadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowColor: 'rgba(15, 23, 42, 0.08)',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 8,
   },
 
   // 장소검색 - 검색창만 가로 확장
@@ -154,8 +154,8 @@ export const GinitStyles = StyleSheet.create({
 
   // 장소검색/모임등록상세 - 입력 포커스(Trust Blue)
   glassInputFocused: {
-    borderColor: GinitTheme.trustBlue,
-    shadowColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.colors.accent,
+    shadowColor: GinitTheme.colors.accent,
     shadowOpacity: 0.22,
     shadowRadius: 10,
     elevation: 3,
@@ -173,15 +173,18 @@ export const GinitStyles = StyleSheet.create({
 
   // 장소검색 - Trust Blue 주요 버튼(검색)
   primaryButton: {
-    borderRadius: 15,
-    backgroundColor: GinitTheme.trustBlue,
+    borderRadius: GinitTheme.radius.button,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
     paddingHorizontal: 18,
     justifyContent: 'center',
-    shadowColor: GinitTheme.trustBlue,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
+    shadowColor: GinitTheme.glass.shadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    elevation: 8,
   },
 
   // 장소검색/모임등록 - 주요 버튼 라벨(흰색)
@@ -193,16 +196,19 @@ export const GinitStyles = StyleSheet.create({
 
   // 장소검색/모임등록 - CTA 오렌지 버튼 본체
   ctaButton: {
-    borderRadius: 15,
-    backgroundColor: GinitTheme.pointOrange,
+    borderRadius: GinitTheme.radius.button,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: GinitTheme.pointOrange,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
+    shadowColor: GinitTheme.glass.shadow,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 1,
+    shadowRadius: 22,
+    elevation: 10,
   },
 
   // 장소검색 - 하단 확인 버튼 여백
@@ -230,16 +236,24 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록 - 다음 단계 CTA(조금 다른 그림자)
   ctaButtonWideShadow: {
     marginTop: 8,
-    borderRadius: 14,
-    backgroundColor: GinitTheme.pointOrange,
+    borderRadius: GinitTheme.radius.button,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: GinitTheme.pointOrange,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
+    shadowColor: GinitTheme.glass.shadow,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 1,
+    shadowRadius: 22,
+    elevation: 10,
+  },
+
+  // 공통 - 버튼 그라데이션 BG (absolute)
+  buttonGradientBg: {
+    ...StyleSheet.absoluteFillObject,
   },
 
   ctaButtonWideDisabled: {

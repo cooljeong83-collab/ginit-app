@@ -234,6 +234,13 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
               onBlur={() => setSearchFocused(false)}
             />
             <Pressable onPress={onSearchPress} style={GinitStyles.primaryButton} accessibilityRole="button">
+              <LinearGradient
+                colors={GinitTheme.colors.ctaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={GinitStyles.buttonGradientBg}
+                pointerEvents="none"
+              />
               <Text style={GinitStyles.primaryButtonLabel}>검색</Text>
             </Pressable>
           </View>
@@ -330,6 +337,13 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
             ]}
             accessibilityRole="button"
             accessibilityState={{ disabled: !canConfirm }}>
+            <LinearGradient
+              colors={GinitTheme.colors.ctaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={GinitStyles.buttonGradientBg}
+              pointerEvents="none"
+            />
             <Text style={GinitStyles.ctaButtonLabel}>확인</Text>
           </Pressable>
         </SafeAreaView>

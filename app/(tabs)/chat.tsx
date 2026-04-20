@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -19,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
+import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
@@ -249,7 +249,7 @@ export default function ChatTab() {
   }, []);
 
   return (
-    <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
+    <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           contentContainerStyle={styles.scroll}
@@ -259,8 +259,8 @@ export default function ChatTab() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onPullRefresh}
-              tintColor={GinitTheme.trustBlue}
-              colors={[GinitTheme.trustBlue]}
+              tintColor={GinitTheme.colors.primary}
+              colors={[GinitTheme.colors.primary]}
             />
           }>
           <View style={styles.feedHeader}>
@@ -307,19 +307,7 @@ export default function ChatTab() {
                   })}
                 </ScrollView>
                 {chipsMoreRight ? (
-                  <LinearGradient
-                    pointerEvents="none"
-                    accessibilityElementsHidden
-                    colors={[
-                      'rgba(220, 238, 255, 0)',
-                      'rgba(232, 244, 255, 0.45)',
-                      'rgba(246, 250, 255, 0.88)',
-                    ]}
-                    locations={[0, 0.55, 1]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.chipsScrollEdgeFade}
-                  />
+                  <View pointerEvents="none" accessibilityElementsHidden style={styles.chipsScrollEdgeFade} />
                 ) : null}
               </View>
             </View>
@@ -346,7 +334,7 @@ export default function ChatTab() {
 
           {loading ? (
             <View style={styles.centerRow}>
-              <ActivityIndicator color={GinitTheme.trustBlue} />
+              <ActivityIndicator color={GinitTheme.colors.primary} />
               <Text style={styles.muted}>불러오는 중…</Text>
             </View>
           ) : null}
@@ -423,7 +411,7 @@ export default function ChatTab() {
                     accessibilityState={{ selected }}>
                     <Text style={styles.modalRowLabel}>{label}</Text>
                     {selected ? (
-                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
+                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                     ) : (
                       <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
                     )}
@@ -437,12 +425,12 @@ export default function ChatTab() {
           </View>
         </Modal>
       </SafeAreaView>
-    </LinearGradient>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: { flex: 1 },
+  root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
   scroll: {
     paddingHorizontal: 20,
@@ -644,6 +632,6 @@ const styles = StyleSheet.create({
   modalCloseLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
   },
 });

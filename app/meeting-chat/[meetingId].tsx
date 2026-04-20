@@ -407,7 +407,7 @@ export default function MeetingChatRoomScreen() {
   if (meeting === undefined) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
-        <ActivityIndicator color={GinitTheme.trustBlue} />
+        <ActivityIndicator color={GinitTheme.colors.primary} />
         <Text style={styles.muted}>모임 불러오는 중…</Text>
       </SafeAreaView>
     );
@@ -449,7 +449,7 @@ export default function MeetingChatRoomScreen() {
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={28} color="#0f172a" />
+            <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
           </Pressable>
           <View style={styles.titleBlock}>
             <Text style={styles.titleMain} numberOfLines={1}>
@@ -559,7 +559,7 @@ export default function MeetingChatRoomScreen() {
                 <Ionicons
                   name={Platform.OS === 'android' && androidEmojiIme ? 'keypad-outline' : 'happy-outline'}
                   size={22}
-                  color={Platform.OS === 'android' && androidEmojiIme ? GinitTheme.trustBlue : '#64748b'}
+                  color={Platform.OS === 'android' && androidEmojiIme ? GinitTheme.colors.primary : '#64748b'}
                 />
               </Pressable>
             </View>
@@ -603,7 +603,7 @@ const styles = StyleSheet.create({
   muted: { fontSize: 14, color: '#64748b' },
   errorText: { fontSize: 15, color: '#b91c1c', textAlign: 'center' },
   backLink: { marginTop: 8, padding: 10 },
-  backLinkText: { fontSize: 15, fontWeight: '700', color: GinitTheme.trustBlue },
+  backLinkText: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.primary },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -766,7 +766,7 @@ const styles = StyleSheet.create({
   avatarFallbackText: {
     fontSize: 15,
     fontWeight: '800',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
   },
   avatarSpacer: {
     width: 36,
@@ -864,7 +864,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,

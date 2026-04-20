@@ -6,7 +6,9 @@
  */
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   forwardRef,
@@ -45,6 +47,7 @@ import { IntensityPicker } from '@/components/create/IntensityPicker';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { GinitStyles } from '@/constants/GinitStyles';
+import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
@@ -78,12 +81,10 @@ import {
 import { addMeeting } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 
-/** 스펙: Trust Blue */
-const TRUST_BLUE = '#0052CC';
-/** 스펙: 화면 전체 배경 (다크 네이비) */
-const SCREEN_BG = '#0F172A';
-/** 스펙: 플레이스홀더 */
-const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
+/** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
+const TRUST_BLUE = GinitTheme.colors.primary;
+const SCREEN_BG = GinitTheme.colors.bg;
+const INPUT_PLACEHOLDER = '#94a3b8';
 
 /** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
 function animate() {
@@ -105,8 +106,8 @@ function VoteCandidateCard({
   }
   return (
     <BlurView
-      tint="dark"
-      intensity={40}
+      tint="light"
+      intensity={GinitTheme.glassModal.blurIntensity}
       style={[styles.glassCardBlur, outerStyle]}
       experimentalBlurMethod="dimezisBlurView">
       {children}
@@ -720,30 +721,67 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
       {!scheduleListOnly ? (
         <View style={styles.nlpSection}>
-          <Text style={styles.nlpLabel}>[말로 입력하세요]</Text>
-          <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffects} outerStyle={styles.nlpGlassOuter}>
-            <View style={styles.nlpGlassInner}>
+          <Text style={styles.aiQuickInitLabel}>말로 일정 아이디어를 입력해보세요</Text>
+          <LinearGradient
+            colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.aiQuickInitBorder}>
+            <View style={styles.aiQuickInitInner}>
               <TextInput
                 value={nlpScheduleInput}
                 onChangeText={setNlpScheduleInput}
                 placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
                 placeholderTextColor={INPUT_PLACEHOLDER}
-                style={styles.nlpTextInput}
-                multiline={false}
+                style={styles.aiQuickInitInput}
+                multiline
+                textAlignVertical="top"
                 returnKeyType="done"
                 autoCapitalize="none"
                 autoCorrect={false}
                 underlineColorAndroid="transparent"
               />
             </View>
-          </VoteCandidateCard>
+          </LinearGradient>
+
+          <View style={styles.aiPreviewRow}>
+            <Text style={styles.aiPreviewHint}>AI 미리보기</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.aiPreviewScroll}>
+              {nlpParsed ? (
+                <View style={styles.aiPreviewCard}>
+                  <View style={styles.aiPreviewPill}>
+                    <Text style={styles.aiPreviewPillText}>AI Generated</Text>
+                  </View>
+                  <Text style={styles.aiPreviewTitle} numberOfLines={2}>
+                    {nlpParsed.summary}
+                  </Text>
+                  <Text style={styles.aiPreviewMeta} numberOfLines={2}>
+                    {`> time: ${nlpParsed.candidate.startTime ?? '미정'}\n> date: ${nlpParsed.candidate.startDate ?? '미정'}`}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.aiPreviewCardMuted}>
+                  <Text style={styles.aiPreviewEmpty}>입력하면 AI 프리뷰가 여기에 나타나요.</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+
           {nlpParsed ? (
             <Pressable
               onPress={applyNlpSuggestion}
-              style={({ pressed }) => [styles.nlpChip, pressed && styles.nlpChipPressed]}
+              style={({ pressed }) => [styles.aiQuickInitCta, pressed && styles.aiQuickInitCtaPressed]}
               accessibilityRole="button"
               accessibilityLabel="자연어 일정 후보로 등록">
-              <Text style={styles.nlpChipText}>📅 {nlpParsed.summary} 등록하기</Text>
+              <View pointerEvents="none" style={styles.aiQuickInitCtaBg}>
+                <LinearGradient
+                  colors={GinitTheme.colors.ctaGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              </View>
+              <Text style={styles.aiQuickInitCtaLabel}>일정 후보로 등록하기</Text>
             </Pressable>
           ) : null}
         </View>
@@ -942,6 +980,9 @@ export default function CreateDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { phoneUserId } = useUserSession();
+  // Android에서 BlurView(특히 experimental blur)가 children 업데이트를 늦게 반영하는 케이스가 있어
+  // 즉시 피드백이 중요한 "선택 UI"는 정적 View 렌더링을 우선합니다.
+  const reduceHeavyEffectsUI = Platform.OS === 'android';
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
   /** 메인 스크롤 세로 오프셋 — 영화 검색 패널 열 때 정렬에 사용 */
@@ -1104,6 +1145,8 @@ export default function CreateDetailsScreen() {
         ]);
         return;
       }
+      // Step 1에서는 선택 즉시 UI가 바뀌도록 애니메이션으로 피드백을 강화합니다.
+      layoutAnimateEaseInEaseOut();
       setSelectedCategoryId(id);
     },
     [currentStep, resetWizardState, selectedCategoryId],
@@ -1598,16 +1641,13 @@ export default function CreateDetailsScreen() {
               currentStep === detailStep && { paddingBottom: 108 + insets.bottom },
             ]}>
             <View collapsable={false}>
-              <View
-                renderToHardwareTextureAndroid
-                style={styles.wizardStepShell}
-                onLayout={(e) => captureStepPosition(1, e)}>
+              <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
                 <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
                 <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
 
                 {catLoading ? (
                   <View style={styles.centerRow}>
-                    <ActivityIndicator color="#93C5FD" />
+                    <ActivityIndicator color={GinitTheme.colors.primary} />
                     <Text style={styles.wizardMuted}>카테고리 불러오는 중…</Text>
                   </View>
                 ) : null}
@@ -1645,7 +1685,7 @@ export default function CreateDetailsScreen() {
                 </View>
 
                 <Text style={[styles.wizardFieldLabel, { marginTop: 18 }]}>공개 / 비공개</Text>
-                <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                   <View style={styles.segmentRow}>
                     <Pressable
                       onPress={() => setIsPublicMeeting(false)}
@@ -1674,6 +1714,14 @@ export default function CreateDetailsScreen() {
                       pressed && selectedCategoryId && categories.length > 0 && styles.addCandidateBtnPressed,
                     ]}
                     accessibilityRole="button">
+                    <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                      <LinearGradient
+                        colors={GinitTheme.colors.ctaGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                    </View>
                     <Text style={styles.wizardPrimaryBtnLabel}>
                       {needsSpecialty ? '확인' : '확인'}
                     </Text>
@@ -1682,13 +1730,10 @@ export default function CreateDetailsScreen() {
               </View>
 
               {selectedCategory != null && needsSpecialty && specialtyKind && currentStep >= 2 ? (
-                <View
-                  renderToHardwareTextureAndroid
-                  style={styles.wizardStepShell}
-                  onLayout={(e) => captureStepPosition(2, e)}>
+                <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(2, e)}>
                   <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>{specialtyStepBadge(specialtyKind)}</Text>
                   <Text style={styles.wizardLockedHint}>카테고리에 맞춰 선택해 주세요.</Text>
-                  <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                  <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                     {specialtyKind === 'movie' ? (
                       <MovieSearch
                         value={movieCandidates}
@@ -1722,6 +1767,14 @@ export default function CreateDetailsScreen() {
                           styles.addCandidateBtnPressed,
                       ]}
                       accessibilityRole="button">
+                      <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                        <LinearGradient
+                          colors={GinitTheme.colors.ctaGradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={StyleSheet.absoluteFillObject}
+                        />
+                      </View>
                       <Text style={styles.wizardPrimaryBtnLabel}>
                         {specialtyKind === 'movie'
                           ? '이 후보들로 모임 만들기'
@@ -1733,12 +1786,9 @@ export default function CreateDetailsScreen() {
               ) : null}
 
               {currentStep >= 3 ? (
-                <View
-                  renderToHardwareTextureAndroid
-                  style={styles.wizardStepShell}
-                  onLayout={(e) => captureStepPosition(3, e)}>
+                <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(3, e)}>
                   <Text style={styles.wizardStepBadge}>3 · 기본 정보</Text>
-                  <VoteCandidateCard reduceHeavyEffects={false} outerStyle={styles.wizardGlassCard}>
+                  <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                     <Text style={styles.wizardFieldLabel}>모임 이름</Text>
                     <TextInput
                       value={title}
@@ -1809,6 +1859,14 @@ export default function CreateDetailsScreen() {
                       onPress={onStep3BasicNext}
                       style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                       accessibilityRole="button">
+                      <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                        <LinearGradient
+                          colors={GinitTheme.colors.ctaGradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={StyleSheet.absoluteFillObject}
+                        />
+                      </View>
                       <Text style={styles.wizardPrimaryBtnLabel}>
                         {needsMovieEarlyPlaces ? '확인 · 장소 선택' : '확인 · 일정 설정'}
                       </Text>
@@ -1821,7 +1879,6 @@ export default function CreateDetailsScreen() {
                 <>
                   {needsMovieEarlyPlaces ? (
                     <View
-                      renderToHardwareTextureAndroid
                       style={styles.wizardStepShell}
                       onLayout={(e) => captureStepPosition(4, e)}>
                       <Text style={styles.wizardStepBadge}>4 · 장소 선택</Text>
@@ -1829,7 +1886,7 @@ export default function CreateDetailsScreen() {
                         모임 장소 후보를 검색해 추가하세요. 영화 모임은 주변 멀티플렉스를 먼저 보여 드려요.
                       </Text>
                       <VoteCandidateCard
-                        reduceHeavyEffects={false}
+                        reduceHeavyEffects={reduceHeavyEffectsUI}
                         outerStyle={[styles.wizardGlassCard, styles.earlyPlaceCardClip]}>
                         <View style={styles.earlyPlaceSearchMount}>
                           <EarlyPlaceSearch
@@ -1846,7 +1903,6 @@ export default function CreateDetailsScreen() {
                   ) : null}
 
                   <View
-                    renderToHardwareTextureAndroid
                     style={styles.wizardStepShell}
                     onLayout={(e) => captureStepPosition(scheduleStep, e)}>
                     <View
@@ -1895,6 +1951,14 @@ export default function CreateDetailsScreen() {
                         onPress={handleConfirmSchedule}
                         style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                         accessibilityRole="button">
+                        <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                          <LinearGradient
+                            colors={GinitTheme.colors.ctaGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={StyleSheet.absoluteFillObject}
+                          />
+                        </View>
                         <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
                       </Pressable>
                     ) : null}
@@ -1903,16 +1967,21 @@ export default function CreateDetailsScreen() {
                         onPress={onPlacesStepConfirm}
                         style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                         accessibilityRole="button">
+                        <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
+                          <LinearGradient
+                            colors={GinitTheme.colors.ctaGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={StyleSheet.absoluteFillObject}
+                          />
+                        </View>
                         <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 설명</Text>
                       </Pressable>
                     ) : null}
                   </View>
 
                   {currentStep >= detailStep ? (
-                    <View
-                      renderToHardwareTextureAndroid
-                      style={styles.wizardStepShell}
-                      onLayout={(e) => captureStepPosition(detailStep, e)}>
+                    <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(detailStep, e)}>
                       <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>
                         {detailStep} · 상세 설명 (선택)
                       </Text>
@@ -1922,7 +1991,7 @@ export default function CreateDetailsScreen() {
                       </Text>
 
                       <VoteCandidateCard
-                        reduceHeavyEffects={false}
+                        reduceHeavyEffects={reduceHeavyEffectsUI}
                         outerStyle={[styles.wizardGlassCard, styles.finalRegistrationGlass]}>
                         
                         <TextInput
@@ -1964,6 +2033,14 @@ export default function CreateDetailsScreen() {
               accessibilityState={{
                 disabled: earlyPlaceCandidates.length === 0 || busy,
               }}>
+              <View pointerEvents="none" style={styles.floatingCtaBg}>
+                <LinearGradient
+                  colors={GinitTheme.colors.ctaGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              </View>
               <Text style={styles.wizardPrimaryBtnLabel}>
                 {earlyPlaceCandidates.length}개의 장소로 일정 정하기
               </Text>
@@ -1984,6 +2061,14 @@ export default function CreateDetailsScreen() {
               ]}
               accessibilityRole="button"
               accessibilityState={{ disabled: finalDisabled }}>
+              <View pointerEvents="none" style={styles.floatingCtaBg}>
+                <LinearGradient
+                  colors={GinitTheme.colors.ctaGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              </View>
               {busy ? (
                 <View style={styles.detailFinalFloatingInner}>
                   <ActivityIndicator color="#FFFFFF" />
@@ -1995,7 +2080,11 @@ export default function CreateDetailsScreen() {
             </Pressable>
           ) : null}
 
-          {wizardError ? <Text style={styles.wizardFloatingError}>{wizardError}</Text> : null}
+          {wizardError ? (
+            <Text pointerEvents="none" style={styles.wizardFloatingError}>
+              {wizardError}
+            </Text>
+          ) : null}
         </SafeAreaView>
       </KeyboardAvoidingView>
     </View>
@@ -2005,12 +2094,12 @@ export default function CreateDetailsScreen() {
 const styles = StyleSheet.create({
   screenRoot: {
     flex: 1,
-    backgroundColor: SCREEN_BG,
+    backgroundColor: GinitTheme.colors.bg,
   },
   safeArea: {
     flex: 1,
-    backgroundColor: SCREEN_BG,
-    paddingHorizontal: 20,
+    backgroundColor: GinitTheme.colors.bg,
+    paddingHorizontal: GinitTheme.spacing.lg,
   },
   topBarRow: {
     flexDirection: 'row',
@@ -2022,7 +2111,7 @@ const styles = StyleSheet.create({
   backLink: {
     fontSize: 16,
     fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.85)',
+    color: GinitTheme.colors.primary,
     minWidth: 56,
   },
   screenTitle: {
@@ -2030,7 +2119,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 18,
     fontWeight: '900',
-    color: 'rgba(255, 255, 255, 0.95)',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.3,
   },
   scrollContent: {
@@ -2043,13 +2132,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#0F172A',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.35,
   },
   sectionHint: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#475569',
+    color: GinitTheme.colors.textMuted,
     lineHeight: 19,
     marginBottom: 14,
   },
@@ -2057,42 +2146,124 @@ const styles = StyleSheet.create({
   nlpSection: {
     marginBottom: 6,
   },
-  nlpLabel: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 2,
-    color: 'rgba(255, 255, 255, 0.45)',
+  aiQuickInitLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
     marginBottom: 10,
+    letterSpacing: 0.2,
   },
-  /** 카드 루트에 합쳐짐: 다크 글로우 + 거의 투명 글래스 배경 */
-  nlpGlassOuter: {
-    marginBottom: 10,
-    padding: 14,
-    backgroundColor: 'rgba(15, 23, 42, 0.42)',
-    borderColor: 'rgba(0, 82, 204, 0.45)',
-    borderWidth: 1.5,
-    shadowColor: TRUST_BLUE,
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.88,
-    shadowRadius: 36,
-    elevation: 26,
-  },
-  nlpGlassInner: {
+  aiQuickInitBorder: {
     borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 2,
+    marginBottom: 10,
   },
-  nlpTextInput: {
-    backgroundColor: 'transparent',
-    color: 'rgba(255, 255, 255, 0.96)',
+  aiQuickInitInner: {
+    borderRadius: 14,
+    backgroundColor: GinitTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 110,
+  },
+  aiQuickInitInput: {
+    minHeight: 86,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: GinitTheme.colors.text,
+    lineHeight: 22,
     padding: 0,
     margin: 0,
-    minHeight: 22,
+  },
+  aiPreviewRow: {
+    marginTop: 2,
+    marginBottom: 10,
+    gap: 8,
+  },
+  aiPreviewHint: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+  },
+  aiPreviewScroll: {
+    gap: 10,
+    paddingBottom: 2,
+    paddingRight: 6,
+  },
+  aiPreviewCard: {
+    width: 160,
+    borderRadius: 16,
+    backgroundColor: GinitTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    padding: 12,
+    ...GinitTheme.shadow.card,
+  },
+  aiPreviewCardMuted: {
+    width: 220,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.70)',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    padding: 12,
+  },
+  aiPreviewEmpty: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 18,
+  },
+  aiPreviewPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    marginBottom: 10,
+  },
+  aiPreviewPillText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
+  },
+  aiPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: GinitTheme.colors.text,
+    letterSpacing: -0.2,
+    marginBottom: 8,
+  },
+  aiPreviewMeta: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 16,
+  },
+  aiQuickInitCta: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
+    ...GinitTheme.shadow.card,
+  },
+  aiQuickInitCtaBg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  aiQuickInitCtaLabel: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.2,
+  },
+  aiQuickInitCtaPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
   },
   nlpChip: {
     alignSelf: 'flex-start',
@@ -2123,15 +2294,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 24,
     padding: 20,
-    backgroundColor: 'rgb(255, 255, 255)',
+    backgroundColor: GinitTheme.colors.surface,
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
-    shadowColor: TRUST_BLUE,
+    shadowColor: GinitTheme.shadow.card.shadowColor,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
+    shadowOpacity: 1,
     shadowRadius: 24,
-    elevation: 15,
+    elevation: 14,
   },
   glassCardInner: {
     position: 'relative',
@@ -2159,7 +2330,7 @@ const styles = StyleSheet.create({
   },
   /** 카드 안 제목 (일정 후보 1 등) */
   cardFieldTitle: {
-    color: 'rgb(0, 0, 0)',
+    color: GinitTheme.colors.text,
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 12,
@@ -2237,7 +2408,7 @@ const styles = StyleSheet.create({
   addCandidateBtn: {
     alignSelf: 'stretch',
     marginBottom: 8,
-    backgroundColor: TRUST_BLUE,
+    backgroundColor: GinitTheme.colors.primary,
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
@@ -2259,7 +2430,13 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   wizardStepShell: {
-    marginBottom: 20,
+    marginBottom: 16,
+    borderRadius: GinitTheme.radius.card,
+    padding: 16,
+    backgroundColor: GinitTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    ...GinitTheme.shadow.card,
   },
   wizardStepPast: {
     opacity: 0.5,
@@ -2272,7 +2449,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.55)',
+    color: GinitTheme.colors.textMuted,
     lineHeight: 20,
   },
   catGrid: {
@@ -2291,18 +2468,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 6,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: GinitTheme.colors.surfaceStrong,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: GinitTheme.colors.border,
   },
   catTileActive: {
-    borderColor: 'rgba(147, 197, 253, 0.75)',
-    backgroundColor: 'rgba(0, 82, 204, 0.22)',
-    shadowColor: TRUST_BLUE,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    borderColor: 'rgba(134, 211, 183, 0.8)',
+    backgroundColor: 'rgba(134, 211, 183, 0.16)',
+    shadowColor: 'rgba(134, 211, 183, 0.55)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 6,
   },
   catTilePressed: {
     opacity: 0.9,
@@ -2316,7 +2493,7 @@ const styles = StyleSheet.create({
   catLabel: {
     fontSize: 10,
     fontWeight: '700',
-    color: 'rgba(248, 250, 252, 0.9)',
+    color: GinitTheme.colors.textSub,
     textAlign: 'center',
     letterSpacing: -0.15,
     lineHeight: 13,
@@ -2326,34 +2503,34 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: GinitTheme.colors.border,
   },
   segmentHalf: {
     flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
   },
   segmentHalfOnPrivate: {
-    backgroundColor: 'rgba(99, 102, 241, 0.22)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   segmentHalfOnPublic: {
-    backgroundColor: 'rgba(14, 165, 233, 0.2)',
+    backgroundColor: 'rgba(134, 211, 183, 0.14)',
   },
   segmentTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: 'rgba(248, 250, 252, 0.55)',
+    color: GinitTheme.colors.textSub,
   },
   segmentTitleOn: {
-    color: '#F8FAFC',
+    color: GinitTheme.colors.primary,
   },
   segmentSub: {
     marginTop: 2,
     fontSize: 10,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.45)',
+    color: GinitTheme.colors.textMuted,
   },
   centerRow: {
     flexDirection: 'row',
@@ -2364,7 +2541,7 @@ const styles = StyleSheet.create({
   wizardMuted: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.45)',
+    color: GinitTheme.colors.textMuted,
   },
   warnBox: {
     marginTop: 10,
@@ -2395,39 +2572,45 @@ const styles = StyleSheet.create({
   wizardStepBadge: {
     fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 0.8,
-    color: 'rgba(248, 250, 252, 0.92)',
+    letterSpacing: 0.2,
+    color: GinitTheme.colors.primary,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
   },
   wizardGlassCard: {
     marginBottom: 12,
     borderRadius: 20,
-    padding: 16,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    padding: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   wizardFieldLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: 'rgba(248, 250, 252, 0.75)',
+    color: GinitTheme.colors.textSub,
     marginBottom: 8,
   },
   wizardFieldHint: {
     fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.5)',
+    color: GinitTheme.colors.textMuted,
     marginBottom: 10,
   },
   wizardTextInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: GinitTheme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
     fontWeight: '600',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.text,
   },
   wizardTextInputMultiline: {
     minHeight: 120,
@@ -2436,16 +2619,22 @@ const styles = StyleSheet.create({
   wizardPrimaryBtn: {
     alignSelf: 'stretch',
     marginTop: 12,
-    backgroundColor: TRUST_BLUE,
     borderRadius: 16,
+    overflow: 'hidden',
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: TRUST_BLUE,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
+    shadowColor: GinitTheme.glass.shadow,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
+    shadowOpacity: 1,
     shadowRadius: 14,
     elevation: 8,
+  },
+  wizardPrimaryBtnBg: {
+    ...StyleSheet.absoluteFillObject,
   },
   wizardPrimaryBtnLabel: {
     color: '#FFFFFF',
@@ -2455,7 +2644,7 @@ const styles = StyleSheet.create({
   wizardLockedHint: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.45)',
+    color: GinitTheme.colors.textMuted,
     marginBottom: 10,
     lineHeight: 20,
   },
@@ -2509,10 +2698,10 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 12,
     borderRadius: 999,
-    backgroundColor: 'rgba(0, 82, 204, 0.22)',
+    backgroundColor: 'rgba(134, 211, 183, 0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.5)',
-    shadowColor: TRUST_BLUE,
+    borderColor: 'rgba(134, 211, 183, 0.55)',
+    shadowColor: 'rgba(134, 211, 183, 0.40)',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 10,
@@ -2524,7 +2713,7 @@ const styles = StyleSheet.create({
   aiTitleChipText: {
     fontSize: 12,
     fontWeight: '800',
-    color: 'rgba(248, 250, 252, 0.95)',
+    color: GinitTheme.colors.text,
     maxWidth: '100%',
   },
   earlyPlaceFloatingBtn: {
@@ -2535,14 +2724,15 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 18,
     borderRadius: 16,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: TRUST_BLUE,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.45)',
-    shadowColor: TRUST_BLUE,
+    borderColor: GinitTheme.glass.borderLight,
+    shadowColor: GinitTheme.glass.shadow,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
+    shadowOpacity: 1,
     shadowRadius: 16,
     elevation: 12,
   },
@@ -2550,25 +2740,25 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.38)',
+    borderColor: 'rgba(15, 23, 42, 0.10)',
   },
   finalDescriptionInput: {
     marginTop: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: GinitTheme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 16,
     fontWeight: '600',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.text,
     minHeight: 160,
     textAlignVertical: 'top',
   },
   finalDescriptionInputFocused: {
-    borderColor: TRUST_BLUE,
-    shadowColor: TRUST_BLUE,
+    borderColor: 'rgba(134, 211, 183, 0.75)',
+    shadowColor: 'rgba(134, 211, 183, 0.55)',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.55,
     shadowRadius: 10,
@@ -2582,16 +2772,20 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     paddingHorizontal: 18,
     borderRadius: 18,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: TRUST_BLUE,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.55)',
-    shadowColor: TRUST_BLUE,
+    borderColor: GinitTheme.glass.borderLight,
+    shadowColor: GinitTheme.glass.shadow,
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 1,
     shadowRadius: 22,
     elevation: 14,
+  },
+  floatingCtaBg: {
+    ...StyleSheet.absoluteFillObject,
   },
   detailFinalFloatingLabel: {
     color: '#FFFFFF',

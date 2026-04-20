@@ -26,8 +26,6 @@ export function MenuPreference({ value, onChange, disabled }: MenuPreferenceProp
 
   return (
     <View>
-      <Text style={S.fieldLabel}>먹고 싶은 쪽</Text>
-      <Text style={S.fieldHint}>복수 선택 가능해요.</Text>
       <View style={S.chipWrap}>
         {OPTIONS.map((label) => {
           const active = value.includes(label);

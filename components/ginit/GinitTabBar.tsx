@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -88,7 +89,11 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
               accessibilityState={focused ? { selected: true } : {}}
               onPress={() => onTabPress(route, originalIndex)}
               style={[styles.tab, isLeftPair ? styles.tabLeft : styles.tabRight]}>
-              <Ionicons name={iconFor(route.name, focused)} size={24} color={focused ? GinitTheme.trustBlue : '#94A3B8'} />
+              <Ionicons
+                name={iconFor(route.name, focused)}
+                size={24}
+                color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
+              />
               <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
                 {label}
               </Text>
@@ -107,6 +112,13 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             bottom: Math.max(insets.bottom, 10) + 18,
           },
         ]}>
+        <LinearGradient
+          colors={GinitTheme.colors.ctaGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.fabBg}
+          pointerEvents="none"
+        />
         <Ionicons name="add" size={32} color="#FFFFFF" />
       </Pressable>
     </View>
@@ -115,13 +127,13 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(15, 23, 42, 0.08)',
-    shadowColor: '#000',
+    borderTopColor: 'rgba(15, 23, 42, 0.10)',
+    shadowColor: 'rgba(15, 23, 42, 0.16)',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
+    shadowOpacity: 1,
+    shadowRadius: 18,
     elevation: 12,
   },
   row: {
@@ -146,11 +158,11 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
+    fontWeight: '700',
+    color: 'rgba(100, 116, 139, 0.85)',
   },
   tabLabelActive: {
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
   },
   fab: {
     position: 'absolute',
@@ -158,13 +170,19 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: GinitTheme.pointOrange,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: GinitTheme.pointOrange,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
+    shadowColor: 'rgba(15, 23, 42, 0.14)',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
+    shadowOpacity: 1,
+    shadowRadius: 14,
     elevation: 10,
+  },
+  fabBg: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

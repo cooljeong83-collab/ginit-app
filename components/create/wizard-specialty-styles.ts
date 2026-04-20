@@ -1,41 +1,43 @@
 import { Platform, StyleSheet, type ViewStyle } from 'react-native';
 
-const TRUST_BLUE = '#0052CC';
+import { GinitTheme } from '@/constants/ginit-theme';
+
+const TRUST_BLUE = GinitTheme.colors.primary;
 /** 영화 리스트 포스터 고정 너비 (80~100px 명세 중간값) */
 export const MOVIE_LIST_POSTER_WIDTH = 92;
-const ENERGETIC_ORANGE = '#FF8A00';
-const INPUT_PLACEHOLDER = 'rgba(255, 255, 255, 0.4)';
+const ENERGETIC_ORANGE = GinitTheme.colors.warning;
+const INPUT_PLACEHOLDER = GinitTheme.glassModal.placeholder;
 
 export const wizardSpecialtyStyles = StyleSheet.create({
   fieldLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: 'rgba(248, 250, 252, 0.75)',
+    color: GinitTheme.colors.textSub,
     marginBottom: 8,
   },
   fieldHint: {
     fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.5)',
+    color: GinitTheme.colors.textMuted,
     marginBottom: 10,
   },
   textInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: GinitTheme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
     fontWeight: '600',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.text,
   },
   resultsBox: {
     marginTop: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     overflow: 'hidden',
   },
   resultRow: {
@@ -47,32 +49,32 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   resultTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: 'rgba(248, 250, 252, 0.95)',
+    color: GinitTheme.colors.text,
   },
   resultMeta: {
     marginTop: 4,
     fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(147, 197, 253, 0.85)',
+    color: GinitTheme.colors.textMuted,
   },
   pickedBlock: {
     marginTop: 14,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(0, 82, 204, 0.18)',
+    backgroundColor: GinitTheme.colors.primarySoft,
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.45)',
+    borderColor: GinitTheme.colors.border,
   },
   pickedTitle: {
     fontSize: 16,
     fontWeight: '900',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.text,
   },
   pickedSub: {
     marginTop: 6,
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.72)',
+    color: GinitTheme.colors.textMuted,
     lineHeight: 19,
   },
   clearLink: {
@@ -82,7 +84,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   clearLinkText: {
     fontSize: 13,
     fontWeight: '800',
-    color: 'rgba(147, 197, 253, 0.95)',
+    color: GinitTheme.colors.primary,
   },
   chipWrap: {
     flexDirection: 'row',
@@ -94,14 +96,14 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: GinitTheme.colors.border,
   },
   glassChipOn: {
-    backgroundColor: 'rgba(0, 82, 204, 0.28)',
-    borderColor: 'rgba(147, 197, 253, 0.55)',
-    shadowColor: TRUST_BLUE,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderColor: 'rgba(134, 211, 183, 0.65)',
+    shadowColor: 'rgba(134, 211, 183, 0.55)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -113,14 +115,14 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   glassChipText: {
     fontSize: 13,
     fontWeight: '800',
-    color: 'rgba(248, 250, 252, 0.92)',
+    color: GinitTheme.colors.text,
   },
   segmentRow: {
     flexDirection: 'row',
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: GinitTheme.colors.border,
     marginTop: 4,
   },
   segmentThird: {
@@ -128,25 +130,25 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 6,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
   },
   segmentThirdOn: {
-    backgroundColor: 'rgba(0, 82, 204, 0.35)',
+    backgroundColor: 'rgba(134, 211, 183, 0.14)',
   },
   segmentTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: 'rgba(248, 250, 252, 0.55)',
+    color: GinitTheme.colors.textSub,
     textAlign: 'center',
   },
   segmentTitleOn: {
-    color: '#F8FAFC',
+    color: GinitTheme.colors.primary,
   },
   segmentSub: {
     marginTop: 2,
     fontSize: 10,
     fontWeight: '600',
-    color: 'rgba(248, 250, 252, 0.45)',
+    color: GinitTheme.colors.textMuted,
     textAlign: 'center',
   },
   /** MovieSearch — 큰 그리드 카드 셸 */
@@ -154,8 +156,8 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     marginTop: 4,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     overflow: 'hidden',
     paddingHorizontal: 12,
     paddingTop: 8,
@@ -179,24 +181,24 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieListRowCardFallback: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.62)',
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.86)',
     overflow: 'hidden',
-    shadowColor: '#020617',
+    shadowColor: 'rgba(15, 23, 42, 0.14)',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.55,
+    shadowOpacity: 1,
     shadowRadius: 22,
     elevation: 10,
   },
   movieListRowOuter: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
     position: 'relative',
-    shadowColor: '#020617',
+    shadowColor: 'rgba(15, 23, 42, 0.14)',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.55,
+    shadowOpacity: 1,
     shadowRadius: 22,
     elevation: 10,
   },

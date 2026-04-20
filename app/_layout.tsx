@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { Platform } from 'react-native';
 
+import { AppBootSplash } from '@/components/AppBootSplash';
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
@@ -29,6 +30,7 @@ export default function RootLayout() {
   return (
     <UserSessionProvider>
       <InAppAlarmsProvider>
+        <AppBootSplash />
         <PushNotificationBootstrap />
         <Stack
         screenOptions={{

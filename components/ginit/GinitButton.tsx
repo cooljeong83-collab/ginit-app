@@ -1,5 +1,6 @@
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Platform,
   Pressable,
@@ -44,10 +45,10 @@ export function GinitButton({
     variant === 'primary'
       ? '#FFFFFF'
       : variant === 'ghost'
-        ? GinitTheme.trustBlue
+        ? GinitTheme.colors.primary
         : isDark
           ? '#F4F6F8'
-          : '#0B1220';
+          : GinitTheme.colors.text;
 
   const handlePress: PressableProps['onPress'] = (e) => {
     if (!disabled && Platform.OS !== 'web') {
@@ -69,21 +70,31 @@ export function GinitButton({
           variant === 'ghost' && styles.ghostShell,
           state.pressed && !disabled && styles.pressed,
           disabled && styles.disabled,
+          variant === 'primary' && styles.primaryShadow,
           resolved,
         ];
       }}
       {...rest}>
       {variant !== 'ghost' ? (
         <View style={styles.clip}>
-          {Platform.OS === 'web' ? (
+          {variant === 'primary' ? (
+            <LinearGradient
+              colors={GinitTheme.colors.ctaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          ) : Platform.OS === 'web' ? (
             <View style={[StyleSheet.absoluteFill, webBlurLayer(variant, isDark)]} />
           ) : (
             <BlurView
-              intensity={variant === 'primary' ? GinitTheme.blur.intensity : GinitTheme.blur.intensity - 8}
-              tint={variant === 'primary' ? 'dark' : tint}
+              intensity={GinitTheme.blur.intensity - 8}
+              tint={tint}
               style={StyleSheet.absoluteFill}
             />
           )}
+
           <View style={[StyleSheet.absoluteFill, colorOverlay(variant, isDark)]} pointerEvents="none" />
           <Text style={[styles.label, { color: labelColor }, textStyle]}>{title}</Text>
         </View>
@@ -98,14 +109,18 @@ export function GinitButton({
 
 function webBlurLayer(variant: GinitButtonVariant, isDark: boolean): ViewStyle {
   if (variant === 'primary') {
-    return { backgroundColor: 'rgba(0, 82, 204, 0.82)' };
+    return { backgroundColor: 'rgba(255, 255, 255, 0.0)' };
   }
-  return { backgroundColor: isDark ? 'rgba(40, 48, 58, 0.75)' : 'rgba(255, 255, 255, 0.5)' };
+  return { backgroundColor: isDark ? 'rgba(40, 48, 58, 0.75)' : 'rgba(255, 255, 255, 0.62)' };
 }
 
 function colorOverlay(variant: GinitButtonVariant, isDark: boolean): ViewStyle {
   if (variant === 'primary') {
-    return { backgroundColor: 'rgba(0, 82, 204, 0.38)' };
+    return {
+      backgroundColor: 'rgba(255, 255, 255, 0.10)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.72)',
+    };
   }
   return {
     backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.28)',
@@ -115,8 +130,8 @@ function colorOverlay(variant: GinitButtonVariant, isDark: boolean): ViewStyle {
 function ghostBorder(isDark: boolean): ViewStyle {
   return {
     borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: isDark ? 'rgba(0, 82, 204, 0.55)' : 'rgba(0, 82, 204, 0.45)',
-    backgroundColor: isDark ? 'rgba(0, 82, 204, 0.08)' : 'rgba(0, 82, 204, 0.06)',
+    borderColor: isDark ? 'rgba(134, 211, 183, 0.55)' : 'rgba(134, 211, 183, 0.45)',
+    backgroundColor: isDark ? 'rgba(134, 211, 183, 0.10)' : 'rgba(134, 211, 183, 0.08)',
   };
 }
 
@@ -124,6 +139,13 @@ const styles = StyleSheet.create({
   pressable: {
     borderRadius: GinitTheme.radius.button,
     overflow: 'hidden',
+  },
+  primaryShadow: {
+    shadowColor: GinitTheme.glass.shadow,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 1,
+    shadowRadius: 22,
+    elevation: 10,
   },
   ghostShell: {
     overflow: 'visible',
@@ -142,8 +164,8 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontWeight: '800',
+    letterSpacing: -0.1,
   },
   pressed: {
     opacity: 0.92,

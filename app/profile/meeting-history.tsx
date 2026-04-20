@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { JoinedMeetingDashboardCard } from '@/components/joined-meetings/JoinedMeetingDashboardCard';
+import { ScreenShell } from '@/components/ui';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -42,7 +42,7 @@ export default function ProfileMeetingHistoryScreen() {
   );
 
   return (
-    <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
+    <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
           <Pressable
@@ -51,7 +51,7 @@ export default function ProfileMeetingHistoryScreen() {
             accessibilityRole="button"
             accessibilityLabel="뒤로"
             style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={28} color="#0f172a" />
+            <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
           </Pressable>
           <Text style={styles.topTitle} numberOfLines={1}>
             참가 모임 히스토리
@@ -67,7 +67,7 @@ export default function ProfileMeetingHistoryScreen() {
 
           {loading ? (
             <View style={styles.centerRow}>
-              <ActivityIndicator color={GinitTheme.trustBlue} />
+              <ActivityIndicator color={GinitTheme.colors.primary} />
               <Text style={styles.muted}>불러오는 중…</Text>
             </View>
           ) : error ? (
@@ -81,12 +81,12 @@ export default function ProfileMeetingHistoryScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
-    </LinearGradient>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: { flex: 1 },
+  root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
   topBar: {
     flexDirection: 'row',
@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '800',
-    color: '#0f172a',
+    color: GinitTheme.colors.text,
     textAlign: 'center',
   },
   topBarSpacer: {

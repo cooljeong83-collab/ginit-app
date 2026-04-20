@@ -1,12 +1,13 @@
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
+import { ScreenShell } from '@/components/ui';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
+import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
@@ -74,7 +75,7 @@ export default function ProfileTab() {
   }, [router, signOutSession]);
 
   return (
-    <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
+    <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]}
@@ -134,14 +135,12 @@ export default function ProfileTab() {
           <Text style={styles.historyHint}>참가했던 모임(참여 중인 모임)을 모아서 확인해요.</Text>
         </ScrollView>
       </SafeAreaView>
-    </LinearGradient>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: {
-    flex: 1,
-  },
+  root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: {
     flex: 1,
   },
@@ -152,7 +151,7 @@ const styles = StyleSheet.create({
   screenTitle: {
     fontSize: 22,
     fontWeight: '900',
-    color: '#0f172a',
+    color: GinitTheme.colors.text,
     marginBottom: 16,
     letterSpacing: -0.4,
     textShadowColor: 'rgba(255, 255, 255, 0.7)',

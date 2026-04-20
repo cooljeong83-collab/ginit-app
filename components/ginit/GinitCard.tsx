@@ -55,20 +55,25 @@ export function GinitCard({ style, children, appearance = 'auto', ...rest }: Gin
       style={[
         styles.shellLight,
         {
-          borderColor: 'rgba(255, 255, 255, 0.3)',
-          shadowColor: 'rgba(15, 23, 42, 0.08)',
+          borderColor: GinitTheme.colors.border,
+          shadowColor: GinitTheme.shadow.card.shadowColor,
         },
         style,
       ]}
       {...rest}>
       {Platform.OS === 'web' ? (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255, 255, 255, 0.7)' }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: GinitTheme.colors.surface }]} />
       ) : (
         <>
-          <BlurView intensity={22} tint="light" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <BlurView
+            intensity={GinitTheme.glassModal.blurIntensity}
+            tint="light"
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
           <View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255, 255, 255, 0.52)' }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: GinitTheme.colors.surface }]}
           />
         </>
       )}
@@ -88,18 +93,18 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   shellLight: {
-    borderRadius: 15,
+    borderRadius: GinitTheme.radius.card,
     borderWidth: 1,
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 4,
+    shadowOffset: GinitTheme.shadow.card.shadowOffset,
+    shadowOpacity: GinitTheme.shadow.card.shadowOpacity,
+    shadowRadius: GinitTheme.shadow.card.shadowRadius,
+    elevation: GinitTheme.shadow.card.elevation,
   },
   tint: {
     ...StyleSheet.absoluteFillObject,
   },
   content: {
-    padding: 20,
+    padding: GinitTheme.spacing.lg,
   },
 });

@@ -1,10 +1,83 @@
 /**
  * Ginit 디자인 시스템 토큰 (Linear GIN-8)
- * Trust Blue를 메인 포인트로 사용합니다.
+ * 2026-04 리디자인: 시안(“Warm & Human Gathering”) 톤으로 팔레트/타이포/라운드 규격을 확장합니다.
+ *
+ * 기존 키(`trustBlue`, `pointOrange`)는 레거시 호환을 위해 유지하되,
+ * 신규 화면/컴포넌트는 `colors/*` 토큰을 우선 사용합니다.
  */
 export const GinitTheme = {
-  trustBlue: '#0052CC',
-  pointOrange: '#FF8A00',
+  /** Legacy: 기존 코드 호환용(점진적 마이그레이션) */
+  trustBlue: '#1F2A44',
+  /** Legacy: 기존 코드 호환용(점진적 마이그레이션) */
+  pointOrange: '#86D3B7',
+
+  /** New: 시안 톤 컬러 토큰 */
+  colors: {
+    // surfaces
+    bg: '#F6FAFF',
+    bgAlt: '#EEF5FF',
+    surface: 'rgba(255, 255, 255, 0.86)',
+    surfaceStrong: '#FFFFFF',
+    border: 'rgba(15, 23, 42, 0.10)',
+    borderStrong: 'rgba(15, 23, 42, 0.16)',
+
+    // text
+    text: '#0F172A',
+    textSub: '#334155',
+    textMuted: '#64748B',
+    textOnDark: '#F8FAFC',
+
+    // brand / actions
+    primary: '#1F2A44',
+    primarySoft: 'rgba(31, 42, 68, 0.10)',
+    accent: '#86D3B7',
+    accent2: '#F4C84A',
+    warning: '#F59E0B',
+    danger: '#DC2626',
+    success: '#22C55E',
+
+    // gradients
+    brandGradient: ['#86D3B7', '#F4C84A'] as const,
+    ctaGradient: ['#86D3B7', '#73C7FF'] as const,
+  },
+
+  /** New: 타이포 스케일(플랫폼 기본 폰트 기반) */
+  typography: {
+    h1: { fontSize: 30, fontWeight: '900' as const, letterSpacing: -0.8 },
+    h2: { fontSize: 22, fontWeight: '900' as const, letterSpacing: -0.4 },
+    title: { fontSize: 18, fontWeight: '900' as const, letterSpacing: -0.2 },
+    body: { fontSize: 15, fontWeight: '700' as const },
+    sub: { fontSize: 13, fontWeight: '600' as const },
+    caption: { fontSize: 12, fontWeight: '600' as const },
+    chip: { fontSize: 11, fontWeight: '800' as const },
+  },
+
+  /** New: 스페이싱(8pt grid) */
+  spacing: {
+    xs: 6,
+    sm: 10,
+    md: 14,
+    lg: 18,
+    xl: 24,
+  },
+
+  /** New: 섀도 규격 */
+  shadow: {
+    card: {
+      shadowColor: 'rgba(15, 23, 42, 0.14)',
+      shadowOffset: { width: 0, height: 18 },
+      shadowOpacity: 1,
+      shadowRadius: 28,
+      elevation: 14,
+    },
+    float: {
+      shadowColor: 'rgba(15, 23, 42, 0.20)',
+      shadowOffset: { width: 0, height: 22 },
+      shadowOpacity: 1,
+      shadowRadius: 34,
+      elevation: 18,
+    },
+  },
   blur: {
     /** 카드·버튼 글래스 블러 강도 (expo-blur intensity) */
     intensity: 48,
@@ -12,8 +85,9 @@ export const GinitTheme = {
     intensityStrong: 64,
   },
   radius: {
-    card: 20,
-    button: 14,
+    card: 22,
+    button: 16,
+    pill: 999,
   },
   glass: {
     overlayLight: 'rgba(255, 255, 255, 0.22)',
@@ -27,9 +101,9 @@ export const GinitTheme = {
    * (backdrop-filter 는 RN에서 `expo-blur` BlurView + 반투명 흰색 Veil 로 근사)
    */
   glassModal: {
-    textPrimary: '#1A1A1A',
-    textSecondary: '#333333',
-    textMuted: '#5C6570',
+    textPrimary: '#0F172A',
+    textSecondary: '#334155',
+    textMuted: '#64748B',
     /** TextInput placeholder — 밝은 박스 위 연한 회색 */
     placeholder: '#A3A3A3',
     veil: 'rgba(255, 255, 255, 0.58)',

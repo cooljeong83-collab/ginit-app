@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -1105,7 +1106,7 @@ export default function MeetingDetailScreen() {
   const notFound = !loading && !loadError && meeting === null;
 
   return (
-    <LinearGradient colors={['#E8F2FF', '#FFF5EB']} style={styles.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+    <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <View style={styles.topBar}>
           <Pressable
@@ -1113,7 +1114,7 @@ export default function MeetingDetailScreen() {
             style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={26} color="#1A1A1A" />
+            <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
           </Pressable>
           <Text style={styles.topTitle}>모임 상세</Text>
           {recruitmentBadge ? (
@@ -1127,7 +1128,7 @@ export default function MeetingDetailScreen() {
 
         {loading ? (
           <View style={styles.centerFill}>
-            <ActivityIndicator color={GinitTheme.trustBlue} />
+            <ActivityIndicator color={GinitTheme.colors.primary} />
             <Text style={styles.muted}>불러오는 중…</Text>
           </View>
         ) : null}
@@ -1137,6 +1138,13 @@ export default function MeetingDetailScreen() {
             <Text style={styles.errorTitle}>문제가 생겼어요</Text>
             <Text style={styles.muted}>{loadError}</Text>
             <Pressable onPress={() => setRetryNonce((n) => n + 1)} style={styles.retryBtn} accessibilityRole="button">
+              <LinearGradient
+                colors={GinitTheme.colors.ctaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.btnGradientBg}
+                pointerEvents="none"
+              />
               <Text style={styles.retryText}>다시 시도</Text>
             </Pressable>
           </View>
@@ -1146,6 +1154,13 @@ export default function MeetingDetailScreen() {
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>모임을 찾을 수 없어요</Text>
             <Pressable onPress={() => router.back()} style={styles.retryBtn} accessibilityRole="button">
+              <LinearGradient
+                colors={GinitTheme.colors.ctaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.btnGradientBg}
+                pointerEvents="none"
+              />
               <Text style={styles.retryText}>돌아가기</Text>
             </Pressable>
           </View>
@@ -1160,7 +1175,7 @@ export default function MeetingDetailScreen() {
             keyboardShouldPersistTaps="handled">
             <View style={styles.titleCard}>
               <Pressable style={styles.pencilAbs} accessibilityRole="button" accessibilityLabel="제목 수정">
-                <Ionicons name="pencil" size={18} color={GinitTheme.trustBlue} />
+                <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
               <Text style={styles.titleCardText}>{meeting.title || '제목 없음'}</Text>
               <Text style={styles.mascotPeek} accessibilityElementsHidden>
@@ -1353,7 +1368,7 @@ export default function MeetingDetailScreen() {
                     </View>
                     {chipSelected ? (
                       <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
-                        <Ionicons name="checkmark-circle" size={20} color={GinitTheme.trustBlue} />
+                        <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
                       </View>
                     ) : null}
                     <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
@@ -1392,7 +1407,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="날짜 제안"
               onPress={openDateProposeModal}>
-              <Ionicons name="calendar-outline" size={20} color={GinitTheme.trustBlue} />
+              <Ionicons name="calendar-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
             </View>
@@ -1446,7 +1461,7 @@ export default function MeetingDetailScreen() {
                             </View>
                             {chipSelected ? (
                               <View style={styles.movieVoteCheckWrapLeft} pointerEvents="none">
-                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
+                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                               </View>
                             ) : null}
                             {mv.posterUrl?.trim() ? (
@@ -1540,7 +1555,7 @@ export default function MeetingDetailScreen() {
                         </View>
                         {chipSelected ? (
                           <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
-                            <Ionicons name="checkmark-circle" size={20} color={GinitTheme.trustBlue} />
+                            <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
                           </View>
                         ) : null}
                         <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
@@ -1579,7 +1594,7 @@ export default function MeetingDetailScreen() {
             )}
             <Text style={styles.placePayNote}>결제: 💵 1/N 정산 (안내)</Text>
             <Pressable style={styles.pencilPlaceRow} accessibilityRole="button" accessibilityLabel="장소 수정">
-              <Ionicons name="pencil" size={18} color={GinitTheme.trustBlue} />
+              <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
               <Text style={styles.pencilPlaceRowText}>장소 편집</Text>
             </Pressable>
 
@@ -1588,7 +1603,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="장소 제안"
               onPress={openPlaceProposeModal}>
-              <Ionicons name="location-outline" size={20} color={GinitTheme.trustBlue} />
+              <Ionicons name="location-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
             </Pressable>
                 </View>
@@ -1627,7 +1642,7 @@ export default function MeetingDetailScreen() {
                 })}
                 {recruitmentPhase === 'recruiting' ? (
                   <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
-                    <Ionicons name="add" size={26} color={GinitTheme.trustBlue} />
+                    <Ionicons name="add" size={26} color={GinitTheme.colors.primary} />
                   </Pressable>
                 ) : null}
               </ScrollView>
@@ -1901,6 +1916,13 @@ export default function MeetingDetailScreen() {
                     (pressed || proposeSaving) && { opacity: proposeSaving ? 0.7 : 0.9 },
                   ]}
                   accessibilityRole="button">
+                  <LinearGradient
+                    colors={GinitTheme.colors.ctaGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.btnGradientBg}
+                    pointerEvents="none"
+                  />
                   {proposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
@@ -1965,6 +1987,13 @@ export default function MeetingDetailScreen() {
                     (pressed || placeProposeSaving) && { opacity: placeProposeSaving ? 0.7 : 0.9 },
                   ]}
                   accessibilityRole="button">
+                  <LinearGradient
+                    colors={GinitTheme.colors.ctaGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.btnGradientBg}
+                    pointerEvents="none"
+                  />
                   {placeProposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
@@ -1976,12 +2005,12 @@ export default function MeetingDetailScreen() {
           </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
-    </LinearGradient>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: { flex: 1 },
+  root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
   topBar: {
     flexDirection: 'row',
@@ -1992,7 +2021,7 @@ const styles = StyleSheet.create({
   },
   iconBtn: { padding: 8, borderRadius: 12 },
   pressed: { opacity: 0.7 },
-  topTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
+  topTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: GinitTheme.colors.text, textAlign: 'center' },
   statusBadgePlaceholder: { minWidth: 72, height: 30, marginRight: 4 },
   statusBadge: {
     paddingHorizontal: 10,
@@ -2015,7 +2044,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 14,
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
   },
   retryText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   scroll: { flex: 1 },
@@ -2073,7 +2105,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 82, 204, 0.1)',
   },
   miniBadgeMuted: { backgroundColor: '#F1F5F9' },
-  miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.trustBlue },
+  miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.primary },
   miniBadgeTextMuted: { color: '#64748B' },
   movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
   movieVoteCard: {
@@ -2092,14 +2124,14 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   movieVoteCardSelected: {
-    borderColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(0, 82, 204, 0.07)',
   },
   movieVoteCheckWrapLeft: { position: 'absolute', top: 5, left: 4, zIndex: 5 },
   moviePoster: { width: 100, height: 148, borderRadius: 10, backgroundColor: '#E2E8F0', alignSelf: 'center' },
   moviePosterPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   moviePosterTitle: { fontSize: 12, fontWeight: '600', color: '#334155', marginTop: 8, lineHeight: 16 },
-  moviePosterTitleSelected: { color: GinitTheme.trustBlue },
+  moviePosterTitleSelected: { color: GinitTheme.colors.primary },
   confirmedMovieRow: {
     flexDirection: 'row',
     gap: 12,
@@ -2188,7 +2220,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   dateChipSelected: {
-    borderColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(0, 82, 204, 0.07)',
   },
   dateChipPressed: { opacity: 0.9 },
@@ -2222,17 +2254,17 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 12,
   },
   voteTallyBadgeText: {
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.2,
     fontVariant: ['tabular-nums'],
   },
   dateChipTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
-  dateChipTitleSelected: { color: GinitTheme.trustBlue },
+  dateChipTitleSelected: { color: GinitTheme.colors.primary },
   dateChipSub: { fontSize: 13, fontWeight: '600', color: '#5C6570', textAlign: 'center', marginTop: 6 },
-  dateChipSubSelected: { color: GinitTheme.trustBlue },
-  dateSelectionHint: { fontSize: 13, color: GinitTheme.trustBlue, fontWeight: '600', marginTop: 8 },
+  dateChipSubSelected: { color: GinitTheme.colors.primary },
+  dateSelectionHint: { fontSize: 13, color: GinitTheme.colors.primary, fontWeight: '600', marginTop: 8 },
   dateSelectionHintMuted: { fontSize: 12, color: '#8B95A1', marginTop: 8 },
   addOutlineBtn: {
     flexDirection: 'row',
@@ -2247,7 +2279,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.65)',
   },
   addOutlineText: { fontSize: 15, fontWeight: '600', color: '#5C6570' },
-  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: GinitTheme.trustBlue },
+  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.primary },
   modalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 12 },
   modalBackdrop: {
     position: 'absolute',
@@ -2296,10 +2328,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 12,
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
     minWidth: 120,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  btnGradientBg: {
+    ...StyleSheet.absoluteFillObject,
   },
   modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   placePayNote: { fontSize: 12, color: '#5C6570', marginTop: 10 },
@@ -2312,7 +2350,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 4,
   },
-  pencilPlaceRowText: { fontSize: 14, fontWeight: '600', color: GinitTheme.trustBlue },
+  pencilPlaceRowText: { fontSize: 14, fontWeight: '600', color: GinitTheme.colors.primary },
   avatarRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 4 },
   avatarCol: { width: 64, alignItems: 'center' },
   avatarCircle: {
@@ -2332,7 +2370,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   avatarPhoto: { width: 52, height: 52, borderRadius: 26 },
-  avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.trustBlue },
+  avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.colors.primary },
   avatarLabel: { marginTop: 6, fontSize: 11, color: '#333', textAlign: 'center', lineHeight: 14 },
   avatarAdd: {
     width: 52,
@@ -2340,7 +2378,7 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 0,
@@ -2362,7 +2400,7 @@ const styles = StyleSheet.create({
   },
   guestJoinHintDone: {
     fontSize: 12,
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
     lineHeight: 17,
     textAlign: 'center',
     fontWeight: '600',
@@ -2400,7 +2438,7 @@ const styles = StyleSheet.create({
   },
   /** 게스트 2버튼일 때 가로 폭 균등 */
   bottomPillFlex: { flex: 1, minWidth: 0 },
-  pillBlue: { backgroundColor: GinitTheme.trustBlue },
+  pillBlue: { backgroundColor: GinitTheme.colors.primary },
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillDanger: { backgroundColor: '#DC2626' },
   pillText: { color: '#fff', fontWeight: '700', fontSize: 14 },

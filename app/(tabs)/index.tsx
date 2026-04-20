@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -20,6 +19,7 @@ import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBel
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitCard } from '@/components/ginit';
+import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
@@ -36,6 +36,8 @@ import {
 } from '@/src/lib/feed-meeting-utils';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
+import { useUserSession } from '@/src/context/UserSessionContext';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce, getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
 
@@ -49,6 +51,7 @@ const MOCK_REGION_ROWS = [
 
 export default function FeedScreen() {
   const router = useRouter();
+  const { phoneUserId } = useUserSession();
   const { width: windowWidth } = useWindowDimensions();
   /** 가로 칩이 화면에 맞게 읽히도록 최대 너비 (패딩·여백 반영) */
   const categoryChipMaxWidth = Math.min(200, Math.max(100, windowWidth * 0.42));
@@ -63,8 +66,8 @@ export default function FeedScreen() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
-  /** true면 모집중(정원 미달·미확정) 모임만 표시. 기본값 on */
-  const [recruitingOnly, setRecruitingOnly] = useState(true);
+  /** true면 모집중(정원 미달·미확정) 모임만 표시. 기본값 off */
+  const [recruitingOnly, setRecruitingOnly] = useState(false);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -220,7 +223,7 @@ export default function FeedScreen() {
   }, []);
 
   return (
-    <LinearGradient colors={['#DCEEFF', '#F6FAFF', '#FFF4ED']} locations={[0, 0.45, 1]} style={styles.gradient}>
+    <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           contentContainerStyle={styles.scroll}
@@ -230,8 +233,8 @@ export default function FeedScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onPullRefresh}
-              tintColor={GinitTheme.trustBlue}
-              colors={[GinitTheme.trustBlue]}
+              tintColor={GinitTheme.colors.primary}
+              colors={[GinitTheme.colors.primary]}
             />
           }>
           <View style={styles.feedHeader}>
@@ -246,7 +249,7 @@ export default function FeedScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="지역 설정 열기"
                   hitSlop={8}>
-                  <Ionicons name="chevron-down" size={20} color={GinitTheme.trustBlue} />
+                  <Ionicons name="chevron-down" size={20} color={GinitTheme.colors.primary} />
                 </Pressable>
               </View>
               <View style={styles.headerActions}>
@@ -287,21 +290,7 @@ export default function FeedScreen() {
                     );
                   })}
                 </ScrollView>
-                {chipsMoreRight ? (
-                  <LinearGradient
-                    pointerEvents="none"
-                    accessibilityElementsHidden
-                    colors={[
-                      'rgba(220, 238, 255, 0)',
-                      'rgba(232, 244, 255, 0.45)',
-                      'rgba(246, 250, 255, 0.88)',
-                    ]}
-                    locations={[0, 0.55, 1]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.chipsScrollEdgeFade}
-                  />
-                ) : null}
+                {chipsMoreRight ? <View pointerEvents="none" accessibilityElementsHidden style={styles.chipsScrollEdgeFade} /> : null}
               </View>
             </View>
           </View>
@@ -386,6 +375,7 @@ export default function FeedScreen() {
               key={m.id}
               meeting={m}
               userCoords={userCoords}
+              joined={isUserJoinedMeeting(m, phoneUserId)}
               onPress={() => router.push(`/meeting/${m.id}`)}
             />
           ))}
@@ -421,7 +411,7 @@ export default function FeedScreen() {
                     accessibilityState={{ selected }}>
                     <Text style={styles.modalRowLabel}>{label}</Text>
                     {selected ? (
-                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
+                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                     ) : (
                       <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
                     )}
@@ -458,7 +448,7 @@ export default function FeedScreen() {
                   accessibilityRole="button">
                   <Text style={styles.modalRowLabel}>{row.label}</Text>
                   {regionLabel === row.label ? (
-                    <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} />
+                    <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                   ) : (
                     <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
                   )}
@@ -471,14 +461,12 @@ export default function FeedScreen() {
           </View>
         </Modal>
       </SafeAreaView>
-    </LinearGradient>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: {
-    flex: 1,
-  },
+  root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: {
     flex: 1,
   },
@@ -550,6 +538,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 28,
+    backgroundColor: 'rgba(246, 250, 255, 0.88)',
   },
   heroCard: {
     marginBottom: 22,
@@ -650,7 +639,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
   },
-  /** 정렬 콤보 옆 — 모집중만 표시 토글(기존 pill과 동일 크기·초록 on) */
+  /** 정렬 콤보 옆 — 모집중만 표시 토글(기존 pill과 동일 크기·초록 on, 기본 off) */
   recruitTogglePill: {
     flexShrink: 0,
     paddingHorizontal: 12,
