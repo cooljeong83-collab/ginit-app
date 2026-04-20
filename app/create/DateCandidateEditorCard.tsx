@@ -1,7 +1,6 @@
 /**
  * 일시 후보 카드 — 8가지 type별 글래스 UI (VoteCandidatesForm 전용).
  */
-import { BlurView } from 'expo-blur';
 import { useMemo, type ReactNode } from 'react';
 import {
   Platform,
@@ -93,7 +92,8 @@ function VoteGlassShell({
 
   const innerStyle: StyleProp<ViewStyle> = [styles.glassInner, borderRadius != null && { borderRadius }, innerRest];
 
-  if (reduceHeavyEffects || Platform.OS === 'web') {
+  // 텍스트 가독성을 위해 iOS에서도 BlurView를 사용하지 않습니다.
+  if (reduceHeavyEffects || Platform.OS === 'web' || Platform.OS === 'ios') {
     return (
       <View style={wrapStyle}>
         <View style={innerStyle}>{children}</View>
@@ -103,9 +103,7 @@ function VoteGlassShell({
 
   return (
     <View style={wrapStyle}>
-      <BlurView tint="light" intensity={28} style={innerStyle} experimentalBlurMethod="dimezisBlurView">
-        {children}
-      </BlurView>
+      <View style={innerStyle}>{children}</View>
     </View>
   );
 }
@@ -742,7 +740,7 @@ export function DateCandidateEditorCard({
 
 const styles = StyleSheet.create({
   glassWrap: {
-    marginBottom: 16,
+    marginBottom: 10,
     borderRadius: 24,
     backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'transparent',
     shadowColor: GinitTheme.glass.shadow,
@@ -753,7 +751,7 @@ const styles = StyleSheet.create({
   },
   glassInner: {
     borderRadius: 24,
-    padding: 20,
+    padding: 12,
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: GinitTheme.colors.border,
@@ -777,10 +775,13 @@ const styles = StyleSheet.create({
   deleteIconText: { color: GinitTheme.colors.text, fontSize: 14, fontWeight: '700' },
   cardFieldTitle: {
     color: GinitTheme.colors.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 8,
     paddingRight: 40,
+    textShadowColor: 'transparent',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
   },
   cardFieldTitleNoDelete: { paddingRight: 0 },
   cardFieldTitleRecurring: { marginTop: 22 },
@@ -802,13 +803,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 138, 0, 0.12)',
   },
   neonBadgeText: { fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-  row2: { flexDirection: 'row', gap: 10 },
+  row2: { flexDirection: 'row', gap: 8 },
   fieldRecess: {
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderColor: GinitTheme.colors.border,
     borderWidth: 1,
     borderRadius: 12,
-    padding: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
   },
   fieldRecessHalf: { flex: 1, minWidth: 0 },
   textInputBare: {
@@ -819,16 +821,23 @@ const styles = StyleSheet.create({
     padding: 0,
     margin: 0,
   },
-  dateTimePressable: { gap: 4 },
-  dateTimeLabel: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.textMuted },
-  dateTimeValue: { fontSize: 16, fontWeight: '700', color: GinitTheme.colors.text },
+  dateTimePressable: { gap: 2 },
+  dateTimeLabel: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.textMuted },
+  dateTimeValue: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.text },
   tbdNeon: {
     color: ORANGE,
     fontWeight: '900',
     letterSpacing: 2,
   },
-  detailToggle: { marginTop: 14, paddingVertical: 6 },
-  detailToggleText: { fontSize: 13, fontWeight: '800', color: GinitTheme.colors.textSub },
+  detailToggle: { marginTop: 8, paddingVertical: 4 },
+  detailToggleText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.textSub,
+    textShadowColor: 'transparent',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
+  },
   typeChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   typeChip: {
     paddingHorizontal: 10,

@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as Font from 'expo-font';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -171,12 +170,6 @@ function MovieGlassListRow({ children, pressed }: { children: ReactNode; pressed
   return (
     <View style={S.movieListRowWrap}>
       <View style={[S.movieListRowOuter, pressed && S.movieListRowPressedOrange]}>
-        <BlurView
-          tint="light"
-          intensity={26}
-          style={StyleSheet.absoluteFill}
-          experimentalBlurMethod="dimezisBlurView"
-        />
         <View style={S.movieListRowInner}>{children}</View>
       </View>
     </View>

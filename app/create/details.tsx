@@ -2174,7 +2174,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: GinitTheme.colors.bg,
-    paddingHorizontal: GinitTheme.spacing.lg,
+    paddingHorizontal: GinitTheme.spacing.md,
   },
   topBarRow: {
     flexDirection: 'row',
@@ -2198,8 +2198,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   scrollContent: {
-    paddingTop: 8,
-    paddingBottom: 40,
+    paddingTop: 6,
+    paddingBottom: 28,
   },
   sectionHeader: {
     marginBottom: 6,
@@ -2215,7 +2215,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     lineHeight: 19,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   /** 자연어 일정 입력 — 리스트 상단 */
   nlpSection: {
@@ -2225,21 +2225,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: GinitTheme.colors.textMuted,
-    marginBottom: 10,
+    marginBottom: 8,
     letterSpacing: 0.2,
   },
   aiQuickInitBorder: {
     borderRadius: 16,
     padding: 2,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   aiQuickInitInner: {
     borderRadius: 14,
     backgroundColor: GinitTheme.colors.surface,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     minHeight: 20,
   },
   aiQuickInitInput: {
@@ -2253,7 +2253,7 @@ const styles = StyleSheet.create({
   },
   aiPreviewRow: {
     marginTop: 2,
-    marginBottom: 10,
+    marginBottom: 8,
     gap: 8,
   },
   aiPreviewHint: {
@@ -2362,11 +2362,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   sectionGap: {
-    marginTop: 26,
+    marginTop: 18,
   },
   /** 글래스 카드: shadow wrapper + clip inner (Android elevation 안전) */
   glassCardWrap: {
-    marginBottom: 16,
+    marginBottom: 12,
     borderRadius: 24,
     backgroundColor: GinitTheme.colors.surface,
     shadowColor: GinitTheme.shadow.card.shadowColor,
@@ -2377,7 +2377,7 @@ const styles = StyleSheet.create({
   },
   glassCardInner: {
     borderRadius: 24,
-    padding: 20,
+    padding: 14,
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: GinitTheme.colors.border,
@@ -2414,19 +2414,20 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 8,
     paddingRight: 40,
   },
   row2: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   /** 음각 필드 래퍼 */
   fieldRecess: {
     backgroundColor: 'rgba(255, 255, 255, 0.72)', // 흰색 반투명 (Line 229)
     borderColor: 'rgba(0, 0, 0, 0.93)', // 아주 연한 테두리 추가
     borderRadius: 12,
-    padding: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   placeFieldRecess: {
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
@@ -2449,7 +2450,7 @@ const styles = StyleSheet.create({
     margin: 0,
   },
   dateTimePressable: {
-    gap: 4,
+    gap: 2,
   },
   dateTimeLabel: {
     fontSize: 13,
@@ -2497,31 +2498,35 @@ const styles = StyleSheet.create({
   addCandidateBtn: {
     alignSelf: 'stretch',
     marginBottom: 8,
-    backgroundColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
     borderRadius: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   addCandidateBtnLabel: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    color: GinitTheme.colors.primary,
+    fontSize: 15,
+    fontWeight: '800',
     textAlign: 'center',
   },
   addCandidateBtnDisabled: {
-    opacity: 0.5,
+    opacity: 0.45,
   },
   addCandidateBtnPressed: {
-    opacity: 0.92,
+    opacity: 0.95,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderColor: 'rgba(134, 211, 183, 0.75)',
   },
   wizardScrollPad: {
     paddingBottom: 120,
   },
   wizardStepShell: {
-    marginBottom: 16,
+    marginBottom: 12,
     borderRadius: GinitTheme.radius.card,
-    padding: 16,
+    padding: 12,
     backgroundColor: GinitTheme.colors.surface,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
