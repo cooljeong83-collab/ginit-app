@@ -66,7 +66,7 @@ export function GinitButton({
         const resolved =
           typeof containerStyle === 'function' ? containerStyle(state) : containerStyle;
         return [
-          styles.pressable,
+          styles.pressableWrap,
           variant === 'ghost' && styles.ghostShell,
           state.pressed && !disabled && styles.pressed,
           disabled && styles.disabled,
@@ -136,9 +136,8 @@ function ghostBorder(isDark: boolean): ViewStyle {
 }
 
 const styles = StyleSheet.create({
-  pressable: {
+  pressableWrap: {
     borderRadius: GinitTheme.radius.button,
-    overflow: 'hidden',
   },
   primaryShadow: {
     shadowColor: GinitTheme.glass.shadow,

@@ -289,32 +289,34 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
 
                 return (
                   <View style={GinitStyles.itemWrap}>
-                    <Pressable
-                      onPress={() => void onSelectPlace(item)}
-                      style={[GinitStyles.glassListRow, active && GinitStyles.glassListRowSelected]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}>
-                      <View style={GinitStyles.listRowInner}>
-                        <View style={GinitStyles.listTextCol}>
-                          <Text style={GinitStyles.listItemTitle} numberOfLines={2}>
-                            {item.title}
-                          </Text>
-                          <Text style={GinitStyles.listItemAddress} numberOfLines={2}>
-                            {item.roadAddress || item.address}
-                          </Text>
-                          {item.category ? <Text style={GinitStyles.listItemCategory}>{item.category}</Text> : null}
+                    <View style={GinitStyles.glassListRowWrap}>
+                      <Pressable
+                        onPress={() => void onSelectPlace(item)}
+                        style={[GinitStyles.glassListRow, active && GinitStyles.glassListRowSelected]}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}>
+                        <View style={GinitStyles.listRowInner}>
+                          <View style={GinitStyles.listTextCol}>
+                            <Text style={GinitStyles.listItemTitle} numberOfLines={2}>
+                              {item.title}
+                            </Text>
+                            <Text style={GinitStyles.listItemAddress} numberOfLines={2}>
+                              {item.roadAddress || item.address}
+                            </Text>
+                            {item.category ? <Text style={GinitStyles.listItemCategory}>{item.category}</Text> : null}
+                          </View>
+                          <View style={GinitStyles.listTrailCol}>
+                            {active ? (
+                              <View style={[GinitStyles.checkBubble, resolved && GinitStyles.checkBubbleDone]}>
+                                <Text style={GinitStyles.checkMark}>✓</Text>
+                              </View>
+                            ) : (
+                              <View style={GinitStyles.checkPlaceholder} />
+                            )}
+                          </View>
                         </View>
-                        <View style={GinitStyles.listTrailCol}>
-                          {active ? (
-                            <View style={[GinitStyles.checkBubble, resolved && GinitStyles.checkBubbleDone]}>
-                              <Text style={GinitStyles.checkMark}>✓</Text>
-                            </View>
-                          ) : (
-                            <View style={GinitStyles.checkPlaceholder} />
-                          )}
-                        </View>
-                      </View>
-                    </Pressable>
+                      </Pressable>
+                    </View>
                     {showInlineMap ? (
                       <View style={GinitStyles.inlineMapSlot}>
                         <GooglePlacePreviewMap latitude={lat} longitude={lng} height={200} borderRadius={12} />

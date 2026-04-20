@@ -16,7 +16,7 @@ export const GinitTheme = {
     // surfaces
     bg: '#F6FAFF',
     bgAlt: '#EEF5FF',
-    surface: 'rgba(255, 255, 255, 0.86)',
+    surface: 'rgba(255, 255, 255)',
     surfaceStrong: '#FFFFFF',
     border: 'rgba(15, 23, 42, 0.10)',
     borderStrong: 'rgba(15, 23, 42, 0.16)',
@@ -29,7 +29,7 @@ export const GinitTheme = {
 
     // brand / actions
     primary: '#1F2A44',
-    primarySoft: 'rgba(31, 42, 68, 0.10)',
+    primarySoft: 'rgba(31, 68, 50, 0.1)',
     accent: '#86D3B7',
     accent2: '#F4C84A',
     warning: '#F59E0B',

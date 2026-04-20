@@ -112,14 +112,16 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             bottom: Math.max(insets.bottom, 10) + 18,
           },
         ]}>
-        <LinearGradient
-          colors={GinitTheme.colors.ctaGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.fabBg}
-          pointerEvents="none"
-        />
-        <Ionicons name="add" size={32} color="#FFFFFF" />
+        <View style={styles.fabInner}>
+          <LinearGradient
+            colors={GinitTheme.colors.ctaGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.fabBg}
+            pointerEvents="none"
+          />
+          <Ionicons name="add" size={32} color="#FFFFFF" />
+        </View>
       </Pressable>
     </View>
   );
@@ -170,17 +172,24 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: 'transparent',
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.72)',
     shadowColor: 'rgba(15, 23, 42, 0.14)',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,
     shadowRadius: 14,
     elevation: 10,
+  },
+  fabInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.72)',
   },
   fabBg: {
     ...StyleSheet.absoluteFillObject,

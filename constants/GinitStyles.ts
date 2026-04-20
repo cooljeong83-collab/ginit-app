@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -367,6 +367,15 @@ export const GinitStyles = StyleSheet.create({
   },
 
   // 장소검색 - 결과 행 글래스 카드
+  glassListRowWrap: {
+    borderRadius: 15,
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'transparent',
+    shadowColor: GinitTheme.glass.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 2,
+  },
   glassListRow: {
     paddingVertical: 14,
     paddingHorizontal: 14,
@@ -374,11 +383,7 @@ export const GinitStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.7)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
-    shadowColor: GinitTheme.glass.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 10,
-    elevation: 2,
+    overflow: 'hidden',
   },
 
   // 장소검색 - 선택된 결과 행

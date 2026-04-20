@@ -28,24 +28,25 @@ export function GinitCard({ style, children, appearance = 'auto', ...rest }: Gin
     return (
       <View
         style={[
-          styles.shellDark,
+          styles.shellDarkWrap,
           {
-            borderColor: GinitTheme.glass.borderDark,
             shadowColor: GinitTheme.glass.shadow,
           },
           style,
         ]}
         {...rest}>
-        {Platform.OS === 'web' ? (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: webFallback }]} />
-        ) : (
-          <BlurView intensity={GinitTheme.blur.intensityStrong} tint={tint} style={StyleSheet.absoluteFill} />
-        )}
-        <View
-          style={[styles.tint, { backgroundColor: GinitTheme.glass.overlayDark }]}
-          pointerEvents="none"
-        />
-        <View style={styles.content}>{children}</View>
+        <View style={[styles.shellDarkInner, { borderColor: GinitTheme.glass.borderDark }]}>
+          {Platform.OS === 'web' ? (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: webFallback }]} />
+          ) : (
+            <BlurView intensity={GinitTheme.blur.intensityStrong} tint={tint} style={StyleSheet.absoluteFill} />
+          )}
+          <View
+            style={[styles.tint, { backgroundColor: GinitTheme.glass.overlayDark }]}
+            pointerEvents="none"
+          />
+          <View style={styles.content}>{children}</View>
+        </View>
       </View>
     );
   }
@@ -53,53 +54,64 @@ export function GinitCard({ style, children, appearance = 'auto', ...rest }: Gin
   return (
     <View
       style={[
-        styles.shellLight,
+        styles.shellLightWrap,
         {
-          borderColor: GinitTheme.colors.border,
           shadowColor: GinitTheme.shadow.card.shadowColor,
         },
         style,
       ]}
       {...rest}>
-      {Platform.OS === 'web' ? (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: GinitTheme.colors.surface }]} />
-      ) : (
-        <>
-          <BlurView
-            intensity={GinitTheme.glassModal.blurIntensity}
-            tint="light"
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
-          <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, { backgroundColor: GinitTheme.colors.surface }]}
-          />
-        </>
-      )}
-      <View style={styles.content}>{children}</View>
+      <View style={[styles.shellLightInner, { borderColor: GinitTheme.colors.border }]}>
+        {Platform.OS === 'web' ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: GinitTheme.colors.surface }]} />
+        ) : (
+          <>
+            <BlurView
+              intensity={GinitTheme.glassModal.blurIntensity}
+              tint="light"
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+            <View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, { backgroundColor: GinitTheme.colors.surface }]}
+            />
+          </>
+        )}
+        <View style={styles.content}>{children}</View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  shellDark: {
+  shellDarkWrap: {
     borderRadius: GinitTheme.radius.card,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    overflow: 'hidden',
+    backgroundColor: Platform.OS === 'android' ? '#0F172A' : 'transparent',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
     shadowRadius: 24,
     elevation: 6,
   },
-  shellLight: {
+  shellDarkInner: {
     borderRadius: GinitTheme.radius.card,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth * 2,
     overflow: 'hidden',
+    backgroundColor: 'transparent',
+  },
+  shellLightWrap: {
+    borderRadius: GinitTheme.radius.card,
+    backgroundColor: Platform.OS === 'android' ? GinitTheme.colors.surfaceStrong : 'transparent',
     shadowOffset: GinitTheme.shadow.card.shadowOffset,
     shadowOpacity: GinitTheme.shadow.card.shadowOpacity,
     shadowRadius: GinitTheme.shadow.card.shadowRadius,
     elevation: GinitTheme.shadow.card.elevation,
+  },
+  shellLightInner: {
+    borderRadius: GinitTheme.radius.card,
+    borderWidth: 1,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
   },
   tint: {
     ...StyleSheet.absoluteFillObject,

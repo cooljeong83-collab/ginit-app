@@ -184,6 +184,10 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     backgroundColor: 'rgba(255, 255, 255, 0.86)',
     overflow: 'hidden',
+  },
+  movieListRowWrap: {
+    borderRadius: 16,
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'transparent',
     shadowColor: 'rgba(15, 23, 42, 0.14)',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 1,
@@ -196,11 +200,6 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
     position: 'relative',
-    shadowColor: 'rgba(15, 23, 42, 0.14)',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 1,
-    shadowRadius: 22,
-    elevation: 10,
   },
   movieListRowInner: {
     display: 'flex',

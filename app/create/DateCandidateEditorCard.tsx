@@ -53,14 +53,58 @@ function VoteGlassShell({
   children: ReactNode;
   outerStyle?: StyleProp<ViewStyle>;
 }) {
-  const base = [styles.glassRoot, outerStyle];
+  const flat = StyleSheet.flatten(outerStyle) as ViewStyle | undefined;
+  const {
+    margin,
+    marginTop,
+    marginBottom,
+    marginLeft,
+    marginRight,
+    marginHorizontal,
+    marginVertical,
+    alignSelf,
+    borderRadius,
+    ...innerRest
+  } = flat ?? {};
+
+  const wrapStyle: StyleProp<ViewStyle> = [
+    styles.glassWrap,
+    (margin != null ||
+      marginTop != null ||
+      marginBottom != null ||
+      marginLeft != null ||
+      marginRight != null ||
+      marginHorizontal != null ||
+      marginVertical != null ||
+      alignSelf != null) && {
+      margin,
+      marginTop,
+      marginBottom,
+      marginLeft,
+      marginRight,
+      marginHorizontal,
+      marginVertical,
+      alignSelf,
+    },
+    borderRadius != null && { borderRadius },
+  ];
+
+  const innerStyle: StyleProp<ViewStyle> = [styles.glassInner, borderRadius != null && { borderRadius }, innerRest];
+
   if (reduceHeavyEffects || Platform.OS === 'web') {
-    return <View style={base}>{children}</View>;
+    return (
+      <View style={wrapStyle}>
+        <View style={innerStyle}>{children}</View>
+      </View>
+    );
   }
+
   return (
-    <BlurView tint="light" intensity={28} style={base} experimentalBlurMethod="dimezisBlurView">
-      {children}
-    </BlurView>
+    <View style={wrapStyle}>
+      <BlurView tint="light" intensity={28} style={innerStyle} experimentalBlurMethod="dimezisBlurView">
+        {children}
+      </BlurView>
+    </View>
   );
 }
 
@@ -695,19 +739,23 @@ export function DateCandidateEditorCard({
 }
 
 const styles = StyleSheet.create({
-  glassRoot: {
+  glassWrap: {
     marginBottom: 16,
     borderRadius: 24,
-    padding: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.65)',
-    overflow: 'hidden',
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'transparent',
     shadowColor: TRUST_BLUE,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.45,
     shadowRadius: 20,
     elevation: 12,
+  },
+  glassInner: {
+    borderRadius: 24,
+    padding: 20,
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.65)',
+    overflow: 'hidden',
   },
   inner: { position: 'relative' },
   deleteIconBtn: {

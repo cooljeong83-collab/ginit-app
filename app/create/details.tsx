@@ -6,7 +6,6 @@
  */
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -101,17 +100,66 @@ function VoteCandidateCard({
   children: ReactNode;
   outerStyle?: StyleProp<ViewStyle>;
 }) {
+  const flat = StyleSheet.flatten(outerStyle) as ViewStyle | undefined;
+  const {
+    margin,
+    marginTop,
+    marginBottom,
+    marginLeft,
+    marginRight,
+    marginHorizontal,
+    marginVertical,
+    alignSelf,
+    borderRadius,
+    ...innerRest
+  } = flat ?? {};
+
+  const wrapStyle: StyleProp<ViewStyle> = [
+    styles.glassCardWrap,
+    (margin != null ||
+      marginTop != null ||
+      marginBottom != null ||
+      marginLeft != null ||
+      marginRight != null ||
+      marginHorizontal != null ||
+      marginVertical != null ||
+      alignSelf != null) && {
+      margin,
+      marginTop,
+      marginBottom,
+      marginLeft,
+      marginRight,
+      marginHorizontal,
+      marginVertical,
+      alignSelf,
+    },
+    borderRadius != null && { borderRadius },
+  ];
+
+  const innerStyle: StyleProp<ViewStyle> = [
+    styles.glassCardInner,
+    borderRadius != null && { borderRadius },
+    innerRest,
+  ];
+
   if (reduceHeavyEffects || Platform.OS === 'web') {
-    return <View style={[styles.glassCardBlur, outerStyle]}>{children}</View>;
+    return (
+      <View style={wrapStyle}>
+        <View style={innerStyle}>{children}</View>
+      </View>
+    );
   }
+
   return (
-    <BlurView
-      tint="light"
-      intensity={GinitTheme.glassModal.blurIntensity}
-      style={[styles.glassCardBlur, outerStyle]}
-      experimentalBlurMethod="dimezisBlurView">
-      {children}
-    </BlurView>
+    <View style={wrapStyle}>
+      <BlurView
+        tint="light"
+        intensity={GinitTheme.glassModal.blurIntensity}
+        style={innerStyle}
+        experimentalBlurMethod="dimezisBlurView">
+        {children}
+      </BlurView>
+    </View>
   );
 }
 
@@ -1731,7 +1779,7 @@ export default function CreateDetailsScreen() {
 
               {selectedCategory != null && needsSpecialty && specialtyKind && currentStep >= 2 ? (
                 <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(2, e)}>
-                  <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>{specialtyStepBadge(specialtyKind)}</Text>
+                  <Text style={[styles.wizardStepBadge, { marginTop: 0 }]}>{specialtyStepBadge(specialtyKind)}</Text>
                   <Text style={styles.wizardLockedHint}>카테고리에 맞춰 선택해 주세요.</Text>
                   <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                     {specialtyKind === 'movie' ? (
@@ -2289,15 +2337,11 @@ const styles = StyleSheet.create({
   sectionGap: {
     marginTop: 26,
   },
-  /** 글래스 카드: BlurView 루트 — 스펙 수치 그대로 */
-  glassCardBlur: {
+  /** 글래스 카드: shadow wrapper + clip inner (Android elevation 안전) */
+  glassCardWrap: {
     marginBottom: 16,
     borderRadius: 24,
-    padding: 20,
     backgroundColor: GinitTheme.colors.surface,
-    borderWidth: 1.5,
-    borderColor: GinitTheme.colors.border,
-    overflow: 'hidden',
     shadowColor: GinitTheme.shadow.card.shadowColor,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 1,
@@ -2305,6 +2349,12 @@ const styles = StyleSheet.create({
     elevation: 14,
   },
   glassCardInner: {
+    borderRadius: 24,
+    padding: 20,
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: GinitTheme.colors.border,
+    overflow: 'hidden',
     position: 'relative',
   },
   deleteIconBtn: {
@@ -2584,8 +2634,8 @@ const styles = StyleSheet.create({
   },
   wizardGlassCard: {
     marginBottom: 12,
-    borderRadius: 20,
-    padding: 0,
+    borderRadius: 10,
+    padding: 5,
     backgroundColor: 'transparent',
     borderWidth: 0,
   },

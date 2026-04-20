@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
@@ -42,88 +42,95 @@ type Props = {
 export function MeetingFeedRow({ meeting: m, userCoords, joined = false, onPress }: Props) {
   const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
   return (
-    <Pressable
-      style={rowStyles.meetRow}
-      accessibilityRole="button"
-      onPress={onPress}
-      accessibilityHint="모임 상세로 이동">
-      <Image source={{ uri: resolveMeetingListThumbnailUri(m) }} style={rowStyles.thumb} contentFit="cover" />
-      <View style={rowStyles.meetBody}>
-        <View style={rowStyles.meetTitleRow}>
-          <View style={rowStyles.meetTitleBlock}>
-            <Text style={rowStyles.meetTitle} numberOfLines={1}>
-              {m.title}
-            </Text>
-            {m.address?.trim() || m.location ? (
-              <Text style={rowStyles.meetAddrLine} numberOfLines={1}>
-                {m.address?.trim() || m.location}
+    <View style={rowStyles.meetRowWrap}>
+      <Pressable
+        style={rowStyles.meetRowInner}
+        accessibilityRole="button"
+        onPress={onPress}
+        accessibilityHint="모임 상세로 이동">
+        <Image source={{ uri: resolveMeetingListThumbnailUri(m) }} style={rowStyles.thumb} contentFit="cover" />
+        <View style={rowStyles.meetBody}>
+          <View style={rowStyles.meetTitleRow}>
+            <View style={rowStyles.meetTitleBlock}>
+              <Text style={rowStyles.meetTitle} numberOfLines={1}>
+                {m.title}
               </Text>
-            ) : null}
+              {m.address?.trim() || m.location ? (
+                <Text style={rowStyles.meetAddrLine} numberOfLines={1}>
+                  {m.address?.trim() || m.location}
+                </Text>
+              ) : null}
+            </View>
+            <View style={rowStyles.pillsStack}>
+              <View style={progressPill.wrap} accessibilityLabel={`진행 ${progressPill.label}`}>
+                <Text style={progressPill.text} numberOfLines={1}>
+                  {progressPill.label}
+                </Text>
+              </View>
+              {joined ? (
+                <View
+                  style={[rowStyles.progressBadge, rowStyles.progressBadgeBlue]}
+                  accessibilityLabel="참여 중인 모임">
+                  <Text style={[rowStyles.progressBadgeText, rowStyles.progressBadgeTextLight]} numberOfLines={1}>
+                    참여중
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </View>
-          <View style={rowStyles.pillsStack}>
-            <View style={progressPill.wrap} accessibilityLabel={`진행 ${progressPill.label}`}>
-              <Text style={progressPill.text} numberOfLines={1}>
-                {progressPill.label}
+          <View style={rowStyles.tagRow}>
+            <View
+              style={rowStyles.meetDistChip}
+              accessibilityLabel={`내 위치에서 ${formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}`}>
+              <Text style={rowStyles.meetDistChipText}>
+                {formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}
               </Text>
             </View>
-            {joined ? (
-              <View
-                style={[rowStyles.progressBadge, rowStyles.progressBadgeBlue]}
-                accessibilityLabel="참여 중인 모임">
-                <Text style={[rowStyles.progressBadgeText, rowStyles.progressBadgeTextLight]} numberOfLines={1}>
-                  참여중
-                </Text>
+            <View style={rowStyles.tagPill}>
+              <Text style={rowStyles.tagText} numberOfLines={1}>
+                {[m.categoryLabel, `최대 ${m.capacity}명`].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+            {m.isPublic === false ? (
+              <View style={rowStyles.lockPill}>
+                <Text style={rowStyles.lockPillText}>비공개</Text>
               </View>
             ) : null}
           </View>
-        </View>
-        <View style={rowStyles.tagRow}>
-          <View
-            style={rowStyles.meetDistChip}
-            accessibilityLabel={`내 위치에서 ${formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}`}>
-            <Text style={rowStyles.meetDistChipText}>
-              {formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}
+          {m.scheduleDate && m.scheduleTime ? (
+            <Text style={rowStyles.schedule} numberOfLines={1}>
+              {m.scheduleDate} {m.scheduleTime}
             </Text>
-          </View>
-          <View style={rowStyles.tagPill}>
-            <Text style={rowStyles.tagText} numberOfLines={1}>
-              {[m.categoryLabel, `최대 ${m.capacity}명`].filter(Boolean).join(' · ')}
-            </Text>
-          </View>
-          {m.isPublic === false ? (
-            <View style={rowStyles.lockPill}>
-              <Text style={rowStyles.lockPillText}>비공개</Text>
-            </View>
           ) : null}
-        </View>
-        {m.scheduleDate && m.scheduleTime ? (
-          <Text style={rowStyles.schedule} numberOfLines={1}>
-            {m.scheduleDate} {m.scheduleTime}
+          <Text style={rowStyles.price} numberOfLines={2}>
+            {m.description}
           </Text>
-        ) : null}
-        <Text style={rowStyles.price} numberOfLines={2}>
-          {m.description}
-        </Text>
-      </View>
-    </Pressable>
+        </View>
+      </Pressable>
+    </View>
   );
 }
 
 const rowStyles = StyleSheet.create({
-  meetRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderRadius: 20,
-    padding: 12,
+  meetRowWrap: {
     marginBottom: 14,
-    gap: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
+    borderRadius: 20,
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'transparent',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.08,
     shadowRadius: 14,
     elevation: 3,
+  },
+  meetRowInner: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderRadius: 20,
+    padding: 12,
+    gap: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+    overflow: 'hidden',
   },
   thumb: {
     width: 88,

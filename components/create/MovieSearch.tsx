@@ -155,25 +155,29 @@ const SEARCH_LIMIT = 24;
 function MovieGlassListRow({ children, pressed }: { children: ReactNode; pressed: boolean }) {
   if (Platform.OS === 'web') {
     return (
-      <View
-        style={[
-          S.movieListRowCardFallback,
-          movieListRowWebGlassStyle,
-          pressed && S.movieListRowPressedOrange,
-        ]}>
-        <View style={S.movieListRowInner}>{children}</View>
+      <View style={S.movieListRowWrap}>
+        <View
+          style={[
+            S.movieListRowCardFallback,
+            movieListRowWebGlassStyle,
+            pressed && S.movieListRowPressedOrange,
+          ]}>
+          <View style={S.movieListRowInner}>{children}</View>
+        </View>
       </View>
     );
   }
   return (
-    <View style={[S.movieListRowOuter, pressed && S.movieListRowPressedOrange]}>
-      <BlurView
-        tint="dark"
-        intensity={26}
-        style={StyleSheet.absoluteFill}
-        experimentalBlurMethod="dimezisBlurView"
-      />
-      <View style={S.movieListRowInner}>{children}</View>
+    <View style={S.movieListRowWrap}>
+      <View style={[S.movieListRowOuter, pressed && S.movieListRowPressedOrange]}>
+        <BlurView
+          tint="dark"
+          intensity={26}
+          style={StyleSheet.absoluteFill}
+          experimentalBlurMethod="dimezisBlurView"
+        />
+        <View style={S.movieListRowInner}>{children}</View>
+      </View>
     </View>
   );
 }
