@@ -5,10 +5,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   InteractionManager,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -17,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
@@ -203,11 +202,7 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
       ) : (
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.enteringStaticVeil]} />
       )}
-      <KeyboardAvoidingView
-        style={GinitStyles.flexFill}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
-        <SafeAreaView style={GinitStyles.safeAreaPadded} edges={['top', 'bottom']}>
+      <SafeAreaView style={GinitStyles.safeAreaPadded} edges={['top', 'bottom']}>
           <View style={GinitStyles.topBarRow}>
             <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
               <Text style={GinitStyles.backLink}>← 닫기</Text>
@@ -259,11 +254,12 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
           ) : null}
 
           <View style={GinitStyles.listWrap}>
-            <FlatList
+            <KeyboardAwareFlatList
               data={results}
               keyExtractor={(item) => item.id}
               extraData={`${selected?.id ?? ''}:${String(selected?.latitude)}:${String(selected?.longitude)}:${resolving ? '1' : '0'}`}
               keyboardShouldPersistTaps="handled"
+              enableOnAndroid
               initialNumToRender={8}
               maxToRenderPerBatch={10}
               windowSize={7}
@@ -349,7 +345,6 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
             <Text style={GinitStyles.ctaButtonLabel}>확인</Text>
           </Pressable>
         </SafeAreaView>
-      </KeyboardAvoidingView>
     </View>
   );
 }

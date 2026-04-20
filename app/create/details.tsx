@@ -23,7 +23,6 @@ import {
   ActivityIndicator,
   Alert,
   InteractionManager,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -45,6 +44,7 @@ import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacit
 import { IntensityPicker } from '@/components/create/IntensityPicker';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
+import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -79,6 +79,9 @@ import {
 } from '@/src/lib/meeting-title-suggestion';
 import { addMeeting } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
+import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const TRUST_BLUE = GinitTheme.colors.primary;
@@ -333,6 +336,8 @@ export type VoteCandidatesFormProps = {
   seedPlaceQuery?: string;
   seedScheduleDate: string;
   seedScheduleTime: string;
+  /** 장소 후보 단계: AI 검색어 생성에 쓰는 테마(카테고리 라벨) */
+  placeThemeLabel?: string;
   initialPayload?: VoteCandidatesPayload | null;
   embedded?: boolean;
   /** true면 부모 ScrollView 안에만 렌더(내부 스크롤·scrollTo 없음) */
@@ -378,6 +383,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     seedPlaceQuery = '',
     seedScheduleDate,
     seedScheduleTime,
+    placeThemeLabel = '',
     initialPayload = null,
     embedded = false,
     bare = false,
@@ -406,11 +412,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [deadlineTick, setDeadlineTick] = useState(0);
   const dateScrollRef = useRef<ScrollView>(null);
 
+  // 장소 후보 단계: 인라인 검색 UI (AI 초기 검색어 + 추천 검색어 + 결과 그리드)
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeBiasHint, setPlaceBiasHint] = useState<string | null>(null);
+  const [placeSearchRows, setPlaceSearchRows] = useState<NaverLocalPlace[]>([]);
+  const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
+  const [placeSearchErr, setPlaceSearchErr] = useState<string | null>(null);
+
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
   const dateCandidatesRef = useRef(dateCandidates);
   dateCandidatesRef.current = dateCandidates;
-  /** `+ 장소 후보 추가` 직후 열린 검색에서 선택 없이 돌아오면 이 행 ID를 제거합니다. */
+  /** 레거시: place-search 화면 이동 플로우에서 쓰던 임시 행 ID (현재는 인라인 검색 UI 사용) */
   const pendingEphemeralPlaceRowIdRef = useRef<string | null>(null);
 
   const isFocused = useIsFocused();
@@ -731,6 +744,87 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
 
+  const placeThemeSeed = useMemo(() => {
+    const label = (placeThemeLabel || '').trim();
+    if (!label) return '맛집';
+    if (label.includes('영화')) return '영화관';
+    if (label.includes('카페')) return '카페';
+    if (label.includes('술') || label.includes('맥주') || label.includes('바')) return '술집';
+    if (label.includes('운동') || label.includes('스포츠') || label.includes('헬스')) return '운동';
+    if (label.includes('전시') || label.includes('미술') || label.includes('공연')) return '전시';
+    if (label.includes('산책') || label.includes('공원')) return '공원';
+    if (label.includes('밥') || label.includes('식') || label.includes('맛집')) return '맛집';
+    return '맛집';
+  }, [placeThemeLabel]);
+
+  const placeSuggestedQueries = useMemo(() => {
+    const bias = (placeBiasHint ?? '').trim();
+    const head = bias ? `${bias} ` : '';
+    const base = [
+      `${head}${placeThemeSeed}`,
+      `${head}맛집`,
+      `${head}카페`,
+      `${head}데이트`,
+      `${head}술집`,
+    ];
+    // 중복 제거 + 빈 문자열 제거
+    return Array.from(new Set(base.map((s) => s.trim()).filter(Boolean))).slice(0, 5);
+  }, [placeBiasHint, placeThemeSeed]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!showPlaces || placesListOnly) return undefined;
+    void ensureNearbySearchBias().then(({ bias }) => {
+      if (!alive) return;
+      const b = bias?.trim() ?? null;
+      setPlaceBiasHint(b);
+      // 사용자가 이미 입력한 검색어가 있으면 존중
+      setPlaceQuery((prev) => {
+        if (prev.trim().length > 0) return prev;
+        const seed = `${b ? `${b} ` : ''}${placeThemeSeed}`.trim();
+        return seed;
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [placeThemeSeed, placesListOnly, showPlaces]);
+
+  useEffect(() => {
+    if (!showPlaces || placesListOnly) return undefined;
+    const qTrim = placeQuery.trim();
+    if (qTrim.length === 0) {
+      setPlaceSearchRows([]);
+      setPlaceSearchErr(null);
+      setPlaceSearchLoading(false);
+      return undefined;
+    }
+    let alive = true;
+    setPlaceSearchLoading(true);
+    setPlaceSearchErr(null);
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const { bias } = await ensureNearbySearchBias();
+          if (!alive) return;
+          const list = await searchNaverLocalPlaces(qTrim, { locationBias: bias });
+          if (!alive) return;
+          setPlaceSearchRows(list);
+        } catch (e) {
+          if (!alive) return;
+          setPlaceSearchRows([]);
+          setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
+        } finally {
+          if (alive) setPlaceSearchLoading(false);
+        }
+      })();
+    }, 360);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [placeQuery, placesListOnly, showPlaces]);
+
   const scheduleSection = (
     <>
       <View style={styles.sectionHeader}>
@@ -845,74 +939,129 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <Text style={styles.sectionHint}>
         {placesListOnly
           ? '확정한 장소 후보예요. 필요하면 카드를 탭해 장소를 다시 고를 수 있어요.'
-          : '각 카드에서 장소 검색 화면으로 이동해 후보를 채워 주세요.'}
+          : '검색어를 입력하면 AI가 추천하는 장소 후보를 아래에서 바로 고를 수 있어요.'}
       </Text>
 
-      {placeCandidates.map((row, placeIndex) => (
-        <VoteCandidateCard
-          key={row.id}
-          reduceHeavyEffects={reduceHeavyEffects}
-          outerStyle={styles.placeCardOuter}>
-          {placeCandidates.length > 0 && !placesListOnly ? (
-            <Pressable
-              onPress={() => removePlaceCandidate(row.id)}
-              style={styles.deleteIconBtn}
-              accessibilityRole="button"
-              accessibilityLabel="장소 후보 삭제">
-              <Text style={styles.deleteIconText}>✕</Text>
-            </Pressable>
+      {!placesListOnly ? (
+        <>
+          <LinearGradient
+            colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.aiQuickInitBorder, { marginBottom: 8 }]}>
+            <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
+              <TextInput
+                value={placeQuery}
+                onChangeText={setPlaceQuery}
+                placeholder='예: "영등포 맛집", "합정 카페"'
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                style={[styles.aiQuickInitInput, { minHeight: 0 }]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                underlineColorAndroid="transparent"
+              />
+            </View>
+          </LinearGradient>
+
+          {placeSuggestedQueries.length > 0 ? (
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.placeSuggestRow}>
+              {placeSuggestedQueries.map((q) => (
+                <Pressable
+                  key={q}
+                  onPress={() => setPlaceQuery(q)}
+                  style={({ pressed }) => [styles.placeSuggestChip, pressed && styles.placeSuggestChipPressed]}
+                  accessibilityRole="button">
+                  <Text style={styles.placeSuggestChipText} numberOfLines={1}>
+                    {q}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           ) : null}
-          <Text style={[styles.cardFieldTitle, placesListOnly && styles.cardFieldTitleNoDeleteOffset]}>
-            장소 후보 {placeIndex + 1}
-          </Text>
-          {isFilled(row) ? (
-            <Pressable onPress={() => openPlaceSearch(row)} accessibilityRole="button" accessibilityLabel="장소 다시 선택">
-              <Text style={styles.placeEmoji}>📍</Text>
-              <Text style={styles.placeNameText} numberOfLines={1}>
+
+          <View style={styles.placeResultsGrid}>
+            {placeSearchLoading ? (
+              <View style={styles.placeResultsStatus}>
+                <ActivityIndicator color={GinitTheme.colors.primary} />
+                <Text style={styles.placeResultsStatusText}>검색 중…</Text>
+              </View>
+            ) : placeSearchErr ? (
+              <Text style={styles.placeResultsStatusText}>{placeSearchErr}</Text>
+            ) : placeSearchRows.length === 0 ? (
+              <Text style={styles.placeResultsStatusText}>검색 결과가 없어요.</Text>
+            ) : (
+              placeSearchRows.slice(0, 12).map((item) => {
+                const title = item.title;
+                const addr = (item.roadAddress || item.address || '').trim() || item.category;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      layoutAnimateEaseInEaseOut();
+                      setPlaceSearchLoading(true);
+                      void (async () => {
+                        try {
+                          const resolved = await resolveNaverPlaceCoordinates(item);
+                          const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
+                          if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
+                          const p: PlaceCandidate = {
+                            id: newId('place'),
+                            placeName: resolved.title.trim(),
+                            address,
+                            latitude: resolved.latitude,
+                            longitude: resolved.longitude,
+                          };
+                          setPlaceCandidates((prev) => {
+                            const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
+                            if (hit) return prev;
+                            return [...prev, placeRowFromCandidate(p)];
+                          });
+                        } catch (e) {
+                          setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+                        } finally {
+                          setPlaceSearchLoading(false);
+                        }
+                      })();
+                    }}
+                    style={({ pressed }) => [styles.placeResultCard, pressed && styles.placeResultCardPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={title}>
+                    <Text style={styles.placeResultTitle} numberOfLines={2}>
+                      {title}
+                    </Text>
+                    <Text style={styles.placeResultAddr} numberOfLines={2}>
+                      {addr}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            )}
+          </View>
+        </>
+      ) : null}
+
+      {placeCandidates.length > 0 ? (
+        <View style={{ marginTop: 10 }}>
+          <Text style={styles.wizardFieldLabel}>선택된 장소 후보</Text>
+          {placeCandidates.map((row) => (
+            <View key={row.id} style={[styles.placePickedRow, styles.placeFieldRecess]}>
+              <Text style={styles.placePickedName} numberOfLines={1}>
                 {row.placeName}
               </Text>
-              <Text style={styles.placeAddrText} numberOfLines={2}>
-                {row.address}
-              </Text>
-              <Text style={styles.placeHint} numberOfLines={1}>
-                {placesListOnly ? '탭하면 장소를 바꿀 수 있어요.' : '탭하여 장소 선택 화면에서 바꾸기'}
-              </Text>
-            </Pressable>
-          ) : (
-            <View style={styles.placeFieldRecess}>
-              <Pressable
-                onPress={() => openPlaceSearch(row)}
-                style={styles.placeSearchPressable}
-                accessibilityRole="button"
-                accessibilityLabel="장소 검색 화면으로 이동">
-                <Text
-                  style={[
-                    styles.placeDraftText,
-                    { color: GinitTheme.colors.text },
-                    !row.query.trim() && { color: GinitTheme.colors.textMuted },
-                  ]}
-                  numberOfLines={2}>
-                  {row.query.trim() || '가게 이름 · 주소 검색 (탭하면 장소 선택 화면)'}
-                </Text>
-              </Pressable>
+              {!placesListOnly ? (
+                <Pressable onPress={() => removePlaceCandidate(row.id)} accessibilityRole="button">
+                  <Text style={styles.placePickedRemove}>삭제</Text>
+                </Pressable>
+              ) : null}
             </View>
-          )}
-        </VoteCandidateCard>
-      ))}
-
-      {!placesListOnly ? (
-        <Pressable
-          onPress={addPlaceCandidate}
-          disabled={!canAddPlaceCandidate}
-          style={({ pressed }) => [
-            styles.addCandidateBtn,
-            !canAddPlaceCandidate && styles.addCandidateBtnDisabled,
-            pressed && canAddPlaceCandidate && styles.addCandidateBtnPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canAddPlaceCandidate }}>
-          <Text style={styles.addCandidateBtnLabel}>+ 장소 후보 추가</Text>
-        </Pressable>
+          ))}
+        </View>
       ) : null}
     </>
   );
@@ -1009,7 +1158,8 @@ export default function CreateDetailsScreen() {
   const reduceHeavyEffectsUI = Platform.OS === 'android';
   const scheduleFormRef = useRef<VoteCandidatesFormHandle>(null);
   const placesFormRef = useRef<VoteCandidatesFormHandle>(null);
-  const mainScrollRef = useRef<ScrollView>(null);
+  // KeyboardAwareScrollView로 래핑되므로 ref는 any로 두고 scrollTo만 사용합니다.
+  const mainScrollRef = useRef<any>(null);
   /** 메인 스크롤 세로 오프셋 — 영화 검색 패널 열 때 정렬에 사용 */
   const mainScrollYRef = useRef(0);
   /** ScrollView 콘텐츠 기준 각 스텝 카드 상단 y (onLayout으로만 갱신) */
@@ -1243,7 +1393,9 @@ export default function CreateDetailsScreen() {
   const scrollToStep = useCallback((s: WizardStep) => {
     const y = stepPositions.current[s];
     if (y == null || !mainScrollRef.current) return;
-    const targetY = Math.max(0, y - 20);
+    // 장소 후보 카드(placesStep)는 가능한 화면 상단에 붙여 보여야 해서 여백을 최소화합니다.
+    const topPad = s === placesStep ? 4 : 20;
+    const targetY = Math.max(0, y - topPad);
 
     if (scrollToStepRafRef.current != null) {
       cancelAnimationFrame(scrollToStepRafRef.current);
@@ -1261,10 +1413,15 @@ export default function CreateDetailsScreen() {
       const postFrameMs = Platform.OS === 'android' ? 100 : 48;
       scrollToStepTimerRef.current = setTimeout(() => {
         scrollToStepTimerRef.current = null;
-        mainScrollRef.current?.scrollTo({ y: targetY, animated: true });
+        const scroller = mainScrollRef.current as any;
+        if (typeof scroller?.scrollToPosition === 'function') {
+          scroller.scrollToPosition(0, targetY, true);
+          return;
+        }
+        scroller?.scrollTo?.({ y: targetY, animated: true });
       }, postFrameMs);
     });
-  }, []);
+  }, [placesStep]);
 
   useEffect(() => {
     if (skipNextStepLayoutAnimateRef.current) {
@@ -1580,7 +1737,7 @@ export default function CreateDetailsScreen() {
 
     setBusy(true);
     try {
-      await addMeeting({
+      const createdMeetingId = await addMeeting({
         title: meetingTitleForSave,
         location: p0.placeName.trim(),
         placeName: p0.placeName.trim(),
@@ -1600,7 +1757,7 @@ export default function CreateDetailsScreen() {
         dateCandidates: vote.dateCandidates,
         extraData,
       });
-      router.back();
+      router.replace(`/meeting/${createdMeetingId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
       setWizardError(msg);
@@ -1629,11 +1786,7 @@ export default function CreateDetailsScreen() {
 
   return (
     <View style={styles.screenRoot}>
-      <KeyboardAvoidingView
-        style={GinitStyles.flexFill}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
-        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
           <View style={styles.topBarRow}>
             <Pressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
               <Text style={styles.backLink}>← 닫기</Text>
@@ -1644,20 +1797,22 @@ export default function CreateDetailsScreen() {
             <View style={{ width: 56 }} />
           </View>
 
-          <ScrollView
+          <KeyboardAwareScreenScroll
             ref={mainScrollRef}
             style={GinitStyles.flexFill}
-            scrollEnabled
-            nestedScrollEnabled
-            overScrollMode="never"
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            removeClippedSubviews={false}
-            scrollEventThrottle={1}
-            onScroll={(e) => {
-              mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+            extraScrollHeight={28}
+            extraHeight={Math.max(0, insets.bottom) + 120}
+            scrollProps={{
+              nestedScrollEnabled: true,
+              overScrollMode: 'never',
+              showsVerticalScrollIndicator: false,
+              removeClippedSubviews: false,
+              scrollEventThrottle: 1,
+              onScroll: (e) => {
+                mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+              },
+              decelerationRate: 'normal',
             }}
-            decelerationRate="normal"
             contentContainerStyle={[
               styles.scrollContent,
               styles.wizardScrollPad,
@@ -1967,6 +2122,7 @@ export default function CreateDetailsScreen() {
                               seedPlaceQuery={seedQ}
                               seedScheduleDate={seedDate}
                               seedScheduleTime={seedTime}
+                              placeThemeLabel={selectedCategory?.label ?? ''}
                               initialPayload={votePayload}
                               bare
                               wizardSegment="schedule"
@@ -1998,6 +2154,7 @@ export default function CreateDetailsScreen() {
                             seedPlaceQuery={seedQ}
                             seedScheduleDate={seedDate}
                             seedScheduleTime={seedTime}
+                            placeThemeLabel={selectedCategory?.label ?? ''}
                             initialPayload={votePayload}
                             bare
                             wizardSegment="schedule"
@@ -2027,6 +2184,7 @@ export default function CreateDetailsScreen() {
                           seedPlaceQuery={seedQ}
                           seedScheduleDate={seedDate}
                           seedScheduleTime={seedTime}
+                          placeThemeLabel={selectedCategory?.label ?? ''}
                           initialPayload={votePayload}
                           bare
                           wizardSegment="places"
@@ -2087,7 +2245,7 @@ export default function CreateDetailsScreen() {
                 </>
               ) : null}
             </View>
-          </ScrollView>
+          </KeyboardAwareScreenScroll>
 
           {needsMovieEarlyPlaces && currentStep === 4 ? (
             <Pressable
@@ -2160,8 +2318,7 @@ export default function CreateDetailsScreen() {
               {wizardError}
             </Text>
           ) : null}
-        </SafeAreaView>
-      </KeyboardAvoidingView>
+      </SafeAreaView>
     </View>
   );
 }
@@ -2436,6 +2593,97 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 12,
+  },
+  placeSuggestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+    paddingRight: 4,
+    marginBottom: 10,
+  },
+  placeSuggestChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+  },
+  placeSuggestChipPressed: {
+    opacity: 0.9,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderColor: 'rgba(134, 211, 183, 0.75)',
+  },
+  placeSuggestChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+    maxWidth: 220,
+  },
+  placeResultsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
+  },
+  placeResultsStatus: {
+    width: '100%',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  placeResultsStatusText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    textAlign: 'center',
+  },
+  placeResultCard: {
+    width: '48%',
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  placeResultCardPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
+  },
+  placeResultTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: GinitTheme.colors.text,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  placeResultAddr: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 15,
+  },
+  placePickedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 8,
+  },
+  placePickedName: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+  },
+  placePickedRemove: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.danger,
   },
   fieldRecessHalf: {
     flex: 1,

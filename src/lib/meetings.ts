@@ -635,6 +635,63 @@ export async function updateParticipantVotes(
   });
 }
 
+/**
+ * 참여 중인 사용자의 투표를 저장합니다.
+ * - 기존 `participantVoteLog`가 없으면(신규 생성자/마이그레이션 전 모임 등) 첫 저장으로 로그를 생성합니다.
+ * - 기존 로그가 있으면 `updateParticipantVotes`와 동일하게 집계를 롤백 후 재반영합니다.
+ */
+export async function upsertParticipantVotes(
+  meetingId: string,
+  phoneUserId: string,
+  votes: { dateChipIds: readonly string[]; placeChipIds: readonly string[]; movieChipIds: readonly string[] },
+): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = phoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+
+  await runTransaction(getFirestoreDb(), async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+    const data = snap.data() as Record<string, unknown>;
+    const rawList = Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    const inList = rawList.some((x) => (normalizePhoneUserId(x) ?? x.trim()) === nsUid);
+    if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
+
+    const log = parseParticipantVoteLog(data);
+    const old = log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === nsUid);
+    const oldD = old?.dateChipIds ?? [];
+    const oldP = old?.placeChipIds ?? [];
+    const oldM = old?.movieChipIds ?? [];
+
+    const vt = parseVoteTalliesField(data) ?? {};
+    let dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+    let places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+    let movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+    dates = mergeTallyIncrement(dates, votes.dateChipIds);
+    places = mergeTallyIncrement(places, votes.placeChipIds);
+    movies = mergeTallyIncrement(movies, votes.movieChipIds);
+
+    const nextLog: ParticipantVoteSnapshot[] = [
+      ...log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid),
+      {
+        userId: nsUid,
+        dateChipIds: [...votes.dateChipIds],
+        placeChipIds: [...votes.placeChipIds],
+        movieChipIds: [...votes.movieChipIds],
+      },
+    ];
+
+    transaction.update(ref, {
+      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+      participantVoteLog: stripUndefinedDeep(nextLog),
+    });
+  });
+}
+
 /** 참여 취소: 참여자 제거 + 해당 사용자 투표 집계 롤백 */
 export async function leaveMeeting(meetingId: string, phoneUserId: string): Promise<void> {
   const mid = meetingId.trim();
@@ -766,7 +823,7 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   await deleteDoc(ref);
 }
 
-export async function addMeeting(input: CreateMeetingInput): Promise<void> {
+export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   const scheduledAt = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
 
@@ -810,10 +867,11 @@ export async function addMeeting(input: CreateMeetingInput): Promise<void> {
 
   console.log('Final Firestore Payload:', toJsonSafeFirestorePreview({ ...cleaned, createdAt: '[serverTimestamp]' }));
 
-  await addDoc(ref, {
+  const created = await addDoc(ref, {
     ...cleaned,
     createdAt: serverTimestamp(),
   });
+  return created.id;
 }
 
 /** 모임 목록 일회 조회(당겨서 새로고침 등). `subscribeMeetings`와 동일 쿼리·매핑. */

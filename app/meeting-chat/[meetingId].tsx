@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  FlatList,
   Keyboard,
   type KeyboardEvent,
   Platform,
@@ -20,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -88,7 +88,7 @@ export default function MeetingChatRoomScreen() {
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   /** Android 삼성 등: IME `defaultInputmode=emoji` — 토글 후 포커스 */
   const [androidEmojiIme, setAndroidEmojiIme] = useState(false);
-  const listRef = useRef<FlatList<MeetingChatMessage>>(null);
+  const listRef = useRef<any>(null);
   const messageInputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MeetingChatMessage[]>([]);
   const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
@@ -216,8 +216,12 @@ export default function MeetingChatRoomScreen() {
         pad = fromBottom + Math.min(slack + 4, 12);
       }
       setKeyboardBottomInset(Math.ceil(pad));
+      requestAnimationFrame(scrollToBottom);
     };
-    const clear = () => setKeyboardBottomInset(0);
+    const clear = () => {
+      setKeyboardBottomInset(0);
+      requestAnimationFrame(scrollToBottom);
+    };
 
     const subs: { remove: () => void }[] = [];
     if (Platform.OS === 'ios') {
@@ -488,7 +492,7 @@ export default function MeetingChatRoomScreen() {
               <Text style={styles.chatErrorText}>{chatError}</Text>
             </View>
           ) : null}
-          <FlatList
+          <KeyboardAwareFlatList
             ref={listRef}
             data={messages}
             keyExtractor={(item) => item.id}
@@ -496,6 +500,8 @@ export default function MeetingChatRoomScreen() {
             contentContainerStyle={styles.listContent}
             onContentSizeChange={scrollToBottom}
             keyboardShouldPersistTaps="handled"
+            enableOnAndroid
+            extraScrollHeight={12}
             ListEmptyComponent={
               <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
             }

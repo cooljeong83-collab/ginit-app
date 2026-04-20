@@ -10,10 +10,8 @@ import {
   Alert,
   Animated,
   BackHandler,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
-import { ScreenShell } from '@/components/ui';
+import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { fetchGooglePeopleExtras, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
@@ -430,15 +428,8 @@ export default function LoginScreen() {
   return (
     <Animated.View style={[styles.rootWrap, { opacity: fade }]}>
       <ScreenShell padded={false} style={styles.screen}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 6 : 0}>
-          <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-            <ScrollView
-              contentContainerStyle={styles.scroll}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}>
+        <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+          <KeyboardAwareScreenScroll contentContainerStyle={styles.scroll} extraScrollHeight={18} extraHeight={32}>
               <View style={styles.topBrand}>
                 <Image source={require('@/assets/images/logo-symbol.png')} style={styles.brandSymbol} contentFit="contain" />
                 <Text style={styles.brandName}>Ginit</Text>
@@ -568,9 +559,8 @@ export default function LoginScreen() {
 
               <View style={styles.footerRule} />
               <Text style={styles.footerCredit}>UI/UX Vision by Ginit Human-Connection Team.</Text>
-            </ScrollView>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+          </KeyboardAwareScreenScroll>
+        </SafeAreaView>
       </ScreenShell>
     </Animated.View>
   );
