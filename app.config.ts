@@ -103,6 +103,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.android,
       /** 키보드가 올라올 때 입력창이 가려지지 않도록(채팅 등) — app.json과 동일 권장값 */
       softwareKeyboardLayoutMode: 'resize',
+      /** Adaptive icon 캐시 우회: foreground 이미지를 v2로 고정 */
+      adaptiveIcon: {
+        ...((config.android as { adaptiveIcon?: Record<string, unknown> } | undefined)?.adaptiveIcon ?? {}),
+        foregroundImage: './assets/images/android-icon-foreground-v2.png',
+      },
       package: 'com.ginit.app',
       googleServicesFile: './env/google-services.json',
       permissions: [
