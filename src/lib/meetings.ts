@@ -823,6 +823,30 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   await deleteDoc(ref);
 }
 
+/**
+ * 회원 탈퇴 등: 주관자 검증 후 모임 문서만 삭제합니다.
+ * 채팅 서브컬렉션·Storage는 호출 측에서 먼저 비운 뒤 호출하세요.
+ * 확정 여부와 관계없이 삭제합니다.
+ */
+export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPhoneUserId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = hostPhoneUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+  const data = snap.data() as Record<string, unknown>;
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsHost = normalizePhoneUserId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) {
+    throw new Error('모임 주관자만 삭제할 수 있어요.');
+  }
+  const m = mapFirestoreMeetingDoc(snap.id, data);
+  notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
+  await deleteDoc(ref);
+}
+
 export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   const scheduledAt = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);

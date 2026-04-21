@@ -39,7 +39,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce, subscribeMeetings } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { useUserSession } from '@/src/context/UserSessionContext';
 
 function profileForCreatedBy(
@@ -372,6 +372,7 @@ export default function ChatTab() {
                     meeting={m}
                     hostPhotoUrl={host?.photoUrl ?? null}
                     hostNickname={host?.nickname ?? '주관자'}
+                    hostWithdrawn={isUserProfileWithdrawn(host)}
                     latestMessage={latestByMeetingId[m.id]}
                     onPress={() => router.push(`/meeting-chat/${m.id}`)}
                   />

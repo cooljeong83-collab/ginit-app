@@ -137,6 +137,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           sounds: [],
         },
       ],
+      /** Android 스플래시 아이콘을 Adaptive 전경(`ic_launcher_foreground`)과 동일하게 */
+      './plugins/withAndroidSplashLauncherForeground.js',
     ],
     extra: {
       ...baseExtra,

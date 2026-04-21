@@ -1697,7 +1697,7 @@ export default function CreateDetailsScreen() {
     }
     if (!phoneUserId?.trim()) {
       Alert.alert('전화번호 필요', '모임을 등록하려면 로그인 화면에서 전화번호로 시작해 주세요.');
-      router.replace('/');
+      router.replace('/login');
       return;
     }
 

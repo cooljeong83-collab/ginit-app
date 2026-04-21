@@ -1,7 +1,18 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  BackHandler,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
@@ -9,12 +20,14 @@ import { ScreenShell } from '@/components/ui';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { deleteFirebaseAuthUserBestEffort, purgeUserAccountRemote, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
 export default function ProfileTab() {
   const router = useRouter();
   const { phoneUserId, signOutSession } = useUserSession();
   const [busy, setBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
@@ -65,7 +78,7 @@ export default function ProfileTab() {
     setBusy(true);
     try {
       await signOutSession();
-      router.replace('/');
+      router.replace('/login');
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
       Alert.alert('로그아웃 실패', msg);
@@ -73,6 +86,68 @@ export default function ProfileTab() {
       setBusy(false);
     }
   }, [router, signOutSession]);
+
+  const runDeleteAccount = useCallback(async () => {
+    if (!phoneUserId?.trim()) {
+      Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
+      return;
+    }
+    setDeleteBusy(true);
+    try {
+      const res = await purgeUserAccountRemote(phoneUserId);
+      if (!res.ok) {
+        Alert.alert('탈퇴를 완료하지 못했어요', res.message);
+        return;
+      }
+      await deleteFirebaseAuthUserBestEffort();
+      await signOutSession();
+      await wipeLocalAppData();
+      const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(doneMsg, ToastAndroid.LONG);
+        setTimeout(() => BackHandler.exitApp(), 400);
+        return;
+      }
+      Alert.alert('탈퇴 완료', doneMsg, [
+        {
+          text: '확인',
+          onPress: () => router.replace('/login'),
+        },
+      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '알 수 없는 오류';
+      Alert.alert('탈퇴 실패', msg);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [phoneUserId, router, signOutSession]);
+
+  const onRequestDeleteAccount = useCallback(() => {
+    if (!phoneUserId?.trim()) {
+      Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
+      return;
+    }
+    Alert.alert(
+      '회원 탈퇴',
+      '탈퇴 시 이름·연락처·이메일·프로필 사진 등 개인 식별 정보는 서버에서 즉시 삭제(비식별화)됩니다.\n\n' +
+        '• 채팅·투표·모임 참여 기록은 서비스 운영을 위해 익명 상태로 보관될 수 있습니다.\n' +
+        '• 진행 중인 모임의 방장인 경우 탈퇴할 수 없습니다(모임 폐쇄 또는 방장 위임 후 가능).\n' +
+        '• 이 기기에 저장된 로그인·캐시 등은 모두 지워집니다.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '다음',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert('최종 확인', '정말 지닛에서 탈퇴할까요?', [
+              { text: '아니오', style: 'cancel' },
+              { text: '탈퇴하기', style: 'destructive', onPress: () => void runDeleteAccount() },
+            ]);
+          },
+        },
+      ],
+    );
+  }, [phoneUserId, runDeleteAccount]);
 
   return (
     <ScreenShell padded={false} style={styles.root}>
@@ -123,7 +198,15 @@ export default function ProfileTab() {
             ) : null}
 
             <GinitButton title="프로필 저장" variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
-            <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy} />
+            <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy || deleteBusy} />
+            <Pressable
+              onPress={onRequestDeleteAccount}
+              disabled={deleteBusy || profileBusy}
+              style={({ pressed }) => [styles.deleteAccountBtn, pressed && styles.deleteAccountBtnPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="회원 탈퇴">
+              <Text style={styles.deleteAccountLabel}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
+            </Pressable>
           </GinitCard>
 
           <GinitButton
@@ -224,5 +307,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     paddingHorizontal: 8,
+  },
+  deleteAccountBtn: {
+    marginTop: 18,
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  deleteAccountBtnPressed: {
+    opacity: 0.75,
+  },
+  deleteAccountLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#b91c1c',
+    textDecorationLine: 'underline',
   },
 });

@@ -1,27 +1,32 @@
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   Animated,
   BackHandler,
+  Easing,
+  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   ToastAndroid,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
+import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '@/constants/login-logo-intro';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
+import { SnsEasySignUpSection } from '@/components/auth/SnsEasySignUpSection';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { getFirebaseAuth } from '@/src/lib/firebase';
@@ -34,12 +39,9 @@ import {
 import { fetchAndroidPhoneHint } from '@/src/lib/phone-hint';
 import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname } from '@/src/lib/user-profile';
+import { ensureUserProfile } from '@/src/lib/user-profile';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
-
-const LOGIN_BACKGROUND_URI =
-  'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=2160&q=85';
 
 type MemberStatus = 'unknown' | 'checking' | 'member' | 'guest';
 
@@ -82,39 +84,59 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
-function ageFromBirthYear(year: number | null | undefined): number | null {
-  if (year == null || !Number.isFinite(year)) return null;
-  const y = new Date().getFullYear() - year;
-  return y >= 0 && y < 130 ? y : null;
-}
+type LogoDest = { x: number; y: number; width: number; height: number };
 
 export default function LoginScreen() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ phone?: string | string[] }>();
+  const win = useWindowDimensions();
   const { isHydrated, setPhoneUserId, setAuthProfile } = useUserSession();
   const [phoneField, setPhoneField] = useState('');
   const [busyGoogle, setBusyGoogle] = useState(false);
-  const [busyStart, setBusyStart] = useState(false);
   const [busyAutoLogin, setBusyAutoLogin] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [peopleExtrasState, setPeopleExtrasState] = useState<GooglePeopleExtras | null>(null);
   const [memberStatus, setMemberStatus] = useState<MemberStatus>('unknown');
   const fade = useRef(new Animated.Value(1)).current;
+  const intro = useRef(new Animated.Value(0)).current;
+  /** -1…1 → 좌우 갸우뚱(인사) */
+  const logoTilt = useRef(new Animated.Value(0)).current;
+  const logoTiltRotate = useMemo(
+    () =>
+      logoTilt.interpolate({
+        inputRange: [-1, 0, 1],
+        outputRange: ['-11deg', '0deg', '11deg'],
+      }),
+    [logoTilt],
+  );
+  const logoWrapRef = useRef<View>(null);
+  const [logoDest, setLogoDest] = useState<LogoDest | null>(null);
+  const introStartedRef = useRef(false);
   const backPressRef = useRef(0);
   const phoneBindUidRef = useRef<string | null>(null);
   const peopleExtrasRef = useRef<GooglePeopleExtras | null>(null);
   const autoLoginPhoneRef = useRef<string | null>(null);
   const phoneFieldRef = useRef(phoneField);
+  const prefillFromRouteDoneRef = useRef(false);
   phoneFieldRef.current = phoneField;
 
   const debouncedPhone = useDebounced(phoneField, 480);
   const loginNormalized = normalizePhoneUserId(phoneField);
 
   useEffect(() => {
+    if (prefillFromRouteDoneRef.current) return;
+    const raw = routeParams.phone;
+    const s = Array.isArray(raw) ? raw[0] : raw;
+    if (typeof s === 'string' && s.trim()) {
+      prefillFromRouteDoneRef.current = true;
+      setPhoneField(s.trim());
+    }
+  }, [routeParams.phone]);
+
+  useEffect(() => {
     if (!loginNormalized) autoLoginPhoneRef.current = null;
   }, [loginNormalized]);
   const debouncedNormalized = normalizePhoneUserId(debouncedPhone);
-  const hasGoogleSession = isGoogleSignedUser(firebaseUser);
   /** 전화번호는 구글 계정이 아니라 기기(SIM, DeviceInfo)에서만 채웁니다. */
   const bindPhoneAfterGoogle = useCallback(async (_user: User, preserveNormalized: string | null) => {
     if (preserveNormalized) {
@@ -171,7 +193,6 @@ export default function LoginScreen() {
         } else if (!u || !isGoogleSignedUser(u)) {
           setAuthProfile(null);
           peopleExtrasRef.current = null;
-          setPeopleExtrasState(null);
         }
       });
     } catch (e) {
@@ -301,7 +322,6 @@ export default function LoginScreen() {
       const { user, googleAccessToken } = await signInWithGoogle({ forRegistration: true });
       const people = await fetchGooglePeopleExtras(googleAccessToken);
       peopleExtrasRef.current = people;
-      setPeopleExtrasState(people);
       setAuthProfile(buildAuthSnapshot(user, people));
       await bindPhoneAfterGoogle(user, preservedPhone);
     } catch (e) {
@@ -309,57 +329,129 @@ export default function LoginScreen() {
       const message = e instanceof Error ? e.message : '알 수 없는 오류';
       if (code === REDIRECT_STARTED) return;
       setLoginError(`${message}${code ? ` (${code})` : ''}`);
-      Alert.alert('가입 실패', code ? `${code}\n${message}` : message);
+      Alert.alert('Google 연동 실패', code ? `${code}\n${message}` : message);
     } finally {
       setBusyGoogle(false);
     }
   }, [bindPhoneAfterGoogle, setAuthProfile, phoneField]);
 
-  const onCompleteSignup = useCallback(async () => {
-    const n = normalizePhoneUserId(phoneField);
-    if (!n) {
-      Alert.alert('안내', '전화번호를 확인해 주세요.');
-      return;
-    }
-    if (!firebaseUser || !hasGoogleSession) {
-      Alert.alert('안내', '먼저 하단에서 Google로 가입을 진행해 주세요.');
-      return;
-    }
-    setLoginError(null);
-    setBusyStart(true);
-    try {
-      const pe = peopleExtrasRef.current;
-      const rawName = firebaseUser.displayName?.trim() ?? '';
-      const nickBase = rawName.split(/\s+/)[0]?.trim() || '';
-      const nickname = nickBase.slice(0, 16) || generateRandomNickname();
-      await applyGoogleSignupProfile(n, {
-        nickname,
-        photoUrl: firebaseUser.photoURL ?? null,
-        email: firebaseUser.email ?? null,
-        displayName: firebaseUser.displayName ?? null,
-        gender: pe?.gender ?? null,
-        birthYear: pe?.birthYear ?? null,
-        birthMonth: pe?.birthMonth ?? null,
-        birthDay: pe?.birthDay ?? null,
-        firebaseUid: firebaseUser.uid,
-      });
-      await registerPhoneIfNew(n);
-      await setPhoneUserId(n);
-      await ensureUserProfile(n);
-      logUi('구글 가입 완료 후 홈 이동', { normalized: n });
-      goHomeAnimated();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
-      setLoginError(msg);
-      Alert.alert('가입 완료 실패', msg);
-    } finally {
-      setBusyStart(false);
-    }
-  }, [phoneField, firebaseUser, hasGoogleSession, setPhoneUserId, goHomeAnimated]);
-
   const isExpoGo = Constants.appOwnership === 'expo';
-  const ageLabel = ageFromBirthYear(peopleExtrasState?.birthYear ?? null);
-  const showSignupButton = memberStatus === 'guest' && !!loginNormalized && !busyAutoLogin;
+
+  const goSignUp = useCallback(() => {
+    const trimmed = phoneField.trim();
+    if (trimmed) {
+      router.push({ pathname: '/sign-up', params: { phone: trimmed } });
+    } else {
+      router.push('/sign-up');
+    }
+  }, [router, phoneField]);
+
+  const onIntroLogoLayout = useCallback(() => {
+    if (logoDest != null) return;
+    const node = logoWrapRef.current;
+    if (!node) return;
+    node.measureInWindow((x, y, w, h) => {
+      if (w <= 0 || h <= 0) return;
+      setLogoDest({ x, y, width: w, height: h });
+    });
+  }, [logoDest]);
+
+  const introMotion = useMemo(() => {
+    if (!logoDest) return null;
+    const { x, y, width, height } = logoDest;
+    const tx = intro.interpolate({
+      inputRange: [0, 1],
+      outputRange: [win.width / 2 - width / 2 - x, 0],
+    });
+    const ty = intro.interpolate({
+      inputRange: [0, 1],
+      outputRange: [win.height / 2 - height / 2 - y, 0],
+    });
+    const scale = intro.interpolate({
+      inputRange: [0, 1],
+      outputRange: [SPLASH_LOGO_FRAME_PX / width, 1],
+    });
+    const contentOpacity = intro.interpolate({
+      inputRange: [0, 0.18, 1],
+      outputRange: [0, 0.92, 1],
+    });
+    return { tx, ty, scale, contentOpacity };
+  }, [logoDest, win.width, win.height, intro]);
+
+  useLayoutEffect(() => {
+    if (!logoDest || introStartedRef.current) return;
+    if (Platform.OS === 'web') {
+      intro.setValue(1);
+      introStartedRef.current = true;
+      return;
+    }
+    introStartedRef.current = true;
+    intro.setValue(0);
+    const run = () => {
+      void AccessibilityInfo.isReduceMotionEnabled().then((reduce) => {
+        if (reduce) {
+          intro.setValue(1);
+          return;
+        }
+        Animated.timing(intro, {
+          toValue: 1,
+          duration: LOGIN_LOGO_INTRO_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      });
+    };
+    const task = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(run);
+    });
+    return () => {
+      task.cancel();
+    };
+  }, [logoDest, intro]);
+
+  useEffect(() => {
+    if (!logoDest || Platform.OS === 'web') return;
+    let cancelled = false;
+    let loop: Animated.CompositeAnimation | null = null;
+    const start = () => {
+      if (cancelled) return;
+      void AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
+        if (cancelled || reduced) return;
+        logoTilt.setValue(0);
+        loop = Animated.loop(
+          Animated.sequence([
+            Animated.timing(logoTilt, {
+              toValue: 1,
+              duration: 620,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: true,
+            }),
+            Animated.timing(logoTilt, {
+              toValue: -1,
+              duration: 720,
+              easing: Easing.inOut(Easing.cubic),
+              useNativeDriver: true,
+            }),
+            Animated.timing(logoTilt, {
+              toValue: 0,
+              duration: 620,
+              easing: Easing.in(Easing.cubic),
+              useNativeDriver: true,
+            }),
+            Animated.delay(560),
+          ]),
+        );
+        loop.start();
+      });
+    };
+    const t = setTimeout(start, LOGIN_LOGO_INTRO_MS + 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      loop?.stop();
+      logoTilt.setValue(0);
+    };
+  }, [logoDest, logoTilt]);
 
   if (!isHydrated) {
     return (
@@ -370,81 +462,65 @@ export default function LoginScreen() {
     );
   }
 
-  const onPressSignup = async () => {
-    const n = normalizePhoneUserId(phoneField);
-    if (!n) {
-      Alert.alert('안내', '전화번호를 확인해 주세요.');
-      return;
-    }
-    if (memberStatus !== 'guest') return;
-    if (busyGoogle || busyStart) return;
-    if (isExpoGo && Platform.OS !== 'web') {
-      Alert.alert('안내', 'Expo Go에서는 Google 네이티브 로그인을 지원하지 않아요. 개발 빌드로 테스트해 주세요.');
-      return;
-    }
-
-    setLoginError(null);
-    setBusyStart(true);
-    try {
-      // Google 연동 (기존 구글 연동과 동일)
-      const { user, googleAccessToken } = await signInWithGoogle({ forRegistration: true });
-      const people = await fetchGooglePeopleExtras(googleAccessToken);
-      peopleExtrasRef.current = people;
-      setPeopleExtrasState(people);
-      setAuthProfile(buildAuthSnapshot(user, people));
-      await bindPhoneAfterGoogle(user, n);
-
-      // 가입 완료(프로필 + 레지스트리)까지 한 번에 처리
-      const rawName = user.displayName?.trim() ?? '';
-      const nickBase = rawName.split(/\s+/)[0]?.trim() || '';
-      const nickname = nickBase.slice(0, 16) || generateRandomNickname();
-      await applyGoogleSignupProfile(n, {
-        nickname,
-        photoUrl: user.photoURL ?? null,
-        email: user.email ?? null,
-        displayName: user.displayName ?? null,
-        gender: people?.gender ?? null,
-        birthYear: people?.birthYear ?? null,
-        birthMonth: people?.birthMonth ?? null,
-        birthDay: people?.birthDay ?? null,
-        firebaseUid: user.uid,
-      });
-      await registerPhoneIfNew(n);
-      await setPhoneUserId(n);
-      await ensureUserProfile(n);
-      logUi('가입하기 CTA 완료 후 홈 이동', { normalized: n });
-      goHomeAnimated();
-    } catch (e) {
-      const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
-      const message = e instanceof Error ? e.message : '알 수 없는 오류';
-      if (code === REDIRECT_STARTED) return;
-      setLoginError(`${message}${code ? ` (${code})` : ''}`);
-      Alert.alert('가입 실패', code ? `${code}\n${message}` : message);
-    } finally {
-      setBusyStart(false);
-    }
-  };
-
   return (
     <Animated.View style={[styles.rootWrap, { opacity: fade }]}>
       <ScreenShell padded={false} style={styles.screen}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          <KeyboardAwareScreenScroll contentContainerStyle={styles.scroll} extraScrollHeight={18} extraHeight={32}>
-              <View style={styles.topBrand}>
-                <Image source={require('@/assets/images/logo-symbol.png')} style={styles.brandSymbol} contentFit="contain" />
-                <Text style={styles.brandName}>Ginit</Text>
-                <Text style={styles.greeting}>반가워요!{'\n'}우리만의 모임을 시작해볼까요?</Text>
-              </View>
+          <KeyboardAwareScreenScroll
+            contentContainerStyle={[styles.scroll, loginScreenStyles.scrollTweak]}
+            extraScrollHeight={18}
+            extraHeight={32}>
+            <View style={[styles.topBrand, loginScreenStyles.topBrand]}>
+              <Animated.View
+                ref={logoWrapRef}
+                nativeID="logo_shared"
+                testID="logo_shared"
+                onLayout={onIntroLogoLayout}
+                collapsable={false}
+                style={[
+                  loginScreenStyles.logoFrame,
+                  logoDest && introMotion
+                    ? {
+                        opacity: 1,
+                        transform: [
+                          { translateX: introMotion.tx },
+                          { translateY: introMotion.ty },
+                          { scale: introMotion.scale },
+                        ],
+                      }
+                    : { opacity: 0 },
+                ]}>
+                <Animated.View style={{ transform: [{ rotate: logoTiltRotate }] }}>
+                  <Image
+                    source={require('@/assets/images/logo-symbol.png')}
+                    style={loginScreenStyles.logoImage}
+                    contentFit="contain"
+                  />
+                </Animated.View>
+              </Animated.View>
+              <Animated.View
+                style={[
+                  logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 },
+                  loginScreenStyles.brandTextCol,
+                ]}>
+                <Text style={loginScreenStyles.brandKr}>지닛</Text>
+                <Text style={[styles.greeting, loginScreenStyles.greetingCenter]}>
+                  반가워요!{'\n'}우리만의 모임을 시작해볼까요?
+                </Text>
+              </Animated.View>
+            </View>
 
+            <Animated.View style={logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }}>
               <View style={styles.authCard}>
                 <BlurView
+                  pointerEvents="none"
                   intensity={32}
                   tint="light"
                   style={StyleSheet.absoluteFill}
                   experimentalBlurMethod={Platform.OS === 'ios' ? 'dimezisBlurView' : undefined}
                 />
-                <View style={styles.cardGlow} />
-                <View style={styles.cardBorder} />
+                <View pointerEvents="none" style={styles.cardGlow} />
+                <View pointerEvents="none" style={styles.cardBorder} />
 
                 {isExpoGo && Platform.OS !== 'web' ? (
                   <View style={styles.expoGoBannerCompact}>
@@ -475,90 +551,47 @@ export default function LoginScreen() {
                 ) : null}
 
                 <View style={styles.phoneRow}>
-                  <Pressable
-                    onPress={() => Alert.alert('준비중', '국가 코드는 현재 +82만 지원합니다.')}
-                    style={({ pressed }) => [styles.countryCodeBtn, pressed && styles.pressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel="국가 코드 선택">
+                  <View style={[styles.countryCodeBtn, styles.countryCodeBtnReadOnly]} pointerEvents="none">
                     <Text style={styles.countryCodeText}>+82</Text>
                     <Text style={styles.countryCodeArrow}>▾</Text>
-                  </Pressable>
+                  </View>
                   <TextInput
                     value={phoneField}
-                    onChangeText={setPhoneField}
                     placeholder="전화번호 입력 (- 없이)"
                     placeholderTextColor="#94a3b8"
-                    style={styles.phoneInputNew}
+                    style={[styles.phoneInputNew, styles.phoneInputReadOnly]}
                     keyboardType="phone-pad"
                     autoCapitalize="none"
-                    editable={!busyAutoLogin}
+                    editable={false}
                   />
                 </View>
 
-                {showSignupButton ? (
-                  <Pressable
-                    onPress={() => void onPressSignup()}
-                    disabled={busyStart || busyGoogle}
-                    style={({ pressed }) => [
-                      styles.signupBtn,
-                      (busyStart || busyGoogle) && styles.btnDisabled,
-                      pressed && !(busyStart || busyGoogle) && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="가입하기">
-                    <LinearGradient
-                      colors={['rgba(134, 211, 183, 0.98)', 'rgba(115, 199, 255, 0.92)']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.signupBtnBg}
-                    />
-                    <View style={styles.signupBtnInner}>
-                      <View style={styles.signupTextCol}>
-                        <Text style={styles.signupBtnLabel}>{busyStart ? '[ 가입 중… ]' : '[ 가입하기 ]'}</Text>
-                        <Text style={styles.signupBtnSub} numberOfLines={1}>
-                          &gt; initiating_sign_up…
-                        </Text>
-                      </View>
-                      <Image
-                        source={require('@/assets/images/logo-symbol.png')}
-                        style={styles.signupBtnIcon}
-                        contentFit="contain"
-                      />
-                    </View>
-                  </Pressable>
-                ) : null}
+                <Pressable
+                  onPress={goSignUp}
+                  disabled={busyAutoLogin}
+                  style={({ pressed }) => [
+                    styles.signupNavBtn,
+                    busyAutoLogin && styles.btnDisabled,
+                    pressed && !busyAutoLogin && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="가입하기 — 회원가입 화면으로 이동">
+                  <Text style={styles.signupNavBtnLabel}>가입하기</Text>
+                </Pressable>
+                <Text style={styles.signupNavHint}>신규 회원은 회원가입 화면에서 정보를 입력합니다.</Text>
+
+                <SnsEasySignUpSection
+                  onGooglePress={() => void onGoogleSignUp()}
+                  googleDisabled={busyAutoLogin || (isExpoGo && Platform.OS !== 'web')}
+                  googleLoading={busyGoogle}
+                />
 
                 {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
               </View>
 
-              <Text style={styles.orLabel}>또는 소셜 계정으로 시작하기</Text>
-              <View style={styles.socialRow}>
-                <Pressable
-                  onPress={onGoogleSignUp}
-                  disabled={busyGoogle || (isExpoGo && Platform.OS !== 'web')}
-                  style={({ pressed }) => [styles.socialBtn, pressed && styles.pressed, busyGoogle && styles.btnDisabled]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Google 연동">
-                  <Text style={[styles.socialLabel, styles.socialLabelGoogle]}>G</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => Alert.alert('준비중', '네이버 연동은 준비 중입니다.')}
-                  style={({ pressed }) => [styles.socialBtn, pressed && styles.pressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="네이버 연동">
-                  <Text style={[styles.socialLabel, styles.socialLabelNaver]}>N</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => Alert.alert('준비중', '카카오 연동은 준비 중입니다.')}
-                  style={({ pressed }) => [styles.socialBtn, pressed && styles.pressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="카카오 연동">
-                  <Text style={[styles.socialLabel, styles.socialLabelKakao]}>K</Text>
-                </Pressable>
-              </View>
-
               <View style={styles.footerRule} />
               <Text style={styles.footerCredit}>UI/UX Vision by Ginit Human-Connection Team.</Text>
+            </Animated.View>
           </KeyboardAwareScreenScroll>
         </SafeAreaView>
       </ScreenShell>
@@ -566,152 +599,46 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  rootWrap: { flex: 1 },
-  screen: { backgroundColor: GinitTheme.colors.bg },
-  flex: { flex: 1 },
-  bootCenter: {
-    flex: 1,
+const loginScreenStyles = StyleSheet.create({
+  scrollTweak: {
+    paddingTop: 10,
+    gap: 20,
+  },
+  topBrand: {
+    paddingTop: 16,
+    paddingBottom: 22,
+    gap: 0,
+  },
+  logoFrame: {
+    width: LOGIN_LOGO_IMAGE_PX,
+    height: LOGIN_LOGO_IMAGE_PX,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: GinitTheme.colors.bg,
-    gap: 12,
+    alignSelf: 'center',
   },
-  bootHint: { fontSize: 14, fontWeight: '600', color: GinitTheme.colors.textMuted },
-  safe: { flex: 1 },
-  scroll: {
-    paddingHorizontal: GinitTheme.spacing.xl,
-    paddingTop: 18,
-    paddingBottom: 34,
-    flexGrow: 1,
-    gap: 14,
+  logoImage: {
+    width: LOGIN_LOGO_IMAGE_PX,
+    height: LOGIN_LOGO_IMAGE_PX,
   },
-
-  topBrand: { alignItems: 'center', paddingTop: 10, paddingBottom: 6 },
-  brandSymbol: { width: 92, height: 92 },
-  brandName: {
-    fontSize: 32,
+  brandTextCol: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    width: '100%',
+    marginTop: 14,
+  },
+  brandKr: {
+    fontSize: 28,
     fontWeight: '900',
     color: GinitTheme.colors.primary,
-    letterSpacing: -1.0,
-    marginTop: 6,
-  },
-  greeting: {
+    letterSpacing: -0.55,
     textAlign: 'center',
-    marginTop: 10,
-    fontSize: 18,
-    fontWeight: '900',
-    color: GinitTheme.colors.text,
-    lineHeight: 24,
+    alignSelf: 'stretch',
+    lineHeight: 34,
   },
-
-  authCard: {
-    borderRadius: 22,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: GinitTheme.colors.surface,
-    padding: 18,
-    shadowColor: GinitTheme.shadow.card.shadowColor,
-    shadowOffset: GinitTheme.shadow.card.shadowOffset,
-    shadowOpacity: GinitTheme.shadow.card.shadowOpacity,
-    shadowRadius: GinitTheme.shadow.card.shadowRadius,
-    elevation: GinitTheme.shadow.card.elevation,
+  greetingCenter: {
+    marginTop: 14,
+    paddingTop: 2,
+    textAlign: 'center',
+    alignSelf: 'stretch',
   },
-  cardGlow: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(134, 211, 183, 0.08)' },
-  cardBorder: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.70)',
-    pointerEvents: 'none',
-  },
-
-  expoGoBannerCompact: {
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 248, 230, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 138, 0, 0.35)',
-    padding: 12,
-    marginBottom: 12,
-    gap: 6,
-  },
-  expoGoTitle: { fontSize: 14, fontWeight: '900', color: '#9a3412' },
-  expoGoBody: { fontSize: 12, fontWeight: '600', color: '#7c2d12', lineHeight: 18 },
-  expoGoMono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '800' },
-
-  checkingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  checkingLabel: { fontSize: 13, fontWeight: '700', color: '#475569' },
-  memberBadge: { fontSize: 13, fontWeight: '700', color: GinitTheme.trustBlue, marginBottom: 12, lineHeight: 19 },
-
-  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
-  countryCodeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-  },
-  countryCodeText: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
-  countryCodeArrow: { fontSize: 14, fontWeight: '900', color: '#334155', marginTop: -2 },
-  phoneInputNew: {
-    flex: 1,
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    backgroundColor: 'rgba(255, 255, 255, 0.65)',
-    paddingHorizontal: 14,
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-
-  signupBtn: { marginTop: 14, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.35)' },
-  signupBtnBg: { ...StyleSheet.absoluteFillObject },
-  signupBtnInner: {
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  signupTextCol: { flex: 1, minWidth: 0, gap: 4 },
-  signupBtnLabel: { fontSize: 16, fontWeight: '900', color: '#e2e8f0' },
-  signupBtnSub: { fontSize: 12, fontWeight: '700', color: 'rgba(226, 232, 240, 0.85)' },
-  signupBtnIcon: { width: 34, height: 34, opacity: 0.92 },
-
-  orLabel: { marginTop: 6, textAlign: 'center', fontSize: 13, fontWeight: '700', color: '#64748b' },
-  socialRow: { flexDirection: 'row', justifyContent: 'center', gap: 18, marginTop: 6 },
-  socialBtn: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.75)',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#0b1426',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  socialLabel: { fontSize: 22, fontWeight: '900' },
-  socialLabelGoogle: { color: '#1f2937' },
-  socialLabelNaver: { color: '#16a34a' },
-  socialLabelKakao: { color: '#111827' },
-
-  footerRule: { height: 1, backgroundColor: 'rgba(148, 163, 184, 0.55)', marginTop: 10 },
-  footerCredit: { marginTop: 10, textAlign: 'center', fontSize: 12, fontWeight: '600', color: '#64748b' },
-
-  btnDisabled: { opacity: 0.48 },
-  pressed: { opacity: 0.9 },
-  errorText: { marginTop: 12, fontSize: 13, fontWeight: '700', color: '#DC2626', lineHeight: 18 },
 });

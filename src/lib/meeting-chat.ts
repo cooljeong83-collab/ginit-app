@@ -27,15 +27,19 @@ import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
 import {
   addDoc,
   collection,
+  documentId,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   type Timestamp,
   type Unsubscribe,
+  writeBatch,
 } from 'firebase/firestore';
-import { getDownloadURL, ref } from 'firebase/storage';
+import { deleteObject, getDownloadURL, listAll, ref } from 'firebase/storage';
 
 import { publicEnv } from '@/src/config/public-env';
 import { ensureFirebaseAuthUserForStorage, getFirebaseAuth, getFirebaseStorage } from '@/src/lib/firebase';
@@ -133,6 +137,93 @@ export function subscribeMeetingChatLatestMessage(
       onError?.(err.message ?? '채팅 미리보기를 불러오지 못했어요.');
     },
   );
+}
+
+const MESSAGE_DELETE_PAGE = 400;
+
+/** 모임 채팅 서브컬렉션의 모든 문서를 배치로 삭제합니다(탈퇴·모임 삭제용). */
+export async function deleteAllMeetingChatMessages(meetingId: string): Promise<void> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) return;
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const db = getFirestoreDb();
+  let lastId: string | undefined;
+  for (;;) {
+    const q =
+      lastId == null
+        ? query(cref, orderBy(documentId()), limit(MESSAGE_DELETE_PAGE))
+        : query(cref, orderBy(documentId()), startAfter(lastId), limit(MESSAGE_DELETE_PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    const batch = writeBatch(db);
+    for (const d of snap.docs) {
+      batch.delete(d.ref);
+    }
+    await batch.commit();
+    lastId = snap.docs[snap.docs.length - 1]!.id;
+    if (snap.size < MESSAGE_DELETE_PAGE) break;
+  }
+}
+
+/** 해당 사용자가 보낸 텍스트·이미지 메시지만 삭제합니다(다른 참여자 채팅은 유지). */
+export async function deleteMeetingChatMessagesFromSender(meetingId: string, phoneUserId: string): Promise<void> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const uid = typeof phoneUserId === 'string' ? phoneUserId.trim() : String(phoneUserId ?? '').trim();
+  if (!mid || !uid) return;
+  const ns = normalizePhoneUserId(uid) ?? uid;
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const db = getFirestoreDb();
+  let lastId: string | undefined;
+  for (;;) {
+    const q =
+      lastId == null
+        ? query(cref, orderBy(documentId()), limit(MESSAGE_DELETE_PAGE))
+        : query(cref, orderBy(documentId()), startAfter(lastId), limit(MESSAGE_DELETE_PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    const batch = writeBatch(db);
+    let n = 0;
+    for (const d of snap.docs) {
+      const data = d.data() as Record<string, unknown>;
+      const sid = typeof data.senderId === 'string' ? data.senderId.trim() : '';
+      const nsSid = sid ? normalizePhoneUserId(sid) ?? sid : '';
+      if (nsSid === ns) {
+        batch.delete(d.ref);
+        n += 1;
+      }
+    }
+    if (n > 0) {
+      await batch.commit();
+    }
+    lastId = snap.docs[snap.docs.length - 1]!.id;
+    if (snap.size < MESSAGE_DELETE_PAGE) break;
+  }
+}
+
+/** 모임 채팅 이미지 Storage 경로(`meetings/{id}/chatImages/…`)를 비웁니다. 실패는 무시합니다. */
+export async function deleteMeetingChatImagesStorageBestEffort(meetingId: string): Promise<void> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) return;
+  try {
+    await ensureFirebaseAuthUserForStorage();
+  } catch {
+    return;
+  }
+  try {
+    const folder = ref(getFirebaseStorage(), `meetings/${mid}/chatImages`);
+    const { items, prefixes } = await listAll(folder);
+    for (const p of prefixes) {
+      const nested = await listAll(p);
+      for (const it of nested.items) {
+        await deleteObject(it).catch(() => {});
+      }
+    }
+    for (const it of items) {
+      await deleteObject(it).catch(() => {});
+    }
+  } catch {
+    /* 규칙·권한으로 목록 불가 시 생략 */
+  }
 }
 
 export async function sendMeetingChatTextMessage(

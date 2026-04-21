@@ -1,5 +1,6 @@
-import { forwardRef, useMemo } from 'react';
+import { forwardRef, useCallback, useMemo } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
+import { Keyboard } from 'react-native';
 import {
   KeyboardAwareScrollView,
   type KeyboardAwareScrollViewProps,
@@ -29,6 +30,8 @@ export type KeyboardAwareScreenScrollProps = {
     | 'extraScrollHeight'
     | 'extraHeight'
   >;
+  /** 스크롤을 시작하면 키보드를 내립니다(드래그 dismiss와 함께 쓰기 좋음). */
+  dismissKeyboardOnScrollBeginDrag?: boolean;
 };
 
 export const KeyboardAwareScreenScroll = forwardRef<KeyboardAwareScrollView, KeyboardAwareScreenScrollProps>(
@@ -40,6 +43,7 @@ function KeyboardAwareScreenScroll(
   extraScrollHeight,
   extraHeight,
   scrollProps,
+  dismissKeyboardOnScrollBeginDrag,
 }: KeyboardAwareScreenScrollProps,
   ref,
 ) {
@@ -47,6 +51,16 @@ function KeyboardAwareScreenScroll(
 
   const resolvedExtraScrollHeight = extraScrollHeight ?? 12;
   const resolvedExtraHeight = extraHeight ?? Math.max(0, insets.bottom) + 24;
+
+  const onScrollBeginDragMerged = useCallback(
+    (e: Parameters<NonNullable<KeyboardAwareScrollViewProps['onScrollBeginDrag']>>[0]) => {
+      if (dismissKeyboardOnScrollBeginDrag) {
+        Keyboard.dismiss();
+      }
+      scrollProps?.onScrollBeginDrag?.(e);
+    },
+    [dismissKeyboardOnScrollBeginDrag, scrollProps],
+  );
 
   const mergedContentContainerStyle = useMemo(() => {
     return [
@@ -71,7 +85,8 @@ function KeyboardAwareScreenScroll(
       // iOS에서 내비게이션/세이프에어리어 고려
       viewIsInsideTabBar
       keyboardOpeningTime={250}
-      {...scrollProps}>
+      {...scrollProps}
+      onScrollBeginDrag={onScrollBeginDragMerged}>
       {children}
     </KeyboardAwareScrollView>
   );

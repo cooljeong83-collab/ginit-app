@@ -68,12 +68,21 @@ type Props = {
   meeting: Meeting;
   hostPhotoUrl: string | null;
   hostNickname: string;
+  /** 탈퇴·익명화된 주관자 — 회색 기본 아이콘만 표시 */
+  hostWithdrawn?: boolean;
   /** `undefined`이면 아직 로딩 중, `null`이면 메시지 없음 */
   latestMessage: MeetingChatMessage | null | undefined;
   onPress: () => void;
 };
 
-export function ChatMeetingListRow({ meeting, hostPhotoUrl, hostNickname, latestMessage, onPress }: Props) {
+export function ChatMeetingListRow({
+  meeting,
+  hostPhotoUrl,
+  hostNickname,
+  hostWithdrawn,
+  latestMessage,
+  onPress,
+}: Props) {
   const title = meeting.title?.trim() || '모임';
   const place = placeLine(meeting);
   const pCount = meetingParticipantCount(meeting);
@@ -104,7 +113,11 @@ export function ChatMeetingListRow({ meeting, hostPhotoUrl, hostNickname, latest
       accessibilityRole="button"
       accessibilityLabel={`${title} 채팅`}>
       <View style={styles.avatarWrap}>
-        {hostPhotoUrl ? (
+        {hostWithdrawn ? (
+          <View style={styles.avatarWithdrawn}>
+            <Ionicons name="person" size={20} color="#94a3b8" />
+          </View>
+        ) : hostPhotoUrl ? (
           <Image source={{ uri: hostPhotoUrl }} style={styles.avatar} contentFit="cover" />
         ) : (
           <View style={styles.avatarFallback}>
@@ -166,6 +179,14 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 12,
     backgroundColor: '#e2e8f0',
+  },
+  avatarWithdrawn: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarFallback: {
     width: 52,

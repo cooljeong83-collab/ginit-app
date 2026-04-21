@@ -1,42 +1,27 @@
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { Platform } from 'react-native';
 
-import { AppBootSplash } from '@/components/AppBootSplash';
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
+/** 네이티브 스플래시가 JS 부트 화면과 맞물릴 때까지 유지 → `SplashBootstrapScreen`에서 hideAsync */
+void SplashScreen.preventAutoHideAsync().catch(() => {});
+
 /**
- * 루트에서는 과거 이슈가 있던 다음을 사용하지 않습니다.
- * - `expo-splash-screen`에서의 선제 `hideAsync` 연쇄
- * - 루트 렌더 경로의 `getFirebaseAuth()` 등 Firebase 초기화
- * - `react-native-device-info` 등 기기 식별 네이티브 호출
- *
  * 전역 유저는 `UserSessionContext`(전화 PK, 구글 프로필 스냅샷)로 제공됩니다.
- * (복구 시 참고용 백업)
- *
- * ```tsx
- * import * as SplashScreen from 'expo-splash-screen';
- * import { useLayoutEffect } from 'react';
- * import { getFirebaseAuth } from '@/src/lib/firebase';
- * export default function RootLayout() {
- *   useLayoutEffect(() => { void SplashScreen.hideAsync(); }, []);
- *   try { getFirebaseAuth(); } catch { ... }
- *   return ( ... );
- * }
- * ```
+ * 스플래시: `preventAutoHideAsync` + `SplashBootstrapScreen` 첫 레이아웃에서 `hideAsync` (이중 전환 방지).
  */
 export default function RootLayout() {
   return (
     <UserSessionProvider>
       <InAppAlarmsProvider>
-        {/* Android 12+는 네이티브 Theme.App.SplashScreen으로만 표시(중복 방지). iOS는 기존 오버레이 유지. */}
-        {Platform.OS === 'ios' ? <AppBootSplash /> : null}
         <PushNotificationBootstrap />
         <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: '#F0F6FF' },
+          contentStyle: { backgroundColor: '#F6FAFF' },
           freezeOnBlur: true,
           animation: 'slide_from_right',
           gestureEnabled: true,

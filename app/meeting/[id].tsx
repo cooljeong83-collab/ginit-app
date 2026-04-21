@@ -51,7 +51,13 @@ import {
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { ensureUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
+import {
+  WITHDRAWN_NICKNAME,
+  ensureUserProfile,
+  getUserProfilesForIds,
+  isUserProfileWithdrawn,
+  type UserProfile,
+} from '@/src/lib/user-profile';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 
@@ -342,9 +348,7 @@ export default function MeetingDetailScreen() {
   const placeVoteFormRef = useRef<VoteCandidatesFormHandle>(null);
 
   const [retryNonce, setRetryNonce] = useState(0);
-  const [participantProfiles, setParticipantProfiles] = useState<
-    Record<string, { nickname: string; photoUrl: string | null; gender?: string | null }>
-  >({});
+  const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
   const [joinBusy, setJoinBusy] = useState(false);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
@@ -402,7 +406,7 @@ export default function MeetingDetailScreen() {
     let cancelled = false;
     void getUserProfilesForIds(ids).then((map) => {
       if (cancelled) return;
-      const rec: Record<string, { nickname: string; photoUrl: string | null; gender?: string | null }> = {};
+      const rec: Record<string, UserProfile> = {};
       map.forEach((v, k) => {
         rec[k] = v;
       });
@@ -1921,17 +1925,26 @@ export default function MeetingDetailScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
                   {orderedParticipantIdsList.map((userId) => {
                     const prof = participantProfiles[userId];
-                    const nickname = prof?.nickname ?? '…';
-                    const g = normalizeGender(prof?.gender);
+                    const withdrawn = isUserProfileWithdrawn(prof);
+                    const nickname = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '…');
+                    const g = withdrawn ? null : normalizeGender(prof?.gender);
                     const hostPk = meeting.createdBy?.trim()
                       ? normalizeParticipantId(meeting.createdBy)
                       : '';
                     const isHostUser = Boolean(hostPk && hostPk === userId);
-                    const photo = prof?.photoUrl?.trim();
+                    const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
                     return (
-                      <View key={userId} style={styles.avatarCol}>
-                        <View style={[styles.avatarCircle, g === 'male' ? styles.avatarCircleMale : null, g === 'female' ? styles.avatarCircleFemale : null]}>
-                          {photo ? (
+                      <View key={userId} style={styles.avatarCol} pointerEvents={withdrawn ? 'none' : 'auto'}>
+                        <View
+                          style={[
+                            styles.avatarCircle,
+                            withdrawn ? styles.avatarCircleWithdrawn : null,
+                            !withdrawn && g === 'male' ? styles.avatarCircleMale : null,
+                            !withdrawn && g === 'female' ? styles.avatarCircleFemale : null,
+                          ]}>
+                          {withdrawn ? (
+                            <Ionicons name="person" size={22} color="#94a3b8" />
+                          ) : photo ? (
                             <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
                           ) : (
                             <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
@@ -2723,6 +2736,10 @@ const styles = StyleSheet.create({
   },
   avatarCircleFemale: {
     borderColor: 'rgba(255, 140, 198, 0.95)',
+  },
+  avatarCircleWithdrawn: {
+    backgroundColor: '#e2e8f0',
+    borderColor: '#cbd5e1',
   },
   avatarPhoto: { width: 52, height: 52, borderRadius: 26 },
   avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.colors.primary },

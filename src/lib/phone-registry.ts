@@ -47,3 +47,12 @@ export async function registerPhoneIfNew(normalizedPhone: string): Promise<{ isN
   await AsyncStorage.setItem(REGISTRY_KEY, JSON.stringify(list));
   return { isNew: true };
 }
+
+/** 탈퇴 등: 로컬 가입 번호 목록에서 제거합니다. */
+export async function removePhoneFromRegistry(normalizedPhone: string): Promise<void> {
+  const id = normalizedPhone.trim();
+  if (!id) return;
+  const list = await readList();
+  const next = list.filter((x) => x !== id);
+  await AsyncStorage.setItem(REGISTRY_KEY, JSON.stringify(next));
+}

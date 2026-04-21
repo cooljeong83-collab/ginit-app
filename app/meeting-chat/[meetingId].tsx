@@ -39,7 +39,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
 function profileForSender(map: Map<string, UserProfile>, senderId: string): UserProfile | undefined {
   const n = normalizePhoneUserId(senderId) ?? senderId.trim();
@@ -325,7 +325,8 @@ export default function MeetingChatRoomScreen() {
       const showAvatar = !isMine && sid && (index === 0 || !prev || prev.kind === 'system' || !sameSenderAsPrev);
 
       const prof = sid ? profileForSender(profiles, sid) : undefined;
-      const nick = prof?.nickname ?? '회원';
+      const withdrawn = isUserProfileWithdrawn(prof);
+      const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
       const isHost = Boolean(hostNorm && sid && sid === hostNorm);
 
       const isImage = item.kind === 'image';
@@ -353,9 +354,13 @@ export default function MeetingChatRoomScreen() {
 
       return (
         <View style={styles.rowOther}>
-          <View style={styles.avatarCol}>
+          <View style={styles.avatarCol} pointerEvents={withdrawn ? 'none' : 'auto'}>
             {showAvatar ? (
-              prof?.photoUrl ? (
+              withdrawn ? (
+                <View style={styles.avatarWithdrawn}>
+                  <Ionicons name="person" size={18} color="#94a3b8" />
+                </View>
+              ) : prof?.photoUrl ? (
                 <Image source={{ uri: prof.photoUrl }} style={styles.avatar} contentFit="cover" />
               ) : (
                 <View style={styles.avatarFallback}>
@@ -366,9 +371,9 @@ export default function MeetingChatRoomScreen() {
               <View style={styles.avatarSpacer} />
             )}
           </View>
-          <View style={styles.otherBlock}>
+          <View style={styles.otherBlock} pointerEvents="box-none">
             {showAvatar ? (
-              <View style={styles.nameRow}>
+              <View style={styles.nameRow} pointerEvents={withdrawn ? 'none' : 'auto'}>
                 <Text style={styles.nickname} numberOfLines={1}>
                   {nick}
                 </Text>
@@ -760,6 +765,14 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     backgroundColor: '#e2e8f0',
+  },
+  avatarWithdrawn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarFallback: {
     width: 36,

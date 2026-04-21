@@ -2,12 +2,15 @@
  * Firestore `users` 컬렉션 — 문서 ID = 정규화된 전화 PK (`+8210…`).
  * 전화 가입 시 `ensureUserProfile`으로 닉네임이 자동 생성되고, 프로필 탭에서 닉네임·사진 URL을 바꿀 수 있습니다.
  */
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, deleteField, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { getFirebaseAuth, getFirebaseFirestore } from '@/src/lib/firebase';
 
 export const USERS_COLLECTION = 'users';
+
+/** 탈퇴(익명화) 후 UI·Firestore에 고정되는 표시 닉네임 */
+export const WITHDRAWN_NICKNAME = '(탈퇴한 회원)';
 
 export type UserProfile = {
   nickname: string;
@@ -15,11 +18,14 @@ export type UserProfile = {
   photoUrl: string | null;
   email?: string | null;
   displayName?: string | null;
+  /** 회원가입 등에서 저장하는 값 예: `MALE`, `FEMALE` */
   gender?: string | null;
   birthYear?: number | null;
   birthMonth?: number | null;
   birthDay?: number | null;
   firebaseUid?: string | null;
+  /** 탈퇴 처리 시 개인정보는 null로 비우고 메시지 등은 senderId로만 연결 */
+  isWithdrawn?: boolean;
 };
 
 const ADJECTIVES = ['즐거운', '든든한', '반짝', '포근한', '상큼한', '느긋한', '산뜻한', '따스한', '멋진', '기분좋은'] as const;
@@ -48,6 +54,7 @@ export function generateRandomNickname(): string {
 }
 
 function mapUserDoc(data: Record<string, unknown>): UserProfile {
+  const isWithdrawn = data.isWithdrawn === true;
   const nick = typeof data.nickname === 'string' ? data.nickname.trim() : '';
   const photo = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
   const email = typeof data.email === 'string' ? data.email.trim() : '';
@@ -57,7 +64,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
   const birthDay = typeof data.birthDay === 'number' ? data.birthDay : null;
   const firebaseUid = typeof data.firebaseUid === 'string' ? data.firebaseUid.trim() : '';
-  return {
+  const base: UserProfile = {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
     email: email || null,
@@ -67,7 +74,28 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     birthMonth,
     birthDay,
     firebaseUid: firebaseUid || null,
+    isWithdrawn,
   };
+  if (isWithdrawn) {
+    return {
+      ...base,
+      nickname: WITHDRAWN_NICKNAME,
+      photoUrl: null,
+      email: null,
+      displayName: null,
+      gender: null,
+      birthYear: null,
+      birthMonth: null,
+      birthDay: null,
+      firebaseUid: null,
+      isWithdrawn: true,
+    };
+  }
+  return base;
+}
+
+export function isUserProfileWithdrawn(p: UserProfile | null | undefined): boolean {
+  return p?.isWithdrawn === true;
 }
 
 /** 프로필 문서가 없을 때 표시용(다른 사용자 문서 미생성 등) */
@@ -94,7 +122,31 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const snap = await getDoc(dRef);
   if (snap.exists()) {
-    return mapUserDoc(snap.data() as Record<string, unknown>);
+    const mapped = mapUserDoc(snap.data() as Record<string, unknown>);
+    if (mapped.isWithdrawn === true) {
+      const nickname = generateRandomNickname();
+      const uid = getFirebaseAuth().currentUser?.uid?.trim() ?? '';
+      await setDoc(
+        dRef,
+        stripUndefinedDeep({
+          nickname,
+          photoUrl: null,
+          isWithdrawn: false,
+          withdrawnAt: deleteField(),
+          email: null,
+          displayName: null,
+          gender: null,
+          birthYear: null,
+          birthMonth: null,
+          birthDay: null,
+          firebaseUid: uid || null,
+          updatedAt: serverTimestamp(),
+        }) as Record<string, unknown>,
+        { merge: true },
+      );
+      return { nickname, photoUrl: null, isWithdrawn: false };
+    }
+    return mapped;
   }
   const nickname = generateRandomNickname();
   await setDoc(dRef, {
@@ -113,6 +165,7 @@ export async function applyGoogleSignupProfile(
     photoUrl: string | null;
     email?: string | null;
     displayName?: string | null;
+    /** 회원가입 시 `MALE` / `FEMALE` 권장 */
     gender?: string | null;
     birthYear?: number | null;
     birthMonth?: number | null;
@@ -136,6 +189,13 @@ export async function applyGoogleSignupProfile(
   if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
   if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
   if (patch.firebaseUid !== undefined) payload.firebaseUid = patch.firebaseUid;
+  if (snap.exists()) {
+    const prev = mapUserDoc(snap.data() as Record<string, unknown>);
+    if (prev.isWithdrawn === true) {
+      (payload as Record<string, unknown>).isWithdrawn = false;
+      (payload as Record<string, unknown>).withdrawnAt = deleteField();
+    }
+  }
   if (!snap.exists()) {
     payload.createdAt = serverTimestamp();
   }
@@ -150,6 +210,14 @@ export async function updateUserProfile(
 ): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
+  const existing = await getDoc(dRef);
+  if (existing.exists()) {
+    const mapped = mapUserDoc(existing.data() as Record<string, unknown>);
+    if (mapped.isWithdrawn === true) {
+      throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
+    }
+  }
   const updates: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (patch.nickname !== undefined) {
     const n = patch.nickname.trim();
@@ -160,7 +228,38 @@ export async function updateUserProfile(
     updates.photoUrl =
       patch.photoUrl === null || String(patch.photoUrl).trim() === '' ? null : String(patch.photoUrl).trim();
   }
-  await updateDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id), stripUndefinedDeep(updates) as Record<string, unknown>);
+  await updateDoc(dRef, stripUndefinedDeep(updates) as Record<string, unknown>);
+}
+
+/** 탈퇴: 채팅·투표·모임 참여 기록은 유지하고, `users` 문서의 식별 정보를 비웁니다. */
+export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise<void> {
+  const id = phoneUserId.trim();
+  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
+  await updateDoc(
+    dRef,
+    stripUndefinedDeep({
+      isWithdrawn: true,
+      nickname: WITHDRAWN_NICKNAME,
+      photoUrl: null,
+      email: null,
+      displayName: null,
+      gender: null,
+      birthYear: null,
+      birthMonth: null,
+      birthDay: null,
+      firebaseUid: null,
+      withdrawnAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }) as Record<string, unknown>,
+  );
+}
+
+/** Firestore `users/{전화 PK}` 문서를 삭제합니다(탈퇴 마지막 단계). */
+export async function deleteUserProfileDocument(phoneUserId: string): Promise<void> {
+  const id = phoneUserId.trim();
+  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  await deleteDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id));
 }
 
 export async function getUserProfilesForIds(phoneUserIds: string[]): Promise<Map<string, UserProfile>> {

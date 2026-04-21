@@ -22,7 +22,7 @@ export default function TabsLayout() {
   useEffect(() => {
     if (!isHydrated) return;
     if (!phoneUserId) {
-      router.replace('/');
+      router.replace('/login');
     }
   }, [isHydrated, phoneUserId, router]);
 
