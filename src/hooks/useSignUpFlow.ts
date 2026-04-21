@@ -1,12 +1,9 @@
-import { signInAnonymously, signOut } from 'firebase/auth';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, ToastAndroid } from 'react-native';
 
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
-import { getFirebaseAuth } from '@/src/lib/firebase';
-import { fetchAndroidPhoneHint } from '@/src/lib/phone-hint';
 import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
-import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname, recordTermsAgreement } from '@/src/lib/user-profile';
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -18,9 +15,9 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
-function isValidEmailOptional(raw: string): boolean {
+function isValidEmailRequired(raw: string): boolean {
   const t = raw.trim();
-  if (!t) return true;
+  if (!t) return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
@@ -48,25 +45,6 @@ export function useSignUpFlow(initialPhone: string) {
 
   useEffect(() => {
     let cancelled = false;
-    if (Platform.OS === 'android' && !normalizePhoneUserId(initialPhone)) {
-      (async () => {
-        try {
-          const hinted = await fetchAndroidPhoneHint();
-          if (cancelled || !hinted) return;
-          const n = normalizePhoneUserId(hinted);
-          setPhoneField((prev) => (prev.trim() ? prev : n ? formatNormalizedPhoneKrDisplay(n) : hinted));
-        } catch {
-          /* */
-        }
-      })();
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [initialPhone]);
-
-  useEffect(() => {
-    let cancelled = false;
     if (!debouncedNormalized) {
       setMemberStatus('unknown');
       return;
@@ -89,13 +67,13 @@ export function useSignUpFlow(initialPhone: string) {
   const normalizedPhone = useMemo(() => normalizePhoneUserId(phoneField), [phoneField]);
 
   const canSubmit = useMemo(() => {
+    if (!isValidEmailRequired(emailField)) return false;
     if (!displayName.trim()) return false;
     if (!normalizedPhone) return false;
     if (memberStatus !== 'guest') return false;
     if (!genderCode) return false;
-    if (!isValidEmailOptional(emailField)) return false;
     return true;
-  }, [displayName, normalizedPhone, memberStatus, emailField, genderCode]);
+  }, [emailField, displayName, normalizedPhone, memberStatus, genderCode]);
 
   const selectGenderCode = useCallback((code: SignUpGenderCode) => {
     setGenderCode(code);
@@ -103,9 +81,19 @@ export function useSignUpFlow(initialPhone: string) {
   }, []);
 
   const runSignUp = useCallback(
-    async (onComplete: () => void) => {
+    async (firebaseUid: string, onComplete: () => void) => {
       const name = displayName.trim();
       const n = normalizedPhone;
+      const uid = firebaseUid.trim();
+      const email = emailField.trim();
+      if (!email) {
+        Alert.alert('안내', '이메일을 입력해 주세요.');
+        return;
+      }
+      if (!isValidEmailRequired(email)) {
+        Alert.alert('안내', '이메일 형식을 확인해 주세요.');
+        return;
+      }
       if (!name) {
         Alert.alert('안내', '이름을 입력해 주세요.');
         return;
@@ -114,8 +102,8 @@ export function useSignUpFlow(initialPhone: string) {
         Alert.alert('안내', '전화번호를 확인해 주세요.');
         return;
       }
-      if (!isValidEmailOptional(emailField)) {
-        Alert.alert('안내', '이메일 형식을 확인해 주세요.');
+      if (!uid) {
+        Alert.alert('안내', '전화번호 인증(OTP)을 먼저 완료해 주세요.');
         return;
       }
       if (memberStatus === 'member') {
@@ -138,17 +126,6 @@ export function useSignUpFlow(initialPhone: string) {
       setErrorText(null);
       setBusy(true);
       try {
-        const auth = getFirebaseAuth();
-        try {
-          await signOut(auth);
-        } catch {
-          /* 기존 Firebase 세션 없음 */
-        }
-        const { user } = await signInAnonymously(auth);
-        if (!user?.uid) {
-          throw new Error('가입용 인증 계정을 만들 수 없습니다.');
-        }
-
         const nickBase = name.split(/\s+/)[0]?.trim().slice(0, 16) || '';
         const nickname = nickBase || generateRandomNickname();
         const emailTrim = emailField.trim();
@@ -157,7 +134,7 @@ export function useSignUpFlow(initialPhone: string) {
           displayName: name.slice(0, 64),
           email: emailTrim || null,
           photoUrl: null,
-          firebaseUid: user.uid,
+          firebaseUid: uid,
           gender: genderCode,
           birthYear: null,
         };
@@ -172,7 +149,7 @@ export function useSignUpFlow(initialPhone: string) {
           birthYear: null,
           birthMonth: null,
           birthDay: null,
-          firebaseUid: user.uid,
+          firebaseUid: uid,
         });
         await registerPhoneIfNew(n);
         await setPhoneUserId(n);
@@ -182,15 +159,8 @@ export function useSignUpFlow(initialPhone: string) {
       } catch (e) {
         const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
         const message = e instanceof Error ? e.message : '알 수 없는 오류';
-        if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
-          const hint =
-            'Firebase 콘솔 → Authentication → 로그인 방법에서「익명」을 켠 뒤 다시 시도해 주세요.';
-          setErrorText(hint);
-          Alert.alert('가입 실패', hint);
-        } else {
-          setErrorText(`${message}${code ? ` (${code})` : ''}`);
-          Alert.alert('가입 실패', code ? `${code}\n${message}` : message);
-        }
+        setErrorText(`${message}${code ? ` (${code})` : ''}`);
+        Alert.alert('가입 실패', code ? `${code}\n${message}` : message);
       } finally {
         setBusy(false);
       }

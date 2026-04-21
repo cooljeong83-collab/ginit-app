@@ -1,0 +1,117 @@
+import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+
+export type PhoneVerificationResult = { verificationId: string };
+
+type UnsubLike = null | undefined | (() => void) | { remove?: () => void; unsubscribe?: () => void };
+
+function safeUnsub(ref: { current: UnsubLike }) {
+  const u = ref.current;
+  if (!u) return;
+  ref.current = null;
+  try {
+    if (typeof u === 'function') {
+      u();
+      return;
+    }
+    if (typeof u.remove === 'function') {
+      u.remove();
+      return;
+    }
+    if (typeof u.unsubscribe === 'function') {
+      u.unsubscribe();
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+export class AuthService {
+  /**
+   * 전화번호로 OTP 전송을 시작합니다.
+   * - 실패(번호 형식/쿼터/Play Services 등) 시 사람이 읽기 쉬운 메시지로 throw 합니다.
+   */
+  static async verifyPhoneNumber(phoneE164: string): Promise<PhoneVerificationResult> {
+    try {
+      const session = auth().verifyPhoneNumber(phoneE164);
+      const verificationId = await new Promise<string>((resolve, reject) => {
+        const unsubRef: { current: UnsubLike } = { current: null };
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const done = (fn: () => void) => {
+          safeUnsub(unsubRef);
+          if (timer) clearTimeout(timer);
+          timer = null;
+          fn();
+        };
+        // 이벤트가 영원히 안 오는 케이스(네트워크/서비스 이슈)를 대비해 상한을 둡니다.
+        timer = setTimeout(() => {
+          done(() => reject(new Error('인증번호 요청이 지연되고 있어요. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.')));
+        }, 20000);
+        const subscription = session.on(
+          'state_changed',
+          (snapshot: FirebaseAuthTypes.PhoneAuthSnapshot) => {
+            if (snapshot.state === 'sent' || snapshot.state === 'timeout') {
+              done(() => resolve(snapshot.verificationId));
+            } else if (snapshot.state === 'error') {
+              done(() => reject(snapshot.error ?? new Error('전화번호 인증을 시작할 수 없습니다.')));
+            }
+          },
+          (e: unknown) => {
+            done(() => reject(e));
+          },
+        );
+        unsubRef.current = subscription as UnsubLike;
+      });
+      return { verificationId };
+    } catch (e) {
+      throw new Error(AuthService.humanizeError(e));
+    }
+  }
+
+  /** OTP 코드 확정 → Firebase 로그인 */
+  static async confirmCode(verificationId: string, code: string): Promise<FirebaseAuthTypes.UserCredential> {
+    try {
+      const credential = auth.PhoneAuthProvider.credential(verificationId, code.trim());
+      return await auth().signInWithCredential(credential);
+    } catch (e) {
+      throw new Error(AuthService.humanizeError(e));
+    }
+  }
+
+  /** 앱 재실행 시 자동 로그인용 auth state 감제 */
+  static onAuthStateChanged(cb: (u: FirebaseAuthTypes.User | null) => void): () => void {
+    return auth().onAuthStateChanged(cb);
+  }
+
+  static async signOut(): Promise<void> {
+    await auth().signOut();
+  }
+
+  static humanizeError(e: unknown): string {
+    const code =
+      typeof e === 'object' && e !== null && 'code' in e ? String((e as { code?: unknown }).code) : '';
+    const message = e instanceof Error ? e.message : String(e);
+    const hay = `${code} ${message}`.toLowerCase();
+
+    // 자주 만나는 케이스(Phone Auth)
+    if (hay.includes('invalid-phone-number')) return '전화번호 형식이 올바르지 않습니다.';
+    if (hay.includes('too-many-requests')) return '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.';
+    if (hay.includes('quota-exceeded')) return 'SMS 인증 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.';
+    if (hay.includes('session-expired')) return '인증 시간이 만료되었습니다. 다시 인증을 진행해 주세요.';
+    if (hay.includes('invalid-verification-code')) return '인증번호가 올바르지 않습니다.';
+    if (hay.includes('network-request-failed')) return '네트워크 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.';
+
+    // Firebase Phone Auth는 프로젝트 설정/요금제에 따라 "billing not enabled" 류 에러가 발생할 수 있음.
+    // 일부 환경에서는 message로만 `billing_hot_enabled` 같은 키가 노출되기도 함.
+    if (hay.includes('billing') || hay.includes('billing_hot_enabled') || hay.includes('billing-not-enabled')) {
+      const tail = __DEV__ && (code || message) ? `\n(디버그: ${code || message})` : '';
+      return (
+        '전화번호 인증을 사용할 수 없는 설정입니다.\n' +
+        'Firebase 콘솔에서 Phone Auth 사용을 위해 결제(Blaze) 설정/프로젝트 설정을 확인해 주세요.' +
+        tail
+      );
+    }
+
+    return message || '알 수 없는 오류가 발생했습니다.';
+  }
+}
+

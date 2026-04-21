@@ -17,16 +17,17 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 
 export default function TabsLayout() {
   const router = useRouter();
-  const { phoneUserId, isHydrated } = useUserSession();
+  const { phoneUserId, authProfile, isHydrated } = useUserSession();
+  const hasSession = Boolean(phoneUserId?.trim() || authProfile?.firebaseUid?.trim());
 
   useEffect(() => {
     if (!isHydrated) return;
-    if (!phoneUserId) {
+    if (!hasSession) {
       router.replace('/login');
     }
-  }, [isHydrated, phoneUserId, router]);
+  }, [isHydrated, hasSession, router]);
 
-  if (!isHydrated || !phoneUserId) {
+  if (!isHydrated || !hasSession) {
     return null;
   }
 

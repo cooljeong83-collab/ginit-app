@@ -1,7 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { AuthService } from '@/src/services/AuthService';
 import { signOutGoogle } from '@/src/lib/google-sign-in';
 import { clearStoredPhoneUserId, readStoredPhoneUserId, writeStoredPhoneUserId } from '@/src/lib/phone-user-id';
+import { clearSecureAuthSession } from '@/src/lib/secure-auth-session';
+import { clearSecureGoogleSession } from '@/src/lib/secure-google-session';
 
 /** 구글·Firebase에서 받은 표시용 프로필 (전역 세션 스냅샷) */
 export type AuthProfileSnapshot = {
@@ -65,8 +68,15 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
 
   const signOutSession = useCallback(async () => {
     await clearStoredPhoneUserId();
+    await clearSecureAuthSession();
+    await clearSecureGoogleSession();
     setPhoneState(null);
     setAuthProfileState(null);
+    try {
+      await AuthService.signOut();
+    } catch {
+      /* Firebase 세션 없음 등 */
+    }
     try {
       await signOutGoogle();
     } catch {

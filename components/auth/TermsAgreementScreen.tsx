@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,6 +30,13 @@ function termBody(key: TermKey): string {
 
 export default function TermsAgreementScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ next?: string | string[] }>();
+  const next = useMemo(() => {
+    const raw = params.next;
+    const v = Array.isArray(raw) ? raw[0] : raw;
+    const t = String(v ?? '').trim();
+    return t || null;
+  }, [params.next]);
   const [checked, setChecked] = useState<Record<TermKey, boolean>>({ tos: false, privacy: false });
   const [detailKey, setDetailKey] = useState<TermKey | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,16 +72,23 @@ export default function TermsAgreementScreen() {
     try {
       if (fn) {
         await fn();
-        // 다음 단계(가입 화면 이동/연동 플로우 시작/가입 완료 후 라우팅)는
-        // pending action 쪽에서 책임집니다. 여기서 back을 호출하면
-        // 방금 열린 화면이 닫히거나 스택이 꼬일 수 있어 추가 내비게이션을 하지 않습니다.
+        // LoginScreen 등: 약관 동의 후 목적지가 명확하면 여기서 replace로 마무리합니다.
+        // SignUpScreen 등: pending action이 자체적으로 라우팅(가입 완료 후 이동)을 책임질 수 있으므로
+        // next가 없으면 추가 내비게이션을 하지 않습니다.
+        if (next) {
+          router.replace(next);
+        }
+        return;
+      }
+      if (next) {
+        router.replace(next);
         return;
       }
       close();
     } finally {
       setBusy(false);
     }
-  }, [allRequiredChecked, busy, close]);
+  }, [allRequiredChecked, busy, close, next, router]);
 
   const detailTitle = useMemo(() => (detailKey ? TERM_LABELS[detailKey].title : ''), [detailKey]);
   const detailText = useMemo(() => (detailKey ? termBody(detailKey) : ''), [detailKey]);

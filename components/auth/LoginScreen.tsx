@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -16,7 +16,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   ToastAndroid,
   useWindowDimensions,
   View,
@@ -36,15 +35,9 @@ import {
   REDIRECT_STARTED,
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
-import { fetchAndroidPhoneHint } from '@/src/lib/phone-hint';
-import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
-import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { ensureUserProfile } from '@/src/lib/user-profile';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
-
-type MemberStatus = 'unknown' | 'checking' | 'member' | 'guest';
 
 function logUi(step: string, extra?: Record<string, unknown>) {
   if (extra && Object.keys(extra).length > 0) {
@@ -76,28 +69,14 @@ function buildAuthSnapshot(u: User, people: GooglePeopleExtras | null): AuthProf
   };
 }
 
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return debounced;
-}
-
 type LogoDest = { x: number; y: number; width: number; height: number };
 
 export default function LoginScreen() {
   const router = useRouter();
-  const routeParams = useLocalSearchParams<{ phone?: string | string[] }>();
   const win = useWindowDimensions();
-  const { isHydrated, setPhoneUserId, setAuthProfile } = useUserSession();
-  const [phoneField, setPhoneField] = useState('');
+  const { isHydrated, setAuthProfile } = useUserSession();
   const [busyGoogle, setBusyGoogle] = useState(false);
-  const [busyAutoLogin, setBusyAutoLogin] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [memberStatus, setMemberStatus] = useState<MemberStatus>('unknown');
   const fade = useRef(new Animated.Value(1)).current;
   const intro = useRef(new Animated.Value(0)).current;
   /** -1…1 → 좌우 갸우뚱(인사) */
@@ -114,76 +93,12 @@ export default function LoginScreen() {
   const [logoDest, setLogoDest] = useState<LogoDest | null>(null);
   const introStartedRef = useRef(false);
   const backPressRef = useRef(0);
-  const phoneBindUidRef = useRef<string | null>(null);
   const peopleExtrasRef = useRef<GooglePeopleExtras | null>(null);
-  const autoLoginPhoneRef = useRef<string | null>(null);
-  const phoneFieldRef = useRef(phoneField);
-  const prefillFromRouteDoneRef = useRef(false);
-  phoneFieldRef.current = phoneField;
-
-  const debouncedPhone = useDebounced(phoneField, 480);
-  const loginNormalized = normalizePhoneUserId(phoneField);
-
-  useEffect(() => {
-    if (prefillFromRouteDoneRef.current) return;
-    const raw = routeParams.phone;
-    const s = Array.isArray(raw) ? raw[0] : raw;
-    if (typeof s === 'string' && s.trim()) {
-      prefillFromRouteDoneRef.current = true;
-      setPhoneField(s.trim());
-    }
-  }, [routeParams.phone]);
-
-  useEffect(() => {
-    if (!loginNormalized) autoLoginPhoneRef.current = null;
-  }, [loginNormalized]);
-  const debouncedNormalized = normalizePhoneUserId(debouncedPhone);
-  /** 전화번호는 구글 계정이 아니라 기기(SIM, DeviceInfo)에서만 채웁니다. */
-  const bindPhoneAfterGoogle = useCallback(async (_user: User, preserveNormalized: string | null) => {
-    if (preserveNormalized) {
-      setPhoneField(formatNormalizedPhoneKrDisplay(preserveNormalized));
-      return;
-    }
-    if (Platform.OS === 'android') {
-      const hinted = await fetchAndroidPhoneHint();
-      if (hinted) {
-        const n = normalizePhoneUserId(hinted);
-        if (n) {
-          setPhoneField(formatNormalizedPhoneKrDisplay(n));
-          return;
-        }
-        setPhoneField(hinted);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (Platform.OS === 'android') {
-        try {
-          const hinted = await fetchAndroidPhoneHint();
-          if (cancelled) return;
-          if (hinted) {
-            const n = normalizePhoneUserId(hinted);
-            setPhoneField(n ? formatNormalizedPhoneKrDisplay(n) : hinted);
-          }
-        } catch {
-          /* */
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     try {
       const a = getFirebaseAuth();
-      setFirebaseUser(a.currentUser);
       return onAuthStateChanged(a, (u) => {
-        setFirebaseUser(u);
         if (u && isGoogleSignedUser(u)) {
           const pe = peopleExtrasRef.current;
           setAuthProfile({
@@ -212,9 +127,7 @@ export default function LoginScreen() {
         if (!alive) return;
         if (meta.status === 'success') {
           logUi('web redirect consume SUCCESS', { uid: meta.user.uid });
-          const preserved = normalizePhoneUserId(phoneFieldRef.current);
           setAuthProfile(snapshotFromFirebaseUser(meta.user));
-          await bindPhoneAfterGoogle(meta.user, preserved);
         } else if (meta.status === 'error') {
           setLoginError(meta.message + (meta.code ? ` (${meta.code})` : ''));
           Alert.alert('리다이렉트 로그인 실패', meta.code ? `${meta.code}\n${meta.message}` : meta.message);
@@ -227,18 +140,7 @@ export default function LoginScreen() {
     return () => {
       alive = false;
     };
-  }, [setAuthProfile, bindPhoneAfterGoogle]);
-
-  useEffect(() => {
-    if (!firebaseUser || !isGoogleSignedUser(firebaseUser)) {
-      phoneBindUidRef.current = null;
-      return;
-    }
-    if (normalizePhoneUserId(phoneField)) return;
-    if (phoneBindUidRef.current === firebaseUser.uid) return;
-    phoneBindUidRef.current = firebaseUser.uid;
-    void bindPhoneAfterGoogle(firebaseUser, null);
-  }, [firebaseUser, phoneField, bindPhoneAfterGoogle]);
+  }, [setAuthProfile]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -255,76 +157,14 @@ export default function LoginScreen() {
     return () => sub.remove();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!debouncedNormalized) {
-      setMemberStatus('unknown');
-      return;
-    }
-    setMemberStatus('checking');
-    (async () => {
-      try {
-        const ok = await isPhoneRegistered(debouncedNormalized);
-        if (cancelled) return;
-        setMemberStatus(ok ? 'member' : 'guest');
-      } catch {
-        if (!cancelled) setMemberStatus('unknown');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedNormalized]);
-
-  const goHomeAnimated = useCallback(() => {
-    Animated.timing(fade, {
-      toValue: 0,
-      duration: 320,
-      useNativeDriver: true,
-    }).start(() => {
-      router.replace('/(tabs)');
-    });
-  }, [fade, router]);
-
-  useEffect(() => {
-    if (memberStatus !== 'member' || !loginNormalized) return;
-    if (autoLoginPhoneRef.current === loginNormalized) return;
-    autoLoginPhoneRef.current = loginNormalized;
-    let cancelled = false;
-    setBusyAutoLogin(true);
-    void (async () => {
-      try {
-        await registerPhoneIfNew(loginNormalized);
-        await setPhoneUserId(loginNormalized);
-        await ensureUserProfile(loginNormalized);
-        logUi('기존 회원 자동 로그인', { normalized: loginNormalized });
-        if (!cancelled) goHomeAnimated();
-      } catch (e) {
-        autoLoginPhoneRef.current = null;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!cancelled) {
-          setLoginError(msg);
-          Alert.alert('자동 로그인 실패', msg);
-        }
-      } finally {
-        if (!cancelled) setBusyAutoLogin(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [memberStatus, loginNormalized, setPhoneUserId, goHomeAnimated]);
-
   const onGoogleSignUp = useCallback(async () => {
     setLoginError(null);
     setBusyGoogle(true);
-    const preservedPhone = normalizePhoneUserId(phoneField);
     try {
       const { user, googleAccessToken } = await signInWithGoogle({ forRegistration: true });
       const people = await fetchGooglePeopleExtras(googleAccessToken);
       peopleExtrasRef.current = people;
       setAuthProfile(buildAuthSnapshot(user, people));
-      await bindPhoneAfterGoogle(user, preservedPhone);
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
       const message = e instanceof Error ? e.message : '알 수 없는 오류';
@@ -334,21 +174,15 @@ export default function LoginScreen() {
     } finally {
       setBusyGoogle(false);
     }
-  }, [bindPhoneAfterGoogle, setAuthProfile, phoneField]);
+  }, [setAuthProfile]);
 
   const isExpoGo = Constants.appOwnership === 'expo';
 
   const goSignUp = useCallback(() => {
-    const trimmed = phoneField.trim();
-    setPendingConsentAction(() => {
-      if (trimmed) {
-        router.push({ pathname: '/sign-up', params: { phone: trimmed, consented: '1' } });
-      } else {
-        router.push({ pathname: '/sign-up', params: { consented: '1' } });
-      }
-    });
-    router.push('/terms-agreement');
-  }, [router, phoneField]);
+    // 약관 동의 완료 후 회원가입 화면으로 이동
+    setPendingConsentAction(null);
+    router.push({ pathname: '/terms-agreement', params: { next: '/sign-up?consented=1' } });
+  }, [router]);
 
   const onIntroLogoLayout = useCallback(() => {
     if (logoDest != null) return;
@@ -536,62 +370,28 @@ export default function LoginScreen() {
                   </View>
                 ) : null}
 
-                {busyAutoLogin ? (
-                  <View style={styles.checkingRow}>
-                    <ActivityIndicator color={GinitTheme.colors.primary} />
-                    <Text style={styles.checkingLabel}>등록된 회원으로 로그인하는 중…</Text>
-                  </View>
-                ) : null}
-
-                {memberStatus === 'checking' && debouncedNormalized && !busyAutoLogin ? (
-                  <View style={styles.checkingRow}>
-                    <ActivityIndicator color={GinitTheme.colors.primary} />
-                    <Text style={styles.checkingLabel}>회원 여부 확인 중…</Text>
-                  </View>
-                ) : null}
-
-                {memberStatus === 'member' && loginNormalized && !busyAutoLogin ? (
-                  <Text style={styles.memberBadge}>이 번호는 이미 지닛에 등록되어 있어요. 잠시만 기다려 주세요.</Text>
-                ) : null}
-
-                <View style={styles.phoneRow}>
-                  <View style={[styles.countryCodeBtn, styles.countryCodeBtnReadOnly]} pointerEvents="none">
-                    <Text style={styles.countryCodeText}>+82</Text>
-                    <Text style={styles.countryCodeArrow}>▾</Text>
-                  </View>
-                  <TextInput
-                    value={phoneField}
-                    placeholder="전화번호 입력 (- 없이)"
-                    placeholderTextColor="#94a3b8"
-                    style={[styles.phoneInputNew, styles.phoneInputReadOnly]}
-                    keyboardType="phone-pad"
-                    autoCapitalize="none"
-                    editable={false}
-                  />
-                </View>
-
                 <Pressable
                   onPress={goSignUp}
-                  disabled={busyAutoLogin}
+                  disabled={false}
                   style={({ pressed }) => [
                     styles.signupNavBtn,
-                    busyAutoLogin && styles.btnDisabled,
-                    pressed && !busyAutoLogin && styles.pressed,
+                    pressed && styles.pressed,
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel="가입하기 — 회원가입 화면으로 이동">
                   <Text style={styles.signupNavBtnLabel}>가입하기</Text>
                 </Pressable>
-                <Text style={styles.signupNavHint}>신규 회원은 회원가입 화면에서 정보를 입력합니다.</Text>
+                <Text style={styles.signupNavHint}>회원가입 화면에서 전화번호 인증과 필수 정보를 입력합니다.</Text>
 
                 <SnsEasySignUpSection
                   onGooglePress={() => {
                     setPendingConsentAction(async () => {
                       await onGoogleSignUp();
+                      // 약관 동의 화면이 최종 이동을 담당합니다.
                     });
-                    router.push('/terms-agreement');
+                    router.push({ pathname: '/terms-agreement', params: { next: '/(tabs)' } });
                   }}
-                  googleDisabled={busyAutoLogin || (isExpoGo && Platform.OS !== 'web')}
+                  googleDisabled={isExpoGo && Platform.OS !== 'web'}
                   googleLoading={busyGoogle}
                 />
 

@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -42,6 +42,19 @@ export default function SplashBootstrapScreen() {
 
   const { readyForUi, statusLabel, hintMessage } = useSplashBootstrap();
   const didHideSplash = useRef(false);
+
+  /**
+   * `preventAutoHideAsync()`가 걸린 상태에서, expo-splash-screen의 PreDrawListener가
+   * 첫 프레임 그리기를 취소할 수 있습니다. `onLayout`만 기다리면 hideAsync가 호출되지 않아
+   * 시작 스플래시에 갇히는 데드락이 생길 수 있어, 마운트 후 즉시 hideAsync를 시도합니다.
+   */
+  useEffect(() => {
+    if (didHideSplash.current) return;
+    didHideSplash.current = true;
+    requestAnimationFrame(() => {
+      void SplashScreen.hideAsync().catch(() => {});
+    });
+  }, []);
 
   const onRootLayout = useCallback(() => {
     if (didHideSplash.current) return;

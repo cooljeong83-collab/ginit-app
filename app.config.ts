@@ -110,14 +110,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       package: 'com.ginit.app',
       googleServicesFile: './env/google-services.json',
-      permissions: [
-        ...((config.android as { permissions?: string[] } | undefined)?.permissions ?? []),
-        'android.permission.READ_PHONE_STATE',
-        'android.permission.READ_PHONE_NUMBERS',
-      ],
     },
     plugins: [
       ...plugins,
+      'expo-secure-store',
       '@react-native-community/datetimepicker',
       '@react-native-google-signin/google-signin',
       [
@@ -129,6 +125,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         'expo-build-properties',
         {
+          ios: {
+            /**
+             * FirebaseAuth (Swift) pods fail to integrate as static libraries unless modular headers are enabled.
+             * Using dynamic frameworks avoids the modular-headers requirement and makes `pod install` succeed.
+             */
+            useFrameworks: 'dynamic',
+          },
           android: {
             extraMavenRepos: ['https://repository.map.naver.com/archive/maven'],
           },
@@ -142,6 +145,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           sounds: [],
         },
       ],
+      /** Android Phone Number Hint API (play-services-auth) */
+      './plugins/withAndroidPlayServicesAuth.js',
       /** Android 스플래시 아이콘을 Adaptive 전경(`ic_launcher_foreground`)과 동일하게 */
       './plugins/withAndroidSplashLauncherForeground.js',
     ],

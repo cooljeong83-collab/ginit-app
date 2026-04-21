@@ -1,6 +1,7 @@
 import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuth, getReactNativePersistence, initializeAuth, signInAnonymously, type Auth } from 'firebase/auth';
+import { getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 import { publicEnv } from '@/src/config/public-env';
@@ -39,14 +40,20 @@ export function getFirebaseApp(): FirebaseApp {
 }
 
 /**
- * Firebase Auth — `getAuth` 기본 persistence(메모리)만 사용합니다.
- * React Native에서 `initializeAuth` + `getReactNativePersistence(AsyncStorage)`를 쓰지 않으므로,
- * 터미널에 `@firebase/auth`의 persistence 관련 안내 로그가 남을 수 있습니다(동작에는 지장 없음).
+ * Firebase Auth (React Native)
+ * - AsyncStorage persistence 연결: 경고 제거 + 자동 로그인(세션 유지)
  */
 export function getFirebaseAuth(): Auth {
   if (auth) return auth;
   const firebaseApp = getFirebaseApp();
-  auth = getAuth(firebaseApp);
+  try {
+    auth = initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    // initializeAuth 중복 초기화 등 fallback
+    auth = getAuth(firebaseApp);
+  }
   return auth;
 }
 
@@ -76,7 +83,20 @@ export async function ensureFirebaseAuthUserForStorage(): Promise<void> {
 /** Cloud Firestore */
 export function getFirebaseFirestore(): Firestore {
   if (firestore) return firestore;
-  firestore = getFirestore(getFirebaseApp());
+  const firebaseApp = getFirebaseApp();
+  // RN에서 Listen(WebChannel)이 불안정할 수 있어 long polling 자동 감지(필요 시 사용)
+  if (process.env.EXPO_OS === 'web') {
+    firestore = getFirestore(firebaseApp);
+    return firestore;
+  }
+  try {
+    firestore = initializeFirestore(firebaseApp, {
+      experimentalAutoDetectLongPolling: true,
+      useFetchStreams: false,
+    });
+  } catch {
+    firestore = getFirestore(firebaseApp);
+  }
   return firestore;
 }
 

@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
@@ -27,7 +28,12 @@ import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
 import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-up-input-sanitize';
+import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { requestPhoneNumberHint } from '@/src/lib/phone-number-hint';
+import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
+import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
+import { AuthService } from '@/src/services/AuthService';
 
 function paramToString(v: string | string[] | undefined): string {
   if (v == null) return '';
@@ -45,19 +51,70 @@ export default function SignUpScreen() {
   }, [params.consented]);
   const { isHydrated } = useUserSession();
   const fade = useRef(new Animated.Value(1)).current;
+  const scrollRef = useRef<KeyboardAwareScrollView>(null);
   const displayNameInputRef = useRef<TextInputRefType>(null);
   const emailInputRef = useRef<TextInputRefType>(null);
+  const phoneInputRef = useRef<TextInputRefType>(null);
+  const otpInputRef = useRef<TextInputRefType>(null);
   const [emailDomain, setEmailDomain] = useState<'gmail.com' | 'naver.com' | 'daum.net' | 'kakao.com' | 'hotmail.com' | 'icloud.com'>(
     'gmail.com',
   );
+  const [customEmailDomain, setCustomEmailDomain] = useState('');
+  const [useCustomEmailDomain, setUseCustomEmailDomain] = useState(false);
   const [emailLocal, setEmailLocal] = useState('');
   const [domainPickerOpen, setDomainPickerOpen] = useState(false);
+  const [otpVerificationId, setOtpVerificationId] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [verifiedFirebaseUid, setVerifiedFirebaseUid] = useState<string | null>(null);
+  const [phoneHintBusy, setPhoneHintBusy] = useState(false);
+  const [genderY, setGenderY] = useState<number | null>(null);
+  const [submitY, setSubmitY] = useState<number | null>(null);
 
   const composedEmail = useMemo(() => {
     const left = emailLocal.trim();
     if (!left) return '';
-    return `${left}@${emailDomain}`;
-  }, [emailLocal, emailDomain]);
+    const domainRaw = useCustomEmailDomain ? customEmailDomain : emailDomain;
+    const domain = String(domainRaw).trim();
+    if (!domain) return '';
+    return `${left}@${domain}`;
+  }, [emailLocal, emailDomain, customEmailDomain, useCustomEmailDomain]);
+
+  const effectiveEmailDomainLabel = useMemo(() => {
+    const raw = useCustomEmailDomain ? customEmailDomain : emailDomain;
+    const t = String(raw).trim();
+    return t || emailDomain;
+  }, [customEmailDomain, emailDomain, useCustomEmailDomain]);
+
+  const sanitizeDomain = useCallback((raw: string) => {
+    const t = raw.trim().toLowerCase().replace(/^@+/, '');
+    return t.replace(/[^a-z0-9.-]/g, '');
+  }, []);
+
+  const focusName = useCallback(() => {
+    requestAnimationFrame(() => {
+      displayNameInputRef.current?.focus();
+      if (Platform.OS === 'android') {
+        requestAnimationFrame(() => hintKoreanImeForFocusedInput());
+        setTimeout(() => hintKoreanImeForFocusedInput(), 60);
+      }
+    });
+  }, []);
+
+  const focusPhone = useCallback(() => {
+    requestAnimationFrame(() => phoneInputRef.current?.focus());
+  }, []);
+
+  const scrollToGender = useCallback(() => {
+    if (genderY == null) return;
+    scrollRef.current?.scrollToPosition(0, Math.max(0, genderY - 14), true);
+  }, [genderY]);
+
+  const scrollToSubmit = useCallback(() => {
+    if (submitY == null) return;
+    scrollRef.current?.scrollToPosition(0, Math.max(0, submitY - 14), true);
+  }, [submitY]);
 
   useFocusEffect(
     useCallback(() => {
@@ -71,7 +128,7 @@ export default function SignUpScreen() {
     displayName,
     setDisplayName,
     phoneField,
-    emailField,
+    setPhoneField,
     setEmailField,
     genderCode,
     selectGenderCode,
@@ -82,11 +139,93 @@ export default function SignUpScreen() {
     runSignUp,
   } = useSignUpFlow(initialPhone);
 
+  const smsRetriever = useOtpSmsRetriever({ onCode: setOtpCode });
+
+  const normalizedPhone = useMemo(() => normalizePhoneUserId(phoneField), [phoneField]);
+  const canSendOtp = !!normalizedPhone && memberStatus === 'guest' && !busy && !otpBusy && !verifiedFirebaseUid;
+  const canConfirmOtp = !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy && !busy && !verifiedFirebaseUid;
+
   // 이메일 입력은 "아이디(골뱅이 앞)" + 도메인 선택으로 구성하고,
   // 실제 저장 값은 hook의 emailField로 동기화합니다.
   useEffect(() => {
     setEmailField(composedEmail);
   }, [composedEmail, setEmailField]);
+
+  // 전화번호가 바뀌면 OTP 세션은 리셋합니다.
+  useEffect(() => {
+    setOtpVerificationId(null);
+    setOtpCode('');
+    setOtpError(null);
+    setVerifiedFirebaseUid(null);
+    smsRetriever.stop();
+  }, [normalizedPhone]);
+
+  // OTP가 채워졌으면 SMS Retriever는 정리합니다.
+  useEffect(() => {
+    if (otpCode.trim().length === 6) smsRetriever.stop();
+  }, [otpCode, smsRetriever]);
+
+  const onSendOtp = useCallback(async () => {
+    if (!normalizedPhone || !canSendOtp) return;
+    setOtpBusy(true);
+    setOtpError(null);
+    try {
+      // Android: SMS Retriever는 "자동 감지" 보조 기능입니다.
+      // 일부 기기/환경에서 startListening이 실패/타임아웃할 수 있으므로, 실패해도 OTP 전송은 계속 진행합니다.
+      try {
+        await smsRetriever.start();
+      } catch {
+        /* 자동 감지 불가 — 수동 입력으로 진행 */
+      }
+      const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
+      setOtpVerificationId(verificationId);
+      requestAnimationFrame(() => otpInputRef.current?.focus());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setOtpError(msg);
+    } finally {
+      setOtpBusy(false);
+    }
+  }, [normalizedPhone, canSendOtp, smsRetriever]);
+
+  const onUsePhoneHint = useCallback(async () => {
+    if (Platform.OS !== 'android') return;
+    if (busy || otpBusy || verifiedFirebaseUid) return;
+    setPhoneHintBusy(true);
+    try {
+      const e164 = await requestPhoneNumberHint();
+      const normalized = e164 ? normalizePhoneUserId(e164) : null;
+      if (normalized) {
+        // UI는 로컬 표기(010...)로 채우고, 내부는 normalizePhoneUserId로 처리합니다.
+        setPhoneField(formatNormalizedPhoneKrDisplay(normalized));
+      }
+    } catch {
+      /* 사용자가 닫았거나 힌트가 없음 */
+    } finally {
+      setPhoneHintBusy(false);
+    }
+  }, [busy, otpBusy, verifiedFirebaseUid, setPhoneField]);
+
+  const onConfirmOtp = useCallback(async () => {
+    if (!otpVerificationId || !canConfirmOtp) return;
+    setOtpBusy(true);
+    setOtpError(null);
+    try {
+      const cred = await AuthService.confirmCode(otpVerificationId, otpCode);
+      const uid = cred.user?.uid ?? '';
+      if (!uid) throw new Error('인증은 완료됐지만 사용자 정보를 가져올 수 없습니다.');
+      setVerifiedFirebaseUid(uid);
+      // "당근마켓식" 자동 로그인: 부트에서 홈 진입을 위해 secure store에 세션을 저장합니다.
+      if (normalizedPhone) {
+        await writeSecureAuthSession({ uid, phoneUserId: normalizedPhone });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setOtpError(msg);
+    } finally {
+      setOtpBusy(false);
+    }
+  }, [otpVerificationId, otpCode, canConfirmOtp, normalizedPhone]);
 
   const proceedAfterSignUp = useCallback(() => {
     void (async () => {
@@ -107,17 +246,22 @@ export default function SignUpScreen() {
 
   const onSubmit = useCallback(() => {
     if (consented) {
-      void runSignUp(proceedAfterSignUp);
+      void runSignUp(verifiedFirebaseUid ?? '', proceedAfterSignUp);
       return;
     }
     setPendingConsentAction(async () => {
-      await runSignUp(proceedAfterSignUp);
+      await runSignUp(verifiedFirebaseUid ?? '', proceedAfterSignUp);
     });
     router.push('/terms-agreement');
-  }, [consented, runSignUp, proceedAfterSignUp, router]);
+  }, [consented, runSignUp, verifiedFirebaseUid, proceedAfterSignUp, router]);
 
   const signUpSubmitDisabled =
-    !canSubmit || busy || memberStatus === 'member' || (memberStatus === 'checking' && phoneField.trim().length > 0);
+    !canSubmit ||
+    busy ||
+    otpBusy ||
+    !verifiedFirebaseUid ||
+    memberStatus === 'member' ||
+    (memberStatus === 'checking' && phoneField.trim().length > 0);
 
   if (!isHydrated) {
     return (
@@ -133,6 +277,7 @@ export default function SignUpScreen() {
       <ScreenShell padded={false} style={styles.screen}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           <KeyboardAwareScreenScroll
+            ref={scrollRef}
             contentContainerStyle={[styles.scroll, signUpScrollExtra.content]}
             extraScrollHeight={18}
             extraHeight={32}
@@ -187,14 +332,51 @@ export default function SignUpScreen() {
               ) : null}
 
               <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>이메일 (필수)</Text>
+                <View style={emailCombo.row}>
+                  <Pressable
+                    onPress={() => emailInputRef.current?.focus()}
+                    style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
+                    <TextInput
+                      ref={emailInputRef}
+                      value={emailLocal}
+                      onChangeText={(t) => setEmailLocal(sanitizeSignUpEmail(t).replace(/@.*/g, ''))}
+                      placeholder="이메일"
+                      placeholderTextColor="#94a3b8"
+                      style={[styles.fullWidthInput, emailCombo.leftInput]}
+                      keyboardType="email-address"
+                      inputMode="email"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="email"
+                      textContentType="emailAddress"
+                      importantForAutofill="yes"
+                      returnKeyType="next"
+                      enterKeyHint="next"
+                      submitBehavior="blurAndSubmit"
+                      onSubmitEditing={focusName}
+                      editable={!busy}
+                      selectTextOnFocus
+                    />
+                  </Pressable>
+                  <Text style={emailCombo.at}>@</Text>
+                  <Pressable
+                    onPress={() => setDomainPickerOpen(true)}
+                    disabled={busy}
+                    style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="이메일 도메인 선택">
+                    <Text style={emailCombo.domainText}>{effectiveEmailDomainLabel}</Text>
+                    <Text style={emailCombo.domainArrow}>▾</Text>
+                  </Pressable>
+                </View>
+                <Text style={emailCombo.hint}>이메일은 로그인 아이디로 사용됩니다.</Text>
+              </View>
+
+              <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>이름 (필수)</Text>
                 <Pressable
-                  onPress={() => {
-                    displayNameInputRef.current?.focus();
-                    if (Platform.OS === 'android') {
-                      requestAnimationFrame(() => hintKoreanImeForFocusedInput());
-                    }
-                  }}
+                  onPress={focusName}
                   style={({ pressed }) => [pressed && styles.pressed]}>
                   <TextInput
                     ref={displayNameInputRef}
@@ -203,7 +385,6 @@ export default function SignUpScreen() {
                     onFocus={() => {
                       if (Platform.OS === 'android') {
                         requestAnimationFrame(() => hintKoreanImeForFocusedInput());
-                        // 일부 IME는 첫 프레임에 힌트를 무시해서 한 번 더 걸어줍니다.
                         setTimeout(() => hintKoreanImeForFocusedInput(), 60);
                       }
                     }}
@@ -219,14 +400,7 @@ export default function SignUpScreen() {
                     returnKeyType="next"
                     enterKeyHint="next"
                     blurOnSubmit={false}
-                    onSubmitEditing={() => {
-                      emailInputRef.current?.focus();
-                      if (Platform.OS === 'android') {
-                        InteractionManager.runAfterInteractions(() => {
-                          emailInputRef.current?.focus();
-                        });
-                      }
-                    }}
+                    onSubmitEditing={focusPhone}
                     {...(Platform.OS === 'web' ? ({ lang: 'ko' } as const) : {})}
                     editable={!busy}
                     selectTextOnFocus
@@ -242,58 +416,95 @@ export default function SignUpScreen() {
                     <Text style={styles.countryCodeArrow}>▾</Text>
                   </View>
                   <TextInput
+                    ref={phoneInputRef}
                     value={phoneField}
-                    placeholder="전화번호 (- 없이)"
+                    onChangeText={(t) => setPhoneField(t)}
+                    placeholder="전화번호 입력 (- 없이)"
                     placeholderTextColor="#94a3b8"
-                    style={[styles.phoneInputNew, styles.phoneInputReadOnly]}
+                    style={styles.phoneInputNew}
                     keyboardType="phone-pad"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    textContentType="telephoneNumber"
+                    importantForAutofill="yes"
                     autoCapitalize="none"
-                    editable={false}
-                    selectTextOnFocus={false}
+                    editable={!busy && !otpBusy && !verifiedFirebaseUid}
+                    selectTextOnFocus
+                    returnKeyType="done"
+                    enterKeyHint="done"
+                    onSubmitEditing={() => {
+                      Keyboard.dismiss();
+                      InteractionManager.runAfterInteractions(() => {
+                        scrollToGender();
+                      });
+                    }}
                   />
                 </View>
-              </View>
-
-              <View style={styles.fieldBlock}>
-                <Text style={styles.fieldLabel}>이메일 (선택)</Text>
-                <View style={emailCombo.row}>
+                {Platform.OS === 'android' ? (
                   <Pressable
-                    onPress={() => emailInputRef.current?.focus()}
-                    style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
+                    onPress={() => void onUsePhoneHint()}
+                    disabled={phoneHintBusy || busy || otpBusy || !!verifiedFirebaseUid}
+                    style={({ pressed }) => [
+                      otpStyles.otpBtn,
+                      (phoneHintBusy || busy || otpBusy || !!verifiedFirebaseUid) && otpStyles.otpBtnDisabled,
+                      pressed && !(phoneHintBusy || busy || otpBusy || !!verifiedFirebaseUid) && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="전화번호 자동 입력">
+                    <Text style={otpStyles.otpBtnText}>{phoneHintBusy ? '불러오는 중…' : '전화번호 자동 입력'}</Text>
+                  </Pressable>
+                ) : null}
+                <View style={otpStyles.otpActionsRow}>
+                  <Pressable
+                    onPress={() => void onSendOtp()}
+                    disabled={!canSendOtp}
+                    style={({ pressed }) => [
+                      otpStyles.otpBtn,
+                      !canSendOtp && otpStyles.otpBtnDisabled,
+                      pressed && canSendOtp && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="인증번호 받기">
+                    <Text style={otpStyles.otpBtnText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
+                  </Pressable>
+                  {verifiedFirebaseUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
+                </View>
+
+                {otpVerificationId && !verifiedFirebaseUid ? (
+                  <View style={otpStyles.otpRow}>
                     <TextInput
-                      ref={emailInputRef}
-                      value={emailLocal}
-                      onChangeText={(t) => setEmailLocal(sanitizeSignUpEmail(t).replace(/@.*/g, ''))}
-                      placeholder="아이디"
+                      ref={otpInputRef}
+                      value={otpCode}
+                      onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="인증번호 6자리"
                       placeholderTextColor="#94a3b8"
-                      style={[styles.fullWidthInput, emailCombo.leftInput]}
-                      keyboardType="default"
-                      inputMode="text"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      autoComplete="email"
-                      textContentType="emailAddress"
-                      importantForAutofill="yes"
+                      style={otpStyles.otpInput}
+                      keyboardType="number-pad"
+                      inputMode="numeric"
+                      textContentType="oneTimeCode"
+                      autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
+                      editable={!otpBusy && !busy}
+                      selectTextOnFocus
                       returnKeyType="done"
                       enterKeyHint="done"
-                      submitBehavior="blurAndSubmit"
-                      onSubmitEditing={Keyboard.dismiss}
-                      editable={!busy}
-                      selectTextOnFocus
+                      onSubmitEditing={() => void onConfirmOtp()}
                     />
-                  </Pressable>
-                  <Text style={emailCombo.at}>@</Text>
-                  <Pressable
-                    onPress={() => setDomainPickerOpen(true)}
-                    disabled={busy}
-                    style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel="이메일 도메인 선택">
-                    <Text style={emailCombo.domainText}>{emailDomain}</Text>
-                    <Text style={emailCombo.domainArrow}>▾</Text>
-                  </Pressable>
-                </View>
-                <Text style={emailCombo.hint}>아이디만 입력하면 도메인은 선택할 수 있어요.</Text>
+                    <Pressable
+                      onPress={() => void onConfirmOtp()}
+                      disabled={!canConfirmOtp}
+                      style={({ pressed }) => [
+                        otpStyles.confirmBtn,
+                        !canConfirmOtp && otpStyles.confirmBtnDisabled,
+                        pressed && canConfirmOtp && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="인증 확인">
+                      <Text style={otpStyles.confirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                {otpError ? <Text style={otpStyles.otpError}>{otpError}</Text> : null}
               </View>
 
               <Modal visible={domainPickerOpen} animationType="fade" transparent onRequestClose={() => setDomainPickerOpen(false)}>
@@ -316,6 +527,7 @@ export default function SignUpScreen() {
                           key={d}
                           onPress={() => {
                             setEmailDomain(d);
+                            setUseCustomEmailDomain(false);
                             setDomainPickerOpen(false);
                           }}
                           style={({ pressed }) => [emailCombo.domainRow, pressed && styles.pressed]}
@@ -325,11 +537,47 @@ export default function SignUpScreen() {
                         </Pressable>
                       );
                     })}
+                    <View style={emailCombo.customDivider} />
+                    <Text style={emailCombo.customTitle}>직접 입력</Text>
+                    <View style={emailCombo.customRow}>
+                      <Text style={emailCombo.customAt}>@</Text>
+                      <TextInput
+                        value={customEmailDomain}
+                        onChangeText={(t) => setCustomEmailDomain(sanitizeDomain(t))}
+                        placeholder="example.com"
+                        placeholderTextColor="#94a3b8"
+                        style={emailCombo.customInput}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="url"
+                        inputMode="text"
+                        returnKeyType="done"
+                        enterKeyHint="done"
+                        editable={!busy}
+                      />
+                      <Pressable
+                        onPress={() => {
+                          const d = sanitizeDomain(customEmailDomain);
+                          if (!d) return;
+                          setCustomEmailDomain(d);
+                          setUseCustomEmailDomain(true);
+                          setDomainPickerOpen(false);
+                        }}
+                        style={({ pressed }) => [emailCombo.customApplyBtn, pressed && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="직접 입력 도메인 적용">
+                        <Text style={emailCombo.customApplyText}>적용</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </Pressable>
               </Modal>
 
-              <View style={styles.fieldBlock}>
+              <View
+                style={styles.fieldBlock}
+                onLayout={(e) => {
+                  setGenderY(e.nativeEvent.layout.y);
+                }}>
                 <Text style={styles.fieldLabel}>성별 (필수)</Text>
                 <View style={styles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
                   {(
@@ -346,6 +594,9 @@ export default function SignUpScreen() {
                         onPress={() => {
                           Keyboard.dismiss();
                           selectGenderCode(code);
+                          InteractionManager.runAfterInteractions(() => {
+                            scrollToSubmit();
+                          });
                         }}
                         style={({ pressed }) => [
                           styles.genderBinaryBtn,
@@ -365,6 +616,7 @@ export default function SignUpScreen() {
               </View>
 
               <Pressable
+                onLayout={(e) => setSubmitY(e.nativeEvent.layout.y)}
                 onPress={() => {
                   Keyboard.dismiss();
                   void onSubmit();
@@ -502,4 +754,95 @@ const emailCombo = StyleSheet.create({
   domainRowTextSelected: {
     color: '#0052CC',
   },
+  customDivider: {
+    marginTop: 10,
+    marginBottom: 10,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  customTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0f172a',
+    marginBottom: 8,
+  },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  customAt: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#64748b',
+    marginTop: -1,
+  },
+  customInput: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 12,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  customApplyBtn: {
+    height: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 82, 204, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customApplyText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0052CC',
+  },
+});
+
+const otpStyles = StyleSheet.create({
+  otpActionsRow: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  otpBtn: {
+    height: 42,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 82, 204, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otpBtnDisabled: { opacity: 0.4 },
+  otpBtnText: { fontSize: 14, fontWeight: '900', color: '#0052CC' },
+  verifiedBadge: { fontSize: 12, fontWeight: '900', color: '#16a34a' },
+  otpRow: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  otpInput: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.10)',
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
+    paddingHorizontal: 12,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  confirmBtn: {
+    height: 48,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: GinitTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmBtnDisabled: { opacity: 0.35 },
+  confirmText: { fontSize: 14, fontWeight: '900', color: '#fff' },
+  otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: '#ef4444' },
 });
