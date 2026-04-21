@@ -54,7 +54,9 @@ import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import {
   WITHDRAWN_NICKNAME,
   ensureUserProfile,
+  getUserProfile,
   getUserProfilesForIds,
+  isGoogleSnsDemographicsIncomplete,
   isUserProfileWithdrawn,
   type UserProfile,
 } from '@/src/lib/user-profile';
@@ -956,6 +958,15 @@ export default function MeetingDetailScreen() {
     setJoinBusy(true);
     try {
       await ensureUserProfile(sessionPk);
+      const profGate = await getUserProfile(sessionPk);
+      if (isGoogleSnsDemographicsIncomplete(profGate)) {
+        Alert.alert(
+          '프로필을 먼저 완성해 주세요',
+          'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
+          [{ text: '프로필로 이동', onPress: () => router.push('/(tabs)/profile') }],
+        );
+        return;
+      }
       const joinVotes =
         meeting.scheduleConfirmed === true
           ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }

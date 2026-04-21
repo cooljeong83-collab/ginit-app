@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   BackHandler,
@@ -15,58 +15,91 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { authScreenStyles as authFormStyles } from '@/components/auth/authScreenStyles';
 import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeUserId } from '@/src/lib/app-user-id';
+import {
+  SIGN_UP_AGE_BAND_OPTIONS,
+  type SignUpAgeBandCode,
+  type SignUpGenderCode,
+} from '@/src/hooks/useSignUpFlow';
 import {
   deleteFirebaseAuthUserBestEffort,
   purgeUserAccountRemote,
   purgeUserAccountRemoteByFirebaseUid,
   wipeLocalAppData,
 } from '@/src/lib/account-deletion';
-import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
+import {
+  ensureUserProfile,
+  isGoogleSnsDemographicsIncomplete,
+  updateUserProfile,
+} from '@/src/lib/user-profile';
+
+const AGE_CODES = new Set(SIGN_UP_AGE_BAND_OPTIONS.map((o) => o.code));
 
 export default function ProfileTab() {
   const router = useRouter();
   const { userId, authProfile, signOutSession } = useUserSession();
+  const profilePk = useMemo(() => {
+    const u = userId?.trim();
+    if (u) return u;
+    const em = authProfile?.email?.trim();
+    if (em) return normalizeUserId(em) ?? '';
+    return '';
+  }, [userId, authProfile?.email]);
+
   const [busy, setBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
+  const [needsSnsDemographics, setNeedsSnsDemographics] = useState(false);
+  const [genderDemo, setGenderDemo] = useState<SignUpGenderCode | null>(null);
+  const [ageBandDemo, setAgeBandDemo] = useState<SignUpAgeBandCode | null>(null);
 
   useEffect(() => {
-    if (!userId?.trim()) return;
+    if (!profilePk) return;
     let cancelled = false;
     (async () => {
       try {
-        const p = await ensureUserProfile(userId);
+        const p = await ensureUserProfile(profilePk);
         if (cancelled) return;
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
+        setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+        const g = p.gender?.trim();
+        setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
+        const ab = p.ageBand?.trim();
+        setAgeBandDemo(ab && AGE_CODES.has(ab as SignUpAgeBandCode) ? (ab as SignUpAgeBandCode) : null);
       } catch {
         if (!cancelled) {
           setNickname('');
           setPhotoUrl('');
+          setNeedsSnsDemographics(false);
+          setGenderDemo(null);
+          setAgeBandDemo(null);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [profilePk]);
 
   const onSaveProfile = useCallback(async () => {
-    if (!userId?.trim()) {
+    if (!profilePk) {
       Alert.alert('안내', '로그인 후 프로필을 저장할 수 있어요.');
       return;
     }
     setProfileBusy(true);
     try {
-      await ensureUserProfile(userId);
-      await updateUserProfile(userId, {
+      await ensureUserProfile(profilePk);
+      await updateUserProfile(profilePk, {
         nickname: nickname.trim(),
         photoUrl: photoUrl.trim() || null,
       });
@@ -77,7 +110,35 @@ export default function ProfileTab() {
     } finally {
       setProfileBusy(false);
     }
-  }, [userId, nickname, photoUrl]);
+  }, [profilePk, nickname, photoUrl]);
+
+  const onSaveDemographics = useCallback(async () => {
+    if (!profilePk) {
+      Alert.alert('안내', '로그인 후 저장할 수 있어요.');
+      return;
+    }
+    if (!genderDemo || !ageBandDemo) {
+      Alert.alert('입력 확인', '성별과 연령대를 모두 선택해 주세요.');
+      return;
+    }
+    setDemoBusy(true);
+    try {
+      await ensureUserProfile(profilePk);
+      await updateUserProfile(profilePk, { gender: genderDemo, ageBand: ageBandDemo });
+      const p = await ensureUserProfile(profilePk);
+      setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+      const g = p.gender?.trim();
+      setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
+      const ab = p.ageBand?.trim();
+      setAgeBandDemo(ab && AGE_CODES.has(ab as SignUpAgeBandCode) ? (ab as SignUpAgeBandCode) : null);
+      Alert.alert('저장됨', '성별과 연령대를 반영했어요. 이제 모임을 만들고 참여할 수 있어요.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
+      Alert.alert('저장 실패', msg);
+    } finally {
+      setDemoBusy(false);
+    }
+  }, [profilePk, genderDemo, ageBandDemo]);
 
   const onSignOut = useCallback(async () => {
     setBusy(true);
@@ -169,10 +230,87 @@ export default function ProfileTab() {
           showsVerticalScrollIndicator={false}>
           <Text style={styles.screenTitle}>프로필</Text>
 
+          {needsSnsDemographics ? (
+            <GinitCard appearance="light" style={styles.snsGuideCard}>
+              <Text style={styles.title}>모임 이용을 위한 정보</Text>
+              <Text style={styles.hint}>
+                SNS 간편 가입으로 들어오셨어요. 성별과 연령대를 선택한 뒤 저장하면 모임 만들기·모임 참여를 할 수 있어요. 앱 소개 투어는 그대로 이용할 수 있어요.
+              </Text>
+
+              <Text style={styles.label}>성별 (필수)</Text>
+              <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
+                {(
+                  [
+                    { code: 'MALE' as const, label: '남자' },
+                    { code: 'FEMALE' as const, label: '여자' },
+                  ] as const
+                ).map(({ code, label }) => {
+                  const selected = genderDemo === code;
+                  return (
+                    <Pressable
+                      key={code}
+                      disabled={demoBusy}
+                      onPress={() => setGenderDemo(code)}
+                      style={({ pressed }) => [
+                        authFormStyles.genderBinaryBtn,
+                        selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
+                        pressed && !demoBusy && authFormStyles.pressed,
+                      ]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, checked: selected }}
+                      accessibilityLabel={label}>
+                      <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.label, { marginTop: 14 }]}>연령대 (필수)</Text>
+              <View style={demographicsStyles.ageWrap} accessibilityRole="radiogroup" accessibilityLabel="연령대 선택">
+                {[SIGN_UP_AGE_BAND_OPTIONS.slice(0, 3), SIGN_UP_AGE_BAND_OPTIONS.slice(3, 6)].map((row, rowIdx) => (
+                  <View key={rowIdx} style={demographicsStyles.ageRow}>
+                    {row.map(({ code, label }) => {
+                      const selected = ageBandDemo === code;
+                      return (
+                        <Pressable
+                          key={code}
+                          disabled={demoBusy}
+                          onPress={() => setAgeBandDemo(code)}
+                          style={({ pressed }) => [
+                            demographicsStyles.ageChip,
+                            selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
+                            pressed && !demoBusy && authFormStyles.pressed,
+                          ]}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected, checked: selected }}
+                          accessibilityLabel={label}>
+                          <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+
+              <GinitButton
+                title="성별·연령대 저장"
+                variant="primary"
+                onPress={() => void onSaveDemographics()}
+                disabled={demoBusy || profileBusy}
+              />
+            </GinitCard>
+          ) : null}
+
           <GinitCard appearance="light" style={styles.profileCard}>
             <Text style={styles.title}>계정 정보</Text>
             <Text style={styles.hint}>
-              닉네임과 프로필 사진(이미지 주소)을 변경할 수 있어요. 가입 직후에는 닉네임이 자동 생성될 수 있어요.
+              {needsSnsDemographics
+                ? '닉네임과 프로필 사진은 SNS 연동 시 자동으로 채워질 수 있어요. 위 카드에서 성별·연령대를 저장하면 모임 기능이 열려요.'
+                : '닉네임과 프로필 사진(이미지 주소)을 변경할 수 있어요. 가입 직후에는 닉네임이 자동 생성될 수 있어요.'}
             </Text>
 
             <Text style={styles.label}>회원 ID</Text>
@@ -260,6 +398,11 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0.5 },
     textShadowRadius: 2,
   },
+  snsGuideCard: {
+    marginBottom: 14,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    backgroundColor: 'rgba(255, 251, 235, 0.92)',
+  },
   profileCard: {
     marginTop: 0,
     borderColor: 'rgba(255, 255, 255, 0.55)',
@@ -341,5 +484,26 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#b91c1c',
     textDecorationLine: 'underline',
+  },
+});
+
+const demographicsStyles = StyleSheet.create({
+  ageWrap: {
+    marginTop: 4,
+    alignSelf: 'stretch',
+    gap: 8,
+  },
+  ageRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  ageChip: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
 });

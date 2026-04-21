@@ -9,6 +9,15 @@ export type GooglePeopleExtras = {
   birthDay: number | null;
 };
 
+/** People API `genders[].value` (예: male/female) → Firestore `users.gender` */
+export function mapGooglePeopleGenderToProfileGender(raw: string | null | undefined): 'MALE' | 'FEMALE' | null {
+  if (!raw?.trim()) return null;
+  const l = raw.trim().toLowerCase();
+  if (l === 'male' || l === 'man') return 'MALE';
+  if (l === 'female' || l === 'woman') return 'FEMALE';
+  return null;
+}
+
 type PeopleDate = { year?: number; month?: number; day?: number };
 
 type PeopleJson = {

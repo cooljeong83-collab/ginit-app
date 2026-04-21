@@ -78,6 +78,7 @@ import {
   getFinalDescriptionPlaceholder,
 } from '@/src/lib/meeting-title-suggestion';
 import { addMeeting } from '@/src/lib/meetings';
+import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
@@ -1153,6 +1154,25 @@ export default function CreateDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
+  const [snsDemographicsBlocked, setSnsDemographicsBlocked] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      const uid = userId?.trim();
+      if (!uid) {
+        setSnsDemographicsBlocked(false);
+        return;
+      }
+      let cancelled = false;
+      void getUserProfile(uid).then((p) => {
+        if (!cancelled) setSnsDemographicsBlocked(isGoogleSnsDemographicsIncomplete(p));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [userId]),
+  );
+
   // Android에서 BlurView(특히 experimental blur)가 children 업데이트를 늦게 반영하는 케이스가 있어
   // 즉시 피드백이 중요한 "선택 UI"는 정적 View 렌더링을 우선합니다.
   const reduceHeavyEffectsUI = Platform.OS === 'android';
@@ -1701,6 +1721,20 @@ export default function CreateDetailsScreen() {
       return;
     }
 
+    try {
+      const prof = await getUserProfile(userId.trim());
+      if (isGoogleSnsDemographicsIncomplete(prof)) {
+        Alert.alert(
+          '프로필을 먼저 완성해 주세요',
+          'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
+          [{ text: '프로필로 이동', onPress: () => router.push('/(tabs)/profile') }],
+        );
+        return;
+      }
+    } catch {
+      /* 네트워크 오류 시에는 등록 시도는 계속(서버/클라이언트 재검증) */
+    }
+
     const vote = built.payload;
     const p0 = vote.placeCandidates[0];
     const primary = primaryScheduleFromDateCandidate(vote.dateCandidates[0]);
@@ -1796,6 +1830,22 @@ export default function CreateDetailsScreen() {
             </Text>
             <View style={{ width: 56 }} />
           </View>
+
+          {snsDemographicsBlocked ? (
+            <View style={styles.snsGateBanner}>
+              <Text style={styles.snsGateTitle}>프로필에 성별·연령대를 입력해 주세요</Text>
+              <Text style={styles.snsGateBody}>
+                SNS 간편 가입 계정은 프로필에서 입력을 마친 뒤 모임을 만들 수 있어요. 앱 소개 투어는 그대로 이용할 수 있어요.
+              </Text>
+              <Pressable
+                onPress={() => router.push('/(tabs)/profile')}
+                style={({ pressed }) => [styles.snsGateBtn, pressed && { opacity: 0.88 }]}
+                accessibilityRole="button"
+                accessibilityLabel="프로필 탭으로 이동">
+                <Text style={styles.snsGateBtnLabel}>프로필로 이동</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           <KeyboardAwareScreenScroll
             ref={mainScrollRef}
@@ -2339,6 +2389,39 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
     gap: 8,
+  },
+  snsGateBanner: {
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(251, 191, 36, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.45)',
+    gap: 8,
+  },
+  snsGateTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#92400e',
+  },
+  snsGateBody: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#78350f',
+    lineHeight: 19,
+  },
+  snsGateBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: GinitTheme.colors.primary,
+  },
+  snsGateBtnLabel: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#fff',
   },
   backLink: {
     fontSize: 16,

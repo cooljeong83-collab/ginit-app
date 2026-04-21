@@ -168,6 +168,7 @@ export function useSignUpFlow(initialPhone: string) {
           phone: n,
           email: emailTrim || null,
           displayName: name.slice(0, 64),
+          signupProvider: 'phone_otp',
           gender: genderCode,
           ageBand: ageBandCode,
           birthYear: null,

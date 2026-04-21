@@ -34,6 +34,8 @@ export type UserProfile = {
   phone?: string | null;
   email?: string | null;
   displayName?: string | null;
+  /** `google_sns`: SNS 간편 가입 — 성별·연령대 입력 전 모임 생성/참여 제한 */
+  signupProvider?: 'google_sns' | 'phone_otp' | null;
   /** 약관 동의 시각(서버 타임스탬프). */
   termsAgreedAt?: unknown | null;
   /** 회원가입 등에서 저장하는 값 예: `MALE`, `FEMALE` */
@@ -80,6 +82,8 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const phone = typeof data.phone === 'string' ? data.phone.trim() : '';
   const email = typeof data.email === 'string' ? data.email.trim() : '';
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
+  const spRaw = typeof data.signupProvider === 'string' ? data.signupProvider.trim().toLowerCase() : '';
+  const signupProvider = spRaw === 'google_sns' || spRaw === 'phone_otp' ? (spRaw as 'google_sns' | 'phone_otp') : null;
   const termsAgreedAt = 'termsAgreedAt' in data ? (data.termsAgreedAt as unknown) : null;
   const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
   const ageBand = typeof data.ageBand === 'string' ? data.ageBand.trim() : '';
@@ -93,6 +97,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     phone: phone || null,
     email: email || null,
     displayName: displayName || null,
+    signupProvider,
     termsAgreedAt,
     gender: gender || null,
     ageBand: ageBand || null,
@@ -110,6 +115,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
       phone: null,
       email: null,
       displayName: null,
+      signupProvider: null,
       termsAgreedAt: null,
       gender: null,
       ageBand: null,
@@ -125,6 +131,14 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
 
 export function isUserProfileWithdrawn(p: UserProfile | null | undefined): boolean {
   return p?.isWithdrawn === true;
+}
+
+/** SNS(Google) 간편 가입자가 성별·연령대를 모두 채우기 전인지 — 모임 생성/참여 제한에 사용 */
+export function isGoogleSnsDemographicsIncomplete(p: UserProfile | null | undefined): boolean {
+  if (!p || p.signupProvider !== 'google_sns') return false;
+  const g = p.gender?.trim();
+  const a = p.ageBand?.trim();
+  return !g || !a;
 }
 
 /** 프로필 문서가 없을 때 표시용(다른 사용자 문서 미생성 등) */
@@ -258,6 +272,7 @@ export async function applyGoogleSignupProfile(
     phone?: string | null;
     email?: string | null;
     displayName?: string | null;
+    signupProvider?: 'google_sns' | 'phone_otp' | null;
     /** 회원가입 시 `MALE` / `FEMALE` 권장 */
     gender?: string | null;
     /** `TEENS` … `SIXTY_PLUS` 등 연령대 구간 */
@@ -280,6 +295,7 @@ export async function applyGoogleSignupProfile(
   if (patch.phone !== undefined) payload.phone = patch.phone;
   if (patch.email !== undefined) payload.email = patch.email;
   if (patch.displayName !== undefined) payload.displayName = patch.displayName;
+  if (patch.signupProvider !== undefined) payload.signupProvider = patch.signupProvider;
   if (patch.gender !== undefined) payload.gender = patch.gender;
   if (patch.ageBand !== undefined) payload.ageBand = patch.ageBand;
   if (patch.birthYear !== undefined) payload.birthYear = patch.birthYear;
@@ -303,7 +319,12 @@ export async function applyGoogleSignupProfile(
 
 export async function updateUserProfile(
   phoneUserId: string,
-  patch: { nickname?: string; photoUrl?: string | null },
+  patch: {
+    nickname?: string;
+    photoUrl?: string | null;
+    gender?: string | null;
+    ageBand?: string | null;
+  },
 ): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
@@ -325,6 +346,12 @@ export async function updateUserProfile(
     updates.photoUrl =
       patch.photoUrl === null || String(patch.photoUrl).trim() === '' ? null : String(patch.photoUrl).trim();
   }
+  if (patch.gender !== undefined) {
+    updates.gender = patch.gender && String(patch.gender).trim() ? String(patch.gender).trim() : null;
+  }
+  if (patch.ageBand !== undefined) {
+    updates.ageBand = patch.ageBand && String(patch.ageBand).trim() ? String(patch.ageBand).trim() : null;
+  }
   await updateDoc(dRef, stripUndefinedDeep(updates) as Record<string, unknown>);
 }
 
@@ -342,6 +369,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
       phone: null,
       email: null,
       displayName: null,
+      signupProvider: null,
       termsAgreedAt: null,
       gender: null,
       ageBand: null,
@@ -377,6 +405,7 @@ export async function withdrawAnonymizeUserProfileByFirebaseUid(firebaseUid: str
           phone: null,
           email: null,
           displayName: null,
+          signupProvider: null,
           termsAgreedAt: null,
           gender: null,
           ageBand: null,

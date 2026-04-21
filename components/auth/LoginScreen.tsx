@@ -32,17 +32,28 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '@/constants/login-logo-intro';
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { getFirebaseAuth } from '@/src/lib/firebase';
-import { fetchGooglePeopleExtras, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
+import {
+  fetchGooglePeopleExtras,
+  mapGooglePeopleGenderToProfileGender,
+  type GooglePeopleExtras,
+} from '@/src/lib/google-people-extras';
 import {
   consumeGoogleRedirectResultWithMeta,
   REDIRECT_STARTED,
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
-import { isPhoneRegistered } from '@/src/lib/phone-registry';
+import { normalizeUserId } from '@/src/lib/app-user-id';
+import { isPhoneRegistered, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
-import { ensureUserProfile, resolveSessionUserIdFromVerifiedPhone } from '@/src/lib/user-profile';
+import {
+  applyGoogleSignupProfile,
+  ensureUserProfile,
+  generateRandomNickname,
+  recordTermsAgreement,
+  resolveSessionUserIdFromVerifiedPhone,
+} from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
 
@@ -70,12 +81,12 @@ function snapshotFromFirebaseUser(u: User): AuthProfileSnapshot {
   };
 }
 
-function buildAuthSnapshot(u: User, people: GooglePeopleExtras | null): AuthProfileSnapshot {
-  return {
-    ...snapshotFromFirebaseUser(u),
-    gender: people?.gender ?? null,
-    birthYear: people?.birthYear ?? null,
-  };
+function pickNicknameFromGoogle(displayName: string, email: string): string {
+  const first = displayName.split(/\s+/)[0]?.trim() ?? '';
+  if (first.length >= 2) return first.slice(0, 16);
+  const local = email.split('@')[0]?.trim() ?? '';
+  if (local.length >= 2) return local.slice(0, 16);
+  return generateRandomNickname();
 }
 
 function snapshotFromPhoneUser(u: FirebaseAuthTypes.User): AuthProfileSnapshot {
@@ -247,7 +258,7 @@ export default function LoginScreen() {
           const pe = peopleExtrasRef.current;
           setAuthProfile({
             ...snapshotFromFirebaseUser(u),
-            gender: pe?.gender ?? null,
+            gender: mapGooglePeopleGenderToProfileGender(pe?.gender ?? null),
             birthYear: pe?.birthYear ?? null,
           });
         } else {
@@ -307,7 +318,43 @@ export default function LoginScreen() {
       const { user, googleAccessToken } = await signInWithGoogle({ forRegistration: true });
       const people = await fetchGooglePeopleExtras(googleAccessToken);
       peopleExtrasRef.current = people;
-      setAuthProfile(buildAuthSnapshot(user, people));
+
+      const email = user.email?.trim() ?? '';
+      const emailPk = email ? normalizeUserId(email) : null;
+      if (!emailPk) {
+        throw new Error('이메일이 있는 Google 계정으로 시도해 주세요. (계정에 이메일이 없습니다)');
+      }
+
+      const display = user.displayName?.trim() ?? '';
+      const nickname = pickNicknameFromGoogle(display, email);
+      const photoUrl = user.photoURL?.trim() ? user.photoURL.trim() : null;
+      const genderFs = mapGooglePeopleGenderToProfileGender(people?.gender ?? null);
+
+      await applyGoogleSignupProfile(emailPk, {
+        nickname,
+        photoUrl,
+        email: email || null,
+        displayName: display ? display.slice(0, 64) : null,
+        signupProvider: 'google_sns',
+        gender: genderFs,
+        ageBand: null,
+        birthYear: people?.birthYear ?? null,
+        birthMonth: people?.birthMonth ?? null,
+        birthDay: people?.birthDay ?? null,
+        firebaseUid: user.uid,
+      });
+      await setUserId(emailPk);
+      await writeSecureAuthSession({ uid: user.uid, userId: emailPk });
+      await registerSignupLocalKeys('', emailPk);
+      await recordTermsAgreement(emailPk);
+      const fresh = await ensureUserProfile(emailPk);
+
+      setAuthProfile({
+        ...snapshotFromFirebaseUser(user),
+        gender: genderFs ?? null,
+        birthYear: people?.birthYear ?? null,
+        ageBand: fresh.ageBand ?? null,
+      });
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
       const message = e instanceof Error ? e.message : '알 수 없는 오류';
@@ -317,7 +364,7 @@ export default function LoginScreen() {
     } finally {
       setBusyGoogle(false);
     }
-  }, [setAuthProfile]);
+  }, [setAuthProfile, setUserId]);
 
   const isExpoGo = Constants.appOwnership === 'expo';
 

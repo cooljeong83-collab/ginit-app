@@ -4,7 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -16,6 +16,8 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useUserSession } from '@/src/context/UserSessionContext';
+import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 
 const ORDER = ['index', 'map', 'chat', 'profile'] as const;
@@ -40,6 +42,7 @@ function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.gly
  */
 export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const router = useRouter();
+  const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
   const routes = ORDER.map((name) => state.routes.find((r) => r.name === name)).filter(Boolean) as (typeof state.routes)[number][];
   const leftRoutes = routes.slice(0, 2);
@@ -63,15 +66,33 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
   };
 
   const onFabPress = () => {
-    if (Platform.OS !== 'web') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-    const d = new Date();
-    const scheduleDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    router.push({
-      pathname: '/create/details',
-      params: { scheduleDate, scheduleTime: '15:00' },
-    });
+    void (async () => {
+      if (Platform.OS !== 'web') {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      const pk = userId?.trim();
+      if (pk) {
+        try {
+          const p = await getUserProfile(pk);
+          if (isGoogleSnsDemographicsIncomplete(p)) {
+            Alert.alert(
+              '프로필을 완성해 주세요',
+              'SNS로 가입한 계정은 모임을 만들기 전에 프로필에서 성별과 연령대를 입력해야 해요.',
+              [{ text: '프로필로 이동', onPress: () => router.push('/(tabs)/profile') }],
+            );
+            return;
+          }
+        } catch {
+          /* 네트워크 실패 시에는 생성 화면으로 보냄(등록 시 서버 검증) */
+        }
+      }
+      const d = new Date();
+      const scheduleDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      router.push({
+        pathname: '/create/details',
+        params: { scheduleDate, scheduleTime: '15:00' },
+      });
+    })();
   };
 
   // 초기 진입: 공이 통통 튀는 느낌(스케일 + 살짝 위아래)
