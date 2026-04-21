@@ -30,7 +30,8 @@ export default function RootLayout() {
   return (
     <UserSessionProvider>
       <InAppAlarmsProvider>
-        <AppBootSplash />
+        {/* Android 12+는 네이티브 Theme.App.SplashScreen으로만 표시(중복 방지). iOS는 기존 오버레이 유지. */}
+        {Platform.OS === 'ios' ? <AppBootSplash /> : null}
         <PushNotificationBootstrap />
         <Stack
         screenOptions={{

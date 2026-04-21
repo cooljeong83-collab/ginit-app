@@ -3,5 +3,10 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "editor.fontSize": 15,
+  "terminal.integrated.fontSize": 15,
+  "debug.console.fontSize": 15,
+  "scm.inputFontSize": 15,
+  "markdown.preview.fontSize": 15
 }

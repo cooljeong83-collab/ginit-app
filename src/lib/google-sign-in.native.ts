@@ -3,9 +3,9 @@ import { GoogleAuthProvider, signInWithCredential, signOut, type User } from 'fi
 
 import { publicEnv } from '@/src/config/public-env';
 
+import { getFirebaseAuth } from './firebase';
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
 import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
-import { getFirebaseAuth } from './firebase';
 
 export const REDIRECT_STARTED = 'auth/redirect-started';
 

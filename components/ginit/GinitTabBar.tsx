@@ -236,6 +236,8 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
         accessibilityLabel="모임 만들기"
         onPress={onFabPress}
         disabled={fabDockedUi}
+        // 도킹 시에는 가운데 탭 Pressable이 동작해야 함. disabled만으로는 히트가 아래로 통과하지 않을 수 있음.
+        pointerEvents={fabDockedUi ? 'none' : 'auto'}
         style={[
           styles.fab,
           {
