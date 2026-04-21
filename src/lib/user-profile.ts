@@ -38,6 +38,8 @@ export type UserProfile = {
   termsAgreedAt?: unknown | null;
   /** 회원가입 등에서 저장하는 값 예: `MALE`, `FEMALE` */
   gender?: string | null;
+  /** 연령대 구간 코드 예: `TEENS`(10대), `TWENTIES`(20대) … */
+  ageBand?: string | null;
   birthYear?: number | null;
   birthMonth?: number | null;
   birthDay?: number | null;
@@ -80,6 +82,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
   const termsAgreedAt = 'termsAgreedAt' in data ? (data.termsAgreedAt as unknown) : null;
   const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
+  const ageBand = typeof data.ageBand === 'string' ? data.ageBand.trim() : '';
   const birthYear = typeof data.birthYear === 'number' ? data.birthYear : null;
   const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
   const birthDay = typeof data.birthDay === 'number' ? data.birthDay : null;
@@ -92,6 +95,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     displayName: displayName || null,
     termsAgreedAt,
     gender: gender || null,
+    ageBand: ageBand || null,
     birthYear,
     birthMonth,
     birthDay,
@@ -108,6 +112,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
       displayName: null,
       termsAgreedAt: null,
       gender: null,
+      ageBand: null,
       birthYear: null,
       birthMonth: null,
       birthDay: null,
@@ -255,6 +260,8 @@ export async function applyGoogleSignupProfile(
     displayName?: string | null;
     /** 회원가입 시 `MALE` / `FEMALE` 권장 */
     gender?: string | null;
+    /** `TEENS` … `SIXTY_PLUS` 등 연령대 구간 */
+    ageBand?: string | null;
     birthYear?: number | null;
     birthMonth?: number | null;
     birthDay?: number | null;
@@ -274,6 +281,7 @@ export async function applyGoogleSignupProfile(
   if (patch.email !== undefined) payload.email = patch.email;
   if (patch.displayName !== undefined) payload.displayName = patch.displayName;
   if (patch.gender !== undefined) payload.gender = patch.gender;
+  if (patch.ageBand !== undefined) payload.ageBand = patch.ageBand;
   if (patch.birthYear !== undefined) payload.birthYear = patch.birthYear;
   if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
   if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
@@ -336,6 +344,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
       displayName: null,
       termsAgreedAt: null,
       gender: null,
+      ageBand: null,
       birthYear: null,
       birthMonth: null,
       birthDay: null,
@@ -370,6 +379,7 @@ export async function withdrawAnonymizeUserProfileByFirebaseUid(firebaseUid: str
           displayName: null,
           termsAgreedAt: null,
           gender: null,
+          ageBand: null,
           birthYear: null,
           birthMonth: null,
           birthDay: null,

@@ -13,6 +13,8 @@ export type AuthProfileSnapshot = {
   photoUrl: string | null;
   firebaseUid: string | null;
   gender?: string | null;
+  /** 회원가입 시 선택 연령대 코드 예: `TEENS`, `TWENTIES` … */
+  ageBand?: string | null;
   birthYear?: number | null;
 };
 

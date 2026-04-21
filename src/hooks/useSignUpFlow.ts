@@ -22,6 +22,18 @@ export type SignUpMemberStatus = 'unknown' | 'checking' | 'member' | 'guest';
 /** Firestore `users.gender` 등에 저장하는 성별 코드 */
 export type SignUpGenderCode = 'MALE' | 'FEMALE';
 
+/** Firestore `users.ageBand` — UI는 한글 라벨, 저장은 고정 코드 */
+export type SignUpAgeBandCode = 'TEENS' | 'TWENTIES' | 'THIRTIES' | 'FORTIES' | 'FIFTIES' | 'SIXTY_PLUS';
+
+export const SIGN_UP_AGE_BAND_OPTIONS: { code: SignUpAgeBandCode; label: string }[] = [
+  { code: 'TEENS', label: '10대' },
+  { code: 'TWENTIES', label: '20대' },
+  { code: 'THIRTIES', label: '30대' },
+  { code: 'FORTIES', label: '40대' },
+  { code: 'FIFTIES', label: '50대' },
+  { code: 'SIXTY_PLUS', label: '60대 이상' },
+];
+
 export function useSignUpFlow(initialPhone: string) {
   const { setUserId, setAuthProfile } = useUserSession();
   const [displayName, setDisplayName] = useState('');
@@ -29,6 +41,7 @@ export function useSignUpFlow(initialPhone: string) {
   const [emailField, setEmailField] = useState('');
   const [memberStatus, setMemberStatus] = useState<SignUpMemberStatus>('unknown');
   const [genderCode, setGenderCode] = useState<SignUpGenderCode | null>(null);
+  const [ageBandCode, setAgeBandCode] = useState<SignUpAgeBandCode | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
@@ -70,11 +83,17 @@ export function useSignUpFlow(initialPhone: string) {
     if (!normalizedPhone) return false;
     if (memberStatus !== 'guest') return false;
     if (!genderCode) return false;
+    if (!ageBandCode) return false;
     return true;
-  }, [emailField, displayName, normalizedPhone, memberStatus, genderCode]);
+  }, [emailField, displayName, normalizedPhone, memberStatus, genderCode, ageBandCode]);
 
   const selectGenderCode = useCallback((code: SignUpGenderCode) => {
     setGenderCode(code);
+    setErrorText(null);
+  }, []);
+
+  const selectAgeBandCode = useCallback((code: SignUpAgeBandCode) => {
+    setAgeBandCode(code);
     setErrorText(null);
   }, []);
 
@@ -117,6 +136,14 @@ export function useSignUpFlow(initialPhone: string) {
         }
         return;
       }
+      if (!ageBandCode) {
+        const msg = '연령대를 선택해주세요.';
+        setErrorText(msg);
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(msg, ToastAndroid.SHORT);
+        }
+        return;
+      }
 
       setErrorText(null);
       setBusy(true);
@@ -130,6 +157,7 @@ export function useSignUpFlow(initialPhone: string) {
           photoUrl: null,
           firebaseUid: uid,
           gender: genderCode,
+          ageBand: ageBandCode,
           birthYear: null,
         };
         setAuthProfile(snapshot);
@@ -141,6 +169,7 @@ export function useSignUpFlow(initialPhone: string) {
           email: emailTrim || null,
           displayName: name.slice(0, 64),
           gender: genderCode,
+          ageBand: ageBandCode,
           birthYear: null,
           birthMonth: null,
           birthDay: null,
@@ -162,7 +191,7 @@ export function useSignUpFlow(initialPhone: string) {
         setBusy(false);
       }
     },
-    [displayName, normalizedPhone, emailField, memberStatus, genderCode, setAuthProfile, setUserId],
+    [displayName, normalizedPhone, emailField, memberStatus, genderCode, ageBandCode, setAuthProfile, setUserId],
   );
 
   return {
@@ -174,6 +203,8 @@ export function useSignUpFlow(initialPhone: string) {
     setEmailField,
     genderCode,
     selectGenderCode,
+    ageBandCode,
+    selectAgeBandCode,
     memberStatus,
     busy,
     errorText,

@@ -28,7 +28,7 @@ import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
-import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
+import { SIGN_UP_AGE_BAND_OPTIONS, useSignUpFlow } from '@/src/hooks/useSignUpFlow';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -74,6 +74,7 @@ export default function SignUpScreen() {
   const [otpError, setOtpError] = useState<string | null>(null);
   const [verifiedFirebaseUid, setVerifiedFirebaseUid] = useState<string | null>(null);
   const [genderY, setGenderY] = useState<number | null>(null);
+  const [ageBandY, setAgeBandY] = useState<number | null>(null);
   const [submitY, setSubmitY] = useState<number | null>(null);
 
   const composedEmail = useMemo(() => {
@@ -101,6 +102,11 @@ export default function SignUpScreen() {
     if (genderY == null) return;
     scrollRef.current?.scrollToPosition(0, Math.max(0, genderY - 14), true);
   }, [genderY]);
+
+  const scrollToAgeBand = useCallback(() => {
+    if (ageBandY == null) return;
+    scrollRef.current?.scrollToPosition(0, Math.max(0, ageBandY - 14), true);
+  }, [ageBandY]);
 
   const scrollToSubmit = useCallback(() => {
     if (submitY == null) return;
@@ -137,6 +143,8 @@ export default function SignUpScreen() {
     setEmailField,
     genderCode,
     selectGenderCode,
+    ageBandCode,
+    selectAgeBandCode,
     memberStatus,
     busy,
     errorText,
@@ -632,7 +640,7 @@ export default function SignUpScreen() {
                           Keyboard.dismiss();
                           selectGenderCode(code);
                           InteractionManager.runAfterInteractions(() => {
-                            scrollToSubmit();
+                            scrollToAgeBand();
                           });
                         }}
                         style={({ pressed }) => [
@@ -649,6 +657,47 @@ export default function SignUpScreen() {
                       </Pressable>
                     );
                   })}
+                </View>
+              </View>
+
+              <View
+                style={styles.fieldBlock}
+                onLayout={(e) => {
+                  setAgeBandY(e.nativeEvent.layout.y);
+                }}>
+                <Text style={styles.fieldLabel}>연령대 (필수)</Text>
+                <View style={ageBandPick.wrap} accessibilityRole="radiogroup" accessibilityLabel="연령대 선택">
+                  {[SIGN_UP_AGE_BAND_OPTIONS.slice(0, 3), SIGN_UP_AGE_BAND_OPTIONS.slice(3, 6)].map((row, rowIdx) => (
+                    <View key={rowIdx} style={ageBandPick.row}>
+                      {row.map(({ code, label }) => {
+                        const selected = ageBandCode === code;
+                        return (
+                          <Pressable
+                            key={code}
+                            disabled={busy}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              selectAgeBandCode(code);
+                              InteractionManager.runAfterInteractions(() => {
+                                scrollToSubmit();
+                              });
+                            }}
+                            style={({ pressed }) => [
+                              ageBandPick.chip,
+                              selected ? styles.genderBinaryBtnSelected : styles.genderBinaryBtnIdle,
+                              pressed && !busy && styles.pressed,
+                            ]}
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected, checked: selected }}
+                            accessibilityLabel={label}>
+                            <Text style={selected ? styles.genderBinaryLabelSelected : styles.genderBinaryLabel}>
+                              {label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ))}
                 </View>
               </View>
 
@@ -709,6 +758,27 @@ const signUpScrollExtra = StyleSheet.create({
   content: {
     gap: 18,
     paddingBottom: 8,
+  },
+});
+
+const ageBandPick = StyleSheet.create({
+  wrap: {
+    marginTop: 4,
+    alignSelf: 'stretch',
+    gap: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  chip: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
 });
 
