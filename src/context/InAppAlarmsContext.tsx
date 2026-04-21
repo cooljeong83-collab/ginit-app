@@ -40,7 +40,7 @@ import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetings } from '@/src/lib/meetings';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -86,7 +86,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [latestById, setLatestById] = useState<Record<string, MeetingChatMessage | null | undefined>>({});
@@ -97,14 +97,14 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
-  const phoneUserIdRef = useRef(phoneUserId);
-  phoneUserIdRef.current = phoneUserId;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
   const pushDedupeRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!phoneUserId?.trim()) {
+    if (!userId?.trim()) {
       setPersistReady(false);
       setMeetings([]);
       setLatestById({});
@@ -115,7 +115,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    void loadInAppAlarmReadState(phoneUserId).then((s) => {
+    void loadInAppAlarmReadState(userId).then((s) => {
       if (cancelled) return;
       setReadState(s);
       setPersistReady(true);
@@ -123,29 +123,29 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [phoneUserId]);
+  }, [userId]);
 
   useEffect(() => {
-    if (!phoneUserId?.trim()) return;
+    if (!userId?.trim()) return;
     return subscribeMeetings(
       (list) => setMeetings(list),
       () => {
         /* 목록 오류는 각 탭에서 처리 */
       },
     );
-  }, [phoneUserId]);
+  }, [userId]);
 
   const joinedKey = useMemo(() => {
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const joined = filterJoinedMeetings(meetings, userId);
     return joined
       .map((m) => m.id)
       .sort()
       .join('\u0001');
-  }, [meetings, phoneUserId]);
+  }, [meetings, userId]);
 
   useEffect(() => {
-    if (!phoneUserId?.trim() || !persistReady) return;
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    if (!userId?.trim() || !persistReady) return;
+    const joined = filterJoinedMeetings(meetings, userId);
     if (joined.length === 0) return;
     const unsubs = joined.map((m) =>
       subscribeMeetingChatLatestMessage(
@@ -161,11 +161,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [phoneUserId, persistReady, joinedKey]);
+  }, [userId, persistReady, joinedKey]);
 
   useEffect(() => {
-    if (!persistReady || !phoneUserId?.trim()) return;
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    if (!persistReady || !userId?.trim()) return;
+    const joined = filterJoinedMeetings(meetings, userId);
     if (joined.length === 0) return;
 
     setReadState((prev) => {
@@ -189,11 +189,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       if (!changed) return prev;
       return { chatReadMessageId, meetingAckFingerprint };
     });
-  }, [persistReady, phoneUserId, meetings, latestById]);
+  }, [persistReady, userId, meetings, latestById]);
 
   useEffect(() => {
     if (!persistReady) return;
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const joined = filterJoinedMeetings(meetings, userId);
     const now = Date.now();
     setMeetingAlarmSinceMs((prev) => {
       const next = { ...prev };
@@ -212,15 +212,15 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  }, [persistReady, meetings, phoneUserId, readState.meetingAckFingerprint]);
+  }, [persistReady, meetings, userId, readState.meetingAckFingerprint]);
 
   /**
    * `setItem` 완료까지 await — `void`만 호출하면 저장 전에 프로세스가 끊겨 재실행 시 알람이 복구되는 경우가 있습니다.
    * (디버그/릴리스 공통)
    */
   useEffect(() => {
-    if (!persistReady || !phoneUserId?.trim()) return;
-    const uid = phoneUserId.trim();
+    if (!persistReady || !userId?.trim()) return;
+    const uid = userId.trim();
     const snapshot = readState;
     let cancelled = false;
     void (async () => {
@@ -230,13 +230,13 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [readState, persistReady, phoneUserId]);
+  }, [readState, persistReady, userId]);
 
   useEffect(() => {
     if (!persistReady) return;
     const flush = (status: AppStateStatus) => {
       if (status !== 'inactive' && status !== 'background') return;
-      const uid = phoneUserIdRef.current?.trim();
+      const uid = userIdRef.current?.trim();
       if (!uid) return;
       void (async () => {
         await saveInAppAlarmReadState(uid, readStateRef.current);
@@ -248,10 +248,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!persistReady || !phoneUserId?.trim()) return;
+    if (!persistReady || !userId?.trim()) return;
 
-    const myPk = normalizePhoneUserId(phoneUserId.trim()) ?? phoneUserId.trim();
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const myPk = normalizeParticipantId(userId.trim());
+    const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
 
     for (const j of joined) {
@@ -265,7 +265,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
       if (latestId && latestId !== readChatId) {
         const senderRaw = latest?.senderId?.trim() ?? '';
-        const senderPk = senderRaw ? normalizePhoneUserId(senderRaw) ?? senderRaw : '';
+        const senderPk = senderRaw ? normalizeParticipantId(senderRaw) : '';
         if (senderPk && senderPk === myPk) continue;
 
         const dedupeKey = `c:${mid}:${latestId}`;
@@ -273,7 +273,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         pushDedupeRef.current.add(dedupeKey);
 
         notifyInAppAlarmHeadsUpFireAndForget({
-          phoneUserId,
+          userId,
           kind: 'chat',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
@@ -289,17 +289,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         pushDedupeRef.current.add(dedupeKey);
 
         notifyInAppAlarmHeadsUpFireAndForget({
-          phoneUserId,
+          userId,
           kind: 'meeting_change',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
         });
       }
     }
-  }, [persistReady, phoneUserId, meetings, latestById, readState.chatReadMessageId, readState.meetingAckFingerprint]);
+  }, [persistReady, userId, meetings, latestById, readState.chatReadMessageId, readState.meetingAckFingerprint]);
 
   const alarms = useMemo(() => {
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
     const rows: InAppAlarmRow[] = [];
     for (const j of joined) {
@@ -335,7 +335,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     }
     rows.sort((a, b) => b.sortMs - a.sortMs);
     return rows;
-  }, [meetings, phoneUserId, latestById, readState, meetingAlarmSinceMs]);
+  }, [meetings, userId, latestById, readState, meetingAlarmSinceMs]);
 
   const hasUnread = alarms.length > 0;
 
@@ -364,7 +364,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
   const markAllAlarmsAsRead = useCallback(() => {
-    const joined = filterJoinedMeetings(meetings, phoneUserId);
+    const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
     setReadState((prev) => {
       const chatReadMessageId = { ...prev.chatReadMessageId };
@@ -381,7 +381,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       }
       return { chatReadMessageId, meetingAckFingerprint };
     });
-  }, [meetings, phoneUserId, latestById]);
+  }, [meetings, userId, latestById]);
 
   const onPressAlarmRow = useCallback(
     (row: InAppAlarmRow) => {

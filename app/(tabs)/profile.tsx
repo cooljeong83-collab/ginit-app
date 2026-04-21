@@ -20,12 +20,17 @@ import { ScreenShell } from '@/components/ui';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { deleteFirebaseAuthUserBestEffort, purgeUserAccountRemote, wipeLocalAppData } from '@/src/lib/account-deletion';
+import {
+  deleteFirebaseAuthUserBestEffort,
+  purgeUserAccountRemote,
+  purgeUserAccountRemoteByFirebaseUid,
+  wipeLocalAppData,
+} from '@/src/lib/account-deletion';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
 export default function ProfileTab() {
   const router = useRouter();
-  const { phoneUserId, signOutSession } = useUserSession();
+  const { userId, authProfile, signOutSession } = useUserSession();
   const [busy, setBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
@@ -33,11 +38,11 @@ export default function ProfileTab() {
   const [photoUrl, setPhotoUrl] = useState('');
 
   useEffect(() => {
-    if (!phoneUserId?.trim()) return;
+    if (!userId?.trim()) return;
     let cancelled = false;
     (async () => {
       try {
-        const p = await ensureUserProfile(phoneUserId);
+        const p = await ensureUserProfile(userId);
         if (cancelled) return;
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
@@ -51,17 +56,17 @@ export default function ProfileTab() {
     return () => {
       cancelled = true;
     };
-  }, [phoneUserId]);
+  }, [userId]);
 
   const onSaveProfile = useCallback(async () => {
-    if (!phoneUserId?.trim()) {
+    if (!userId?.trim()) {
       Alert.alert('안내', '로그인 후 프로필을 저장할 수 있어요.');
       return;
     }
     setProfileBusy(true);
     try {
-      await ensureUserProfile(phoneUserId);
-      await updateUserProfile(phoneUserId, {
+      await ensureUserProfile(userId);
+      await updateUserProfile(userId, {
         nickname: nickname.trim(),
         photoUrl: photoUrl.trim() || null,
       });
@@ -72,7 +77,7 @@ export default function ProfileTab() {
     } finally {
       setProfileBusy(false);
     }
-  }, [phoneUserId, nickname, photoUrl]);
+  }, [userId, nickname, photoUrl]);
 
   const onSignOut = useCallback(async () => {
     setBusy(true);
@@ -88,13 +93,17 @@ export default function ProfileTab() {
   }, [router, signOutSession]);
 
   const runDeleteAccount = useCallback(async () => {
-    if (!phoneUserId?.trim()) {
+    const sessionUserId = userId?.trim() ?? '';
+    const firebaseUid = authProfile?.firebaseUid?.trim() ?? '';
+    if (!sessionUserId && !firebaseUid) {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
     setDeleteBusy(true);
     try {
-      const res = await purgeUserAccountRemote(phoneUserId);
+      const res = sessionUserId
+        ? await purgeUserAccountRemote(sessionUserId)
+        : await purgeUserAccountRemoteByFirebaseUid(firebaseUid);
       if (!res.ok) {
         Alert.alert('탈퇴를 완료하지 못했어요', res.message);
         return;
@@ -120,10 +129,12 @@ export default function ProfileTab() {
     } finally {
       setDeleteBusy(false);
     }
-  }, [phoneUserId, router, signOutSession]);
+  }, [userId, authProfile?.firebaseUid, router, signOutSession]);
 
   const onRequestDeleteAccount = useCallback(() => {
-    if (!phoneUserId?.trim()) {
+    const sessionUserId = userId?.trim() ?? '';
+    const firebaseUid = authProfile?.firebaseUid?.trim() ?? '';
+    if (!sessionUserId && !firebaseUid) {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
@@ -147,7 +158,7 @@ export default function ProfileTab() {
         },
       ],
     );
-  }, [phoneUserId, runDeleteAccount]);
+  }, [userId, authProfile?.firebaseUid, runDeleteAccount]);
 
   return (
     <ScreenShell padded={false} style={styles.root}>
@@ -161,11 +172,19 @@ export default function ProfileTab() {
           <GinitCard appearance="light" style={styles.profileCard}>
             <Text style={styles.title}>계정 정보</Text>
             <Text style={styles.hint}>
-              닉네임과 프로필 사진(이미지 주소)을 변경할 수 있어요. 전화번호로 가입 시 닉네임이 자동 생성될 수 있어요.
+              닉네임과 프로필 사진(이미지 주소)을 변경할 수 있어요. 가입 직후에는 닉네임이 자동 생성될 수 있어요.
             </Text>
 
-            <Text style={styles.label}>회원 ID (전화번호)</Text>
-            <Text style={styles.phone}>{phoneUserId ?? '(없음)'}</Text>
+            <Text style={styles.label}>회원 ID</Text>
+            <Text style={styles.phone}>
+              {userId?.trim()
+                ? userId
+                : authProfile?.email?.trim()
+                  ? authProfile.email
+                  : authProfile?.firebaseUid?.trim()
+                    ? authProfile.firebaseUid
+                    : '(없음)'}
+            </Text>
 
             <Text style={styles.label}>닉네임</Text>
             <TextInput

@@ -1152,7 +1152,7 @@ type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export default function CreateDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
   // Android에서 BlurView(특히 experimental blur)가 children 업데이트를 늦게 반영하는 케이스가 있어
   // 즉시 피드백이 중요한 "선택 UI"는 정적 View 렌더링을 우선합니다.
   const reduceHeavyEffectsUI = Platform.OS === 'android';
@@ -1695,7 +1695,7 @@ export default function CreateDetailsScreen() {
       Alert.alert('입력 확인', built?.error ?? '일시·장소 후보를 확인해 주세요.');
       return;
     }
-    if (!phoneUserId?.trim()) {
+    if (!userId?.trim()) {
       Alert.alert('전화번호 필요', '모임을 등록하려면 로그인 화면에서 전화번호로 시작해 주세요.');
       router.replace('/login');
       return;
@@ -1747,7 +1747,7 @@ export default function CreateDetailsScreen() {
         description: descriptionForSave,
         capacity: cap,
         minParticipants: minP,
-        createdBy: phoneUserId.trim(),
+        createdBy: userId.trim(),
         categoryId: cid,
         categoryLabel: clabel,
         isPublic: isPublicMeeting,
@@ -1771,7 +1771,7 @@ export default function CreateDetailsScreen() {
     isPublicMeeting,
     maxParticipants,
     minParticipants,
-    phoneUserId,
+    userId,
     router,
     selectedCategory?.id,
     selectedCategory?.label,

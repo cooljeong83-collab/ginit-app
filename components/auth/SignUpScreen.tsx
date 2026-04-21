@@ -1,9 +1,10 @@
+import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Animated,
   findNodeHandle,
@@ -18,21 +19,22 @@ import {
   type TextInput as TextInputRefType,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
+import { phoneOtpInlineStyles as otpStyles } from '@/components/auth/phoneOtpStyles';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
-import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
-import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-up-input-sanitize';
+import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
+import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-up-input-sanitize';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
-import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { AuthService } from '@/src/services/AuthService';
 
 function paramToString(v: string | string[] | undefined): string {
@@ -56,6 +58,9 @@ export default function SignUpScreen() {
   const emailInputRef = useRef<TextInputRefType>(null);
   const phoneInputRef = useRef<TextInputRefType>(null);
   const otpInputRef = useRef<TextInputRefType>(null);
+  /** 전화 입력 완료 후 키보드/접근성 포커스를 인증번호 받기 쪽으로 옮깁니다. */
+  const sendOtpFocusHostRef = useRef<View | null>(null);
+  const prevCanSendOtpRef = useRef(false);
   const [emailDomain, setEmailDomain] = useState<'gmail.com' | 'naver.com' | 'daum.net' | 'kakao.com' | 'hotmail.com' | 'icloud.com'>(
     'gmail.com',
   );
@@ -165,6 +170,36 @@ export default function SignUpScreen() {
     if (otpCode.trim().length === 6) smsRetriever.stop();
   }, [otpCode, smsRetriever]);
 
+  const focusSendOtpControl = useCallback(() => {
+    const host = sendOtpFocusHostRef.current;
+    if (!host) return;
+    try {
+      // Android: D-pad/키보드 탭 순서용 포커스
+      const focus = (host as View & { focus?: () => void }).focus;
+      focus?.call(host);
+    } catch {
+      /* noop */
+    }
+    try {
+      const tag = findNodeHandle(host);
+      if (tag != null && typeof AccessibilityInfo.setAccessibilityFocus === 'function') {
+        AccessibilityInfo.setAccessibilityFocus(tag);
+      }
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  /** 11자리 입력 직후 + 인증번호 받기가 활성화되는 순간 포커스 이동 */
+  useEffect(() => {
+    const digitsLen = phoneField.replace(/\D/g, '').length;
+    const becameEnabled = canSendOtp && !prevCanSendOtpRef.current;
+    prevCanSendOtpRef.current = canSendOtp;
+    if (digitsLen === 11 && becameEnabled) {
+      requestAnimationFrame(() => focusSendOtpControl());
+    }
+  }, [canSendOtp, phoneField, focusSendOtpControl]);
+
   const onSendOtp = useCallback(async () => {
     if (!normalizedPhone || !canSendOtp) return;
     setOtpBusy(true);
@@ -192,7 +227,7 @@ export default function SignUpScreen() {
       setVerifiedFirebaseUid(uid);
       // "당근마켓식" 자동 로그인: 부트에서 홈 진입을 위해 secure store에 세션을 저장합니다.
       if (normalizedPhone) {
-        await writeSecureAuthSession({ uid, phoneUserId: normalizedPhone });
+        await writeSecureAuthSession({ uid, userId: normalizedPhone });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -439,7 +474,7 @@ export default function SignUpScreen() {
                       setPhoneField(formatPhoneKrDisplay(digits));
                     }}
                     onFocus={() => scrollToFocused(phoneInputRef)}
-                    placeholder="전화번호 입력 (010부터)"
+                    placeholder="전화번호 입력"
                     placeholderTextColor="#94a3b8"
                     style={styles.phoneInputNew}
                     keyboardType="phone-pad"
@@ -453,24 +488,31 @@ export default function SignUpScreen() {
                     returnKeyType="done"
                     enterKeyHint="done"
                     onSubmitEditing={() => {
+                      if (normalizedPhone) {
+                        Keyboard.dismiss();
+                        requestAnimationFrame(() => focusSendOtpControl());
+                        return;
+                      }
                       Keyboard.dismiss();
                       InteractionManager.runAfterInteractions(() => {
                         scrollToGender();
                       });
                     }}
                   />
-                  <Pressable
-                    onPress={() => void onSendOtp()}
-                    disabled={!canSendOtp}
-                    style={({ pressed }) => [
-                      otpStyles.sendInlineBtn,
-                      !canSendOtp && otpStyles.sendInlineBtnDisabled,
-                      pressed && canSendOtp && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="인증번호 받기">
-                    <Text style={otpStyles.sendInlineText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
-                  </Pressable>
+                  <View ref={sendOtpFocusHostRef} focusable={Platform.OS === 'android'} collapsable={false}>
+                    <Pressable
+                      onPress={() => void onSendOtp()}
+                      disabled={!canSendOtp}
+                      style={({ pressed }) => [
+                        otpStyles.sendInlineBtn,
+                        !canSendOtp && otpStyles.sendInlineBtnDisabled,
+                        pressed && canSendOtp && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="인증번호 받기">
+                      <Text style={otpStyles.sendInlineText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
+                    </Pressable>
+                  </View>
                 </View>
                 {verifiedFirebaseUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
 
@@ -751,61 +793,3 @@ const emailCombo = StyleSheet.create({
   },
 });
 
-const otpStyles = StyleSheet.create({
-  otpBtn: {
-    height: 42,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  otpBtnDisabled: { opacity: 0.4 },
-  otpBtnText: { fontSize: 14, fontWeight: '900', color: GinitTheme.colors.primary },
-  sendInlineBtn: {
-    height: 48,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendInlineBtnDisabled: { opacity: 0.4 },
-  sendInlineText: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.primary },
-  verifiedBadge: {
-    marginTop: 8,
-    alignSelf: 'stretch',
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '900',
-    color: GinitTheme.colors.success,
-  },
-  otpRow: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  otpInput: {
-    flex: 1,
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    backgroundColor: 'rgba(255, 255, 255, 0.65)',
-    paddingHorizontal: 12,
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  confirmBtn: {
-    height: 48,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: GinitTheme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmBtnDisabled: { opacity: 0.35 },
-  confirmText: { fontSize: 14, fontWeight: '900', color: '#fff' },
-  otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.danger },
-});

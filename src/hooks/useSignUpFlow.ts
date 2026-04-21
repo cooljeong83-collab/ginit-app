@@ -2,18 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, ToastAndroid } from 'react-native';
 
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
-import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
+import { normalizeUserId } from '@/src/lib/app-user-id';
+import { isPhoneRegistered, registerPhoneIfNew, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname, recordTermsAgreement } from '@/src/lib/user-profile';
 
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return debounced;
-}
+/** 전화번호 입력이 멈춘 뒤 짧게 기다렸다가 회원 조회(과도한 호출·레이스 완화) */
+const PHONE_MEMBER_CHECK_DEBOUNCE_MS = 220;
 
 function isValidEmailRequired(raw: string): boolean {
   const t = raw.trim();
@@ -27,7 +23,7 @@ export type SignUpMemberStatus = 'unknown' | 'checking' | 'member' | 'guest';
 export type SignUpGenderCode = 'MALE' | 'FEMALE';
 
 export function useSignUpFlow(initialPhone: string) {
-  const { setPhoneUserId, setAuthProfile } = useUserSession();
+  const { setUserId, setAuthProfile } = useUserSession();
   const [displayName, setDisplayName] = useState('');
   const [phoneField, setPhoneField] = useState(initialPhone);
   const [emailField, setEmailField] = useState('');
@@ -36,33 +32,35 @@ export function useSignUpFlow(initialPhone: string) {
   const [busy, setBusy] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
-  const debouncedPhone = useDebounced(phoneField, 480);
-  const debouncedNormalized = normalizePhoneUserId(debouncedPhone);
-
   useEffect(() => {
     setPhoneField((prev) => (initialPhone && prev === '' ? initialPhone : prev));
   }, [initialPhone]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!debouncedNormalized) {
+    const n = normalizePhoneUserId(phoneField);
+    if (!n) {
       setMemberStatus('unknown');
       return;
     }
     setMemberStatus('checking');
-    void (async () => {
-      try {
-        const ok = await isPhoneRegistered(debouncedNormalized);
-        if (cancelled) return;
-        setMemberStatus(ok ? 'member' : 'guest');
-      } catch {
-        if (!cancelled) setMemberStatus('unknown');
-      }
-    })();
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const ok = await isPhoneRegistered(n);
+          if (cancelled) return;
+          setMemberStatus(ok ? 'member' : 'guest');
+        } catch {
+          // 네트워크 실패 시 OTP까지 막지 않음(서버에서 중복 가입은 이후 단계에서 걸림)
+          if (!cancelled) setMemberStatus('guest');
+        }
+      })();
+    }, PHONE_MEMBER_CHECK_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(t);
     };
-  }, [debouncedNormalized]);
+  }, [phoneField]);
 
   const normalizedPhone = useMemo(() => normalizePhoneUserId(phoneField), [phoneField]);
 
@@ -85,12 +83,9 @@ export function useSignUpFlow(initialPhone: string) {
       const name = displayName.trim();
       const n = normalizedPhone;
       const uid = firebaseUid.trim();
-      const email = emailField.trim();
-      if (!email) {
-        Alert.alert('안내', '이메일을 입력해 주세요.');
-        return;
-      }
-      if (!isValidEmailRequired(email)) {
+      const emailTrim = emailField.trim();
+      const emailPk = normalizeUserId(emailTrim);
+      if (!emailPk) {
         Alert.alert('안내', '이메일 형식을 확인해 주세요.');
         return;
       }
@@ -128,7 +123,6 @@ export function useSignUpFlow(initialPhone: string) {
       try {
         const nickBase = name.split(/\s+/)[0]?.trim().slice(0, 16) || '';
         const nickname = nickBase || generateRandomNickname();
-        const emailTrim = emailField.trim();
 
         const snapshot: AuthProfileSnapshot = {
           displayName: name.slice(0, 64),
@@ -140,9 +134,10 @@ export function useSignUpFlow(initialPhone: string) {
         };
         setAuthProfile(snapshot);
 
-        await applyGoogleSignupProfile(n, {
+        await applyGoogleSignupProfile(emailPk, {
           nickname,
           photoUrl: null,
+          phone: n,
           email: emailTrim || null,
           displayName: name.slice(0, 64),
           gender: genderCode,
@@ -152,9 +147,11 @@ export function useSignUpFlow(initialPhone: string) {
           firebaseUid: uid,
         });
         await registerPhoneIfNew(n);
-        await setPhoneUserId(n);
-        await ensureUserProfile(n);
-        await recordTermsAgreement(n);
+        await registerSignupLocalKeys(n, emailPk);
+        await setUserId(emailPk);
+        await writeSecureAuthSession({ uid, userId: emailPk });
+        await ensureUserProfile(emailPk);
+        await recordTermsAgreement(emailPk);
         onComplete();
       } catch (e) {
         const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
@@ -165,15 +162,7 @@ export function useSignUpFlow(initialPhone: string) {
         setBusy(false);
       }
     },
-    [
-      displayName,
-      normalizedPhone,
-      emailField,
-      memberStatus,
-      genderCode,
-      setAuthProfile,
-      setPhoneUserId,
-    ],
+    [displayName, normalizedPhone, emailField, memberStatus, genderCode, setAuthProfile, setUserId],
   );
 
   return {

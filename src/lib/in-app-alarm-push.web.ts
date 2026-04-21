@@ -5,7 +5,7 @@ export const GINIT_IN_APP_ANDROID_CHANNEL = 'ginit_in_app';
 export type InAppAlarmPushKind = 'chat' | 'meeting_change';
 
 export type SendInAppAlarmPushParams = {
-  phoneUserId: string;
+  userId: string;
   kind: InAppAlarmPushKind;
   meetingId: string;
   meetingTitle: string;

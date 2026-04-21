@@ -1,8 +1,22 @@
 /**
- * Firestore `users` 컬렉션 — 문서 ID = 정규화된 전화 PK (`+8210…`).
- * 전화 가입 시 `ensureUserProfile`으로 닉네임이 자동 생성되고, 프로필 탭에서 닉네임·사진 URL을 바꿀 수 있습니다.
+ * Firestore `users` 컬렉션 — 문서 ID = 앱 사용자 PK.
+ * - 신규: 정규화 이메일(`normalizeUserId`). `phone` 필드에 E.164(+82…)를 둡니다.
+ * - 레거시: 문서 ID가 전화 PK인 계정(OTP 전용 가입 등)도 그대로 읽습니다.
  */
-import { deleteDoc, deleteField, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
@@ -16,6 +30,8 @@ export type UserProfile = {
   nickname: string;
   /** HTTPS 등 원격 프로필 이미지 URL (없으면 이니셜 아바타) */
   photoUrl: string | null;
+  /** 가입 시 인증한 전화(E.164). 문서 ID가 이메일일 때 조회·중복 방지용 */
+  phone?: string | null;
   email?: string | null;
   displayName?: string | null;
   /** 약관 동의 시각(서버 타임스탬프). */
@@ -59,6 +75,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const isWithdrawn = data.isWithdrawn === true;
   const nick = typeof data.nickname === 'string' ? data.nickname.trim() : '';
   const photo = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
+  const phone = typeof data.phone === 'string' ? data.phone.trim() : '';
   const email = typeof data.email === 'string' ? data.email.trim() : '';
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
   const termsAgreedAt = 'termsAgreedAt' in data ? (data.termsAgreedAt as unknown) : null;
@@ -70,6 +87,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const base: UserProfile = {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
+    phone: phone || null,
     email: email || null,
     displayName: displayName || null,
     termsAgreedAt,
@@ -85,6 +103,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
       ...base,
       nickname: WITHDRAWN_NICKNAME,
       photoUrl: null,
+      phone: null,
       email: null,
       displayName: null,
       termsAgreedAt: null,
@@ -104,10 +123,93 @@ export function isUserProfileWithdrawn(p: UserProfile | null | undefined): boole
 }
 
 /** 프로필 문서가 없을 때 표시용(다른 사용자 문서 미생성 등) */
-export function fallbackProfileLabel(phoneUserId: string): UserProfile {
-  const digits = phoneUserId.replace(/\D/g, '');
+export function fallbackProfileLabel(userId: string): UserProfile {
+  const t = userId.trim();
+  if (t.includes('@')) {
+    const local = t.split('@')[0]?.trim() ?? '';
+    const nick = local.length >= 2 ? `${local.slice(0, 2)}…` : local || '회원';
+    return { nickname: nick, photoUrl: null };
+  }
+  const digits = t.replace(/\D/g, '');
   const tail = digits.slice(-4);
   return { nickname: tail ? `회원${tail}` : '회원', photoUrl: null };
+}
+
+/**
+ * 전화(E.164)로 사용자 행을 찾습니다.
+ * - 레거시: `users/{전화}` 문서
+ * - 신규: `users/{이메일}` 문서 중 `phone` 필드가 일치하는 문서
+ */
+export async function findUserRowByPhoneE164(normalizedPhone: string): Promise<{ docId: string; profile: UserProfile } | null> {
+  const phone = normalizedPhone.trim();
+  if (!phone) return null;
+  const db = getFirebaseFirestore();
+  const legacyRef = doc(db, USERS_COLLECTION, phone);
+  const legacySnap = await getDoc(legacyRef);
+  if (legacySnap.exists()) {
+    return { docId: phone, profile: mapUserDoc(legacySnap.data() as Record<string, unknown>) };
+  }
+  try {
+    const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(3)));
+    if (qs.empty) return null;
+    const d0 = qs.docs[0];
+    return { docId: d0.id, profile: mapUserDoc(d0.data() as Record<string, unknown>) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * OTP 인증 직후: 로그인에 쓸 `users` 문서 ID(이메일 또는 레거시 전화).
+ * 활성(비탈퇴) 계정만 docId를 돌려줍니다.
+ */
+export async function resolveSessionUserIdFromVerifiedPhone(normalizedPhone: string): Promise<string | null> {
+  const row = await findUserRowByPhoneE164(normalizedPhone.trim());
+  if (!row) return null;
+  if (isUserProfileWithdrawn(row.profile)) return null;
+  return row.docId;
+}
+
+/**
+ * 탈퇴 처리된 계정을 전화번호로 찾아 재가입 플로우용으로 되살립니다.
+ * @returns 이후 `ensureUserProfile` 등에 넘길 문서 ID
+ */
+export async function reactivateWithdrawnUserForOtpSignup(normalizedPhone: string): Promise<string> {
+  const phone = normalizedPhone.trim();
+  if (!phone) throw new Error('전화번호가 없습니다.');
+  const db = getFirebaseFirestore();
+  const legacyRef = doc(db, USERS_COLLECTION, phone);
+  const legacySnap = await getDoc(legacyRef);
+  if (legacySnap.exists()) {
+    const mapped = mapUserDoc(legacySnap.data() as Record<string, unknown>);
+    if (mapped.isWithdrawn === true) {
+      await updateDoc(
+        legacyRef,
+        stripUndefinedDeep({
+          isWithdrawn: false,
+          withdrawnAt: deleteField(),
+          updatedAt: serverTimestamp(),
+        }) as Record<string, unknown>,
+      );
+    }
+    return phone;
+  }
+  const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(5)));
+  for (const d of qs.docs) {
+    const mapped = mapUserDoc(d.data() as Record<string, unknown>);
+    if (mapped.isWithdrawn === true) {
+      await updateDoc(
+        d.ref,
+        stripUndefinedDeep({
+          isWithdrawn: false,
+          withdrawnAt: deleteField(),
+          updatedAt: serverTimestamp(),
+        }) as Record<string, unknown>,
+      );
+      return d.id;
+    }
+  }
+  return phone;
 }
 
 export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
@@ -123,7 +225,7 @@ export async function getUserProfile(phoneUserId: string): Promise<UserProfile |
  */
 export async function ensureUserProfile(phoneUserId: string): Promise<UserProfile> {
   const id = phoneUserId.trim();
-  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  if (!id) throw new Error('사용자 ID가 없습니다.');
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const snap = await getDoc(dRef);
   if (snap.exists()) {
@@ -147,6 +249,8 @@ export async function applyGoogleSignupProfile(
   patch: {
     nickname: string;
     photoUrl: string | null;
+    /** E.164 전화 — 문서 ID가 이메일일 때 `phone` 필드로 저장 */
+    phone?: string | null;
     email?: string | null;
     displayName?: string | null;
     /** 회원가입 시 `MALE` / `FEMALE` 권장 */
@@ -158,7 +262,7 @@ export async function applyGoogleSignupProfile(
   },
 ): Promise<UserProfile> {
   const id = phoneUserId.trim();
-  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  if (!id) throw new Error('사용자 ID가 없습니다.');
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const snap = await getDoc(dRef);
   const payload: Record<string, unknown> = {
@@ -166,6 +270,7 @@ export async function applyGoogleSignupProfile(
     photoUrl: patch.photoUrl,
     updatedAt: serverTimestamp(),
   };
+  if (patch.phone !== undefined) payload.phone = patch.phone;
   if (patch.email !== undefined) payload.email = patch.email;
   if (patch.displayName !== undefined) payload.displayName = patch.displayName;
   if (patch.gender !== undefined) payload.gender = patch.gender;
@@ -193,7 +298,7 @@ export async function updateUserProfile(
   patch: { nickname?: string; photoUrl?: string | null },
 ): Promise<void> {
   const id = phoneUserId.trim();
-  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  if (!id) throw new Error('사용자 ID가 없습니다.');
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const existing = await getDoc(dRef);
   if (existing.exists()) {
@@ -218,7 +323,7 @@ export async function updateUserProfile(
 /** 탈퇴: 채팅·투표·모임 참여 기록은 유지하고, `users` 문서의 식별 정보를 비웁니다. */
 export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
-  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  if (!id) throw new Error('사용자 ID가 없습니다.');
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   await updateDoc(
     dRef,
@@ -226,6 +331,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
       isWithdrawn: true,
       nickname: WITHDRAWN_NICKNAME,
       photoUrl: null,
+      phone: null,
       email: null,
       displayName: null,
       termsAgreedAt: null,
@@ -240,10 +346,46 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
   );
 }
 
+/**
+ * 구글/UID 기반 로그인 사용자 탈퇴:
+ * `users` 문서의 `firebaseUid`로 역조회 후 익명화합니다.
+ * 문서가 없으면 서버 익명화는 no-op으로 통과합니다.
+ */
+export async function withdrawAnonymizeUserProfileByFirebaseUid(firebaseUid: string): Promise<void> {
+  const uid = firebaseUid.trim();
+  if (!uid) throw new Error('Firebase UID가 없습니다.');
+  const db = getFirebaseFirestore();
+  const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('firebaseUid', '==', uid)));
+  if (qs.empty) return;
+  await Promise.all(
+    qs.docs.map(async (d) => {
+      await updateDoc(
+        d.ref,
+        stripUndefinedDeep({
+          isWithdrawn: true,
+          nickname: WITHDRAWN_NICKNAME,
+          photoUrl: null,
+          phone: null,
+          email: null,
+          displayName: null,
+          termsAgreedAt: null,
+          gender: null,
+          birthYear: null,
+          birthMonth: null,
+          birthDay: null,
+          firebaseUid: null,
+          withdrawnAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }) as Record<string, unknown>,
+      );
+    }),
+  );
+}
+
 /** 약관 동의 기록(서버 시각 기준). */
 export async function recordTermsAgreement(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
-  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  if (!id) throw new Error('사용자 ID가 없습니다.');
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   await updateDoc(
     dRef,
@@ -254,10 +396,10 @@ export async function recordTermsAgreement(phoneUserId: string): Promise<void> {
   );
 }
 
-/** Firestore `users/{전화 PK}` 문서를 삭제합니다(탈퇴 마지막 단계). */
+/** Firestore `users/{사용자 PK}` 문서를 삭제합니다(탈퇴 마지막 단계). */
 export async function deleteUserProfileDocument(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
-  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  if (!id) throw new Error('사용자 ID가 없습니다.');
   await deleteDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id));
 }
 

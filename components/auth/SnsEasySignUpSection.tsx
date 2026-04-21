@@ -29,8 +29,8 @@ const INNER_BAND_MAX = 220;
 const INNER_BAND_MIN = 160;
 const ICON_SLOT = 40;
 const ICON_TEXT_GAP = 12;
-/** 항목 사이 세로 간격 (요청 12dp) */
-const ROW_VERTICAL_GAP = 12;
+/** 항목 사이 세로 간격 */
+const ROW_VERTICAL_GAP = 8;
 
 function toastServicePrepare(): void {
   const msg = '서비스 준비 중입니다';
@@ -148,13 +148,13 @@ const secStyles = StyleSheet.create({
   section: {
     alignSelf: 'stretch',
     width: '100%',
-    marginTop: GinitTheme.spacing.xl,
+    marginTop: GinitTheme.spacing.sm,
     paddingHorizontal: 0,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: GinitTheme.spacing.md,
+    marginBottom: 6,
     gap: GinitTheme.spacing.sm,
   },
   dividerLine: {
@@ -200,11 +200,11 @@ const rowStyles = StyleSheet.create({
     width: '100%',
     borderRadius: 10,
     overflow: 'hidden',
-    paddingVertical: 14,
+    paddingVertical: 10,
     paddingHorizontal: GinitTheme.spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
+    minHeight: 46,
   },
   hitDisabled: {
     opacity: 0.45,

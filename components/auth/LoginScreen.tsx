@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -12,21 +12,24 @@ import {
   BackHandler,
   Easing,
   InteractionManager,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   ToastAndroid,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '@/constants/login-logo-intro';
-import { GinitTheme } from '@/constants/ginit-theme';
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
+import { phoneOtpInlineStyles as otpStyles } from '@/components/auth/phoneOtpStyles';
 import { SnsEasySignUpSection } from '@/components/auth/SnsEasySignUpSection';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
+import { GinitTheme } from '@/constants/ginit-theme';
+import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '@/constants/login-logo-intro';
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { fetchGooglePeopleExtras, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
@@ -35,7 +38,13 @@ import {
   REDIRECT_STARTED,
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
+import { isPhoneRegistered } from '@/src/lib/phone-registry';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
+import { ensureUserProfile, resolveSessionUserIdFromVerifiedPhone } from '@/src/lib/user-profile';
+import { AuthService } from '@/src/services/AuthService';
+import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -69,14 +78,47 @@ function buildAuthSnapshot(u: User, people: GooglePeopleExtras | null): AuthProf
   };
 }
 
+function snapshotFromPhoneUser(u: FirebaseAuthTypes.User): AuthProfileSnapshot {
+  return {
+    displayName: u.displayName ?? null,
+    email: u.email ?? null,
+    photoUrl: u.photoURL ?? null,
+    firebaseUid: u.uid ?? null,
+  };
+}
+
+function paramToString(v: string | string[] | undefined): string {
+  if (v == null) return '';
+  return Array.isArray(v) ? (v[0] ?? '') : v;
+}
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
 type LogoDest = { x: number; y: number; width: number; height: number };
+
+type LoginMemberStatus = 'unknown' | 'checking' | 'registered' | 'guest';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ phone?: string | string[] }>();
+  const initialPhone = useMemo(() => paramToString(params.phone), [params.phone]);
   const win = useWindowDimensions();
-  const { isHydrated, setAuthProfile } = useUserSession();
+  const { isHydrated, setAuthProfile, setUserId } = useUserSession();
   const [busyGoogle, setBusyGoogle] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [phoneField, setPhoneField] = useState('');
+  const [loginMemberStatus, setLoginMemberStatus] = useState<LoginMemberStatus>('unknown');
+  const [otpVerificationId, setOtpVerificationId] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
   const fade = useRef(new Animated.Value(1)).current;
   const intro = useRef(new Animated.Value(0)).current;
   /** -1…1 → 좌우 갸우뚱(인사) */
@@ -95,20 +137,121 @@ export default function LoginScreen() {
   const backPressRef = useRef(0);
   const peopleExtrasRef = useRef<GooglePeopleExtras | null>(null);
 
+  const debouncedPhone = useDebounced(phoneField, 480);
+  const debouncedNormalized = useMemo(() => normalizePhoneUserId(debouncedPhone), [debouncedPhone]);
+  const normalizedPhone = useMemo(() => normalizePhoneUserId(phoneField), [phoneField]);
+
+  useEffect(() => {
+    setPhoneField((prev) => (initialPhone && prev === '' ? initialPhone : prev));
+  }, [initialPhone]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!debouncedNormalized) {
+      setLoginMemberStatus('unknown');
+      return;
+    }
+    setLoginMemberStatus('checking');
+    void (async () => {
+      try {
+        const ok = await isPhoneRegistered(debouncedNormalized);
+        if (cancelled) return;
+        setLoginMemberStatus(ok ? 'registered' : 'guest');
+      } catch {
+        if (!cancelled) setLoginMemberStatus('unknown');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedNormalized]);
+
+  useEffect(() => {
+    setOtpVerificationId(null);
+    setOtpCode('');
+    setOtpError(null);
+  }, [normalizedPhone]);
+
+  const formatPhoneKrDisplay = useCallback((digitsOnly: string) => {
+    const d = digitsOnly.replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 7) return `${d.slice(0, 3)}-${d.slice(3)}`;
+    return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7, 11)}`;
+  }, []);
+
+  const canSendLoginOtp = !!normalizedPhone && loginMemberStatus === 'registered' && !otpBusy;
+  const canConfirmLoginOtp =
+    !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy;
+
+  const onSendLoginOtp = useCallback(async () => {
+    if (!normalizedPhone || !canSendLoginOtp) return;
+    setOtpBusy(true);
+    setOtpError(null);
+    try {
+      const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
+      setOtpVerificationId(verificationId);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setOtpError(msg);
+    } finally {
+      setOtpBusy(false);
+    }
+  }, [normalizedPhone, canSendLoginOtp]);
+
+  const onConfirmLoginOtp = useCallback(async () => {
+    if (!otpVerificationId || !canConfirmLoginOtp || !normalizedPhone) return;
+    setOtpBusy(true);
+    setOtpError(null);
+    try {
+      const cred = await AuthService.confirmCode(otpVerificationId, otpCode);
+      const uid = cred.user?.uid ?? '';
+      if (!uid) throw new Error('인증은 완료됐지만 사용자 정보를 가져올 수 없습니다.');
+      const e164 = cred.user.phoneNumber ?? normalizedPhone;
+      const n = e164 ? normalizePhoneUserId(e164) : null;
+      if (!n) throw new Error('전화번호를 확인할 수 없습니다.');
+      const docId = await resolveSessionUserIdFromVerifiedPhone(n);
+      if (!docId) {
+        throw new Error('가입된 계정을 찾지 못했어요. 회원가입을 먼저 진행해 주세요.');
+      }
+      await setUserId(docId);
+      await writeSecureAuthSession({ uid, userId: docId });
+      await ensureUserProfile(docId);
+      setAuthProfile(snapshotFromPhoneUser(cred.user));
+      router.replace('/(tabs)');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setOtpError(msg);
+    } finally {
+      setOtpBusy(false);
+    }
+  }, [
+    otpVerificationId,
+    otpCode,
+    canConfirmLoginOtp,
+    normalizedPhone,
+    setUserId,
+    setAuthProfile,
+    router,
+  ]);
+
   useEffect(() => {
     try {
       const a = getFirebaseAuth();
       return onAuthStateChanged(a, (u) => {
-        if (u && isGoogleSignedUser(u)) {
+        if (!u || u.isAnonymous) {
+          peopleExtrasRef.current = null;
+          setAuthProfile(null);
+          return;
+        }
+        if (isGoogleSignedUser(u)) {
           const pe = peopleExtrasRef.current;
           setAuthProfile({
             ...snapshotFromFirebaseUser(u),
             gender: pe?.gender ?? null,
             birthYear: pe?.birthYear ?? null,
           });
-        } else if (!u || !isGoogleSignedUser(u)) {
-          setAuthProfile(null);
-          peopleExtrasRef.current = null;
+        } else {
+          setAuthProfile(snapshotFromFirebaseUser(u));
         }
       });
     } catch (e) {
@@ -306,8 +449,8 @@ export default function LoginScreen() {
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           <KeyboardAwareScreenScroll
             contentContainerStyle={[styles.scroll, loginScreenStyles.scrollTweak]}
-            extraScrollHeight={18}
-            extraHeight={32}>
+            extraScrollHeight={12}
+            extraHeight={22}>
             <View style={[styles.topBrand, loginScreenStyles.topBrand]}>
               <Animated.View
                 ref={logoWrapRef}
@@ -342,14 +485,14 @@ export default function LoginScreen() {
                   loginScreenStyles.brandTextCol,
                 ]}>
                 <Text style={loginScreenStyles.brandKr}>지닛</Text>
-                <Text style={[styles.greeting, loginScreenStyles.greetingCenter]}>
+                <Text style={[styles.greeting, loginScreenStyles.greetingCenter, loginScreenStyles.greetingTight]}>
                   반가워요!{'\n'}우리만의 모임을 시작해볼까요?
                 </Text>
               </Animated.View>
             </View>
 
             <Animated.View style={logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }}>
-              <View style={styles.authCard}>
+              <View style={[styles.authCard, loginScreenStyles.authCardTight]}>
                 <BlurView
                   pointerEvents="none"
                   intensity={32}
@@ -360,8 +503,9 @@ export default function LoginScreen() {
                 <View pointerEvents="none" style={styles.cardGlow} />
                 <View pointerEvents="none" style={styles.cardBorder} />
 
+                <View style={styles.authCardContent}>
                 {isExpoGo && Platform.OS !== 'web' ? (
-                  <View style={styles.expoGoBannerCompact}>
+                  <View style={[styles.expoGoBannerCompact, loginScreenStyles.expoGoBannerTight]}>
                     <Text style={styles.expoGoTitle}>개발 빌드가 필요해요</Text>
                     <Text style={styles.expoGoBody}>
                       Google 네이티브 로그인은 Expo Go에 포함되어 있지 않습니다.{' '}
@@ -370,18 +514,110 @@ export default function LoginScreen() {
                   </View>
                 ) : null}
 
+                {loginMemberStatus === 'checking' && debouncedPhone.trim() ? (
+                  <View style={[styles.checkingRow, loginScreenStyles.checkingRowTight]}>
+                    <ActivityIndicator color={GinitTheme.colors.primary} />
+                    <Text style={styles.checkingLabel}>회원 여부 확인 중…</Text>
+                  </View>
+                ) : null}
+
+                <View style={[styles.fieldBlock, loginScreenStyles.loginFieldBlock]}>
+                  <Text style={styles.fieldLabel}>기존 회원 로그인</Text>
+                   <View style={styles.phoneRow}>
+                    <TextInput
+                      value={phoneField}
+                      onChangeText={(t) => {
+                        const digits = t.replace(/\D/g, '').slice(0, 11);
+                        setPhoneField(formatPhoneKrDisplay(digits));
+                      }}
+                      placeholder="전화번호 입력"
+                      placeholderTextColor="#94a3b8"
+                      style={styles.phoneInputNew}
+                      keyboardType="phone-pad"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      textContentType="telephoneNumber"
+                      importantForAutofill="yes"
+                      autoCapitalize="none"
+                      editable={!otpBusy}
+                      selectTextOnFocus
+                      returnKeyType="done"
+                      enterKeyHint="done"
+                      onSubmitEditing={() => Keyboard.dismiss()}
+                    />
+                    <Pressable
+                      onPress={() => void onSendLoginOtp()}
+                      disabled={!canSendLoginOtp}
+                      style={({ pressed }) => [
+                        otpStyles.sendInlineBtn,
+                        !canSendLoginOtp && otpStyles.sendInlineBtnDisabled,
+                        pressed && canSendLoginOtp && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="인증번호 받기">
+                      <Text style={otpStyles.sendInlineText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
+                    </Pressable>
+                  </View>
+
+                  {otpVerificationId ? (
+                    <View style={[otpStyles.otpRow, loginScreenStyles.otpRowTight]}>
+                      <TextInput
+                        value={otpCode}
+                        onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="인증번호 6자리"
+                        placeholderTextColor="#94a3b8"
+                        style={otpStyles.otpInput}
+                        keyboardType="number-pad"
+                        inputMode="numeric"
+                        textContentType="oneTimeCode"
+                        autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
+                        editable={!otpBusy}
+                        selectTextOnFocus
+                        returnKeyType="done"
+                        enterKeyHint="done"
+                        onSubmitEditing={() => void onConfirmLoginOtp()}
+                      />
+                      <Pressable
+                        onPress={() => void onConfirmLoginOtp()}
+                        disabled={!canConfirmLoginOtp}
+                        style={({ pressed }) => [
+                          otpStyles.confirmBtn,
+                          !canConfirmLoginOtp && otpStyles.confirmBtnDisabled,
+                          pressed && canConfirmLoginOtp && styles.pressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="인증 확인">
+                        <Text style={otpStyles.confirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
+                  {otpError ? <Text style={otpStyles.otpError}>{otpError}</Text> : null}
+                </View>
+
+                <View style={loginScreenStyles.phoneLoginDivider} />
+
+                {loginMemberStatus === 'guest' && debouncedNormalized ? (
+                  <Text style={loginScreenStyles.loginGuestHintAboveSignup}>
+                    이 번호로는 가입 이력이 없어요. 아래 가입하기로 회원가입을 진행해 주세요.
+                  </Text>
+                ) : null}
+
                 <Pressable
                   onPress={goSignUp}
                   disabled={false}
                   style={({ pressed }) => [
                     styles.signupNavBtn,
+                    loginScreenStyles.signupNavBtnTight,
                     pressed && styles.pressed,
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel="가입하기 — 회원가입 화면으로 이동">
                   <Text style={styles.signupNavBtnLabel}>가입하기</Text>
                 </Pressable>
-                <Text style={styles.signupNavHint}>회원가입 화면에서 전화번호 인증과 필수 정보를 입력합니다.</Text>
+                <Text style={[styles.signupNavHint, loginScreenStyles.signupNavHintTight]}>
+                  회원가입 화면에서 전화번호 인증과 필수 정보를 입력합니다.
+                </Text>
 
                 <SnsEasySignUpSection
                   onGooglePress={() => {
@@ -395,11 +631,14 @@ export default function LoginScreen() {
                   googleLoading={busyGoogle}
                 />
 
-                {loginError ? <Text style={styles.errorText}>{loginError}</Text> : null}
+                {loginError ? <Text style={[styles.errorText, loginScreenStyles.loginErrorTight]}>{loginError}</Text> : null}
+                </View>
               </View>
 
-              <View style={styles.footerRule} />
-              <Text style={styles.footerCredit}>UI/UX Vision by Ginit Human-Connection Team.</Text>
+              <View style={[styles.footerRule, loginScreenStyles.footerRuleTight]} />
+              <Text style={[styles.footerCredit, loginScreenStyles.footerCreditTight]}>
+                UI/UX Vision by Ginit Human-Connection Team.
+              </Text>
             </Animated.View>
           </KeyboardAwareScreenScroll>
         </SafeAreaView>
@@ -410,12 +649,13 @@ export default function LoginScreen() {
 
 const loginScreenStyles = StyleSheet.create({
   scrollTweak: {
-    paddingTop: 10,
-    gap: 20,
+    paddingTop: 8,
+    paddingBottom: 22,
+    gap: 10,
   },
   topBrand: {
-    paddingTop: 16,
-    paddingBottom: 22,
+    paddingTop: 8,
+    paddingBottom: 12,
     gap: 0,
   },
   logoFrame: {
@@ -433,21 +673,88 @@ const loginScreenStyles = StyleSheet.create({
     alignSelf: 'stretch',
     alignItems: 'center',
     width: '100%',
-    marginTop: 14,
+    marginTop: 8,
   },
   brandKr: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '900',
     color: GinitTheme.colors.primary,
-    letterSpacing: -0.55,
+    letterSpacing: -0.5,
     textAlign: 'center',
     alignSelf: 'stretch',
-    lineHeight: 34,
+    lineHeight: 29,
   },
   greetingCenter: {
-    marginTop: 14,
-    paddingTop: 2,
+    marginTop: 6,
+    paddingTop: 0,
     textAlign: 'center',
     alignSelf: 'stretch',
+  },
+  greetingTight: {
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  authCardTight: {
+    padding: 14,
+  },
+  expoGoBannerTight: {
+    marginBottom: 8,
+    padding: 10,
+    gap: 4,
+  },
+  checkingRowTight: {
+    marginBottom: 6,
+  },
+  /** 가입하기 버튼 바로 위(구분선 아래) */
+  loginGuestHintAboveSignup: {
+    marginTop: 2,
+    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#b45309',
+    lineHeight: 17,
+    textAlign: 'center',
+  },
+  loginFieldBlock: {
+    marginTop: 4,
+    gap: 4,
+  },
+  phoneLoginSub: {
+    marginTop: 0,
+    marginBottom: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+    lineHeight: 16,
+  },
+  otpRowTight: {
+    marginTop: 6,
+  },
+  phoneLoginDivider: {
+    marginTop: 10,
+    marginBottom: 8,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(15, 23, 42, 0.12)',
+    alignSelf: 'stretch',
+  },
+  signupNavBtnTight: {
+    marginTop: 8,
+    minHeight: 46,
+    paddingVertical: 12,
+  },
+  signupNavHintTight: {
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  loginErrorTight: {
+    marginTop: 6,
+  },
+  footerRuleTight: {
+    marginTop: 6,
+  },
+  footerCreditTight: {
+    marginTop: 4,
+    marginBottom: 4,
+    fontSize: 11,
   },
 });

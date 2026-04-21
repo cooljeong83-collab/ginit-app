@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { getUserProfile, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { USERS_COLLECTION, getUserProfile, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 
-/** 로컬에 등록된 전화 PK 목록 (서버 대체 — 보안 가이드상 기기 번호 기반 자동 가입) */
+/** 로컬에 등록된 사용자 PK(전화 E.164 또는 이메일) 목록 — 오프라인 시 가입 여부 보조 */
 const REGISTRY_KEY = 'ginit.phoneRegistry.v1';
 
 async function readList(): Promise<string[]> {
@@ -16,27 +18,42 @@ async function readList(): Promise<string[]> {
   }
 }
 
-/** AsyncStorage 목록에 이미 있는지(가입 완료로 기록된 번호) */
-export async function isPhoneRegisteredLocally(normalizedPhone: string): Promise<boolean> {
+/** AsyncStorage 목록에 이미 있는지(가입 완료로 기록된 PK) */
+export async function isPhoneRegisteredLocally(normalizedId: string): Promise<boolean> {
   const list = await readList();
-  return list.includes(normalizedPhone);
+  return list.includes(normalizedId);
+}
+
+async function hasActiveUserWithPhoneField(normalizedPhone: string): Promise<boolean> {
+  const phone = normalizedPhone.trim();
+  if (!phone) return false;
+  try {
+    const db = getFirebaseFirestore();
+    const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(5)));
+    for (const d of qs.docs) {
+      const p = await getUserProfile(d.id);
+      if (p && !isUserProfileWithdrawn(p)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * 가입된 회원으로 본다: 로컬 등록 목록 또는 Firestore `users/{전화}` 문서 존재.
+ * 가입된 회원으로 본다: `users/{id}` 문서가 있고 탈퇴가 아니면 true.
+ * `id`가 전화 E.164이면 레거시 문서(`users/{전화}`) 또는 `phone` 필드 일치 문서를 모두 고려합니다.
  */
-export async function isPhoneRegistered(normalizedPhone: string): Promise<boolean> {
-  const id = normalizedPhone.trim();
-  if (!id) return false;
+export async function isPhoneRegistered(id: string): Promise<boolean> {
+  const trimmed = id.trim();
+  if (!trimmed) return false;
   try {
-    const p = await getUserProfile(id);
-    if (!p) return false;
-    // 탈퇴 계정은 "가입된 회원"으로 취급하지 않아야 로그인 화면에서 시작합니다.
-    return !isUserProfileWithdrawn(p);
+    const p = await getUserProfile(trimmed);
+    if (p && !isUserProfileWithdrawn(p)) return true;
+    if (trimmed.startsWith('+') && (await hasActiveUserWithPhoneField(trimmed))) return true;
+    return false;
   } catch {
-    // 네트워크가 불안정해 서버 확인이 불가하면 로컬 등록 여부로만 판단합니다.
-    // (단, 서버에서 탈퇴된 계정은 online 시 즉시 login으로 돌아오게 됩니다.)
-    return await isPhoneRegisteredLocally(id);
+    return await isPhoneRegisteredLocally(trimmed);
   }
 }
 
@@ -51,7 +68,18 @@ export async function registerPhoneIfNew(normalizedPhone: string): Promise<{ isN
   return { isNew: true };
 }
 
-/** 탈퇴 등: 로컬 가입 번호 목록에서 제거합니다. */
+/** 이메일 PK 가입 완료 시 전화·이메일을 모두 로컬 목록에 넣어 오프라인 부트를 돕습니다. */
+export async function registerSignupLocalKeys(normalizedPhone: string, userIdEmail: string): Promise<void> {
+  const list = await readList();
+  const next = new Set(list);
+  const p = normalizedPhone.trim();
+  const e = userIdEmail.trim();
+  if (p) next.add(p);
+  if (e) next.add(e);
+  await AsyncStorage.setItem(REGISTRY_KEY, JSON.stringify([...next]));
+}
+
+/** 탈퇴 등: 로컬 가입 PK 목록에서 제거합니다. */
 export async function removePhoneFromRegistry(normalizedPhone: string): Promise<void> {
   const id = normalizedPhone.trim();
   if (!id) return;

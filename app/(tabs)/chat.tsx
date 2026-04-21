@@ -58,7 +58,7 @@ function profileForCreatedBy(
 
 export default function ChatTab() {
   const router = useRouter();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
   const { width: windowWidth } = useWindowDimensions();
   const categoryChipMaxWidth = Math.min(200, Math.max(100, windowWidth * 0.42));
 
@@ -158,8 +158,8 @@ export default function ChatTab() {
   }, [categories, selectedCategoryId]);
 
   const joinedMeetings = useMemo(
-    () => filterJoinedMeetings(meetings, phoneUserId),
-    [meetings, phoneUserId],
+    () => filterJoinedMeetings(meetings, userId),
+    [meetings, userId],
   );
 
   const feedChips = useMemo(() => buildFeedChips(joinedMeetings, categories), [categories, joinedMeetings]);
@@ -175,7 +175,7 @@ export default function ChatTab() {
     [filteredMeetings, listSortMode, userCoords],
   );
 
-  const signedIn = Boolean(phoneUserId?.trim());
+  const signedIn = Boolean(userId?.trim());
 
   const chatRowMeetingKey = useMemo(
     () => sortedFilteredMeetings.map((m) => m.id).join('\u0001'),

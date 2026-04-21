@@ -1,7 +1,7 @@
 /**
  * Firestore `meetings` 컬렉션.
  *
- * `createdBy`는 **정규화된 전화번호 PK**(+8210…) 문자열로 저장됩니다. (Firebase UID와 다를 수 있음)
+ * `createdBy`는 **앱 사용자 PK** 문자열로 저장됩니다. (신규: 정규화 이메일, 레거시: +8210… 전화 PK)
  *
  * 콘솔 규칙 예시(인증만 요구하는 단순형):
  *   match /meetings/{id} {
@@ -37,7 +37,7 @@ import { getFirebaseFirestore } from './firebase';
 import { notifyMeetingParticipantsOfHostActionFireAndForget } from './meeting-host-push-notify';
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
-import { normalizePhoneUserId } from './phone-user-id';
+import { normalizeParticipantId } from './app-user-id';
 
 export const MEETINGS_COLLECTION = 'meetings';
 
@@ -108,8 +108,8 @@ export type Meeting = {
 /** 표시용 참여 인원 수(주관자 + `participantIds`, 중복 제거). */
 export function meetingParticipantCount(m: Meeting): number {
   const ids = m.participantIds ?? [];
-  const set = new Set(ids.map((x) => normalizePhoneUserId(String(x)) ?? String(x).trim()).filter(Boolean));
-  const host = m.createdBy?.trim() ? normalizePhoneUserId(m.createdBy) ?? m.createdBy.trim() : '';
+  const set = new Set(ids.map((x) => normalizeParticipantId(String(x)) ?? String(x).trim()).filter(Boolean));
+  const host = m.createdBy?.trim() ? normalizeParticipantId(m.createdBy) ?? m.createdBy.trim() : '';
   if (host) set.add(host);
   return Math.max(set.size, ids.length > 0 ? ids.length : host ? 1 : 0);
 }
@@ -237,19 +237,19 @@ function parseParticipantVoteLog(data: Record<string, unknown>): ParticipantVote
 
 /** 내 투표 스냅샷(없으면 null — 구 데이터 등) */
 export function getParticipantVoteSnapshot(meeting: Meeting, phoneUserId: string): ParticipantVoteSnapshot | null {
-  const ns = normalizePhoneUserId(phoneUserId.trim()) ?? phoneUserId.trim();
+  const ns = normalizeParticipantId(phoneUserId.trim());
   const log = meeting.participantVoteLog ?? [];
-  return log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === ns) ?? null;
+  return log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === ns) ?? null;
 }
 
 function countDistinctMeetingParticipants(m: Meeting): number {
   const hostRaw = m.createdBy?.trim() ?? '';
-  const host = hostRaw ? normalizePhoneUserId(hostRaw) ?? hostRaw : '';
+  const host = hostRaw ? normalizeParticipantId(hostRaw) ?? hostRaw : '';
   const listRaw = m.participantIds ?? [];
   const seen = new Set<string>();
   if (host) seen.add(host);
   for (const x of listRaw) {
-    const id = normalizePhoneUserId(String(x)) ?? String(x).trim();
+    const id = normalizeParticipantId(String(x)) ?? String(x).trim();
     if (id) seen.add(id);
   }
   return seen.size;
@@ -539,7 +539,7 @@ export async function joinMeeting(
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const nsUid = normalizeParticipantId(uid) ?? uid;
 
   await runTransaction(getFirestoreDb(), async (transaction) => {
     const snap = await transaction.get(ref);
@@ -548,7 +548,7 @@ export async function joinMeeting(
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
-    const inList = rawList.some((x) => (normalizePhoneUserId(x) ?? x.trim()) === nsUid);
+    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
     if (inList) {
       return;
     }
@@ -558,7 +558,7 @@ export async function joinMeeting(
     const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
 
     const log = parseParticipantVoteLog(data);
-    const filtered = log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid);
+    const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
     const nextLog: ParticipantVoteSnapshot[] = [
       ...filtered,
       {
@@ -586,7 +586,7 @@ export async function updateParticipantVotes(
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
-  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const nsUid = normalizeParticipantId(uid) ?? uid;
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
   await runTransaction(getFirestoreDb(), async (transaction) => {
@@ -596,11 +596,11 @@ export async function updateParticipantVotes(
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
-    const inList = rawList.some((x) => (normalizePhoneUserId(x) ?? x.trim()) === nsUid);
+    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
     if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
 
     const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === nsUid);
+    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
     if (!old) {
       throw new Error(
         '이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 아래 탈퇴 후 다시 참여해 주세요.',
@@ -619,7 +619,7 @@ export async function updateParticipantVotes(
     movies = mergeTallyIncrement(movies, votes.movieChipIds);
 
     const nextLog: ParticipantVoteSnapshot[] = [
-      ...log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid),
+      ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
       {
         userId: nsUid,
         dateChipIds: [...votes.dateChipIds],
@@ -648,7 +648,7 @@ export async function upsertParticipantVotes(
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
-  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const nsUid = normalizeParticipantId(uid) ?? uid;
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
   await runTransaction(getFirestoreDb(), async (transaction) => {
@@ -658,11 +658,11 @@ export async function upsertParticipantVotes(
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
-    const inList = rawList.some((x) => (normalizePhoneUserId(x) ?? x.trim()) === nsUid);
+    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
     if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
 
     const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === nsUid);
+    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
     const oldD = old?.dateChipIds ?? [];
     const oldP = old?.placeChipIds ?? [];
     const oldM = old?.movieChipIds ?? [];
@@ -676,7 +676,7 @@ export async function upsertParticipantVotes(
     movies = mergeTallyIncrement(movies, votes.movieChipIds);
 
     const nextLog: ParticipantVoteSnapshot[] = [
-      ...log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid),
+      ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
       {
         userId: nsUid,
         dateChipIds: [...votes.dateChipIds],
@@ -697,7 +697,7 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
-  const nsUid = normalizePhoneUserId(uid) ?? uid;
+  const nsUid = normalizeParticipantId(uid) ?? uid;
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
   await runTransaction(getFirestoreDb(), async (transaction) => {
@@ -709,14 +709,14 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
       : [];
     let removeToken: string | null = null;
     for (const x of rawList) {
-      if ((normalizePhoneUserId(x) ?? x.trim()) === nsUid) {
+      if ((normalizeParticipantId(x) ?? x.trim()) === nsUid) {
         removeToken = x;
         break;
       }
     }
 
     const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) === nsUid);
+    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
     const oldD = old?.dateChipIds ?? [];
     const oldP = old?.placeChipIds ?? [];
     const oldM = old?.movieChipIds ?? [];
@@ -725,7 +725,7 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
     const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
     const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
     const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    const nextLog = log.filter((e) => (normalizePhoneUserId(e.userId) ?? e.userId.trim()) !== nsUid);
+    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
 
     const patch: Record<string, unknown> = {
       voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
@@ -752,8 +752,8 @@ export async function confirmMeetingSchedule(
   if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
   const data = snap.data() as Record<string, unknown>;
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-  const nsHost = normalizePhoneUserId(uid) ?? uid;
-  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  const nsHost = normalizeParticipantId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 일정을 확정할 수 있어요.');
   }
@@ -782,8 +782,8 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
   if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
   const data = snap.data() as Record<string, unknown>;
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-  const nsHost = normalizePhoneUserId(uid) ?? uid;
-  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  const nsHost = normalizeParticipantId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 확정을 취소할 수 있어요.');
   }
@@ -810,8 +810,8 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
   const data = snap.data() as Record<string, unknown>;
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-  const nsHost = normalizePhoneUserId(uid) ?? uid;
-  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  const nsHost = normalizeParticipantId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 삭제할 수 있어요.');
   }
@@ -837,8 +837,8 @@ export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPh
   if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
   const data = snap.data() as Record<string, unknown>;
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-  const nsHost = normalizePhoneUserId(uid) ?? uid;
-  const nsCreated = createdBy ? normalizePhoneUserId(createdBy) ?? createdBy : '';
+  const nsHost = normalizeParticipantId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 삭제할 수 있어요.');
   }

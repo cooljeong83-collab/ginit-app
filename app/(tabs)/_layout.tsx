@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 
 import { GinitTabBar } from '@/components/ginit';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 
 /*
  * === 백업: Firebase 익명 로그인 대기 후 탭 표시 ===
@@ -11,20 +12,40 @@ import { useUserSession } from '@/src/context/UserSessionContext';
  * import { getFirebaseAuth } from '@/src/lib/firebase';
  * import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
  * const [firebaseReady, setFirebaseReady] = useState(false);
- * useEffect(() => { ... signInAnonymously ... onAuthStateChanged ... }, [phoneUserId]);
+ * useEffect(() => { ... signInAnonymously ... onAuthStateChanged ... }, [userId]);
  * if (!firebaseReady) return <ActivityIndicator ... />;
  */
 
 export default function TabsLayout() {
   const router = useRouter();
-  const { phoneUserId, authProfile, isHydrated } = useUserSession();
-  const hasSession = Boolean(phoneUserId?.trim() || authProfile?.firebaseUid?.trim());
+  const { userId, authProfile, isHydrated } = useUserSession();
+  const hasSession = Boolean(userId?.trim() || authProfile?.firebaseUid?.trim());
 
   useEffect(() => {
     if (!isHydrated) return;
     if (!hasSession) {
       router.replace('/login');
     }
+  }, [isHydrated, hasSession, router]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!hasSession) return;
+    let alive = true;
+    (async () => {
+      try {
+        const introSeen = await readAppIntroComplete();
+        if (!alive) return;
+        if (!introSeen) {
+          router.replace({ pathname: '/onboarding', params: { next: 'tabs', flow: 'postLogin' } });
+        }
+      } catch {
+        // 온보딩 스토리지 오류 시에도 UX는 안전하게 탭 진입을 유지합니다.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [isHydrated, hasSession, router]);
 
   if (!isHydrated || !hasSession) {

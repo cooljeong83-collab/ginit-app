@@ -3,7 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import type { Meeting } from '@/src/lib/meetings';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 export type MeetingHostPushAction =
@@ -13,8 +13,8 @@ export type MeetingHostPushAction =
   | 'dates_updated'
   | 'places_updated';
 
-function hostNorm(hostPhoneUserId: string): string {
-  return normalizePhoneUserId(hostPhoneUserId.trim()) ?? hostPhoneUserId.trim();
+function hostNorm(hostUserId: string): string {
+  return normalizeParticipantId(hostUserId.trim());
 }
 
 /** 주관자 제외 참가자 전화 PK 목록 */
@@ -23,19 +23,19 @@ function participantRecipientIds(m: Meeting, hostId: string): string[] {
   const raw = m.participantIds ?? [];
   const out = new Set<string>();
   for (const x of raw) {
-    const id = normalizePhoneUserId(x) ?? String(x).trim();
+    const id = normalizeParticipantId(String(x));
     if (!id || id === h) continue;
     out.add(id);
   }
   return [...out];
 }
 
-async function fetchExpoPushTokensForUsers(phoneUserIds: string[]): Promise<string[]> {
-  if (phoneUserIds.length === 0) return [];
+async function fetchExpoPushTokensForUsers(userIds: string[]): Promise<string[]> {
+  if (userIds.length === 0) return [];
   const db = getFirebaseFirestore();
   const tokens: string[] = [];
   await Promise.all(
-    phoneUserIds.map(async (pid) => {
+    userIds.map(async (pid) => {
       const snap = await getDoc(doc(db, USER_EXPO_PUSH_TOKENS_COLLECTION, pid));
       const t = snap.data()?.token;
       if (typeof t === 'string' && (t.startsWith('ExponentPushToken') || t.startsWith('ExpoPushToken'))) {

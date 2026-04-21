@@ -8,14 +8,14 @@ import { Image } from 'expo-image';
 import { deleteUser } from 'firebase/auth';
 
 import { getFirebaseAuth } from '@/src/lib/firebase';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { fetchMeetingsOnce, type Meeting } from '@/src/lib/meetings';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { withdrawAnonymizeUserProfile } from '@/src/lib/user-profile';
+import { withdrawAnonymizeUserProfile, withdrawAnonymizeUserProfileByFirebaseUid } from '@/src/lib/user-profile';
 
-function isMeetingHost(meeting: Meeting, nsUserId: string): boolean {
+function isMeetingHost(meeting: Meeting, sessionUserIdNorm: string): boolean {
   const c = meeting.createdBy?.trim() ?? '';
   if (!c) return false;
-  return (normalizePhoneUserId(c) ?? c) === nsUserId;
+  return normalizeParticipantId(c) === sessionUserIdNorm;
 }
 
 export type AccountDeletionResult =
@@ -32,7 +32,7 @@ const HOST_BLOCK_MESSAGE =
 export async function purgeUserAccountRemote(phoneUserId: string): Promise<AccountDeletionResult> {
   const raw = phoneUserId.trim();
   if (!raw) return { ok: false, message: '로그인 정보가 없습니다.' };
-  const ns = normalizePhoneUserId(raw) ?? raw;
+  const ns = normalizeParticipantId(raw);
 
   const listRes = await fetchMeetingsOnce();
   if (!listRes.ok) {
@@ -52,6 +52,34 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
     return { ok: false, message: msg };
   }
 
+  return { ok: true };
+}
+
+/**
+ * 구글/UID 로그인 사용자용 서버 탈퇴 처리.
+ * - 진행 중 모임 방장(firebaseUid 기반) 이면 차단
+ * - users 문서는 firebaseUid로 역조회 후 익명화 (없으면 no-op)
+ */
+export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): Promise<AccountDeletionResult> {
+  const uid = firebaseUid.trim();
+  if (!uid) return { ok: false, message: '로그인 정보가 없습니다.' };
+
+  const listRes = await fetchMeetingsOnce();
+  if (!listRes.ok) {
+    return { ok: false, message: listRes.message };
+  }
+  const meetings = listRes.meetings;
+  const hosted = meetings.filter((m) => (m.createdBy?.trim() ?? '') === uid);
+  if (hosted.length > 0) {
+    return { ok: false, message: HOST_BLOCK_MESSAGE };
+  }
+
+  try {
+    await withdrawAnonymizeUserProfileByFirebaseUid(uid);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '프로필 익명화에 실패했습니다.';
+    return { ok: false, message: msg };
+  }
   return { ok: true };
 }
 

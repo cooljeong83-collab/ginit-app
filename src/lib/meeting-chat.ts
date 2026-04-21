@@ -166,9 +166,9 @@ export async function deleteAllMeetingChatMessages(meetingId: string): Promise<v
 }
 
 /** 해당 사용자가 보낸 텍스트·이미지 메시지만 삭제합니다(다른 참여자 채팅은 유지). */
-export async function deleteMeetingChatMessagesFromSender(meetingId: string, phoneUserId: string): Promise<void> {
+export async function deleteMeetingChatMessagesFromSender(meetingId: string, userId: string): Promise<void> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
-  const uid = typeof phoneUserId === 'string' ? phoneUserId.trim() : String(phoneUserId ?? '').trim();
+  const uid = typeof userId === 'string' ? userId.trim() : String(userId ?? '').trim();
   if (!mid || !uid) return;
   const ns = normalizePhoneUserId(uid) ?? uid;
   const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);

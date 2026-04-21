@@ -4,7 +4,7 @@ import { AppState, Platform } from 'react-native';
 
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 /** Android 헤드업 배너용 — `HIGH` 이상이어야 다른 앱 사용 중에도 상단 배너가 뜨는 경우가 많습니다. */
@@ -23,8 +23,8 @@ export async function ensureGinitInAppAndroidChannel(): Promise<void> {
 
 export type InAppAlarmPushKind = 'chat' | 'meeting_change';
 
-async function fetchExpoPushTokenForUser(phoneUserId: string): Promise<string | null> {
-  const uid = normalizePhoneUserId(phoneUserId.trim()) ?? phoneUserId.trim();
+async function fetchExpoPushTokenForUser(userId: string): Promise<string | null> {
+  const uid = normalizeParticipantId(userId.trim());
   if (!uid) return null;
   const snap = await getDoc(doc(getFirebaseFirestore(), USER_EXPO_PUSH_TOKENS_COLLECTION, uid));
   const t = snap.data()?.token;
@@ -35,7 +35,7 @@ async function fetchExpoPushTokenForUser(phoneUserId: string): Promise<string | 
 }
 
 export type SendInAppAlarmPushParams = {
-  phoneUserId: string;
+  userId: string;
   kind: InAppAlarmPushKind;
   meetingId: string;
   meetingTitle: string;
@@ -98,7 +98,7 @@ async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<vo
  * 로그인한 사용자 본인의 Expo 푸시 토큰으로 전송(백그라운드·다른 앱 사용 중 헤드업용).
  */
 export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Promise<void> {
-  const token = await fetchExpoPushTokenForUser(params.phoneUserId);
+  const token = await fetchExpoPushTokenForUser(params.userId);
   if (!token) return;
   const c = buildHeadsUpContent(params);
   const msg: ExpoPushMessage = {

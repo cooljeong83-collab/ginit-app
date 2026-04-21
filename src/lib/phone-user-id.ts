@@ -1,8 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-/** AsyncStorage + 앱 전역에서 쓰는 전화번호 기반 사용자 PK (정규화된 문자열, 예: +821012345678) */
-export const PHONE_USER_ID_STORAGE_KEY = 'ginit.phoneUserId.v1';
-
 /**
  * 한국 번호 위주 정규화. 숫자만 추출 후 10~11자리 로컬(0으로 시작) 또는 이미 82 포함 시 +82… 형태로 반환.
  * 유효하지 않으면 null.
@@ -34,21 +29,4 @@ export function normalizePhoneUserId(raw: string): string | null {
     return `+82${d}`;
   }
   return null;
-}
-
-export async function readStoredPhoneUserId(): Promise<string | null> {
-  try {
-    const v = await AsyncStorage.getItem(PHONE_USER_ID_STORAGE_KEY);
-    return v?.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-export async function writeStoredPhoneUserId(phoneUserId: string): Promise<void> {
-  await AsyncStorage.setItem(PHONE_USER_ID_STORAGE_KEY, phoneUserId);
-}
-
-export async function clearStoredPhoneUserId(): Promise<void> {
-  await AsyncStorage.removeItem(PHONE_USER_ID_STORAGE_KEY);
 }

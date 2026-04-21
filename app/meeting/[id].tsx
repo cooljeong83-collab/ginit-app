@@ -48,9 +48,9 @@ import {
   updateParticipantVotes,
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
   WITHDRAWN_NICKNAME,
   ensureUserProfile,
@@ -274,10 +274,6 @@ function mergeAppendNewPlaceCandidatesWithoutDup(
   return { merged, additions };
 }
 
-function normalizeParticipantId(raw: string): string {
-  return normalizePhoneUserId(raw) ?? raw.trim();
-}
-
 /** 표시 순서: 주선자 → 나머지 참여자(중복 제거) */
 function orderedParticipantIds(m: Meeting): string[] {
   const hostRaw = m.createdBy?.trim() ?? '';
@@ -305,22 +301,19 @@ function nicknameInitial(nickname: string): string {
   return g ?? '?';
 }
 
-/** 세션 전화 PK와 모임 `createdBy`(정규화된 전화 PK)가 같으면 주선자 */
-function isMeetingHost(sessionPhone: string | null, createdBy: string | null | undefined): boolean {
-  const s = sessionPhone?.trim() ?? '';
+/** 세션 사용자 PK와 모임 `createdBy`가 같으면 주선자 */
+function isMeetingHost(sessionUserId: string | null, createdBy: string | null | undefined): boolean {
+  const s = sessionUserId?.trim() ?? '';
   const c = createdBy?.trim() ?? '';
   if (!s || !c) return false;
-  if (s === c) return true;
-  const ns = normalizePhoneUserId(s) ?? s;
-  const nc = normalizePhoneUserId(c) ?? c;
-  return ns === nc;
+  return normalizeParticipantId(s) === normalizeParticipantId(c);
 }
 
 export default function MeetingDetailScreen() {
   const router = useRouter();
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
   const { syncMeetingAckFromMeeting } = useInAppAlarms();
   const isFocused = useIsFocused();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
@@ -388,10 +381,10 @@ export default function MeetingDetailScreen() {
   }, [id, retryNonce]);
 
   useEffect(() => {
-    if (!isFocused || !meeting || !phoneUserId?.trim()) return;
-    if (!isUserJoinedMeeting(meeting, phoneUserId)) return;
+    if (!isFocused || !meeting || !userId?.trim()) return;
+    if (!isUserJoinedMeeting(meeting, userId)) return;
     syncMeetingAckFromMeeting(meeting);
-  }, [isFocused, meeting, phoneUserId, syncMeetingAckFromMeeting]);
+  }, [isFocused, meeting, userId, syncMeetingAckFromMeeting]);
 
   useEffect(() => {
     if (!meeting) {
@@ -713,13 +706,13 @@ export default function MeetingDetailScreen() {
     );
   }, []);
 
-  const isHost = useMemo(() => (meeting ? isMeetingHost(phoneUserId, meeting.createdBy) : false), [meeting, phoneUserId]);
+  const isHost = useMemo(() => (meeting ? isMeetingHost(userId, meeting.createdBy) : false), [meeting, userId]);
 
   const orderedParticipantIdsList = useMemo(() => (meeting ? orderedParticipantIds(meeting) : []), [meeting]);
 
   const sessionPk = useMemo(
-    () => (phoneUserId?.trim() ? normalizePhoneUserId(phoneUserId) ?? phoneUserId.trim() : ''),
-    [phoneUserId],
+    () => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''),
+    [userId],
   );
 
   const alreadyJoinedMeeting = useMemo(() => {
@@ -1215,7 +1208,7 @@ export default function MeetingDetailScreen() {
   );
 
   const handleUnconfirmMeetingSchedule = useCallback(() => {
-    if (!meeting || !phoneUserId?.trim()) {
+    if (!meeting || !userId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 확정을 취소할 수 있어요.');
       return;
     }
@@ -1232,7 +1225,7 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setConfirmScheduleBusy(true);
               try {
-                await unconfirmMeetingSchedule(meeting.id, phoneUserId.trim());
+                await unconfirmMeetingSchedule(meeting.id, userId.trim());
               } catch (e) {
                 Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -1243,10 +1236,10 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, phoneUserId]);
+  }, [meeting, userId]);
 
   const handleConfirmSchedule = useCallback(() => {
-    if (!meeting || !phoneUserId?.trim()) {
+    if (!meeting || !userId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 확정할 수 있어요.');
       return;
     }
@@ -1270,7 +1263,7 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setConfirmScheduleBusy(true);
               try {
-                await confirmMeetingSchedule(meeting.id, phoneUserId.trim(), hostTiePicks);
+                await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
               } catch (e) {
                 Alert.alert('확정 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -1281,10 +1274,10 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, phoneUserId, hostTiePicks, scrollToVoteBlock]);
+  }, [meeting, userId, hostTiePicks, scrollToVoteBlock]);
 
   const handleDeleteMeeting = useCallback(() => {
-    if (!meeting || !phoneUserId?.trim()) {
+    if (!meeting || !userId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 삭제할 수 있어요.');
       return;
     }
@@ -1301,7 +1294,7 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setDeleteMeetingBusy(true);
               try {
-                await deleteMeetingByHost(meeting.id, phoneUserId.trim());
+                await deleteMeetingByHost(meeting.id, userId.trim());
                 router.back();
               } catch (e) {
                 Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
@@ -1313,7 +1306,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, phoneUserId, router]);
+  }, [meeting, userId, router]);
 
   const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
     if (!meeting || !confirmedPlaceCoords) return;

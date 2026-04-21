@@ -53,7 +53,7 @@ const MOCK_REGION_ROWS = [
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
   const { width: windowWidth } = useWindowDimensions();
   /** 가로 칩이 화면에 맞게 읽히도록 최대 너비 (패딩·여백 반영) */
   const categoryChipMaxWidth = Math.min(200, Math.max(100, windowWidth * 0.42));
@@ -390,7 +390,7 @@ export default function FeedScreen() {
               key={m.id}
               meeting={m}
               userCoords={userCoords}
-              joined={isUserJoinedMeeting(m, phoneUserId)}
+              joined={isUserJoinedMeeting(m, userId)}
               onPress={() => router.push(`/meeting/${m.id}`)}
             />
           ))}

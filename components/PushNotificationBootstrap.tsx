@@ -52,12 +52,12 @@ function navigateFromPushData(
  */
 export function PushNotificationBootstrap() {
   const router = useRouter();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
   const bootHandled = useRef(false);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!phoneUserId?.trim()) return;
+    if (!userId?.trim()) return;
 
     (async () => {
       if (!Device.isDevice) return;
@@ -87,12 +87,12 @@ export function PushNotificationBootstrap() {
           ? await Notifications.getExpoPushTokenAsync({ projectId })
           : await Notifications.getExpoPushTokenAsync();
         const token = tokenRes.data?.trim();
-        if (token) await saveUserExpoPushToken(phoneUserId, token);
+        if (token) await saveUserExpoPushToken(userId, token);
       } catch {
         /* 시뮬레이터·EAS projectId 미설정 등 */
       }
     })();
-  }, [phoneUserId]);
+  }, [userId]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;

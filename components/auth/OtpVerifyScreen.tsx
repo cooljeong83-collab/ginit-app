@@ -11,7 +11,7 @@ import { AuthService } from '@/src/services/AuthService';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
   ensureUserProfile,
-  getUserProfile,
+  findUserRowByPhoneE164,
   isUserProfileWithdrawn,
   reactivateWithdrawnUserForOtpSignup,
   recordTermsAgreement,
@@ -39,22 +39,27 @@ export default function OtpVerifyScreen() {
   const params = useLocalSearchParams<{ verificationId?: string | string[]; phoneE164?: string | string[] }>();
   const verificationId = useMemo(() => paramToString(params.verificationId), [params.verificationId]);
   const phoneE164 = useMemo(() => paramToString(params.phoneE164), [params.phoneE164]);
-  const { setPhoneUserId } = useUserSession();
+  const { setUserId } = useUserSession();
 
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [checked, setChecked] = useState<Record<TermKey, boolean>>({ tos: false, privacy: false, safety: false });
+  /** 약관 동의 후 `ensureUserProfile`에 쓸 Firestore 문서 ID(레거시 전화 또는 이메일) */
+  const [pendingProfileDocId, setPendingProfileDocId] = useState<string | null>(null);
 
   const allRequiredChecked = checked.tos && checked.privacy && checked.safety;
 
   const canVerify = verificationId.trim().length > 0 && code.trim().length === 6 && !busy;
 
-  const proceedToHome = useCallback(async (resolvedPhoneUserId: string) => {
-    await setPhoneUserId(resolvedPhoneUserId);
-    await ensureUserProfile(resolvedPhoneUserId);
-    router.replace('/(tabs)');
-  }, [setPhoneUserId, router]);
+  const proceedToHome = useCallback(
+    async (resolvedUserId: string) => {
+      await setUserId(resolvedUserId);
+      await ensureUserProfile(resolvedUserId);
+      router.replace('/(tabs)');
+    },
+    [setUserId, router],
+  );
 
   const onVerify = useCallback(async () => {
     if (!canVerify) return;
@@ -68,16 +73,19 @@ export default function OtpVerifyScreen() {
         return;
       }
 
-      const p = await getUserProfile(normalized);
-      const isNew = p == null || isUserProfileWithdrawn(p);
-      if (isNew) {
-        // 탈퇴 계정이면 재활성화(약관은 새로 받는다)
-        await reactivateWithdrawnUserForOtpSignup(normalized);
+      const row = await findUserRowByPhoneE164(normalized);
+      if (row && !isUserProfileWithdrawn(row.profile)) {
+        await proceedToHome(row.docId);
+        return;
+      }
+      if (row && isUserProfileWithdrawn(row.profile)) {
+        const docId = await reactivateWithdrawnUserForOtpSignup(normalized);
+        setPendingProfileDocId(docId);
         setTermsOpen(true);
         return;
       }
-
-      await proceedToHome(normalized);
+      setPendingProfileDocId(normalized);
+      setTermsOpen(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('오류', msg);
@@ -96,18 +104,19 @@ export default function OtpVerifyScreen() {
         Alert.alert('오류', '전화번호 세션을 확인할 수 없습니다.');
         return;
       }
-      // 최초 가입(또는 재가입)에서만 약관 기록
-      await ensureUserProfile(normalized);
-      await recordTermsAgreement(normalized);
-      await proceedToHome(normalized);
+      const docId = pendingProfileDocId?.trim() || normalized;
+      await ensureUserProfile(docId);
+      await recordTermsAgreement(docId);
+      await proceedToHome(docId);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('오류', msg);
     } finally {
       setBusy(false);
       setTermsOpen(false);
+      setPendingProfileDocId(null);
     }
-  }, [allRequiredChecked, busy, phoneE164, proceedToHome]);
+  }, [allRequiredChecked, busy, phoneE164, pendingProfileDocId, proceedToHome]);
 
   const toggleOne = useCallback((k: TermKey) => setChecked((p) => ({ ...p, [k]: !p[k] })), []);
   const toggleAll = useCallback(() => {
@@ -289,4 +298,3 @@ const styles = StyleSheet.create({
   agreeBtnDisabled: { opacity: 0.35 },
   agreeText: { fontSize: 15, fontWeight: '900', color: '#fff' },
 });
-

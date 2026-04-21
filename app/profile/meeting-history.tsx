@@ -15,7 +15,7 @@ import { subscribeMeetings } from '@/src/lib/meetings';
 
 export default function ProfileMeetingHistoryScreen() {
   const router = useRouter();
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +37,8 @@ export default function ProfileMeetingHistoryScreen() {
   }, []);
 
   const joinedMeetings = useMemo(
-    () => filterJoinedMeetings(meetings, phoneUserId),
-    [meetings, phoneUserId],
+    () => filterJoinedMeetings(meetings, userId),
+    [meetings, userId],
   );
 
   return (

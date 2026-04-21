@@ -36,17 +36,17 @@ import {
   subscribeMeetingChatMessages,
 } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
 function profileForSender(map: Map<string, UserProfile>, senderId: string): UserProfile | undefined {
-  const n = normalizePhoneUserId(senderId) ?? senderId.trim();
+  const n = normalizeParticipantId(senderId);
   const hit = map.get(senderId) ?? map.get(n);
   if (hit) return hit;
   for (const [k, v] of map) {
-    if ((normalizePhoneUserId(k) ?? k.trim()) === n) return v;
+    if (normalizeParticipantId(k) === n) return v;
   }
   return undefined;
 }
@@ -73,7 +73,7 @@ export default function MeetingChatRoomScreen() {
     : typeof params.meetingId === 'string'
       ? params.meetingId.trim()
       : '';
-  const { phoneUserId } = useUserSession();
+  const { userId } = useUserSession();
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [meetingError, setMeetingError] = useState<string | null>(null);
@@ -94,9 +94,7 @@ export default function MeetingChatRoomScreen() {
   const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
   const { markChatReadUpTo } = useInAppAlarms();
 
-  const myId = useMemo(() => (phoneUserId?.trim() ? normalizePhoneUserId(phoneUserId) ?? phoneUserId.trim() : ''), [
-    phoneUserId,
-  ]);
+  const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
   messagesRef.current = messages;
 
@@ -119,8 +117,8 @@ export default function MeetingChatRoomScreen() {
   const allowed = useMemo(() => {
     if (meeting === undefined) return null;
     if (!meeting) return false;
-    return isUserJoinedMeeting(meeting, phoneUserId);
-  }, [meeting, phoneUserId]);
+    return isUserJoinedMeeting(meeting, userId);
+  }, [meeting, userId]);
 
   useEffect(() => {
     lastMarkedReadRef.current = null;
@@ -250,7 +248,7 @@ export default function MeetingChatRoomScreen() {
   }, []);
 
   const onSend = useCallback(async () => {
-    if (!meetingId || !phoneUserId?.trim()) {
+    if (!meetingId || !userId?.trim()) {
       Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
       return;
     }
@@ -258,17 +256,17 @@ export default function MeetingChatRoomScreen() {
     if (!body || sending || uploadingImage) return;
     setSending(true);
     try {
-      await sendMeetingChatTextMessage(meetingId, phoneUserId, body);
+      await sendMeetingChatTextMessage(meetingId, userId, body);
       setDraft('');
     } catch (e) {
       Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
     } finally {
       setSending(false);
     }
-  }, [meetingId, phoneUserId, draft, sending, uploadingImage]);
+  }, [meetingId, userId, draft, sending, uploadingImage]);
 
   const onPickImage = useCallback(async () => {
-    if (!meetingId || !phoneUserId?.trim()) {
+    if (!meetingId || !userId?.trim()) {
       Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
       return;
     }
@@ -289,7 +287,7 @@ export default function MeetingChatRoomScreen() {
     setUploadingImage(true);
     try {
       const caption = draft.trim();
-      await sendMeetingChatImageMessage(meetingId, phoneUserId, asset.uri, {
+      await sendMeetingChatImageMessage(meetingId, userId, asset.uri, {
         caption: caption || undefined,
         naturalWidth: typeof asset.width === 'number' && asset.width > 0 ? asset.width : undefined,
       });
@@ -299,11 +297,9 @@ export default function MeetingChatRoomScreen() {
     } finally {
       setUploadingImage(false);
     }
-  }, [meetingId, phoneUserId, draft, uploadingImage]);
+  }, [meetingId, userId, draft, uploadingImage]);
 
-  const hostNorm = meeting?.createdBy?.trim()
-    ? normalizePhoneUserId(meeting.createdBy) ?? meeting.createdBy.trim()
-    : '';
+  const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
 
   const renderItem = useCallback(
     ({ item, index }: { item: MeetingChatMessage; index: number }) => {
@@ -314,13 +310,11 @@ export default function MeetingChatRoomScreen() {
           </View>
         );
       }
-      const sid = item.senderId?.trim() ? normalizePhoneUserId(item.senderId) ?? item.senderId.trim() : '';
+      const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
       const isMine = Boolean(myId && sid && sid === myId);
       const prev = index > 0 ? messages[index - 1] : null;
       const prevSid =
-        prev && prev.kind !== 'system'
-          ? normalizePhoneUserId(prev.senderId ?? '') ?? prev.senderId?.trim() ?? ''
-          : '';
+        prev && prev.kind !== 'system' ? normalizeParticipantId(String(prev.senderId ?? '').trim()) : '';
       const sameSenderAsPrev = Boolean(sid && prevSid && prevSid === sid);
       const showAvatar = !isMine && sid && (index === 0 || !prev || prev.kind === 'system' || !sameSenderAsPrev);
 

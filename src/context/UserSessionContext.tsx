@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { AuthService } from '@/src/services/AuthService';
+import { clearStoredUserId, readStoredUserId, writeStoredUserId } from '@/src/lib/app-user-id';
 import { signOutGoogle } from '@/src/lib/google-sign-in';
-import { clearStoredPhoneUserId, readStoredPhoneUserId, writeStoredPhoneUserId } from '@/src/lib/phone-user-id';
 import { clearSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { clearSecureGoogleSession } from '@/src/lib/secure-google-session';
+import { AuthService } from '@/src/services/AuthService';
 
 /** 구글·Firebase에서 받은 표시용 프로필 (전역 세션 스냅샷) */
 export type AuthProfileSnapshot = {
@@ -17,13 +17,13 @@ export type AuthProfileSnapshot = {
 };
 
 type UserSessionContextValue = {
-  /** 정규화된 전화번호 PK (예: +821012345678) */
-  phoneUserId: string | null;
-  /** AsyncStorage에서 `phoneUserId` 복원 완료 여부(부트 스플래시 전에 false) */
+  /** 앱 사용자 PK — 신규는 정규화 이메일, 레거시는 전화 E.164(+82…) */
+  userId: string | null;
+  /** AsyncStorage에서 `userId` 복원 완료 여부(부트 스플래시 전에 false) */
   isHydrated: boolean;
-  setPhoneUserId: (phoneUserId: string) => Promise<void>;
-  /** 저장된 전화 세션만 제거(스플래시에서 불일치 시). 구글 로그아웃은 하지 않습니다. */
-  clearStoredPhoneSession: () => Promise<void>;
+  setUserId: (userId: string) => Promise<void>;
+  /** 저장된 사용자 PK만 제거(스플래시에서 불일치 시). 구글 로그아웃은 하지 않습니다. */
+  clearStoredUserSession: () => Promise<void>;
   signOutSession: () => Promise<void>;
   authProfile: AuthProfileSnapshot | null;
   setAuthProfile: (profile: AuthProfileSnapshot | null) => void;
@@ -32,7 +32,7 @@ type UserSessionContextValue = {
 const UserSessionContext = createContext<UserSessionContextValue | null>(null);
 
 export function UserSessionProvider({ children }: { children: ReactNode }) {
-  const [phoneUserId, setPhoneState] = useState<string | null>(null);
+  const [userId, setUserIdState] = useState<string | null>(null);
   const [authProfile, setAuthProfileState] = useState<AuthProfileSnapshot | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -40,8 +40,8 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
     let alive = true;
     void (async () => {
       try {
-        const stored = await readStoredPhoneUserId();
-        if (alive && stored) setPhoneState(stored);
+        const stored = await readStoredUserId();
+        if (alive && stored) setUserIdState(stored);
       } finally {
         if (alive) setIsHydrated(true);
       }
@@ -51,15 +51,15 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const setPhoneUserId = useCallback(async (id: string) => {
+  const setUserId = useCallback(async (id: string) => {
     const t = id.trim();
-    setPhoneState(t);
-    await writeStoredPhoneUserId(t);
+    setUserIdState(t);
+    await writeStoredUserId(t);
   }, []);
 
-  const clearStoredPhoneSession = useCallback(async () => {
-    await clearStoredPhoneUserId();
-    setPhoneState(null);
+  const clearStoredUserSession = useCallback(async () => {
+    await clearStoredUserId();
+    setUserIdState(null);
   }, []);
 
   const setAuthProfile = useCallback((profile: AuthProfileSnapshot | null) => {
@@ -67,10 +67,10 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOutSession = useCallback(async () => {
-    await clearStoredPhoneUserId();
+    await clearStoredUserId();
     await clearSecureAuthSession();
     await clearSecureGoogleSession();
-    setPhoneState(null);
+    setUserIdState(null);
     setAuthProfileState(null);
     try {
       await AuthService.signOut();
@@ -86,15 +86,15 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      phoneUserId,
+      userId,
       isHydrated,
-      setPhoneUserId,
-      clearStoredPhoneSession,
+      setUserId,
+      clearStoredUserSession,
       signOutSession,
       authProfile,
       setAuthProfile,
     }),
-    [phoneUserId, isHydrated, setPhoneUserId, clearStoredPhoneSession, signOutSession, authProfile, setAuthProfile],
+    [userId, isHydrated, setUserId, clearStoredUserSession, signOutSession, authProfile, setAuthProfile],
   );
 
   return <UserSessionContext.Provider value={value}>{children}</UserSessionContext.Provider>;
