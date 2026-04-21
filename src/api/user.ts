@@ -1,4 +1,4 @@
-import { getUserProfile, reactivateUserForSignup, recordTermsAgreement, withdrawAnonymizeUserProfile } from '@/src/lib/user-profile';
+import { getUserProfile, recordTermsAgreement, withdrawAnonymizeUserProfile } from '@/src/lib/user-profile';
 
 /**
  * 얇은 API 레이어(현재는 Firestore 직접 호출).
@@ -6,7 +6,6 @@ import { getUserProfile, reactivateUserForSignup, recordTermsAgreement, withdraw
  */
 export const userApi = {
   getUserProfile,
-  reactivateUserForSignup,
   recordTermsAgreement,
   withdrawAnonymizeUserProfile,
 };

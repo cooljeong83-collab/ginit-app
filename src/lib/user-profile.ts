@@ -5,7 +5,7 @@
 import { deleteDoc, deleteField, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
-import { getFirebaseAuth, getFirebaseFirestore } from '@/src/lib/firebase';
+import { getFirebaseFirestore } from '@/src/lib/firebase';
 
 export const USERS_COLLECTION = 'users';
 
@@ -18,6 +18,8 @@ export type UserProfile = {
   photoUrl: string | null;
   email?: string | null;
   displayName?: string | null;
+  /** 약관 동의 시각(서버 타임스탬프). */
+  termsAgreedAt?: unknown | null;
   /** 회원가입 등에서 저장하는 값 예: `MALE`, `FEMALE` */
   gender?: string | null;
   birthYear?: number | null;
@@ -59,6 +61,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const photo = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
   const email = typeof data.email === 'string' ? data.email.trim() : '';
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
+  const termsAgreedAt = 'termsAgreedAt' in data ? (data.termsAgreedAt as unknown) : null;
   const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
   const birthYear = typeof data.birthYear === 'number' ? data.birthYear : null;
   const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
@@ -69,6 +72,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     photoUrl: photo || null,
     email: email || null,
     displayName: displayName || null,
+    termsAgreedAt,
     gender: gender || null,
     birthYear,
     birthMonth,
@@ -83,6 +87,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
       photoUrl: null,
       email: null,
       displayName: null,
+      termsAgreedAt: null,
       gender: null,
       birthYear: null,
       birthMonth: null,
@@ -223,12 +228,27 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
       photoUrl: null,
       email: null,
       displayName: null,
+      termsAgreedAt: null,
       gender: null,
       birthYear: null,
       birthMonth: null,
       birthDay: null,
       firebaseUid: null,
       withdrawnAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }) as Record<string, unknown>,
+  );
+}
+
+/** 약관 동의 기록(서버 시각 기준). */
+export async function recordTermsAgreement(phoneUserId: string): Promise<void> {
+  const id = phoneUserId.trim();
+  if (!id) throw new Error('전화 사용자 ID가 없습니다.');
+  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
+  await updateDoc(
+    dRef,
+    stripUndefinedDeep({
+      termsAgreedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }) as Record<string, unknown>,
   );

@@ -7,7 +7,7 @@ import { getFirebaseAuth } from '@/src/lib/firebase';
 import { fetchAndroidPhoneHint } from '@/src/lib/phone-hint';
 import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname } from '@/src/lib/user-profile';
+import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname, recordTermsAgreement } from '@/src/lib/user-profile';
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -177,6 +177,7 @@ export function useSignUpFlow(initialPhone: string) {
         await registerPhoneIfNew(n);
         await setPhoneUserId(n);
         await ensureUserProfile(n);
+        await recordTermsAgreement(n);
         onComplete();
       } catch (e) {
         const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';

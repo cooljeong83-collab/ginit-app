@@ -29,7 +29,6 @@ export async function isPhoneRegistered(normalizedPhone: string): Promise<boolea
   const id = normalizedPhone.trim();
   if (!id) return false;
   try {
-    const locally = await isPhoneRegisteredLocally(id);
     const p = await getUserProfile(id);
     if (!p) return false;
     // 탈퇴 계정은 "가입된 회원"으로 취급하지 않아야 로그인 화면에서 시작합니다.

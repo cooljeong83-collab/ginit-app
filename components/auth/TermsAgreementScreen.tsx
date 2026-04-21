@@ -65,16 +65,16 @@ export default function TermsAgreementScreen() {
     try {
       if (fn) {
         await fn();
+        // 다음 단계(가입 화면 이동/연동 플로우 시작/가입 완료 후 라우팅)는
+        // pending action 쪽에서 책임집니다. 여기서 back을 호출하면
+        // 방금 열린 화면이 닫히거나 스택이 꼬일 수 있어 추가 내비게이션을 하지 않습니다.
+        return;
       }
-      try {
-        router.back();
-      } catch {
-        router.replace('/login');
-      }
+      close();
     } finally {
       setBusy(false);
     }
-  }, [allRequiredChecked, busy, router]);
+  }, [allRequiredChecked, busy, close]);
 
   const detailTitle = useMemo(() => (detailKey ? TERM_LABELS[detailKey].title : ''), [detailKey]);
   const detailText = useMemo(() => (detailKey ? termBody(detailKey) : ''), [detailKey]);

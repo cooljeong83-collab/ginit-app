@@ -40,6 +40,7 @@ import { fetchAndroidPhoneHint } from '@/src/lib/phone-hint';
 import { isPhoneRegistered, registerPhoneIfNew } from '@/src/lib/phone-registry';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { ensureUserProfile } from '@/src/lib/user-profile';
+import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -339,11 +340,14 @@ export default function LoginScreen() {
 
   const goSignUp = useCallback(() => {
     const trimmed = phoneField.trim();
-    if (trimmed) {
-      router.push({ pathname: '/sign-up', params: { phone: trimmed } });
-    } else {
-      router.push('/sign-up');
-    }
+    setPendingConsentAction(() => {
+      if (trimmed) {
+        router.push({ pathname: '/sign-up', params: { phone: trimmed, consented: '1' } });
+      } else {
+        router.push({ pathname: '/sign-up', params: { consented: '1' } });
+      }
+    });
+    router.push('/terms-agreement');
   }, [router, phoneField]);
 
   const onIntroLogoLayout = useCallback(() => {
@@ -581,7 +585,12 @@ export default function LoginScreen() {
                 <Text style={styles.signupNavHint}>신규 회원은 회원가입 화면에서 정보를 입력합니다.</Text>
 
                 <SnsEasySignUpSection
-                  onGooglePress={() => void onGoogleSignUp()}
+                  onGooglePress={() => {
+                    setPendingConsentAction(async () => {
+                      await onGoogleSignUp();
+                    });
+                    router.push('/terms-agreement');
+                  }}
                   googleDisabled={busyAutoLogin || (isExpoGo && Platform.OS !== 'web')}
                   googleLoading={busyGoogle}
                 />
