@@ -1,4 +1,4 @@
-import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import { FirebaseAuthTypes, PhoneAuthProvider, getAuth } from '@react-native-firebase/auth';
 
 export type PhoneVerificationResult = { verificationId: string };
 
@@ -32,7 +32,7 @@ export class AuthService {
    */
   static async verifyPhoneNumber(phoneE164: string): Promise<PhoneVerificationResult> {
     try {
-      const session = auth().verifyPhoneNumber(phoneE164);
+      const session = getAuth().verifyPhoneNumber(phoneE164);
       const verificationId = await new Promise<string>((resolve, reject) => {
         const unsubRef: { current: UnsubLike } = { current: null };
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -70,8 +70,8 @@ export class AuthService {
   /** OTP 코드 확정 → Firebase 로그인 */
   static async confirmCode(verificationId: string, code: string): Promise<FirebaseAuthTypes.UserCredential> {
     try {
-      const credential = auth.PhoneAuthProvider.credential(verificationId, code.trim());
-      return await auth().signInWithCredential(credential);
+      const credential = PhoneAuthProvider.credential(verificationId, code.trim());
+      return await getAuth().signInWithCredential(credential);
     } catch (e) {
       throw new Error(AuthService.humanizeError(e));
     }
@@ -79,11 +79,11 @@ export class AuthService {
 
   /** 앱 재실행 시 자동 로그인용 auth state 감제 */
   static onAuthStateChanged(cb: (u: FirebaseAuthTypes.User | null) => void): () => void {
-    return auth().onAuthStateChanged(cb);
+    return getAuth().onAuthStateChanged(cb);
   }
 
   static async signOut(): Promise<void> {
-    await auth().signOut();
+    await getAuth().signOut();
   }
 
   static humanizeError(e: unknown): string {

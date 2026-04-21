@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  findNodeHandle,
   InteractionManager,
   Keyboard,
   Modal,
@@ -28,8 +29,7 @@ import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
 import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-up-input-sanitize';
-import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { requestPhoneNumberHint } from '@/src/lib/phone-number-hint';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
@@ -59,38 +59,24 @@ export default function SignUpScreen() {
   const [emailDomain, setEmailDomain] = useState<'gmail.com' | 'naver.com' | 'daum.net' | 'kakao.com' | 'hotmail.com' | 'icloud.com'>(
     'gmail.com',
   );
-  const [customEmailDomain, setCustomEmailDomain] = useState('');
-  const [useCustomEmailDomain, setUseCustomEmailDomain] = useState(false);
+  const [emailDomainMode, setEmailDomainMode] = useState<'preset' | 'manual'>('manual');
   const [emailLocal, setEmailLocal] = useState('');
+  const [emailFull, setEmailFull] = useState('');
   const [domainPickerOpen, setDomainPickerOpen] = useState(false);
   const [otpVerificationId, setOtpVerificationId] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
   const [verifiedFirebaseUid, setVerifiedFirebaseUid] = useState<string | null>(null);
-  const [phoneHintBusy, setPhoneHintBusy] = useState(false);
   const [genderY, setGenderY] = useState<number | null>(null);
   const [submitY, setSubmitY] = useState<number | null>(null);
 
   const composedEmail = useMemo(() => {
+    if (emailDomainMode === 'manual') return emailFull.trim();
     const left = emailLocal.trim();
     if (!left) return '';
-    const domainRaw = useCustomEmailDomain ? customEmailDomain : emailDomain;
-    const domain = String(domainRaw).trim();
-    if (!domain) return '';
-    return `${left}@${domain}`;
-  }, [emailLocal, emailDomain, customEmailDomain, useCustomEmailDomain]);
-
-  const effectiveEmailDomainLabel = useMemo(() => {
-    const raw = useCustomEmailDomain ? customEmailDomain : emailDomain;
-    const t = String(raw).trim();
-    return t || emailDomain;
-  }, [customEmailDomain, emailDomain, useCustomEmailDomain]);
-
-  const sanitizeDomain = useCallback((raw: string) => {
-    const t = raw.trim().toLowerCase().replace(/^@+/, '');
-    return t.replace(/[^a-z0-9.-]/g, '');
-  }, []);
+    return `${left}@${emailDomain}`;
+  }, [emailDomainMode, emailFull, emailLocal, emailDomain]);
 
   const focusName = useCallback(() => {
     requestAnimationFrame(() => {
@@ -115,6 +101,20 @@ export default function SignUpScreen() {
     if (submitY == null) return;
     scrollRef.current?.scrollToPosition(0, Math.max(0, submitY - 14), true);
   }, [submitY]);
+
+  const formatPhoneKrDisplay = useCallback((digitsOnly: string) => {
+    const d = digitsOnly.replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 7) return `${d.slice(0, 3)}-${d.slice(3)}`;
+    return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7, 11)}`;
+  }, []);
+
+  const scrollToFocused = useCallback((r: React.RefObject<TextInputRefType>) => {
+    const node = r.current ? findNodeHandle(r.current) : null;
+    if (!node) return;
+    // KeyboardAwareScrollView 내부 로직을 그대로 활용해 "키보드 위로" 올립니다.
+    scrollRef.current?.scrollToFocusedInput?.(node);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -145,7 +145,7 @@ export default function SignUpScreen() {
   const canSendOtp = !!normalizedPhone && memberStatus === 'guest' && !busy && !otpBusy && !verifiedFirebaseUid;
   const canConfirmOtp = !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy && !busy && !verifiedFirebaseUid;
 
-  // 이메일 입력은 "아이디(골뱅이 앞)" + 도메인 선택으로 구성하고,
+  // 이메일 입력은 "도메인 선택" 또는 "직접 입력" 모드를 지원하고,
   // 실제 저장 값은 hook의 emailField로 동기화합니다.
   useEffect(() => {
     setEmailField(composedEmail);
@@ -170,13 +170,6 @@ export default function SignUpScreen() {
     setOtpBusy(true);
     setOtpError(null);
     try {
-      // Android: SMS Retriever는 "자동 감지" 보조 기능입니다.
-      // 일부 기기/환경에서 startListening이 실패/타임아웃할 수 있으므로, 실패해도 OTP 전송은 계속 진행합니다.
-      try {
-        await smsRetriever.start();
-      } catch {
-        /* 자동 감지 불가 — 수동 입력으로 진행 */
-      }
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
       requestAnimationFrame(() => otpInputRef.current?.focus());
@@ -186,25 +179,7 @@ export default function SignUpScreen() {
     } finally {
       setOtpBusy(false);
     }
-  }, [normalizedPhone, canSendOtp, smsRetriever]);
-
-  const onUsePhoneHint = useCallback(async () => {
-    if (Platform.OS !== 'android') return;
-    if (busy || otpBusy || verifiedFirebaseUid) return;
-    setPhoneHintBusy(true);
-    try {
-      const e164 = await requestPhoneNumberHint();
-      const normalized = e164 ? normalizePhoneUserId(e164) : null;
-      if (normalized) {
-        // UI는 로컬 표기(010...)로 채우고, 내부는 normalizePhoneUserId로 처리합니다.
-        setPhoneField(formatNormalizedPhoneKrDisplay(normalized));
-      }
-    } catch {
-      /* 사용자가 닫았거나 힌트가 없음 */
-    } finally {
-      setPhoneHintBusy(false);
-    }
-  }, [busy, otpBusy, verifiedFirebaseUid, setPhoneField]);
+  }, [normalizedPhone, canSendOtp]);
 
   const onConfirmOtp = useCallback(async () => {
     if (!otpVerificationId || !canConfirmOtp) return;
@@ -334,41 +309,84 @@ export default function SignUpScreen() {
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>이메일 (필수)</Text>
                 <View style={emailCombo.row}>
-                  <Pressable
-                    onPress={() => emailInputRef.current?.focus()}
-                    style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
-                    <TextInput
-                      ref={emailInputRef}
-                      value={emailLocal}
-                      onChangeText={(t) => setEmailLocal(sanitizeSignUpEmail(t).replace(/@.*/g, ''))}
-                      placeholder="이메일"
-                      placeholderTextColor="#94a3b8"
-                      style={[styles.fullWidthInput, emailCombo.leftInput]}
-                      keyboardType="email-address"
-                      inputMode="email"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      autoComplete="email"
-                      textContentType="emailAddress"
-                      importantForAutofill="yes"
-                      returnKeyType="next"
-                      enterKeyHint="next"
-                      submitBehavior="blurAndSubmit"
-                      onSubmitEditing={focusName}
-                      editable={!busy}
-                      selectTextOnFocus
-                    />
-                  </Pressable>
-                  <Text style={emailCombo.at}>@</Text>
-                  <Pressable
-                    onPress={() => setDomainPickerOpen(true)}
-                    disabled={busy}
-                    style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel="이메일 도메인 선택">
-                    <Text style={emailCombo.domainText}>{effectiveEmailDomainLabel}</Text>
-                    <Text style={emailCombo.domainArrow}>▾</Text>
-                  </Pressable>
+                  {emailDomainMode === 'manual' ? (
+                    <>
+                      <Pressable
+                        onPress={() => emailInputRef.current?.focus()}
+                        style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
+                        <TextInput
+                          ref={emailInputRef}
+                          value={emailFull}
+                          onChangeText={(t) => setEmailFull(sanitizeSignUpEmail(t))}
+                          placeholder="name@example.com"
+                          placeholderTextColor="#94a3b8"
+                          style={[styles.fullWidthInput, emailCombo.leftInput]}
+                          keyboardType="email-address"
+                          inputMode="email"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          autoComplete="email"
+                          textContentType="emailAddress"
+                          importantForAutofill="yes"
+                          returnKeyType="next"
+                          enterKeyHint="next"
+                          submitBehavior="blurAndSubmit"
+                      onFocus={() => scrollToFocused(emailInputRef)}
+                          onSubmitEditing={focusName}
+                          editable={!busy}
+                          selectTextOnFocus
+                        />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setDomainPickerOpen(true)}
+                        disabled={busy}
+                        style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="이메일 도메인 선택">
+                        <Text style={emailCombo.domainText}>직접 입력</Text>
+                        <Text style={emailCombo.domainArrow}>▾</Text>
+                      </Pressable>
+                    </>
+                  ) : (
+                    <>
+                      <Pressable
+                        onPress={() => emailInputRef.current?.focus()}
+                        style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
+                        <TextInput
+                          ref={emailInputRef}
+                          value={emailLocal}
+                          onChangeText={(t) => setEmailLocal(sanitizeSignUpEmail(t).replace(/@.*/g, ''))}
+                          placeholder="이메일"
+                          placeholderTextColor="#94a3b8"
+                          style={[styles.fullWidthInput, emailCombo.leftInput]}
+                          keyboardType="email-address"
+                          inputMode="email"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          autoComplete="email"
+                          textContentType="emailAddress"
+                          importantForAutofill="yes"
+                          returnKeyType="next"
+                          enterKeyHint="next"
+                          submitBehavior="blurAndSubmit"
+                          onFocus={() => scrollToFocused(emailInputRef)}
+                          onSubmitEditing={focusName}
+                          editable={!busy}
+                          selectTextOnFocus
+                        />
+                      </Pressable>
+                      <Text style={emailCombo.at}>@</Text>
+                      <Pressable
+                        onPress={() => setDomainPickerOpen(true)}
+                        disabled={busy}
+                        style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="이메일 도메인 선택">
+                        <Text style={emailCombo.domainText}>{emailDomain}</Text>
+                        <Text style={emailCombo.domainArrow}>▾</Text>
+                      </Pressable>
+                    </>
+                  )}
                 </View>
                 <Text style={emailCombo.hint}>이메일은 로그인 아이디로 사용됩니다.</Text>
               </View>
@@ -383,6 +401,7 @@ export default function SignUpScreen() {
                     value={displayName}
                     onChangeText={(t) => setDisplayName(sanitizeSignUpDisplayName(t))}
                     onFocus={() => {
+                      scrollToFocused(displayNameInputRef);
                       if (Platform.OS === 'android') {
                         requestAnimationFrame(() => hintKoreanImeForFocusedInput());
                         setTimeout(() => hintKoreanImeForFocusedInput(), 60);
@@ -411,15 +430,16 @@ export default function SignUpScreen() {
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>전화번호 (필수)</Text>
                 <View style={styles.phoneRow}>
-                  <View style={[styles.countryCodeBtn, styles.countryCodeBtnReadOnly]} pointerEvents="none">
-                    <Text style={styles.countryCodeText}>+82</Text>
-                    <Text style={styles.countryCodeArrow}>▾</Text>
-                  </View>
                   <TextInput
                     ref={phoneInputRef}
                     value={phoneField}
-                    onChangeText={(t) => setPhoneField(t)}
-                    placeholder="전화번호 입력 (- 없이)"
+                    onChangeText={(t) => {
+                      // 입력은 사용자가 익숙한 010... 로 받되, 전송 시 normalizePhoneUserId가 +82...로 변환합니다.
+                      const digits = t.replace(/\D/g, '').slice(0, 11);
+                      setPhoneField(formatPhoneKrDisplay(digits));
+                    }}
+                    onFocus={() => scrollToFocused(phoneInputRef)}
+                    placeholder="전화번호 입력 (010부터)"
                     placeholderTextColor="#94a3b8"
                     style={styles.phoneInputNew}
                     keyboardType="phone-pad"
@@ -439,36 +459,20 @@ export default function SignUpScreen() {
                       });
                     }}
                   />
-                </View>
-                {Platform.OS === 'android' ? (
-                  <Pressable
-                    onPress={() => void onUsePhoneHint()}
-                    disabled={phoneHintBusy || busy || otpBusy || !!verifiedFirebaseUid}
-                    style={({ pressed }) => [
-                      otpStyles.otpBtn,
-                      (phoneHintBusy || busy || otpBusy || !!verifiedFirebaseUid) && otpStyles.otpBtnDisabled,
-                      pressed && !(phoneHintBusy || busy || otpBusy || !!verifiedFirebaseUid) && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="전화번호 자동 입력">
-                    <Text style={otpStyles.otpBtnText}>{phoneHintBusy ? '불러오는 중…' : '전화번호 자동 입력'}</Text>
-                  </Pressable>
-                ) : null}
-                <View style={otpStyles.otpActionsRow}>
                   <Pressable
                     onPress={() => void onSendOtp()}
                     disabled={!canSendOtp}
                     style={({ pressed }) => [
-                      otpStyles.otpBtn,
-                      !canSendOtp && otpStyles.otpBtnDisabled,
+                      otpStyles.sendInlineBtn,
+                      !canSendOtp && otpStyles.sendInlineBtnDisabled,
                       pressed && canSendOtp && styles.pressed,
                     ]}
                     accessibilityRole="button"
                     accessibilityLabel="인증번호 받기">
-                    <Text style={otpStyles.otpBtnText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
+                    <Text style={otpStyles.sendInlineText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
                   </Pressable>
-                  {verifiedFirebaseUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
                 </View>
+                {verifiedFirebaseUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
 
                 {otpVerificationId && !verifiedFirebaseUid ? (
                   <View style={otpStyles.otpRow}>
@@ -476,6 +480,7 @@ export default function SignUpScreen() {
                       ref={otpInputRef}
                       value={otpCode}
                       onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
+                      onFocus={() => scrollToFocused(otpInputRef)}
                       placeholder="인증번호 6자리"
                       placeholderTextColor="#94a3b8"
                       style={otpStyles.otpInput}
@@ -483,7 +488,7 @@ export default function SignUpScreen() {
                       inputMode="numeric"
                       textContentType="oneTimeCode"
                       autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
-                      editable={!otpBusy && !busy}
+                      editable={!verifiedFirebaseUid && !otpBusy && !busy}
                       selectTextOnFocus
                       returnKeyType="done"
                       enterKeyHint="done"
@@ -511,6 +516,24 @@ export default function SignUpScreen() {
                 <Pressable style={emailCombo.modalDim} onPress={() => setDomainPickerOpen(false)}>
                   <View style={emailCombo.modalCard}>
                     <Text style={emailCombo.modalTitle}>이메일 도메인 선택</Text>
+                    <Pressable
+                      onPress={() => {
+                        setEmailDomainMode('manual');
+                        const prev = composedEmail.trim();
+                        if (prev) setEmailFull(prev);
+                        setDomainPickerOpen(false);
+                      }}
+                      style={({ pressed }) => [emailCombo.domainRow, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="직접 입력">
+                      <Text
+                        style={[
+                          emailCombo.domainRowText,
+                          emailDomainMode === 'manual' && emailCombo.domainRowTextSelected,
+                        ]}>
+                        직접 입력
+                      </Text>
+                    </Pressable>
                     {(
                       [
                         'gmail.com',
@@ -527,7 +550,11 @@ export default function SignUpScreen() {
                           key={d}
                           onPress={() => {
                             setEmailDomain(d);
-                            setUseCustomEmailDomain(false);
+                            setEmailDomainMode('preset');
+                            if (emailFull.trim()) {
+                              const left = emailFull.trim().split('@')[0] ?? '';
+                              if (left) setEmailLocal(left);
+                            }
                             setDomainPickerOpen(false);
                           }}
                           style={({ pressed }) => [emailCombo.domainRow, pressed && styles.pressed]}
@@ -537,38 +564,6 @@ export default function SignUpScreen() {
                         </Pressable>
                       );
                     })}
-                    <View style={emailCombo.customDivider} />
-                    <Text style={emailCombo.customTitle}>직접 입력</Text>
-                    <View style={emailCombo.customRow}>
-                      <Text style={emailCombo.customAt}>@</Text>
-                      <TextInput
-                        value={customEmailDomain}
-                        onChangeText={(t) => setCustomEmailDomain(sanitizeDomain(t))}
-                        placeholder="example.com"
-                        placeholderTextColor="#94a3b8"
-                        style={emailCombo.customInput}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        keyboardType="url"
-                        inputMode="text"
-                        returnKeyType="done"
-                        enterKeyHint="done"
-                        editable={!busy}
-                      />
-                      <Pressable
-                        onPress={() => {
-                          const d = sanitizeDomain(customEmailDomain);
-                          if (!d) return;
-                          setCustomEmailDomain(d);
-                          setUseCustomEmailDomain(true);
-                          setDomainPickerOpen(false);
-                        }}
-                        style={({ pressed }) => [emailCombo.customApplyBtn, pressed && styles.pressed]}
-                        accessibilityRole="button"
-                        accessibilityLabel="직접 입력 도메인 적용">
-                        <Text style={emailCombo.customApplyText}>적용</Text>
-                      </Pressable>
-                    </View>
                   </View>
                 </Pressable>
               </Modal>
@@ -754,73 +749,41 @@ const emailCombo = StyleSheet.create({
   domainRowTextSelected: {
     color: '#0052CC',
   },
-  customDivider: {
-    marginTop: 10,
-    marginBottom: 10,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  customTitle: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#0f172a',
-    marginBottom: 8,
-  },
-  customRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  customAt: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#64748b',
-    marginTop: -1,
-  },
-  customInput: {
-    flex: 1,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 12,
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  customApplyBtn: {
-    height: 44,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0, 82, 204, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  customApplyText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#0052CC',
-  },
 });
 
 const otpStyles = StyleSheet.create({
-  otpActionsRow: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   otpBtn: {
     height: 42,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: 'rgba(0, 82, 204, 0.10)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.22)',
+    borderColor: 'rgba(31, 42, 68, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   otpBtnDisabled: { opacity: 0.4 },
-  otpBtnText: { fontSize: 14, fontWeight: '900', color: '#0052CC' },
-  verifiedBadge: { fontSize: 12, fontWeight: '900', color: '#16a34a' },
+  otpBtnText: { fontSize: 14, fontWeight: '900', color: GinitTheme.colors.primary },
+  sendInlineBtn: {
+    height: 48,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(31, 42, 68, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendInlineBtnDisabled: { opacity: 0.4 },
+  sendInlineText: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.primary },
+  verifiedBadge: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.success,
+  },
   otpRow: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   otpInput: {
     flex: 1,
@@ -844,5 +807,5 @@ const otpStyles = StyleSheet.create({
   },
   confirmBtnDisabled: { opacity: 0.35 },
   confirmText: { fontSize: 14, fontWeight: '900', color: '#fff' },
-  otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: '#ef4444' },
+  otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.danger },
 });

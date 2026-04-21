@@ -79,6 +79,7 @@ function KeyboardAwareScreenScroll(
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       enableOnAndroid
+      enableAutomaticScroll
       enableResetScrollToCoords
       extraScrollHeight={resolvedExtraScrollHeight}
       extraHeight={resolvedExtraHeight}
