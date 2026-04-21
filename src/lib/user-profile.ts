@@ -123,29 +123,8 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
   const snap = await getDoc(dRef);
   if (snap.exists()) {
     const mapped = mapUserDoc(snap.data() as Record<string, unknown>);
-    if (mapped.isWithdrawn === true) {
-      const nickname = generateRandomNickname();
-      const uid = getFirebaseAuth().currentUser?.uid?.trim() ?? '';
-      await setDoc(
-        dRef,
-        stripUndefinedDeep({
-          nickname,
-          photoUrl: null,
-          isWithdrawn: false,
-          withdrawnAt: deleteField(),
-          email: null,
-          displayName: null,
-          gender: null,
-          birthYear: null,
-          birthMonth: null,
-          birthDay: null,
-          firebaseUid: uid || null,
-          updatedAt: serverTimestamp(),
-        }) as Record<string, unknown>,
-        { merge: true },
-      );
-      return { nickname, photoUrl: null, isWithdrawn: false };
-    }
+    // 탈퇴 계정은 자동으로 재활성화하지 않습니다(재가입 플로우에서만 명시적으로 처리).
+    if (mapped.isWithdrawn === true) return mapped;
     return mapped;
   }
   const nickname = generateRandomNickname();

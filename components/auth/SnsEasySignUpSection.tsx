@@ -1,5 +1,5 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import {
@@ -123,7 +123,7 @@ export function SnsEasySignUpSection({ onGooglePress, googleDisabled, googleLoad
           accessibilityLabel="카카오톡으로 시작하기"
           icon={
             <View style={secStyles.kakaoMark} accessibilityElementsHidden>
-              <MaterialCommunityIcons name="chat" size={15} color={KAKAO_INK} />
+              <Ionicons name="chatbubble-ellipses" size={15} color={KAKAO_INK} />
             </View>
           }
         />

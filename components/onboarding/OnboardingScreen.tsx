@@ -1,4 +1,4 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
@@ -62,11 +62,11 @@ function paramToString(v: string | string[] | undefined): string | undefined {
 function IllustrationPlaceholder({ kind }: { kind: IllustrationKind }) {
   const icon =
     kind === 'gathering' ? (
-      <MaterialCommunityIcons name="account-group-outline" size={56} color="#64748b" />
+      <Ionicons name="people-outline" size={56} color="#64748b" />
     ) : kind === 'calendar' ? (
-      <MaterialCommunityIcons name="calendar-clock-outline" size={56} color="#64748b" />
+      <Ionicons name="calendar-outline" size={56} color="#64748b" />
     ) : (
-      <MaterialCommunityIcons name="image-multiple-outline" size={56} color="#64748b" />
+      <Ionicons name="images-outline" size={56} color="#64748b" />
     );
   return (
     <View style={illusStyles.frame} accessibilityLabel="일러스트 영역(추후 이미지 삽입)">

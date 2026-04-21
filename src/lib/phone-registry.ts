@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { getUserProfile } from '@/src/lib/user-profile';
+import { getUserProfile, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
 /** 로컬에 등록된 전화 PK 목록 (서버 대체 — 보안 가이드상 기기 번호 기반 자동 가입) */
 const REGISTRY_KEY = 'ginit.phoneRegistry.v1';
@@ -28,12 +28,16 @@ export async function isPhoneRegisteredLocally(normalizedPhone: string): Promise
 export async function isPhoneRegistered(normalizedPhone: string): Promise<boolean> {
   const id = normalizedPhone.trim();
   if (!id) return false;
-  if (await isPhoneRegisteredLocally(id)) return true;
   try {
+    const locally = await isPhoneRegisteredLocally(id);
     const p = await getUserProfile(id);
-    return p !== null;
+    if (!p) return false;
+    // 탈퇴 계정은 "가입된 회원"으로 취급하지 않아야 로그인 화면에서 시작합니다.
+    return !isUserProfileWithdrawn(p);
   } catch {
-    return false;
+    // 네트워크가 불안정해 서버 확인이 불가하면 로컬 등록 여부로만 판단합니다.
+    // (단, 서버에서 탈퇴된 계정은 online 시 즉시 login으로 돌아오게 됩니다.)
+    return await isPhoneRegisteredLocally(id);
   }
 }
 
