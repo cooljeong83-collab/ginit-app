@@ -2,10 +2,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Alert,
   Animated,
   findNodeHandle,
   InteractionManager,
@@ -35,6 +36,7 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-up-input-sanitize';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
+import { hasLoginableUserForPhoneE164 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 
 function paramToString(v: string | string[] | undefined): string {
@@ -60,7 +62,8 @@ export default function SignUpScreen() {
   const otpInputRef = useRef<TextInputRefType>(null);
   /** 전화 입력 완료 후 키보드/접근성 포커스를 인증번호 받기 쪽으로 옮깁니다. */
   const sendOtpFocusHostRef = useRef<View | null>(null);
-  const prevCanSendOtpRef = useRef(false);
+  /** onChangeText 클로저·플랫폼 버그 대비: 마지막으로 확정된 숫자만 문자열 */
+  const lastPhoneDigitsRef = useRef('');
   const [emailDomain, setEmailDomain] = useState<'gmail.com' | 'naver.com' | 'daum.net' | 'kakao.com' | 'hotmail.com' | 'icloud.com'>(
     'gmail.com',
   );
@@ -120,7 +123,7 @@ export default function SignUpScreen() {
     return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7, 11)}`;
   }, []);
 
-  const scrollToFocused = useCallback((r: React.RefObject<TextInputRefType>) => {
+  const scrollToFocused = useCallback((r: React.RefObject<TextInputRefType | null>) => {
     const node = r.current ? findNodeHandle(r.current) : null;
     if (!node) return;
     // KeyboardAwareScrollView 내부 로직을 그대로 활용해 "키보드 위로" 올립니다.
@@ -154,8 +157,15 @@ export default function SignUpScreen() {
 
   const smsRetriever = useOtpSmsRetriever({ onCode: setOtpCode });
 
+  useLayoutEffect(() => {
+    lastPhoneDigitsRef.current = phoneField.replace(/\D/g, '');
+  }, [phoneField]);
+
   const normalizedPhone = useMemo(() => normalizePhoneUserId(phoneField), [phoneField]);
-  const canSendOtp = !!normalizedPhone && memberStatus === 'guest' && !busy && !otpBusy && !verifiedFirebaseUid;
+  const phoneDigitCount = useMemo(() => phoneField.replace(/\D/g, '').length, [phoneField]);
+  /** 회원 여부와 관계없이 탭 가능. 11자리·유효 번호일 때만 실제 전송은 `onSendOtp`에서 진행합니다. */
+  const canSendOtp =
+    phoneDigitCount === 11 && !!normalizedPhone && !busy && !otpBusy && !verifiedFirebaseUid;
   const canConfirmOtp = !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy && !busy && !verifiedFirebaseUid;
 
   // 이메일 입력은 "도메인 선택" 또는 "직접 입력" 모드를 지원하고,
@@ -198,21 +208,18 @@ export default function SignUpScreen() {
     }
   }, []);
 
-  /** 11자리 입력 직후 + 인증번호 받기가 활성화되는 순간 포커스 이동 */
-  useEffect(() => {
-    const digitsLen = phoneField.replace(/\D/g, '').length;
-    const becameEnabled = canSendOtp && !prevCanSendOtpRef.current;
-    prevCanSendOtpRef.current = canSendOtp;
-    if (digitsLen === 11 && becameEnabled) {
-      requestAnimationFrame(() => focusSendOtpControl());
-    }
-  }, [canSendOtp, phoneField, focusSendOtpControl]);
-
   const onSendOtp = useCallback(async () => {
     if (!normalizedPhone || !canSendOtp) return;
     setOtpBusy(true);
     setOtpError(null);
     try {
+      const alreadyMember = await hasLoginableUserForPhoneE164(normalizedPhone);
+      if (alreadyMember) {
+        const msg = '이 번호는 이미 가입되어 있어요. 로그인 화면으로 돌아가 주세요.';
+        setOtpError(msg);
+        Alert.alert('안내', msg);
+        return;
+      }
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
       requestAnimationFrame(() => otpInputRef.current?.focus());
@@ -365,7 +372,7 @@ export default function SignUpScreen() {
                           placeholderTextColor="#94a3b8"
                           style={[styles.fullWidthInput, emailCombo.leftInput]}
                           keyboardType="email-address"
-                          inputMode="email"
+                          inputMode={Platform.OS === 'web' ? 'email' : undefined}
                           autoCapitalize="none"
                           autoCorrect={false}
                           autoComplete="email"
@@ -403,7 +410,7 @@ export default function SignUpScreen() {
                           placeholderTextColor="#94a3b8"
                           style={[styles.fullWidthInput, emailCombo.leftInput]}
                           keyboardType="email-address"
-                          inputMode="email"
+                          inputMode={Platform.OS === 'web' ? 'email' : undefined}
                           autoCapitalize="none"
                           autoCorrect={false}
                           autoComplete="email"
@@ -479,6 +486,12 @@ export default function SignUpScreen() {
                     onChangeText={(t) => {
                       // 입력은 사용자가 익숙한 010... 로 받되, 전송 시 normalizePhoneUserId가 +82...로 변환합니다.
                       const digits = t.replace(/\D/g, '').slice(0, 11);
+                      const prev = lastPhoneDigitsRef.current;
+                      // 11자리 완성 직후 RN Web 등에서 한 이벤트로 '4'처럼 짧은 문자열만 넘어와 전체가 지워지는 경우 방지(접두어 유지 편집은 허용)
+                      if (prev.length === 11 && digits.length > 0 && digits.length <= 4 && !prev.startsWith(digits)) {
+                        return;
+                      }
+                      lastPhoneDigitsRef.current = digits;
                       setPhoneField(formatPhoneKrDisplay(digits));
                     }}
                     onFocus={() => scrollToFocused(phoneInputRef)}
@@ -487,18 +500,22 @@ export default function SignUpScreen() {
                     style={styles.phoneInputNew}
                     keyboardType="phone-pad"
                     inputMode="tel"
-                    autoComplete="tel"
-                    textContentType="telephoneNumber"
-                    importantForAutofill="yes"
+                    autoComplete={Platform.OS === 'android' ? 'off' : 'tel'}
+                    textContentType={Platform.OS === 'ios' ? 'telephoneNumber' : undefined}
+                    importantForAutofill={Platform.OS === 'android' ? 'no' : 'yes'}
                     autoCapitalize="none"
                     editable={!busy && !otpBusy && !verifiedFirebaseUid}
                     selectTextOnFocus
                     returnKeyType="done"
                     enterKeyHint="done"
                     onSubmitEditing={() => {
-                      if (normalizedPhone) {
+                      if (normalizedPhone && canSendOtp) {
                         Keyboard.dismiss();
                         requestAnimationFrame(() => focusSendOtpControl());
+                        return;
+                      }
+                      if (normalizedPhone && memberStatus === 'checking') {
+                        Keyboard.dismiss();
                         return;
                       }
                       Keyboard.dismiss();

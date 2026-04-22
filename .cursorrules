@@ -1,0 +1,14 @@
+# 플랫폼별 원칙
+- Android(Galaxy S26 Ultra), iOS, Web(Universal) 코드를 동시 지원하되, 플랫폼별 분기 처리를 철저히 할 것.
+
+# 수정 범위 제한 (성역화)
+- 요청하지 않은 UI 스타일(Padding, Margin, FontSize)은 1px도 변경하지 말 것.
+- 영어 전용 TextInput의 keyboardType="ascii-capable" 속성을 임의로 숫자로 바꾸지 말 것.
+
+# 로직 분리 철저
+- 로그아웃(Logout): signOut()과 로컬 토큰 삭제만 수행.
+- 회원탈퇴(Withdrawal): deleteUser()와 DB 데이터 파기 수행. 둘을 절대 혼동하지 말 것.
+
+# 작업 방식
+- 수정 전 '수정 계획서'를 제출하여 승인을 먼저 받을 것.
+- 기존 코드를 '정리'하거나 '최적화'하려는 시도를 하지 말고, 최소한의 라인만 수정할 것.s

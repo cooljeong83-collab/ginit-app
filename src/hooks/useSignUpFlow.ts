@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, ToastAndroid } from 'react-native';
 
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { isPhoneRegistered, registerPhoneIfNew, registerSignupLocalKeys } from '@/src/lib/phone-registry';
+import { registerPhoneIfNew, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
-import { applyGoogleSignupProfile, ensureUserProfile, generateRandomNickname, recordTermsAgreement } from '@/src/lib/user-profile';
+import {
+  applyGoogleSignupProfile,
+  ensureUserProfile,
+  generateRandomNickname,
+  hasLoginableUserForPhoneE164,
+  recordTermsAgreement,
+} from '@/src/lib/user-profile';
 
 /** 전화번호 입력이 멈춘 뒤 짧게 기다렸다가 회원 조회(과도한 호출·레이스 완화) */
 const PHONE_MEMBER_CHECK_DEBOUNCE_MS = 220;
@@ -38,6 +44,8 @@ export function useSignUpFlow(initialPhone: string) {
   const { setUserId, setAuthProfile } = useUserSession();
   const [displayName, setDisplayName] = useState('');
   const [phoneField, setPhoneField] = useState(initialPhone);
+  /** 전화 이펙트가 겹칠 때 이전 회원 조회 결과가 상태를 덮어쓰지 않게 함 */
+  const memberPhoneCheckSeqRef = useRef(0);
   const [emailField, setEmailField] = useState('');
   const [memberStatus, setMemberStatus] = useState<SignUpMemberStatus>('unknown');
   const [genderCode, setGenderCode] = useState<SignUpGenderCode | null>(null);
@@ -50,27 +58,44 @@ export function useSignUpFlow(initialPhone: string) {
   }, [initialPhone]);
 
   useEffect(() => {
-    let cancelled = false;
+    const mySeq = ++memberPhoneCheckSeqRef.current;
     const n = normalizePhoneUserId(phoneField);
     if (!n) {
       setMemberStatus('unknown');
       return;
     }
-    setMemberStatus('checking');
+    const digitsOnly = phoneField.replace(/\D/g, '');
+    /** 11자리 완성 시에는 바로 조회(인증번호 받기가 `guest`까지 기다리지 않게) */
+    const delay = digitsOnly.length === 11 ? 0 : PHONE_MEMBER_CHECK_DEBOUNCE_MS;
+    /** 입력 중 매 키마다 `checking`으로 리렌더하면 RN Web 등에서 전화 입력 값이 깨지는 경우가 있어,
+     *  `checking`은 디바운스 타이머 안에서만 설정합니다. */
+    const snapshotN = n;
     const t = setTimeout(() => {
+      if (memberPhoneCheckSeqRef.current !== mySeq) return;
+      setMemberStatus('checking');
       void (async () => {
         try {
-          const ok = await isPhoneRegistered(n);
-          if (cancelled) return;
-          setMemberStatus(ok ? 'member' : 'guest');
+          const MEMBER_CHECK_TIMEOUT_MS = 8000;
+          const race = await Promise.race([
+            hasLoginableUserForPhoneE164(snapshotN).then((v) => ({ kind: 'ok' as const, v })),
+            new Promise<{ kind: 'timeout' }>((resolve) => setTimeout(() => resolve({ kind: 'timeout' }), MEMBER_CHECK_TIMEOUT_MS)),
+          ]);
+          if (memberPhoneCheckSeqRef.current !== mySeq) return;
+          if (race.kind === 'timeout') {
+            // 오래 걸리면 가입 진행을 막지 않음(OTP·서버에서 최종 검증)
+            setMemberStatus('guest');
+            return;
+          }
+          setMemberStatus(race.v ? 'member' : 'guest');
         } catch {
           // 네트워크 실패 시 OTP까지 막지 않음(서버에서 중복 가입은 이후 단계에서 걸림)
-          if (!cancelled) setMemberStatus('guest');
+          if (memberPhoneCheckSeqRef.current === mySeq) {
+            setMemberStatus('guest');
+          }
         }
       })();
-    }, PHONE_MEMBER_CHECK_DEBOUNCE_MS);
+    }, delay);
     return () => {
-      cancelled = true;
       clearTimeout(t);
     };
   }, [phoneField]);

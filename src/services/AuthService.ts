@@ -1,4 +1,12 @@
-import { FirebaseAuthTypes, PhoneAuthProvider, getAuth } from '@react-native-firebase/auth';
+import {
+  FirebaseAuthTypes,
+  PhoneAuthProvider,
+  getAuth,
+  onAuthStateChanged as onFirebaseAuthStateChanged,
+  signInWithCredential,
+  signOut as firebaseSignOut,
+  verifyPhoneNumber as startFirebasePhoneVerification,
+} from '@react-native-firebase/auth';
 
 export type PhoneVerificationResult = { verificationId: string };
 
@@ -32,7 +40,9 @@ export class AuthService {
    */
   static async verifyPhoneNumber(phoneE164: string): Promise<PhoneVerificationResult> {
     try {
-      const session = getAuth().verifyPhoneNumber(phoneE164);
+      const auth = getAuth();
+      /** `false` = 기본 자동검증 타임아웃(60초)·강제 재전송 없음 — 구 `auth().verifyPhoneNumber(phone)`과 동일 */
+      const session = startFirebasePhoneVerification(auth, phoneE164, false);
       const verificationId = await new Promise<string>((resolve, reject) => {
         const unsubRef: { current: UnsubLike } = { current: null };
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -70,8 +80,9 @@ export class AuthService {
   /** OTP 코드 확정 → Firebase 로그인 */
   static async confirmCode(verificationId: string, code: string): Promise<FirebaseAuthTypes.UserCredential> {
     try {
+      const auth = getAuth();
       const credential = PhoneAuthProvider.credential(verificationId, code.trim());
-      return await getAuth().signInWithCredential(credential);
+      return await signInWithCredential(auth, credential);
     } catch (e) {
       throw new Error(AuthService.humanizeError(e));
     }
@@ -79,11 +90,11 @@ export class AuthService {
 
   /** 앱 재실행 시 자동 로그인용 auth state 감제 */
   static onAuthStateChanged(cb: (u: FirebaseAuthTypes.User | null) => void): () => void {
-    return getAuth().onAuthStateChanged(cb);
+    return onFirebaseAuthStateChanged(getAuth(), cb);
   }
 
   static async signOut(): Promise<void> {
-    await getAuth().signOut();
+    await firebaseSignOut(getAuth());
   }
 
   static humanizeError(e: unknown): string {

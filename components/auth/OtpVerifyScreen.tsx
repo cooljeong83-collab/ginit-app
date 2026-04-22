@@ -16,7 +16,7 @@ import {
   reactivateWithdrawnUserForOtpSignup,
   recordTermsAgreement,
 } from '@/src/lib/user-profile';
-import auth from '@react-native-firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
 
 type TermKey = 'tos' | 'privacy' | 'safety';
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
@@ -98,7 +98,7 @@ export default function OtpVerifyScreen() {
     if (!allRequiredChecked || busy) return;
     setBusy(true);
     try {
-      const e164 = auth().currentUser?.phoneNumber ?? phoneE164;
+      const e164 = getAuth().currentUser?.phoneNumber ?? phoneE164;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
         Alert.alert('오류', '전화번호 세션을 확인할 수 없습니다.');

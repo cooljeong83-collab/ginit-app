@@ -43,7 +43,7 @@ import {
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { isPhoneRegistered, registerSignupLocalKeys } from '@/src/lib/phone-registry';
+import { registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
@@ -151,6 +151,7 @@ export default function LoginScreen() {
   const debouncedPhone = useDebounced(phoneField, 480);
   const debouncedNormalized = useMemo(() => normalizePhoneUserId(debouncedPhone), [debouncedPhone]);
   const normalizedPhone = useMemo(() => normalizePhoneUserId(phoneField), [phoneField]);
+  const loginPhoneDigitCount = useMemo(() => phoneField.replace(/\D/g, '').length, [phoneField]);
 
   useEffect(() => {
     setPhoneField((prev) => (initialPhone && prev === '' ? initialPhone : prev));
@@ -165,9 +166,10 @@ export default function LoginScreen() {
     setLoginMemberStatus('checking');
     void (async () => {
       try {
-        const ok = await isPhoneRegistered(debouncedNormalized);
+        /** OTP 확인 시점과 동일: 실제 로그인 가능한 `users` 문서가 있을 때만 registered */
+        const docId = await resolveSessionUserIdFromVerifiedPhone(debouncedNormalized);
         if (cancelled) return;
-        setLoginMemberStatus(ok ? 'registered' : 'guest');
+        setLoginMemberStatus(docId ? 'registered' : 'guest');
       } catch {
         if (!cancelled) setLoginMemberStatus('unknown');
       }
@@ -190,7 +192,14 @@ export default function LoginScreen() {
     return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7, 11)}`;
   }, []);
 
-  const canSendLoginOtp = !!normalizedPhone && loginMemberStatus === 'registered' && !otpBusy;
+  /** debounce로 조회한 번호와 입력값이 같고, 그 번호로 로그인 가능할 때만 OTP 전송 가능 */
+  const phoneMatchesDebouncedLookup =
+    !!normalizedPhone && !!debouncedNormalized && normalizedPhone === debouncedNormalized;
+  const canSendLoginOtp =
+    loginPhoneDigitCount === 11 &&
+    phoneMatchesDebouncedLookup &&
+    loginMemberStatus === 'registered' &&
+    !otpBusy;
   const canConfirmLoginOtp =
     !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy;
 
@@ -222,7 +231,7 @@ export default function LoginScreen() {
       if (!n) throw new Error('전화번호를 확인할 수 없습니다.');
       const docId = await resolveSessionUserIdFromVerifiedPhone(n);
       if (!docId) {
-        throw new Error('가입된 계정을 찾지 못했어요. 회원가입을 먼저 진행해 주세요.');
+        throw new Error('회원 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
       }
       await setUserId(docId);
       await writeSecureAuthSession({ uid, userId: docId });
@@ -369,10 +378,16 @@ export default function LoginScreen() {
   const isExpoGo = Constants.appOwnership === 'expo';
 
   const goSignUp = useCallback(() => {
-    // 약관 동의 완료 후 회원가입 화면으로 이동
+    // 약관 동의 완료 후 회원가입 화면으로 이동 (로그인에 입력한 전화번호를 가입 화면에 전달)
     setPendingConsentAction(null);
-    router.push({ pathname: '/terms-agreement', params: { next: '/sign-up?consented=1' } });
-  }, [router]);
+    const digits = phoneField.replace(/\D/g, '').slice(0, 11);
+    const phoneQuery =
+      digits.length > 0 ? `&phone=${encodeURIComponent(formatPhoneKrDisplay(digits))}` : '';
+    router.push({
+      pathname: '/terms-agreement',
+      params: { next: `/sign-up?consented=1${phoneQuery}` },
+    });
+  }, [router, phoneField, formatPhoneKrDisplay]);
 
   const onIntroLogoLayout = useCallback(() => {
     if (logoDest != null) return;
@@ -644,7 +659,7 @@ export default function LoginScreen() {
 
                 <View style={loginScreenStyles.phoneLoginDivider} />
 
-                {loginMemberStatus === 'guest' && debouncedNormalized ? (
+                {loginMemberStatus === 'guest' && phoneMatchesDebouncedLookup ? (
                   <Text style={loginScreenStyles.loginGuestHintAboveSignup}>
                     이 번호로는 가입 이력이 없어요. 아래 가입하기로 회원가입을 진행해 주세요.
                   </Text>

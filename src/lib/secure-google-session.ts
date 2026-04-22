@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { compatDeleteItemAsync, compatGetItemAsync, compatSetItemAsync } from '@/src/lib/secure-store-compat';
 
 /**
  * Google/Firebase(JS SDK) 세션 보조 저장소.
@@ -19,12 +19,12 @@ export async function writeSecureGoogleSession(session: SecureGoogleSession): Pr
   const uid = session.uid.trim();
   if (!uid) return;
   const email = session.email?.trim() || null;
-  await SecureStore.setItemAsync(KEY, JSON.stringify({ uid, email }));
+  await compatSetItemAsync(KEY, JSON.stringify({ uid, email }));
 }
 
 export async function readSecureGoogleSession(): Promise<SecureGoogleSession | null> {
   try {
-    const raw = await SecureStore.getItemAsync(KEY);
+    const raw = await compatGetItemAsync(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SecureGoogleSession>;
     const uid = String(parsed.uid ?? '').trim();
@@ -38,7 +38,7 @@ export async function readSecureGoogleSession(): Promise<SecureGoogleSession | n
 
 export async function clearSecureGoogleSession(): Promise<void> {
   try {
-    await SecureStore.deleteItemAsync(KEY);
+    await compatDeleteItemAsync(KEY);
   } catch {
     /* noop */
   }

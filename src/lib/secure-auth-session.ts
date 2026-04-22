@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { compatDeleteItemAsync, compatGetItemAsync, compatSetItemAsync } from '@/src/lib/secure-store-compat';
 
 export type SecureAuthSession = {
   /** Firebase Auth uid */
@@ -15,12 +15,12 @@ export async function writeSecureAuthSession(session: SecureAuthSession): Promis
   const uid = session.uid.trim();
   const userId = session.userId.trim();
   if (!uid || !userId) return;
-  await SecureStore.setItemAsync(KEY, JSON.stringify({ uid, userId }));
+  await compatSetItemAsync(KEY, JSON.stringify({ uid, userId }));
 }
 
 export async function readSecureAuthSession(): Promise<SecureAuthSession | null> {
   try {
-    const raw = await SecureStore.getItemAsync(KEY);
+    const raw = await compatGetItemAsync(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as LegacyShape;
     if (!parsed.uid) return null;
@@ -35,7 +35,7 @@ export async function readSecureAuthSession(): Promise<SecureAuthSession | null>
 
 export async function clearSecureAuthSession(): Promise<void> {
   try {
-    await SecureStore.deleteItemAsync(KEY);
+    await compatDeleteItemAsync(KEY);
   } catch {
     /* noop */
   }

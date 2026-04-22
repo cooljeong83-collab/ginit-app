@@ -1,7 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { signOut as signOutJsAuth } from 'firebase/auth';
+
 import { clearStoredUserId, readStoredUserId, writeStoredUserId } from '@/src/lib/app-user-id';
 import { signOutGoogle } from '@/src/lib/google-sign-in';
+import { getFirebaseAuth } from '@/src/lib/firebase';
 import { clearSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { clearSecureGoogleSession } from '@/src/lib/secure-google-session';
 import { AuthService } from '@/src/services/AuthService';
@@ -69,21 +72,27 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOutSession = useCallback(async () => {
+    // 로그아웃(.cursorrules): Firebase signOut만 수행 — deleteUser/원격 탈퇴(purge)와 분리합니다.
+    try {
+      await AuthService.signOut();
+    } catch {
+      /* RN Phone Auth 세션 없음 등 */
+    }
+    try {
+      await signOutJsAuth(getFirebaseAuth());
+    } catch {
+      /* JS Auth 세션 없음/미초기화 등 */
+    }
+    try {
+      await signOutGoogle();
+    } catch {
+      /* 구글 네이티브/웹 세션 없음 등 */
+    }
     await clearStoredUserId();
     await clearSecureAuthSession();
     await clearSecureGoogleSession();
     setUserIdState(null);
     setAuthProfileState(null);
-    try {
-      await AuthService.signOut();
-    } catch {
-      /* Firebase 세션 없음 등 */
-    }
-    try {
-      await signOutGoogle();
-    } catch {
-      /* Firebase/구글 세션 없음 등 */
-    }
   }, []);
 
   const value = useMemo(

@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { ensureFirestoreReadAuth, getFirebaseFirestore } from '@/src/lib/firebase';
 
 export const USERS_COLLECTION = 'users';
 
@@ -162,6 +162,7 @@ export function fallbackProfileLabel(userId: string): UserProfile {
 export async function findUserRowByPhoneE164(normalizedPhone: string): Promise<{ docId: string; profile: UserProfile } | null> {
   const phone = normalizedPhone.trim();
   if (!phone) return null;
+  await ensureFirestoreReadAuth();
   const db = getFirebaseFirestore();
   const legacyRef = doc(db, USERS_COLLECTION, phone);
   const legacySnap = await getDoc(legacyRef);
@@ -187,6 +188,16 @@ export async function resolveSessionUserIdFromVerifiedPhone(normalizedPhone: str
   if (!row) return null;
   if (isUserProfileWithdrawn(row.profile)) return null;
   return row.docId;
+}
+
+/**
+ * 로그인·회원가입 UI 공통: 해당 전화(E.164)로 **로그인에 쓸 활성 `users` 문서**가 있는지.
+ * `LoginScreen`의 가입 여부 판별과 동일(`resolveSessionUserIdFromVerifiedPhone` !== null).
+ * `phone-registry`의 `isPhoneRegistered`(로컬 레지스트리 폴백 등)과는 구분됩니다.
+ */
+export async function hasLoginableUserForPhoneE164(normalizedPhone: string): Promise<boolean> {
+  const docId = await resolveSessionUserIdFromVerifiedPhone(normalizedPhone.trim());
+  return docId != null;
 }
 
 /**

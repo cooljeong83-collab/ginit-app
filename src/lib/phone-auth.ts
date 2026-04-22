@@ -1,4 +1,10 @@
-import { FirebaseAuthTypes, PhoneAuthProvider, getAuth } from '@react-native-firebase/auth';
+import {
+  FirebaseAuthTypes,
+  PhoneAuthProvider,
+  getAuth,
+  signInWithCredential,
+  verifyPhoneNumber as startFirebasePhoneVerification,
+} from '@react-native-firebase/auth';
 
 /**
  * Firebase Phone Auth (React Native Firebase)
@@ -30,7 +36,8 @@ function safeUnsub(ref: { current: UnsubLike }) {
 }
 
 export async function startPhoneVerification(phoneE164: string): Promise<string> {
-  const session = getAuth().verifyPhoneNumber(phoneE164);
+  const auth = getAuth();
+  const session = startFirebasePhoneVerification(auth, phoneE164, false);
   return await new Promise<string>((resolve, reject) => {
     const unsubRef: { current: UnsubLike } = { current: null };
     const subscription = session.on(
@@ -58,7 +65,8 @@ export async function startPhoneVerification(phoneE164: string): Promise<string>
 }
 
 export async function confirmPhoneCode(verificationId: string, code: string): Promise<FirebaseAuthTypes.UserCredential> {
+  const auth = getAuth();
   const credential = PhoneAuthProvider.credential(verificationId, code.trim());
-  return await getAuth().signInWithCredential(credential);
+  return await signInWithCredential(auth, credential);
 }
 

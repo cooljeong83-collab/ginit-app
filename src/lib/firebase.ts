@@ -58,12 +58,28 @@ export function getFirebaseAuth(): Auth {
 }
 
 /**
+ * JS `firebase/auth` 세션이 없을 때 Firestore(`firebase/firestore`)가 규칙상 막히는 경우가 많습니다.
+ * Phone Auth는 `@react-native-firebase/auth`를 쓰더라도, 모듈형 Firestore는 여기 `getFirebaseAuth()` 토큰을 따릅니다.
+ * 로그아웃 직후 로그인 화면에서의 `users` 조회 등에 쓰며, 실패해도 throw 하지 않습니다.
+ */
+export async function ensureFirestoreReadAuth(): Promise<void> {
+  const a = getFirebaseAuth();
+  if (a.currentUser) return;
+  try {
+    await signInAnonymously(a);
+  } catch {
+    /* 익명 미허용·오프라인 등 — 호출부에서 조회만 실패할 수 있음 */
+  }
+}
+
+/**
  * 전화번호만 로그인한 경우 `currentUser`가 없어 Storage 토큰을 못 씁니다.
  * 이때 한 번 `signInAnonymously`로 ID 토큰을 만듭니다.
  *
  * Firebase 콘솔 → Authentication → 로그인 제공업체 → **익명** 사용 설정이 필요합니다.
  */
 export async function ensureFirebaseAuthUserForStorage(): Promise<void> {
+  await ensureFirestoreReadAuth();
   const a = getFirebaseAuth();
   if (a.currentUser) return;
   try {
