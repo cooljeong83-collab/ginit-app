@@ -1606,7 +1606,7 @@ export default function MeetingDetailScreen() {
               </>
             ) : (
               <>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
+                <View style={styles.candidateListV}>
                   {dateChipsShown.map((chip) => {
                     const chipSelected = dateHostPickMode ? hostTieDateId === chip.id : selectedDateIds.includes(chip.id);
                     const tally = meeting.voteTallies?.dates?.[chip.id] ?? 0;
@@ -1616,6 +1616,7 @@ export default function MeetingDetailScreen() {
                         onPress={() => onDateChipPress(chip.id)}
                         style={({ pressed }) => [
                           styles.dateChip,
+                          styles.candidateChipV,
                           chipSelected ? styles.dateChipSelected : null,
                           pressed ? styles.dateChipPressed : null,
                         ]}
@@ -1630,18 +1631,22 @@ export default function MeetingDetailScreen() {
                             <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
                           </View>
                         ) : null}
-                        <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                        <Text
+                          style={[styles.dateChipTitle, styles.dateChipTitleV, chipSelected && styles.dateChipTitleSelected]}
+                          numberOfLines={2}>
                           {chip.title}
                         </Text>
                         {chip.sub ? (
-                          <Text style={[styles.dateChipSub, chipSelected && styles.dateChipSubSelected]} numberOfLines={1}>
+                          <Text
+                            style={[styles.dateChipSub, styles.dateChipSubV, chipSelected && styles.dateChipSubSelected]}
+                            numberOfLines={1}>
                             {chip.sub}
                           </Text>
                         ) : null}
                       </Pressable>
                     );
                   })}
-                </ScrollView>
+                </View>
                 <Text
                   style={
                     dateHostPickMode
@@ -1722,10 +1727,7 @@ export default function MeetingDetailScreen() {
                   </>
                 ) : extraMovies.length > 0 ? (
                   <>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.movieScrollContent}>
+                    <View style={styles.candidateListV}>
                       {movieRowsShown.map(({ mv, chipId }) => {
                         const chipSelected = movieHostPickMode
                           ? hostTieMovieId === chipId
@@ -1737,6 +1739,7 @@ export default function MeetingDetailScreen() {
                             onPress={() => onMovieChipPress(chipId)}
                             style={({ pressed }) => [
                               styles.movieVoteCard,
+                              styles.movieVoteCardV,
                               chipSelected ? styles.movieVoteCardSelected : null,
                               pressed ? styles.dateChipPressed : null,
                             ]}
@@ -1751,26 +1754,32 @@ export default function MeetingDetailScreen() {
                                 <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                               </View>
                             ) : null}
-                            {mv.posterUrl?.trim() ? (
-                              <Image
-                                source={{ uri: mv.posterUrl.trim() }}
-                                style={styles.moviePoster}
-                                contentFit="cover"
-                                transition={120}
-                              />
-                            ) : (
-                              <View style={[styles.moviePoster, styles.moviePosterPlaceholder]}>
-                                <Ionicons name="film-outline" size={28} color="#94A3B8" />
+                            <View style={styles.movieRowLeft}>
+                              {mv.posterUrl?.trim() ? (
+                                <Image
+                                  source={{ uri: mv.posterUrl.trim() }}
+                                  style={styles.moviePoster}
+                                  contentFit="cover"
+                                  transition={120}
+                                />
+                              ) : (
+                                <View style={[styles.moviePoster, styles.moviePosterPlaceholder]}>
+                                  <Ionicons name="film-outline" size={28} color="#94A3B8" />
+                                </View>
+                              )}
+                              <View style={styles.movieRowTextCol}>
+                                <Text
+                                  style={[styles.moviePosterTitle, styles.moviePosterTitleV, chipSelected && styles.moviePosterTitleSelected]}
+                                  numberOfLines={2}>
+                                  {mv.title}
+                                  {mv.year ? ` (${mv.year})` : ''}
+                                </Text>
                               </View>
-                            )}
-                            <Text style={[styles.moviePosterTitle, chipSelected && styles.moviePosterTitleSelected]} numberOfLines={2}>
-                              {mv.title}
-                              {mv.year ? ` (${mv.year})` : ''}
-                            </Text>
+                            </View>
                           </Pressable>
                         );
                       })}
-                    </ScrollView>
+                    </View>
                     <Text
                       style={
                         movieHostPickMode
@@ -1838,7 +1847,7 @@ export default function MeetingDetailScreen() {
               </>
             ) : placeChips.length > 0 ? (
               <>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
+                <View style={styles.candidateListV}>
                   {placeChipsShown.map((chip) => {
                     const chipSelected = placeHostPickMode
                       ? hostTiePlaceId === chip.id
@@ -1851,6 +1860,7 @@ export default function MeetingDetailScreen() {
                         style={({ pressed }) => [
                           styles.dateChip,
                           styles.placeVoteChip,
+                          styles.candidateChipV,
                           chipSelected ? styles.dateChipSelected : null,
                           pressed ? styles.dateChipPressed : null,
                         ]}
@@ -1865,18 +1875,22 @@ export default function MeetingDetailScreen() {
                             <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
                           </View>
                         ) : null}
-                        <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                        <Text
+                          style={[styles.dateChipTitle, styles.dateChipTitleV, chipSelected && styles.dateChipTitleSelected]}
+                          numberOfLines={2}>
                           {chip.title}
                         </Text>
                         {chip.sub ? (
-                          <Text style={[styles.dateChipSub, chipSelected && styles.dateChipSubSelected]} numberOfLines={2}>
+                          <Text
+                            style={[styles.dateChipSub, styles.dateChipSubV, chipSelected && styles.dateChipSubSelected]}
+                            numberOfLines={2}>
                             {chip.sub}
                           </Text>
                         ) : null}
                       </Pressable>
                     );
                   })}
-                </ScrollView>
+                </View>
                 <Text
                   style={
                     placeHostPickMode
@@ -2503,6 +2517,18 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  movieVoteCardV: {
+    width: '100%',
+    padding: 10,
+  },
+  movieRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minWidth: 0,
+  },
+  movieRowTextCol: { flex: 1, minWidth: 0 },
+  moviePosterTitleV: { marginTop: 0, fontSize: 13, lineHeight: 18 },
   movieVoteCardSelected: {
     borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(0, 82, 204, 0.07)',
@@ -2582,6 +2608,16 @@ const styles = StyleSheet.create({
   tieHostHintEm: { fontWeight: '800', color: '#b45309' },
   dateChipScroll: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
   placeVoteChip: { minWidth: 148, maxWidth: 220 },
+  candidateListV: { gap: 10, paddingBottom: 6 },
+  candidateChipV: {
+    alignSelf: 'stretch',
+    width: '100%',
+    minWidth: undefined,
+    maxWidth: undefined,
+    paddingRight: 14,
+  },
+  dateChipTitleV: { textAlign: 'left' },
+  dateChipSubV: { textAlign: 'left' },
   dateChip: {
     minWidth: 112,
     maxWidth: 140,

@@ -32,6 +32,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
@@ -406,6 +407,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   ref,
 ) {
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
   const seedQ = seedPlaceQuery.trim();
   const seedDate = seedScheduleDate.trim() || fmtDate(new Date());
   const seedTime = seedScheduleTime.trim() || '15:00';
@@ -1020,64 +1022,87 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             </ScrollView>
           ) : null}
 
-          <View style={styles.placeResultsGrid}>
-            {placeSearchLoading ? (
-              <View style={styles.placeResultsStatus}>
-                <ActivityIndicator color={GinitTheme.colors.primary} />
-                <Text style={styles.placeResultsStatusText}>검색 중…</Text>
+          {(() => {
+            const placeResultsViewportH = Math.min(460, Math.max(260, Math.round(windowHeight * 0.36)));
+            const listEmpty = !placeSearchLoading && !placeSearchErr && placeSearchRows.length === 0;
+            const centerEmpty = listEmpty || placeSearchLoading;
+            return (
+              <View style={[styles.placeResultsScrollHost, { height: placeResultsViewportH }]}>
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
+                  style={styles.placeResultsScrollView}
+                  contentContainerStyle={[
+                    styles.placeResultsScrollContent,
+                    centerEmpty && {
+                      flexGrow: 1,
+                      minHeight: placeResultsViewportH - 4,
+                      justifyContent: 'center',
+                    },
+                  ]}>
+                  {placeSearchLoading ? (
+                    <View style={styles.placeResultsStatus}>
+                      <ActivityIndicator color={GinitTheme.colors.primary} />
+                      <Text style={styles.placeResultsStatusText}>검색 중…</Text>
+                    </View>
+                  ) : placeSearchErr ? (
+                    <Text style={styles.placeResultsStatusText}>{placeSearchErr}</Text>
+                  ) : listEmpty ? (
+                    <Text style={styles.placeResultsStatusText}>검색 결과가 없어요.</Text>
+                  ) : (
+                    <View style={styles.placeResultsGrid}>
+                      {placeSearchRows.slice(0, 12).map((item) => {
+                        const title = item.title;
+                        const addr = (item.roadAddress || item.address || '').trim() || item.category;
+                        return (
+                          <Pressable
+                            key={item.id}
+                            onPress={() => {
+                              layoutAnimateEaseInEaseOut();
+                              setPlaceSearchLoading(true);
+                              void (async () => {
+                                try {
+                                  const resolved = await resolveNaverPlaceCoordinates(item);
+                                  const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
+                                  if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
+                                  const p: PlaceCandidate = {
+                                    id: newId('place'),
+                                    placeName: resolved.title.trim(),
+                                    address,
+                                    latitude: resolved.latitude,
+                                    longitude: resolved.longitude,
+                                  };
+                                  setPlaceCandidates((prev) => {
+                                    const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
+                                    if (hit) return prev;
+                                    return [...prev, placeRowFromCandidate(p)];
+                                  });
+                                } catch (e) {
+                                  setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+                                } finally {
+                                  setPlaceSearchLoading(false);
+                                }
+                              })();
+                            }}
+                            style={({ pressed }) => [styles.placeResultCard, pressed && styles.placeResultCardPressed]}
+                            accessibilityRole="button"
+                            accessibilityLabel={title}>
+                            <Text style={styles.placeResultTitle} numberOfLines={2}>
+                              {title}
+                            </Text>
+                            <Text style={styles.placeResultAddr} numberOfLines={2}>
+                              {addr}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                </ScrollView>
               </View>
-            ) : placeSearchErr ? (
-              <Text style={styles.placeResultsStatusText}>{placeSearchErr}</Text>
-            ) : placeSearchRows.length === 0 ? (
-              <Text style={styles.placeResultsStatusText}>검색 결과가 없어요.</Text>
-            ) : (
-              placeSearchRows.slice(0, 12).map((item) => {
-                const title = item.title;
-                const addr = (item.roadAddress || item.address || '').trim() || item.category;
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => {
-                      layoutAnimateEaseInEaseOut();
-                      setPlaceSearchLoading(true);
-                      void (async () => {
-                        try {
-                          const resolved = await resolveNaverPlaceCoordinates(item);
-                          const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
-                          if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
-                          const p: PlaceCandidate = {
-                            id: newId('place'),
-                            placeName: resolved.title.trim(),
-                            address,
-                            latitude: resolved.latitude,
-                            longitude: resolved.longitude,
-                          };
-                          setPlaceCandidates((prev) => {
-                            const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
-                            if (hit) return prev;
-                            return [...prev, placeRowFromCandidate(p)];
-                          });
-                        } catch (e) {
-                          setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
-                        } finally {
-                          setPlaceSearchLoading(false);
-                        }
-                      })();
-                    }}
-                    style={({ pressed }) => [styles.placeResultCard, pressed && styles.placeResultCardPressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel={title}>
-                    <Text style={styles.placeResultTitle} numberOfLines={2}>
-                      {title}
-                    </Text>
-                    <Text style={styles.placeResultAddr} numberOfLines={2}>
-                      {addr}
-                    </Text>
-                  </Pressable>
-                );
-              })
-            )}
-          </View>
+            );
+          })()}
         </>
       ) : null}
 
@@ -1214,8 +1239,12 @@ export default function CreateDetailsScreen() {
   const placesFormRef = useRef<VoteCandidatesFormHandle>(null);
   // KeyboardAwareScrollView로 래핑되므로 ref는 any로 두고 scrollTo만 사용합니다.
   const mainScrollRef = useRef<any>(null);
+  /** `measureInWindow()` 가능한 메인 스크롤 호스트(View) */
+  const mainScrollHostRef = useRef<View>(null);
   /** 메인 스크롤 세로 오프셋 — 영화 검색 패널 열 때 정렬에 사용 */
   const mainScrollYRef = useRef(0);
+  /** 장소 단계 배지 헤더 — 화면 상단으로 스크롤 앵커 */
+  const placesStepHeaderAnchorRef = useRef<View>(null);
   /** ScrollView 콘텐츠 기준 각 스텝 카드 상단 y (onLayout으로만 갱신) */
   const stepPositions = useRef<Partial<Record<WizardStep, number>>>({});
   /** 일정·장소 폼 래퍼의 상대 y (장소 구간 스크롤 앵커) */
@@ -1482,6 +1511,25 @@ export default function CreateDetailsScreen() {
   /**
    * 레이아웃 변화(LayoutAnimation)와 스크롤을 다른 프레임으로 분리.
    */
+  const alignPlacesStepHeaderToTop = useCallback(() => {
+    const scrollView = mainScrollRef.current;
+    const scrollHost = mainScrollHostRef.current;
+    const anchor = placesStepHeaderAnchorRef.current;
+    if (!scrollView || !scrollHost || !anchor) return;
+    anchor.measureInWindow((hx: number, hy: number, _hw: number, _hh: number) => {
+      scrollHost.measureInWindow((sx: number, sy: number, _sw: number, _sh: number) => {
+        const scrollY = mainScrollYRef.current;
+        const pad = Platform.OS === 'android' ? 10 : 8;
+        const nextY = Math.max(0, scrollY + (hy - sy) - pad);
+        if (typeof scrollView.scrollTo === 'function') {
+          scrollView.scrollTo({ y: nextY, animated: true });
+        } else if (typeof scrollView.scrollToPosition === 'function') {
+          scrollView.scrollToPosition(0, nextY, true);
+        }
+      });
+    });
+  }, []);
+
   const scrollToStep = useCallback((s: WizardStep) => {
     const y = stepPositions.current[s];
     if (y == null || !mainScrollRef.current) return;
@@ -1536,6 +1584,31 @@ export default function CreateDetailsScreen() {
     }, 48);
     return () => clearTimeout(id);
   }, [currentStep, scrollToStep]);
+
+  /** 장소 후보 단계: 단계 타이틀(배지)이 화면 최상단에 오도록 보정 — 레이아웃·검색 데이터 지연에 맞춰 재시도 */
+  useEffect(() => {
+    if (currentStep !== placesStep) return;
+    let cancelled = false;
+    let t1: ReturnType<typeof setTimeout> | null = null;
+    let t2: ReturnType<typeof setTimeout> | null = null;
+    let t3: ReturnType<typeof setTimeout> | null = null;
+    const run = () => {
+      if (!cancelled) alignPlacesStepHeaderToTop();
+    };
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      t1 = setTimeout(run, Platform.OS === 'android' ? 100 : 56);
+      t2 = setTimeout(run, Platform.OS === 'android' ? 280 : 200);
+      t3 = setTimeout(run, Platform.OS === 'android' ? 520 : 380);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      if (t1) clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+      if (t3) clearTimeout(t3);
+    };
+  }, [currentStep, placesStep, alignPlacesStepHeaderToTop]);
 
   useEffect(
     () => () => {
@@ -1919,30 +1992,31 @@ export default function CreateDetailsScreen() {
             </View>
           ) : null}
 
-          <KeyboardAwareScreenScroll
-            ref={mainScrollRef}
-            style={GinitStyles.flexFill}
-            extraScrollHeight={28}
-            extraHeight={Math.max(0, insets.bottom) + 120}
-            scrollProps={{
-              nestedScrollEnabled: true,
-              overScrollMode: 'never',
-              showsVerticalScrollIndicator: false,
-              removeClippedSubviews: false,
-              scrollEventThrottle: 1,
-              onScroll: (e) => {
-                mainScrollYRef.current = e.nativeEvent.contentOffset.y;
-              },
-              decelerationRate: 'normal',
-            }}
-            contentContainerStyle={[
-              styles.scrollContent,
-              styles.wizardScrollPad,
-              needsMovieEarlyPlaces &&
-                currentStep === 4 && { paddingBottom: 110 + insets.bottom },
-              currentStep === detailStep && { paddingBottom: 108 + insets.bottom },
-            ]}>
-            <View collapsable={false}>
+          <View ref={mainScrollHostRef} collapsable={false} style={GinitStyles.flexFill}>
+            <KeyboardAwareScreenScroll
+              ref={mainScrollRef}
+              style={GinitStyles.flexFill}
+              extraScrollHeight={28}
+              extraHeight={Math.max(0, insets.bottom) + 120}
+              scrollProps={{
+                nestedScrollEnabled: true,
+                overScrollMode: 'never',
+                showsVerticalScrollIndicator: false,
+                removeClippedSubviews: false,
+                scrollEventThrottle: 1,
+                onScroll: (e) => {
+                  mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+                },
+                decelerationRate: 'normal',
+              }}
+              contentContainerStyle={[
+                styles.scrollContent,
+                styles.wizardScrollPad,
+                needsMovieEarlyPlaces &&
+                  currentStep === 4 && { paddingBottom: 110 + insets.bottom },
+                currentStep === detailStep && { paddingBottom: 108 + insets.bottom },
+              ]}>
+              <View collapsable={false}>
               <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
                 <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
                 <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
@@ -2292,7 +2366,10 @@ export default function CreateDetailsScreen() {
 
                   {currentStep >= placesStep ? (
                     <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(placesStep, e)}>
-                      <View style={styles.placesStepHeader}>
+                      <View
+                        ref={placesStepHeaderAnchorRef}
+                        collapsable={false}
+                        style={styles.placesStepHeader}>
                         <Text style={styles.wizardStepBadge}>{placesStep} · 장소 후보</Text>
                         <Text style={styles.wizardLockedHint}>
                           {currentStep >= detailStep
@@ -2368,8 +2445,9 @@ export default function CreateDetailsScreen() {
                   ) : null}
                 </>
               ) : null}
-            </View>
-          </KeyboardAwareScreenScroll>
+              </View>
+            </KeyboardAwareScreenScroll>
+          </View>
 
           {needsMovieEarlyPlaces && currentStep === 4 ? (
             <Pressable
@@ -2777,6 +2855,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: GinitTheme.colors.text,
     maxWidth: 220,
+  },
+  placeResultsScrollHost: {
+    width: '100%',
+    marginTop: 4,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    overflow: 'hidden',
+  },
+  placeResultsScrollView: {
+    flex: 1,
+  },
+  placeResultsScrollContent: {
+    paddingBottom: 10,
+    paddingHorizontal: 4,
   },
   placeResultsGrid: {
     flexDirection: 'row',
