@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import {
   ActivityIndicator,
@@ -76,7 +77,9 @@ import {
   generateSuggestedMeetingTitle,
   generateSuggestedMeetingTitles,
   getFinalDescriptionPlaceholder,
+  type MeetingTitleSuggestionContext,
 } from '@/src/lib/meeting-title-suggestion';
+import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting } from '@/src/lib/meetings';
 import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
@@ -353,6 +356,10 @@ export type VoteCandidatesFormProps = {
   scheduleListOnly?: boolean;
   /** true면 장소 후보 카드는 유지하고 추가·삭제(행 2개 이상일 때)만 숨김 — 상세 단계에서 확정 장소 유지용 */
   placesListOnly?: boolean;
+  /** `bare`일 때 상위 세로 스크롤 — 일정 후보 추가 시 새 카드가 보이도록 오프셋 보정 */
+  parentScrollRef?: RefObject<any>;
+  /** 상위 `ScrollView`의 `contentOffset.y` (onScroll로 갱신) */
+  parentScrollYRef?: RefObject<number>;
 };
 
 export type VoteCandidatesBuildResult =
@@ -393,6 +400,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     headerBeforePlaces,
     scheduleListOnly = false,
     placesListOnly = false,
+    parentScrollRef,
+    parentScrollYRef,
   },
   ref,
 ) {
@@ -686,6 +695,25 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     setPlaceCandidates((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
+  /** 펼친 일시 후보 카드 1장 + 여백에 가까운 세로 픽셀(부모 스크롤 보정용) */
+  const SCHEDULE_CARD_SCROLL_APPROX = 380;
+
+  const scrollParentAfterScheduleRowAdded = useCallback(() => {
+    const sc = parentScrollRef?.current;
+    if (!sc || !parentScrollYRef) return;
+    const cur = parentScrollYRef.current ?? 0;
+    const nextY = cur + SCHEDULE_CARD_SCROLL_APPROX;
+    requestAnimationFrame(() => {
+      if (typeof sc.scrollTo === 'function') {
+        sc.scrollTo({ y: nextY, animated: true });
+        return;
+      }
+      if (typeof sc.scrollToPosition === 'function') {
+        sc.scrollToPosition(0, nextY, true);
+      }
+    });
+  }, [parentScrollRef, parentScrollYRef]);
+
   const addDateRow = useCallback(() => {
     animate();
     const nid = newId('date');
@@ -701,8 +729,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           dateScrollRef.current?.scrollToEnd({ animated: true });
         });
       });
+    } else if (parentScrollRef?.current && parentScrollYRef) {
+      requestAnimationFrame(() => {
+        InteractionManager.runAfterInteractions(() => {
+          setTimeout(() => scrollParentAfterScheduleRowAdded(), 96);
+        });
+      });
     }
-  }, [bare]);
+  }, [bare, parentScrollRef, parentScrollYRef, scrollParentAfterScheduleRowAdded]);
 
   const removeDateRow = useCallback((id: string) => {
     animate();
@@ -1268,6 +1302,9 @@ export default function CreateDetailsScreen() {
   const [description, setDescription] = useState('');
   const [descFocused, setDescFocused] = useState(false);
   const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
+  const [titleRegion, setTitleRegion] = useState<string | null>(null);
+  const [titleWeatherMood, setTitleWeatherMood] = useState<string | null>(null);
+  const titleSuggestionsGenRef = useRef(0);
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
   const [movieCandidates, setMovieCandidates] = useState<SelectedMovieExtra[]>([]);
@@ -1390,12 +1427,47 @@ export default function CreateDetailsScreen() {
 
   useEffect(() => {
     const label = selectedCategory?.label?.trim() ?? paramCategoryLabel.trim();
-    if (label) {
-      setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5));
-    } else {
+    if (!label) {
       setAiTitleSuggestions([]);
+      setTitleRegion(null);
+      setTitleWeatherMood(null);
+      return;
     }
+    const gen = ++titleSuggestionsGenRef.current;
+    let alive = true;
+    void (async () => {
+      try {
+        const { bias, coords } = await ensureNearbySearchBias();
+        let weather: string | null = null;
+        if (coords) {
+          weather = await fetchTitleWeatherMood(coords);
+        }
+        if (!alive || gen !== titleSuggestionsGenRef.current) return;
+        const region = bias?.trim() ?? null;
+        setTitleRegion(region);
+        setTitleWeatherMood(weather);
+        const ctx: MeetingTitleSuggestionContext = { regionLabel: region, weatherMood: weather };
+        setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5, ctx));
+      } catch {
+        if (!alive || gen !== titleSuggestionsGenRef.current) return;
+        setTitleRegion(null);
+        setTitleWeatherMood(null);
+        /** 위치·날씨 실패 시에도 오류 문구 없이 지역/날씨 없는 캐주얼 추천만 생성 */
+        setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5, {}));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [paramCategoryLabel, selectedCategory?.label]);
+
+  const titleSuggestionCtx = useMemo(
+    (): MeetingTitleSuggestionContext => ({
+      regionLabel: titleRegion,
+      weatherMood: titleWeatherMood,
+    }),
+    [titleRegion, titleWeatherMood],
+  );
 
   /** 직접 입력이 없으면 AI 추천 첫 항목 → 없으면 카테고리 기반 한 줄 생성 */
   const effectiveMeetingTitle = useMemo(() => {
@@ -1404,8 +1476,8 @@ export default function CreateDetailsScreen() {
     const firstAi = aiTitleSuggestions[0]?.trim() ?? '';
     if (firstAi.length > 0) return firstAi;
     const label = (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임';
-    return generateSuggestedMeetingTitle(label, new Date(), 0);
-  }, [title, aiTitleSuggestions, selectedCategory?.label, paramCategoryLabel]);
+    return generateSuggestedMeetingTitle(label, new Date(), 0, titleSuggestionCtx);
+  }, [title, aiTitleSuggestions, selectedCategory?.label, paramCategoryLabel, titleSuggestionCtx]);
 
   /**
    * 레이아웃 변화(LayoutAnimation)와 스크롤을 다른 프레임으로 분리.
@@ -2179,6 +2251,8 @@ export default function CreateDetailsScreen() {
                               scheduleListOnly={false}
                               placesListOnly={currentStep >= detailStep}
                               onPlacesBlockLayout={onPlacesBlockLayout}
+                              parentScrollRef={mainScrollRef}
+                              parentScrollYRef={mainScrollYRef}
                             />
                           </View>
 
