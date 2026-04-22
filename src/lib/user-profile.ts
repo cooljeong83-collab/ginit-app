@@ -33,6 +33,8 @@ export type UserProfile = {
   photoUrl: string | null;
   /** 가입 시 인증한 전화(E.164). 문서 ID가 이메일일 때 조회·중복 방지용 */
   phone?: string | null;
+  /** 모임 참여 제한용 전화번호 인증 완료 시각(서버 타임스탬프 권장) */
+  phoneVerifiedAt?: unknown | null;
   email?: string | null;
   displayName?: string | null;
   /** `google_sns`: SNS 간편 가입 — 성별·연령대 입력 전 모임 생성/참여 제한 */
@@ -81,6 +83,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const nick = typeof data.nickname === 'string' ? data.nickname.trim() : '';
   const photo = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
   const phone = typeof data.phone === 'string' ? data.phone.trim() : '';
+  const phoneVerifiedAt = 'phoneVerifiedAt' in data ? (data.phoneVerifiedAt as unknown) : null;
   const email = typeof data.email === 'string' ? data.email.trim() : '';
   const displayName = typeof data.displayName === 'string' ? data.displayName.trim() : '';
   const spRaw = typeof data.signupProvider === 'string' ? data.signupProvider.trim().toLowerCase() : '';
@@ -96,6 +99,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
     phone: phone || null,
+    phoneVerifiedAt,
     email: email || null,
     displayName: displayName || null,
     signupProvider,
@@ -114,6 +118,7 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
       nickname: WITHDRAWN_NICKNAME,
       photoUrl: null,
       phone: null,
+      phoneVerifiedAt: null,
       email: null,
       displayName: null,
       signupProvider: null,
@@ -140,6 +145,14 @@ export function isGoogleSnsDemographicsIncomplete(p: UserProfile | null | undefi
   const g = p.gender?.trim();
   const a = p.ageBand?.trim();
   return !g || !a;
+}
+
+/** 모임 참여 제한용: 전화번호 인증 완료 사용자 여부 */
+export function isUserPhoneVerified(p: UserProfile | null | undefined): boolean {
+  if (!p || p.isWithdrawn === true) return false;
+  // OTP 가입/로그인은 Firebase Phone Auth를 거치므로 기본적으로 verified로 취급합니다.
+  if (p.signupProvider === 'phone_otp') return true;
+  return p.phoneVerifiedAt != null;
 }
 
 /** 프로필 문서가 없을 때 표시용(다른 사용자 문서 미생성 등) */
@@ -354,6 +367,8 @@ export async function updateUserProfile(
     photoUrl?: string | null;
     gender?: string | null;
     ageBand?: string | null;
+    phone?: string | null;
+    phoneVerifiedAt?: unknown | null;
   },
 ): Promise<void> {
   const id = phoneUserId.trim();
@@ -381,6 +396,12 @@ export async function updateUserProfile(
   }
   if (patch.ageBand !== undefined) {
     updates.ageBand = patch.ageBand && String(patch.ageBand).trim() ? String(patch.ageBand).trim() : null;
+  }
+  if (patch.phone !== undefined) {
+    updates.phone = patch.phone && String(patch.phone).trim() ? String(patch.phone).trim() : null;
+  }
+  if (patch.phoneVerifiedAt !== undefined) {
+    updates.phoneVerifiedAt = patch.phoneVerifiedAt;
   }
   await updateDoc(dRef, stripUndefinedDeep(updates) as Record<string, unknown>);
 }

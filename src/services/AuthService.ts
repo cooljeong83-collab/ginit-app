@@ -88,6 +88,27 @@ export class AuthService {
     }
   }
 
+  /**
+   * (로그인 상태에서) 전화번호 OTP를 현재 계정에 연결합니다.
+   * - Google SNS 가입자가 프로필에서 전화번호 인증을 진행할 때 사용
+   * - 이미 phone이 연결된 계정이면 에러 메시지를 사람이 읽기 쉽게 throw
+   */
+  static async linkPhoneWithCode(verificationId: string, code: string): Promise<FirebaseAuthTypes.UserCredential> {
+    try {
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) throw new Error('로그인 상태를 확인할 수 없습니다.');
+      const credential = PhoneAuthProvider.credential(verificationId, code.trim());
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      const linked = await (user as unknown as { linkWithCredential: (c: unknown) => Promise<FirebaseAuthTypes.UserCredential> }).linkWithCredential(
+        credential,
+      );
+      return linked;
+    } catch (e) {
+      throw new Error(AuthService.humanizeError(e));
+    }
+  }
+
   /** 앱 재실행 시 자동 로그인용 auth state 감제 */
   static onAuthStateChanged(cb: (u: FirebaseAuthTypes.User | null) => void): () => void {
     return onFirebaseAuthStateChanged(getAuth(), cb);

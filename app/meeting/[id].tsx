@@ -23,6 +23,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
+import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -1606,13 +1607,15 @@ export default function MeetingDetailScreen() {
               </>
             ) : (
               <>
-                <View style={styles.candidateListV}>
-                  {dateChipsShown.map((chip) => {
+                <VoteCandidateListV
+                  items={dateChipsShown}
+                  style={styles.candidateListV}
+                  keyForItem={(chip) => chip.id}
+                  renderItem={(chip) => {
                     const chipSelected = dateHostPickMode ? hostTieDateId === chip.id : selectedDateIds.includes(chip.id);
                     const tally = meeting.voteTallies?.dates?.[chip.id] ?? 0;
                     return (
                       <Pressable
-                        key={chip.id}
                         onPress={() => onDateChipPress(chip.id)}
                         style={({ pressed }) => [
                           styles.dateChip,
@@ -1645,8 +1648,8 @@ export default function MeetingDetailScreen() {
                         ) : null}
                       </Pressable>
                     );
-                  })}
-                </View>
+                  }}
+                />
                 <Text
                   style={
                     dateHostPickMode
@@ -1847,15 +1850,17 @@ export default function MeetingDetailScreen() {
               </>
             ) : placeChips.length > 0 ? (
               <>
-                <View style={styles.candidateListV}>
-                  {placeChipsShown.map((chip) => {
+                <VoteCandidateListV
+                  items={placeChipsShown}
+                  style={styles.candidateListV}
+                  keyForItem={(chip) => chip.id}
+                  renderItem={(chip) => {
                     const chipSelected = placeHostPickMode
                       ? hostTiePlaceId === chip.id
                       : selectedPlaceIds.includes(chip.id);
                     const tally = meeting.voteTallies?.places?.[chip.id] ?? 0;
                     return (
                       <Pressable
-                        key={chip.id}
                         onPress={() => onPlaceChipPress(chip.id)}
                         style={({ pressed }) => [
                           styles.dateChip,
@@ -1889,8 +1894,8 @@ export default function MeetingDetailScreen() {
                         ) : null}
                       </Pressable>
                     );
-                  })}
-                </View>
+                  }}
+                />
                 <Text
                   style={
                     placeHostPickMode

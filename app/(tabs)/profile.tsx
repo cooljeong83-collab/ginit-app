@@ -36,8 +36,10 @@ import {
 import {
   ensureUserProfile,
   isGoogleSnsDemographicsIncomplete,
+  isUserPhoneVerified,
   updateUserProfile,
 } from '@/src/lib/user-profile';
+import { formatNormalizedPhoneKrDisplay } from '@/src/lib/phone-user-id';
 
 const AGE_CODES = new Set(SIGN_UP_AGE_BAND_OPTIONS.map((o) => o.code));
 
@@ -61,6 +63,8 @@ export default function ProfileTab() {
   const [needsSnsDemographics, setNeedsSnsDemographics] = useState(false);
   const [genderDemo, setGenderDemo] = useState<SignUpGenderCode | null>(null);
   const [ageBandDemo, setAgeBandDemo] = useState<SignUpAgeBandCode | null>(null);
+  const [verifiedPhoneLabel, setVerifiedPhoneLabel] = useState<string | null>(null);
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
 
   useEffect(() => {
     if (!profilePk) return;
@@ -72,6 +76,9 @@ export default function ProfileTab() {
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
         setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+        setIsPhoneVerified(isUserPhoneVerified(p));
+        const phone = p.phone?.trim();
+        setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
         const g = p.gender?.trim();
         setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
         const ab = p.ageBand?.trim();
@@ -81,6 +88,8 @@ export default function ProfileTab() {
           setNickname('');
           setPhotoUrl('');
           setNeedsSnsDemographics(false);
+          setIsPhoneVerified(false);
+          setVerifiedPhoneLabel(null);
           setGenderDemo(null);
           setAgeBandDemo(null);
         }
@@ -127,6 +136,9 @@ export default function ProfileTab() {
       await updateUserProfile(profilePk, { gender: genderDemo, ageBand: ageBandDemo });
       const p = await ensureUserProfile(profilePk);
       setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+      setIsPhoneVerified(isUserPhoneVerified(p));
+      const phone = p.phone?.trim();
+      setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
       const g = p.gender?.trim();
       setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
       const ab = p.ageBand?.trim();
@@ -301,6 +313,35 @@ export default function ProfileTab() {
                 variant="primary"
                 onPress={() => void onSaveDemographics()}
                 disabled={demoBusy || profileBusy}
+              />
+
+              <View style={{ height: 14 }} />
+              <Text style={styles.label}>전화번호 인증 (필수)</Text>
+              <Text style={styles.subHint}>
+                {isPhoneVerified ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}` : '아직 인증되지 않았어요.'}
+              </Text>
+              <GinitButton
+                title={isPhoneVerified ? '전화번호 다시 인증' : '전화번호 인증하기'}
+                variant="secondary"
+                onPress={() => router.push('/profile/phone-verify')}
+                disabled={demoBusy || profileBusy}
+              />
+            </GinitCard>
+          ) : null}
+
+          {!needsSnsDemographics ? (
+            <GinitCard appearance="light" style={styles.snsGuideCard}>
+              <Text style={styles.title}>모임 이용을 위한 정보</Text>
+              <Text style={styles.hint}>모임 참여를 위해 전화번호 인증이 필요해요.</Text>
+              <Text style={styles.label}>전화번호 인증 (필수)</Text>
+              <Text style={styles.subHint}>
+                {isPhoneVerified ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}` : '아직 인증되지 않았어요.'}
+              </Text>
+              <GinitButton
+                title={isPhoneVerified ? '전화번호 다시 인증' : '전화번호 인증하기'}
+                variant="secondary"
+                onPress={() => router.push('/profile/phone-verify')}
+                disabled={profileBusy}
               />
             </GinitCard>
           ) : null}

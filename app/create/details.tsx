@@ -39,7 +39,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DateCandidateEditorCard, type DatePickerField } from '@/app/create/DateCandidateEditorCard';
+import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
 import { EarlyPlaceSearch } from '@/components/create/EarlyPlaceSearch';
 import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
@@ -84,13 +84,13 @@ import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting } from '@/src/lib/meetings';
 import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
+import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
+import { useAutoFocusOnStep } from '@/src/hooks/useAutoFocusOnStep';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
-const TRUST_BLUE = GinitTheme.colors.primary;
-const SCREEN_BG = GinitTheme.colors.bg;
 const INPUT_PLACEHOLDER = '#94a3b8';
 
 /** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
@@ -298,56 +298,7 @@ function buildInitialEditorState(
   };
 }
 
-/** 후보 1이 시드 기본 point 그대로인지 (NLP가 첫 카드를 교체해도 되는지). */
-function isInitialState(d: DateCandidate, seedDate: string, seedTime: string): boolean {
-  if (d.type !== 'point') return false;
-  if (d.startDate.trim() !== seedDate.trim()) return false;
-  if ((d.startTime ?? '').trim() !== seedTime.trim()) return false;
-  if (d.endDate?.trim() || d.endTime?.trim()) return false;
-  if (d.textLabel?.trim()) return false;
-  if (d.subType) return false;
-  if (d.isDeadlineSet) return false;
-  return true;
-}
-
-type NlpApplyResult = {
-  next: DateCandidate[];
-  expandRowId: string | null;
-  shouldAutoExpand: boolean;
-  didAppend: boolean;
-};
-
-function computeNlpApply(prev: DateCandidate[], nlp: SmartNlpResult, seedDate: string, seedTime: string): NlpApplyResult {
-  const nid = newId('date');
-  return {
-    next: [...prev, { ...nlp.candidate, id: nid }],
-    expandRowId: nid,
-    shouldAutoExpand: nlp.candidate.type !== 'point',
-    didAppend: true,
-  };
-}
-
-function normalizeHm(raw: string | null | undefined): string {
-  const t = String(raw ?? '').trim();
-  if (!t) return '';
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
-  if (!m) return t;
-  const hh = Math.min(23, Math.max(0, Number(m[1])));
-  const mm = Math.min(59, Math.max(0, Number(m[2])));
-  return `${pad2(hh)}:${pad2(mm)}`;
-}
-
-function dateCandidateDupKey(d: DateCandidate): string {
-  const type = d.type ?? 'point';
-  const sd = String(d.startDate ?? '').trim();
-  const st = normalizeHm(d.startTime);
-  const ed = String(d.endDate ?? '').trim();
-  const et = normalizeHm(d.endTime);
-  const sub = String(d.subType ?? '').trim();
-  const txt = String(d.textLabel ?? '').trim();
-  const deadline = d.isDeadlineSet ? '1' : '';
-  return `${type}|${sd}|${st}|${ed}|${et}|${sub}|${deadline}|${txt}`;
-}
+// (NLP 적용 결과 타입은 `computeNlpApply` 반환 타입을 사용합니다.)
 
 export type VoteCandidatesFormProps = {
   seedPlaceQuery?: string;
@@ -419,7 +370,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   ref,
 ) {
   const router = useRouter();
-  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
   const seedQ = seedPlaceQuery.trim();
   const seedDate = seedScheduleDate.trim() || fmtDate(new Date());
   const seedTime = seedScheduleTime.trim() || '15:00';
@@ -512,7 +463,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       });
       return;
     }
-    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsed, seedDate, seedTime);
+    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsed);
     setDateCandidates(next);
     if (shouldAutoExpand && expandRowId) {
       setDateDetailExpanded((ex) => ({ ...ex, [expandRowId]: true }));
@@ -536,7 +487,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         });
       });
     }
-  }, [bare, nlpParsed, nlpScheduleInput, seedDate, seedTime]);
+  }, [bare, nlpParsed, nlpScheduleInput, parentScrollRef, parentScrollYRef, scrollParentAfterScheduleRowAdded]);
 
   useImperativeHandle(
     ref,
@@ -658,24 +609,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     [router, seedQ, seedDate, seedTime],
   );
 
-  const openPlaceSearch = useCallback(
-    (row: PlaceRowModel) => {
-      const q = row.query.trim() || row.placeName.trim();
-      requestAnimationFrame(() => {
-        InteractionManager.runAfterInteractions(() => {
-          router.push({
-            pathname: '/place-search',
-            params: {
-              initialQuery: q,
-              voteRowId: row.id,
-            },
-          });
-        });
-      });
-    },
-    [router],
-  );
-
   useFocusEffect(
     useCallback(() => {
       const sel = consumePendingVotePlaceRow();
@@ -713,23 +646,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       InteractionManager.runAfterInteractions(() => animate());
     }, []),
   );
-
-  const addPlaceCandidate = useCallback(() => {
-    const row = emptyPlaceRow();
-    pendingEphemeralPlaceRowIdRef.current = row.id;
-    setPlaceCandidates((prev) => [...prev, row]);
-    requestAnimationFrame(() => {
-      InteractionManager.runAfterInteractions(() => {
-        router.push({
-          pathname: '/place-search',
-          params: {
-            initialQuery: row.query.trim(),
-            voteRowId: row.id,
-          },
-        });
-      });
-    });
-  }, [router]);
 
   const removePlaceCandidate = useCallback((id: string) => {
     animate();
@@ -822,13 +738,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     else updateDateRow(rowId, { endTime: hm });
     setPicker(null);
   }, [iosDraft, picker, updateDateRow]);
-
-  const lastPlaceCandidate = placeCandidates[placeCandidates.length - 1];
-  const canAddPlaceCandidate =
-    placeCandidates.length === 0 ||
-    (lastPlaceCandidate != null &&
-      lastPlaceCandidate.latitude != null &&
-      lastPlaceCandidate.longitude != null);
 
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
@@ -1657,29 +1566,15 @@ export default function CreateDetailsScreen() {
     layoutAnimateEaseInEaseOut();
   }, [currentStep]);
 
-  /** Step 3 진입 시: 모임 이름 입력창 자동 포커스 */
-  useEffect(() => {
-    if (busy) return;
-    if (currentStep !== 3) return;
-    const t = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        meetingTitleInputRef.current?.focus?.();
-      });
-    }, Platform.OS === 'android' ? 120 : 60);
-    return () => clearTimeout(t);
-  }, [busy, currentStep]);
+  useAutoFocusOnStep({
+    enabled: !busy && currentStep === 3,
+    targetRef: meetingTitleInputRef,
+  });
 
-  /** 상세 설명 단계 진입 시: 상세 설명 입력창 자동 포커스 */
-  useEffect(() => {
-    if (busy) return;
-    if (currentStep !== detailStep) return;
-    const t = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        detailDescriptionInputRef.current?.focus?.();
-      });
-    }, Platform.OS === 'android' ? 120 : 60);
-    return () => clearTimeout(t);
-  }, [busy, currentStep, detailStep]);
+  useAutoFocusOnStep({
+    enabled: !busy && currentStep === detailStep,
+    targetRef: detailDescriptionInputRef,
+  });
 
   useEffect(() => {
     const target = pendingScrollAfterStepRef.current;
@@ -1743,32 +1638,7 @@ export default function CreateDetailsScreen() {
     [placesStep, scheduleStep],
   );
 
-  const voteWizardSegment = useMemo(() => {
-    // 상세 단계에서도 일정·장소 후보 카드는 함께 보여 주고, 편집 범위는 scheduleListOnly / placesListOnly로 제한.
-    if (currentStep >= detailStep) return 'both' as const;
-    if (currentStep < scheduleStep) return 'none' as const;
-    // 일정 단계: 일정만 편집. 장소 카드는「일정 확정」이후 placesStep에서 표시.
-    if (currentStep === scheduleStep) return 'schedule' as const;
-    // placesStep: 일정 요약 + 장소 후보
-    return 'both' as const;
-  }, [currentStep, detailStep, scheduleStep]);
-
-  const headerBeforePlaces = useMemo(
-    () =>
-      currentStep >= placesStep ? (
-        <View style={styles.placesStepHeader}>
-          <Text style={styles.wizardStepBadge}>
-            {placesStep} · 장소 후보
-          </Text>
-          <Text style={styles.wizardLockedHint}>
-            {currentStep >= detailStep
-              ? '확정한 장소 후보예요. 필요하면 카드를 탭해 바꿀 수 있어요.'
-              : '장소 행을 눌러 검색·선택하거나 후보를 추가하세요.'}
-          </Text>
-        </View>
-      ) : null,
-    [currentStep, detailStep, placesStep],
-  );
+  // (VoteCandidatesForm 안에서 사용하는 headerBeforePlaces는 현재 사용하지 않습니다.)
 
   const onMinParticipantsChange = useCallback((n: number) => {
     setMinParticipants(n);

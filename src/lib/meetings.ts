@@ -38,6 +38,7 @@ import { notifyMeetingParticipantsOfHostActionFireAndForget } from './meeting-ho
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
 import type { DateCandidate } from './meeting-place-bridge';
 import { normalizeParticipantId } from './app-user-id';
+import { getUserProfile, isUserPhoneVerified } from './user-profile';
 
 export const MEETINGS_COLLECTION = 'meetings';
 
@@ -541,6 +542,11 @@ export async function joinMeeting(
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
   const nsUid = normalizeParticipantId(uid) ?? uid;
 
+  const profile = await getUserProfile(uid);
+  if (!isUserPhoneVerified(profile)) {
+    throw new Error('전화번호 인증을 완료한 사용자만 모임에 참여할 수 있어요. 프로필에서 인증을 진행해 주세요.');
+  }
+
   await runTransaction(getFirestoreDb(), async (transaction) => {
     const snap = await transaction.get(ref);
     if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
@@ -586,6 +592,10 @@ export async function updateParticipantVotes(
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const profile = await getUserProfile(uid);
+  if (!isUserPhoneVerified(profile)) {
+    throw new Error('전화번호 인증을 완료한 사용자만 모임에서 투표할 수 있어요. 프로필에서 인증을 진행해 주세요.');
+  }
   const nsUid = normalizeParticipantId(uid) ?? uid;
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
