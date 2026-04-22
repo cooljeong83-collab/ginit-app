@@ -1,7 +1,7 @@
 /**
  * 일시 후보 카드 — 8가지 type별 글래스 UI (VoteCandidatesForm 전용).
  */
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   Platform,
   Pressable,
@@ -293,6 +293,7 @@ export function DateCandidateEditorCard({
   reduceHeavyEffects,
   onOpenPicker,
   deadlineTick,
+  autoFocusFirstInput = false,
 }: {
   d: DateCandidate;
   dateIndex: number;
@@ -304,8 +305,20 @@ export function DateCandidateEditorCard({
   reduceHeavyEffects: boolean;
   onOpenPicker: (field: DatePickerField) => void;
   deadlineTick: number;
+  /** 새 카드 추가 직후: 첫 입력창에 자동 포커스 */
+  autoFocusFirstInput?: boolean;
 }) {
   const badge = d.type === 'date-range' || d.type === 'datetime-range' ? rangeNightsBadge(d.startDate, d.endDate ?? d.startDate) : null;
+  const firstInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!autoFocusFirstInput) return;
+    if (!expanded) return;
+    const id = requestAnimationFrame(() => {
+      firstInputRef.current?.focus?.();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [autoFocusFirstInput, expanded, d.type]);
 
   const renderWebPair = (
     dateVal: string,
@@ -469,6 +482,7 @@ export function DateCandidateEditorCard({
               <>
                 <View style={styles.fieldRecess}>
                   <TextInput
+                    ref={firstInputRef}
                     value={d.startDate}
                     onChangeText={(t) => onPatch({ startDate: t })}
                     placeholder="YYYY-MM-DD"
@@ -583,6 +597,7 @@ export function DateCandidateEditorCard({
             <Text style={styles.blockLabel}>여러 일정 안 (투표용 설명)</Text>
             <View style={styles.fieldRecess}>
               <TextInput
+                ref={firstInputRef}
                 value={d.textLabel ?? ''}
                 onChangeText={(t) => onPatch({ textLabel: t })}
                 placeholder="예: 내일 오후 vs 모레 오전"
@@ -613,6 +628,7 @@ export function DateCandidateEditorCard({
             <Text style={styles.blockLabel}>유연 일정 (말로 적기)</Text>
             <View style={[styles.fieldRecess, styles.flexRecess]}>
               <TextInput
+                ref={firstInputRef}
                 value={d.textLabel ?? ''}
                 onChangeText={(t) => onPatch({ textLabel: t })}
                 placeholder="예: 시험 끝나는 주말쯤, 대략 저녁"
@@ -644,6 +660,7 @@ export function DateCandidateEditorCard({
             {Platform.OS === 'web' ? (
               <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
                 <TextInput
+                  ref={firstInputRef}
                   value={d.startDate}
                   onChangeText={(t) => onPatch({ startDate: t })}
                   placeholder="YYYY-MM-DD"

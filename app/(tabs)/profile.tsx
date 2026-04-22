@@ -334,6 +334,8 @@ export default function ProfileTab() {
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={24}
+              keyboardType="default"
+              inputMode="text"
             />
 
             <Text style={styles.label}>프로필 사진 URL (선택)</Text>

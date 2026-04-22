@@ -418,6 +418,8 @@ export function EarlyPlaceSearch({
         returnKeyType="search"
         autoCapitalize="none"
         autoCorrect={false}
+        keyboardType="default"
+        inputMode="text"
         {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
       />
       {nearbyHint ? (

@@ -69,6 +69,14 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
   const canConfirm =
     selected != null && selected.latitude != null && selected.longitude != null && !resolving;
 
+  useEffect(() => {
+    // 장소 후보 추가 직후 진입: 검색창에 즉시 포커스
+    const id = setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 160);
+    return () => clearTimeout(id);
+  }, []);
+
   const runSearch = useCallback(
     async (raw: string, opts?: { signal?: AbortSignal }) => {
       Keyboard.dismiss();
@@ -224,8 +232,12 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
                 searchFocused && GinitStyles.glassInputFocused,
               ]}
               returnKeyType="search"
+              keyboardType="default"
+              inputMode="text"
               onSubmitEditing={() => void runSearch(query)}
-              onFocus={() => setSearchFocused(true)}
+              onFocus={() => {
+                setSearchFocused(true);
+              }}
               onBlur={() => setSearchFocused(false)}
             />
             <Pressable onPress={onSearchPress} style={GinitStyles.primaryButton} accessibilityRole="button">

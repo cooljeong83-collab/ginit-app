@@ -318,16 +318,6 @@ type NlpApplyResult = {
 };
 
 function computeNlpApply(prev: DateCandidate[], nlp: SmartNlpResult, seedDate: string, seedTime: string): NlpApplyResult {
-  const first = prev[0];
-  if (prev.length === 1 && first && isInitialState(first, seedDate, seedTime)) {
-    const row: DateCandidate = { ...nlp.candidate, id: first.id };
-    return {
-      next: [row],
-      expandRowId: first.id,
-      shouldAutoExpand: nlp.candidate.type !== 'point',
-      didAppend: false,
-    };
-  }
   const nid = newId('date');
   return {
     next: [...prev, { ...nlp.candidate, id: nid }],
@@ -335,6 +325,28 @@ function computeNlpApply(prev: DateCandidate[], nlp: SmartNlpResult, seedDate: s
     shouldAutoExpand: nlp.candidate.type !== 'point',
     didAppend: true,
   };
+}
+
+function normalizeHm(raw: string | null | undefined): string {
+  const t = String(raw ?? '').trim();
+  if (!t) return '';
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!m) return t;
+  const hh = Math.min(23, Math.max(0, Number(m[1])));
+  const mm = Math.min(59, Math.max(0, Number(m[2])));
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
+
+function dateCandidateDupKey(d: DateCandidate): string {
+  const type = d.type ?? 'point';
+  const sd = String(d.startDate ?? '').trim();
+  const st = normalizeHm(d.startTime);
+  const ed = String(d.endDate ?? '').trim();
+  const et = normalizeHm(d.endTime);
+  const sub = String(d.subType ?? '').trim();
+  const txt = String(d.textLabel ?? '').trim();
+  const deadline = d.isDeadlineSet ? '1' : '';
+  return `${type}|${sd}|${st}|${ed}|${et}|${sub}|${deadline}|${txt}`;
 }
 
 export type VoteCandidatesFormProps = {
@@ -407,7 +419,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   ref,
 ) {
   const router = useRouter();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const seedQ = seedPlaceQuery.trim();
   const seedDate = seedScheduleDate.trim() || fmtDate(new Date());
   const seedTime = seedScheduleTime.trim() || '15:00';
@@ -423,6 +435,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
   const [deadlineTick, setDeadlineTick] = useState(0);
   const dateScrollRef = useRef<ScrollView>(null);
+  /** `+ 일정 후보 추가` 직후: 새 카드 첫 입력 자동 포커스 */
+  const pendingAutoFocusDateIdRef = useRef<string | null>(null);
+  /** 일정 아이디어 입력(자연어) — 새로 마운트될 때 자동 포커스 */
+  const nlpIdeaInputRef = useRef<TextInput>(null);
+  /** 장소 후보 검색어 입력 — 새로 마운트될 때 자동 포커스 */
+  const placeQueryInputRef = useRef<TextInput>(null);
 
   // 장소 후보 단계: 인라인 검색 UI (AI 초기 검색어 + 추천 검색어 + 결과 그리드)
   const [placeQuery, setPlaceQuery] = useState('');
@@ -480,24 +498,45 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   }, [nlpScheduleInput]);
 
   const applyNlpSuggestion = useCallback(() => {
-    if (!nlpParsed) return;
+    const trimmed = nlpScheduleInput.trim();
+    const parsed = nlpParsed ?? (trimmed ? parseSmartNaturalSchedule(trimmed, new Date()) : null);
+    if (!parsed) return;
     animate();
     const prev = dateCandidatesRef.current;
-    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, nlpParsed, seedDate, seedTime);
+    const nextKey = dateCandidateDupKey(parsed.candidate);
+    const dup = prev.some((d) => dateCandidateDupKey(d) === nextKey);
+    if (dup) {
+      Alert.alert('동일한 일정 후보가 있습니다.');
+      requestAnimationFrame(() => {
+        nlpIdeaInputRef.current?.focus?.();
+      });
+      return;
+    }
+    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsed, seedDate, seedTime);
     setDateCandidates(next);
     if (shouldAutoExpand && expandRowId) {
       setDateDetailExpanded((ex) => ({ ...ex, [expandRowId]: true }));
     }
     setNlpScheduleInput('');
     setNlpParsed(null);
+    // 후보를 추가/반영해도 입력 흐름이 끊기지 않게 포커스 유지
+    requestAnimationFrame(() => {
+      nlpIdeaInputRef.current?.focus?.();
+    });
     if (didAppend && !bare) {
       requestAnimationFrame(() => {
         InteractionManager.runAfterInteractions(() => {
           dateScrollRef.current?.scrollToEnd({ animated: true });
         });
       });
+    } else if (didAppend && bare && parentScrollRef?.current && parentScrollYRef) {
+      requestAnimationFrame(() => {
+        InteractionManager.runAfterInteractions(() => {
+          setTimeout(() => scrollParentAfterScheduleRowAdded(), 96);
+        });
+      });
     }
-  }, [bare, nlpParsed, seedDate, seedTime]);
+  }, [bare, nlpParsed, nlpScheduleInput, seedDate, seedTime]);
 
   useImperativeHandle(
     ref,
@@ -719,6 +758,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const addDateRow = useCallback(() => {
     animate();
     const nid = newId('date');
+    pendingAutoFocusDateIdRef.current = nid;
     setDateCandidates((prev) => {
       const last = prev[prev.length - 1];
       const row: DateCandidate = last ? { ...last, id: nid } : createPointCandidate(nid, fmtDate(new Date()), '15:00');
@@ -748,6 +788,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const updateDateRow = useCallback((id: string, patch: Partial<DateCandidate>) => {
     setDateCandidates((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
+
+  useEffect(() => {
+    // 새 카드가 렌더된 다음 1회만 autoFocus 되도록 플래그를 정리합니다.
+    if (!pendingAutoFocusDateIdRef.current) return;
+    const id = pendingAutoFocusDateIdRef.current;
+    const hit = dateCandidates.some((d) => d.id === id);
+    if (!hit) return;
+    const t = setTimeout(() => {
+      if (pendingAutoFocusDateIdRef.current === id) pendingAutoFocusDateIdRef.current = null;
+    }, 400);
+    return () => clearTimeout(t);
+  }, [dateCandidates]);
 
   const openPicker = useCallback(
     (rowId: string, field: DatePickerField) => {
@@ -780,6 +832,32 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
+
+  useEffect(() => {
+    if (wizardSegment !== 'schedule') return;
+    if (!showSchedule) return;
+    if (scheduleListOnly) return;
+    // 일정 후보 등록(자연어) 카드가 생성되면 바로 입력할 수 있게 포커스
+    const t = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        nlpIdeaInputRef.current?.focus?.();
+      });
+    }, Platform.OS === 'android' ? 140 : 80);
+    return () => clearTimeout(t);
+  }, [wizardSegment, showSchedule, scheduleListOnly]);
+
+  useEffect(() => {
+    if (wizardSegment !== 'places') return;
+    if (!showPlaces) return;
+    if (placesListOnly) return;
+    // 장소 후보 등록 카드가 생성되면 검색어 입력창에 바로 포커스
+    const t = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        placeQueryInputRef.current?.focus?.();
+      });
+    }, Platform.OS === 'android' ? 140 : 80);
+    return () => clearTimeout(t);
+  }, [wizardSegment, showPlaces, placesListOnly]);
 
   const placeThemeSeed = useMemo(() => {
     const label = (placeThemeLabel || '').trim();
@@ -883,6 +961,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             style={styles.aiQuickInitBorder}>
             <View style={styles.aiQuickInitInner}>
               <TextInput
+                ref={nlpIdeaInputRef}
                 value={nlpScheduleInput}
                 onChangeText={setNlpScheduleInput}
                 placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
@@ -891,8 +970,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 //multiline
                 //textAlignVertical="top"
                 returnKeyType="done"
+                blurOnSubmit={false}
+                onSubmitEditing={() => {
+                  requestAnimationFrame(() => applyNlpSuggestion());
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
+                keyboardType="default"
+                inputMode="text"
                 underlineColorAndroid="transparent"
               />
             </View>
@@ -900,44 +985,32 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
           <View style={styles.aiPreviewRow}>
             <Text style={styles.aiPreviewHint}>AI 미리보기</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.aiPreviewScroll}>
-              {nlpParsed ? (
-                <View style={styles.aiPreviewCard}>
-                  <View style={styles.aiPreviewPill}>
-                    <Text style={styles.aiPreviewPillText}>AI Generated</Text>
-                  </View>
-                  <Text style={styles.aiPreviewTitle} numberOfLines={2}>
-                    {nlpParsed.summary}
-                  </Text>
-                  <Text style={styles.aiPreviewMeta} numberOfLines={2}>
-                    {`> time: ${nlpParsed.candidate.startTime ?? '미정'}\n> date: ${nlpParsed.candidate.startDate ?? '미정'}`}
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.aiPreviewCardMuted}>
-                  <Text style={styles.aiPreviewEmpty}>입력하면 AI 프리뷰가 여기에 나타나요.</Text>
-                </View>
-              )}
-            </ScrollView>
+            {nlpParsed ? (
+              <Pressable
+                onPress={applyNlpSuggestion}
+                style={({ pressed }) => [
+                  styles.aiPreviewCard,
+                  { width: '100%' },
+                  pressed && { opacity: 0.92 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="AI 일정 프리뷰를 일정 후보로 추가">
+                <Text style={styles.aiPreviewTitle} numberOfLines={1} ellipsizeMode="tail">
+                  {`${nlpParsed.summary} · ${nlpParsed.candidate.startDate ?? '미정'} · ${
+                    nlpParsed.candidate.startTime ?? '미정'
+                  }`}
+                </Text>
+              </Pressable>
+            ) : (
+              <View style={[styles.aiPreviewCardMuted, { width: '100%' }]}>
+                <Text style={styles.aiPreviewEmpty} numberOfLines={1} ellipsizeMode="tail">
+                  입력하면 AI 프리뷰가 여기에 나타나요.
+                </Text>
+              </View>
+            )}
           </View>
 
-          {nlpParsed ? (
-            <Pressable
-              onPress={applyNlpSuggestion}
-              style={({ pressed }) => [styles.aiQuickInitCta, pressed && styles.aiQuickInitCtaPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="자연어 일정 후보로 등록">
-              <View pointerEvents="none" style={styles.aiQuickInitCtaBg}>
-                <LinearGradient
-                  colors={GinitTheme.colors.ctaGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFillObject}
-                />
-              </View>
-              <Text style={styles.aiQuickInitCtaLabel}>일정 후보로 등록하기</Text>
-            </Pressable>
-          ) : null}
+          {/** 후보 추가는 프리뷰 카드 탭으로만 처리합니다. */}
         </View>
       ) : null}
 
@@ -957,6 +1030,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           reduceHeavyEffects={reduceHeavyEffects}
           onOpenPicker={(field) => openPicker(d.id, field)}
           deadlineTick={deadlineTick}
+          autoFocusFirstInput={pendingAutoFocusDateIdRef.current === d.id}
         />
       ))}
 
@@ -988,6 +1062,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             style={[styles.aiQuickInitBorder, { marginBottom: 8 }]}>
             <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
               <TextInput
+                ref={placeQueryInputRef}
                 value={placeQuery}
                 onChangeText={setPlaceQuery}
                 placeholder='예: "영등포 맛집", "합정 카페"'
@@ -996,6 +1071,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="search"
+                keyboardType="default"
+                inputMode="text"
                 underlineColorAndroid="transparent"
               />
             </View>
@@ -1023,7 +1100,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           ) : null}
 
           {(() => {
-            const placeResultsViewportH = Math.min(460, Math.max(260, Math.round(windowHeight * 0.36)));
+            // 1열 리스트 기준: 후보 3개가 한 번에 보이는 높이로 고정
+            const placeResultsViewportH = Math.min(420, Math.max(300, Math.round(windowHeight * 0.32)));
             const listEmpty = !placeSearchLoading && !placeSearchErr && placeSearchRows.length === 0;
             const centerEmpty = listEmpty || placeSearchLoading;
             return (
@@ -1245,6 +1323,10 @@ export default function CreateDetailsScreen() {
   const mainScrollYRef = useRef(0);
   /** 장소 단계 배지 헤더 — 화면 상단으로 스크롤 앵커 */
   const placesStepHeaderAnchorRef = useRef<View>(null);
+  /** Step 3 기본 정보: 모임 이름 입력 포커스 */
+  const meetingTitleInputRef = useRef<TextInput>(null);
+  /** 상세 설명: 입력 포커스 */
+  const detailDescriptionInputRef = useRef<TextInput>(null);
   /** ScrollView 콘텐츠 기준 각 스텝 카드 상단 y (onLayout으로만 갱신) */
   const stepPositions = useRef<Partial<Record<WizardStep, number>>>({});
   /** 일정·장소 폼 래퍼의 상대 y (장소 구간 스크롤 앵커) */
@@ -1575,6 +1657,30 @@ export default function CreateDetailsScreen() {
     layoutAnimateEaseInEaseOut();
   }, [currentStep]);
 
+  /** Step 3 진입 시: 모임 이름 입력창 자동 포커스 */
+  useEffect(() => {
+    if (busy) return;
+    if (currentStep !== 3) return;
+    const t = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        meetingTitleInputRef.current?.focus?.();
+      });
+    }, Platform.OS === 'android' ? 120 : 60);
+    return () => clearTimeout(t);
+  }, [busy, currentStep]);
+
+  /** 상세 설명 단계 진입 시: 상세 설명 입력창 자동 포커스 */
+  useEffect(() => {
+    if (busy) return;
+    if (currentStep !== detailStep) return;
+    const t = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        detailDescriptionInputRef.current?.focus?.();
+      });
+    }, Platform.OS === 'android' ? 120 : 60);
+    return () => clearTimeout(t);
+  }, [busy, currentStep, detailStep]);
+
   useEffect(() => {
     const target = pendingScrollAfterStepRef.current;
     if (target == null || target !== currentStep) return;
@@ -1784,7 +1890,6 @@ export default function CreateDetailsScreen() {
     setVotePayload(cap.payload);
     setPlaceSearchSeed('');
     scheduleFormRef.current?.resetPlaceSearchSession();
-    pendingScrollAfterStepRef.current = placesStep;
     setCurrentStep(placesStep);
   }, [placesStep]);
 
@@ -2003,6 +2108,7 @@ export default function CreateDetailsScreen() {
                 overScrollMode: 'never',
                 showsVerticalScrollIndicator: false,
                 removeClippedSubviews: false,
+                keyboardShouldPersistTaps: 'handled',
                 scrollEventThrottle: 1,
                 onScroll: (e) => {
                   mainScrollYRef.current = e.nativeEvent.contentOffset.y;
@@ -2173,6 +2279,7 @@ export default function CreateDetailsScreen() {
                       style={[styles.aiQuickInitBorder, { marginBottom: 0 }]}>
                       <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
                         <TextInput
+                          ref={meetingTitleInputRef}
                           value={title}
                           onChangeText={setTitle}
                           placeholder={
@@ -2183,6 +2290,8 @@ export default function CreateDetailsScreen() {
                           editable={!busy}
                           autoCapitalize="none"
                           autoCorrect={false}
+                          keyboardType="default"
+                          inputMode="text"
                           underlineColorAndroid="transparent"
                         />
                       </View>
@@ -2429,6 +2538,7 @@ export default function CreateDetailsScreen() {
                         outerStyle={[styles.wizardGlassCard, styles.finalRegistrationGlass]}>
                         
                         <TextInput
+                          ref={detailDescriptionInputRef}
                           value={description}
                           onChangeText={setDescription}
                           placeholder={descriptionPlaceholder}
@@ -2437,6 +2547,8 @@ export default function CreateDetailsScreen() {
                           multiline
                           textAlignVertical="top"
                           editable={!busy}
+                          keyboardType="default"
+                          inputMode="text"
                           onFocus={() => setDescFocused(true)}
                           onBlur={() => setDescFocused(false)}
                         />
@@ -2656,10 +2768,10 @@ const styles = StyleSheet.create({
   aiPreviewScroll: {
     gap: 10,
     paddingBottom: 2,
-    paddingRight: 6,
+    paddingRight: 0,
   },
   aiPreviewCard: {
-    width: 160,
+    width: '100%',
     borderRadius: 16,
     backgroundColor: GinitTheme.colors.surface,
     borderWidth: 1,
@@ -2668,7 +2780,7 @@ const styles = StyleSheet.create({
     ...GinitTheme.shadow.card,
   },
   aiPreviewCardMuted: {
-    width: 220,
+    width: '100%',
     borderRadius: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.70)',
     borderWidth: 1,
@@ -2873,10 +2985,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   placeResultsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 10,
+    flexDirection: 'column',
+    gap: 10,
   },
   placeResultsStatus: {
     width: '100%',
@@ -2892,7 +3002,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   placeResultCard: {
-    width: '48%',
+    width: '100%',
     borderRadius: 14,
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
