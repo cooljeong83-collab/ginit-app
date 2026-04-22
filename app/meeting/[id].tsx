@@ -2206,22 +2206,29 @@ export default function MeetingDetailScreen() {
           onRequestClose={() => !proposeSaving && setProposeOpen(false)}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalRoot}>
+            style={styles.proposeModalRoot}>
             <Pressable
-              style={styles.modalBackdrop}
+              style={styles.proposeModalBackdrop}
               onPress={() => !proposeSaving && setProposeOpen(false)}
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View style={[styles.modalSheetDark, { maxHeight: Math.round(windowHeight * 0.88) }]}>
-              <Text style={styles.modalTitleLight}>날짜 제안</Text>
-              <Text style={styles.modalSubLight}>
+            <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+              <View style={styles.proposeModalHeaderRow}>
+                <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
+                  <Ionicons name="calendar-outline" size={22} color={GinitTheme.colors.primary} />
+                </View>
+                <View style={styles.proposeModalHeaderTextCol}>
+                  <Text style={styles.proposeModalTitle}>날짜 제안</Text>
+                </View>
+              </View>
+              <Text style={styles.proposeModalSub}>
                 기존 일정 목록은 여기서 바꾸지 않아요. 새로 넣을 일시만 추가하면 기존 후보 뒤에 붙습니다.
               </Text>
               {proposeInitialPayload ? (
                 <KeyboardAwareScreenScroll
-                  style={styles.modalFormScroll}
-                  contentContainerStyle={styles.modalFormScrollContent}
+                  style={styles.proposeModalFormScroll}
+                  contentContainerStyle={styles.proposeModalFormScrollContent}
                   extraScrollHeight={22}
                   extraHeight={56}
                   scrollProps={{
@@ -2240,18 +2247,18 @@ export default function MeetingDetailScreen() {
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
-              <View style={styles.modalActions}>
+              <View style={styles.proposeModalFooter}>
                 <Pressable
                   onPress={() => !proposeSaving && setProposeOpen(false)}
-                  style={({ pressed }) => [styles.modalBtnGhostDark, pressed && styles.dateChipPressed]}
+                  style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
                   accessibilityRole="button">
-                  <Text style={styles.modalBtnGhostTextLight}>취소</Text>
+                  <Text style={styles.proposeModalGhostBtnText}>취소</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => void confirmDateProposals()}
                   disabled={proposeSaving}
                   style={({ pressed }) => [
-                    styles.modalBtnPrimary,
+                    styles.proposeModalPrimaryBtn,
                     (pressed || proposeSaving) && { opacity: proposeSaving ? 0.7 : 0.9 },
                   ]}
                   accessibilityRole="button">
@@ -2265,7 +2272,7 @@ export default function MeetingDetailScreen() {
                   {proposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.modalBtnPrimaryText}>후보 저장</Text>
+                    <Text style={styles.proposeModalPrimaryBtnText}>후보 저장</Text>
                   )}
                 </Pressable>
               </View>
@@ -2280,22 +2287,29 @@ export default function MeetingDetailScreen() {
           onRequestClose={() => !placeProposeSaving && setPlaceProposeOpen(false)}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalRoot}>
+            style={styles.proposeModalRoot}>
             <Pressable
-              style={styles.modalBackdrop}
+              style={styles.proposeModalBackdrop}
               onPress={() => !placeProposeSaving && setPlaceProposeOpen(false)}
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View style={[styles.modalSheetDark, { maxHeight: Math.round(windowHeight * 0.88) }]}>
-              <Text style={styles.modalTitleLight}>장소 제안</Text>
-              <Text style={styles.modalSubLight}>
+            <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+              <View style={styles.proposeModalHeaderRow}>
+                <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
+                  <Ionicons name="location-outline" size={22} color={GinitTheme.colors.primary} />
+                </View>
+                <View style={styles.proposeModalHeaderTextCol}>
+                  <Text style={styles.proposeModalTitle}>장소 제안</Text>
+                </View>
+              </View>
+              <Text style={styles.proposeModalSub}>
                 기존 장소 목록은 여기서 바꾸지 않아요. 새로 넣을 장소만 추가하면 기존 후보 뒤에 붙습니다.
               </Text>
               {placeProposeInitialPayload ? (
                 <KeyboardAwareScreenScroll
-                  style={styles.modalFormScroll}
-                  contentContainerStyle={styles.modalFormScrollContent}
+                  style={styles.proposeModalFormScroll}
+                  contentContainerStyle={styles.proposeModalFormScrollContent}
                   extraScrollHeight={22}
                   extraHeight={56}
                   scrollProps={{
@@ -2314,18 +2328,18 @@ export default function MeetingDetailScreen() {
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
-              <View style={styles.modalActions}>
+              <View style={styles.proposeModalFooter}>
                 <Pressable
                   onPress={() => !placeProposeSaving && setPlaceProposeOpen(false)}
-                  style={({ pressed }) => [styles.modalBtnGhostDark, pressed && styles.dateChipPressed]}
+                  style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
                   accessibilityRole="button">
-                  <Text style={styles.modalBtnGhostTextLight}>취소</Text>
+                  <Text style={styles.proposeModalGhostBtnText}>취소</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => void confirmPlaceProposals()}
                   disabled={placeProposeSaving}
                   style={({ pressed }) => [
-                    styles.modalBtnPrimary,
+                    styles.proposeModalPrimaryBtn,
                     (pressed || placeProposeSaving) && { opacity: placeProposeSaving ? 0.7 : 0.9 },
                   ]}
                   accessibilityRole="button">
@@ -2339,7 +2353,7 @@ export default function MeetingDetailScreen() {
                   {placeProposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.modalBtnPrimaryText}>후보 저장</Text>
+                    <Text style={styles.proposeModalPrimaryBtnText}>후보 저장</Text>
                   )}
                 </Pressable>
               </View>
@@ -2646,66 +2660,92 @@ const styles = StyleSheet.create({
   },
   addOutlineText: { fontSize: 15, fontWeight: '600', color: '#5C6570' },
   addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.primary },
-  modalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 12 },
-  modalBackdrop: {
+  /** 날짜·장소 제안 모달 — 상세 화면 카드(밝은 서피스)와 동일 톤 */
+  proposeModalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
+  proposeModalBackdrop: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    backgroundColor: 'rgba(15, 23, 42, 0.38)',
   },
-  modalSheetDark: {
+  proposeModalSheet: {
     zIndex: 2,
-    backgroundColor: '#0F172A',
-    borderRadius: 18,
-    padding: 16,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    borderRadius: 20,
+    padding: 18,
     maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 8,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    ...GinitTheme.shadow.card,
   },
-  modalTitleLight: { fontSize: 18, fontWeight: '700', color: '#F8FAFC', marginBottom: 6 },
-  modalSubLight: { fontSize: 13, color: 'rgba(248, 250, 252, 0.72)', lineHeight: 19, marginBottom: 8 },
-  modalFormScroll: { flexGrow: 0 },
-  modalFormScrollContent: { paddingBottom: 12 },
-  modalActions: {
+  proposeModalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  proposeModalIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 82, 204, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  proposeModalHeaderTextCol: { flex: 1, minWidth: 0 },
+  proposeModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+    color: GinitTheme.colors.text,
+  },
+  proposeModalSub: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  proposeModalFormScroll: { flexGrow: 0 },
+  proposeModalFormScrollContent: { paddingBottom: 12 },
+  proposeModalFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: 10,
-    marginTop: 12,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
   },
-  modalBtnGhostDark: {
+  proposeModalGhostBtn: {
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingHorizontal: 18,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderColor: GinitTheme.colors.borderStrong,
+    backgroundColor: GinitTheme.colors.bg,
   },
-  modalBtnGhostTextLight: { fontSize: 15, fontWeight: '600', color: 'rgba(248, 250, 252, 0.85)' },
-  modalBtnPrimary: {
+  proposeModalGhostBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.textSub },
+  proposeModalPrimaryBtn: {
     paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
+    paddingHorizontal: 22,
+    borderRadius: 14,
     backgroundColor: 'transparent',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.22)',
-    minWidth: 120,
+    borderWidth: 0,
+    minWidth: 124,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnGradientBg: {
     ...StyleSheet.absoluteFillObject,
   },
-  modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  proposeModalPrimaryBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   placePayNote: { fontSize: 12, color: '#5C6570', marginTop: 10 },
   pencilPlaceRow: {
     flexDirection: 'row',

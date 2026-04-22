@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -19,7 +18,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
-import { GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
@@ -304,30 +302,6 @@ export default function FeedScreen() {
             </View>
           </View>
 
-          <GinitCard appearance="light" style={styles.heroCard}>
-            <View style={styles.heroPanel}>
-              <View style={styles.heroInner}>
-                <View style={styles.heroCopy}>
-                  <Text style={styles.heroTitle}>AI가 제안하는 완벽한 모임!</Text>
-                  <Text style={styles.heroDesc}>
-                    오늘 저녁, {userCoords ? `${regionLabel} 근처` : '내 주변'}에서 새로운 모임을 찾아보세요. 바로
-                    참여해 보세요.
-                  </Text>
-                </View>
-                <View style={styles.heroArt} accessibilityLabel="AI 추천">
-                  <View style={styles.heroLogoWrap} pointerEvents="none">
-                    <Image
-                      source={require('@/assets/images/icon.png')}
-                      style={styles.heroLogo}
-                      contentFit="contain"
-                    />
-                  </View>
-                  <Text style={styles.heroSparkle}>✨</Text>
-                </View>
-              </View>
-            </View>
-          </GinitCard>
-
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionLabel}>
               모임{selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}
@@ -554,76 +528,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 28,
     backgroundColor: 'rgba(246, 250, 255, 0.88)',
-  },
-  heroCard: {
-    marginBottom: 22,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-  },
-  heroPanel: {
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.78)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.95)',
-  },
-  heroInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  heroCopy: {
-    flex: 1,
-    gap: 8,
-  },
-  heroTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0b1220',
-    letterSpacing: -0.3,
-  },
-  heroDesc: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: '#334155',
-  },
-  heroArt: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 82, 204, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: 'rgba(0, 82, 204, 0.14)',
-  },
-  heroEmoji: {
-    fontSize: 36,
-  },
-  heroLogo: {
-    width: 46,
-    height: 46,
-  },
-  heroLogoWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.86)',
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: 'rgba(15, 23, 42, 0.12)',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  heroSparkle: {
-    position: 'absolute',
-    top: 6,
-    right: 8,
-    fontSize: 14,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
