@@ -20,6 +20,7 @@ import {
 
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { ensureFirestoreReadAuth, getFirebaseFirestore } from '@/src/lib/firebase';
+import { formatNormalizedPhoneKrDisplay } from '@/src/lib/phone-user-id';
 
 export const USERS_COLLECTION = 'users';
 
@@ -170,12 +171,30 @@ export async function findUserRowByPhoneE164(normalizedPhone: string): Promise<{
     return { docId: phone, profile: mapUserDoc(legacySnap.data() as Record<string, unknown>) };
   }
   try {
-    const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(3)));
+    // 기존 데이터 마이그레이션 흔적: `users.phone` 값이 +82 / 82 / 010- / 010 등으로 섞여 있을 수 있어
+    // 가능한 표현들을 함께 조회합니다(`in`은 최대 10개 제한).
+    const kr = formatNormalizedPhoneKrDisplay(phone);
+    const digits = kr.replace(/\D/g, '');
+    const candidates = Array.from(
+      new Set(
+        [
+          phone,
+          phone.startsWith('+') ? phone.slice(1) : phone,
+          kr,
+          digits,
+        ].map((v) => String(v ?? '').trim()).filter(Boolean),
+      ),
+    ).slice(0, 10);
+    const qs =
+      candidates.length <= 1
+        ? await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(3)))
+        : await getDocs(query(collection(db, USERS_COLLECTION), where('phone', 'in', candidates), limit(3)));
     if (qs.empty) return null;
     const d0 = qs.docs[0];
     return { docId: d0.id, profile: mapUserDoc(d0.data() as Record<string, unknown>) };
-  } catch {
-    return null;
+  } catch (e) {
+    /** 권한/네트워크 등 → `null`(미가입)로 삼키면 재가입이 열리므로 그대로 전파 */
+    throw e instanceof Error ? e : new Error(String(e));
   }
 }
 

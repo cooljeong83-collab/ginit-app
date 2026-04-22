@@ -82,15 +82,13 @@ export function useSignUpFlow(initialPhone: string) {
           ]);
           if (memberPhoneCheckSeqRef.current !== mySeq) return;
           if (race.kind === 'timeout') {
-            // 오래 걸리면 가입 진행을 막지 않음(OTP·서버에서 최종 검증)
-            setMemberStatus('guest');
+            setMemberStatus('unknown');
             return;
           }
           setMemberStatus(race.v ? 'member' : 'guest');
         } catch {
-          // 네트워크 실패 시 OTP까지 막지 않음(서버에서 중복 가입은 이후 단계에서 걸림)
           if (memberPhoneCheckSeqRef.current === mySeq) {
-            setMemberStatus('guest');
+            setMemberStatus('unknown');
           }
         }
       })();

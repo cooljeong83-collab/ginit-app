@@ -43,7 +43,7 @@ import {
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { registerSignupLocalKeys } from '@/src/lib/phone-registry';
+import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
@@ -130,6 +130,7 @@ export default function LoginScreen() {
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
+  const otpInputRef = useRef<TextInput | null>(null);
   const fade = useRef(new Animated.Value(1)).current;
   const intro = useRef(new Animated.Value(0)).current;
   /** -1…1 → 좌우 갸우뚱(인사) */
@@ -169,7 +170,13 @@ export default function LoginScreen() {
         /** OTP 확인 시점과 동일: 실제 로그인 가능한 `users` 문서가 있을 때만 registered */
         const docId = await resolveSessionUserIdFromVerifiedPhone(debouncedNormalized);
         if (cancelled) return;
-        setLoginMemberStatus(docId ? 'registered' : 'guest');
+        if (docId) {
+          setLoginMemberStatus('registered');
+          return;
+        }
+        const localMember = await isPhoneRegisteredLocally(debouncedNormalized);
+        if (cancelled) return;
+        setLoginMemberStatus(localMember ? 'registered' : 'guest');
       } catch {
         if (!cancelled) setLoginMemberStatus('unknown');
       }
@@ -210,6 +217,7 @@ export default function LoginScreen() {
     try {
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
+      requestAnimationFrame(() => otpInputRef.current?.focus());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setOtpError(msg);
@@ -234,6 +242,7 @@ export default function LoginScreen() {
         throw new Error('회원 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
       }
       await setUserId(docId);
+      await registerSignupLocalKeys(n, docId);
       await writeSecureAuthSession({ uid, userId: docId });
       await ensureUserProfile(docId);
       setAuthProfile(snapshotFromPhoneUser(cred.user));
@@ -624,6 +633,7 @@ export default function LoginScreen() {
                   {otpVerificationId ? (
                     <View style={[otpStyles.otpRow, loginScreenStyles.otpRowTight]}>
                       <TextInput
+                        ref={otpInputRef}
                         value={otpCode}
                         onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
                         placeholder="인증번호 6자리"
