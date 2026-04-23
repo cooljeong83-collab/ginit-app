@@ -53,9 +53,11 @@ import {
   generateRandomNickname,
   recordTermsAgreement,
   resolveSessionUserIdFromVerifiedPhone,
+  updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import { serverTimestamp } from 'firebase/firestore';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -245,6 +247,8 @@ export default function LoginScreen() {
       await registerSignupLocalKeys(n, docId);
       await writeSecureAuthSession({ uid, userId: docId });
       await ensureUserProfile(docId);
+      // 전화 OTP로 로그인한 경우에도 인증 상태를 사용자 문서에 기록합니다.
+      await updateUserProfile(docId, { phone: n, phoneVerifiedAt: serverTimestamp() });
       setAuthProfile(snapshotFromPhoneUser(cred.user));
       router.replace('/(tabs)');
     } catch (e) {
@@ -353,6 +357,9 @@ export default function LoginScreen() {
         photoUrl,
         email: email || null,
         displayName: display ? display.slice(0, 64) : null,
+        // Google SNS 가입은 전화 OTP 인증을 거치지 않으므로, 필드는 null로 "생성"만 해 둡니다.
+        phone: null,
+        phoneVerifiedAt: null,
         signupProvider: 'google_sns',
         gender: genderFs,
         ageBand: null,

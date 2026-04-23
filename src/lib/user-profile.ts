@@ -49,6 +49,12 @@ export type UserProfile = {
   birthMonth?: number | null;
   birthDay?: number | null;
   firebaseUid?: string | null;
+  /** 지닛 게이미피케이션 */
+  gLevel?: number | null;
+  gXp?: number | null;
+  gTrust?: number | null;
+  gDna?: string | null;
+  meetingCount?: number | null;
   /** 탈퇴 처리 시 개인정보는 null로 비우고 메시지 등은 senderId로만 연결 */
   isWithdrawn?: boolean;
 };
@@ -95,6 +101,11 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
   const birthDay = typeof data.birthDay === 'number' ? data.birthDay : null;
   const firebaseUid = typeof data.firebaseUid === 'string' ? data.firebaseUid.trim() : '';
+  const gLevel = typeof data.gLevel === 'number' ? Math.trunc(data.gLevel) : null;
+  const gXp = typeof data.gXp === 'number' ? Math.trunc(data.gXp) : null;
+  const gTrust = typeof data.gTrust === 'number' ? Math.trunc(data.gTrust) : null;
+  const gDna = typeof data.gDna === 'string' ? data.gDna.trim() : '';
+  const meetingCount = typeof data.meetingCount === 'number' ? Math.trunc(data.meetingCount) : null;
   const base: UserProfile = {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
@@ -110,6 +121,11 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     birthMonth,
     birthDay,
     firebaseUid: firebaseUid || null,
+    gLevel,
+    gXp,
+    gTrust,
+    gDna: gDna || null,
+    meetingCount,
     isWithdrawn,
   };
   if (isWithdrawn) {
@@ -300,9 +316,22 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
   await setDoc(dRef, {
     nickname,
     photoUrl: null,
+    gLevel: 1,
+    gXp: 0,
+    gTrust: 100,
+    gDna: 'Explorer',
+    meetingCount: 0,
     createdAt: serverTimestamp(),
   });
-  return { nickname, photoUrl: null };
+  return {
+    nickname,
+    photoUrl: null,
+    gLevel: 1,
+    gXp: 0,
+    gTrust: 100,
+    gDna: 'Explorer',
+    meetingCount: 0,
+  };
 }
 
 /** 구글 가입 직후: Firestore 사용자 문서에 계정·People API 정보 병합(신규는 생성). */
@@ -313,6 +342,8 @@ export async function applyGoogleSignupProfile(
     photoUrl: string | null;
     /** E.164 전화 — 문서 ID가 이메일일 때 `phone` 필드로 저장 */
     phone?: string | null;
+    /** 전화번호 인증 완료 시각(서버 타임스탬프 권장) */
+    phoneVerifiedAt?: unknown | null;
     email?: string | null;
     displayName?: string | null;
     signupProvider?: 'google_sns' | 'phone_otp' | null;
@@ -324,6 +355,12 @@ export async function applyGoogleSignupProfile(
     birthMonth?: number | null;
     birthDay?: number | null;
     firebaseUid?: string | null;
+    /** 지닛 게이미피케이션(없으면 신규 생성 시 기본값) */
+    gLevel?: number | null;
+    gXp?: number | null;
+    gTrust?: number | null;
+    gDna?: string | null;
+    meetingCount?: number | null;
   },
 ): Promise<UserProfile> {
   const id = phoneUserId.trim();
@@ -336,6 +373,7 @@ export async function applyGoogleSignupProfile(
     updatedAt: serverTimestamp(),
   };
   if (patch.phone !== undefined) payload.phone = patch.phone;
+  if (patch.phoneVerifiedAt !== undefined) payload.phoneVerifiedAt = patch.phoneVerifiedAt;
   if (patch.email !== undefined) payload.email = patch.email;
   if (patch.displayName !== undefined) payload.displayName = patch.displayName;
   if (patch.signupProvider !== undefined) payload.signupProvider = patch.signupProvider;
@@ -345,6 +383,11 @@ export async function applyGoogleSignupProfile(
   if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
   if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
   if (patch.firebaseUid !== undefined) payload.firebaseUid = patch.firebaseUid;
+  if (patch.gLevel !== undefined) payload.gLevel = patch.gLevel;
+  if (patch.gXp !== undefined) payload.gXp = patch.gXp;
+  if (patch.gTrust !== undefined) payload.gTrust = patch.gTrust;
+  if (patch.gDna !== undefined) payload.gDna = patch.gDna;
+  if (patch.meetingCount !== undefined) payload.meetingCount = patch.meetingCount;
   if (snap.exists()) {
     const prev = mapUserDoc(snap.data() as Record<string, unknown>);
     if (prev.isWithdrawn === true) {
@@ -354,6 +397,12 @@ export async function applyGoogleSignupProfile(
   }
   if (!snap.exists()) {
     payload.createdAt = serverTimestamp();
+    // 어떤 가입 방식이든 기본 게이미피케이션 컬럼을 생성합니다.
+    if (payload.gLevel === undefined) payload.gLevel = 1;
+    if (payload.gXp === undefined) payload.gXp = 0;
+    if (payload.gTrust === undefined) payload.gTrust = 100;
+    if (payload.gDna === undefined) payload.gDna = 'Explorer';
+    if (payload.meetingCount === undefined) payload.meetingCount = 0;
   }
   await setDoc(dRef, stripUndefinedDeep(payload) as Record<string, unknown>, { merge: true });
   const after = await getDoc(dRef);

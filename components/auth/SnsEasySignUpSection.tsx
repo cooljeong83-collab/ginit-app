@@ -1,16 +1,13 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
-import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   type LayoutChangeEvent,
   Platform,
   Pressable,
   StyleSheet,
   Text,
-  ToastAndroid,
   View,
 } from 'react-native';
 
@@ -20,9 +17,6 @@ const RIPPLE = 'rgba(15, 23, 42, 0.08)';
 const LABEL = '#000000';
 const ICON_SIZE = 20;
 const GOOGLE_BLUE = '#4285F4';
-const KAKAO_YELLOW = '#FEE500';
-const KAKAO_INK = '#191919';
-const NAVER_GREEN = '#03C75A';
 
 /** 로고+텍스트 한 덩어리의 고정 가로폭 (dp, 좁은 부모에서는 onLayout으로 축소) */
 const INNER_BAND_MAX = 220;
@@ -31,15 +25,6 @@ const ICON_SLOT = 40;
 const ICON_TEXT_GAP = 12;
 /** 항목 사이 세로 간격 */
 const ROW_VERTICAL_GAP = 8;
-
-function toastServicePrepare(): void {
-  const msg = '서비스 준비 중입니다';
-  if (Platform.OS === 'android') {
-    ToastAndroid.show(msg, ToastAndroid.SHORT);
-  } else {
-    Alert.alert('안내', msg);
-  }
-}
 
 type RowProps = {
   innerBandWidth: number;
@@ -86,7 +71,7 @@ export type SnsEasySignUpSectionProps = {
 
 /**
  * 로그인·회원가입 공통 — SNS 간편 연동(텍스트 링크 스타일, 배경·테두리 없음).
- * Google은 실제 플로우, 카카오·네이버는 토스트만(추후 연동).
+ * Google 간편 로그인 진입 버튼만 제공합니다.
  */
 export function SnsEasySignUpSection({ onGooglePress, googleDisabled, googleLoading }: SnsEasySignUpSectionProps) {
   const [innerBandWidth, setInnerBandWidth] = useState(INNER_BAND_MAX);
@@ -115,28 +100,6 @@ export function SnsEasySignUpSection({ onGooglePress, googleDisabled, googleLoad
           loading={googleLoading}
           accessibilityLabel="Google로 시작하기"
           icon={<FontAwesome5 name="google" size={ICON_SIZE} color={GOOGLE_BLUE} brand />}
-        />
-        <SnsTextLinkRow
-          innerBandWidth={innerBandWidth}
-          label="카카오톡으로 시작하기"
-          onPress={toastServicePrepare}
-          accessibilityLabel="카카오톡으로 시작하기"
-          icon={
-            <View style={secStyles.kakaoMark} accessibilityElementsHidden>
-              <Ionicons name="chatbubble-ellipses" size={15} color={KAKAO_INK} />
-            </View>
-          }
-        />
-        <SnsTextLinkRow
-          innerBandWidth={innerBandWidth}
-          label="네이버로 시작하기"
-          onPress={toastServicePrepare}
-          accessibilityLabel="네이버로 시작하기"
-          icon={
-            <Text style={secStyles.naverLetter} accessibilityElementsHidden>
-              N
-            </Text>
-          }
         />
       </View>
     </View>
@@ -174,22 +137,6 @@ const secStyles = StyleSheet.create({
     alignSelf: 'stretch',
     alignItems: 'stretch',
     gap: ROW_VERTICAL_GAP,
-  },
-  kakaoMark: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: KAKAO_YELLOW,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  naverLetter: {
-    width: 24,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '900',
-    color: NAVER_GREEN,
-    letterSpacing: -0.5,
   },
 });
 

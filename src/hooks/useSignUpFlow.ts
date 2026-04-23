@@ -13,6 +13,7 @@ import {
   hasLoginableUserForPhoneE164,
   recordTermsAgreement,
 } from '@/src/lib/user-profile';
+import { serverTimestamp } from 'firebase/firestore';
 
 /** 전화번호 입력이 멈춘 뒤 짧게 기다렸다가 회원 조회(과도한 호출·레이스 완화) */
 const PHONE_MEMBER_CHECK_DEBOUNCE_MS = 220;
@@ -189,6 +190,7 @@ export function useSignUpFlow(initialPhone: string) {
           nickname,
           photoUrl: null,
           phone: n,
+          phoneVerifiedAt: serverTimestamp(),
           email: emailTrim || null,
           displayName: name.slice(0, 64),
           signupProvider: 'phone_otp',

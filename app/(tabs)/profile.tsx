@@ -242,109 +242,92 @@ export default function ProfileTab() {
           showsVerticalScrollIndicator={false}>
           <Text style={styles.screenTitle}>프로필</Text>
 
-          {needsSnsDemographics ? (
-            <GinitCard appearance="light" style={styles.snsGuideCard}>
-              <Text style={styles.title}>모임 이용을 위한 정보</Text>
-              <Text style={styles.hint}>
-                SNS 간편 가입으로 들어오셨어요. 성별과 연령대를 선택한 뒤 저장하면 모임 만들기·모임 참여를 할 수 있어요. 앱 소개 투어는 그대로 이용할 수 있어요.
-              </Text>
+          <GinitCard appearance="light" style={styles.snsGuideCard}>
+            <Text style={styles.title}>모임 이용을 위한 정보</Text>
+            <Text style={styles.hint}>
+              {needsSnsDemographics
+                ? 'SNS 간편 가입으로 들어오셨어요. 성별과 연령대를 선택한 뒤 저장하면 모임 만들기·모임 참여를 할 수 있어요. 앱 소개 투어는 그대로 이용할 수 있어요.'
+                : '모임 참여를 위해 전화번호 인증이 필요해요. 성별과 연령대는 언제든 수정할 수 있어요.'}
+            </Text>
 
-              <Text style={styles.label}>성별 (필수)</Text>
-              <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
-                {(
-                  [
-                    { code: 'MALE' as const, label: '남자' },
-                    { code: 'FEMALE' as const, label: '여자' },
-                  ] as const
-                ).map(({ code, label }) => {
-                  const selected = genderDemo === code;
-                  return (
-                    <Pressable
-                      key={code}
-                      disabled={demoBusy}
-                      onPress={() => setGenderDemo(code)}
-                      style={({ pressed }) => [
-                        authFormStyles.genderBinaryBtn,
-                        selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
-                        pressed && !demoBusy && authFormStyles.pressed,
-                      ]}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected, checked: selected }}
-                      accessibilityLabel={label}>
-                      <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
-                        {label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+            <Text style={styles.label}>성별 (필수)</Text>
+            <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
+              {(
+                [
+                  { code: 'MALE' as const, label: '남자' },
+                  { code: 'FEMALE' as const, label: '여자' },
+                ] as const
+              ).map(({ code, label }) => {
+                const selected = genderDemo === code;
+                return (
+                  <Pressable
+                    key={code}
+                    disabled={demoBusy}
+                    onPress={() => setGenderDemo(code)}
+                    style={({ pressed }) => [
+                      authFormStyles.genderBinaryBtn,
+                      selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
+                      pressed && !demoBusy && authFormStyles.pressed,
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected, checked: selected }}
+                    accessibilityLabel={label}>
+                    <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-              <Text style={[styles.label, { marginTop: 14 }]}>연령대 (필수)</Text>
-              <View style={demographicsStyles.ageWrap} accessibilityRole="radiogroup" accessibilityLabel="연령대 선택">
-                {[SIGN_UP_AGE_BAND_OPTIONS.slice(0, 3), SIGN_UP_AGE_BAND_OPTIONS.slice(3, 6)].map((row, rowIdx) => (
-                  <View key={rowIdx} style={demographicsStyles.ageRow}>
-                    {row.map(({ code, label }) => {
-                      const selected = ageBandDemo === code;
-                      return (
-                        <Pressable
-                          key={code}
-                          disabled={demoBusy}
-                          onPress={() => setAgeBandDemo(code)}
-                          style={({ pressed }) => [
-                            demographicsStyles.ageChip,
-                            selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
-                            pressed && !demoBusy && authFormStyles.pressed,
-                          ]}
-                          accessibilityRole="radio"
-                          accessibilityState={{ selected, checked: selected }}
-                          accessibilityLabel={label}>
-                          <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
-                            {label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
+            <Text style={[styles.label, { marginTop: 14 }]}>연령대 (필수)</Text>
+            <View style={demographicsStyles.ageWrap} accessibilityRole="radiogroup" accessibilityLabel="연령대 선택">
+              {[SIGN_UP_AGE_BAND_OPTIONS.slice(0, 3), SIGN_UP_AGE_BAND_OPTIONS.slice(3, 6)].map((row, rowIdx) => (
+                <View key={rowIdx} style={demographicsStyles.ageRow}>
+                  {row.map(({ code, label }) => {
+                    const selected = ageBandDemo === code;
+                    return (
+                      <Pressable
+                        key={code}
+                        disabled={demoBusy}
+                        onPress={() => setAgeBandDemo(code)}
+                        style={({ pressed }) => [
+                          demographicsStyles.ageChip,
+                          selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
+                          pressed && !demoBusy && authFormStyles.pressed,
+                        ]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected, checked: selected }}
+                        accessibilityLabel={label}>
+                        <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
 
-              <GinitButton
-                title="성별·연령대 저장"
-                variant="primary"
-                onPress={() => void onSaveDemographics()}
-                disabled={demoBusy || profileBusy}
-              />
+            <GinitButton
+              title={needsSnsDemographics ? '성별·연령대 저장' : '성별·연령대 저장(수정)'}
+              variant="primary"
+              onPress={() => void onSaveDemographics()}
+              disabled={demoBusy || profileBusy}
+            />
 
-              <View style={{ height: 14 }} />
-              <Text style={styles.label}>전화번호 인증 (필수)</Text>
-              <Text style={styles.subHint}>
-                {isPhoneVerified ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}` : '아직 인증되지 않았어요.'}
-              </Text>
-              <GinitButton
-                title={isPhoneVerified ? '전화번호 다시 인증' : '전화번호 인증하기'}
-                variant="secondary"
-                onPress={() => router.push('/profile/phone-verify')}
-                disabled={demoBusy || profileBusy}
-              />
-            </GinitCard>
-          ) : null}
-
-          {!needsSnsDemographics ? (
-            <GinitCard appearance="light" style={styles.snsGuideCard}>
-              <Text style={styles.title}>모임 이용을 위한 정보</Text>
-              <Text style={styles.hint}>모임 참여를 위해 전화번호 인증이 필요해요.</Text>
-              <Text style={styles.label}>전화번호 인증 (필수)</Text>
-              <Text style={styles.subHint}>
-                {isPhoneVerified ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}` : '아직 인증되지 않았어요.'}
-              </Text>
-              <GinitButton
-                title={isPhoneVerified ? '전화번호 다시 인증' : '전화번호 인증하기'}
-                variant="secondary"
-                onPress={() => router.push('/profile/phone-verify')}
-                disabled={profileBusy}
-              />
-            </GinitCard>
-          ) : null}
+            <View style={{ height: 14 }} />
+            <Text style={styles.label}>전화번호 인증 (필수)</Text>
+            <Text style={styles.subHint}>
+              {isPhoneVerified ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}` : '아직 인증되지 않았어요.'}
+            </Text>
+            <GinitButton
+              title={isPhoneVerified ? '전화번호 다시 인증' : '전화번호 인증하기'}
+              variant="secondary"
+              onPress={() => router.push('/profile/phone-verify')}
+              disabled={demoBusy || profileBusy}
+            />
+          </GinitCard>
 
           <GinitCard appearance="light" style={styles.profileCard}>
             <Text style={styles.title}>계정 정보</Text>
