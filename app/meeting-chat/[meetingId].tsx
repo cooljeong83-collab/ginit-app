@@ -2,12 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Keyboard,
   type KeyboardEvent,
@@ -20,6 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { Swipeable } from 'react-native-gesture-handler';
 
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -83,6 +86,11 @@ export default function MeetingChatRoomScreen() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [replyTo, setReplyTo] = useState<MeetingChatMessage['replyTo']>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const drawerAnim = useRef(new Animated.Value(0)).current;
+  const plusAnim = useRef(new Animated.Value(0)).current;
   /** 키보드 본체 + IME 상단(이모지/툴바 등)까지 포함해 입력창을 올리기 위한 하단 여백 */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
@@ -247,6 +255,22 @@ export default function MeetingChatRoomScreen() {
     });
   }, []);
 
+  useEffect(() => {
+    Animated.timing(drawerAnim, {
+      toValue: drawerOpen ? 1 : 0,
+      duration: drawerOpen ? 220 : 180,
+      useNativeDriver: true,
+    }).start();
+  }, [drawerOpen, drawerAnim]);
+
+  useEffect(() => {
+    Animated.timing(plusAnim, {
+      toValue: plusMenuOpen ? 1 : 0,
+      duration: plusMenuOpen ? 180 : 140,
+      useNativeDriver: true,
+    }).start();
+  }, [plusMenuOpen, plusAnim]);
+
   const onSend = useCallback(async () => {
     if (!meetingId || !userId?.trim()) {
       Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
@@ -256,14 +280,20 @@ export default function MeetingChatRoomScreen() {
     if (!body || sending || uploadingImage) return;
     setSending(true);
     try {
-      await sendMeetingChatTextMessage(meetingId, userId, body);
+      await sendMeetingChatTextMessage(meetingId, userId, body, replyTo?.messageId ? replyTo : null);
       setDraft('');
+      setReplyTo(null);
     } catch (e) {
       Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
     } finally {
       setSending(false);
     }
-  }, [meetingId, userId, draft, sending, uploadingImage]);
+  }, [meetingId, userId, draft, sending, uploadingImage, replyTo]);
+
+  const openPlusMenu = useCallback(() => {
+    if (uploadingImage || sending) return;
+    setPlusMenuOpen(true);
+  }, [uploadingImage, sending]);
 
   const onPickImage = useCallback(async () => {
     if (!meetingId || !userId?.trim()) {
@@ -301,18 +331,48 @@ export default function MeetingChatRoomScreen() {
 
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
 
+  const announcementText = useMemo(() => {
+    if (!meeting) return '';
+    if (meeting.scheduleConfirmed !== true) return '';
+    const place = meeting.placeName?.trim() || meeting.location?.trim();
+    const d = meeting.scheduleDate?.trim();
+    const t = meeting.scheduleTime?.trim();
+    const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
+    return parts.length ? `확정: ${parts.join(' · ')}` : '';
+  }, [meeting]);
+
   const renderItem = useCallback(
     ({ item, index }: { item: MeetingChatMessage; index: number }) => {
+      const prev = index > 0 ? messages[index - 1] : null;
+      const currDate = item.createdAt?.toDate?.() ?? null;
+      const prevDate = prev?.createdAt?.toDate?.() ?? null;
+      const dateLabel =
+        currDate &&
+        (!prevDate ||
+          currDate.getFullYear() !== prevDate.getFullYear() ||
+          currDate.getMonth() !== prevDate.getMonth() ||
+          currDate.getDate() !== prevDate.getDate())
+          ? currDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+          : '';
+
       if (item.kind === 'system') {
         return (
-          <View style={styles.systemRow}>
-            <Text style={styles.systemText}>{item.text}</Text>
+          <View>
+            {dateLabel ? (
+              <View style={styles.dateChipRow}>
+                <View style={styles.dateChip}>
+                  <Text style={styles.dateChipText}>{dateLabel}</Text>
+                </View>
+              </View>
+            ) : null}
+            <View style={styles.systemRow}>
+              <Text style={styles.systemText}>{item.text}</Text>
+            </View>
           </View>
         );
       }
       const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
       const isMine = Boolean(myId && sid && sid === myId);
-      const prev = index > 0 ? messages[index - 1] : null;
       const prevSid =
         prev && prev.kind !== 'system' ? normalizeParticipantId(String(prev.senderId ?? '').trim()) : '';
       const sameSenderAsPrev = Boolean(sid && prevSid && prevSid === sid);
@@ -327,26 +387,54 @@ export default function MeetingChatRoomScreen() {
       const caption = item.text?.trim();
 
       if (isMine) {
-        return (
+        const bubble = (
           <View style={styles.rowMine}>
             <Text style={styles.timeMine}>{formatChatTime(item.createdAt)}</Text>
-            <View style={[styles.bubbleMine, isImage && styles.bubbleMineMedia]}>
-              {isImage ? (
-                item.imageUrl ? (
-                  <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+            <View style={[styles.bubbleMineWrap, isImage && styles.bubbleMineMedia]}>
+              <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
+                {item.replyTo?.messageId ? (
+                  <View style={styles.replyQuoteMine}>
+                    <Text style={styles.replyQuoteLabelMine}>답장</Text>
+                    <Text style={styles.replyQuoteTextMine} numberOfLines={2}>
+                      {item.replyTo.text || '메시지'}
+                    </Text>
+                  </View>
+                ) : null}
+                {isImage ? (
+                  item.imageUrl ? (
+                    <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                  ) : (
+                    <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
+                  )
                 ) : (
-                  <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
-                )
-              ) : (
-                <Text style={styles.bubbleMineText}>{item.text}</Text>
-              )}
-              {isImage && caption ? <Text style={styles.imageCaptionMine}>{caption}</Text> : null}
+                  <Text style={styles.bubbleMineText}>{item.text}</Text>
+                )}
+                {isImage && caption ? <Text style={styles.imageCaptionMine}>{caption}</Text> : null}
+              </BlurView>
             </View>
+          </View>
+        );
+        return (
+          <View>
+            {dateLabel ? (
+              <View style={styles.dateChipRow}>
+                <View style={styles.dateChip}>
+                  <Text style={styles.dateChipText}>{dateLabel}</Text>
+                </View>
+              </View>
+            ) : null}
+            <Swipeable
+              renderLeftActions={() => <View style={{ width: 60 }} />}
+              onSwipeableOpen={() => {
+                setReplyTo({ messageId: item.id, senderId: item.senderId ?? null, text: item.text });
+              }}>
+              {bubble}
+            </Swipeable>
           </View>
         );
       }
 
-      return (
+      const otherBubble = (
         <View style={styles.rowOther}>
           <View style={styles.avatarCol} pointerEvents={withdrawn ? 'none' : 'auto'}>
             {showAvatar ? (
@@ -375,21 +463,50 @@ export default function MeetingChatRoomScreen() {
               </View>
             ) : null}
             <View style={styles.bubbleOtherWrap}>
-              <View style={[styles.bubbleOther, isImage && styles.bubbleOtherMedia]}>
-                {isImage ? (
-                  item.imageUrl ? (
-                    <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+              <View style={[styles.bubbleOtherOuter, isImage && styles.bubbleOtherMedia]}>
+                <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
+                  {item.replyTo?.messageId ? (
+                    <View style={styles.replyQuoteOther}>
+                      <Text style={styles.replyQuoteLabelOther}>답장</Text>
+                      <Text style={styles.replyQuoteTextOther} numberOfLines={2}>
+                        {item.replyTo.text || '메시지'}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {isImage ? (
+                    item.imageUrl ? (
+                      <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                    ) : (
+                      <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
+                    )
                   ) : (
-                    <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
-                  )
-                ) : (
-                  <Text style={styles.bubbleOtherText}>{item.text}</Text>
-                )}
-                {isImage && caption ? <Text style={styles.imageCaptionOther}>{caption}</Text> : null}
+                    <Text style={styles.bubbleOtherText}>{item.text}</Text>
+                  )}
+                  {isImage && caption ? <Text style={styles.imageCaptionOther}>{caption}</Text> : null}
+                </BlurView>
+                {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
               </View>
               <Text style={styles.timeOther}>{formatChatTime(item.createdAt)}</Text>
             </View>
           </View>
+        </View>
+      );
+      return (
+        <View>
+          {dateLabel ? (
+            <View style={styles.dateChipRow}>
+              <View style={styles.dateChip}>
+                <Text style={styles.dateChipText}>{dateLabel}</Text>
+              </View>
+            </View>
+          ) : null}
+          <Swipeable
+            renderLeftActions={() => <View style={{ width: 60 }} />}
+            onSwipeableOpen={() => {
+              setReplyTo({ messageId: item.id, senderId: item.senderId ?? null, text: item.text });
+            }}>
+            {otherBubble}
+          </Swipeable>
         </View>
       );
     },
@@ -475,11 +592,27 @@ export default function MeetingChatRoomScreen() {
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="메뉴"
-              onPress={() => Alert.alert('안내', '채팅 메뉴는 곧 제공됩니다.')}>
+              onPress={() => setDrawerOpen(true)}>
               <Ionicons name="menu-outline" size={24} color="#475569" />
             </Pressable>
           </View>
         </View>
+
+        {announcementText ? (
+          <Pressable
+            onPress={() => Alert.alert('확정된 정보', announcementText)}
+            style={styles.announcementBar}
+            accessibilityRole="button"
+            accessibilityLabel="공지">
+            <BlurView tint="light" intensity={60} style={styles.announcementInner}>
+              <Ionicons name="megaphone-outline" size={16} color="#0052CC" />
+              <Text style={styles.announcementText} numberOfLines={1}>
+                {announcementText}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#64748b" />
+            </BlurView>
+          </Pressable>
+        ) : null}
 
         <View style={styles.meetingInfoOuter}>
           <MeetingFeedRow meeting={meeting} userCoords={userCoords} onPress={goMeetingDetail} />
@@ -515,13 +648,30 @@ export default function MeetingChatRoomScreen() {
         </View>
 
         <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]}>
+          {replyTo?.messageId ? (
+            <View style={styles.replyPreviewRow}>
+              <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
+                <Text style={styles.replyPreviewTitle}>답장</Text>
+                <Text style={styles.replyPreviewBody} numberOfLines={1}>
+                  {replyTo.text || '메시지'}
+                </Text>
+                <Pressable
+                  onPress={() => setReplyTo(null)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="답장 취소">
+                  <Ionicons name="close" size={18} color="#475569" />
+                </Pressable>
+              </BlurView>
+            </View>
+          ) : null}
           <View style={styles.composer}>
             <Pressable
               style={styles.plusBtn}
-              onPress={() => void onPickImage()}
+              onPress={openPlusMenu}
               disabled={uploadingImage}
               accessibilityRole="button"
-              accessibilityLabel="사진 보내기">
+              accessibilityLabel="퀵 액션 열기">
               {uploadingImage ? (
                 <ActivityIndicator size="small" color="#475569" />
               ) : (
@@ -582,6 +732,143 @@ export default function MeetingChatRoomScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* + 퀵 액션 */}
+        {plusMenuOpen ? (
+          <Pressable style={styles.overlayDim} onPress={() => setPlusMenuOpen(false)} accessibilityRole="button">
+            <Animated.View
+              style={[
+                styles.plusSheet,
+                {
+                  opacity: plusAnim,
+                  transform: [
+                    {
+                      translateY: plusAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [14, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}>
+              <BlurView tint="light" intensity={60} style={styles.plusSheetInner}>
+                <Text style={styles.plusTitle}>퀵 액션</Text>
+                <View style={styles.plusRow}>
+                  <Pressable
+                    onPress={() => {
+                      setPlusMenuOpen(false);
+                      void onPickImage();
+                    }}
+                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
+                    accessibilityRole="button">
+                    <Ionicons name="image-outline" size={18} color="#0052CC" />
+                    <Text style={styles.plusActionText}>사진</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setPlusMenuOpen(false);
+                      Alert.alert('AI 장소추천', '곧 채팅에서 바로 추천을 띄워드릴게요.');
+                    }}
+                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
+                    accessibilityRole="button">
+                    <Ionicons name="sparkles-outline" size={18} color="#FF8A00" />
+                    <Text style={styles.plusActionText}>AI 장소추천</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.plusRow}>
+                  <Pressable
+                    onPress={() => {
+                      setPlusMenuOpen(false);
+                      Alert.alert('투표 만들기', '곧 제공됩니다. (다음 단계: 채팅에서 투표 카드 생성)');
+                    }}
+                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
+                    accessibilityRole="button">
+                    <Ionicons name="bar-chart-outline" size={18} color="#0052CC" />
+                    <Text style={styles.plusActionText}>투표 만들기</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setPlusMenuOpen(false);
+                      setDraft((v) => (v.trim() ? v : '정산 요청합니다. 각자 확인 부탁드려요!'));
+                      requestAnimationFrame(() => messageInputRef.current?.focus());
+                    }}
+                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
+                    accessibilityRole="button">
+                    <Ionicons name="card-outline" size={18} color="#FF8A00" />
+                    <Text style={styles.plusActionText}>정산 요청</Text>
+                  </Pressable>
+                </View>
+              </BlurView>
+            </Animated.View>
+          </Pressable>
+        ) : null}
+
+        {/* 우측 드로어: 멤버 리스트 */}
+        {drawerOpen ? (
+          <Pressable style={styles.overlayDim} onPress={() => setDrawerOpen(false)} accessibilityRole="button">
+            <Animated.View
+              style={[
+                styles.drawer,
+                {
+                  transform: [
+                    {
+                      translateX: drawerAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [320, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}>
+              <BlurView tint="light" intensity={60} style={styles.drawerInner}>
+                <View style={styles.drawerHeader}>
+                  <Text style={styles.drawerTitle}>참여 멤버</Text>
+                  <Pressable onPress={() => setDrawerOpen(false)} hitSlop={10} accessibilityRole="button">
+                    <Ionicons name="close" size={20} color="#475569" />
+                  </Pressable>
+                </View>
+                <Text style={styles.drawerHint}>gTrust · gDna</Text>
+                <View style={styles.drawerList}>
+                  {[...(meeting?.participantIds ?? []), ...(meeting?.createdBy?.trim() ? [meeting.createdBy] : [])]
+                    .filter((x, i, arr) => {
+                      const n = normalizeParticipantId(String(x)) ?? String(x).trim();
+                      return n && arr.findIndex((y) => (normalizeParticipantId(String(y)) ?? String(y).trim()) === n) === i;
+                    })
+                    .map((pid) => {
+                      const n = normalizeParticipantId(String(pid)) ?? String(pid).trim();
+                      const p = n ? profileForSender(profiles, n) : undefined;
+                      const nick = isUserProfileWithdrawn(p) ? WITHDRAWN_NICKNAME : (p?.nickname ?? '회원');
+                      const trust = typeof p?.gTrust === 'number' ? p.gTrust : null;
+                      const dna = typeof p?.gDna === 'string' ? p.gDna : '';
+                      const isHost = Boolean(hostNorm && n && n === hostNorm);
+                      return (
+                        <View key={String(pid)} style={styles.drawerRow}>
+                          <View style={styles.drawerAvatar}>
+                            {p?.photoUrl ? (
+                              <Image source={{ uri: p.photoUrl }} style={styles.drawerAvatarImg} contentFit="cover" />
+                            ) : (
+                              <Text style={styles.drawerAvatarText}>{nick.slice(0, 1)}</Text>
+                            )}
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.drawerNameRow}>
+                              <Text style={styles.drawerName} numberOfLines={1}>
+                                {nick}
+                              </Text>
+                              {isHost ? <Ionicons name="star" size={14} color="#CA8A04" /> : null}
+                            </View>
+                            <Text style={styles.drawerMeta}>
+                              {trust != null ? `gTrust ${trust}` : 'gTrust -'}{dna ? ` · ${dna}` : ''}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                </View>
+              </BlurView>
+            </Animated.View>
+          </Pressable>
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -618,6 +905,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  announcementBar: {
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    backgroundColor: '#ECEFF1',
+  },
+  announcementInner: {
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    overflow: 'hidden',
+  },
+  announcementText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0f172a',
   },
   titleBlock: {
     flex: 1,
@@ -657,6 +967,24 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     backgroundColor: '#ECEFF1',
+  },
+  dateChipRow: {
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  dateChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  dateChipText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#475569',
   },
   chatErrorBanner: {
     paddingHorizontal: 12,
@@ -708,15 +1036,18 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 10,
   },
+  bubbleMineWrap: {
+    maxWidth: '78%',
+  },
   bubbleMine: {
-    maxWidth: '76%',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(0, 82, 204, 0.22)',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 16,
     borderTopRightRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0, 82, 204, 0.2)',
+    borderColor: 'rgba(0, 82, 204, 0.30)',
+    overflow: 'hidden',
   },
   bubbleMineMedia: {
     paddingHorizontal: 6,
@@ -807,15 +1138,33 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 6,
   },
-  bubbleOther: {
+  bubbleOtherOuter: {
     maxWidth: '78%',
-    backgroundColor: '#fff',
+    position: 'relative',
+  },
+  bubbleOther: {
+    backgroundColor: 'rgba(255,255,255,0.58)',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 16,
     borderTopLeftRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
+    overflow: 'hidden',
+  },
+  aiNeonOutline: {
+    position: 'absolute',
+    top: -1,
+    left: -1,
+    right: -1,
+    bottom: -1,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 138, 0, 0.85)',
+    shadowColor: '#FF8A00',
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
   },
   bubbleOtherMedia: {
     paddingHorizontal: 6,
@@ -837,6 +1186,129 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94a3b8',
     marginBottom: 2,
+  },
+  replyQuoteMine: {
+    marginBottom: 8,
+    paddingLeft: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(255,255,255,0.55)',
+  },
+  replyQuoteOther: {
+    marginBottom: 8,
+    paddingLeft: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(0, 82, 204, 0.35)',
+  },
+  replyQuoteLabelMine: { fontSize: 11, fontWeight: '900', color: 'rgba(255,255,255,0.92)' },
+  replyQuoteLabelOther: { fontSize: 11, fontWeight: '900', color: '#0052CC' },
+  replyQuoteTextMine: { marginTop: 2, fontSize: 12, color: 'rgba(255,255,255,0.92)' },
+  replyQuoteTextOther: { marginTop: 2, fontSize: 12, color: '#475569' },
+  replyPreviewRow: {
+    paddingHorizontal: 10,
+    paddingTop: 10,
+  },
+  replyPreviewCard: {
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    overflow: 'hidden',
+  },
+  replyPreviewTitle: { fontSize: 12, fontWeight: '900', color: '#0052CC' },
+  replyPreviewBody: { flex: 1, fontSize: 12, fontWeight: '800', color: '#0f172a' },
+  overlayDim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.25)',
+  },
+  plusSheet: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 92,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  plusSheetInner: {
+    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  plusTitle: { fontSize: 13, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
+  plusRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  plusAction: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  plusActionText: { fontSize: 13, fontWeight: '900', color: '#0f172a' },
+  drawer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: 300,
+    borderTopLeftRadius: 18,
+    borderBottomLeftRadius: 18,
+    overflow: 'hidden',
+  },
+  drawerInner: {
+    flex: 1,
+    paddingTop: 14,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.62)',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255,255,255,0.22)',
+  },
+  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  drawerTitle: { fontSize: 15, fontWeight: '900', color: '#0f172a' },
+  drawerHint: { fontSize: 12, color: '#64748b', marginBottom: 10, fontWeight: '800' },
+  drawerList: { gap: 10 },
+  drawerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  drawerAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0, 82, 204, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerAvatarImg: { width: 38, height: 38 },
+  drawerAvatarText: { fontSize: 14, fontWeight: '900', color: '#0052CC' },
+  drawerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  drawerName: { fontSize: 13, fontWeight: '900', color: '#0f172a', flexShrink: 1 },
+  drawerMeta: { marginTop: 2, fontSize: 12, color: '#475569', fontWeight: '800' },
+  pressed: {
+    opacity: 0.85,
   },
   composer: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
@@ -15,21 +16,23 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
  */
 export default function RootLayout() {
   return (
-    <UserSessionProvider>
-      <InAppAlarmsProvider>
-        <PushNotificationBootstrap />
-        <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#F6FAFF' },
-          freezeOnBlur: true,
-          animation: 'slide_from_right',
-          gestureEnabled: true,
-          fullScreenGestureEnabled: true,
-          ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
-        }}
-      />
-      </InAppAlarmsProvider>
-    </UserSessionProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <UserSessionProvider>
+        <InAppAlarmsProvider>
+          <PushNotificationBootstrap />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: '#F6FAFF' },
+              freezeOnBlur: true,
+              animation: 'slide_from_right',
+              gestureEnabled: true,
+              fullScreenGestureEnabled: true,
+              ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
+            }}
+          />
+        </InAppAlarmsProvider>
+      </UserSessionProvider>
+    </GestureHandlerRootView>
   );
 }

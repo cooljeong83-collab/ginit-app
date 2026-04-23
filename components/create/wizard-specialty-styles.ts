@@ -102,8 +102,8 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   glassChipOn: {
     backgroundColor: GinitTheme.colors.primarySoft,
-    borderColor: 'rgba(134, 211, 183, 0.65)',
-    shadowColor: 'rgba(134, 211, 183, 0.55)',
+    borderColor: 'rgba(31, 42, 68, 0.40)',
+    shadowColor: 'rgba(31, 42, 68, 0.22)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -133,7 +133,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.55)',
   },
   segmentThirdOn: {
-    backgroundColor: 'rgba(134, 211, 183, 0.14)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   segmentTitle: {
     fontSize: 13,

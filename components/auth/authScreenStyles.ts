@@ -163,11 +163,14 @@ export const authScreenStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   genderBinaryBtnSelected: {
-    backgroundColor: GinitTheme.colors.primary,
-    shadowColor: 'rgba(15, 23, 42, 0.22)',
+    // CTA 버튼(프로필 저장 등) 톤에 맞춘 하이라이트(민트 글래스)
+    backgroundColor: 'rgba(134, 211, 183, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(134, 211, 183, 0.55)',
+    shadowColor: 'rgba(134, 211, 183, 0.25)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
-    shadowRadius: 5,
+    shadowRadius: 8,
     elevation: 3,
   },
   genderBinaryBtnIdle: {
@@ -176,7 +179,7 @@ export const authScreenStyles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   genderBinaryLabel: { fontSize: 15, fontWeight: '800', color: '#64748b' },
-  genderBinaryLabelSelected: { fontSize: 15, fontWeight: '900', color: '#FFFFFF' },
+  genderBinaryLabelSelected: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.primary },
 
   registerLinkRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' },
   registerLinkMuted: { fontSize: 13, fontWeight: '600', color: '#64748b' },

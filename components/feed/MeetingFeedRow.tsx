@@ -1,11 +1,19 @@
 import { Image } from 'expo-image';
+import { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
+import { trimKoreanAddressToGuDistrict } from '@/src/lib/korean-address-display';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import {
+  formatPublicMeetingAgeSummary,
+  formatPublicMeetingGenderSummary,
+  formatPublicMeetingSettlementSummary,
+  getMeetingRecruitmentPhase,
+  parsePublicMeetingDetailsConfig,
+} from '@/src/lib/meetings';
 
 function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
   switch (phase) {
@@ -41,6 +49,21 @@ type Props = {
 /** 홈 피드와 동일한 모임 한 줄 카드 */
 export function MeetingFeedRow({ meeting: m, userCoords, joined = false, onPress }: Props) {
   const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
+  const publicCondLine = useMemo(() => {
+    if (m.isPublic === false) return null;
+    const cfg = parsePublicMeetingDetailsConfig(m.meetingConfig);
+    if (!cfg) return null;
+    return [
+      formatPublicMeetingAgeSummary(cfg.ageLimit),
+      formatPublicMeetingGenderSummary(cfg.genderRatio),
+      formatPublicMeetingSettlementSummary(cfg.settlement),
+    ].join(' · ');
+  }, [m]);
+  const addrLine = useMemo(() => {
+    const raw = (m.address?.trim() || m.location?.trim() || '').trim();
+    if (!raw) return '';
+    return trimKoreanAddressToGuDistrict(raw);
+  }, [m.address, m.location]);
   return (
     <View style={rowStyles.meetRowWrap}>
       <Pressable
@@ -55,9 +78,9 @@ export function MeetingFeedRow({ meeting: m, userCoords, joined = false, onPress
               <Text style={rowStyles.meetTitle} numberOfLines={1}>
                 {m.title}
               </Text>
-              {m.address?.trim() || m.location ? (
+              {addrLine ? (
                 <Text style={rowStyles.meetAddrLine} numberOfLines={1}>
-                  {m.address?.trim() || m.location}
+                  {addrLine}
                 </Text>
               ) : null}
             </View>
@@ -100,6 +123,11 @@ export function MeetingFeedRow({ meeting: m, userCoords, joined = false, onPress
           {m.scheduleDate && m.scheduleTime ? (
             <Text style={rowStyles.schedule} numberOfLines={1}>
               {m.scheduleDate} {m.scheduleTime}
+            </Text>
+          ) : null}
+          {publicCondLine ? (
+            <Text style={rowStyles.publicCondLine} numberOfLines={1}>
+              조건 · {publicCondLine}
             </Text>
           ) : null}
           <Text style={rowStyles.price} numberOfLines={2}>
@@ -235,6 +263,11 @@ const rowStyles = StyleSheet.create({
   schedule: {
     fontSize: 12,
     fontWeight: '700',
+    color: '#64748b',
+  },
+  publicCondLine: {
+    fontSize: 12,
+    fontWeight: '600',
     color: '#64748b',
   },
   price: {

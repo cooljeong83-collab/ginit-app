@@ -27,6 +27,8 @@ export const USERS_COLLECTION = 'users';
 /** 탈퇴(익명화) 후 UI·Firestore에 고정되는 표시 닉네임 */
 export const WITHDRAWN_NICKNAME = '(탈퇴한 회원)';
 
+export type UserStatus = 'ACTIVE' | 'BANNED' | 'WITHDRAWN';
+
 export type UserProfile = {
   nickname: string;
   /** HTTPS 등 원격 프로필 이미지 URL (없으면 이니셜 아바타) */
@@ -41,6 +43,14 @@ export type UserProfile = {
   signupProvider?: 'google_sns' | 'phone_otp' | null;
   /** 약관 동의 시각(서버 타임스탬프). */
   termsAgreedAt?: unknown | null;
+  /** 마케팅 정보 수신 동의 여부 */
+  isMarketingAgreed?: boolean | null;
+  /** FCM 푸시 토큰(디바이스별 최신값) */
+  fcmToken?: string | null;
+  /** 마지막 로그인 시각(서버 타임스탬프 권장) */
+  lastLoginAt?: unknown | null;
+  /** 계정 상태 */
+  status?: UserStatus | null;
   /** 회원가입 등에서 저장하는 값 예: `MALE`, `FEMALE` */
   gender?: string | null;
   /** 연령대 구간 코드 예: `TEENS`(10대), `TWENTIES`(20대) … */
@@ -48,6 +58,18 @@ export type UserProfile = {
   birthYear?: number | null;
   birthMonth?: number | null;
   birthDay?: number | null;
+  /**
+   * 생년월일(통합 필드, 권장).
+   * - Firestore Timestamp(Date)로 저장
+   * - 마이그레이션 기간 동안 birthYear/Month/Day는 "읽기 호환"만 유지
+   */
+  birthDate?: unknown | null;
+  /** 주 활동 지역(예: 성수동, 강남역) */
+  baseRegion?: string | null;
+  /** 관심 카테고리 ID 리스트 */
+  interests?: string[] | null;
+  /** 한 줄 소개 */
+  bio?: string | null;
   firebaseUid?: string | null;
   /** 지닛 게이미피케이션 */
   gLevel?: number | null;
@@ -55,6 +77,43 @@ export type UserProfile = {
   gTrust?: number | null;
   gDna?: string | null;
   meetingCount?: number | null;
+  /** 시즌 랭킹 포인트 */
+  rankingPoints?: number | null;
+  /** 획득한 배지 ID 리스트 */
+  badges?: string[] | null;
+
+  /**
+   * AI 개인화 및 취향(에이전트 최적화)
+   * - 예: { vibe: 'quiet', dietary: 'vegan', preferred_time: 'evening' }
+   */
+  preferences?: Record<string, unknown> | null;
+  /** 추천받고 싶지 않은 단어/카테고리 */
+  blockedKeywords?: string[] | null;
+
+  /** 위치 및 로컬 상권 */
+  lastLocation?: unknown | null;
+  /** 찜/단골 가게 ID 리스트 */
+  favoriteStores?: string[] | null;
+
+  /** 신뢰 및 안전 */
+  isIdentityVerified?: boolean | null;
+  /** 다른 사용자로부터 받은 누적 신고 횟수 */
+  reportCount?: number | null;
+  /** 유저가 직접 차단한 상대방 UID 리스트 */
+  blockedUsers?: string[] | null;
+
+  /** 경제 시스템 */
+  pointBalance?: number | null;
+  couponCount?: number | null;
+  billingCustomerId?: string | null;
+
+  /** 마케팅 및 성장 */
+  referralCode?: string | null;
+  joinPath?: string | null;
+  appVersion?: string | null;
+
+  /** 확장용 만능 메타데이터 */
+  metadata?: Record<string, unknown> | null;
   /** 탈퇴 처리 시 개인정보는 null로 비우고 메시지 등은 senderId로만 연결 */
   isWithdrawn?: boolean;
 };
@@ -85,6 +144,9 @@ export function generateRandomNickname(): string {
 }
 
 function mapUserDoc(data: Record<string, unknown>): UserProfile {
+  const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === 'object' && !Array.isArray(v);
+
   const isWithdrawn = data.isWithdrawn === true;
   const nick = typeof data.nickname === 'string' ? data.nickname.trim() : '';
   const photo = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
@@ -95,17 +157,61 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const spRaw = typeof data.signupProvider === 'string' ? data.signupProvider.trim().toLowerCase() : '';
   const signupProvider = spRaw === 'google_sns' || spRaw === 'phone_otp' ? (spRaw as 'google_sns' | 'phone_otp') : null;
   const termsAgreedAt = 'termsAgreedAt' in data ? (data.termsAgreedAt as unknown) : null;
+  const isMarketingAgreed = typeof data.isMarketingAgreed === 'boolean' ? data.isMarketingAgreed : null;
+  const fcmToken = typeof data.fcmToken === 'string' ? data.fcmToken.trim() : '';
+  const lastLoginAt = 'lastLoginAt' in data ? (data.lastLoginAt as unknown) : null;
+  const statusRaw = typeof data.status === 'string' ? data.status.trim().toUpperCase() : '';
+  const status: UserStatus | null =
+    statusRaw === 'ACTIVE' || statusRaw === 'BANNED' || statusRaw === 'WITHDRAWN'
+      ? (statusRaw as UserStatus)
+      : null;
   const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
   const ageBand = typeof data.ageBand === 'string' ? data.ageBand.trim() : '';
   const birthYear = typeof data.birthYear === 'number' ? data.birthYear : null;
   const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
   const birthDay = typeof data.birthDay === 'number' ? data.birthDay : null;
+  const birthDate = 'birthDate' in data ? (data.birthDate as unknown) : null;
+  const baseRegion = typeof data.baseRegion === 'string' ? data.baseRegion.trim() : '';
+  const interests = Array.isArray(data.interests)
+    ? (data.interests as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim())
+    : null;
+  const bio = typeof data.bio === 'string' ? data.bio.trim() : '';
   const firebaseUid = typeof data.firebaseUid === 'string' ? data.firebaseUid.trim() : '';
   const gLevel = typeof data.gLevel === 'number' ? Math.trunc(data.gLevel) : null;
   const gXp = typeof data.gXp === 'number' ? Math.trunc(data.gXp) : null;
   const gTrust = typeof data.gTrust === 'number' ? Math.trunc(data.gTrust) : null;
   const gDna = typeof data.gDna === 'string' ? data.gDna.trim() : '';
   const meetingCount = typeof data.meetingCount === 'number' ? Math.trunc(data.meetingCount) : null;
+  const rankingPoints = typeof data.rankingPoints === 'number' ? Math.trunc(data.rankingPoints) : null;
+  const badges = Array.isArray(data.badges)
+    ? (data.badges as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim())
+    : null;
+  const preferences = isPlainObject(data.preferences) ? (data.preferences as Record<string, unknown>) : null;
+  const blockedKeywords = Array.isArray(data.blockedKeywords)
+    ? (data.blockedKeywords as unknown[])
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .map((x) => x.trim())
+    : null;
+  const lastLocation = 'lastLocation' in data ? (data.lastLocation as unknown) : null;
+  const favoriteStores = Array.isArray(data.favoriteStores)
+    ? (data.favoriteStores as unknown[])
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .map((x) => x.trim())
+    : null;
+  const isIdentityVerified = typeof data.isIdentityVerified === 'boolean' ? data.isIdentityVerified : null;
+  const reportCount = typeof data.reportCount === 'number' ? Math.trunc(data.reportCount) : null;
+  const blockedUsers = Array.isArray(data.blockedUsers)
+    ? (data.blockedUsers as unknown[])
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .map((x) => x.trim())
+    : null;
+  const pointBalance = typeof data.pointBalance === 'number' ? Math.trunc(data.pointBalance) : null;
+  const couponCount = typeof data.couponCount === 'number' ? Math.trunc(data.couponCount) : null;
+  const billingCustomerId = typeof data.billingCustomerId === 'string' ? data.billingCustomerId.trim() : '';
+  const referralCode = typeof data.referralCode === 'string' ? data.referralCode.trim() : '';
+  const joinPath = typeof data.joinPath === 'string' ? data.joinPath.trim() : '';
+  const appVersion = typeof data.appVersion === 'string' ? data.appVersion.trim() : '';
+  const metadata = isPlainObject(data.metadata) ? (data.metadata as Record<string, unknown>) : null;
   const base: UserProfile = {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
@@ -115,17 +221,41 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     displayName: displayName || null,
     signupProvider,
     termsAgreedAt,
+    isMarketingAgreed,
+    fcmToken: fcmToken || null,
+    lastLoginAt,
+    status,
     gender: gender || null,
     ageBand: ageBand || null,
     birthYear,
     birthMonth,
     birthDay,
+    birthDate,
+    baseRegion: baseRegion || null,
+    interests,
+    bio: bio || null,
     firebaseUid: firebaseUid || null,
     gLevel,
     gXp,
     gTrust,
     gDna: gDna || null,
     meetingCount,
+    rankingPoints,
+    badges,
+    preferences,
+    blockedKeywords,
+    lastLocation,
+    favoriteStores,
+    isIdentityVerified,
+    reportCount,
+    blockedUsers,
+    pointBalance,
+    couponCount,
+    billingCustomerId: billingCustomerId || null,
+    referralCode: referralCode || null,
+    joinPath: joinPath || null,
+    appVersion: appVersion || null,
+    metadata,
     isWithdrawn,
   };
   if (isWithdrawn) {
@@ -139,12 +269,36 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
       displayName: null,
       signupProvider: null,
       termsAgreedAt: null,
+      isMarketingAgreed: null,
+      fcmToken: null,
+      lastLoginAt: null,
+      status: 'WITHDRAWN',
       gender: null,
       ageBand: null,
       birthYear: null,
       birthMonth: null,
       birthDay: null,
+      birthDate: null,
+      baseRegion: null,
+      interests: null,
+      bio: null,
       firebaseUid: null,
+      rankingPoints: null,
+      badges: null,
+      preferences: null,
+      blockedKeywords: null,
+      lastLocation: null,
+      favoriteStores: null,
+      isIdentityVerified: null,
+      reportCount: null,
+      blockedUsers: null,
+      pointBalance: null,
+      couponCount: null,
+      billingCustomerId: null,
+      referralCode: null,
+      joinPath: null,
+      appVersion: null,
+      metadata: null,
       isWithdrawn: true,
     };
   }
@@ -159,8 +313,12 @@ export function isUserProfileWithdrawn(p: UserProfile | null | undefined): boole
 export function isGoogleSnsDemographicsIncomplete(p: UserProfile | null | undefined): boolean {
   if (!p || p.signupProvider !== 'google_sns') return false;
   const g = p.gender?.trim();
-  const a = p.ageBand?.trim();
-  return !g || !a;
+  const bd = p.birthDate ?? null;
+  // birthDate가 없으면(레거시) 기존 필드로도 체크
+  const y = p.birthYear ?? null;
+  const m = p.birthMonth ?? null;
+  const d = p.birthDay ?? null;
+  return !g || (!bd && (!y || !m || !d));
 }
 
 /** 모임 참여 제한용: 전화번호 인증 완료 사용자 여부 */
@@ -316,21 +474,67 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
   await setDoc(dRef, {
     nickname,
     photoUrl: null,
+    status: 'ACTIVE',
+    isMarketingAgreed: false,
+    fcmToken: null,
+    lastLoginAt: serverTimestamp(),
+    baseRegion: null,
+    interests: [],
+    bio: null,
     gLevel: 1,
     gXp: 0,
     gTrust: 100,
     gDna: 'Explorer',
     meetingCount: 0,
+    rankingPoints: 0,
+    badges: [],
+    preferences: {},
+    blockedKeywords: [],
+    lastLocation: null,
+    favoriteStores: [],
+    isIdentityVerified: false,
+    reportCount: 0,
+    blockedUsers: [],
+    pointBalance: 0,
+    couponCount: 0,
+    billingCustomerId: null,
+    referralCode: null,
+    joinPath: null,
+    appVersion: null,
+    metadata: {},
     createdAt: serverTimestamp(),
   });
   return {
     nickname,
     photoUrl: null,
+    status: 'ACTIVE',
+    isMarketingAgreed: false,
+    fcmToken: null,
+    lastLoginAt: null,
+    baseRegion: null,
+    interests: [],
+    bio: null,
     gLevel: 1,
     gXp: 0,
     gTrust: 100,
     gDna: 'Explorer',
     meetingCount: 0,
+    rankingPoints: 0,
+    badges: [],
+    preferences: {},
+    blockedKeywords: [],
+    lastLocation: null,
+    favoriteStores: [],
+    isIdentityVerified: false,
+    reportCount: 0,
+    blockedUsers: [],
+    pointBalance: 0,
+    couponCount: 0,
+    billingCustomerId: null,
+    referralCode: null,
+    joinPath: null,
+    appVersion: null,
+    metadata: {},
   };
 }
 
@@ -351,9 +555,17 @@ export async function applyGoogleSignupProfile(
     gender?: string | null;
     /** `TEENS` … `SIXTY_PLUS` 등 연령대 구간 */
     ageBand?: string | null;
+    /** 레거시 호환: 더 이상 쓰지 않음(읽기만). */
     birthYear?: number | null;
+    /** 레거시 호환: 더 이상 쓰지 않음(읽기만). */
     birthMonth?: number | null;
+    /** 레거시 호환: 더 이상 쓰지 않음(읽기만). */
     birthDay?: number | null;
+    /** 권장: Timestamp(Date) */
+    birthDate?: unknown | null;
+    baseRegion?: string | null;
+    interests?: string[] | null;
+    bio?: string | null;
     firebaseUid?: string | null;
     /** 지닛 게이미피케이션(없으면 신규 생성 시 기본값) */
     gLevel?: number | null;
@@ -361,6 +573,26 @@ export async function applyGoogleSignupProfile(
     gTrust?: number | null;
     gDna?: string | null;
     meetingCount?: number | null;
+    rankingPoints?: number | null;
+    badges?: string[] | null;
+    status?: UserStatus | null;
+    isMarketingAgreed?: boolean | null;
+    fcmToken?: string | null;
+    lastLoginAt?: unknown | null;
+    preferences?: Record<string, unknown> | null;
+    blockedKeywords?: string[] | null;
+    lastLocation?: unknown | null;
+    favoriteStores?: string[] | null;
+    isIdentityVerified?: boolean | null;
+    reportCount?: number | null;
+    blockedUsers?: string[] | null;
+    pointBalance?: number | null;
+    couponCount?: number | null;
+    billingCustomerId?: string | null;
+    referralCode?: string | null;
+    joinPath?: string | null;
+    appVersion?: string | null;
+    metadata?: Record<string, unknown> | null;
   },
 ): Promise<UserProfile> {
   const id = phoneUserId.trim();
@@ -379,15 +611,36 @@ export async function applyGoogleSignupProfile(
   if (patch.signupProvider !== undefined) payload.signupProvider = patch.signupProvider;
   if (patch.gender !== undefined) payload.gender = patch.gender;
   if (patch.ageBand !== undefined) payload.ageBand = patch.ageBand;
-  if (patch.birthYear !== undefined) payload.birthYear = patch.birthYear;
-  if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
-  if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
+  if (patch.birthDate !== undefined) payload.birthDate = patch.birthDate;
+  if (patch.baseRegion !== undefined) payload.baseRegion = patch.baseRegion;
+  if (patch.interests !== undefined) payload.interests = patch.interests;
+  if (patch.bio !== undefined) payload.bio = patch.bio;
   if (patch.firebaseUid !== undefined) payload.firebaseUid = patch.firebaseUid;
   if (patch.gLevel !== undefined) payload.gLevel = patch.gLevel;
   if (patch.gXp !== undefined) payload.gXp = patch.gXp;
   if (patch.gTrust !== undefined) payload.gTrust = patch.gTrust;
   if (patch.gDna !== undefined) payload.gDna = patch.gDna;
   if (patch.meetingCount !== undefined) payload.meetingCount = patch.meetingCount;
+  if (patch.rankingPoints !== undefined) payload.rankingPoints = patch.rankingPoints;
+  if (patch.badges !== undefined) payload.badges = patch.badges;
+  if (patch.status !== undefined) payload.status = patch.status;
+  if (patch.isMarketingAgreed !== undefined) payload.isMarketingAgreed = patch.isMarketingAgreed;
+  if (patch.fcmToken !== undefined) payload.fcmToken = patch.fcmToken;
+  if (patch.lastLoginAt !== undefined) payload.lastLoginAt = patch.lastLoginAt;
+  if (patch.preferences !== undefined) payload.preferences = patch.preferences;
+  if (patch.blockedKeywords !== undefined) payload.blockedKeywords = patch.blockedKeywords;
+  if (patch.lastLocation !== undefined) payload.lastLocation = patch.lastLocation;
+  if (patch.favoriteStores !== undefined) payload.favoriteStores = patch.favoriteStores;
+  if (patch.isIdentityVerified !== undefined) payload.isIdentityVerified = patch.isIdentityVerified;
+  if (patch.reportCount !== undefined) payload.reportCount = patch.reportCount;
+  if (patch.blockedUsers !== undefined) payload.blockedUsers = patch.blockedUsers;
+  if (patch.pointBalance !== undefined) payload.pointBalance = patch.pointBalance;
+  if (patch.couponCount !== undefined) payload.couponCount = patch.couponCount;
+  if (patch.billingCustomerId !== undefined) payload.billingCustomerId = patch.billingCustomerId;
+  if (patch.referralCode !== undefined) payload.referralCode = patch.referralCode;
+  if (patch.joinPath !== undefined) payload.joinPath = patch.joinPath;
+  if (patch.appVersion !== undefined) payload.appVersion = patch.appVersion;
+  if (patch.metadata !== undefined) payload.metadata = patch.metadata;
   if (snap.exists()) {
     const prev = mapUserDoc(snap.data() as Record<string, unknown>);
     if (prev.isWithdrawn === true) {
@@ -397,12 +650,35 @@ export async function applyGoogleSignupProfile(
   }
   if (!snap.exists()) {
     payload.createdAt = serverTimestamp();
+    if (payload.status === undefined) payload.status = 'ACTIVE';
+    if (payload.isMarketingAgreed === undefined) payload.isMarketingAgreed = false;
+    if (payload.fcmToken === undefined) payload.fcmToken = null;
+    if (payload.lastLoginAt === undefined) payload.lastLoginAt = serverTimestamp();
+    if (payload.baseRegion === undefined) payload.baseRegion = null;
+    if (payload.interests === undefined) payload.interests = [];
+    if (payload.bio === undefined) payload.bio = null;
     // 어떤 가입 방식이든 기본 게이미피케이션 컬럼을 생성합니다.
     if (payload.gLevel === undefined) payload.gLevel = 1;
     if (payload.gXp === undefined) payload.gXp = 0;
     if (payload.gTrust === undefined) payload.gTrust = 100;
     if (payload.gDna === undefined) payload.gDna = 'Explorer';
     if (payload.meetingCount === undefined) payload.meetingCount = 0;
+    if (payload.rankingPoints === undefined) payload.rankingPoints = 0;
+    if (payload.badges === undefined) payload.badges = [];
+    if (payload.preferences === undefined) payload.preferences = {};
+    if (payload.blockedKeywords === undefined) payload.blockedKeywords = [];
+    if (payload.lastLocation === undefined) payload.lastLocation = null;
+    if (payload.favoriteStores === undefined) payload.favoriteStores = [];
+    if (payload.isIdentityVerified === undefined) payload.isIdentityVerified = false;
+    if (payload.reportCount === undefined) payload.reportCount = 0;
+    if (payload.blockedUsers === undefined) payload.blockedUsers = [];
+    if (payload.pointBalance === undefined) payload.pointBalance = 0;
+    if (payload.couponCount === undefined) payload.couponCount = 0;
+    if (payload.billingCustomerId === undefined) payload.billingCustomerId = null;
+    if (payload.referralCode === undefined) payload.referralCode = null;
+    if (payload.joinPath === undefined) payload.joinPath = null;
+    if (payload.appVersion === undefined) payload.appVersion = null;
+    if (payload.metadata === undefined) payload.metadata = {};
   }
   await setDoc(dRef, stripUndefinedDeep(payload) as Record<string, unknown>, { merge: true });
   const after = await getDoc(dRef);
@@ -415,9 +691,41 @@ export async function updateUserProfile(
     nickname?: string;
     photoUrl?: string | null;
     gender?: string | null;
+    /** 더 이상 사용하지 않음(레거시 호환). */
     ageBand?: string | null;
+    /** 레거시 호환: 더 이상 쓰지 않음(읽기만). */
+    birthYear?: number | null;
+    /** 레거시 호환: 더 이상 쓰지 않음(읽기만). */
+    birthMonth?: number | null;
+    /** 레거시 호환: 더 이상 쓰지 않음(읽기만). */
+    birthDay?: number | null;
+    /** 권장: Timestamp(Date) */
+    birthDate?: unknown | null;
+    baseRegion?: string | null;
+    interests?: string[] | null;
+    bio?: string | null;
+    status?: UserStatus | null;
+    isMarketingAgreed?: boolean | null;
+    fcmToken?: string | null;
+    lastLoginAt?: unknown | null;
+    rankingPoints?: number | null;
+    badges?: string[] | null;
     phone?: string | null;
     phoneVerifiedAt?: unknown | null;
+    preferences?: Record<string, unknown> | null;
+    blockedKeywords?: string[] | null;
+    lastLocation?: unknown | null;
+    favoriteStores?: string[] | null;
+    isIdentityVerified?: boolean | null;
+    reportCount?: number | null;
+    blockedUsers?: string[] | null;
+    pointBalance?: number | null;
+    couponCount?: number | null;
+    billingCustomerId?: string | null;
+    referralCode?: string | null;
+    joinPath?: string | null;
+    appVersion?: string | null;
+    metadata?: Record<string, unknown> | null;
   },
 ): Promise<void> {
   const id = phoneUserId.trim();
@@ -446,11 +754,110 @@ export async function updateUserProfile(
   if (patch.ageBand !== undefined) {
     updates.ageBand = patch.ageBand && String(patch.ageBand).trim() ? String(patch.ageBand).trim() : null;
   }
+  if (patch.birthDate !== undefined) {
+    updates.birthDate = patch.birthDate;
+  }
+  if (patch.baseRegion !== undefined) {
+    const t = patch.baseRegion && String(patch.baseRegion).trim() ? String(patch.baseRegion).trim() : null;
+    updates.baseRegion = t;
+  }
+  if (patch.interests !== undefined) {
+    updates.interests = Array.isArray(patch.interests)
+      ? patch.interests.map((x) => String(x).trim()).filter(Boolean)
+      : patch.interests == null
+        ? null
+        : [];
+  }
+  if (patch.bio !== undefined) {
+    const t = patch.bio && String(patch.bio).trim() ? String(patch.bio).trim() : null;
+    updates.bio = t;
+  }
+  if (patch.status !== undefined) {
+    updates.status = patch.status;
+  }
+  if (patch.isMarketingAgreed !== undefined) {
+    updates.isMarketingAgreed = patch.isMarketingAgreed;
+  }
+  if (patch.fcmToken !== undefined) {
+    const t = patch.fcmToken && String(patch.fcmToken).trim() ? String(patch.fcmToken).trim() : null;
+    updates.fcmToken = t;
+  }
+  if (patch.lastLoginAt !== undefined) {
+    updates.lastLoginAt = patch.lastLoginAt;
+  }
+  if (patch.rankingPoints !== undefined) {
+    const n = patch.rankingPoints;
+    updates.rankingPoints = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  if (patch.badges !== undefined) {
+    updates.badges = Array.isArray(patch.badges)
+      ? patch.badges.map((x) => String(x).trim()).filter(Boolean)
+      : patch.badges == null
+        ? null
+        : [];
+  }
   if (patch.phone !== undefined) {
     updates.phone = patch.phone && String(patch.phone).trim() ? String(patch.phone).trim() : null;
   }
   if (patch.phoneVerifiedAt !== undefined) {
     updates.phoneVerifiedAt = patch.phoneVerifiedAt;
+  }
+  if (patch.preferences !== undefined) {
+    updates.preferences = patch.preferences && typeof patch.preferences === 'object' && !Array.isArray(patch.preferences) ? patch.preferences : patch.preferences == null ? null : {};
+  }
+  if (patch.blockedKeywords !== undefined) {
+    updates.blockedKeywords = Array.isArray(patch.blockedKeywords)
+      ? patch.blockedKeywords.map((x) => String(x).trim()).filter(Boolean)
+      : patch.blockedKeywords == null
+        ? null
+        : [];
+  }
+  if (patch.lastLocation !== undefined) {
+    updates.lastLocation = patch.lastLocation;
+  }
+  if (patch.favoriteStores !== undefined) {
+    updates.favoriteStores = Array.isArray(patch.favoriteStores)
+      ? patch.favoriteStores.map((x) => String(x).trim()).filter(Boolean)
+      : patch.favoriteStores == null
+        ? null
+        : [];
+  }
+  if (patch.isIdentityVerified !== undefined) {
+    updates.isIdentityVerified = typeof patch.isIdentityVerified === 'boolean' ? patch.isIdentityVerified : null;
+  }
+  if (patch.reportCount !== undefined) {
+    const n = patch.reportCount;
+    updates.reportCount = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  if (patch.blockedUsers !== undefined) {
+    updates.blockedUsers = Array.isArray(patch.blockedUsers)
+      ? patch.blockedUsers.map((x) => String(x).trim()).filter(Boolean)
+      : patch.blockedUsers == null
+        ? null
+        : [];
+  }
+  if (patch.pointBalance !== undefined) {
+    const n = patch.pointBalance;
+    updates.pointBalance = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  if (patch.couponCount !== undefined) {
+    const n = patch.couponCount;
+    updates.couponCount = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  if (patch.billingCustomerId !== undefined) {
+    updates.billingCustomerId = patch.billingCustomerId && String(patch.billingCustomerId).trim() ? String(patch.billingCustomerId).trim() : null;
+  }
+  if (patch.referralCode !== undefined) {
+    updates.referralCode = patch.referralCode && String(patch.referralCode).trim() ? String(patch.referralCode).trim() : null;
+  }
+  if (patch.joinPath !== undefined) {
+    updates.joinPath = patch.joinPath && String(patch.joinPath).trim() ? String(patch.joinPath).trim() : null;
+  }
+  if (patch.appVersion !== undefined) {
+    updates.appVersion = patch.appVersion && String(patch.appVersion).trim() ? String(patch.appVersion).trim() : null;
+  }
+  if (patch.metadata !== undefined) {
+    updates.metadata = patch.metadata && typeof patch.metadata === 'object' && !Array.isArray(patch.metadata) ? patch.metadata : patch.metadata == null ? null : {};
   }
   await updateDoc(dRef, stripUndefinedDeep(updates) as Record<string, unknown>);
 }
@@ -476,6 +883,21 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
       birthYear: null,
       birthMonth: null,
       birthDay: null,
+      birthDate: null,
+      preferences: null,
+      blockedKeywords: null,
+      lastLocation: null,
+      favoriteStores: null,
+      isIdentityVerified: null,
+      reportCount: null,
+      blockedUsers: null,
+      pointBalance: null,
+      couponCount: null,
+      billingCustomerId: null,
+      referralCode: null,
+      joinPath: null,
+      appVersion: null,
+      metadata: null,
       firebaseUid: null,
       withdrawnAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -512,6 +934,21 @@ export async function withdrawAnonymizeUserProfileByFirebaseUid(firebaseUid: str
           birthYear: null,
           birthMonth: null,
           birthDay: null,
+          birthDate: null,
+          preferences: null,
+          blockedKeywords: null,
+          lastLocation: null,
+          favoriteStores: null,
+          isIdentityVerified: null,
+          reportCount: null,
+          blockedUsers: null,
+          pointBalance: null,
+          couponCount: null,
+          billingCustomerId: null,
+          referralCode: null,
+          joinPath: null,
+          appVersion: null,
+          metadata: null,
           firebaseUid: null,
           withdrawnAt: serverTimestamp(),
           updatedAt: serverTimestamp(),

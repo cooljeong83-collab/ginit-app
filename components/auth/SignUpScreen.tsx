@@ -29,7 +29,8 @@ import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
-import { SIGN_UP_AGE_BAND_OPTIONS, useSignUpFlow } from '@/src/hooks/useSignUpFlow';
+import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
+import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -146,8 +147,8 @@ export default function SignUpScreen() {
     setEmailField,
     genderCode,
     selectGenderCode,
-    ageBandCode,
-    selectAgeBandCode,
+    birthdate,
+    setBirthdate,
     memberStatus,
     busy,
     errorText,
@@ -682,40 +683,18 @@ export default function SignUpScreen() {
                 onLayout={(e) => {
                   setAgeBandY(e.nativeEvent.layout.y);
                 }}>
-                <Text style={styles.fieldLabel}>연령대 (필수)</Text>
-                <View style={ageBandPick.wrap} accessibilityRole="radiogroup" accessibilityLabel="연령대 선택">
-                  {[SIGN_UP_AGE_BAND_OPTIONS.slice(0, 3), SIGN_UP_AGE_BAND_OPTIONS.slice(3, 6)].map((row, rowIdx) => (
-                    <View key={rowIdx} style={ageBandPick.row}>
-                      {row.map(({ code, label }) => {
-                        const selected = ageBandCode === code;
-                        return (
-                          <Pressable
-                            key={code}
-                            disabled={busy}
-                            onPress={() => {
-                              Keyboard.dismiss();
-                              selectAgeBandCode(code);
-                              InteractionManager.runAfterInteractions(() => {
-                                scrollToSubmit();
-                              });
-                            }}
-                            style={({ pressed }) => [
-                              ageBandPick.chip,
-                              selected ? styles.genderBinaryBtnSelected : styles.genderBinaryBtnIdle,
-                              pressed && !busy && styles.pressed,
-                            ]}
-                            accessibilityRole="radio"
-                            accessibilityState={{ selected, checked: selected }}
-                            accessibilityLabel={label}>
-                            <Text style={selected ? styles.genderBinaryLabelSelected : styles.genderBinaryLabel}>
-                              {label}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  ))}
-                </View>
+                <Text style={styles.fieldLabel}>생년월일 (필수)</Text>
+                <BirthdateWheel
+                  value={birthdate}
+                  onChange={(v) => {
+                    Keyboard.dismiss();
+                    setBirthdate(v);
+                    InteractionManager.runAfterInteractions(() => {
+                      scrollToSubmit();
+                    });
+                  }}
+                  disabled={busy}
+                />
               </View>
 
               <Pressable
@@ -778,26 +757,7 @@ const signUpScrollExtra = StyleSheet.create({
   },
 });
 
-const ageBandPick = StyleSheet.create({
-  wrap: {
-    marginTop: 4,
-    alignSelf: 'stretch',
-    gap: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 8,
-    alignSelf: 'stretch',
-  },
-  chip: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-});
+// (연령대 선택 UI 제거됨)
 
 const emailCombo = StyleSheet.create({
   row: {

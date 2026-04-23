@@ -30,6 +30,7 @@ import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 
 import {
@@ -153,6 +154,8 @@ export function EarlyPlaceSearch({
   const [nearbyHint, setNearbyHint] = useState<string | null>(null);
   const [locationReady, setLocationReady] = useState(false);
   const expandedPickerRef = useRef<View>(null);
+  const earlyPlaceQueryInputRef = useRef<TextInput>(null);
+  const earlyPlaceQueryDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(earlyPlaceQueryInputRef), []);
 
   /** 웹: 얇은 Trust Blue 톤 스크롤바 (::webkit-scrollbar) */
   useEffect(() => {
@@ -409,6 +412,8 @@ export function EarlyPlaceSearch({
     <View>
       <Text style={S.fieldLabel}>장소 검색</Text>
       <TextInput
+        ref={earlyPlaceQueryInputRef}
+        {...earlyPlaceQueryDeferKb}
         value={query}
         onChangeText={setQuery}
         placeholder="영화관, 지역명, 맛집 등 검색…"

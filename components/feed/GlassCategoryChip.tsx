@@ -95,8 +95,8 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   chipClipActive: {
-    borderColor: 'rgba(134, 211, 183, 0.75)',
-    shadowColor: 'rgba(115, 199, 255, 0.55)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
+    shadowColor: 'rgba(31, 42, 68, 0.22)',
     shadowOpacity: 0.22,
   },
   chipAndroidFrost: {

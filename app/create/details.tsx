@@ -82,6 +82,7 @@ import {
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting } from '@/src/lib/meetings';
+import type { PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
@@ -89,6 +90,8 @@ import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 import { useAutoFocusOnStep } from '@/src/hooks/useAutoFocusOnStep';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
+import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
@@ -336,6 +339,10 @@ export type VoteCandidatesFormHandle = {
   buildPayload: () => VoteCandidatesBuildResult;
   validateScheduleStep: () => VoteCandidatesGateResult;
   validatePlacesStep: () => VoteCandidatesGateResult;
+  /** 일정 스텝 첫 입력(자연어) 포커스 */
+  focusScheduleIdeaInput: () => void;
+  /** 장소 스텝 첫 입력(검색어) 포커스 */
+  focusPlaceQueryInput: () => void;
   /** 첫 장소 행에 검색어를 넣고 장소 검색 화면을 열어 자동 검색·포커스 */
   openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => void;
   /** 장소 검색 대기 행·모달 등 파생 UI 정리 */
@@ -392,6 +399,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const nlpIdeaInputRef = useRef<TextInput>(null);
   /** 장소 후보 검색어 입력 — 새로 마운트될 때 자동 포커스 */
   const placeQueryInputRef = useRef<TextInput>(null);
+  const nlpIdeaDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(nlpIdeaInputRef), []);
+  const placeQueryDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(placeQueryInputRef), []);
 
   // 장소 후보 단계: 인라인 검색 UI (AI 초기 검색어 + 추천 검색어 + 결과 그리드)
   const [placeQuery, setPlaceQuery] = useState('');
@@ -454,7 +463,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (!parsed) return;
     animate();
     const prev = dateCandidatesRef.current;
-    const nextKey = dateCandidateDupKey(parsed.candidate);
+    const nextKey = dateCandidateDupKey({ id: 'nlp', ...(parsed.candidate as Omit<DateCandidate, 'id'>) });
     const dup = prev.some((d) => dateCandidateDupKey(d) === nextKey);
     if (dup) {
       Alert.alert('동일한 일정 후보가 있습니다.');
@@ -483,11 +492,25 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     } else if (didAppend && bare && parentScrollRef?.current && parentScrollYRef) {
       requestAnimationFrame(() => {
         InteractionManager.runAfterInteractions(() => {
-          setTimeout(() => scrollParentAfterScheduleRowAdded(), 96);
+          setTimeout(() => {
+            const sc = parentScrollRef?.current;
+            if (!sc || !parentScrollYRef) return;
+            const cur = parentScrollYRef.current ?? 0;
+            const nextY = cur + 380;
+            requestAnimationFrame(() => {
+              if (typeof sc.scrollTo === 'function') {
+                sc.scrollTo({ y: nextY, animated: true });
+                return;
+              }
+              if (typeof sc.scrollToPosition === 'function') {
+                sc.scrollToPosition(0, nextY, true);
+              }
+            });
+          }, 96);
         });
       });
     }
-  }, [bare, nlpParsed, nlpScheduleInput, parentScrollRef, parentScrollYRef, scrollParentAfterScheduleRowAdded]);
+  }, [bare, nlpParsed, nlpScheduleInput, parentScrollRef, parentScrollYRef]);
 
   useImperativeHandle(
     ref,
@@ -531,6 +554,20 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
+      },
+      focusScheduleIdeaInput: () => {
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            nlpIdeaInputRef.current?.focus?.();
+          });
+        });
+      },
+      focusPlaceQueryInput: () => {
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            placeQueryInputRef.current?.focus?.();
+          });
+        });
       },
       openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => {
         const q = suggestedQuery.trim() || '카페';
@@ -705,6 +742,34 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     setDateCandidates((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
 
+  const focusNextDateCandidateAfterWebSubmit = useCallback(
+    (currentId: string) => {
+      if (scheduleListOnly) return;
+      const rows = dateCandidatesRef.current;
+      const idx = rows.findIndex((d) => d.id === currentId);
+      if (idx < 0) return;
+      const next = rows[idx + 1];
+      if (!next) return;
+      pendingAutoFocusDateIdRef.current = next.id;
+      animate();
+      setDateDetailExpanded((ex) => ({ ...ex, [next.id]: true }));
+      if (!bare) {
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            dateScrollRef.current?.scrollToEnd({ animated: true });
+          });
+        });
+      } else if (parentScrollRef?.current && parentScrollYRef) {
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            setTimeout(() => scrollParentAfterScheduleRowAdded(), 96);
+          });
+        });
+      }
+    },
+    [bare, parentScrollRef, parentScrollYRef, scheduleListOnly, scrollParentAfterScheduleRowAdded],
+  );
+
   useEffect(() => {
     // 새 카드가 렌더된 다음 1회만 autoFocus 되도록 플래그를 정리합니다.
     if (!pendingAutoFocusDateIdRef.current) return;
@@ -871,6 +936,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             <View style={styles.aiQuickInitInner}>
               <TextInput
                 ref={nlpIdeaInputRef}
+                {...nlpIdeaDeferKb}
                 value={nlpScheduleInput}
                 onChangeText={setNlpScheduleInput}
                 placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
@@ -940,6 +1006,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           onOpenPicker={(field) => openPicker(d.id, field)}
           deadlineTick={deadlineTick}
           autoFocusFirstInput={pendingAutoFocusDateIdRef.current === d.id}
+          onSubmitLastFieldInCard={
+            scheduleListOnly || Platform.OS !== 'web' ? undefined : () => focusNextDateCandidateAfterWebSubmit(d.id)
+          }
         />
       ))}
 
@@ -972,6 +1041,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
               <TextInput
                 ref={placeQueryInputRef}
+                {...placeQueryDeferKb}
                 value={placeQuery}
                 onChangeText={setPlaceQuery}
                 placeholder='예: "영등포 맛집", "합정 카페"'
@@ -1234,8 +1304,9 @@ export default function CreateDetailsScreen() {
   const placesStepHeaderAnchorRef = useRef<View>(null);
   /** Step 3 기본 정보: 모임 이름 입력 포커스 */
   const meetingTitleInputRef = useRef<TextInput>(null);
-  /** 상세 설명: 입력 포커스 */
+  /** 상세 조건 단계: 소개글 입력 포커스 */
   const detailDescriptionInputRef = useRef<TextInput>(null);
+  const meetingTitleDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(meetingTitleInputRef), []);
   /** ScrollView 콘텐츠 기준 각 스텝 카드 상단 y (onLayout으로만 갱신) */
   const stepPositions = useRef<Partial<Record<WizardStep, number>>>({});
   /** 일정·장소 폼 래퍼의 상대 y (장소 구간 스크롤 앵커) */
@@ -1279,6 +1350,18 @@ export default function CreateDetailsScreen() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [isPublicMeeting, setIsPublicMeeting] = useState(pickParam(isPublicParam) !== '0');
 
+  const [meetingConfig, setMeetingConfig] = useState<PublicMeetingDetailsConfig>(() => {
+    return {
+      ageLimit: ['NONE'],
+      genderRatio: 'ALL',
+      settlement: 'DUTCH',
+      minGLevel: 1,
+      minGTrust: null,
+      approvalType: 'INSTANT',
+      requestMessageEnabled: null,
+    };
+  });
+
   const [title, setTitle] = useState('');
   const [minParticipants, setMinParticipants] = useState(1);
   const [maxParticipants, setMaxParticipants] = useState(4);
@@ -1321,6 +1404,14 @@ export default function CreateDetailsScreen() {
 
   const [description, setDescription] = useState('');
   const [descFocused, setDescFocused] = useState(false);
+  const detailDescriptionDeferKb = useMemo(
+    () =>
+      deferSoftInputUntilUserTapProps(detailDescriptionInputRef, {
+        onFocus: () => setDescFocused(true),
+        onBlur: () => setDescFocused(false),
+      }),
+    [],
+  );
   const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
   const [titleRegion, setTitleRegion] = useState<string | null>(null);
   const [titleWeatherMood, setTitleWeatherMood] = useState<string | null>(null);
@@ -1570,6 +1661,27 @@ export default function CreateDetailsScreen() {
     enabled: !busy && currentStep === 3,
     targetRef: meetingTitleInputRef,
   });
+
+  useEffect(() => {
+    if (busy) return;
+    if (currentStep !== scheduleStep) return;
+    // 스텝 헤더를 위로 올린 뒤 첫 입력에 포커스
+    scrollToStep(scheduleStep);
+    const t = setTimeout(() => {
+      scheduleFormRef.current?.focusScheduleIdeaInput?.();
+    }, Platform.OS === 'android' ? 140 : 80);
+    return () => clearTimeout(t);
+  }, [busy, currentStep, scheduleStep, scrollToStep]);
+
+  useEffect(() => {
+    if (busy) return;
+    if (currentStep !== placesStep) return;
+    scrollToStep(placesStep);
+    const t = setTimeout(() => {
+      placesFormRef.current?.focusPlaceQueryInput?.();
+    }, Platform.OS === 'android' ? 160 : 90);
+    return () => clearTimeout(t);
+  }, [busy, currentStep, placesStep, scrollToStep]);
 
   useAutoFocusOnStep({
     enabled: !busy && currentStep === detailStep,
@@ -1910,6 +2022,7 @@ export default function CreateDetailsScreen() {
         placeCandidates: vote.placeCandidates,
         dateCandidates: vote.dateCandidates,
         extraData,
+        meetingConfig: isPublicMeeting ? meetingConfig : null,
       });
       router.replace(`/meeting/${createdMeetingId}`);
     } catch (e) {
@@ -1933,9 +2046,10 @@ export default function CreateDetailsScreen() {
     movieCandidates,
     menuPreferences,
     sportIntensity,
+    meetingConfig,
   ]);
 
-  /** 등록 버튼: 로딩 중만 비활성화. 상세 설명 길이는 눌렀을 때 검증(짧으면 안내). */
+  /** 등록 버튼: 로딩 중만 비활성화. 소개글 길이는 눌렀을 때 검증(짧으면 안내). */
   const finalDisabled = busy;
 
   return (
@@ -1994,7 +2108,7 @@ export default function CreateDetailsScreen() {
               ]}>
               <View collapsable={false}>
               <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
-                <Text style={styles.wizardStepBadge}>1 · 모임 성격</Text>
+                <Text style={styles.wizardStepBadge}>모임 성격</Text>
                 <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
 
                 {catLoading ? (
@@ -2093,6 +2207,7 @@ export default function CreateDetailsScreen() {
                         disabled={busy}
                         parentScrollRef={mainScrollRef}
                         parentScrollYRef={mainScrollYRef}
+                        autoFocusSearch={!busy && currentStep === 2}
                       />
                     ) : null}
                     {specialtyKind === 'food' ? (
@@ -2139,7 +2254,7 @@ export default function CreateDetailsScreen() {
 
               {currentStep >= 3 ? (
                 <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(3, e)}>
-                  <Text style={styles.wizardStepBadge}>3 · 기본 정보</Text>
+                  <Text style={styles.wizardStepBadge}>기본 정보</Text>
                   <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                     <Text style={styles.wizardFieldLabel}>모임 이름</Text>
                     <LinearGradient
@@ -2150,6 +2265,7 @@ export default function CreateDetailsScreen() {
                       <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
                         <TextInput
                           ref={meetingTitleInputRef}
+                          {...meetingTitleDeferKb}
                           value={title}
                           onChangeText={setTitle}
                           placeholder={
@@ -2245,7 +2361,7 @@ export default function CreateDetailsScreen() {
                     <View
                       style={styles.wizardStepShell}
                       onLayout={(e) => captureStepPosition(4, e)}>
-                      <Text style={styles.wizardStepBadge}>4 · 장소 선택</Text>
+                      <Text style={styles.wizardStepBadge}>장소 선택</Text>
                       <Text style={styles.wizardLockedHint}>
                         모임 장소 후보를 검색해 추가하세요. 영화 모임은 주변 멀티플렉스를 먼저 보여 드려요.
                       </Text>
@@ -2273,7 +2389,7 @@ export default function CreateDetailsScreen() {
                           styles.scheduleStepHeader,
                           needsMovieEarlyPlaces && currentStep < scheduleStep && styles.wizardFormHidden,
                         ]}>
-                        <Text style={styles.wizardStepBadge}>{scheduleStep} · 일정 설정</Text>
+                        <Text style={styles.wizardStepBadge}>일정 설정</Text>
                         <Text style={styles.wizardLockedHint}>
                           {currentStep === scheduleStep
                             ? '말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.'
@@ -2349,7 +2465,7 @@ export default function CreateDetailsScreen() {
                         ref={placesStepHeaderAnchorRef}
                         collapsable={false}
                         style={styles.placesStepHeader}>
-                        <Text style={styles.wizardStepBadge}>{placesStep} · 장소 후보</Text>
+                        <Text style={styles.wizardStepBadge}>장소 후보</Text>
                         <Text style={styles.wizardLockedHint}>
                           {currentStep >= detailStep
                             ? '확정한 장소 후보예요. 필요하면 카드를 탭해 바꿀 수 있어요.'
@@ -2387,7 +2503,7 @@ export default function CreateDetailsScreen() {
                               style={StyleSheet.absoluteFillObject}
                             />
                           </View>
-                          <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 설명</Text>
+                          <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 조건</Text>
                         </Pressable>
                       ) : null}
                     </View>
@@ -2395,13 +2511,27 @@ export default function CreateDetailsScreen() {
 
                   {currentStep >= detailStep ? (
                     <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(detailStep, e)}>
-                      <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>
-                        {detailStep} · 상세 설명 (선택)
-                      </Text>
+                      <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>상세 조건 (선택)</Text>
                       <Text style={styles.wizardLockedHint}>
                         위에서 확정한 일정을 확인한 뒤 등록해 주세요. 소개를 비워 두면 지닛이 맞춤 소개글을
                         자동으로 넣어 드려요.
                       </Text>
+
+                      {isPublicMeeting ? (
+                        <>
+                          <Text style={[styles.wizardFieldLabel, { marginTop: 12 }]}>공개 모임</Text>
+                          <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
+                            <PublicMeetingDetailsCard
+                              reduceHeavyEffects={reduceHeavyEffectsUI}
+                              value={meetingConfig}
+                              onChange={(next) => {
+                                animate();
+                                setMeetingConfig(next);
+                              }}
+                            />
+                          </VoteCandidateCard>
+                        </>
+                      ) : null}
 
                       <VoteCandidateCard
                         reduceHeavyEffects={reduceHeavyEffectsUI}
@@ -2409,6 +2539,7 @@ export default function CreateDetailsScreen() {
                         
                         <TextInput
                           ref={detailDescriptionInputRef}
+                          {...detailDescriptionDeferKb}
                           value={description}
                           onChangeText={setDescription}
                           placeholder={descriptionPlaceholder}
@@ -2419,8 +2550,6 @@ export default function CreateDetailsScreen() {
                           editable={!busy}
                           keyboardType="default"
                           inputMode="text"
-                          onFocus={() => setDescFocused(true)}
-                          onBlur={() => setDescFocused(false)}
                         />
                       </VoteCandidateCard>
                     </View>

@@ -14,6 +14,7 @@ import {
 import {
   ActivityIndicator,
   Dimensions,
+  InteractionManager,
   Platform,
   Pressable,
   ScrollView,
@@ -28,6 +29,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/tmdb-movie-poster';
 
 import {
@@ -245,6 +247,8 @@ export type MovieSearchProps = {
   parentScrollRef?: RefObject<ScrollView | null>;
   /** 부모 ScrollView의 `contentOffset.y` — `onScroll`에서 갱신 */
   parentScrollYRef?: RefObject<number>;
+  /** 마운트/패널 오픈 직후 검색 input에 포커스 */
+  autoFocusSearch?: boolean;
 };
 
 export function MovieSearch({
@@ -254,10 +258,13 @@ export function MovieSearch({
   disabled,
   parentScrollRef,
   parentScrollYRef,
+  autoFocusSearch = false,
 }: MovieSearchProps) {
   const [query, setQuery] = useState('');
   const [addingMore, setAddingMore] = useState(false);
   const expandedPickerRef = useRef<View>(null);
+  const searchInputRef = useRef<TextInput>(null);
+  const searchInputDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(searchInputRef), []);
   const [pretendardFamily, setPretendardFamily] = useState<string | undefined>(undefined);
   const [rankRows, setRankRows] = useState<SelectedMovieExtra[]>([]);
   const [rankReady, setRankReady] = useState(false);
@@ -279,6 +286,17 @@ export function MovieSearch({
   }, []);
 
   const pickerOpen = value.length === 0 || addingMore;
+
+  useEffect(() => {
+    if (!autoFocusSearch || disabled) return;
+    if (!pickerOpen) return;
+    const t = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        searchInputRef.current?.focus?.();
+      });
+    }, Platform.OS === 'android' ? 140 : 80);
+    return () => clearTimeout(t);
+  }, [autoFocusSearch, disabled, pickerOpen]);
 
   useEffect(() => {
     if (value.length === 0) {
@@ -505,6 +523,8 @@ export function MovieSearch({
     <View>
       <Text style={S.fieldLabel}>영화 검색</Text>
       <TextInput
+        ref={searchInputRef}
+        {...searchInputDeferKb}
         value={query}
         onChangeText={setQuery}
         placeholder="제목 검색…"

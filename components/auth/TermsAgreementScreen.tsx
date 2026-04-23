@@ -76,12 +76,12 @@ export default function TermsAgreementScreen() {
         // SignUpScreen 등: pending action이 자체적으로 라우팅(가입 완료 후 이동)을 책임질 수 있으므로
         // next가 없으면 추가 내비게이션을 하지 않습니다.
         if (next) {
-          router.replace(next);
+          router.replace(next as any);
         }
         return;
       }
       if (next) {
-        router.replace(next);
+        router.replace(next as any);
         return;
       }
       close();

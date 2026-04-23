@@ -57,7 +57,7 @@ import {
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
-import { serverTimestamp } from 'firebase/firestore';
+import { Timestamp, serverTimestamp } from 'firebase/firestore';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -248,7 +248,12 @@ export default function LoginScreen() {
       await writeSecureAuthSession({ uid, userId: docId });
       await ensureUserProfile(docId);
       // 전화 OTP로 로그인한 경우에도 인증 상태를 사용자 문서에 기록합니다.
-      await updateUserProfile(docId, { phone: n, phoneVerifiedAt: serverTimestamp() });
+      await updateUserProfile(docId, {
+        phone: n,
+        phoneVerifiedAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+        status: 'ACTIVE',
+      });
       setAuthProfile(snapshotFromPhoneUser(cred.user));
       router.replace('/(tabs)');
     } catch (e) {
@@ -351,6 +356,10 @@ export default function LoginScreen() {
       const nickname = pickNicknameFromGoogle(display, email);
       const photoUrl = user.photoURL?.trim() ? user.photoURL.trim() : null;
       const genderFs = mapGooglePeopleGenderToProfileGender(people?.gender ?? null);
+      const birthDateTs =
+        people?.birthYear && people?.birthMonth && people?.birthDay
+          ? Timestamp.fromDate(new Date(people.birthYear, people.birthMonth - 1, people.birthDay))
+          : null;
 
       await applyGoogleSignupProfile(emailPk, {
         nickname,
@@ -362,23 +371,20 @@ export default function LoginScreen() {
         phoneVerifiedAt: null,
         signupProvider: 'google_sns',
         gender: genderFs,
-        ageBand: null,
-        birthYear: people?.birthYear ?? null,
-        birthMonth: people?.birthMonth ?? null,
-        birthDay: people?.birthDay ?? null,
+        birthDate: birthDateTs,
         firebaseUid: user.uid,
       });
       await setUserId(emailPk);
       await writeSecureAuthSession({ uid: user.uid, userId: emailPk });
       await registerSignupLocalKeys('', emailPk);
       await recordTermsAgreement(emailPk);
-      const fresh = await ensureUserProfile(emailPk);
+      await ensureUserProfile(emailPk);
 
       setAuthProfile({
         ...snapshotFromFirebaseUser(user),
         gender: genderFs ?? null,
         birthYear: people?.birthYear ?? null,
-        ageBand: fresh.ageBand ?? null,
+        ageBand: null,
       });
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';

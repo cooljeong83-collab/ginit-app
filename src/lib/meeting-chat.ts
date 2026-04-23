@@ -58,6 +58,12 @@ export type MeetingChatMessage = {
   kind: MeetingChatMessageKind;
   /** `kind === 'image'`일 때 다운로드 URL */
   imageUrl: string | null;
+  /** 답장(인용) */
+  replyTo?: {
+    messageId: string;
+    senderId: string | null;
+    text: string;
+  } | null;
   createdAt: Timestamp | null;
 };
 
@@ -75,7 +81,21 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
   const imageUrl =
     typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
-  return { id, senderId, text, kind, imageUrl, createdAt };
+  const rt = data.replyTo;
+  const replyTo =
+    rt && typeof rt === 'object' && !Array.isArray(rt)
+      ? {
+          messageId: typeof (rt as Record<string, unknown>).messageId === 'string' ? String((rt as Record<string, unknown>).messageId) : '',
+          senderId:
+            typeof (rt as Record<string, unknown>).senderId === 'string'
+              ? String((rt as Record<string, unknown>).senderId)
+              : (rt as Record<string, unknown>).senderId == null
+                ? null
+                : String((rt as Record<string, unknown>).senderId),
+          text: typeof (rt as Record<string, unknown>).text === 'string' ? String((rt as Record<string, unknown>).text) : '',
+        }
+      : null;
+  return { id, senderId, text, kind, imageUrl, replyTo: replyTo?.messageId ? replyTo : null, createdAt };
 }
 
 /**
@@ -230,6 +250,7 @@ export async function sendMeetingChatTextMessage(
   meetingId: string,
   senderPhoneUserId: string,
   rawText: string,
+  replyTo?: { messageId: string; senderId: string | null; text: string } | null,
 ): Promise<void> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   const uid = typeof senderPhoneUserId === 'string' ? senderPhoneUserId.trim() : String(senderPhoneUserId ?? '').trim();
@@ -245,6 +266,14 @@ export async function sendMeetingChatTextMessage(
     stripUndefinedDeep({
       senderId,
       text,
+      replyTo:
+        replyTo && replyTo.messageId?.trim()
+          ? {
+              messageId: replyTo.messageId.trim(),
+              senderId: replyTo.senderId ?? null,
+              text: String(replyTo.text ?? '').trim().slice(0, 280),
+            }
+          : null,
       kind: 'text' as const,
       createdAt: serverTimestamp(),
     }) as Record<string, unknown>,

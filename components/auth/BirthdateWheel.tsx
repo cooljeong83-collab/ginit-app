@@ -17,13 +17,22 @@ const ITEM_HEIGHT = 28;
 const WHEEL_HEIGHT = 84;
 const PAD = (WHEEL_HEIGHT - ITEM_HEIGHT) / 2;
 
-const COUNT_OPTIONS: { value: number; label: string }[] = Array.from({ length: 100 }, (_, i) => ({
-  value: i + 1,
-  label: String(i + 1),
-}));
+type Opt = { value: number; label: string };
+
+function range(start: number, end: number): number[] {
+  const out: number[] = [];
+  for (let v = start; v <= end; v += 1) out.push(v);
+  return out;
+}
+
+function daysInMonth(year: number, month1: number): number {
+  const m = Math.min(12, Math.max(1, month1));
+  // JS Date: month is 0-based, day=0 means last day of previous month
+  return new Date(year, m, 0).getDate();
+}
 
 type WheelColumnProps = {
-  options: { value: number; label: string }[];
+  options: Opt[];
   value: number;
   onChange: (v: number) => void;
   disabled?: boolean;
@@ -56,7 +65,7 @@ function WheelColumn({ options, value, onChange, disabled }: WheelColumnProps) {
     }
     const id = requestAnimationFrame(() => scrollToIndex(indexFor(value)));
     return () => cancelAnimationFrame(id);
-  }, [indexFor, options, scrollToIndex, value]);
+  }, [indexFor, scrollToIndex, value]);
 
   const emitFromOffset = useCallback(
     (y: number) => {
@@ -110,9 +119,7 @@ function WheelColumn({ options, value, onChange, disabled }: WheelColumnProps) {
         keyboardShouldPersistTaps="handled">
         {options.map((opt, idx) => (
           <View key={`${opt.value}-${idx}`} style={col.item}>
-            <Text
-              style={[col.itemText, idx === selectedIdx && col.itemTextSelected]}
-              numberOfLines={1}>
+            <Text style={[col.itemText, idx === selectedIdx && col.itemTextSelected]} numberOfLines={1}>
               {opt.label}
             </Text>
           </View>
@@ -124,10 +131,9 @@ function WheelColumn({ options, value, onChange, disabled }: WheelColumnProps) {
 
 const col = StyleSheet.create({
   wheelClip: {
-    width: '100%',
-    maxWidth: 220,
+    flex: 1,
+    minWidth: 0,
     height: WHEEL_HEIGHT,
-    alignSelf: 'center',
     borderRadius: 10,
     overflow: 'hidden',
     backgroundColor: 'transparent',
@@ -144,19 +150,9 @@ const col = StyleSheet.create({
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
     zIndex: 1,
   },
-  scrollContent: {
-    paddingVertical: PAD,
-  },
-  item: {
-    height: ITEM_HEIGHT,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  itemText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: GinitTheme.colors.textMuted,
-  },
+  scrollContent: { paddingVertical: PAD },
+  item: { height: ITEM_HEIGHT, justifyContent: 'center', alignItems: 'center' },
+  itemText: { fontSize: 14, fontWeight: '700', color: GinitTheme.colors.textMuted },
   itemTextSelected: {
     color: TRUST_BLUE,
     fontWeight: '900',
@@ -171,22 +167,71 @@ const col = StyleSheet.create({
   },
 });
 
-export type GlassSingleCapacityWheelProps = {
-  value: number;
-  onChange: (n: number) => void;
+export type BirthdateValue = { year: number; month: number; day: number };
+
+export type BirthdateWheelProps = {
+  value: BirthdateValue;
+  onChange: (v: BirthdateValue) => void;
   disabled?: boolean;
+  /** 기본 1950~(현재연도-10) */
+  yearRange?: { min: number; max: number };
 };
 
-export function GlassSingleCapacityWheel({ value, onChange, disabled }: GlassSingleCapacityWheelProps) {
-  const a11y = useMemo(() => `참석 인원 ${value}명`, [value]);
+export function BirthdateWheel({ value, onChange, disabled, yearRange }: BirthdateWheelProps) {
+  const nowYear = new Date().getFullYear();
+  const yr = yearRange ?? { min: 1950, max: nowYear - 10 };
+
+  const yearOptions = useMemo<Opt[]>(
+    () => range(yr.min, yr.max).reverse().map((y) => ({ value: y, label: `${y}` })),
+    [yr.max, yr.min],
+  );
+  const monthOptions = useMemo<Opt[]>(
+    () => range(1, 12).map((m) => ({ value: m, label: `${m}` })),
+    [],
+  );
+  const maxDay = useMemo(() => daysInMonth(value.year, value.month), [value.month, value.year]);
+  const dayOptions = useMemo<Opt[]>(
+    () => range(1, maxDay).map((d) => ({ value: d, label: `${d}` })),
+    [maxDay],
+  );
+
+  // 월/년 변경으로 day가 범위를 넘어가면 자동 보정
+  useEffect(() => {
+    if (value.day <= maxDay) return;
+    onChange({ ...value, day: maxDay });
+  }, [maxDay, onChange, value]);
 
   return (
-    <View
-      style={styles.shell}
-      pointerEvents={disabled ? 'none' : 'auto'}
-      accessible
-      accessibilityLabel={a11y}>
-      <WheelColumn options={COUNT_OPTIONS} value={value} onChange={onChange} disabled={disabled} />
+    <View style={styles.shell} pointerEvents={disabled ? 'none' : 'auto'} accessible accessibilityLabel="생년월일 선택">
+      <View style={styles.row}>
+        <View style={styles.colInline}>
+          <Text style={styles.sideLabel}>년</Text>
+          <WheelColumn
+            options={yearOptions}
+            value={value.year}
+            onChange={(year) => onChange({ ...value, year })}
+            disabled={disabled}
+          />
+        </View>
+        <View style={styles.colInline}>
+          <Text style={styles.sideLabel}>월</Text>
+          <WheelColumn
+            options={monthOptions}
+            value={value.month}
+            onChange={(month) => onChange({ ...value, month })}
+            disabled={disabled}
+          />
+        </View>
+        <View style={styles.colInline}>
+          <Text style={styles.sideLabel}>일</Text>
+          <WheelColumn
+            options={dayOptions}
+            value={Math.min(value.day, maxDay)}
+            onChange={(day) => onChange({ ...value, day })}
+            disabled={disabled}
+          />
+        </View>
+      </View>
     </View>
   );
 }
@@ -201,6 +246,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     overflow: 'hidden',
-    alignItems: 'center',
+  },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 },
+  colInline: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 0 },
+  sideLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+    width: 16,
+    textAlign: 'right',
+    letterSpacing: 0.2,
   },
 });
+

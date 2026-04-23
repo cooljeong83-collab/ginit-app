@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
+import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { ScreenShell } from '@/components/ui';
@@ -29,8 +30,13 @@ import {
 } from '@/src/lib/feed-display-location';
 import {
   buildFeedChips,
+  defaultFeedSearchFilters,
+  feedSearchFiltersActive,
   listSortModeLabel,
   meetingMatchesCategoryFilter,
+  meetingMatchesFeedSearch,
+  meetingWithinHomeFeedRadius,
+  type FeedSearchFilters,
   type MeetingListSortMode,
   sortMeetingsForFeed,
 } from '@/src/lib/feed-meeting-utils';
@@ -68,6 +74,9 @@ export default function FeedScreen() {
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
   /** true면 모집중(정원 미달·미확정) 모임만 표시. 기본값 off */
   const [recruitingOnly, setRecruitingOnly] = useState(false);
+  const [feedSearchModalOpen, setFeedSearchModalOpen] = useState(false);
+  const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
+  const [draftFeedSearch, setDraftFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -172,15 +181,24 @@ export default function FeedScreen() {
     }
   }, [categories, selectedCategoryId]);
 
-  const feedChips = useMemo(() => buildFeedChips(meetings, categories), [categories, meetings]);
+  const meetingsWithinRadius = useMemo(
+    () => meetings.filter((m) => meetingWithinHomeFeedRadius(m, userCoords)),
+    [meetings, userCoords],
+  );
+
+  const feedChips = useMemo(
+    () => buildFeedChips(meetingsWithinRadius, categories),
+    [categories, meetingsWithinRadius],
+  );
 
   const filteredMeetings = useMemo(() => {
-    return meetings.filter((m) => {
+    return meetingsWithinRadius.filter((m) => {
       if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
       if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
+      if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
       return true;
     });
-  }, [meetings, selectedCategoryId, categories, recruitingOnly]);
+  }, [meetingsWithinRadius, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
 
   const sortedFilteredMeetings = useMemo(
     () => sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords),
@@ -206,6 +224,16 @@ export default function FeedScreen() {
 
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
+
+  const openFeedSearch = useCallback(() => {
+    setDraftFeedSearch(appliedFeedSearch);
+    setFeedSearchModalOpen(true);
+  }, [appliedFeedSearch]);
+  const closeFeedSearch = useCallback(() => setFeedSearchModalOpen(false), []);
+  const applyFeedSearch = useCallback(() => {
+    setAppliedFeedSearch(draftFeedSearch);
+    setFeedSearchModalOpen(false);
+  }, [draftFeedSearch]);
 
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -260,8 +288,14 @@ export default function FeedScreen() {
                 </Pressable>
               </View>
               <View style={styles.headerActions}>
-                <Pressable accessibilityRole="button" hitSlop={10}>
+                <Pressable
+                  onPress={openFeedSearch}
+                  accessibilityRole="button"
+                  accessibilityLabel="검색 및 조건 필터"
+                  hitSlop={10}
+                  style={styles.searchIconWrap}>
                   <Ionicons name="search-outline" size={24} color="#0f172a" />
+                  {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
                 </Pressable>
                 <InAppAlarmsBellButton />
               </View>
@@ -349,13 +383,22 @@ export default function FeedScreen() {
             <Text style={styles.empty}>등록된 모임이 없습니다. + 버튼으로 첫 모임을 만들어 보세요.</Text>
           ) : null}
 
-          {!loading && !listError && meetings.length > 0 && filteredMeetings.length === 0 ? (
+          {!loading && !listError && meetings.length > 0 && meetingsWithinRadius.length === 0 && userCoords ? (
+            <Text style={styles.empty}>내 위치 기준 반경 5km 안에 등록된 모임이 없어요.</Text>
+          ) : null}
+
+          {!loading &&
+          !listError &&
+          meetingsWithinRadius.length > 0 &&
+          filteredMeetings.length === 0 ? (
             <Text style={styles.empty}>
-              {selectedFilterLabel
-                ? `「${selectedFilterLabel}」 카테고리 모임이 아직 없어요. 다른 칩을 선택해 보세요.`
-                : recruitingOnly
-                  ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 모집 완료·확정 모임도 볼 수 있어요.'
-                  : '조건에 맞는 모임이 없어요.'}
+              {feedSearchFiltersActive(appliedFeedSearch)
+                ? '검색·조건에 맞는 모임이 없어요. 검색을 열어 필터를 바꿔 보세요.'
+                : selectedFilterLabel
+                  ? `「${selectedFilterLabel}」 카테고리 모임이 아직 없어요. 다른 칩을 선택해 보세요.`
+                  : recruitingOnly
+                    ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 모집 완료·확정 모임도 볼 수 있어요.'
+                    : '조건에 맞는 모임이 없어요.'}
             </Text>
           ) : null}
 
@@ -413,6 +456,14 @@ export default function FeedScreen() {
             </View>
           </View>
         </Modal>
+
+        <FeedSearchFilterModal
+          visible={feedSearchModalOpen}
+          filters={draftFeedSearch}
+          onChangeFilters={setDraftFeedSearch}
+          onClose={closeFeedSearch}
+          onApply={applyFeedSearch}
+        />
 
         <Modal
           visible={regionModalOpen}
@@ -500,6 +551,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     flexShrink: 0,
+  },
+  searchIconWrap: {
+    position: 'relative',
+    padding: 2,
+  },
+  searchFilterDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#fff',
   },
   chipsFullBleed: {
     alignSelf: 'stretch',

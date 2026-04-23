@@ -149,8 +149,8 @@ const col = StyleSheet.create({
     height: ITEM_HEIGHT,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: 'rgba(134, 211, 183, 0.65)',
-    backgroundColor: 'rgba(134, 211, 183, 0.16)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
     zIndex: 1,
   },
   scrollContent: {
@@ -171,7 +171,7 @@ const col = StyleSheet.create({
     fontWeight: '900',
     ...Platform.select({
       ios: {
-        textShadowColor: 'rgba(134, 211, 183, 0.85)',
+        textShadowColor: 'rgba(31, 42, 68, 0.55)',
         textShadowOffset: { width: 0, height: 0 },
         textShadowRadius: 8,
       },

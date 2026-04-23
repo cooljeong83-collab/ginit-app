@@ -13,7 +13,7 @@ import {
   hasLoginableUserForPhoneE164,
   recordTermsAgreement,
 } from '@/src/lib/user-profile';
-import { serverTimestamp } from 'firebase/firestore';
+import { Timestamp, serverTimestamp } from 'firebase/firestore';
 
 /** 전화번호 입력이 멈춘 뒤 짧게 기다렸다가 회원 조회(과도한 호출·레이스 완화) */
 const PHONE_MEMBER_CHECK_DEBOUNCE_MS = 220;
@@ -29,17 +29,7 @@ export type SignUpMemberStatus = 'unknown' | 'checking' | 'member' | 'guest';
 /** Firestore `users.gender` 등에 저장하는 성별 코드 */
 export type SignUpGenderCode = 'MALE' | 'FEMALE';
 
-/** Firestore `users.ageBand` — UI는 한글 라벨, 저장은 고정 코드 */
-export type SignUpAgeBandCode = 'TEENS' | 'TWENTIES' | 'THIRTIES' | 'FORTIES' | 'FIFTIES' | 'SIXTY_PLUS';
-
-export const SIGN_UP_AGE_BAND_OPTIONS: { code: SignUpAgeBandCode; label: string }[] = [
-  { code: 'TEENS', label: '10대' },
-  { code: 'TWENTIES', label: '20대' },
-  { code: 'THIRTIES', label: '30대' },
-  { code: 'FORTIES', label: '40대' },
-  { code: 'FIFTIES', label: '50대' },
-  { code: 'SIXTY_PLUS', label: '60대 이상' },
-];
+export type SignUpBirthdate = { year: number; month: number; day: number };
 
 export function useSignUpFlow(initialPhone: string) {
   const { setUserId, setAuthProfile } = useUserSession();
@@ -50,7 +40,9 @@ export function useSignUpFlow(initialPhone: string) {
   const [emailField, setEmailField] = useState('');
   const [memberStatus, setMemberStatus] = useState<SignUpMemberStatus>('unknown');
   const [genderCode, setGenderCode] = useState<SignUpGenderCode | null>(null);
-  const [ageBandCode, setAgeBandCode] = useState<SignUpAgeBandCode | null>(null);
+  const [birthdate, setBirthdate] = useState<SignUpBirthdate>(() => {
+    return { year: 1983, month: 1, day: 1 };
+  });
   const [busy, setBusy] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
@@ -107,17 +99,17 @@ export function useSignUpFlow(initialPhone: string) {
     if (!normalizedPhone) return false;
     if (memberStatus !== 'guest') return false;
     if (!genderCode) return false;
-    if (!ageBandCode) return false;
+    if (!birthdate.year || !birthdate.month || !birthdate.day) return false;
     return true;
-  }, [emailField, displayName, normalizedPhone, memberStatus, genderCode, ageBandCode]);
+  }, [emailField, displayName, normalizedPhone, memberStatus, genderCode, birthdate.day, birthdate.month, birthdate.year]);
 
   const selectGenderCode = useCallback((code: SignUpGenderCode) => {
     setGenderCode(code);
     setErrorText(null);
   }, []);
 
-  const selectAgeBandCode = useCallback((code: SignUpAgeBandCode) => {
-    setAgeBandCode(code);
+  const setBirthdateSafe = useCallback((v: SignUpBirthdate) => {
+    setBirthdate(v);
     setErrorText(null);
   }, []);
 
@@ -160,12 +152,10 @@ export function useSignUpFlow(initialPhone: string) {
         }
         return;
       }
-      if (!ageBandCode) {
-        const msg = '연령대를 선택해주세요.';
+      if (!birthdate.year || !birthdate.month || !birthdate.day) {
+        const msg = '생년월일을 선택해주세요.';
         setErrorText(msg);
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(msg, ToastAndroid.SHORT);
-        }
+        if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
         return;
       }
 
@@ -181,11 +171,11 @@ export function useSignUpFlow(initialPhone: string) {
           photoUrl: null,
           firebaseUid: uid,
           gender: genderCode,
-          ageBand: ageBandCode,
-          birthYear: null,
+          birthYear: birthdate.year,
         };
         setAuthProfile(snapshot);
 
+        const birthDateTs = Timestamp.fromDate(new Date(birthdate.year, birthdate.month - 1, birthdate.day));
         await applyGoogleSignupProfile(emailPk, {
           nickname,
           photoUrl: null,
@@ -195,10 +185,7 @@ export function useSignUpFlow(initialPhone: string) {
           displayName: name.slice(0, 64),
           signupProvider: 'phone_otp',
           gender: genderCode,
-          ageBand: ageBandCode,
-          birthYear: null,
-          birthMonth: null,
-          birthDay: null,
+          birthDate: birthDateTs,
           firebaseUid: uid,
         });
         await registerPhoneIfNew(n);
@@ -217,7 +204,7 @@ export function useSignUpFlow(initialPhone: string) {
         setBusy(false);
       }
     },
-    [displayName, normalizedPhone, emailField, memberStatus, genderCode, ageBandCode, setAuthProfile, setUserId],
+    [displayName, normalizedPhone, emailField, memberStatus, genderCode, birthdate.day, birthdate.month, birthdate.year, setAuthProfile, setUserId],
   );
 
   return {
@@ -229,8 +216,8 @@ export function useSignUpFlow(initialPhone: string) {
     setEmailField,
     genderCode,
     selectGenderCode,
-    ageBandCode,
-    selectAgeBandCode,
+    birthdate,
+    setBirthdate: setBirthdateSafe,
     memberStatus,
     busy,
     errorText,

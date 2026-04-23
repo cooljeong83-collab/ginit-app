@@ -36,11 +36,16 @@ import {
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
   deleteMeetingByHost,
+  formatPublicMeetingAgeSummary,
+  formatPublicMeetingApprovalSummary,
+  formatPublicMeetingGenderSummary,
+  formatPublicMeetingSettlementSummary,
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
   joinMeeting,
   leaveMeeting,
+  parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
   subscribeMeetingById,
   unconfirmMeetingSchedule,
@@ -555,6 +560,11 @@ export default function MeetingDetailScreen() {
 
   const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
   const extraSport = useMemo(() => (meeting ? extractSportIntensity(meeting.extraData) : null), [meeting?.extraData]);
+
+  const publicMeetingDetails = useMemo(() => {
+    if (!meeting || meeting.isPublic === false) return null;
+    return parsePublicMeetingDetailsConfig(meeting.meetingConfig);
+  }, [meeting]);
 
   const representativeScheduleText = useMemo(() => {
     if (!meeting) return null;
@@ -1436,6 +1446,36 @@ export default function MeetingDetailScreen() {
               ) : (
                 <Text style={styles.infoRowMuted}>등록된 소개가 없어요.</Text>
               )}
+
+              {publicMeetingDetails ? (
+                <>
+                  <Text style={styles.infoSectionLabel}>상세 조건</Text>
+                  <Text style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>모집 연령대 </Text>
+                    {formatPublicMeetingAgeSummary(publicMeetingDetails.ageLimit)}
+                  </Text>
+                  <Text style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>성별 비율 </Text>
+                    {formatPublicMeetingGenderSummary(publicMeetingDetails.genderRatio)}
+                  </Text>
+                  <Text style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>정산 </Text>
+                    {formatPublicMeetingSettlementSummary(publicMeetingDetails.settlement)}
+                  </Text>
+                  <Text style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>참가 자격 </Text>
+                    {`최소 Lv ${publicMeetingDetails.minGLevel}`}
+                  </Text>
+                  <Text style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>승인 </Text>
+                    {formatPublicMeetingApprovalSummary(publicMeetingDetails.approvalType)}
+                  </Text>
+                  {publicMeetingDetails.approvalType === 'HOST_APPROVAL' &&
+                  publicMeetingDetails.requestMessageEnabled === true ? (
+                    <Text style={styles.infoRowMuted}>참가 신청 시 한 줄 메시지를 받아요.</Text>
+                  ) : null}
+                </>
+              ) : null}
 
               {(specialtyKind === 'food' || extraMenus.length > 0) && (
                 <>

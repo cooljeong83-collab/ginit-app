@@ -104,7 +104,112 @@ export type Meeting = {
   confirmedDateChipId?: string | null;
   confirmedPlaceChipId?: string | null;
   confirmedMovieChipId?: string | null;
+  /** 공개 모임 상세 조건(필터/추천/승인 정책) */
+  meetingConfig?: PublicMeetingDetailsConfig | Record<string, unknown> | null;
 };
+
+export type PublicMeetingAgeLimit = 'TWENTIES' | 'THIRTIES' | 'FORTY_PLUS' | 'NONE';
+export type PublicMeetingGenderRatio = 'ALL' | 'SAME_GENDER_ONLY' | 'HALF_HALF';
+export type PublicMeetingSettlement = 'DUTCH' | 'HOST_PAYS' | 'INDIVIDUAL';
+export type PublicMeetingApprovalType = 'INSTANT' | 'HOST_APPROVAL';
+
+export type PublicMeetingDetailsConfig = {
+  /** 모집 연령대(멀티 선택). NONE이 있으면 제한 없음으로 해석 */
+  ageLimit: PublicMeetingAgeLimit[];
+  genderRatio: PublicMeetingGenderRatio;
+  settlement: PublicMeetingSettlement;
+  /** 참가 자격: 최소 gLevel/gTrust */
+  minGLevel: number;
+  minGTrust?: number | null;
+  approvalType: PublicMeetingApprovalType;
+  /** approvalType=HOST_APPROVAL 일 때 신청 메시지 받기 */
+  requestMessageEnabled?: boolean | null;
+};
+
+function isPublicMeetingAgeLimit(x: unknown): x is PublicMeetingAgeLimit {
+  return x === 'TWENTIES' || x === 'THIRTIES' || x === 'FORTY_PLUS' || x === 'NONE';
+}
+
+function isPublicMeetingGenderRatio(x: unknown): x is PublicMeetingGenderRatio {
+  return x === 'ALL' || x === 'SAME_GENDER_ONLY' || x === 'HALF_HALF';
+}
+
+function isPublicMeetingSettlement(x: unknown): x is PublicMeetingSettlement {
+  return x === 'DUTCH' || x === 'HOST_PAYS' || x === 'INDIVIDUAL';
+}
+
+function isPublicMeetingApprovalType(x: unknown): x is PublicMeetingApprovalType {
+  return x === 'INSTANT' || x === 'HOST_APPROVAL';
+}
+
+/**
+ * Firestore `meetingConfig` → UI용. `null`이면 필드가 없거나 형식이 맞지 않음.
+ */
+export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDetailsConfig | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+
+  let ageLimit: PublicMeetingAgeLimit[] = ['NONE'];
+  if (Array.isArray(o.ageLimit)) {
+    const xs = o.ageLimit.filter(isPublicMeetingAgeLimit);
+    if (xs.length > 0) ageLimit = xs;
+  }
+
+  const genderRatio = isPublicMeetingGenderRatio(o.genderRatio) ? o.genderRatio : 'ALL';
+  const settlement = isPublicMeetingSettlement(o.settlement) ? o.settlement : 'DUTCH';
+  const minGLevel = Math.max(1, Math.min(50, toFiniteInt(o.minGLevel, 1)));
+  const approvalType = isPublicMeetingApprovalType(o.approvalType) ? o.approvalType : 'INSTANT';
+  const requestMessageEnabled =
+    o.requestMessageEnabled === true ? true : o.requestMessageEnabled === false ? false : null;
+
+  return { ageLimit, genderRatio, settlement, minGLevel, approvalType, requestMessageEnabled };
+}
+
+const AGE_SUMMARY_ORDER: PublicMeetingAgeLimit[] = ['TWENTIES', 'THIRTIES', 'FORTY_PLUS'];
+
+const AGE_SUMMARY_LABEL: Record<PublicMeetingAgeLimit, string> = {
+  TWENTIES: '20대',
+  THIRTIES: '30대',
+  FORTY_PLUS: '40대 이상',
+  NONE: '제한 없음',
+};
+
+/** 모임 상세 등 읽기 전용 한 줄 요약 */
+export function formatPublicMeetingAgeSummary(ageLimit: PublicMeetingAgeLimit[]): string {
+  const uniq = [...new Set(ageLimit ?? [])];
+  if (uniq.length === 0 || uniq.includes('NONE')) return '제한 없음';
+  return AGE_SUMMARY_ORDER.filter((k) => uniq.includes(k))
+    .map((k) => AGE_SUMMARY_LABEL[k])
+    .join(', ');
+}
+
+export function formatPublicMeetingGenderSummary(g: PublicMeetingGenderRatio): string {
+  switch (g) {
+    case 'SAME_GENDER_ONLY':
+      return '동성만';
+    case 'HALF_HALF':
+      return '남녀 반반';
+    case 'ALL':
+    default:
+      return '모두';
+  }
+}
+
+export function formatPublicMeetingSettlementSummary(s: PublicMeetingSettlement): string {
+  switch (s) {
+    case 'HOST_PAYS':
+      return '호스트 지불';
+    case 'INDIVIDUAL':
+      return '개별 계산';
+    case 'DUTCH':
+    default:
+      return '1/N 더치페이';
+  }
+}
+
+export function formatPublicMeetingApprovalSummary(a: PublicMeetingApprovalType): string {
+  return a === 'HOST_APPROVAL' ? '호스트 승인' : '즉시 참여';
+}
 
 /** 표시용 참여 인원 수(주관자 + `participantIds`, 중복 제거). */
 export function meetingParticipantCount(m: Meeting): number {
@@ -142,6 +247,7 @@ export type CreateMeetingInput = {
   placeCandidates?: PlaceCandidateLike[] | null;
   dateCandidates?: DateCandidate[] | null;
   extraData?: MeetingExtraData | null;
+  meetingConfig?: PublicMeetingDetailsConfig | null;
 };
 
 /** `YYYY-MM-DD` + `H:mm` 또는 `HH:mm` → Firestore Timestamp (파싱 실패 시 null). */
@@ -433,6 +539,7 @@ function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meet
     latitude: typeof data.latitude === 'number' && Number.isFinite(data.latitude) ? data.latitude : null,
     longitude: typeof data.longitude === 'number' && Number.isFinite(data.longitude) ? data.longitude : null,
     extraData: (data.extraData as Meeting['extraData']) ?? null,
+    meetingConfig: (data.meetingConfig as Meeting['meetingConfig']) ?? null,
     dateCandidates: Array.isArray(data.dateCandidates) ? (data.dateCandidates as DateCandidate[]) : null,
     placeCandidates: Array.isArray(data.placeCandidates)
       ? (data.placeCandidates as Meeting['placeCandidates'])
@@ -893,6 +1000,7 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
       : null,
     dateCandidates: input.dateCandidates?.length ? stripUndefinedDeep(input.dateCandidates) : null,
     extraData: input.extraData != null ? stripUndefinedDeep(input.extraData) : null,
+    meetingConfig: input.meetingConfig != null ? stripUndefinedDeep(input.meetingConfig) : null,
     participantIds: input.createdBy?.trim() ? [input.createdBy.trim()] : [],
     scheduleConfirmed: false,
   };

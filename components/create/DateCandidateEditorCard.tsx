@@ -1,7 +1,7 @@
 /**
  * 일시 후보 카드 — 8가지 type별 글래스 UI (VoteCandidatesForm 전용).
  */
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import {
   Platform,
   Pressable,
@@ -15,6 +15,7 @@ import {
 
 import type { DateCandidate, DateCandidateType } from '@/src/lib/meeting-place-bridge';
 import { rangeNightsBadge } from '@/src/lib/date-candidate';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -284,6 +285,7 @@ export function DateCandidateEditorCard({
   onOpenPicker,
   deadlineTick,
   autoFocusFirstInput = false,
+  onSubmitLastFieldInCard,
 }: {
   d: DateCandidate;
   dateIndex: number;
@@ -296,12 +298,40 @@ export function DateCandidateEditorCard({
   onOpenPicker: (field: DatePickerField) => void;
   deadlineTick: number;
   autoFocusFirstInput?: boolean;
+  /** 웹 텍스트 입력에서 마지막 필드의 Submit(엔터) — 다음 카드/필드로 넘길 때 */
+  onSubmitLastFieldInCard?: () => void;
 }) {
   const badge =
     d.type === 'date-range' || d.type === 'datetime-range'
       ? rangeNightsBadge(d.startDate, d.endDate ?? d.startDate)
       : null;
   const firstInputRef = useRef<TextInput>(null);
+  const webEndDateRef = useRef<TextInput>(null);
+  /** `datetime-range` 종료 행 / `deadline` 마감 행 등 “두 번째 날짜+시간” 웹 입력 */
+  const webSecondPairDateRef = useRef<TextInput>(null);
+  const webSecondPairTimeRef = useRef<TextInput>(null);
+  /** `multi`·`flexible`의 대표 날짜(웹) — 본문 multiline 다음 포커스 대상 */
+  const webRepPairDateRef = useRef<TextInput>(null);
+
+  const deferKbByRef = useMemo(
+    () =>
+      new Map<RefObject<TextInput | null>, ReturnType<typeof deferSoftInputUntilUserTapProps>>([
+        [firstInputRef, deferSoftInputUntilUserTapProps(firstInputRef)],
+        [webEndDateRef, deferSoftInputUntilUserTapProps(webEndDateRef)],
+        [webSecondPairDateRef, deferSoftInputUntilUserTapProps(webSecondPairDateRef)],
+        [webSecondPairTimeRef, deferSoftInputUntilUserTapProps(webSecondPairTimeRef)],
+        [webRepPairDateRef, deferSoftInputUntilUserTapProps(webRepPairDateRef)],
+      ]),
+    [],
+  );
+  const deferFor = (r: RefObject<TextInput | null> | undefined) =>
+    r ? (deferKbByRef.get(r) ?? {}) : {};
+
+  const focusWebRef = useCallback((r: RefObject<TextInput | null> | null) => {
+    requestAnimationFrame(() => {
+      r?.current?.focus?.();
+    });
+  }, []);
 
   useEffect(() => {
     if (!autoFocusFirstInput) return;
@@ -319,31 +349,61 @@ export function DateCandidateEditorCard({
     onTime: (t: string) => void,
     timePlaceholder: string,
     timeDisabled?: boolean,
-  ) => (
-    <View style={styles.row2}>
-      <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
-        <TextInput
-          value={dateVal}
-          onChangeText={onDate}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={INPUT_PLACEHOLDER}
-          style={styles.textInputBare}
-          autoCapitalize="none"
-        />
+    opts?: {
+      dateRef?: RefObject<TextInput | null>;
+      timeRef?: RefObject<TextInput | null>;
+      onSubmitFromTimeField?: () => void;
+    },
+  ) => {
+    const dateRef = opts?.dateRef;
+    const timeRef = opts?.timeRef;
+    const onSubmitFromTime = opts?.onSubmitFromTimeField;
+    return (
+      <View style={styles.row2}>
+        <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
+          <TextInput
+            ref={dateRef}
+            {...deferFor(dateRef)}
+            value={dateVal}
+            onChangeText={onDate}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={INPUT_PLACEHOLDER}
+            style={styles.textInputBare}
+            autoCapitalize="none"
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => {
+              if (timeDisabled) {
+                if (onSubmitFromTime) onSubmitFromTime();
+                else onSubmitLastFieldInCard?.();
+                return;
+              }
+              focusWebRef(timeRef ?? null);
+            }}
+          />
+        </View>
+        <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
+          <TextInput
+            ref={timeRef}
+            {...deferFor(timeRef)}
+            value={timeDisabled ? '' : (timeVal ?? '')}
+            onChangeText={onTime}
+            placeholder={timePlaceholder}
+            placeholderTextColor={INPUT_PLACEHOLDER}
+            style={styles.textInputBare}
+            autoCapitalize="none"
+            editable={!timeDisabled}
+            returnKeyType={onSubmitFromTime ? 'next' : onSubmitLastFieldInCard ? 'next' : 'done'}
+            blurOnSubmit={false}
+            onSubmitEditing={() => {
+              onSubmitFromTime?.();
+              if (!onSubmitFromTime) onSubmitLastFieldInCard?.();
+            }}
+          />
+        </View>
       </View>
-      <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
-        <TextInput
-          value={timeDisabled ? '' : (timeVal ?? '')}
-          onChangeText={onTime}
-          placeholder={timePlaceholder}
-          placeholderTextColor={INPUT_PLACEHOLDER}
-          style={styles.textInputBare}
-          autoCapitalize="none"
-          editable={!timeDisabled}
-        />
-      </View>
-    </View>
-  );
+    );
+  };
 
   const renderNativePair = (
     dateVal: string,
@@ -400,6 +460,8 @@ export function DateCandidateEditorCard({
           (t) => onPatch({ startDate: t }),
           (t) => onPatch({ startTime: t }),
           'HH:mm',
+          undefined,
+          { dateRef: firstInputRef, onSubmitFromTimeField: onSubmitLastFieldInCard },
         )
       ) : (
         renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -456,6 +518,8 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ startDate: t }),
                 (t) => onPatch({ startTime: t }),
                 'HH:mm',
+                undefined,
+                { dateRef: firstInputRef, onSubmitFromTimeField: onSubmitLastFieldInCard },
               )
             ) : (
               renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -473,23 +537,32 @@ export function DateCandidateEditorCard({
                 <View style={styles.fieldRecess}>
                   <TextInput
                     ref={firstInputRef}
+                    {...deferFor(firstInputRef)}
                     value={d.startDate}
                     onChangeText={(t) => onPatch({ startDate: t })}
                     placeholder="YYYY-MM-DD"
                     placeholderTextColor={INPUT_PLACEHOLDER}
                     style={styles.textInputBare}
                     autoCapitalize="none"
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => focusWebRef(webEndDateRef)}
                   />
                 </View>
                 <Text style={[styles.blockLabel, { marginTop: 10 }]}>종료일</Text>
                 <View style={styles.fieldRecess}>
                   <TextInput
+                    ref={webEndDateRef}
+                    {...deferFor(webEndDateRef)}
                     value={d.endDate ?? ''}
                     onChangeText={(t) => onPatch({ endDate: t })}
                     placeholder="YYYY-MM-DD"
                     placeholderTextColor={INPUT_PLACEHOLDER}
                     style={styles.textInputBare}
                     autoCapitalize="none"
+                    returnKeyType={onSubmitLastFieldInCard ? 'next' : 'done'}
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => onSubmitLastFieldInCard?.()}
                   />
                 </View>
               </>
@@ -526,6 +599,11 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ startDate: t }),
                 (t) => onPatch({ startTime: t }),
                 'HH:mm',
+                undefined,
+                {
+                  dateRef: firstInputRef,
+                  onSubmitFromTimeField: () => focusWebRef(webSecondPairDateRef),
+                },
               )
             ) : (
               renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -538,6 +616,12 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ endDate: t }),
                 (t) => onPatch({ endTime: t }),
                 'HH:mm',
+                undefined,
+                {
+                  dateRef: webSecondPairDateRef,
+                  timeRef: webSecondPairTimeRef,
+                  onSubmitFromTimeField: onSubmitLastFieldInCard,
+                },
               )
             ) : (
               renderNativePair(d.endDate ?? d.startDate, d.endTime, 'endDate', 'endTime')
@@ -573,6 +657,8 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ startDate: t }),
                 (t) => onPatch({ startTime: t }),
                 'HH:mm',
+                undefined,
+                { dateRef: firstInputRef, onSubmitFromTimeField: onSubmitLastFieldInCard },
               )
             ) : (
               renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -588,12 +674,16 @@ export function DateCandidateEditorCard({
             <View style={styles.fieldRecess}>
               <TextInput
                 ref={firstInputRef}
+                {...deferFor(firstInputRef)}
                 value={d.textLabel ?? ''}
                 onChangeText={(t) => onPatch({ textLabel: t })}
                 placeholder="예: 내일 오후 vs 모레 오전"
                 placeholderTextColor={INPUT_PLACEHOLDER}
                 style={[styles.textInputBare, styles.multiInput]}
                 multiline
+                blurOnSubmit
+                returnKeyType="next"
+                onSubmitEditing={() => focusWebRef(webRepPairDateRef)}
               />
             </View>
             <Text style={[styles.blockLabel, { marginTop: 10 }]}>대표 날짜 (표시용)</Text>
@@ -604,6 +694,8 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ startDate: t }),
                 (t) => onPatch({ startTime: t }),
                 'HH:mm',
+                undefined,
+                { dateRef: webRepPairDateRef, onSubmitFromTimeField: onSubmitLastFieldInCard },
               )
             ) : (
               renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -619,12 +711,16 @@ export function DateCandidateEditorCard({
             <View style={[styles.fieldRecess, styles.flexRecess]}>
               <TextInput
                 ref={firstInputRef}
+                {...deferFor(firstInputRef)}
                 value={d.textLabel ?? ''}
                 onChangeText={(t) => onPatch({ textLabel: t })}
                 placeholder="예: 시험 끝나는 주말쯤, 대략 저녁"
                 placeholderTextColor={INPUT_PLACEHOLDER}
                 style={[styles.textInputBare, styles.flexInput]}
                 multiline
+                blurOnSubmit
+                returnKeyType="next"
+                onSubmitEditing={() => focusWebRef(webRepPairDateRef)}
               />
             </View>
             <Text style={[styles.blockLabel, { marginTop: 10 }]}>참고 일시</Text>
@@ -635,6 +731,8 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ startDate: t }),
                 (t) => onPatch({ startTime: t }),
                 'HH:mm',
+                undefined,
+                { dateRef: webRepPairDateRef, onSubmitFromTimeField: onSubmitLastFieldInCard },
               )
             ) : (
               renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -651,12 +749,16 @@ export function DateCandidateEditorCard({
               <View style={[styles.fieldRecess, styles.fieldRecessHalf]}>
                 <TextInput
                   ref={firstInputRef}
+                  {...deferFor(firstInputRef)}
                   value={d.startDate}
                   onChangeText={(t) => onPatch({ startDate: t })}
                   placeholder="YYYY-MM-DD"
                   placeholderTextColor={INPUT_PLACEHOLDER}
                   style={styles.textInputBare}
                   autoCapitalize="none"
+                  returnKeyType={onSubmitLastFieldInCard ? 'next' : 'done'}
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => onSubmitLastFieldInCard?.()}
                 />
               </View>
             ) : (
@@ -684,6 +786,11 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ startDate: t }),
                 (t) => onPatch({ startTime: t }),
                 'HH:mm',
+                undefined,
+                {
+                  dateRef: firstInputRef,
+                  onSubmitFromTimeField: () => focusWebRef(webSecondPairDateRef),
+                },
               )
             ) : (
               renderNativePair(d.startDate, d.startTime, 'startDate', 'startTime')
@@ -696,6 +803,12 @@ export function DateCandidateEditorCard({
                 (t) => onPatch({ endDate: t }),
                 (t) => onPatch({ endTime: t }),
                 'HH:mm',
+                undefined,
+                {
+                  dateRef: webSecondPairDateRef,
+                  timeRef: webSecondPairTimeRef,
+                  onSubmitFromTimeField: onSubmitLastFieldInCard,
+                },
               )
             ) : (
               renderNativePair(d.endDate ?? d.startDate, d.endTime, 'endDate', 'endTime')

@@ -1,8 +1,9 @@
-import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAuth, getReactNativePersistence, initializeAuth, signInAnonymously, type Auth } from 'firebase/auth';
+import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, signInAnonymously, type Auth } from 'firebase/auth';
 import { getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
+import { Platform } from 'react-native';
 
 import { publicEnv } from '@/src/config/public-env';
 
@@ -40,20 +41,42 @@ export function getFirebaseApp(): FirebaseApp {
 }
 
 /**
- * Firebase Auth (React Native)
- * - AsyncStorage persistence 연결: 경고 제거 + 자동 로그인(세션 유지)
+ * Firebase Auth
+ * - **Web**: `firebase/auth`의 `getAuth`.
+ * - **iOS/Android**: `@firebase/auth` RN 번들의 `initializeAuth` + `getReactNativePersistence(AsyncStorage)`  
+ *   (`firebase/auth` 타입 번들에는 RN persistence가 없어 `require('@firebase/auth')`로 로드)
+ * - 그 외: `getAuth` 메모리 persistence.
  */
 export function getFirebaseAuth(): Auth {
   if (auth) return auth;
   const firebaseApp = getFirebaseApp();
-  try {
-    auth = initializeAuth(firebaseApp, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
-  } catch {
-    // initializeAuth 중복 초기화 등 fallback
+  if (Platform.OS === 'web') {
     auth = getAuth(firebaseApp);
+    return auth;
   }
+  if (Platform.OS === 'ios' || Platform.OS === 'android') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const rnAuth = require('@firebase/auth') as {
+      initializeAuth: (app: FirebaseApp, deps: { persistence: unknown }) => Auth;
+      getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
+      getAuth: (app: FirebaseApp) => Auth;
+    };
+    try {
+      auth = rnAuth.initializeAuth(firebaseApp, {
+        persistence: rnAuth.getReactNativePersistence(AsyncStorage),
+      });
+      return auth;
+    } catch (e) {
+      const code =
+        typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: unknown }).code) : '';
+      if (code === 'auth/already-initialized') {
+        auth = rnAuth.getAuth(firebaseApp);
+        return auth;
+      }
+      throw e;
+    }
+  }
+  auth = getAuth(firebaseApp);
   return auth;
 }
 
@@ -108,7 +131,6 @@ export function getFirebaseFirestore(): Firestore {
   try {
     firestore = initializeFirestore(firebaseApp, {
       experimentalAutoDetectLongPolling: true,
-      useFetchStreams: false,
     });
   } catch {
     firestore = getFirestore(firebaseApp);
