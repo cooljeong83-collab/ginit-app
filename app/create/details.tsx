@@ -2379,6 +2379,13 @@ export default function CreateDetailsScreen() {
         Alert.alert('입력 확인', '회비를 선택한 경우 1원 이상의 금액을 입력해 주세요.');
         return;
       }
+      if (meetingConfig.settlement === 'MEMBERSHIP_FEE' && typeof meetingConfig.membershipFeeWon === 'number') {
+        if (meetingConfig.membershipFeeWon > 100000) {
+          setWizardError('회비는 최대 10만원까지 입력할 수 있어요.');
+          Alert.alert('입력 확인', '회비는 최대 10만원까지 입력할 수 있어요.');
+          return;
+        }
+      }
     } else {
       if (
         !Number.isFinite(minParticipants) ||
@@ -2987,25 +2994,6 @@ export default function CreateDetailsScreen() {
                           styles.detailStepDescriptionCardOuter,
                         ]}>
                         <View style={styles.detailDescriptionInputShell}>
-                          <View style={styles.detailDescriptionVoiceHeader}>
-                            <Pressable
-                              onPress={onPressVoiceInputDescription}
-                              disabled={busy}
-                              style={({ pressed }) => [
-                                styles.voiceBtn,
-                                busy && styles.addCandidateBtnDisabled,
-                                pressed && !busy && styles.voiceBtnPressed,
-                              ]}
-                              hitSlop={10}
-                              accessibilityRole="button"
-                              accessibilityLabel="모임 소개 음성 입력">
-                              {voiceDescriptionRecognizing ? (
-                                <VoiceWaveform active color={GinitTheme.colors.primary} />
-                              ) : (
-                                <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
-                              )}
-                            </Pressable>
-                          </View>
                           <TextInput
                             ref={detailDescriptionInputRef}
                             {...detailDescriptionDeferKb}
@@ -3015,6 +3003,7 @@ export default function CreateDetailsScreen() {
                             placeholderTextColor={INPUT_PLACEHOLDER}
                             style={[
                               styles.finalDescriptionInput,
+                              styles.finalDescriptionInputWithVoiceFab,
                               descFocused && styles.finalDescriptionInputFocused,
                             ]}
                             multiline
@@ -3023,6 +3012,24 @@ export default function CreateDetailsScreen() {
                             keyboardType="default"
                             inputMode="text"
                           />
+                          <Pressable
+                            onPress={onPressVoiceInputDescription}
+                            disabled={busy}
+                            style={({ pressed }) => [
+                              styles.voiceBtn,
+                              styles.detailDescriptionVoiceFab,
+                              busy && styles.addCandidateBtnDisabled,
+                              pressed && !busy && styles.voiceBtnPressed,
+                            ]}
+                            hitSlop={10}
+                            accessibilityRole="button"
+                            accessibilityLabel="모임 소개 음성 입력">
+                            {voiceDescriptionRecognizing ? (
+                              <VoiceWaveform active color={GinitTheme.colors.primary} />
+                            ) : (
+                              <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                            )}
+                          </Pressable>
                         </View>
                       </VoteCandidateCard>
                     </View>
@@ -3918,14 +3925,15 @@ const styles = StyleSheet.create({
   detailDescriptionInputShell: {
     position: 'relative',
   },
-  /** 상세 단계 소개 카드 — 음성 입력 우측 상단 */
-  detailDescriptionVoiceHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    paddingRight: 2,
-    paddingTop: 2,
-    marginBottom: 4,
+  detailDescriptionVoiceFab: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    zIndex: 2,
+  },
+  finalDescriptionInputWithVoiceFab: {
+    paddingRight: 52,
+    paddingBottom: 48,
   },
   finalDescriptionInput: {
     marginTop: 0,

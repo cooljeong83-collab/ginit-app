@@ -671,6 +671,9 @@ export async function applyGoogleSignupProfile(
   if (patch.gender !== undefined) payload.gender = patch.gender;
   if (patch.ageBand !== undefined) payload.ageBand = patch.ageBand;
   if (patch.birthDate !== undefined) payload.birthDate = patch.birthDate;
+  if (patch.birthYear !== undefined) payload.birthYear = patch.birthYear;
+  if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
+  if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
   if (patch.baseRegion !== undefined) payload.baseRegion = patch.baseRegion;
   if (patch.interests !== undefined) payload.interests = patch.interests;
   if (patch.bio !== undefined) payload.bio = patch.bio;

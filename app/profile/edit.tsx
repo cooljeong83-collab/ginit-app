@@ -1,9 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   BackHandler,
   KeyboardAvoidingView,
@@ -20,19 +22,18 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GinitButton, GinitCard } from '@/components/ginit';
-import { ScreenShell } from '@/components/ui';
-import { HomeGlassStyles } from '@/constants/home-glass-styles';
-import { GinitTheme } from '@/constants/ginit-theme';
 import { authScreenStyles as authFormStyles } from '@/components/auth/authScreenStyles';
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
+import { GinitButton, GinitCard } from '@/components/ginit';
+import { ScreenShell } from '@/components/ui';
+import { GinitTheme } from '@/constants/ginit-theme';
+import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { normalizeUserId } from '@/src/lib/app-user-id';
 import { deleteFirebaseAuthUserBestEffort, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
-import { Timestamp, serverTimestamp } from 'firebase/firestore';
+import { normalizeUserId } from '@/src/lib/app-user-id';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
-import { AuthService } from '@/src/services/AuthService';
 import {
   ensureUserProfile,
   firestoreTimestampLikeToDate,
@@ -40,7 +41,8 @@ import {
   isUserPhoneVerified,
   updateUserProfile,
 } from '@/src/lib/user-profile';
-import { uploadProfilePhoto } from '@/src/lib/profile-photo';
+import { AuthService } from '@/src/services/AuthService';
+import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
@@ -117,6 +119,11 @@ export default function ProfileEditScreen() {
             : null;
         if (bdDate) {
           setBirthDemo({ year: bdDate.getFullYear(), month: bdDate.getMonth() + 1, day: bdDate.getDate() });
+        } else {
+          const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+          const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+          const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+          if (y && m && d) setBirthDemo({ year: y, month: m, day: d });
         }
       } catch {
         if (!alive) return;
@@ -172,7 +179,7 @@ export default function ProfileEditScreen() {
       setPhotoUrl(url);
       await updateUserProfile(profilePk, { photoUrl: url });
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('업로드 완료', '프로필 사진을 업데이트했어요.');
+      if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
       Alert.alert('업로드 실패', msg);
@@ -194,7 +201,7 @@ export default function ProfileEditScreen() {
         photoUrl: photoUrl.trim() || null,
       });
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('저장됨', '닉네임과 프로필 사진 설정을 반영했어요.');
+      Alert.alert('저장됨', '닉네임을 반영했어요.');
       router.back();
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
@@ -452,25 +459,69 @@ export default function ProfileEditScreen() {
     );
   }, [userId, authProfile?.firebaseUid, runDeleteAccount]);
 
+  const avatarInitial = useMemo(() => {
+    const n = nickname.trim();
+    if (!n) return '?';
+    return n.slice(0, 1).toUpperCase();
+  }, [nickname]);
+
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]} showsVerticalScrollIndicator={false}>
-          <View style={styles.topRow}>
-            <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]} accessibilityRole="button">
-              <Text style={styles.backText}>←</Text>
-            </Pressable>
-            <Text style={styles.screenTitle}>프로필 편집</Text>
-            <View style={{ width: 40 }} />
+          <View style={styles.heroWrap}>
+            <View style={styles.heroInner}>
+              <View style={styles.heroTopRow}>
+                <Pressable
+                  onPress={() => router.back()}
+                  style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="뒤로">
+                  <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+                </Pressable>
+              </View>
+              <Text style={styles.heroTitle}>프로필 편집</Text>
+              <Text style={styles.heroSubtitle}>모임에서 보이는 이름과 사진을 바꿀 수 있어요.</Text>
+
+              <Pressable
+                onPress={() => void onPickAndUploadPhoto()}
+                disabled={photoUploadBusy || profileBusy || deleteBusy || busy}
+                style={({ pressed }) => [styles.avatarPress, pressed && !(photoUploadBusy || profileBusy || deleteBusy || busy) && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="프로필 사진 바꾸기"
+                accessibilityHint="갤러리에서 사진을 선택합니다">
+                <View style={styles.avatarRing}>
+                  {photoUrl.trim() ? (
+                    <Image source={{ uri: photoUrl.trim() }} style={styles.avatarImg} contentFit="cover" />
+                  ) : (
+                    <View style={styles.avatarFallback}>
+                      <Text style={styles.avatarFallbackText}>{avatarInitial}</Text>
+                    </View>
+                  )}
+                  <View style={styles.avatarCameraBadge} pointerEvents="none">
+                    {photoUploadBusy ? (
+                      <ActivityIndicator size="small" color={GinitTheme.colors.primary} />
+                    ) : (
+                      <Ionicons name="camera" size={16} color={GinitTheme.colors.primary} />
+                    )}
+                  </View>
+                </View>
+              </Pressable>
+              <Text style={styles.avatarHint}>사진을 눌러 선택하면 바로 업로드·저장돼요</Text>
+            </View>
           </View>
 
-          <GinitCard appearance="light" style={styles.card}>
-            <Text style={styles.label}>닉네임</Text>
+          <GinitCard appearance="light" style={[styles.card, styles.cardOverlap]}>
+            
+            <View style={styles.nicknameHeader}>
+              <Text style={styles.labelInline}>닉네임</Text>
+              <Text style={styles.charCount}>{nickname.length}/24</Text>
+            </View>
             <TextInput
               value={nickname}
               onChangeText={setNickname}
               placeholder="모임에서 보이는 이름"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={GinitTheme.colors.textMuted}
               style={styles.input}
               autoCapitalize="none"
               autoCorrect={false}
@@ -480,52 +531,40 @@ export default function ProfileEditScreen() {
               editable={!profileBusy && !deleteBusy}
             />
 
-            <Text style={styles.label}>프로필 사진 URL (선택)</Text>
-            <Text style={styles.subHint}>HTTPS 이미지 주소를 넣으면 모임 참여자 목록에 표시돼요.</Text>
-            <GinitButton
-              title={photoUploadBusy ? '사진 업로드 중…' : '프로필 사진 업로드'}
-              variant="secondary"
-              onPress={() => void onPickAndUploadPhoto()}
-              disabled={photoUploadBusy || profileBusy || deleteBusy || busy}
-            />
-            <TextInput
-              value={photoUrl}
-              onChangeText={setPhotoUrl}
-              placeholder="https://…"
-              placeholderTextColor="#94a3b8"
-              style={styles.input}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              editable={!profileBusy && !deleteBusy}
-            />
-
-            {photoUrl.trim() ? (
-              <View style={styles.previewWrap}>
-                <Image source={{ uri: photoUrl.trim() }} style={styles.preview} contentFit="cover" />
-              </View>
-            ) : null}
-
-            <GinitButton title={profileBusy ? '저장 중…' : '저장'} variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
-
-            <View style={{ marginTop: 10 }}>
-              <GinitButton
-                title="서비스 이용 인증(정보 등록)"
-                variant="secondary"
-                onPress={() => setAuthSheetVisible(true)}
-                disabled={complianceBusy || otpBusy || profileBusy}
-              />
+            <View style={styles.saveBlock}>
+              <GinitButton title={profileBusy ? '저장 중…' : '변경 사항 저장'} variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
             </View>
           </GinitCard>
 
           <GinitCard appearance="light" style={styles.card}>
+            <View style={styles.complianceHeader}>
+              <View style={styles.complianceIconWrap}>
+                <Ionicons name="shield-checkmark-outline" size={22} color={GinitTheme.colors.primary} />
+              </View>
+              <View style={styles.complianceTextCol}>
+                <Text style={styles.complianceTitle}>모임 이용 인증</Text>
+                <Text style={styles.complianceSub}>모임 만들기·참여를 위해 동의와 전화 인증이 필요해요.</Text>
+              </View>
+            </View>
+            <GinitButton
+              title="인증·정보 등록 열기"
+              variant="secondary"
+              onPress={() => setAuthSheetVisible(true)}
+              disabled={complianceBusy || otpBusy || profileBusy}
+            />
+          </GinitCard>
+
+          <GinitCard appearance="light" style={styles.card}>
+            <Text style={styles.sectionEyebrow}>계정</Text>
             <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy || deleteBusy} />
+            <View style={styles.divider} />
             <Pressable
               onPress={onRequestDeleteAccount}
               disabled={deleteBusy || profileBusy}
               style={({ pressed }) => [styles.deleteAccountBtn, pressed && styles.deleteAccountBtnPressed]}
               accessibilityRole="button"
               accessibilityLabel="회원 탈퇴">
+              <Ionicons name="warning-outline" size={18} color={GinitTheme.colors.danger} style={styles.deleteIcon} />
               <Text style={styles.deleteAccountLabel}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
             </Pressable>
           </GinitCard>
@@ -555,6 +594,7 @@ export default function ProfileEditScreen() {
                     showsVerticalScrollIndicator={false}
                     style={{ maxHeight: authSheetLayout.scrollMax }}
                     contentContainerStyle={styles.sheetScrollContent}>
+                    <View style={styles.sheetGrabber} accessibilityElementsHidden />
                     <Text style={styles.sheetTitle}>서비스 이용 인증</Text>
                     <Text style={styles.sheetLead}>모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.</Text>
 
@@ -698,45 +738,232 @@ export default function ProfileEditScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
-  scrollBottom: { paddingTop: 8, paddingBottom: 32 },
+  scrollBottom: { paddingTop: 0, paddingBottom: 36 },
   pressed: { opacity: 0.88 },
-  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  backBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  backText: { fontSize: 20, fontWeight: '900', color: '#0f172a' },
-  screenTitle: { fontSize: 20, fontWeight: '900', color: '#0f172a', letterSpacing: -0.4 },
-  card: { borderColor: 'rgba(255, 255, 255, 0.55)', marginBottom: 14 },
-  label: { fontSize: 12, fontWeight: '700', color: '#64748b', marginTop: 12, marginBottom: 4 },
-  subHint: { fontSize: 12, color: '#94a3b8', marginBottom: 6 },
-  input: {
-    minHeight: 46,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    color: '#0f172a',
-    fontWeight: '800',
-  },
-  previewWrap: {
-    marginTop: 12,
-    borderRadius: 14,
+
+  heroWrap: {
+    marginHorizontal: -20,
+    marginBottom: 6,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
   },
-  preview: { width: '100%', height: 160 },
-  deleteAccountBtn: {
-    marginTop: 10,
-    paddingVertical: 12,
-    borderRadius: 12,
+  heroInner: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 26,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.95)',
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: -0.75,
+    color: GinitTheme.colors.text,
+  },
+  heroSubtitle: {
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: '600',
+    color: GinitTheme.colors.textSub,
+    lineHeight: 20,
+    maxWidth: 340,
+  },
+  avatarPress: {
+    alignSelf: 'center',
+    marginTop: 18,
+  },
+  avatarRing: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    padding: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'rgba(15, 23, 42, 0.18)',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 1,
+    shadowRadius: 22,
+    elevation: 8,
+  },
+  avatarImg: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+  },
+  avatarFallback: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    backgroundColor: 'rgba(31, 42, 68, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+  },
+  avatarFallbackText: {
+    fontSize: 38,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
+    letterSpacing: -1,
+  },
+  avatarCameraBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    borderColor: GinitTheme.colors.border,
+    shadowColor: 'rgba(15, 23, 42, 0.12)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  avatarHint: {
+    marginTop: 10,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+  },
+
+  card: {
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    marginBottom: GinitTheme.spacing.md,
+  },
+  cardOverlap: {
+    marginTop: -34,
+    zIndex: 2,
+  },
+  sectionEyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: -0.35,
+    color: GinitTheme.colors.text,
+    marginBottom: 8,
+  },
+  nicknameHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  labelInline: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+  },
+  charCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: GinitTheme.colors.border,
+    marginVertical: GinitTheme.spacing.md,
+  },
+  label: { fontSize: 12, fontWeight: '700', color: '#64748b', marginTop: 12, marginBottom: 4 },
+  subHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 18,
+    marginBottom: GinitTheme.spacing.sm,
+  },
+  input: {
+    minHeight: 48,
+    borderRadius: 14,
+    paddingHorizontal: GinitTheme.spacing.md,
+    backgroundColor: GinitTheme.colors.bgAlt,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    color: GinitTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  saveBlock: {
+    marginTop: GinitTheme.spacing.lg,
+  },
+  complianceHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: GinitTheme.spacing.md,
+    marginBottom: GinitTheme.spacing.md,
+  },
+  complianceIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 15,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  complianceTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  complianceTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+    color: GinitTheme.colors.text,
+  },
+  complianceSub: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 18,
+  },
+
+  deleteAccountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 0,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(220, 38, 38, 0.22)',
+    backgroundColor: 'rgba(254, 242, 242, 0.65)',
   },
   deleteAccountBtnPressed: { opacity: 0.88 },
-  deleteAccountLabel: { fontSize: 14, fontWeight: '900', color: '#b91c1c' },
+  deleteIcon: { marginTop: 1 },
+  deleteAccountLabel: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.danger },
 
   sheetKbWrap: { flex: 1 },
   sheetRoot: { flex: 1 },
@@ -764,6 +991,14 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   sheetScrollContent: { paddingBottom: 4 },
+  sheetGrabber: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(15, 23, 42, 0.12)',
+    marginBottom: 12,
+  },
   sheetTitle: { fontSize: 20, fontWeight: '900', color: '#0f172a', marginBottom: 6 },
   sheetLead: { fontSize: 14, fontWeight: '600', color: '#64748b', lineHeight: 20, marginBottom: 14 },
   termsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4 },

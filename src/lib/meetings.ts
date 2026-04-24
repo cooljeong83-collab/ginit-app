@@ -193,7 +193,7 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
   if (settlement === 'MEMBERSHIP_FEE') {
     const raw = toFiniteInt(o.membershipFeeWon, NaN);
     membershipFeeWon =
-      Number.isFinite(raw) && raw >= 0 ? Math.min(9_999_999, Math.trunc(raw)) : null;
+      Number.isFinite(raw) && raw >= 0 ? Math.min(100_000, Math.trunc(raw)) : null;
   }
   const minGLevel = Math.max(1, Math.min(50, toFiniteInt(o.minGLevel, 1)));
   let minGTrust: number | null = null;

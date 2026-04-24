@@ -362,9 +362,12 @@ export default function LoginScreen() {
       const nickname = pickNicknameFromGoogle(display, email);
       const photoUrl = user.photoURL?.trim() ? user.photoURL.trim() : null;
       const genderFs = mapGooglePeopleGenderToProfileGender(people?.gender ?? null);
+      const py = people?.birthYear ?? null;
+      const pm = people?.birthMonth ?? null;
+      const pd = people?.birthDay ?? null;
       const birthDateTs =
-        people?.birthYear && people?.birthMonth && people?.birthDay
-          ? Timestamp.fromDate(new Date(people.birthYear, people.birthMonth - 1, people.birthDay))
+        py != null && pm != null && pd != null
+          ? Timestamp.fromDate(new Date(py, pm - 1, pd))
           : null;
 
       await applyGoogleSignupProfile(emailPk, {
@@ -376,8 +379,16 @@ export default function LoginScreen() {
         phone: null,
         phoneVerifiedAt: null,
         signupProvider: 'google_sns',
-        gender: genderFs,
-        birthDate: birthDateTs,
+        // People API 동의 후에만 넘어오는 값만 병합(없으면 기존 문서 값을 덮어쓰지 않음)
+        ...(genderFs ? { gender: genderFs } : {}),
+        ...(birthDateTs
+          ? {
+              birthDate: birthDateTs,
+              birthYear: py,
+              birthMonth: pm,
+              birthDay: pd,
+            }
+          : {}),
         firebaseUid: user.uid,
       });
       await setUserId(emailPk);

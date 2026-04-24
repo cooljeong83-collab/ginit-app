@@ -537,7 +537,7 @@ export default function MapScreen() {
                 />
                 <View style={styles.listCardBody}>
                   <View style={styles.listTitleRow}>
-                    <Text style={styles.listTitle} numberOfLines={2}>
+                    <Text style={styles.listTitle} numberOfLines={1} ellipsizeMode="tail">
                       {m.title}
                     </Text>
                     <View style={progressPill.wrap}>
@@ -878,9 +878,10 @@ const styles = StyleSheet.create({
   listTitle: {
     flex: 1,
     fontSize: 15,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontWeight: '900',
+    letterSpacing: -0.2,
     lineHeight: 20,
+    color: GinitTheme.colors.text,
   },
   listMeta: {
     fontSize: 12,

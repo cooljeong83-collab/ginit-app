@@ -1,9 +1,11 @@
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   BackHandler,
@@ -60,6 +62,7 @@ import {
   updateUserProfile,
   type UserProfile,
 } from '@/src/lib/user-profile';
+import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
@@ -83,6 +86,7 @@ export default function ProfileTab() {
   const [busy, setBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [needsSnsDemographics, setNeedsSnsDemographics] = useState(false);
@@ -254,6 +258,47 @@ export default function ProfileTab() {
   const onGoEditProfile = useCallback(() => {
     router.push('/profile/edit');
   }, [router]);
+
+  const onPickHeaderProfilePhoto = useCallback(async () => {
+    if (!profilePk) {
+      Alert.alert('안내', '로그인 후 사진을 바꿀 수 있어요.');
+      return;
+    }
+    setPhotoUploadBusy(true);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('권한 필요', '사진을 선택하려면 사진 보관함 권한이 필요합니다.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      const uri = asset?.uri?.trim() ?? '';
+      if (!uri) throw new Error('이미지 정보를 가져오지 못했습니다.');
+
+      const url = await uploadProfilePhoto({
+        userId: profilePk,
+        localImageUri: uri,
+        naturalWidth: asset?.width,
+      });
+      await updateUserProfile(profilePk, { photoUrl: url });
+      setPhotoUrl(url);
+      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
+      await refreshProfile();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
+      Alert.alert('업로드 실패', msg);
+    } finally {
+      setPhotoUploadBusy(false);
+    }
+  }, [profilePk, refreshProfile]);
 
   const onGoTrust = useCallback(() => {
     if (trustSectionY == null) return;
@@ -522,7 +567,13 @@ export default function ProfileTab() {
           showsVerticalScrollIndicator={false}>
           <View style={styles.headerWrap}>
             <View style={styles.headerRow}>
-              <View style={styles.avatarWrap} accessibilityLabel="프로필 사진">
+              <Pressable
+                onPress={() => void onPickHeaderProfilePhoto()}
+                disabled={photoUploadBusy || busy || deleteBusy}
+                style={({ pressed }) => [styles.avatarWrap, pressed && !(photoUploadBusy || busy || deleteBusy) && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="프로필 사진 바꾸기"
+                accessibilityHint="갤러리에서 고르고 확인하면 바로 저장돼요">
                 {photoUrl.trim() ? (
                   <Image source={{ uri: photoUrl.trim() }} style={styles.avatar} contentFit="cover" />
                 ) : (
@@ -530,7 +581,12 @@ export default function ProfileTab() {
                     <Text style={styles.avatarFallbackText}>{(nickname?.trim() || 'G').slice(0, 1)}</Text>
                   </View>
                 )}
-              </View>
+                {photoUploadBusy ? (
+                  <View style={styles.avatarUploadOverlay} pointerEvents="none">
+                    <ActivityIndicator color="#fff" />
+                  </View>
+                ) : null}
+              </Pressable>
               <View style={styles.headerTextCol}>
                 <Text style={styles.headerName} numberOfLines={1}>
                   {nickname?.trim() || '사용자'}
@@ -818,6 +874,13 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
     backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    position: 'relative',
+  },
+  avatarUploadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.42)',
   },
   avatar: {
     width: '100%',

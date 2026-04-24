@@ -186,6 +186,9 @@ export function useSignUpFlow(initialPhone: string) {
           signupProvider: 'phone_otp',
           gender: genderCode,
           birthDate: birthDateTs,
+          birthYear: birthdate.year,
+          birthMonth: birthdate.month,
+          birthDay: birthdate.day,
           firebaseUid: uid,
         });
         await registerPhoneIfNew(n);

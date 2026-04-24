@@ -13,8 +13,9 @@ export type GooglePeopleExtras = {
 export function mapGooglePeopleGenderToProfileGender(raw: string | null | undefined): 'MALE' | 'FEMALE' | null {
   if (!raw?.trim()) return null;
   const l = raw.trim().toLowerCase();
-  if (l === 'male' || l === 'man') return 'MALE';
-  if (l === 'female' || l === 'woman') return 'FEMALE';
+  if (l === 'male' || l === 'man' || l === 'masculine') return 'MALE';
+  if (l === 'female' || l === 'woman' || l === 'feminine') return 'FEMALE';
+  /** People API: other / unspecified / not specified 등은 앱에서 MALE·FEMALE로 저장하지 않음 */
   return null;
 }
 

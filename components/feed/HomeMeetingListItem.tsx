@@ -22,11 +22,17 @@ import type {
   PublicMeetingGenderRatio,
   PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
-import { formatPublicMeetingAgeSummary, parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import {
+  formatPublicMeetingAgeSummary,
+  MEETING_CAPACITY_UNLIMITED,
+  meetingParticipantCount,
+  meetingPrimaryStartMs,
+  parsePublicMeetingDetailsConfig,
+} from '@/src/lib/meetings';
 
 const AnimatedView = Animated.createAnimatedComponent(View);
 
-function rgbFromCssColor(c: string): { r: number; g: number; b: number } | null {
+function rgbaFromCssColor(c: string): { r: number; g: number; b: number; a: number } | null {
   const s = (c ?? '').trim();
   if (!s) return null;
   if (s.startsWith('#')) {
@@ -35,13 +41,13 @@ function rgbFromCssColor(c: string): { r: number; g: number; b: number } | null 
       const r = parseInt(hex[0] + hex[0], 16);
       const g = parseInt(hex[1] + hex[1], 16);
       const b = parseInt(hex[2] + hex[2], 16);
-      if ([r, g, b].every(Number.isFinite)) return { r, g, b };
+      if ([r, g, b].every(Number.isFinite)) return { r, g, b, a: 1 };
     }
     if (hex.length === 6) {
       const r = parseInt(hex.slice(0, 2), 16);
       const g = parseInt(hex.slice(2, 4), 16);
       const b = parseInt(hex.slice(4, 6), 16);
-      if ([r, g, b].every(Number.isFinite)) return { r, g, b };
+      if ([r, g, b].every(Number.isFinite)) return { r, g, b, a: 1 };
     }
     return null;
   }
@@ -51,7 +57,19 @@ function rgbFromCssColor(c: string): { r: number; g: number; b: number } | null 
   const g = Math.max(0, Math.min(255, Math.round(Number(m[2]))));
   const b = Math.max(0, Math.min(255, Math.round(Number(m[3]))));
   if (![r, g, b].every(Number.isFinite)) return null;
-  return { r, g, b };
+  const aRaw = m[4] == null ? 1 : Number(m[4]);
+  const a = Number.isFinite(aRaw) ? Math.max(0, Math.min(1, aRaw)) : 1;
+  return { r, g, b, a };
+}
+
+function blendOverWhite(rgb: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number } {
+  // 실제 UI에서 그라데이션은 흰 글래스 위에 깔리므로, 대비 계산은 흰색 배경으로 블렌딩합니다.
+  const a = Math.max(0, Math.min(1, rgb.a));
+  return {
+    r: Math.round(rgb.r * a + 255 * (1 - a)),
+    g: Math.round(rgb.g * a + 255 * (1 - a)),
+    b: Math.round(rgb.b * a + 255 * (1 - a)),
+  };
 }
 
 function luminance01(rgb: { r: number; g: number; b: number }): number {
@@ -67,11 +85,15 @@ function luminance01(rgb: { r: number; g: number; b: number }): number {
 }
 
 function contrastIconColorFromGradient(gradient: readonly [string, string]): string {
-  const a = rgbFromCssColor(gradient[0]);
-  const b = rgbFromCssColor(gradient[1]);
-  const avg = a && b ? { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2 } : a ?? b;
-  if (!avg) return '#FFFFFF';
-  const L = luminance01({ r: avg.r, g: avg.g, b: avg.b });
+  const a = rgbaFromCssColor(gradient[0]);
+  const b = rgbaFromCssColor(gradient[1]);
+  const avgRgba =
+    a && b
+      ? { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2, a: (a.a + b.a) / 2 }
+      : a ?? b;
+  if (!avgRgba) return '#FFFFFF';
+  const blended = blendOverWhite(avgRgba);
+  const L = luminance01(blended);
   return L >= 0.62 ? '#0b1220' : '#FFFFFF';
 }
 
@@ -89,6 +111,35 @@ function settlementCornerLabel(cfg: PublicMeetingDetailsConfig): string {
     default:
       return 'N분할';
   }
+}
+
+function formatMeetingScheduleLine(m: Meeting): string {
+  const date = m.scheduleDate?.trim() ?? '';
+  const time = m.scheduleTime?.trim() ?? '';
+  if (date && time) return `${date} ${time}`;
+  if (date) return date;
+  if (time) return time;
+  const ms = meetingPrimaryStartMs(m);
+  if (ms != null) {
+    return new Intl.DateTimeFormat('ko-KR', {
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(new Date(ms));
+  }
+  return '';
+}
+
+function capacityFillRatio(m: Meeting): number {
+  const n = meetingParticipantCount(m);
+  const cap = m.capacity ?? 0;
+  if (!cap || cap >= MEETING_CAPACITY_UNLIMITED) return 1;
+  const r = n / cap;
+  if (!Number.isFinite(r)) return 0;
+  return Math.max(0, Math.min(1, r));
 }
 
 function approvalChipParts(a: PublicMeetingDetailsConfig['approvalType']): {
@@ -207,6 +258,12 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
   const visual = useMemo(() => getHomeCategoryVisual(m), [m]);
   const statusCorner = useMemo(() => homeMeetingStatusBadgeLabel(m), [m]);
   const iconColor = useMemo(() => contrastIconColorFromGradient(visual.gradient), [visual.gradient]);
+  const scheduleLine = useMemo(() => formatMeetingScheduleLine(m), [m]);
+  const capFill = useMemo(() => capacityFillRatio(m), [m]);
+  const showCapacityBar = useMemo(() => {
+    const cap = m.capacity ?? 0;
+    return Boolean(cap && cap < MEETING_CAPACITY_UNLIMITED);
+  }, [m.capacity]);
   const cfg = useMemo(
     () => (m.isPublic === true ? parsePublicMeetingDetailsConfig(m.meetingConfig) : null),
     [m.isPublic, m.meetingConfig],
@@ -234,8 +291,9 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
         onPress={onPress}
         accessibilityRole="button"
         accessibilityHint="모임 상세로 이동"
+        accessibilityState={{ selected: joined }}
         style={s.pressable}>
-        <View style={s.cardShadow}>
+        <View style={[s.cardShadow, joined && s.cardShadowJoined]}>
           <View style={s.cardShell}>
             <LinearGradient
               colors={[...visual.gradient]}
@@ -243,7 +301,7 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
               end={{ x: 0, y: 1 }}
               style={s.accentStripe}
             />
-            <View style={s.cardInner}>
+            <View style={[s.cardInner, joined && s.cardInnerJoined]}>
               <View style={s.zoneA}>
                 <View style={s.symbolCol}>
                   <View style={s.categoryIconBubble} accessibilityLabel={m.categoryLabel?.trim() || '모임'}>
@@ -255,34 +313,50 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
                     />
                     <Ionicons name={visual.icon} size={15} color={iconColor} style={s.categoryIconFg} />
                   </View>
-                  {joined ? (
-                    <View style={s.joinedPill}>
-                      <Text style={s.joinedPillText}>참여</Text>
-                    </View>
+                  {showCapacityBar ? (
+                    <>
+                      <View
+                        style={s.capacitySymbolTrack}
+                        accessibilityLabel={`참여 인원 ${meetingParticipantCount(m)}명, 최대 ${m.capacity}명`}>
+                        <View style={[s.capacityFill, { width: `${Math.round(capFill * 100)}%` }]} />
+                      </View>
+                      <Text style={s.capacityCountLabel} numberOfLines={1}>
+                        {`${meetingParticipantCount(m)}/${m.capacity}`}
+                      </Text>
+                    </>
                   ) : null}
                 </View>
                 <View style={s.zoneAMain}>
-                  <View style={s.titleRow}>
-                    <Text style={s.heroTitle} numberOfLines={2}>
-                      {m.title}
-                    </Text>
-                    <View style={s.zoneARight}>
-                      <NeonHeadBadge statusLine={statusCorner} pulse={pulseCoordinating} />
-                    </View>
-                  </View>
-                  {m.isPublic === true && cfg ? (
-                    <View style={s.metaRow}>
-                      <Text style={[s.metaMuted, s.metaTextFlex]} numberOfLines={1} ellipsizeMode="tail">
-                        {[distanceLine, ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
+                  <View style={s.titleScheduleStack}>
+                    <View style={s.titleRow}>
+                      <Text style={s.heroTitle} numberOfLines={1} ellipsizeMode="tail">
+                        {m.title}
                       </Text>
-                      <View style={s.genderDock}>
-                        <GenderSymbolVisual
-                          ratio={cfg.genderRatio}
-                          hostGenderSnapshot={cfg.hostGenderSnapshot}
-                          compact
-                        />
+                      <View style={s.zoneARight}>
+                        <NeonHeadBadge statusLine={statusCorner} pulse={pulseCoordinating} />
                       </View>
                     </View>
+                    {scheduleLine ? (
+                      <Text style={s.scheduleLine} numberOfLines={1} ellipsizeMode="tail">
+                        {scheduleLine}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {m.isPublic === true && cfg ? (
+                    <>
+                      <View style={s.metaRow}>
+                        <Text style={[s.metaMuted, s.metaTextFlex]} numberOfLines={1} ellipsizeMode="tail">
+                          {[distanceLine, ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
+                        </Text>
+                        <View style={s.genderDock}>
+                          <GenderSymbolVisual
+                            ratio={cfg.genderRatio}
+                            hostGenderSnapshot={cfg.hostGenderSnapshot}
+                            compact
+                          />
+                        </View>
+                      </View>
+                    </>
                   ) : (
                     <Text style={s.metaMuted} numberOfLines={1}>
                       {[distanceLine, m.isPublic === true && ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
@@ -353,6 +427,10 @@ const s = StyleSheet.create({
     borderRadius: GinitTheme.radius.card,
     backgroundColor: GinitTheme.colors.surface,
   },
+  /** 참여 중인 모임 — 선택된 카드처럼 은은한 하이라이트 */
+  cardShadowJoined: {
+    backgroundColor: GinitTheme.colors.bgAlt,
+  },
   cardShell: {
     borderRadius: GinitTheme.radius.card,
     overflow: 'hidden',
@@ -376,6 +454,9 @@ const s = StyleSheet.create({
     borderLeftWidth: StyleSheet.hairlineWidth,
     borderLeftColor: GinitTheme.colors.border,
   },
+  cardInnerJoined: {
+    backgroundColor: GinitTheme.colors.primarySoft,
+  },
   zoneA: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -392,6 +473,11 @@ const s = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: 2,
+  },
+  /** 타이틀 ↔ 일시만 촘촘히; 아래 메타와는 zoneAMain gap 유지 */
+  titleScheduleStack: {
+    minWidth: 0,
+    gap: 1,
   },
   zoneARight: {
     flexShrink: 0,
@@ -423,11 +509,43 @@ const s = StyleSheet.create({
   heroTitle: {
     flex: 1,
     minWidth: 0,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
     letterSpacing: -0.2,
-    lineHeight: 21,
+    lineHeight: 18,
     color: GinitTheme.colors.text,
+  },
+  scheduleLine: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1e293b',
+    letterSpacing: -0.2,
+    lineHeight: 15,
+  },
+  /** 좌측 심볼(32) 아래 — 참여 인원 미니 막대 */
+  capacitySymbolTrack: {
+    width: 32,
+    height: 3,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(15, 23, 42, 0.10)',
+    alignSelf: 'center',
+  },
+  capacityFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: GinitTheme.colors.primary,
+  },
+  /** 막대 아래: 참여 인원 / 최대 인원 */
+  capacityCountLabel: {
+    marginTop: 3,
+    fontSize: 9,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.35,
+    alignSelf: 'center',
+    maxWidth: 40,
+    textAlign: 'center',
   },
   metaRow: {
     flexDirection: 'row',
@@ -482,25 +600,6 @@ const s = StyleSheet.create({
     color: GinitTheme.colors.textSub,
     letterSpacing: -0.2,
     textAlign: 'right',
-  },
-  /** 카테고리 심볼(32)과 동일 너비로 정렬 */
-  joinedPill: {
-    width: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    paddingVertical: 3,
-    borderRadius: 10,
-    backgroundColor: GinitTheme.colors.primarySoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-  },
-  joinedPillText: {
-    fontSize: 9,
-    fontWeight: '900',
-    color: GinitTheme.colors.primary,
-    letterSpacing: -0.6,
-    lineHeight: 11,
   },
   privateRow: {
     flexDirection: 'row',

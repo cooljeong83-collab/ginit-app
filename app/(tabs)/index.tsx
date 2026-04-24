@@ -8,6 +8,7 @@ import {
   Modal,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -73,7 +74,7 @@ export default function FeedScreen() {
   /** 거리·거리순 정렬에 쓰는 기준점: 캐시 좌표 → GPS로 갱신(실패 시 캐시 유지) */
   const userCoordsRef = useRef<LatLng | null>(null);
   const [regionModalOpen, setRegionModalOpen] = useState(false);
-  const [sortFilterModalOpen, setSortFilterModalOpen] = useState(false);
+  const [feedListSettingsModalOpen, setFeedListSettingsModalOpen] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
@@ -233,8 +234,13 @@ export default function FeedScreen() {
 
   const sortComboLabel = useMemo(() => listSortModeLabel(listSortMode), [listSortMode]);
 
-  const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
-  const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
+  const openFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(true), []);
+  const closeFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(false), []);
+
+  const feedListSettingsDotActive = useMemo(
+    () => recruitingOnly || feedSearchFiltersActive(appliedFeedSearch) || listSortMode !== 'latest',
+    [recruitingOnly, appliedFeedSearch, listSortMode],
+  );
 
   const openCategoryPicker = useCallback(() => setCategoryPickerOpen(true), []);
   const closeCategoryPicker = useCallback(() => setCategoryPickerOpen(false), []);
@@ -309,6 +315,15 @@ export default function FeedScreen() {
               {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
             </Pressable>
             <InAppAlarmsBellButton />
+            <Pressable
+              onPress={openFeedListSettingsModal}
+              accessibilityRole="button"
+              accessibilityLabel="목록 정렬 및 필터 설정"
+              hitSlop={10}
+              style={styles.settingsIconWrap}>
+              <Ionicons name="settings-outline" size={24} color="#0f172a" />
+              {feedListSettingsDotActive ? <View style={styles.settingsFilterDot} /> : null}
+            </Pressable>
           </View>
         </View>
         <View style={styles.tabCategoryBar}>
@@ -337,37 +352,6 @@ export default function FeedScreen() {
             accessibilityState={{ expanded: categoryPickerOpen }}>
             <Text style={styles.categoryDropdownText} numberOfLines={1} ellipsizeMode="tail">
               {categoryDropdownLabel}
-            </Text>
-            <Ionicons name="chevron-down" size={18} color="#475569" />
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionLabel}>
-          {homeTab === 'explore'
-            ? `모임${selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}`
-            : `내 모임${selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}`}
-        </Text>
-        <View style={styles.sectionHeaderControls}>
-          <Pressable
-            onPress={() => setRecruitingOnly((v) => !v)}
-            style={[styles.recruitTogglePill, recruitingOnly && styles.recruitTogglePillOn]}
-            accessibilityRole="button"
-            accessibilityLabel="모집중만 보기"
-            accessibilityState={{ selected: recruitingOnly }}>
-            <Text style={[styles.recruitTogglePillLabel, recruitingOnly && styles.recruitTogglePillLabelOn]}>
-              모집중
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={openSortFilterModal}
-            style={({ pressed }) => [styles.sortComboTrigger, pressed && styles.sortComboTriggerPressed]}
-            accessibilityRole="button"
-            accessibilityLabel={`정렬, 현재 ${sortComboLabel}`}
-            accessibilityHint="탭하면 정렬 방식을 바꿀 수 있어요">
-            <Text style={styles.sortComboTriggerText} numberOfLines={1} ellipsizeMode="tail">
-              {sortComboLabel}
             </Text>
             <Ionicons name="chevron-down" size={18} color="#475569" />
           </Pressable>
@@ -461,43 +445,69 @@ export default function FeedScreen() {
         />
 
         <Modal
-          visible={sortFilterModalOpen}
+          visible={feedListSettingsModalOpen}
           animationType="fade"
           transparent
-          onRequestClose={closeSortFilterModal}>
+          onRequestClose={closeFeedListSettingsModal}>
           <View style={styles.modalRoot}>
             <Pressable
               style={StyleSheet.absoluteFillObject}
-              onPress={closeSortFilterModal}
+              onPress={closeFeedListSettingsModal}
               accessibilityRole="button"
-              accessibilityLabel="정렬 닫기"
+              accessibilityLabel="목록 설정 닫기"
             />
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>정렬</Text>
-              <Text style={styles.modalHint}>목록을 어떤 순서로 보여줄지 선택하세요.</Text>
-              {(['distance', 'latest', 'soon'] as const).map((mode) => {
-                const selected = listSortMode === mode;
-                const label = listSortModeLabel(mode);
-                return (
-                  <Pressable
-                    key={mode}
-                    onPress={() => {
-                      setListSortMode(mode);
-                      closeSortFilterModal();
-                    }}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}>
-                    <Text style={styles.modalRowLabel}>{label}</Text>
-                    {selected ? (
-                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                    ) : (
-                      <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
-                    )}
-                  </Pressable>
-                );
-              })}
-              <Pressable onPress={closeSortFilterModal} style={styles.modalCloseBtn} accessibilityRole="button">
+            <View style={[styles.modalCard, styles.modalCardWide]}>
+              <Text style={styles.modalTitle}>목록 설정</Text>
+              <Text style={styles.modalHint}>
+                정렬·모집중만 보기·검색 조건을 한곳에서 바꿀 수 있어요. (카테고리는 상단 드롭다운)
+              </Text>
+              <Text style={styles.modalCurrentSummary} numberOfLines={2}>
+                현재 정렬: {sortComboLabel}
+                {recruitingOnly ? ' · 모집중만 표시' : ''}
+              </Text>
+
+              <ScrollView style={styles.feedSettingsScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalSectionTitle}>정렬</Text>
+                {(['distance', 'latest', 'soon'] as const).map((mode) => {
+                  const selected = listSortMode === mode;
+                  const label = listSortModeLabel(mode);
+                  return (
+                    <Pressable
+                      key={mode}
+                      onPress={() => setListSortMode(mode)}
+                      style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}>
+                      <Text style={styles.modalRowLabel}>{label}</Text>
+                      {selected ? (
+                        <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                      ) : (
+                        <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
+                      )}
+                    </Pressable>
+                  );
+                })}
+
+                <Text style={styles.modalSectionTitle}>표시</Text>
+                <Pressable
+                  onPress={() => setRecruitingOnly((v) => !v)}
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: recruitingOnly }}
+                  accessibilityLabel="모집중만 보기">
+                  <View style={styles.modalRowLabelBlock}>
+                    <Text style={styles.modalRowLabel}>모집중만 보기</Text>
+                    <Text style={styles.modalRowSub}>정원 미달·일정 미확정 모임만</Text>
+                  </View>
+                  <View style={[styles.recruitTogglePill, recruitingOnly && styles.recruitTogglePillOn]}>
+                    <Text style={[styles.recruitTogglePillLabel, recruitingOnly && styles.recruitTogglePillLabelOn]}>
+                      {recruitingOnly ? '켜짐' : '꺼짐'}
+                    </Text>
+                  </View>
+                </Pressable>
+              </ScrollView>
+
+              <Pressable onPress={closeFeedListSettingsModal} style={styles.modalCloseBtn} accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>닫기</Text>
               </Pressable>
             </View>
@@ -700,53 +710,20 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#fff',
   },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 12,
-    flexWrap: 'wrap',
+  settingsIconWrap: {
+    position: 'relative',
+    padding: 2,
   },
-  sectionLabel: {
-    flex: 1,
-    minWidth: 120,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  sectionHeaderControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 1,
-    minWidth: 0,
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-  },
-  sortComboTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    maxWidth: 220,
-    minWidth: 120,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  sortComboTriggerPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderColor: 'rgba(0, 82, 204, 0.25)',
-  },
-  sortComboTriggerText: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0f172a',
+  settingsFilterDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#fff',
   },
   /** 정렬 콤보 옆 — 모집중만 표시 토글(기존 pill과 동일 크기·초록 on, 기본 off) */
   recruitTogglePill: {
@@ -822,6 +799,37 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 24,
     elevation: 8,
+  },
+  modalCardWide: {
+    maxHeight: '92%',
+  },
+  feedSettingsScroll: {
+    maxHeight: 400,
+  },
+  modalCurrentSummary: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+    lineHeight: 17,
+    marginBottom: 8,
+  },
+  modalSectionTitle: {
+    marginTop: 4,
+    marginBottom: 2,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#475569',
+  },
+  modalRowLabelBlock: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 8,
+  },
+  modalRowSub: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
   },
   modalTitle: {
     fontSize: 18,
