@@ -1,8 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
-import * as Font from 'expo-font';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
-  type ReactNode,
   type RefObject,
   useCallback,
   useEffect,
@@ -13,18 +10,21 @@ import {
 import {
   ActivityIndicator,
   Dimensions,
+  findNodeHandle,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
   View,
   type ViewStyle,
 } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
@@ -33,14 +33,65 @@ import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 
-import {
-  INPUT_PLACEHOLDER,
-  movieAddOutlineBtnWebStyle,
-  movieListRowWebGlassStyle,
-  wizardSpecialtyStyles as S,
-} from './wizard-specialty-styles';
+import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
-const TRUST_BLUE = '#0052CC';
+function measureHostInWindow(
+  scrollHost: unknown,
+  anchorWindowY: number,
+  pad: number,
+  callback: (x: number, y: number, w: number, h: number) => void,
+): void {
+  if (scrollHost == null) return;
+  const host = scrollHost as {
+    measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+  };
+  if (typeof host.measureInWindow === 'function') {
+    host.measureInWindow(callback);
+    return;
+  }
+  const tag = findNodeHandle(scrollHost as never);
+  if (tag != null && typeof UIManager.measureInWindow === 'function') {
+    UIManager.measureInWindow(tag, callback);
+    return;
+  }
+  callback(0, anchorWindowY - pad, Dimensions.get('window').width, Dimensions.get('window').height);
+}
+
+type ScrollHost = {
+  scrollToPosition?: (x: number, y: number, animated?: boolean) => void;
+  scrollTo?: (opts: { x?: number; y?: number; animated?: boolean }) => void;
+  getScrollResponder?: () =>
+    | {
+        scrollTo?: (opts: { x?: number; y?: number; animated?: boolean }) => void;
+        scrollResponderScrollTo?: (opts: { x: number; y: number; animated: boolean }) => void;
+      }
+    | null
+    | undefined;
+};
+
+function scrollParentToY(scrollHost: unknown, y: number, animated: boolean): void {
+  if (scrollHost == null) return;
+  const clamped = Math.max(0, y);
+  const h = scrollHost as ScrollHost;
+  if (typeof h.scrollToPosition === 'function') {
+    h.scrollToPosition(0, clamped, animated);
+    return;
+  }
+  if (typeof h.scrollTo === 'function') {
+    h.scrollTo({ x: 0, y: clamped, animated });
+    return;
+  }
+  if (typeof h.getScrollResponder === 'function') {
+    const r = h.getScrollResponder();
+    if (r && typeof r.scrollResponderScrollTo === 'function') {
+      r.scrollResponderScrollTo({ x: 0, y: clamped, animated });
+      return;
+    }
+    if (r && typeof r.scrollTo === 'function') {
+      r.scrollTo({ x: 0, y: clamped, animated });
+    }
+  }
+}
 
 const WEB_SCROLLBAR_CLASS = 'ginit-early-place-nested-scroll';
 const WEB_SCROLLBAR_STYLE_ID = 'ginit-early-place-nested-scroll-style';
@@ -49,11 +100,6 @@ const WEB_SCROLLBAR_STYLE_ID = 'ginit-early-place-nested-scroll-style';
 const CINEMA_SCROLL_MAX = 168;
 /** details 플로팅「n개의 장소로 일정 정하기」+ 여백(대략) */
 const FLOATING_CTA_RESERVE = 100;
-
-const PRETENDARD_BOLD_URI =
-  'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf';
-const PRETENDARD_REGULAR_URI =
-  'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Regular.otf';
 
 /** 영화 카테고리: 상단 시드(서울 일대 예시 좌표) */
 const NEARBY_CINEMA_SEEDS: PlaceCandidate[] = [
@@ -98,38 +144,13 @@ function newPlaceId() {
   return `place-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function PlaceGlassCard({ children, pressed }: { children: ReactNode; pressed: boolean }) {
-  if (Platform.OS === 'web') {
-    return (
-      <View
-        style={[
-          S.movieListRowCardFallback,
-          movieListRowWebGlassStyle,
-          pressed && S.movieListRowPressedOrange,
-        ]}>
-        <View style={styles.listCardInner}>{children}</View>
-      </View>
-    );
-  }
-  return (
-    <View style={[S.movieListRowOuter, pressed && S.movieListRowPressedOrange]}>
-      <BlurView
-        tint="dark"
-        intensity={26}
-        style={StyleSheet.absoluteFill}
-        experimentalBlurMethod="dimezisBlurView"
-      />
-      <View style={styles.listCardInner}>{children}</View>
-    </View>
-  );
-}
-
 export type EarlyPlaceSearchProps = {
   value: PlaceCandidate[];
   onChange: (next: PlaceCandidate[]) => void;
   showCinemaPicks?: boolean;
   disabled?: boolean;
-  parentScrollRef?: RefObject<ScrollView | null>;
+  /** `ScrollView` 또는 `KeyboardAwareScrollView` 등 */
+  parentScrollRef?: RefObject<ScrollView | null> | RefObject<unknown>;
   parentScrollYRef?: RefObject<number>;
 };
 
@@ -147,8 +168,6 @@ export function EarlyPlaceSearch({
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<NaverLocalPlace[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [fontBold, setFontBold] = useState<string | undefined>(undefined);
-  const [fontRegular, setFontRegular] = useState<string | undefined>(undefined);
   /** GPS 확보 시 영화관 시드 정렬·검색 재실행용 */
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [nearbyHint, setNearbyHint] = useState<string | null>(null);
@@ -176,30 +195,6 @@ export function EarlyPlaceSearch({
     `;
     document.head.appendChild(el);
     return undefined;
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        await Font.loadAsync({
-          PretendardBold: PRETENDARD_BOLD_URI,
-          PretendardRegular: PRETENDARD_REGULAR_URI,
-        });
-        if (!cancelled) {
-          setFontBold('PretendardBold');
-          setFontRegular('PretendardRegular');
-        }
-      } catch {
-        if (!cancelled) {
-          setFontBold(undefined);
-          setFontRegular(undefined);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {
@@ -244,12 +239,12 @@ export function EarlyPlaceSearch({
       if (!scrollView || !anchor) return;
       anchor.measureInWindow((hx: number, hy: number) => {
         if (cancelled) return;
-        const scrollHost = scrollView as unknown as View;
-        scrollHost.measureInWindow((sx: number, sy: number) => {
+        measureHostInWindow(scrollView, hy, 12, (sx: number, sy: number) => {
           if (cancelled) return;
           const scrollY = parentScrollYRef.current;
-          const nextY = scrollY + (hy - sy) - 12;
-          scrollView.scrollTo({ y: Math.max(0, nextY), animated: true });
+          const pad = 12;
+          const nextY = scrollY + (hy - sy) - pad;
+          scrollParentToY(scrollView, nextY, true);
         });
       });
     };
@@ -343,15 +338,6 @@ export function EarlyPlaceSearch({
     };
   }, [pickerOpen, qTrim, locationReady]);
 
-  const titleStyle = useMemo(
-    () => [styles.placeTitle, fontBold ? { fontFamily: fontBold } : { fontWeight: '700' as const }],
-    [fontBold],
-  );
-  const addressStyle = useMemo(
-    () => [styles.placeAddress, fontRegular ? { fontFamily: fontRegular } : { fontWeight: '400' as const }],
-    [fontRegular],
-  );
-
   const onPickCandidate = useCallback(
     (p: PlaceCandidate) => {
       if (value.some((x) => x.placeName === p.placeName && x.address === p.address)) {
@@ -411,22 +397,31 @@ export function EarlyPlaceSearch({
   const searchHeader = (
     <View>
       <Text style={S.fieldLabel}>장소 검색</Text>
-      <TextInput
-        ref={earlyPlaceQueryInputRef}
-        {...earlyPlaceQueryDeferKb}
-        value={query}
-        onChangeText={setQuery}
-        placeholder="영화관, 지역명, 맛집 등 검색…"
-        placeholderTextColor={INPUT_PLACEHOLDER}
-        style={[S.textInput, { marginTop: 4 }]}
-        editable={!disabled}
-        returnKeyType="search"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="default"
-        inputMode="text"
-        {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
-      />
+      <LinearGradient
+        colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.placeSearchGradientBorder}>
+        <View style={styles.placeSearchGradientInner}>
+          <TextInput
+            ref={earlyPlaceQueryInputRef}
+            {...earlyPlaceQueryDeferKb}
+            value={query}
+            onChangeText={setQuery}
+            placeholder='예: "강남 CGV", "영등포 맛집"'
+            placeholderTextColor={INPUT_PLACEHOLDER}
+            style={styles.placeSearchInput}
+            editable={!disabled}
+            returnKeyType="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="default"
+            inputMode="text"
+            underlineColorAndroid="transparent"
+            {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
+          />
+        </View>
+      </LinearGradient>
       {nearbyHint ? (
         <Text style={[S.fieldHint, { marginTop: 6 }]}>{`「${nearbyHint}」 근처로 검색해요`}</Text>
       ) : locationReady ? (
@@ -468,30 +463,33 @@ export function EarlyPlaceSearch({
 
   const listContentStyle = useMemo(
     () => [
-      { gap: 14, paddingTop: 8, paddingBottom: 12 } as ViewStyle,
+      { gap: 10, paddingTop: 8, paddingBottom: 12 } as ViewStyle,
       Platform.OS === 'web' && ({ width: '100%', flexDirection: 'column' } as const),
     ],
     [],
   );
 
   const renderPickRow = (key: string, title: string, address: string, onPress: () => void) => (
-    <Animated.View key={key} style={S.movieListItemOuter} entering={FadeInDown.duration(320)}>
+    <Animated.View
+      key={key}
+      style={Platform.OS === 'web' ? ({ width: '100%' } as const) : { alignSelf: 'stretch' }}
+      entering={FadeInDown.duration(320)}>
       <Pressable
         onPress={onPress}
         disabled={disabled || loading}
-        style={Platform.OS === 'web' ? ({ width: '100%' } as const) : undefined}
+        style={({ pressed }) => [
+          styles.resultCard,
+          Platform.OS === 'web' && { width: '100%' as const },
+          pressed && styles.resultCardPressed,
+        ]}
         accessibilityRole="button"
         accessibilityLabel={title}>
-        {({ pressed }) => (
-          <PlaceGlassCard pressed={pressed}>
-            <Text style={titleStyle} numberOfLines={2}>
-              {title}
-            </Text>
-            <Text style={addressStyle} numberOfLines={3}>
-              {address}
-            </Text>
-          </PlaceGlassCard>
-        )}
+        <Text style={styles.resultTitle} numberOfLines={2}>
+          {title}
+        </Text>
+        <Text style={styles.resultAddr} numberOfLines={3}>
+          {address}
+        </Text>
       </Pressable>
     </Animated.View>
   );
@@ -501,7 +499,7 @@ export function EarlyPlaceSearch({
       <View style={styles.cinemaSection}>
         {!locationReady ? (
           <View style={styles.cinemaLoadingWrap} accessibilityLabel="내 위치 확인 중">
-            <ActivityIndicator color={TRUST_BLUE} />
+            <ActivityIndicator color={GinitTheme.colors.primary} />
             <Text style={[S.fieldHint, styles.cinemaLoadingHint]}>
               내 위치를 확인한 뒤, 가까운 영화관부터 순서대로 보여 드려요
             </Text>
@@ -540,7 +538,7 @@ export function EarlyPlaceSearch({
       {qTrim.length > 0 ? (
         loading ? (
           <View style={{ paddingVertical: 24, alignItems: 'center', gap: 10 }}>
-            <ActivityIndicator size="large" color={TRUST_BLUE} />
+            <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
             <Text style={S.resultMeta}>검색 중…</Text>
           </View>
         ) : err ? (
@@ -603,30 +601,32 @@ export function EarlyPlaceSearch({
 
   return (
     <View style={styles.pickColumnOuter}>
-      <Text style={S.fieldLabel}>확정된 장소 후보</Text>
+      <Text style={S.fieldLabel}>선택된 장소 후보</Text>
       <Animated.View
         layout={LinearTransition.springify().damping(18).stiffness(220)}
-        style={S.movieCandidatesColumn}>
+        style={styles.pickedStack}>
         {value.map((item, index) => (
           <Animated.View
             key={item.id}
             layout={LinearTransition.springify().damping(18).stiffness(220)}
             entering={FadeInDown.duration(400).delay(Math.min(index * 64, 260))}>
-            <View style={styles.confirmedCard}>
+            <View style={[styles.pickedRow, styles.pickedRowRecess]}>
+              <View style={styles.pickedTextCol}>
+                <Text style={styles.resultTitle} numberOfLines={2}>
+                  {item.placeName}
+                </Text>
+                <Text style={styles.resultAddr} numberOfLines={4}>
+                  {item.address}
+                </Text>
+              </View>
               <Pressable
                 onPress={() => removeOne(item.id)}
                 disabled={disabled}
-                style={({ pressed }) => [S.movieConfirmedRemoveHit, pressed && { opacity: 0.85 }]}
+                style={({ pressed }) => [pressed && { opacity: 0.85 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`${item.placeName} 후보에서 제거`}>
-                <Ionicons name="close" size={18} color="rgba(248, 250, 252, 0.92)" />
+                <Text style={styles.pickedRemove}>삭제</Text>
               </Pressable>
-              <Text style={[titleStyle, { paddingRight: 4 }]} numberOfLines={2}>
-                {item.placeName}
-              </Text>
-              <Text style={addressStyle} numberOfLines={4}>
-                {item.address}
-              </Text>
             </View>
           </Animated.View>
         ))}
@@ -635,15 +635,9 @@ export function EarlyPlaceSearch({
       <Pressable
         onPress={toggleAdd}
         disabled={disabled}
-        style={({ pressed }) => [
-          S.movieAddOutlineBtn,
-          Platform.OS === 'web' && movieAddOutlineBtnWebStyle,
-          pressed && S.movieAddOutlineBtnPressed,
-        ]}
+        style={({ pressed }) => [styles.addMoreBtn, pressed && styles.addMoreBtnPressed]}
         accessibilityRole="button">
-        <Text style={S.movieAddOutlineBtnLabel}>
-          {addingMore ? '검색 닫기' : '+ 다른 장소 후보 추가'}
-        </Text>
+        <Text style={styles.addMoreBtnLabel}>{addingMore ? '검색 닫기' : '+ 다른 장소 후보 추가'}</Text>
       </Pressable>
 
       {addingMore ? (
@@ -658,7 +652,7 @@ export function EarlyPlaceSearch({
 }
 
 const styles = StyleSheet.create({
-  /** 부모(페이지 ScrollView)가 자식 높이로 늘어나지 않도록 — 리스트만 내부 스크롤 */
+  /** 일반 모임 `VoteCandidatesForm` 장소 단계와 동일 톤 — 바깥 래퍼만 */
   pickerRoot: {
     flexDirection: 'column',
     alignSelf: 'stretch',
@@ -667,14 +661,6 @@ const styles = StyleSheet.create({
     minHeight: 0,
     flexShrink: 1,
     marginTop: 4,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.35)',
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
   },
   pickColumnOuter: {
     width: '100%',
@@ -684,20 +670,37 @@ const styles = StyleSheet.create({
     minHeight: 0,
     flexShrink: 1,
   },
-  listCardInner: {
-    width: '100%',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: 8,
-    paddingVertical: 12,
+  placeSearchGradientBorder: {
+    borderRadius: 16,
+    padding: 2,
+    marginTop: 4,
+    marginBottom: 0,
+  },
+  placeSearchGradientInner: {
+    borderRadius: 14,
+    backgroundColor: GinitTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
     paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 0,
+  },
+  placeSearchInput: {
+    minHeight: 20,
+    fontSize: 16,
+    fontWeight: '700',
+    color: GinitTheme.colors.text,
+    lineHeight: 22,
+    padding: 0,
+    margin: 0,
   },
   listPanelShell: {
     marginTop: 8,
+    width: '100%',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.25)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     overflow: 'hidden',
     flexGrow: 0,
     flexShrink: 0,
@@ -724,49 +727,95 @@ const styles = StyleSheet.create({
   cinemaListShell: {
     marginTop: 6,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.2)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     overflow: 'hidden',
     alignSelf: 'stretch',
   },
   cinemaScrollContent: {
-    gap: 12,
-    paddingTop: 6,
+    gap: 10,
+    paddingTop: 8,
     paddingBottom: 10,
-    paddingHorizontal: 0,
+    paddingHorizontal: 4,
   },
-  placeTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F8FAFC',
-    letterSpacing: -0.3,
-    lineHeight: 22,
-  },
-  placeAddress: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: 'rgba(255, 255, 255, 0.6)',
-    lineHeight: 19,
-  },
-  confirmedCard: {
-    position: 'relative',
-    borderRadius: 16,
+  resultCard: {
+    width: '100%',
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderColor: GinitTheme.colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  resultCardPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
+  },
+  resultTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: GinitTheme.colors.text,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  resultAddr: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 15,
+  },
+  pickedStack: {
+    flexDirection: 'column',
+    gap: 10,
+    marginTop: 8,
+    width: Platform.OS === 'web' ? ('100%' as const) : undefined,
+    alignSelf: 'stretch',
+  },
+  pickedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  pickedRowRecess: {
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderColor: GinitTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  pickedTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pickedRemove: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.danger,
+  },
+  addMoreBtn: {
+    alignSelf: 'stretch',
+    marginTop: 10,
+    marginBottom: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    borderRadius: 16,
     paddingVertical: 14,
-    paddingHorizontal: 14,
-    paddingRight: 44,
-    overflow: 'hidden',
-    ...Platform.select({
-      web: {
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-      } as const,
-      default: {
-        backgroundColor: 'rgba(15, 23, 42, 0.72)',
-      },
-    }),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addMoreBtnPressed: {
+    opacity: 0.95,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderColor: 'rgba(134, 211, 183, 0.75)',
+  },
+  addMoreBtnLabel: {
+    color: GinitTheme.colors.primary,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
   },
 });

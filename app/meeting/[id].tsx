@@ -593,7 +593,7 @@ export default function MeetingDetailScreen() {
       {
         icon: 'wallet-outline',
         label: '정산 방식',
-        value: formatPublicMeetingSettlementSummary(d.settlement),
+        value: formatPublicMeetingSettlementSummary(d.settlement, d.membershipFeeWon),
       },
       {
         icon: 'ribbon-outline',
@@ -2374,7 +2374,12 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+            <View
+              style={[
+                styles.proposeModalSheet,
+                styles.proposeModalSheetDateCompact,
+                { maxHeight: Math.round(Math.min(windowHeight * 0.76, windowHeight - 48)) },
+              ]}>
               <View style={styles.proposeModalHeaderRow}>
                 <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
                   <Ionicons name="calendar-outline" size={22} color={GinitTheme.colors.primary} />
@@ -2383,15 +2388,18 @@ export default function MeetingDetailScreen() {
                   <Text style={styles.proposeModalTitle}>날짜 제안</Text>
                 </View>
               </View>
-              <Text style={styles.proposeModalSub}>
-                기존 일정 목록은 여기서 바꾸지 않아요. 새로 넣을 일시만 추가하면 기존 후보 뒤에 붙습니다.
+              <Text style={[styles.proposeModalSub, styles.proposeModalSubDateCompact]}>
+                AI 미리보기를 탭하면 여기서 보이는 일정 후보 1만 바뀌어요. 저장하면 모임 일정 후보에 반영돼요.
               </Text>
               {proposeInitialPayload ? (
                 <KeyboardAwareScreenScroll
-                  style={styles.proposeModalFormScroll}
-                  contentContainerStyle={styles.proposeModalFormScrollContent}
-                  extraScrollHeight={22}
-                  extraHeight={56}
+                  style={[styles.proposeModalFormScroll, styles.proposeModalFormScrollDate]}
+                  contentContainerStyle={[
+                    styles.proposeModalFormScrollContent,
+                    styles.proposeModalFormScrollContentDateCompact,
+                  ]}
+                  extraScrollHeight={18}
+                  extraHeight={44}
                   scrollProps={{
                     nestedScrollEnabled: true,
                     showsVerticalScrollIndicator: false,
@@ -2405,10 +2413,11 @@ export default function MeetingDetailScreen() {
                     initialPayload={proposeInitialPayload}
                     bare
                     wizardSegment="schedule"
+                    scheduleAiReplacesFirstCandidate
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
-              <View style={styles.proposeModalFooter}>
+              <View style={[styles.proposeModalFooter, styles.proposeModalFooterDateCompact]}>
                 <Pressable
                   onPress={() => !proposeSaving && setProposeOpen(false)}
                   style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
@@ -2981,6 +2990,11 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     ...GinitTheme.shadow.card,
   },
+  /** 날짜 제안만 — 시트 패딩 살짝 줄임(높이는 maxHeight·스크롤 minHeight로 확보) */
+  proposeModalSheetDateCompact: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
   proposeModalHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3009,8 +3023,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 10,
   },
+  proposeModalSubDateCompact: {
+    marginBottom: 6,
+  },
   proposeModalFormScroll: { flexGrow: 0 },
+  /** 날짜 제안: 일정 후보 카드·AI 미리보기가 한 화면에 들어오도록 최소 높이 확보 */
+  proposeModalFormScrollDate: {
+    minHeight: 360,
+    flexGrow: 1,
+  },
   proposeModalFormScrollContent: { paddingBottom: 12 },
+  proposeModalFormScrollContentDateCompact: {
+    paddingBottom: 8,
+    flexGrow: 1,
+  },
   proposeModalFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -3020,6 +3046,10 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: GinitTheme.colors.border,
+  },
+  proposeModalFooterDateCompact: {
+    marginTop: 8,
+    paddingTop: 8,
   },
   proposeModalGhostBtn: {
     paddingVertical: 12,

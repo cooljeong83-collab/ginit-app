@@ -1,5 +1,4 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -27,10 +26,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { authScreenStyles as authFormStyles } from '@/components/auth/authScreenStyles';
 import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
-import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { normalizeUserId } from '@/src/lib/app-user-id';
 import {
   type SignUpGenderCode,
 } from '@/src/hooks/useSignUpFlow';
@@ -40,12 +38,18 @@ import {
   purgeUserAccountRemoteByFirebaseUid,
   wipeLocalAppData,
 } from '@/src/lib/account-deletion';
+import { normalizeUserId } from '@/src/lib/app-user-id';
 import {
   effectiveGTrust,
   levelBarFillColorForTrust,
   trustTierForUser,
   xpProgressWithinLevel,
 } from '@/src/lib/ginit-trust';
+import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import {
+  isProfileRegisterInfoParamOn,
+  PROFILE_REGISTER_INFO_QUERY,
+} from '@/src/lib/profile-register-info';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
   ensureUserProfile,
@@ -53,16 +57,11 @@ import {
   isGoogleSnsDemographicsIncomplete,
   isMeetingServiceComplianceComplete,
   isUserPhoneVerified,
-  type UserProfile,
   updateUserProfile,
+  type UserProfile,
 } from '@/src/lib/user-profile';
-import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import {
-  isProfileRegisterInfoParamOn,
-  PROFILE_REGISTER_INFO_QUERY,
-} from '@/src/lib/profile-register-info';
 import { AuthService } from '@/src/services/AuthService';
-import { Timestamp, serverTimestamp } from 'firebase/firestore';
+import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
 
@@ -98,6 +97,7 @@ export default function ProfileTab() {
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
+  const otpAutoConfirmRef = useRef(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
   const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
@@ -132,8 +132,16 @@ export default function ProfileTab() {
       setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
       setIsPhoneVerified(isUserPhoneVerified(p));
       const phone = p.phone?.trim();
-      setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
-      setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
+      const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
+      const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
+      const phoneDisplay =
+        phoneDigits.length <= 3
+          ? phoneDigits
+          : phoneDigits.length <= 7
+            ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
+            : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
+      setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
+      setPhoneField(phoneDisplay);
       const g = p.gender?.trim();
       setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
       const bd = p.birthDate as unknown;
@@ -405,6 +413,22 @@ export default function ProfileTab() {
     }
   }, [profilePk, otpVerificationId, otpCode, phoneField]);
 
+  useEffect(() => {
+    if (!otpVerificationId) {
+      otpAutoConfirmRef.current = false;
+      return;
+    }
+    const digits = otpCode.replace(/\D/g, '').slice(0, 6);
+    if (digits.length < 6) {
+      otpAutoConfirmRef.current = false;
+      return;
+    }
+    if (otpAutoConfirmRef.current) return;
+    if (!canConfirmOtp) return;
+    otpAutoConfirmRef.current = true;
+    void onConfirmOtp();
+  }, [otpCode, otpVerificationId, canConfirmOtp, onConfirmOtp]);
+
   // 프로필 편집(닉네임/사진 업로드 등)은 `/profile/edit`에서 수행합니다.
 
   const onSignOut = useCallback(async () => {
@@ -529,25 +553,6 @@ export default function ProfileTab() {
                 <Text style={styles.headerEditText}>프로필 편집</Text>
               </Pressable>
             </View>
-          </View>
-
-          <View style={styles.quickGrid}>
-            <Pressable
-              onPress={() => router.push('/profile/meeting-history')}
-              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="모임 히스토리">
-              <Ionicons name="time-outline" size={18} color={GinitTheme.colors.primary} />
-              <Text style={styles.quickLabel}>히스토리</Text>
-            </Pressable>
-            <Pressable
-              onPress={onGoTrust}
-              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="나의 신뢰도">
-              <Ionicons name="pulse-outline" size={18} color={GinitTheme.colors.primary} />
-              <Text style={styles.quickLabel}>신뢰도</Text>
-            </Pressable>
           </View>
 
           <GinitCard

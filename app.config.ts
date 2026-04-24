@@ -117,6 +117,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       '@react-native-community/datetimepicker',
       '@react-native-google-signin/google-signin',
       [
+        'expo-speech-recognition',
+        {
+          microphonePermission: '음성 입력을 위해 마이크 접근이 필요합니다.',
+          speechRecognitionPermission: '음성 입력을 위해 음성 인식 접근이 필요합니다.',
+          androidSpeechServicePackages: ['com.google.android.googlequicksearchbox'],
+        },
+      ],
+      [
         '@mj-studio/react-native-naver-map',
         {
           client_id: naverClientId,

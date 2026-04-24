@@ -85,12 +85,6 @@ export function SnsEasySignUpSection({ onGooglePress, googleDisabled, googleLoad
 
   return (
     <View style={secStyles.section} onLayout={onSectionLayout}>
-      <View style={secStyles.dividerRow}>
-        <View style={secStyles.dividerLine} />
-        <Text style={secStyles.dividerTitle}>SNS 간편 가입</Text>
-        <View style={secStyles.dividerLine} />
-      </View>
-
       <View style={secStyles.stack}>
         <SnsTextLinkRow
           innerBandWidth={innerBandWidth}

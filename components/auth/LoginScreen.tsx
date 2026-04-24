@@ -22,8 +22,8 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
 import { phoneOtpInlineStyles as otpStyles } from '@/components/auth/phoneOtpStyles';
@@ -31,7 +31,8 @@ import { SnsEasySignUpSection } from '@/components/auth/SnsEasySignUpSection';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '@/constants/login-logo-intro';
-import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
+import { useUserSession, type AuthProfileSnapshot } from '@/src/context/UserSessionContext';
+import { normalizeUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import {
   fetchGooglePeopleExtras,
@@ -43,7 +44,6 @@ import {
   REDIRECT_STARTED,
   signInWithGoogle,
 } from '@/src/lib/google-sign-in';
-import { normalizeUserId } from '@/src/lib/app-user-id';
 import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
@@ -58,7 +58,7 @@ import {
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
-import { Timestamp, serverTimestamp } from 'firebase/firestore';
+import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -542,7 +542,7 @@ export default function LoginScreen() {
             contentContainerStyle={[styles.scroll, loginScreenStyles.scrollTweak]}
             extraScrollHeight={12}
             extraHeight={22}>
-            <View style={[styles.topBrand, loginScreenStyles.topBrand]}>
+            <View style={loginScreenStyles.heroWrap}>
               <Animated.View
                 ref={logoWrapRef}
                 nativeID="logo_shared"
@@ -563,30 +563,22 @@ export default function LoginScreen() {
                     : { opacity: 0 },
                 ]}>
                 <Animated.View style={{ transform: [{ rotate: logoTiltRotate }] }}>
-                  <Image
-                    source={require('@/assets/images/logo-symbol.png')}
-                    style={loginScreenStyles.logoImage}
-                    contentFit="contain"
-                  />
+                  <Image source={require('@/assets/images/logo-symbol.png')} style={loginScreenStyles.logoImage} contentFit="contain" />
                 </Animated.View>
               </Animated.View>
-              <Animated.View
-                style={[
-                  logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 },
-                  loginScreenStyles.brandTextCol,
-                ]}>
+
+              <Animated.View style={[loginScreenStyles.heroTextCol, logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }]}>
                 <Text style={loginScreenStyles.brandKr}>지닛</Text>
-                <Text style={[styles.greeting, loginScreenStyles.greetingCenter, loginScreenStyles.greetingTight]}>
-                  반가워요!{'\n'}우리만의 모임을 시작해볼까요?
-                </Text>
+                <Text style={loginScreenStyles.heroTitle}>우리만의 모임을{'\n'}가볍게 시작해요</Text>
+                <Text style={loginScreenStyles.heroSub}>Google로 한 번에 시작하고, 필요한 정보는 나중에 채울 수 있어요.</Text>
               </Animated.View>
             </View>
 
             <Animated.View style={logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }}>
-              <View style={[styles.authCard, loginScreenStyles.authCardTight]}>
+              <View style={[styles.authCard, loginScreenStyles.authCardTight, loginScreenStyles.ctaCard]}>
                 <BlurView
                   pointerEvents="none"
-                  intensity={32}
+                  intensity={36}
                   tint="light"
                   style={StyleSheet.absoluteFill}
                   experimentalBlurMethod={Platform.OS === 'ios' ? 'dimezisBlurView' : undefined}
@@ -595,142 +587,40 @@ export default function LoginScreen() {
                 <View pointerEvents="none" style={styles.cardBorder} />
 
                 <View style={styles.authCardContent}>
-                {isExpoGo && Platform.OS !== 'web' ? (
-                  <View style={[styles.expoGoBannerCompact, loginScreenStyles.expoGoBannerTight]}>
-                    <Text style={styles.expoGoTitle}>개발 빌드가 필요해요</Text>
-                    <Text style={styles.expoGoBody}>
-                      Google 네이티브 로그인은 Expo Go에 포함되어 있지 않습니다.{' '}
-                      <Text style={styles.expoGoMono}>npx expo run:android</Text>
-                    </Text>
-                  </View>
-                ) : null}
-
-                {loginMemberStatus === 'checking' && debouncedPhone.trim() ? (
-                  <View style={[styles.checkingRow, loginScreenStyles.checkingRowTight]}>
-                    <ActivityIndicator color={GinitTheme.colors.primary} />
-                    <Text style={styles.checkingLabel}>회원 여부 확인 중…</Text>
-                  </View>
-                ) : null}
-
-                <View style={[styles.fieldBlock, loginScreenStyles.loginFieldBlock]}>
-                  <Text style={styles.fieldLabel}>기존 회원 로그인</Text>
-                   <View style={styles.phoneRow}>
-                    <TextInput
-                      value={phoneField}
-                      onChangeText={(t) => {
-                        const digits = t.replace(/\D/g, '').slice(0, 11);
-                        setPhoneField(formatPhoneKrDisplay(digits));
-                      }}
-                      placeholder="전화번호 입력"
-                      placeholderTextColor="#94a3b8"
-                      style={styles.phoneInputNew}
-                      keyboardType="phone-pad"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      textContentType="telephoneNumber"
-                      importantForAutofill="yes"
-                      autoCapitalize="none"
-                      editable={!otpBusy}
-                      selectTextOnFocus
-                      returnKeyType="done"
-                      enterKeyHint="done"
-                      onSubmitEditing={() => Keyboard.dismiss()}
-                    />
-                    <Pressable
-                      onPress={() => void onSendLoginOtp()}
-                      disabled={!canSendLoginOtp}
-                      style={({ pressed }) => [
-                        otpStyles.sendInlineBtn,
-                        !canSendLoginOtp && otpStyles.sendInlineBtnDisabled,
-                        pressed && canSendLoginOtp && styles.pressed,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="인증번호 받기">
-                      <Text style={otpStyles.sendInlineText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
-                    </Pressable>
-                  </View>
-
-                  {otpVerificationId ? (
-                    <View style={[otpStyles.otpRow, loginScreenStyles.otpRowTight]}>
-                      <TextInput
-                        ref={otpInputRef}
-                        value={otpCode}
-                        onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="인증번호 6자리"
-                        placeholderTextColor="#94a3b8"
-                        style={otpStyles.otpInput}
-                        keyboardType="number-pad"
-                        inputMode="numeric"
-                        textContentType="oneTimeCode"
-                        autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
-                        editable={!otpBusy}
-                        selectTextOnFocus
-                        returnKeyType="done"
-                        enterKeyHint="done"
-                        onSubmitEditing={() => void onConfirmLoginOtp()}
-                      />
-                      <Pressable
-                        onPress={() => void onConfirmLoginOtp()}
-                        disabled={!canConfirmLoginOtp}
-                        style={({ pressed }) => [
-                          otpStyles.confirmBtn,
-                          !canConfirmLoginOtp && otpStyles.confirmBtnDisabled,
-                          pressed && canConfirmLoginOtp && styles.pressed,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="인증 확인">
-                        <Text style={otpStyles.confirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
-                      </Pressable>
+                  {isExpoGo && Platform.OS !== 'web' ? (
+                    <View style={[styles.expoGoBannerCompact, loginScreenStyles.expoGoBannerTight]}>
+                      <Text style={styles.expoGoTitle}>개발 빌드가 필요해요</Text>
+                      <Text style={styles.expoGoBody}>
+                        Google 네이티브 로그인은 Expo Go에 포함되어 있지 않습니다.{' '}
+                        <Text style={styles.expoGoMono}>npx expo run:android</Text>
+                      </Text>
                     </View>
                   ) : null}
 
-                  {otpError ? <Text style={otpStyles.otpError}>{otpError}</Text> : null}
-                </View>
+                  <SnsEasySignUpSection
+                    onGooglePress={() => {
+                      setPendingConsentAction(async () => {
+                        await onGoogleSignUp();
+                      });
+                      router.push({ pathname: '/terms-agreement', params: { next: '/(tabs)' } });
+                    }}
+                    googleDisabled={isExpoGo && Platform.OS !== 'web'}
+                    googleLoading={busyGoogle}
+                  />
 
-                <View style={loginScreenStyles.phoneLoginDivider} />
+                  {loginError ? (
+                    <View style={loginScreenStyles.errorPill}>
+                      <Text style={[styles.errorText, loginScreenStyles.loginErrorTight]}>{loginError}</Text>
+                    </View>
+                  ) : null}
 
-                {loginMemberStatus === 'guest' && phoneMatchesDebouncedLookup ? (
-                  <Text style={loginScreenStyles.loginGuestHintAboveSignup}>
-                    이 번호로는 가입 이력이 없어요. 아래 가입하기로 회원가입을 진행해 주세요.
+                  <Text style={loginScreenStyles.legalLine}>
+                    계속하면 서비스 이용약관 및 개인정보 처리방침에 동의한 것으로 간주됩니다.
                   </Text>
-                ) : null}
-
-                <Pressable
-                  onPress={goSignUp}
-                  disabled={false}
-                  style={({ pressed }) => [
-                    styles.signupNavBtn,
-                    loginScreenStyles.signupNavBtnTight,
-                    pressed && styles.pressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="가입하기 — 회원가입 화면으로 이동">
-                  <Text style={styles.signupNavBtnLabel}>가입하기</Text>
-                </Pressable>
-                <Text style={[styles.signupNavHint, loginScreenStyles.signupNavHintTight]}>
-                  회원가입 화면에서 전화번호 인증과 필수 정보를 입력합니다.
-                </Text>
-
-                <SnsEasySignUpSection
-                  onGooglePress={() => {
-                    setPendingConsentAction(async () => {
-                      await onGoogleSignUp();
-                      // 약관 동의 화면이 최종 이동을 담당합니다.
-                    });
-                    router.push({ pathname: '/terms-agreement', params: { next: '/(tabs)' } });
-                  }}
-                  googleDisabled={isExpoGo && Platform.OS !== 'web'}
-                  googleLoading={busyGoogle}
-                />
-
-                {loginError ? <Text style={[styles.errorText, loginScreenStyles.loginErrorTight]}>{loginError}</Text> : null}
                 </View>
               </View>
 
-              <View style={[styles.footerRule, loginScreenStyles.footerRuleTight]} />
-              <Text style={[styles.footerCredit, loginScreenStyles.footerCreditTight]}>
-                UI/UX Vision by Ginit Human-Connection Team.
-              </Text>
+              <Text style={[styles.footerCredit, loginScreenStyles.footerCreditTight]}>UI/UX Vision by Ginit Human-Connection Team.</Text>
             </Animated.View>
           </KeyboardAwareScreenScroll>
         </SafeAreaView>
@@ -741,14 +631,16 @@ export default function LoginScreen() {
 
 const loginScreenStyles = StyleSheet.create({
   scrollTweak: {
-    paddingTop: 8,
+    paddingTop: 14,
     paddingBottom: 22,
-    gap: 10,
+    gap: 14,
   },
-  topBrand: {
-    paddingTop: 8,
-    paddingBottom: 12,
-    gap: 0,
+  heroWrap: {
+    paddingTop: 10,
+    paddingBottom: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
   logoFrame: {
     width: LOGIN_LOGO_IMAGE_PX,
@@ -761,7 +653,7 @@ const loginScreenStyles = StyleSheet.create({
     width: LOGIN_LOGO_IMAGE_PX,
     height: LOGIN_LOGO_IMAGE_PX,
   },
-  brandTextCol: {
+  heroTextCol: {
     alignSelf: 'stretch',
     alignItems: 'center',
     width: '100%',
@@ -776,18 +668,30 @@ const loginScreenStyles = StyleSheet.create({
     alignSelf: 'stretch',
     lineHeight: 29,
   },
-  greetingCenter: {
-    marginTop: 6,
-    paddingTop: 0,
+  heroTitle: {
+    marginTop: 10,
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#0f172a',
+    letterSpacing: -0.6,
     textAlign: 'center',
-    alignSelf: 'stretch',
+    lineHeight: 28,
   },
-  greetingTight: {
-    fontSize: 15,
-    lineHeight: 21,
+  heroSub: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748b',
+    lineHeight: 18,
+    textAlign: 'center',
+    paddingHorizontal: 18,
   },
   authCardTight: {
     padding: 14,
+  },
+  ctaCard: {
+    paddingTop: 16,
+    paddingBottom: 14,
   },
   expoGoBannerTight: {
     marginBottom: 8,
@@ -839,14 +743,29 @@ const loginScreenStyles = StyleSheet.create({
     lineHeight: 16,
   },
   loginErrorTight: {
-    marginTop: 6,
-  },
-  footerRuleTight: {
-    marginTop: 6,
+    marginTop: 0,
   },
   footerCreditTight: {
-    marginTop: 4,
-    marginBottom: 4,
+    marginTop: 10,
+    marginBottom: 6,
     fontSize: 11,
+    textAlign: 'center',
+  },
+  errorPill: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(220, 38, 38, 0.22)',
+  },
+  legalLine: {
+    marginTop: 10,
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94a3b8',
+    lineHeight: 16,
+    textAlign: 'center',
   },
 });

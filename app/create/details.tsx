@@ -4,11 +4,13 @@
  * 일정 확정(`scheduleStep`) 후 `placesStep`에서 장소 후보 카드를 채운 뒤 상세·등록(`detailStep`)으로 이동.
  * 단계 번호(표시): 영화 …→5(일정)→6(장소)→7(상세). 비영화 …→4(일정)→5(장소)→6(상세).
  */
+import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
   forwardRef,
   useCallback,
@@ -23,6 +25,7 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   InteractionManager,
   Modal,
   Platform,
@@ -39,13 +42,13 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
 import { EarlyPlaceSearch } from '@/components/create/EarlyPlaceSearch';
 import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { IntensityPicker } from '@/components/create/IntensityPicker';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
+import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -61,6 +64,7 @@ import {
   primaryScheduleFromDateCandidate,
   validateDateCandidate,
 } from '@/src/lib/date-candidate';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
 import {
   buildMeetingExtraData,
@@ -82,20 +86,102 @@ import {
   type MeetingTitleSuggestionContext,
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
-import { addMeeting } from '@/src/lib/meetings';
 import type { PublicMeetingDetailsConfig } from '@/src/lib/meetings';
-import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
+import { addMeeting } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
-import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
-import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
-import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
+import { DateCandidateEditorCard, type DatePickerField } from '../../components/create/DateCandidateEditorCard';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
+
+type SpeechRecognitionErrorEvent = {
+  error?: string;
+  message?: string;
+};
+
+function humanizeSpeechRecognitionError(event: SpeechRecognitionErrorEvent | null | undefined): string {
+  const code = String(event?.error ?? '').trim();
+  const rawMsg = String(event?.message ?? '').trim();
+
+  const map: Record<string, string> = {
+    'not-allowed': '마이크 또는 음성 인식 권한이 없어요. 설정에서 권한을 허용해 주세요.',
+    'service-not-allowed':
+      '이 기기에서 음성 인식 서비스를 사용할 수 없어요. (음성 인식/구글 음성 서비스 설정을 확인해 주세요)',
+    'language-not-supported': '지원되지 않는 언어로 인식을 시작했어요. 한국어(ko-KR)로 다시 시도해 주세요.',
+    network: '네트워크 문제로 음성 인식에 실패했어요. 연결 상태를 확인하고 다시 시도해 주세요.',
+    'no-speech': '말소리가 감지되지 않았어요. 조금 더 크게 말하거나 다시 시도해 주세요.',
+    'audio-capture': '마이크 입력을 가져오지 못했어요. 다른 앱이 마이크를 사용 중인지 확인해 주세요.',
+    aborted: '음성 인식이 중단되었어요.',
+    interrupted: '다른 오디오(통화/알람 등) 때문에 음성 인식이 중단되었어요.',
+    'bad-grammar': '음성 인식 요청 형식이 올바르지 않아요. 앱을 최신으로 업데이트한 뒤 다시 시도해 주세요.',
+  };
+
+  if (code && map[code]) return map[code];
+  if (rawMsg) {
+    if (/[가-힣]/.test(rawMsg)) return rawMsg;
+    return `음성 인식에 실패했어요.\n\n원인: ${rawMsg}${code ? `\n코드: ${code}` : ''}`;
+  }
+  return '음성 인식에 실패했어요. 잠시 후 다시 시도해 주세요.';
+}
+
+function VoiceWaveform({ active, color }: { active: boolean; color: string }) {
+  const v1 = useRef(new Animated.Value(0)).current;
+  const v2 = useRef(new Animated.Value(0)).current;
+  const v3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!active) return;
+    const mk = (v: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(v, { toValue: 1, duration: 220, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0, duration: 260, useNativeDriver: true }),
+        ]),
+      );
+    const l1 = mk(v1, 0);
+    const l2 = mk(v2, 90);
+    const l3 = mk(v3, 180);
+    l1.start();
+    l2.start();
+    l3.start();
+    return () => {
+      l1.stop();
+      l2.stop();
+      l3.stop();
+      v1.setValue(0);
+      v2.setValue(0);
+      v3.setValue(0);
+    };
+  }, [active, v1, v2, v3]);
+
+  if (!active) return null;
+
+  const barStyle = (v: Animated.Value) => ({
+    transform: [
+      {
+        scaleY: v.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.35, 1.0],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <View style={styles.voiceWaveWrap} pointerEvents="none">
+      <Animated.View style={[styles.voiceWaveBar, { backgroundColor: color }, barStyle(v1)]} />
+      <Animated.View style={[styles.voiceWaveBar, { backgroundColor: color }, barStyle(v2)]} />
+      <Animated.View style={[styles.voiceWaveBar, { backgroundColor: color }, barStyle(v3)]} />
+    </View>
+  );
+}
 
 /** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
 function animate() {
@@ -196,6 +282,83 @@ function fmtTime(d: Date) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+function defaultScheduleTimePlus3Hours(): string {
+  const d = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  return fmtTime(d);
+}
+
+function weekendAnytimeMatches(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return /주말\s*아무\s*때나|이번\s*주말\s*아무\s*때나|주말\s*(언제|아무)\s*(든|때나)|주말\s*아무때나/.test(t);
+}
+
+const WEEKEND_ANYTIME_PREVIEW_COUNT = 5;
+
+/** 이번·다음 주말의 여러 시각대 풀(미리보기에서 랜덤 샘플링) */
+function upcomingWeekendSlotPool(now: Date): { ymd: string; hm: string }[] {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes(), 0, 0);
+  const min = new Date(base.getTime() + 3 * 60 * 60 * 1000);
+
+  const day = base.getDay(); // 0 Sun .. 6 Sat
+  const daysToSat = (6 - day + 7) % 7;
+  const sat0 = new Date(base.getFullYear(), base.getMonth(), base.getDate() + daysToSat, 0, 0, 0, 0);
+
+  const mk = (d: Date, hh: number, mm: number) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0);
+
+  const hours = [11, 13, 15, 17, 19, 21];
+  const candidates: Date[] = [];
+  for (const weekOffset of [0, 7]) {
+    const sat = new Date(sat0.getFullYear(), sat0.getMonth(), sat0.getDate() + weekOffset, 0, 0, 0, 0);
+    const sun = new Date(sat.getFullYear(), sat.getMonth(), sat.getDate() + 1, 0, 0, 0, 0);
+    for (const h of hours) {
+      candidates.push(mk(sat, h, 0));
+      candidates.push(mk(sun, h, 0));
+    }
+  }
+
+  return candidates
+    .filter((d) => d.getTime() >= min.getTime())
+    .map((d) => ({ ymd: fmtDateYmd(d), hm: fmtTime(d) }));
+}
+
+function pickRandomUniqueSlots(slots: { ymd: string; hm: string }[], count: number): { ymd: string; hm: string }[] {
+  const a = slots.slice();
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = a[i]!;
+    a[i] = a[j]!;
+    a[j] = tmp;
+  }
+  const out: { ymd: string; hm: string }[] = [];
+  const seen = new Set<string>();
+  for (const s of a) {
+    const k = `${s.ymd}|${s.hm}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+    if (out.length >= count) break;
+  }
+  return out;
+}
+
+function forcePointCandidate(d: DateCandidate): DateCandidate {
+  const startDate = String(d.startDate ?? '').trim() || fmtDate(new Date());
+  const startTime = String(d.startTime ?? '').trim() || defaultScheduleTimePlus3Hours();
+  return {
+    ...d,
+    type: 'point',
+    startDate,
+    startTime,
+    endDate: undefined,
+    endTime: undefined,
+    subType: undefined,
+    textLabel: undefined,
+    isDeadlineSet: undefined,
+  };
+}
+
 function parseDateTimeStrings(dateStr: string, timeStr: string): Date {
   const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
   const tm = /^(\d{1,2}):(\d{2})$/.exec(timeStr.trim());
@@ -218,9 +381,6 @@ function getPickerDraft(row: DateCandidate, field: DatePickerField): Date {
     case 'startDate':
     case 'startTime':
       return parseDateTimeStrings(row.startDate, row.startTime ?? '12:00');
-    case 'endDate':
-    case 'endTime':
-      return parseDateTimeStrings(row.endDate ?? row.startDate, row.endTime ?? '12:00');
   }
 }
 
@@ -230,10 +390,6 @@ function pickerFieldLabel(field: DatePickerField): string {
       return '시작 날짜';
     case 'startTime':
       return '시작 시간';
-    case 'endDate':
-      return '종료 날짜';
-    case 'endTime':
-      return '종료 시간';
   }
 }
 
@@ -291,9 +447,9 @@ function buildInitialEditorState(
             const c = coerceDateCandidate(d, { startDate: safeSeedDate, startTime: seedTime });
             const raw = d as { id?: string };
             const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : newId('date');
-            return { ...c, id };
+            return forcePointCandidate({ ...c, id });
           })
-        : [createPointCandidate(newId('date'), safeSeedDate, seedTime)];
+        : [];
     const placeCandidates =
       initialPayload.placeCandidates.length > 0
         ? initialPayload.placeCandidates.map(placeRowFromCandidate)
@@ -302,7 +458,7 @@ function buildInitialEditorState(
   }
   return {
     placeCandidates: [],
-    dateCandidates: [createPointCandidate(newId('date'), safeSeedDate, seedTime)],
+    dateCandidates: [],
   };
 }
 
@@ -332,6 +488,8 @@ export type VoteCandidatesFormProps = {
   parentScrollRef?: RefObject<any>;
   /** 상위 `ScrollView`의 `contentOffset.y` (onScroll로 갱신) */
   parentScrollYRef?: RefObject<number>;
+  /** true면 AI 미리보기/주말 미리보기 탭 시 새 행이 아니라 첫 번째 일정 후보만 덮어씀(날짜 제안 모달 등) */
+  scheduleAiReplacesFirstCandidate?: boolean;
 };
 
 export type VoteCandidatesBuildResult =
@@ -378,9 +536,56 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placesListOnly = false,
     parentScrollRef,
     parentScrollYRef,
+    scheduleAiReplacesFirstCandidate = false,
   },
   ref,
 ) {
+  const [voiceTarget, setVoiceTarget] = useState<'scheduleIdea' | 'placeQuery' | null>(null);
+  const [voiceRecognizing, setVoiceRecognizing] = useState(false);
+
+  useSpeechRecognitionEvent('start', () => setVoiceRecognizing(true));
+  useSpeechRecognitionEvent('end', () => {
+    setVoiceRecognizing(false);
+    setVoiceTarget(null);
+  });
+  useSpeechRecognitionEvent('error', (event) => {
+    setVoiceRecognizing(false);
+    setVoiceTarget(null);
+    Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
+  });
+  useSpeechRecognitionEvent('result', (event) => {
+    const t = String(event?.results?.[0]?.transcript ?? '').trim();
+    if (!t) return;
+    if (voiceTarget === 'scheduleIdea') setNlpScheduleInput(t);
+    if (voiceTarget === 'placeQuery') setPlaceQuery(t);
+    if (event?.isFinal) {
+      setVoiceRecognizing(false);
+      setVoiceTarget(null);
+      ExpoSpeechRecognitionModule.stop();
+    }
+  });
+
+  const onPressVoiceInput = useCallback(
+    async (target: 'scheduleIdea' | 'placeQuery') => {
+      if (voiceRecognizing && voiceTarget === target) {
+        ExpoSpeechRecognitionModule.stop();
+        return;
+      }
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+        return;
+      }
+      setVoiceTarget(target);
+      ExpoSpeechRecognitionModule.start({
+        lang: 'ko-KR',
+        interimResults: true,
+        maxAlternatives: 1,
+        continuous: false,
+      });
+    },
+    [voiceRecognizing, voiceTarget],
+  );
   const router = useRouter();
   const { height: windowHeight } = useWindowDimensions();
   const seedQ = seedPlaceQuery.trim();
@@ -395,6 +600,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [iosDraft, setIosDraft] = useState(() => new Date());
   const [nlpScheduleInput, setNlpScheduleInput] = useState('');
   const [nlpParsed, setNlpParsed] = useState<SmartNlpResult | null>(null);
+  const [weekendPreviewSlots, setWeekendPreviewSlots] = useState<{ ymd: string; hm: string }[]>([]);
   const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
   const [deadlineTick, setDeadlineTick] = useState(0);
   const dateScrollRef = useRef<ScrollView>(null);
@@ -454,8 +660,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const trimmed = nlpScheduleInput.trim();
     if (!trimmed) {
       setNlpParsed(null);
+      setWeekendPreviewSlots([]);
       return undefined;
     }
+    if (weekendAnytimeMatches(trimmed)) {
+      setNlpParsed(null);
+      const pool = upcomingWeekendSlotPool(new Date());
+      setWeekendPreviewSlots(pickRandomUniqueSlots(pool, WEEKEND_ANYTIME_PREVIEW_COUNT));
+      return undefined;
+    }
+    setWeekendPreviewSlots([]);
     const t = setTimeout(() => {
       setNlpParsed(parseSmartNaturalSchedule(trimmed, new Date()));
     }, 500);
@@ -464,17 +678,64 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const applyNlpSuggestion = useCallback(() => {
     const trimmed = nlpScheduleInput.trim();
+    if (weekendAnytimeMatches(trimmed)) {
+      return;
+    }
     const parsed = nlpParsed ?? (trimmed ? parseSmartNaturalSchedule(trimmed, new Date()) : null);
     if (!parsed) return;
+    const parsedPoint: SmartNlpResult = {
+      summary: parsed.summary,
+      candidate: {
+        type: 'point',
+        startDate: String(parsed.candidate.startDate ?? '').trim() || fmtDateYmd(new Date()),
+        startTime: String(parsed.candidate.startTime ?? '').trim() || defaultScheduleTimePlus3Hours(),
+      },
+    };
     animate();
     const prev = dateCandidatesRef.current;
-    const nextKey = dateCandidateDupKey({ id: 'nlp', ...(parsed.candidate as Omit<DateCandidate, 'id'>) });
+    const nextKey = dateCandidateDupKey({ id: 'nlp', ...(parsedPoint.candidate as Omit<DateCandidate, 'id'>) });
+
+    if (scheduleAiReplacesFirstCandidate) {
+      const first = prev[0];
+      if (!first) return;
+      const patched = forcePointCandidate({
+        ...first,
+        startDate: parsedPoint.candidate.startDate,
+        startTime: parsedPoint.candidate.startTime,
+      } as DateCandidate);
+      const pk = dateCandidateDupKey(patched);
+      if (prev.slice(1).some((d) => dateCandidateDupKey(d) === pk)) {
+        Alert.alert('동일한 일정 후보가 있습니다.');
+        return;
+      }
+      if (dateCandidateDupKey(first) === pk) {
+        setNlpScheduleInput('');
+        setNlpParsed(null);
+        return;
+      }
+      const next = [patched, ...prev.slice(1)];
+      for (let i = 0; i < next.length; i += 1) {
+        const err = validateDateCandidate(next[i], i);
+        if (err) {
+          Alert.alert(
+            '일시 확인',
+            `${err}\n\n자연어로 추가할 때도 오늘 이후이며, 지금부터 최소 1시간 이상 남은 일정만 등록할 수 있어요.`,
+          );
+          return;
+        }
+      }
+      setDateCandidates(next.map(forcePointCandidate));
+      setNlpScheduleInput('');
+      setNlpParsed(null);
+      return;
+    }
+
     const dup = prev.some((d) => dateCandidateDupKey(d) === nextKey);
     if (dup) {
       Alert.alert('동일한 일정 후보가 있습니다.');
       return;
     }
-    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsed);
+    const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsedPoint);
     for (let i = 0; i < next.length; i += 1) {
       const err = validateDateCandidate(next[i], i);
       if (err) {
@@ -485,7 +746,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         return;
       }
     }
-    setDateCandidates(next);
+    setDateCandidates(next.map(forcePointCandidate));
     if (shouldAutoExpand && expandRowId) {
       setDateDetailExpanded((ex) => ({ ...ex, [expandRowId]: true }));
     }
@@ -518,13 +779,109 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         });
       });
     }
-  }, [bare, nlpParsed, nlpScheduleInput, parentScrollRef, parentScrollYRef]);
+  }, [bare, nlpParsed, nlpScheduleInput, parentScrollRef, parentScrollYRef, scheduleAiReplacesFirstCandidate]);
+
+  const appendWeekendPreviewSlot = useCallback(
+    (slot: { ymd: string; hm: string }) => {
+      animate();
+      const prev = dateCandidatesRef.current;
+
+      if (scheduleAiReplacesFirstCandidate) {
+        const first = prev[0];
+        if (!first) return;
+        const patched = forcePointCandidate({
+          ...first,
+          startDate: slot.ymd,
+          startTime: slot.hm,
+        } as DateCandidate);
+        const key = dateCandidateDupKey(patched);
+        if (prev.slice(1).some((d) => dateCandidateDupKey(d) === key)) {
+          Alert.alert('동일한 일정 후보가 있습니다.');
+          return;
+        }
+        if (dateCandidateDupKey(first) === key) {
+          setNlpScheduleInput('');
+          setNlpParsed(null);
+          setWeekendPreviewSlots([]);
+          return;
+        }
+        const next = [patched, ...prev.slice(1)];
+        for (let i = 0; i < next.length; i += 1) {
+          const err = validateDateCandidate(next[i], i);
+          if (err) {
+            Alert.alert('일시 확인', err);
+            return;
+          }
+        }
+        setDateCandidates(next);
+        setNlpScheduleInput('');
+        setNlpParsed(null);
+        setWeekendPreviewSlots([]);
+        return;
+      }
+
+      const candidate = forcePointCandidate({
+        id: newId('date'),
+        type: 'point',
+        startDate: slot.ymd,
+        startTime: slot.hm,
+      } as DateCandidate);
+      const key = dateCandidateDupKey(candidate);
+      if (prev.some((d) => dateCandidateDupKey(d) === key)) {
+        Alert.alert('동일한 일정 후보가 있습니다.');
+        return;
+      }
+      const next = [...prev, candidate];
+      for (let i = 0; i < next.length; i += 1) {
+        const err = validateDateCandidate(next[i], i);
+        if (err) {
+          Alert.alert('일시 확인', err);
+          return;
+        }
+      }
+      setDateCandidates(next);
+      setNlpScheduleInput('');
+      setNlpParsed(null);
+      setWeekendPreviewSlots([]);
+      if (!bare) {
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            dateScrollRef.current?.scrollToEnd({ animated: true });
+          });
+        });
+      } else if (parentScrollRef?.current && parentScrollYRef) {
+        requestAnimationFrame(() => {
+          InteractionManager.runAfterInteractions(() => {
+            setTimeout(() => {
+              const sc = parentScrollRef?.current;
+              if (!sc || !parentScrollYRef) return;
+              const cur = parentScrollYRef.current ?? 0;
+              const nextY = cur + 380;
+              requestAnimationFrame(() => {
+                if (typeof sc.scrollTo === 'function') {
+                  sc.scrollTo({ y: nextY, animated: true });
+                  return;
+                }
+                if (typeof sc.scrollToPosition === 'function') {
+                  sc.scrollToPosition(0, nextY, true);
+                }
+              });
+            }, 96);
+          });
+        });
+      }
+    },
+    [bare, parentScrollRef, parentScrollYRef, scheduleAiReplacesFirstCandidate],
+  );
 
   useImperativeHandle(
     ref,
     () => ({
       validateScheduleStep: (): VoteCandidatesGateResult => {
         const dates = dateCandidatesRef.current;
+        if (dates.length === 0) {
+          return { ok: false, error: '일시 후보를 최소 1개 이상 등록해 주세요.' };
+        }
         for (let i = 0; i < dates.length; i += 1) {
           const err = validateDateCandidate(dates[i], i);
           if (err) return { ok: false, error: err };
@@ -711,7 +1068,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     pendingAutoFocusDateIdRef.current = nid;
     setDateCandidates((prev) => {
       const last = prev[prev.length - 1];
-      const row: DateCandidate = last ? { ...last, id: nid } : createPointCandidate(nid, fmtDate(new Date()), '15:00');
+      const row: DateCandidate = last
+        ? { ...last, id: nid }
+        : createPointCandidate(nid, fmtDate(new Date()), defaultScheduleTimePlus3Hours());
       return [...prev, row];
     });
     setDateDetailExpanded((ex) => ({ ...ex, [nid]: true }));
@@ -796,11 +1155,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     today0.setHours(0, 0, 0, 0);
     if (!row) return today0;
     if (picker.field === 'startDate') return today0;
-    if (picker.field === 'endDate') {
-      const s = parseDateTimeStrings(row.startDate, row.startTime ?? '00:00');
-      const s0 = new Date(s.getFullYear(), s.getMonth(), s.getDate(), 0, 0, 0, 0);
-      return s0.getTime() > today0.getTime() ? s0 : today0;
-    }
     return undefined;
   }, [picker, dateCandidates]);
 
@@ -821,9 +1175,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         ? { ...row, startDate: ymd }
         : field === 'startTime'
           ? { ...row, startTime: hm }
-          : field === 'endDate'
-            ? { ...row, endDate: ymd }
-            : { ...row, endTime: hm };
+          : row;
     const err = validateDateCandidate(next, Math.max(0, idx));
     if (err) {
       Alert.alert('일시 확인', err);
@@ -831,8 +1183,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     }
     if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
     else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
-    else if (field === 'endDate') updateDateRow(rowId, { endDate: ymd });
-    else updateDateRow(rowId, { endTime: hm });
     setPicker(null);
   }, [iosDraft, picker, updateDateRow]);
 
@@ -940,58 +1290,107 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             end={{ x: 1, y: 1 }}
             style={styles.aiQuickInitBorder}>
             <View style={styles.aiQuickInitInner}>
-              <TextInput
-                ref={nlpIdeaInputRef}
-                {...nlpIdeaDeferKb}
-                value={nlpScheduleInput}
-                onChangeText={setNlpScheduleInput}
-                placeholder='예: "내일 저녁 7시", "이번 주말 아무 때나"'
-                placeholderTextColor={INPUT_PLACEHOLDER}
-                style={styles.aiQuickInitInput}
-                //multiline
-                //textAlignVertical="top"
-                returnKeyType="done"
-                blurOnSubmit={false}
-                onSubmitEditing={() => {
-                  requestAnimationFrame(() => applyNlpSuggestion());
-                }}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="default"
-                inputMode="text"
-                underlineColorAndroid="transparent"
-              />
+              <View style={styles.voiceInputRow}>
+                <TextInput
+                  ref={nlpIdeaInputRef}
+                  {...nlpIdeaDeferKb}
+                  value={nlpScheduleInput}
+                  onChangeText={setNlpScheduleInput}
+                  placeholder='"내일 저녁 7시", "이번 주말 아무 때나"'
+                  placeholderTextColor={INPUT_PLACEHOLDER}
+                  style={[styles.aiQuickInitInput, styles.voiceInput]}
+                  //multiline
+                  //textAlignVertical="top"
+                  returnKeyType="done"
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => {
+                    requestAnimationFrame(() => applyNlpSuggestion());
+                  }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="default"
+                  inputMode="text"
+                  underlineColorAndroid="transparent"
+                />
+                <Pressable
+                  onPress={() => onPressVoiceInput('scheduleIdea')}
+                  style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="일시 후보 음성 입력">
+                  {voiceRecognizing && voiceTarget === 'scheduleIdea' ? (
+                    <VoiceWaveform active color={GinitTheme.colors.primary} />
+                  ) : (
+                    <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                  )}
+                </Pressable>
+              </View>
             </View>
           </LinearGradient>
 
           <View style={styles.aiPreviewRow}>
             <Text style={styles.aiPreviewHint}>AI 미리보기</Text>
-            {nlpParsed ? (
+            {weekendPreviewSlots.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.aiPreviewScroll}>
+                {weekendPreviewSlots.map((slot) => (
+                  <Pressable
+                    key={`${slot.ymd}-${slot.hm}`}
+                    onPress={() => appendWeekendPreviewSlot(slot)}
+                    style={({ pressed }) => [
+                      styles.aiPreviewScheduleChip,
+                      styles.aiPreviewScheduleChipCarousel,
+                      pressed && styles.aiPreviewScheduleChipPressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`일정 후보 추가 ${slot.ymd} ${slot.hm}`}>
+                    <Text style={styles.aiPreviewScheduleChipLabel} numberOfLines={1} ellipsizeMode="tail">
+                      {`${slot.ymd} · ${slot.hm}`}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : nlpParsed ? (
               <Pressable
                 onPress={applyNlpSuggestion}
                 style={({ pressed }) => [
-                  styles.aiPreviewCard,
-                  { width: '100%' },
-                  pressed && { opacity: 0.92 },
+                  styles.aiPreviewScheduleChip,
+                  styles.aiPreviewScheduleChipFull,
+                  pressed && styles.aiPreviewScheduleChipPressed,
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel="AI 일정 프리뷰를 일정 후보로 추가">
-                <Text style={styles.aiPreviewTitle} numberOfLines={1} ellipsizeMode="tail">
-                  {`${nlpParsed.summary} · ${nlpParsed.candidate.startDate ?? '미정'} · ${
-                    nlpParsed.candidate.startTime ?? '미정'
-                  }`}
+                <Text style={styles.aiPreviewScheduleChipLabel} numberOfLines={1} ellipsizeMode="tail">
+                  {(() => {
+                    const c = nlpParsed.candidate;
+                    const sd = String(c.startDate ?? '').trim();
+                    const st = String(c.startTime ?? '').trim();
+                    const datePart = sd ? sd : '날짜 미정';
+                    const timePart = st ? st : '시간 미정';
+                    return `${datePart} · ${timePart}`;
+                  })()}
                 </Text>
               </Pressable>
             ) : (
-              <View style={[styles.aiPreviewCardMuted, { width: '100%' }]}>
-                <Text style={styles.aiPreviewEmpty} numberOfLines={1} ellipsizeMode="tail">
+              <View style={styles.aiPreviewScheduleChipPlaceholder}>
+                <Text style={styles.aiPreviewScheduleChipHint} numberOfLines={1} ellipsizeMode="tail">
                   입력하면 AI 프리뷰가 여기에 나타나요.
                 </Text>
               </View>
             )}
           </View>
 
-          {/** 후보 추가는 프리뷰 카드 탭으로만 처리합니다. */}
+          <Pressable
+            onPress={addDateRow}
+            style={({ pressed }) => [styles.addCandidateBtn, pressed && styles.addCandidateBtnPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="일자 후보 등록">
+            <Text style={styles.addCandidateBtnLabel}>+ 일자 후보 등록</Text>
+          </Pressable>
+
+          {/** 일반 일정은 AI 미리보기 카드 탭으로 추가할 수 있고, 위 버튼으로 빈 일자 행을 직접 추가할 수 있어요. */}
         </View>
       ) : null}
 
@@ -1007,21 +1406,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           }}
           canDelete={!scheduleListOnly && dateCandidates.length > 1}
           onRemove={() => removeDateRow(d.id)}
-          onPatch={(patch) => updateDateRow(d.id, patch)}
+            onPatch={(patch: Partial<DateCandidate>) => updateDateRow(d.id, patch)}
           reduceHeavyEffects={reduceHeavyEffects}
-          onOpenPicker={(field) => openPicker(d.id, field)}
+            onOpenPicker={(field: DatePickerField) => openPicker(d.id, field)}
           deadlineTick={deadlineTick}
           onSubmitLastFieldInCard={
             scheduleListOnly || Platform.OS !== 'web' ? undefined : () => focusNextDateCandidateAfterWebSubmit(d.id)
           }
         />
       ))}
-
-      {!scheduleListOnly ? (
-        <Pressable onPress={addDateRow} style={styles.addCandidateBtn} accessibilityRole="button">
-          <Text style={styles.addCandidateBtnLabel}>+ 일정 후보 추가</Text>
-        </Pressable>
-      ) : null}
     </>
   );
 
@@ -1044,21 +1437,35 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             end={{ x: 1, y: 1 }}
             style={[styles.aiQuickInitBorder, { marginBottom: 8 }]}>
             <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
-              <TextInput
-                ref={placeQueryInputRef}
-                {...placeQueryDeferKb}
-                value={placeQuery}
-                onChangeText={setPlaceQuery}
-                placeholder='예: "영등포 맛집", "합정 카페"'
-                placeholderTextColor={INPUT_PLACEHOLDER}
-                style={[styles.aiQuickInitInput, { minHeight: 0 }]}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
-                keyboardType="default"
-                inputMode="text"
-                underlineColorAndroid="transparent"
-              />
+              <View style={styles.voiceInputRow}>
+                <TextInput
+                  ref={placeQueryInputRef}
+                  {...placeQueryDeferKb}
+                  value={placeQuery}
+                  onChangeText={setPlaceQuery}
+                  placeholder='예: "영등포 맛집", "합정 카페"'
+                  placeholderTextColor={INPUT_PLACEHOLDER}
+                  style={[styles.aiQuickInitInput, styles.voiceInput, { minHeight: 0 }]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  keyboardType="default"
+                  inputMode="text"
+                  underlineColorAndroid="transparent"
+                />
+                <Pressable
+                  onPress={() => onPressVoiceInput('placeQuery')}
+                  style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="장소 후보 음성 입력">
+                  {voiceRecognizing && voiceTarget === 'placeQuery' ? (
+                    <VoiceWaveform active color={GinitTheme.colors.primary} />
+                  ) : (
+                    <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                  )}
+                </Pressable>
+              </View>
             </View>
           </LinearGradient>
 
@@ -1234,8 +1641,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               </View>
               <DateTimePicker
                 value={iosDraft}
-                mode={picker.field === 'startDate' || picker.field === 'endDate' ? 'date' : 'time'}
-                display={picker.field === 'startDate' || picker.field === 'endDate' ? 'inline' : 'spinner'}
+                mode={picker.field === 'startDate' ? 'date' : 'time'}
+                display={picker.field === 'startDate' ? 'inline' : 'spinner'}
                 onChange={(_, date) => {
                   if (date) setIosDraft(date);
                 }}
@@ -1251,8 +1658,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {picker && Platform.OS === 'android' ? (
         <DateTimePicker
           value={iosDraft}
-          mode={picker.field === 'startDate' || picker.field === 'endDate' ? 'date' : 'time'}
-          display={picker.field === 'startTime' || picker.field === 'endTime' ? 'spinner' : 'default'}
+          mode={picker.field === 'startDate' ? 'date' : 'time'}
+          display={picker.field === 'startTime' ? 'spinner' : 'default'}
           minimumDate={iosPickerMinimumDate}
           onChange={(event: DateTimePickerEvent, date) => {
             const { rowId, field } = picker;
@@ -1269,9 +1676,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 ? { ...row, startDate: ymd }
                 : field === 'startTime'
                   ? { ...row, startTime: hm }
-                  : field === 'endDate'
-                    ? { ...row, endDate: ymd }
-                    : { ...row, endTime: hm };
+                  : row;
             const err = validateDateCandidate(next, Math.max(0, idx));
             if (err) {
               Alert.alert('일시 확인', err);
@@ -1279,8 +1684,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             }
             if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
             else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
-            else if (field === 'endDate') updateDateRow(rowId, { endDate: ymd });
-            else updateDateRow(rowId, { endTime: hm });
           }}
         />
       ) : null}
@@ -1436,6 +1839,80 @@ export default function CreateDetailsScreen() {
       }),
     [],
   );
+
+  const [voiceTitleRecognizing, setVoiceTitleRecognizing] = useState(false);
+  const [voiceDescriptionRecognizing, setVoiceDescriptionRecognizing] = useState(false);
+  /** 제목·상세 소개 음성 입력이 같은 모듈 리스너를 쓰므로 결과 라우팅용 */
+  const voiceCreateTargetRef = useRef<'title' | 'description' | null>(null);
+
+  useSpeechRecognitionEvent('start', () => {
+    const k = voiceCreateTargetRef.current;
+    if (k === 'title') setVoiceTitleRecognizing(true);
+    if (k === 'description') setVoiceDescriptionRecognizing(true);
+  });
+  useSpeechRecognitionEvent('end', () => {
+    setVoiceTitleRecognizing(false);
+    setVoiceDescriptionRecognizing(false);
+    voiceCreateTargetRef.current = null;
+  });
+  useSpeechRecognitionEvent('error', (event) => {
+    setVoiceTitleRecognizing(false);
+    setVoiceDescriptionRecognizing(false);
+    voiceCreateTargetRef.current = null;
+    Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
+  });
+  useSpeechRecognitionEvent('result', (event) => {
+    const t = String(event?.results?.[0]?.transcript ?? '').trim();
+    if (!t) return;
+    const k = voiceCreateTargetRef.current;
+    if (k === 'title') setTitle(t);
+    if (k === 'description') setDescription(t);
+    if (event?.isFinal) {
+      setVoiceTitleRecognizing(false);
+      setVoiceDescriptionRecognizing(false);
+      voiceCreateTargetRef.current = null;
+      ExpoSpeechRecognitionModule.stop();
+    }
+  });
+
+  const onPressVoiceInputTitle = useCallback(async () => {
+    if (voiceTitleRecognizing || voiceDescriptionRecognizing) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      return;
+    }
+    voiceCreateTargetRef.current = 'title';
+    ExpoSpeechRecognitionModule.start({
+      lang: 'ko-KR',
+      interimResults: true,
+      maxAlternatives: 1,
+      continuous: false,
+    });
+  }, [voiceDescriptionRecognizing, voiceTitleRecognizing]);
+
+  const onPressVoiceInputDescription = useCallback(async () => {
+    if (voiceTitleRecognizing || voiceDescriptionRecognizing) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      return;
+    }
+    voiceCreateTargetRef.current = 'description';
+    ExpoSpeechRecognitionModule.start({
+      lang: 'ko-KR',
+      interimResults: true,
+      maxAlternatives: 1,
+      continuous: false,
+    });
+  }, [voiceDescriptionRecognizing, voiceTitleRecognizing]);
+
   const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
   const [titleRegion, setTitleRegion] = useState<string | null>(null);
   const [titleWeatherMood, setTitleWeatherMood] = useState<string | null>(null);
@@ -1520,7 +1997,7 @@ export default function CreateDetailsScreen() {
   );
 
   const screenTitle = useMemo(
-    () => (selectedCategory?.label ? `${selectedCategory.label}  약속 잡기` : '약속 잡기'),
+    () => (selectedCategory?.label ? `${selectedCategory.label}  모임 생성` : '모임 생성'),
     [selectedCategory?.label],
   );
 
@@ -1854,7 +2331,7 @@ export default function CreateDetailsScreen() {
       dateCandidates:
         votePayload?.dateCandidates && votePayload.dateCandidates.length > 0
           ? votePayload.dateCandidates.map((d) => ({ ...d }))
-          : [createPointCandidate(newId('date'), seedDate, seedTime)],
+          : [],
     });
     setVoteHydrateKey((k) => k + 1);
     pendingScrollAfterStepRef.current = scheduleStep;
@@ -1921,6 +2398,16 @@ export default function CreateDetailsScreen() {
       ) {
         setWizardError('최대 인원을 선택해 주세요.');
         Alert.alert('입력 확인', '최대 인원을 선택해 주세요.');
+        return;
+      }
+      if (
+        meetingConfig.settlement === 'MEMBERSHIP_FEE' &&
+        (typeof meetingConfig.membershipFeeWon !== 'number' ||
+          !Number.isFinite(meetingConfig.membershipFeeWon) ||
+          meetingConfig.membershipFeeWon < 1)
+      ) {
+        setWizardError('회비 금액을 입력해 주세요.');
+        Alert.alert('입력 확인', '회비를 선택한 경우 1원 이상의 금액을 입력해 주세요.');
         return;
       }
     } else {
@@ -2109,7 +2596,7 @@ export default function CreateDetailsScreen() {
                 styles.wizardScrollPad,
                 needsMovieEarlyPlaces &&
                   currentStep === 4 && { paddingBottom: 110 + insets.bottom },
-                currentStep === detailStep && { paddingBottom: 108 + insets.bottom },
+                currentStep === detailStep && { paddingBottom: 132 + insets.bottom },
               ]}>
               <View collapsable={false}>
               <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
@@ -2267,23 +2754,37 @@ export default function CreateDetailsScreen() {
                       end={{ x: 1, y: 1 }}
                       style={[styles.aiQuickInitBorder, { marginBottom: 0 }]}>
                       <View style={[styles.aiQuickInitInner, { minHeight: 0, paddingVertical: 10 }]}>
-                        <TextInput
-                          ref={meetingTitleInputRef}
-                          {...meetingTitleDeferKb}
-                          value={title}
-                          onChangeText={setTitle}
-                          placeholder={
-                            aiTitleSuggestions[0] ? `예: ${aiTitleSuggestions[0]}` : '모임 이름을 입력하세요'
-                          }
-                          placeholderTextColor={INPUT_PLACEHOLDER}
-                          style={[styles.aiQuickInitInput, { minHeight: 0 }]}
-                          editable={!busy}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          keyboardType="default"
-                          inputMode="text"
-                          underlineColorAndroid="transparent"
-                        />
+                        <View style={styles.voiceInputRow}>
+                          <TextInput
+                            ref={meetingTitleInputRef}
+                            {...meetingTitleDeferKb}
+                            value={title}
+                            onChangeText={setTitle}
+                            placeholder={
+                              aiTitleSuggestions[0] ? `예: ${aiTitleSuggestions[0]}` : '모임 이름을 입력하세요'
+                            }
+                            placeholderTextColor={INPUT_PLACEHOLDER}
+                            style={[styles.aiQuickInitInput, styles.voiceInput, { minHeight: 0 }]}
+                            editable={!busy}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            keyboardType="default"
+                            inputMode="text"
+                            underlineColorAndroid="transparent"
+                          />
+                          <Pressable
+                            onPress={onPressVoiceInputTitle}
+                            style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
+                            hitSlop={10}
+                            accessibilityRole="button"
+                            accessibilityLabel="모임 이름 음성 입력">
+                            {voiceTitleRecognizing ? (
+                              <VoiceWaveform active color={GinitTheme.colors.primary} />
+                            ) : (
+                              <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                            )}
+                          </Pressable>
+                        </View>
                       </View>
                     </LinearGradient>
                     <Text style={[styles.wizardFieldHint, { marginTop: 6 }]}>
@@ -2539,22 +3040,49 @@ export default function CreateDetailsScreen() {
 
                       <VoteCandidateCard
                         reduceHeavyEffects={reduceHeavyEffectsUI}
-                        outerStyle={[styles.wizardGlassCard, styles.finalRegistrationGlass]}>
-                        
-                        <TextInput
-                          ref={detailDescriptionInputRef}
-                          {...detailDescriptionDeferKb}
-                          value={description}
-                          onChangeText={setDescription}
-                          placeholder={descriptionPlaceholder}
-                          placeholderTextColor={INPUT_PLACEHOLDER}
-                          style={[styles.finalDescriptionInput, descFocused && styles.finalDescriptionInputFocused]}
-                          multiline
-                          textAlignVertical="top"
-                          editable={!busy}
-                          keyboardType="default"
-                          inputMode="text"
-                        />
+                        outerStyle={[
+                          styles.wizardGlassCard,
+                          styles.finalRegistrationGlass,
+                          styles.detailStepDescriptionCardOuter,
+                        ]}>
+                        <View style={styles.detailDescriptionInputShell}>
+                          <TextInput
+                            ref={detailDescriptionInputRef}
+                            {...detailDescriptionDeferKb}
+                            value={description}
+                            onChangeText={setDescription}
+                            placeholder={descriptionPlaceholder}
+                            placeholderTextColor={INPUT_PLACEHOLDER}
+                            style={[
+                              styles.finalDescriptionInput,
+                              styles.finalDescriptionInputWithVoiceFab,
+                              descFocused && styles.finalDescriptionInputFocused,
+                            ]}
+                            multiline
+                            textAlignVertical="top"
+                            editable={!busy}
+                            keyboardType="default"
+                            inputMode="text"
+                          />
+                          <Pressable
+                            onPress={onPressVoiceInputDescription}
+                            disabled={busy}
+                            style={({ pressed }) => [
+                              styles.voiceBtn,
+                              styles.detailDescriptionVoiceFab,
+                              busy && styles.addCandidateBtnDisabled,
+                              pressed && !busy && styles.voiceBtnPressed,
+                            ]}
+                            hitSlop={10}
+                            accessibilityRole="button"
+                            accessibilityLabel="모임 소개 음성 입력">
+                            {voiceDescriptionRecognizing ? (
+                              <VoiceWaveform active color={GinitTheme.colors.primary} />
+                            ) : (
+                              <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                            )}
+                          </Pressable>
+                        </View>
                       </VoteCandidateCard>
                     </View>
                   ) : null}
@@ -2758,6 +3286,41 @@ const styles = StyleSheet.create({
     padding: 0,
     margin: 0,
   },
+  voiceInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  voiceInput: {
+    flex: 1,
+  },
+  voiceBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 82, 204, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.16)',
+  },
+  voiceBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  voiceWaveWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 3,
+    height: 18,
+  },
+  voiceWaveBar: {
+    width: 3,
+    height: 18,
+    borderRadius: 2,
+    opacity: 0.95,
+  },
   aiPreviewRow: {
     marginTop: 2,
     marginBottom: 8,
@@ -2769,32 +3332,53 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.textMuted,
   },
   aiPreviewScroll: {
-    gap: 10,
+    gap: 8,
     paddingBottom: 2,
     paddingRight: 0,
   },
-  aiPreviewCard: {
-    width: '100%',
-    borderRadius: 16,
-    backgroundColor: GinitTheme.colors.surface,
+  /** `PublicMeetingDetailsCard` 모집 연령대 칩과 동일 스펙 */
+  aiPreviewScheduleChip: {
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    padding: 12,
-    ...GinitTheme.shadow.card,
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
+    justifyContent: 'center',
   },
-  aiPreviewCardMuted: {
+  aiPreviewScheduleChipCarousel: {
+    width: 220,
+    flexShrink: 0,
+  },
+  aiPreviewScheduleChipFull: {
     width: '100%',
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.70)',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    padding: 12,
+    alignSelf: 'stretch',
   },
-  aiPreviewEmpty: {
+  aiPreviewScheduleChipLabel: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+  },
+  aiPreviewScheduleChipHint: {
+    fontSize: 13,
+    fontWeight: '800',
     color: GinitTheme.colors.textMuted,
-    lineHeight: 18,
+  },
+  aiPreviewScheduleChipPlaceholder: {
+    width: '100%',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  aiPreviewScheduleChipPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.99 }],
   },
   aiPreviewPill: {
     alignSelf: 'flex-start',
@@ -2811,18 +3395,28 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: GinitTheme.colors.primary,
   },
-  aiPreviewTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: GinitTheme.colors.text,
-    letterSpacing: -0.2,
+  aiPreviewClickableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
   },
-  aiPreviewMeta: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: GinitTheme.colors.textMuted,
-    lineHeight: 16,
+  aiPreviewPlusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.18)',
+  },
+  aiPreviewPlusText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
+    letterSpacing: -0.1,
   },
   aiQuickInitCta: {
     borderRadius: 16,
@@ -3448,6 +4042,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(15, 23, 42, 0.10)',
   },
+  /** 상세 소개 입력과 하단 등록 CTA 사이 여백 */
+  detailStepDescriptionCardOuter: {
+    marginBottom: 16,
+  },
+  detailDescriptionInputShell: {
+    position: 'relative',
+  },
+  detailDescriptionVoiceFab: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    zIndex: 2,
+  },
+  finalDescriptionInputWithVoiceFab: {
+    paddingRight: 52,
+    paddingBottom: 48,
+  },
   finalDescriptionInput: {
     marginTop: 0,
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
@@ -3472,8 +4083,8 @@ const styles = StyleSheet.create({
   },
   detailFinalFloatingBtn: {
     position: 'absolute',
-    left: 18,
-    right: 18,
+    left: 20,
+    right: 20,
     zIndex: 100,
     paddingVertical: 18,
     paddingHorizontal: 18,

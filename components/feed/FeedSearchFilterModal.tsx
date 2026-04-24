@@ -27,6 +27,7 @@ const SETTLE_OPTIONS: { value: PublicMeetingSettlement; label: string }[] = [
   { value: 'DUTCH', label: '1/N' },
   { value: 'HOST_PAYS', label: '호스트' },
   { value: 'INDIVIDUAL', label: '개별' },
+  { value: 'MEMBERSHIP_FEE', label: '회비' },
 ];
 
 const APPROVAL_OPTIONS: { value: PublicMeetingApprovalType; label: string }[] = [

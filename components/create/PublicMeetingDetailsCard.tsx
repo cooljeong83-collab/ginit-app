@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GINIT_HIGH_TRUST_HOST_MIN } from '@/src/lib/ginit-trust';
@@ -121,7 +121,26 @@ export function PublicMeetingDetailsCard({
     [onChange, value],
   );
   const setSettlement = useCallback(
-    (v: PublicMeetingSettlement) => onChange({ ...value, settlement: v }),
+    (v: PublicMeetingSettlement) => {
+      onChange({
+        ...value,
+        settlement: v,
+        membershipFeeWon: v === 'MEMBERSHIP_FEE' ? (value.membershipFeeWon ?? null) : undefined,
+      });
+    },
+    [onChange, value],
+  );
+
+  const setMembershipFeeDigits = useCallback(
+    (raw: string) => {
+      const digits = raw.replace(/\D/g, '');
+      if (digits === '') {
+        onChange({ ...value, membershipFeeWon: null });
+        return;
+      }
+      const n = Math.min(99_999_999, parseInt(digits, 10));
+      onChange({ ...value, membershipFeeWon: Number.isFinite(n) ? n : null });
+    },
     [onChange, value],
   );
   const setApproval = useCallback(
@@ -201,6 +220,7 @@ export function PublicMeetingDetailsCard({
               { id: 'DUTCH', label: '1/N' },
               { id: 'HOST_PAYS', label: '호스트' },
               { id: 'INDIVIDUAL', label: '개별' },
+              { id: 'MEMBERSHIP_FEE', label: '회비' },
             ]}
             onChange={(id) => {
               setFocused('settlement');
@@ -212,8 +232,26 @@ export function PublicMeetingDetailsCard({
               ? '참가자가 비용을 균등하게 나눠요.'
               : value.settlement === 'HOST_PAYS'
                 ? '호스트가 먼저 결제한 뒤 참가자와 정산해요.'
-                : '각자 주문하고 각자 결제해요.'}
+                : value.settlement === 'INDIVIDUAL'
+                  ? '각자 주문하고 각자 결제해요.'
+                  : '참가 시 납부할 회비가 있으면 아래에 금액을 입력해 주세요.'}
           </Text>
+          {value.settlement === 'MEMBERSHIP_FEE' ? (
+            <View style={styles.feeBlock}>
+              <Text style={styles.feeLabel}>회비 금액 (원)</Text>
+              <TextInput
+                value={value.membershipFeeWon != null ? String(value.membershipFeeWon) : ''}
+                onChangeText={setMembershipFeeDigits}
+                placeholder="숫자만 입력 (예: 15000)"
+                placeholderTextColor={GinitTheme.glassModal.placeholder}
+                style={styles.feeInput}
+                keyboardType="number-pad"
+                maxLength={11}
+                editable
+                onFocus={() => setFocused('settlement')}
+              />
+            </View>
+          ) : null}
         </View>
 
         <View style={[styles.block, blockFocusStyle(focused === 'level', reduceHeavyEffects)]}>
@@ -410,6 +448,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     lineHeight: 16,
+  },
+  feeBlock: {
+    marginTop: 12,
+  },
+  feeLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.textSub,
+    marginBottom: 6,
+  },
+  feeInput: {
+    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : FIELD_FILL,
+    borderRadius: RADIUS,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 16,
+    fontWeight: '700',
+    color: GinitTheme.colors.text,
   },
   stepperRow: {
     flexDirection: 'row',

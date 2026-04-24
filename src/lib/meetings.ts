@@ -118,7 +118,7 @@ export type Meeting = {
 
 export type PublicMeetingAgeLimit = 'TWENTIES' | 'THIRTIES' | 'FORTY_PLUS' | 'NONE';
 export type PublicMeetingGenderRatio = 'ALL' | 'SAME_GENDER_ONLY' | 'HALF_HALF';
-export type PublicMeetingSettlement = 'DUTCH' | 'HOST_PAYS' | 'INDIVIDUAL';
+export type PublicMeetingSettlement = 'DUTCH' | 'HOST_PAYS' | 'INDIVIDUAL' | 'MEMBERSHIP_FEE';
 export type PublicMeetingApprovalType = 'INSTANT' | 'HOST_APPROVAL';
 
 export type PublicMeetingDetailsConfig = {
@@ -126,6 +126,8 @@ export type PublicMeetingDetailsConfig = {
   ageLimit: PublicMeetingAgeLimit[];
   genderRatio: PublicMeetingGenderRatio;
   settlement: PublicMeetingSettlement;
+  /** `settlement === 'MEMBERSHIP_FEE'` 일 때 참가 회비(원, 정수) */
+  membershipFeeWon?: number | null;
   /** 참가 자격: 최소 gLevel/gTrust */
   minGLevel: number;
   minGTrust?: number | null;
@@ -143,7 +145,7 @@ function isPublicMeetingGenderRatio(x: unknown): x is PublicMeetingGenderRatio {
 }
 
 function isPublicMeetingSettlement(x: unknown): x is PublicMeetingSettlement {
-  return x === 'DUTCH' || x === 'HOST_PAYS' || x === 'INDIVIDUAL';
+  return x === 'DUTCH' || x === 'HOST_PAYS' || x === 'INDIVIDUAL' || x === 'MEMBERSHIP_FEE';
 }
 
 function isPublicMeetingApprovalType(x: unknown): x is PublicMeetingApprovalType {
@@ -165,6 +167,12 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
 
   const genderRatio = isPublicMeetingGenderRatio(o.genderRatio) ? o.genderRatio : 'ALL';
   const settlement = isPublicMeetingSettlement(o.settlement) ? o.settlement : 'DUTCH';
+  let membershipFeeWon: number | null | undefined;
+  if (settlement === 'MEMBERSHIP_FEE') {
+    const raw = toFiniteInt(o.membershipFeeWon, NaN);
+    membershipFeeWon =
+      Number.isFinite(raw) && raw >= 0 ? Math.min(99_999_999, Math.trunc(raw)) : null;
+  }
   const minGLevel = Math.max(1, Math.min(50, toFiniteInt(o.minGLevel, 1)));
   let minGTrust: number | null = null;
   if (typeof o.minGTrust === 'number' && Number.isFinite(o.minGTrust)) {
@@ -174,7 +182,16 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
   const requestMessageEnabled =
     o.requestMessageEnabled === true ? true : o.requestMessageEnabled === false ? false : null;
 
-  return { ageLimit, genderRatio, settlement, minGLevel, minGTrust, approvalType, requestMessageEnabled };
+  return {
+    ageLimit,
+    genderRatio,
+    settlement,
+    ...(settlement === 'MEMBERSHIP_FEE' ? { membershipFeeWon: membershipFeeWon ?? null } : {}),
+    minGLevel,
+    minGTrust,
+    approvalType,
+    requestMessageEnabled,
+  };
 }
 
 /**
@@ -244,12 +261,19 @@ export function formatPublicMeetingGenderSummary(g: PublicMeetingGenderRatio): s
   }
 }
 
-export function formatPublicMeetingSettlementSummary(s: PublicMeetingSettlement): string {
+export function formatPublicMeetingSettlementSummary(
+  s: PublicMeetingSettlement,
+  membershipFeeWon?: number | null,
+): string {
   switch (s) {
     case 'HOST_PAYS':
       return '호스트 지불';
     case 'INDIVIDUAL':
       return '개별 계산';
+    case 'MEMBERSHIP_FEE':
+      return typeof membershipFeeWon === 'number' && membershipFeeWon > 0
+        ? `회비 ${membershipFeeWon.toLocaleString('ko-KR')}원`
+        : '회비';
     case 'DUTCH':
     default:
       return '1/N 더치페이';

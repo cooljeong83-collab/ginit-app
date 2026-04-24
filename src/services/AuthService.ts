@@ -149,6 +149,17 @@ export class AuthService {
     if (hay.includes('session-expired')) return '인증 시간이 만료되었습니다. 다시 인증을 진행해 주세요.';
     if (hay.includes('invalid-verification-code')) return '인증번호가 올바르지 않습니다.';
     if (hay.includes('network-request-failed')) return '네트워크 연결이 불안정합니다. 잠시 후 다시 시도해 주세요.';
+    // 이미 다른 계정이 같은 전화번호를 사용 중
+    if (
+      hay.includes('account-exists-with-different-credential') ||
+      hay.includes('credential-already-in-use') ||
+      hay.includes('phone-number-already-exists')
+    ) {
+      return (
+        '이미 다른 계정에 연결된 전화번호입니다.\n' +
+        '다른 번호로 인증하거나, 해당 번호로 가입/로그인했던 계정으로 다시 로그인해 주세요.'
+      );
+    }
 
     // Firebase Phone Auth는 프로젝트 설정/요금제에 따라 "billing not enabled" 류 에러가 발생할 수 있음.
     // 일부 환경에서는 message로만 `billing_hot_enabled` 같은 키가 노출되기도 함.

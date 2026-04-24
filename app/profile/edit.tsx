@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   BackHandler,
@@ -74,6 +74,7 @@ export default function ProfileEditScreen() {
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
+  const otpAutoConfirmRef = useRef(false);
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
   const [termsConsentChecked, setTermsConsentChecked] = useState(false);
   const [complianceBusy, setComplianceBusy] = useState(false);
@@ -97,8 +98,16 @@ export default function ProfileEditScreen() {
         setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
         setIsPhoneVerified(isUserPhoneVerified(p));
         const phone = p.phone?.trim();
-        setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
-        setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
+        const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
+        const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
+        const phoneDisplay =
+          phoneDigits.length <= 3
+            ? phoneDigits
+            : phoneDigits.length <= 7
+              ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
+              : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
+        setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
+        setPhoneField(phoneDisplay);
         const g = p.gender?.trim();
         setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
         const bd = p.birthDate as unknown;
@@ -267,14 +276,38 @@ export default function ProfileEditScreen() {
     }
   }, [profilePk, otpVerificationId, otpCode, phoneField]);
 
+  useEffect(() => {
+    if (!otpVerificationId) {
+      otpAutoConfirmRef.current = false;
+      return;
+    }
+    const digits = otpCode.replace(/\\D/g, '').slice(0, 6);
+    if (digits.length < 6) {
+      otpAutoConfirmRef.current = false;
+      return;
+    }
+    if (otpAutoConfirmRef.current) return;
+    if (!canConfirmOtp) return;
+    otpAutoConfirmRef.current = true;
+    void onConfirmOtp();
+  }, [otpCode, otpVerificationId, canConfirmOtp, onConfirmOtp]);
+
   const refreshEditProfile = useCallback(async () => {
     if (!profilePk) return;
     const p = await ensureUserProfile(profilePk);
     setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
     setIsPhoneVerified(isUserPhoneVerified(p));
     const phone = p.phone?.trim();
-    setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
-    setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
+    const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
+    const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
+    const phoneDisplay =
+      phoneDigits.length <= 3
+        ? phoneDigits
+        : phoneDigits.length <= 7
+          ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
+          : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
+    setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
+    setPhoneField(phoneDisplay);
   }, [profilePk]);
 
   const onSubmitMeetingCompliance = useCallback(async () => {

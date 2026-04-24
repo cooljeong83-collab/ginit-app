@@ -109,7 +109,7 @@ export function MeetingFeedRow({
     return [
       formatPublicMeetingAgeSummary(cfg.ageLimit),
       formatPublicMeetingGenderSummary(cfg.genderRatio),
-      formatPublicMeetingSettlementSummary(cfg.settlement),
+      formatPublicMeetingSettlementSummary(cfg.settlement, cfg.membershipFeeWon),
     ].join(' · ');
   }, [m]);
 

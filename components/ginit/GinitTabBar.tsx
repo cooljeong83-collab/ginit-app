@@ -1,26 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
+  Extrapolation,
+  interpolate,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withRepeat,
-  withTiming
+  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
+import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
@@ -58,7 +59,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     // 탭바(콘텐츠 영역) + wrap의 paddingBottom 위로 확실히 띄웁니다.
     const tabBarH = 52 + 8; // row minHeight + paddingTop
     const wrapPad = Math.max(insets.bottom, 10);
-    const gap = 12;
+    const gap = 0; // FAB ↔ 탭 메뉴 사이(기존 12 → 조금 축소)
     return wrapPad + tabBarH + gap;
   }, [insets.bottom]);
 
@@ -127,19 +128,32 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     return () => unsub();
   }, [fabDocked, fabFloat]);
 
+  /** 스크롤 시 알약 → 동그라미(정원) 형태로 보간 */
+  const fabLayoutStyle = useAnimatedStyle(() => {
+    const dock = fabDocked.value;
+    const w = interpolate(dock, [0, 1], [112, 56], Extrapolation.CLAMP);
+    const h = interpolate(dock, [0, 1], [58, 56], Extrapolation.CLAMP);
+    const br = interpolate(dock, [0, 1], [29, 28], Extrapolation.CLAMP);
+    return { width: w, height: h, borderRadius: br };
+  });
+
+  const fabRadiusStyle = useAnimatedStyle(() => {
+    const dock = fabDocked.value;
+    const br = interpolate(dock, [0, 1], [29, 28], Extrapolation.CLAMP);
+    return { borderRadius: br };
+  });
+
   const fabAnimStyle = useAnimatedStyle(() => {
     const dock = fabDocked.value;
     const f = fabFloat.value; // 0..1..0..
-    // undocked: -3..-1 정도로만 떠있게 (상단으로 과하게 올라가지 않게 제한)
-    const floatY = -4 + (f - 0.5) * 6; // [-7, -1]
+    const floatY = -4 + (f - 0.5) * 6;
     const translateY = (1 - dock) * floatY;
-    const opacity = 1;
-    const baseScale = (1 - dock) * 1 + dock * 0.84;
-    const breathe = 1 + (1 - dock) * ((f - 0.5) * 0.04); // +/- 2%
-    const scale = baseScale * breathe;
+    // 도킹 시에는 크기 변화는 fabLayoutStyle이 담당 — 스케일은 1에 가깝게 유지
+    const breathe = 1 + (1 - dock) * ((f - 0.5) * 0.04);
+    const scale = breathe;
     return {
       transform: [{ translateY }, { scale }],
-      opacity,
+      opacity: 1,
     };
   });
 
@@ -147,20 +161,16 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     const dock = fabDocked.value;
     return {
       opacity: 1 - dock,
-      transform: [{ scaleX: 1 - dock * 0.12 }],
+      maxWidth: interpolate(dock, [0, 1], [160, 0], Extrapolation.CLAMP),
+      transform: [{ scaleX: interpolate(dock, [0, 1], [1, 0.92], Extrapolation.CLAMP) }],
     };
   });
 
-  const fabShadowStyle = useAnimatedStyle(() => {
+  const fabContentPadStyle = useAnimatedStyle(() => {
     const dock = fabDocked.value;
-    const f = fabFloat.value;
-    // 떠오를수록(위로 갈수록) 그림자는 조금 더 진하고 작아짐
-    const lift = 1 - f; // 1(bottom) -> 0(top)
-    const opacity = (1 - dock) * (0.22 + 0.10 * lift);
-    const s = 1 - 0.12 * lift;
     return {
-      opacity,
-      transform: [{ scaleX: s }, { scaleY: s }],
+      paddingHorizontal: interpolate(dock, [0, 1], [14, 0], Extrapolation.CLAMP),
+      gap: interpolate(dock, [0, 1], [8, 0], Extrapolation.CLAMP),
     };
   });
 
@@ -210,40 +220,35 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
       </View>
 
       {showFab ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="모임 만들기"
-          onPress={onFabPress}
-          style={[
-            styles.fab,
-            {
-              bottom: fabSafeBottom,
-            },
-          ]}>
-          <Animated.View style={[styles.fabShadow, fabShadowStyle]} pointerEvents="none" />
-          <Animated.View style={[styles.fabInner, fabAnimStyle]}>
-            <LinearGradient
-              colors={GinitTheme.colors.ctaGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.fabBg}
-              pointerEvents="none"
-            />
-            <View style={styles.fabContent}>
-              <Image
-                source={require('@/assets/images/logo-symbol.png')}
-                style={styles.fabLogo}
-                contentFit="contain"
-                accessibilityIgnoresInvertColors
+        <Animated.View
+          pointerEvents="box-none"
+          style={[{ position: 'absolute', right: 18, bottom: fabSafeBottom }, fabLayoutStyle]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="모임 만들기"
+            onPress={onFabPress}
+            style={StyleSheet.absoluteFillObject}>
+            <Animated.View style={[styles.fabInner, fabAnimStyle, fabRadiusStyle]}>
+              <LinearGradient
+                colors={GinitTheme.colors.ctaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.fabBg}
+                pointerEvents="none"
               />
-              <Animated.View style={[styles.fabLabelWrap, fabLabelStyle]}>
-                <Text style={styles.fabLabelText} numberOfLines={1}>
-                  모임 생성
-                </Text>
+              <Animated.View style={[styles.fabContent, fabContentPadStyle]}>
+                <View style={styles.fabLogo} pointerEvents="none">
+                  <Ionicons name="add" size={24} color="#FFFFFF" />
+                </View>
+                <Animated.View style={[styles.fabLabelWrap, fabLabelStyle]}>
+                  <Text style={styles.fabLabelText} numberOfLines={1}>
+                    모임 생성
+                  </Text>
+                </Animated.View>
               </Animated.View>
-            </View>
-          </Animated.View>
-        </Pressable>
+            </Animated.View>
+          </Pressable>
+        </Animated.View>
       ) : null}
     </View>
   );
@@ -289,38 +294,14 @@ const styles = StyleSheet.create({
   tabLabelActive: {
     color: GinitTheme.colors.primary,
   },
-  fab: {
-    position: 'absolute',
-    right: 18,
-    width: 112,
-    height: 58,
-    borderRadius: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: 'rgba(15, 23, 42, 0.14)',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 14,
-    elevation: 10,
-  },
   fabInner: {
-    width: 112,
-    height: 58,
-    borderRadius: 29,
+    ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.72)',
-  },
-  fabShadow: {
-    position: 'absolute',
-    bottom: -20,
-    width: 56,
-    height: 14,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15, 23, 42, 0.22)',
   },
   fabBg: {
     ...StyleSheet.absoluteFillObject,
@@ -329,12 +310,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
   },
   fabLogo: {
     width: 28,
     height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fabLabelWrap: {
     overflow: 'hidden',

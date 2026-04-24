@@ -49,6 +49,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Notion 로컬 캐시 (페이지 id)
+scripts/.notion_dashboard_ids.json
+
 app-example
 
 # generated native folders

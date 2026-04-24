@@ -1,14 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingScheduleStartMs } from '@/src/lib/feed-meeting-utils';
 import { homeMeetingStatusBadgeLabel } from '@/src/lib/feed-home-visual';
+import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import type { Meeting } from '@/src/lib/meetings';
-import { MEETING_CAPACITY_UNLIMITED, meetingParticipantCount } from '@/src/lib/meetings';
+import {
+  formatPublicMeetingAgeSummary,
+  formatPublicMeetingApprovalSummary,
+  formatPublicMeetingGenderSummary,
+  formatPublicMeetingSettlementSummary,
+  MEETING_CAPACITY_UNLIMITED,
+  meetingParticipantCount,
+  parsePublicMeetingDetailsConfig,
+} from '@/src/lib/meetings';
 
 function capacitySummaryLine(m: Meeting): string {
   const n = meetingParticipantCount(m);
@@ -51,6 +60,28 @@ function categoryGlyph(m: Meeting): keyof typeof Ionicons.glyphMap {
   return 'people-outline';
 }
 
+/** 공개 모임 상세 조건 — 홈 그리드 한 줄 칩(가로 스크롤)용 */
+function publicMeetingConditionChips(m: Meeting): { key: string; label: string }[] {
+  if (m.isPublic !== true) return [];
+  const cfg = parsePublicMeetingDetailsConfig(m.meetingConfig);
+  if (!cfg) return [];
+  const chips: { key: string; label: string }[] = [];
+  chips.push({ key: 'age', label: formatPublicMeetingAgeSummary(cfg.ageLimit) });
+  chips.push({ key: 'gender', label: formatPublicMeetingGenderSummary(cfg.genderRatio) });
+  chips.push({
+    key: 'settle',
+    label: formatPublicMeetingSettlementSummary(cfg.settlement, cfg.membershipFeeWon),
+  });
+  chips.push({ key: 'glv', label: `참가 Lv${cfg.minGLevel}+` });
+  if (typeof cfg.minGTrust === 'number' && Number.isFinite(cfg.minGTrust)) {
+    const hostMin = Math.trunc(cfg.minGTrust);
+    const needFinal = isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
+    chips.push({ key: 'trust', label: `신뢰≥${needFinal}` });
+  }
+  chips.push({ key: 'appr', label: formatPublicMeetingApprovalSummary(cfg.approvalType) });
+  return chips;
+}
+
 function formatDdayLabel(m: Meeting): string | null {
   const ms = meetingScheduleStartMs(m);
   if (ms == null) return null;
@@ -89,6 +120,7 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
   const capFill = useMemo(() => capacityFillRatio(m), [m]);
   const barFillColor = useMemo(() => participantBarFillColor(m, capFill), [m, capFill]);
   const showDdayMeta = dday != null && statusCorner !== '내일 모임';
+  const condChips = useMemo(() => publicMeetingConditionChips(m), [m]);
 
   return (
     <View style={s.meetRowWrap}>
@@ -107,32 +139,34 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
                 style={StyleSheet.absoluteFillObject}
               />
               <View style={s.symbolVeil} pointerEvents="none" />
-              <View style={[s.symbolCircleInner, categoryLabel ? s.symbolCircleInnerWithCat : null]}>
-                <Ionicons
-                  name={glyph}
-                  size={categoryLabel ? 17 : 22}
-                  color={GinitTheme.colors.primary}
-                  style={categoryLabel ? s.symbolGlyphWithLabel : undefined}
-                />
-                {categoryLabel ? (
-                  <Text style={s.symbolCategoryText} numberOfLines={2}>
-                    {categoryLabel}
+              <View style={s.symbolCircleColumn}>
+                <View style={[s.symbolCircleInner, categoryLabel ? s.symbolCircleInnerWithCat : null]}>
+                  <Ionicons
+                    name={glyph}
+                    size={categoryLabel ? 17 : 22}
+                    color={GinitTheme.colors.primary}
+                    style={categoryLabel ? s.symbolGlyphWithLabel : undefined}
+                  />
+                  {categoryLabel ? (
+                    <Text style={s.symbolCategoryText} numberOfLines={2}>
+                      {categoryLabel}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={s.symbolBarSection}>
+                  <View style={s.symbolParticipantTrack}>
+                    <View
+                      style={[
+                        s.symbolParticipantFill,
+                        { width: `${Math.round(capFill * 100)}%`, backgroundColor: barFillColor },
+                      ]}
+                    />
+                  </View>
+                  <Text style={s.symbolParticipantCaption} numberOfLines={1}>
+                    {peopleChip}
                   </Text>
-                ) : null}
+                </View>
               </View>
-            </View>
-            <View style={s.symbolBarSection}>
-              <View style={s.symbolParticipantTrack}>
-                <View
-                  style={[
-                    s.symbolParticipantFill,
-                    { width: `${Math.round(capFill * 100)}%`, backgroundColor: barFillColor },
-                  ]}
-                />
-              </View>
-              <Text style={s.symbolParticipantCaption} numberOfLines={1}>
-                {peopleChip}
-              </Text>
             </View>
           </View>
           <View style={s.mainCol}>
@@ -169,6 +203,23 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
                 </View>
               ) : null}
             </View>
+            {condChips.length > 0 ? (
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                style={s.condScrollView}
+                contentContainerStyle={s.condChipRow}>
+                {condChips.map((c) => (
+                  <View key={c.key} style={s.condChip} accessibilityLabel={c.label}>
+                    <Text style={s.condChipText} numberOfLines={1} ellipsizeMode="tail">
+                      {c.label}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
             <View style={s.distRow}>
               {m.isPublic === false ? (
                 <View style={s.lockPill}>
@@ -197,7 +248,7 @@ const s = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
-    gap: 8,
+    gap: 7,
   },
   topRow: {
     flexDirection: 'row',
@@ -213,30 +264,39 @@ const s = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
+    position: 'relative',
   },
   symbolCircleCompact: {
-    height: 48,
+    height: 70,
+    minHeight: 70,
   },
   symbolCircleTall: {
-    minHeight: 78,
-    paddingBottom: 2,
+    minHeight: 84,
+  },
+  symbolCircleColumn: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    zIndex: 1,
+    flexDirection: 'column',
   },
   symbolCircleInner: {
     flex: 1,
     width: '100%',
+    minHeight: 0,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
     paddingVertical: 4,
     gap: 2,
   },
+  /** 막대 하단 고정 — 아이콘·카테고리명은 그 위 영역에서 세로 중앙 */
   symbolCircleInnerWithCat: {
-    justifyContent: 'flex-start',
-    paddingTop: 5,
-    paddingBottom: 6,
+    justifyContent: 'center',
+    paddingVertical: 4,
   },
   symbolGlyphWithLabel: {
-    marginTop: 2,
+    marginTop: 0,
   },
   symbolCategoryText: {
     fontSize: 9,
@@ -252,9 +312,13 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.52)',
   },
   symbolBarSection: {
-    width: 56,
-    marginTop: 8,
-    gap: 4,
+    width: '100%',
+    alignSelf: 'stretch',
+    flexShrink: 0,
+    paddingHorizontal: 6,
+    paddingTop: 4,
+    paddingBottom: 5,
+    gap: 3,
     alignItems: 'stretch',
   },
   symbolParticipantTrack: {
@@ -277,7 +341,7 @@ const s = StyleSheet.create({
   mainCol: {
     flex: 1,
     minWidth: 0,
-    gap: 6,
+    gap: 5,
   },
   titleRow: {
     flexDirection: 'row',
@@ -373,11 +437,39 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: GinitTheme.colors.textSub,
   },
+  condScrollView: {
+    flexGrow: 0,
+    maxHeight: 22,
+    marginTop: -1,
+  },
+  condChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingRight: 2,
+  },
+  condChip: {
+    flexShrink: 0,
+    maxWidth: 112,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: GinitTheme.colors.bgAlt,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+  },
+  condChipText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: GinitTheme.colors.textSub,
+    letterSpacing: -0.15,
+  },
   distRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flexWrap: 'wrap',
+    minHeight: 0,
   },
   lockPill: {
     paddingHorizontal: 8,

@@ -14,12 +14,14 @@ import {
 import {
   ActivityIndicator,
   Dimensions,
+  findNodeHandle,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
   View,
 } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
@@ -39,6 +41,69 @@ import {
 } from './wizard-specialty-styles';
 
 const TRUST_BLUE = GinitTheme.colors.primary;
+
+/**
+ * ScrollView / KeyboardAwareScrollView 등 ref에 measureInWindow 가 없을 때 findNodeHandle 폴백.
+ * 폴백 시 anchorWindowY·pad 로 sy 를 맞춰 nextY = scrollY 가 되게 해 잘못된 대량 스크롤을 막음.
+ */
+function measureHostInWindow(
+  scrollHost: unknown,
+  anchorWindowY: number,
+  pad: number,
+  callback: (x: number, y: number, w: number, h: number) => void,
+): void {
+  if (scrollHost == null) return;
+  const host = scrollHost as {
+    measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+  };
+  if (typeof host.measureInWindow === 'function') {
+    host.measureInWindow(callback);
+    return;
+  }
+  const tag = findNodeHandle(scrollHost as never);
+  if (tag != null && typeof UIManager.measureInWindow === 'function') {
+    UIManager.measureInWindow(tag, callback);
+    return;
+  }
+  callback(0, anchorWindowY - pad, Dimensions.get('window').width, Dimensions.get('window').height);
+}
+
+type ScrollHost = {
+  scrollToPosition?: (x: number, y: number, animated?: boolean) => void;
+  scrollTo?: (opts: { x?: number; y?: number; animated?: boolean }) => void;
+  getScrollResponder?: () =>
+    | {
+        scrollTo?: (opts: { x?: number; y?: number; animated?: boolean }) => void;
+        scrollResponderScrollTo?: (opts: { x: number; y: number; animated: boolean }) => void;
+      }
+    | null
+    | undefined;
+};
+
+/** `ScrollView` 직접 ref 또는 `KeyboardAwareScrollView`(scrollToPosition) 등 */
+function scrollParentToY(scrollHost: unknown, y: number, animated: boolean): void {
+  if (scrollHost == null) return;
+  const clamped = Math.max(0, y);
+  const h = scrollHost as ScrollHost;
+  if (typeof h.scrollToPosition === 'function') {
+    h.scrollToPosition(0, clamped, animated);
+    return;
+  }
+  if (typeof h.scrollTo === 'function') {
+    h.scrollTo({ x: 0, y: clamped, animated });
+    return;
+  }
+  if (typeof h.getScrollResponder === 'function') {
+    const r = h.getScrollResponder();
+    if (r && typeof r.scrollResponderScrollTo === 'function') {
+      r.scrollResponderScrollTo({ x: 0, y: clamped, animated });
+      return;
+    }
+    if (r && typeof r.scrollTo === 'function') {
+      r.scrollTo({ x: 0, y: clamped, animated });
+    }
+  }
+}
 
 const PRETENDARD_BOLD_URI =
   'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf';
@@ -305,13 +370,12 @@ export function MovieSearch({
       if (!scrollView || !anchor) return;
       anchor.measureInWindow((hx: number, hy: number, _hw: number, _hh: number) => {
         if (cancelled) return;
-        const scrollHost = scrollView as unknown as View;
-        scrollHost.measureInWindow((sx: number, sy: number, _sw: number, _sh: number) => {
+        measureHostInWindow(scrollView, hy, 12, (sx: number, sy: number, _sw: number, _sh: number) => {
           if (cancelled) return;
           const scrollY = parentScrollYRef.current;
           const pad = 12;
           const nextY = scrollY + (hy - sy) - pad;
-          scrollView.scrollTo({ y: Math.max(0, nextY), animated: true });
+          scrollParentToY(scrollView, nextY, true);
         });
       });
     };
