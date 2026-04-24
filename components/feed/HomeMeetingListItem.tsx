@@ -1,96 +1,195 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { meetingScheduleStartMs } from '@/src/lib/feed-meeting-utils';
-import { homeMeetingStatusBadgeLabel } from '@/src/lib/feed-home-visual';
+import { getHomeCategoryVisual, homeMeetingStatusBadgeLabel } from '@/src/lib/feed-home-visual';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
-import type { Meeting } from '@/src/lib/meetings';
-import {
-  formatPublicMeetingAgeSummary,
-  formatPublicMeetingApprovalSummary,
-  formatPublicMeetingGenderSummary,
-  formatPublicMeetingSettlementSummary,
-  MEETING_CAPACITY_UNLIMITED,
-  meetingParticipantCount,
-  parsePublicMeetingDetailsConfig,
+import type {
+  Meeting,
+  PublicMeetingDetailsConfig,
+  PublicMeetingGenderRatio,
+  PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
+import { formatPublicMeetingAgeSummary, parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
 
-function capacitySummaryLine(m: Meeting): string {
-  const n = meetingParticipantCount(m);
-  const cap = m.capacity ?? 0;
-  if (!cap || cap >= MEETING_CAPACITY_UNLIMITED) return `${n}명`;
-  return `${n}/${cap}명`;
-}
+const AnimatedView = Animated.createAnimatedComponent(View);
 
-/** 정원 대비 참여 비율(무제한 정원이면 상대 막대 길이만 표시) */
-function capacityFillRatio(m: Meeting): number {
-  const n = meetingParticipantCount(m);
-  const cap = m.capacity ?? 0;
-  if (!cap || cap >= MEETING_CAPACITY_UNLIMITED) return Math.min(1, Math.max(0.12, n / 16));
-  return Math.min(1, n / Math.max(cap, 1));
-}
-
-/**
- * 막대 색: 초기(≤50%) 녹색 → 과반(>50%) 경고 앰버 → 정원 마감 시 브랜드 네이비(‘마감’은 강조보다 안정감).
- * 무제한 정원은 막대 비율(capFill)로 동일 구간 적용.
- */
-function participantBarFillColor(m: Meeting, capFill: number): string {
-  const n = meetingParticipantCount(m);
-  const cap = m.capacity ?? 0;
-  const finite = cap > 0 && cap < MEETING_CAPACITY_UNLIMITED;
-  const ratio = finite ? n / Math.max(cap, 1) : capFill;
-  if (finite && n >= cap) return GinitTheme.colors.primary;
-  if (ratio >= 1) return GinitTheme.colors.primary;
-  if (ratio > 0.5) return GinitTheme.colors.warning;
-  return GinitTheme.colors.success;
-}
-
-function categoryGlyph(m: Meeting): keyof typeof Ionicons.glyphMap {
-  const hay = `${m.categoryLabel ?? ''} ${m.title ?? ''}`.toLowerCase();
-  if (/영화|movie|film/.test(hay)) return 'film-outline';
-  if (/운동|헬스|러닝|gym|fitness/.test(hay)) return 'barbell-outline';
-  if (/맛집|식사|brunch|카페|술|food/.test(hay)) return 'restaurant-outline';
-  if (/독서|책|book/.test(hay)) return 'book-outline';
-  if (/음악|콘서트|music/.test(hay)) return 'musical-notes-outline';
-  if (/산책|등산|walk|outdoor/.test(hay)) return 'walk-outline';
-  return 'people-outline';
-}
-
-/** 공개 모임 상세 조건 — 홈 그리드 한 줄 칩(가로 스크롤)용 */
-function publicMeetingConditionChips(m: Meeting): { key: string; label: string }[] {
-  if (m.isPublic !== true) return [];
-  const cfg = parsePublicMeetingDetailsConfig(m.meetingConfig);
-  if (!cfg) return [];
-  const chips: { key: string; label: string }[] = [];
-  chips.push({ key: 'age', label: formatPublicMeetingAgeSummary(cfg.ageLimit) });
-  chips.push({ key: 'gender', label: formatPublicMeetingGenderSummary(cfg.genderRatio) });
-  chips.push({
-    key: 'settle',
-    label: formatPublicMeetingSettlementSummary(cfg.settlement, cfg.membershipFeeWon),
-  });
-  chips.push({ key: 'glv', label: `참가 Lv${cfg.minGLevel}+` });
-  if (typeof cfg.minGTrust === 'number' && Number.isFinite(cfg.minGTrust)) {
-    const hostMin = Math.trunc(cfg.minGTrust);
-    const needFinal = isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
-    chips.push({ key: 'trust', label: `신뢰≥${needFinal}` });
+function rgbFromCssColor(c: string): { r: number; g: number; b: number } | null {
+  const s = (c ?? '').trim();
+  if (!s) return null;
+  if (s.startsWith('#')) {
+    const hex = s.slice(1);
+    if (hex.length === 3) {
+      const r = parseInt(hex[0] + hex[0], 16);
+      const g = parseInt(hex[1] + hex[1], 16);
+      const b = parseInt(hex[2] + hex[2], 16);
+      if ([r, g, b].every(Number.isFinite)) return { r, g, b };
+    }
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      if ([r, g, b].every(Number.isFinite)) return { r, g, b };
+    }
+    return null;
   }
-  chips.push({ key: 'appr', label: formatPublicMeetingApprovalSummary(cfg.approvalType) });
-  return chips;
+  const m = s.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+  if (!m) return null;
+  const r = Math.max(0, Math.min(255, Math.round(Number(m[1]))));
+  const g = Math.max(0, Math.min(255, Math.round(Number(m[2]))));
+  const b = Math.max(0, Math.min(255, Math.round(Number(m[3]))));
+  if (![r, g, b].every(Number.isFinite)) return null;
+  return { r, g, b };
 }
 
-function formatDdayLabel(m: Meeting): string | null {
-  const ms = meetingScheduleStartMs(m);
-  if (ms == null) return null;
-  const dayMs = 24 * 60 * 60 * 1000;
-  const diffDays = Math.ceil((ms - Date.now()) / dayMs);
-  if (diffDays === 0) return 'D-Day';
-  if (diffDays > 0 && diffDays <= 99) return `D-${diffDays}`;
-  if (diffDays < 0) return '지난 일정';
-  return null;
+function luminance01(rgb: { r: number; g: number; b: number }): number {
+  // sRGB relative luminance (gamma-corrected). Output 0..1
+  const toLinear = (x: number) => {
+    const v = x / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const r = toLinear(rgb.r);
+  const g = toLinear(rgb.g);
+  const b = toLinear(rgb.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastIconColorFromGradient(gradient: readonly [string, string]): string {
+  const a = rgbFromCssColor(gradient[0]);
+  const b = rgbFromCssColor(gradient[1]);
+  const avg = a && b ? { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2 } : a ?? b;
+  if (!avg) return '#FFFFFF';
+  const L = luminance01({ r: avg.r, g: avg.g, b: avg.b });
+  return L >= 0.62 ? '#0b1220' : '#FFFFFF';
+}
+
+function settlementCornerLabel(cfg: PublicMeetingDetailsConfig): string {
+  switch (cfg.settlement) {
+    case 'HOST_PAYS':
+      return '호스트 부담';
+    case 'INDIVIDUAL':
+      return '개별 정산';
+    case 'MEMBERSHIP_FEE':
+      return typeof cfg.membershipFeeWon === 'number' && cfg.membershipFeeWon > 0
+        ? `회비 ${cfg.membershipFeeWon.toLocaleString('ko-KR')}원`
+        : '회비';
+    case 'DUTCH':
+    default:
+      return 'N분할';
+  }
+}
+
+function approvalChipParts(a: PublicMeetingDetailsConfig['approvalType']): {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+} {
+  return a === 'HOST_APPROVAL'
+    ? { icon: 'shield-checkmark-outline', label: '승인제' }
+    : { icon: 'flash-outline', label: '즉시' };
+}
+
+/** 대상 성별 — 남·녀 심볼만 (`compact`: 메타 줄 우측 캡슐용 작은 크기). 동성만은 `hostGenderSnapshot`으로 주최자 성별 표시 */
+function GenderSymbolVisual({
+  ratio,
+  compact,
+  hostGenderSnapshot,
+}: {
+  ratio: PublicMeetingGenderRatio;
+  compact?: boolean;
+  hostGenderSnapshot?: PublicMeetingHostGenderSnapshot | null;
+}) {
+  /** `PublicMeetingDetailsCard` 칩·세그먼트와 동일 톤: primary / textSub / muted */
+  const male = GinitTheme.colors.primary;
+  const female = GinitTheme.colors.textSub;
+  const muted = GinitTheme.colors.textMuted;
+  const sm = compact ? 13 : 16;
+  const md = compact ? 14 : 18;
+  const pairGap = compact ? 3 : 5;
+
+  if (ratio === 'HALF_HALF') {
+    return (
+      <View style={s.genderRow} accessibilityLabel="남녀 반반">
+        <View style={[s.genderIconPair, { gap: pairGap }]}>
+          <Ionicons name="male" size={sm} color={male} />
+          {!compact ? <View style={s.genderDot} /> : <View style={s.genderDotCompact} />}
+          <Ionicons name="female" size={sm} color={female} />
+        </View>
+      </View>
+    );
+  }
+  if (ratio === 'SAME_GENDER_ONLY') {
+    const host = hostGenderSnapshot ?? null;
+    if (host === 'male') {
+      return (
+        <View style={s.genderRow} accessibilityLabel="남성 동성 모집">
+          <Ionicons name="male" size={compact ? 14 : 17} color={male} />
+        </View>
+      );
+    }
+    if (host === 'female') {
+      return (
+        <View style={s.genderRow} accessibilityLabel="여성 동성 모집">
+          <Ionicons name="female" size={compact ? 14 : 17} color={female} />
+        </View>
+      );
+    }
+    return (
+      <View style={s.genderRow} accessibilityLabel="동성만">
+        <Ionicons name="people" size={sm} color={GinitTheme.colors.primary} />
+      </View>
+    );
+  }
+  return (
+    <View style={s.genderRow} accessibilityLabel="성별 제한 없음">
+      <Ionicons name="male-female-outline" size={md} color={muted} />
+    </View>
+  );
+}
+
+function NeonHeadBadge({ statusLine, pulse }: { statusLine: string; pulse: boolean }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    if (pulse) {
+      scale.value = withRepeat(
+        withSequence(
+          withTiming(1.03, { duration: 820, easing: Easing.inOut(Easing.sin) }),
+          withTiming(1, { duration: 820, easing: Easing.inOut(Easing.sin) }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      cancelAnimation(scale);
+      scale.value = withTiming(1, { duration: 160 });
+    }
+  }, [pulse, scale]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <AnimatedView style={[s.neonBadgeOuter, pulse && s.neonBadgePulseWrap, pulseStyle]}>
+      <View style={s.neonBadgeInner}>
+        <Text style={s.neonBadgeStatus} numberOfLines={2}>
+          {statusLine}
+        </Text>
+      </View>
+    </AnimatedView>
+  );
 }
 
 type Props = {
@@ -100,132 +199,137 @@ type Props = {
   onPress: () => void;
 };
 
-/** 홈 탭 모임 카드 — 좌측 심볼+카테고리 하단 참여 막대, 거리·D-Day 메타 */
+/**
+ * 홈 모임 리스트 카드 — 모임 생성(`VoteCandidateCard`/wizard)과 동일한 밝은 글래스·보더 패턴,
+ * 정산 칩을 자격 칩열 최앞, 성별은 거리·연령 메타 줄 우측 캡슐(심볼만).
+ */
 export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }: Props) {
-  const glyph = useMemo(() => categoryGlyph(m), [m]);
-  const categoryLabel = m.categoryLabel?.trim() ?? '';
+  const visual = useMemo(() => getHomeCategoryVisual(m), [m]);
   const statusCorner = useMemo(() => homeMeetingStatusBadgeLabel(m), [m]);
-  const dday = useMemo(() => formatDdayLabel(m), [m]);
-  const statusBadgeStyle = useMemo(() => {
-    if (statusCorner === '내일 모임') return { wrap: s.statusBadgeTomorrow, text: s.statusBadgeTextDark };
-    if (statusCorner === '확정') return { wrap: s.statusBadgeConfirmed, text: s.statusBadgeTextOnPrimary };
-    return { wrap: s.statusBadgeCoordinating, text: s.statusBadgeTextPrimary };
-  }, [statusCorner]);
+  const iconColor = useMemo(() => contrastIconColorFromGradient(visual.gradient), [visual.gradient]);
+  const cfg = useMemo(
+    () => (m.isPublic === true ? parsePublicMeetingDetailsConfig(m.meetingConfig) : null),
+    [m.isPublic, m.meetingConfig],
+  );
 
-  const distanceChipText = useMemo(
+  const distanceLine = useMemo(
     () => formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords)),
     [m, userCoords],
   );
-  const peopleChip = capacitySummaryLine(m);
-  const capFill = useMemo(() => capacityFillRatio(m), [m]);
-  const barFillColor = useMemo(() => participantBarFillColor(m, capFill), [m, capFill]);
-  const showDdayMeta = dday != null && statusCorner !== '내일 모임';
-  const condChips = useMemo(() => publicMeetingConditionChips(m), [m]);
+
+  const ageMeta = cfg ? formatPublicMeetingAgeSummary(cfg.ageLimit) : '';
+  const trustMin = useMemo(() => {
+    if (!cfg || typeof cfg.minGTrust !== 'number' || !Number.isFinite(cfg.minGTrust)) return null;
+    const hostMin = Math.trunc(cfg.minGTrust);
+    return isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
+  }, [cfg]);
+
+  /** 일정·장소 조율 단계(모집 중)일 때만 미세 펄스 */
+  const pulseCoordinating = statusCorner === '모집 중';
+  const approvalParts = cfg ? approvalChipParts(cfg.approvalType) : null;
 
   return (
     <View style={s.meetRowWrap}>
       <Pressable
-        style={s.meetRowInner}
-        accessibilityRole="button"
         onPress={onPress}
-        accessibilityHint="모임 상세로 이동">
-        <View style={s.topRow}>
-          <View style={s.symbolCol}>
-            <View style={[s.symbolCircle, categoryLabel ? s.symbolCircleTall : s.symbolCircleCompact]}>
-              <LinearGradient
-                colors={[...GinitTheme.colors.brandGradient]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
-              />
-              <View style={s.symbolVeil} pointerEvents="none" />
-              <View style={s.symbolCircleColumn}>
-                <View style={[s.symbolCircleInner, categoryLabel ? s.symbolCircleInnerWithCat : null]}>
-                  <Ionicons
-                    name={glyph}
-                    size={categoryLabel ? 17 : 22}
-                    color={GinitTheme.colors.primary}
-                    style={categoryLabel ? s.symbolGlyphWithLabel : undefined}
-                  />
-                  {categoryLabel ? (
-                    <Text style={s.symbolCategoryText} numberOfLines={2}>
-                      {categoryLabel}
-                    </Text>
+        accessibilityRole="button"
+        accessibilityHint="모임 상세로 이동"
+        style={s.pressable}>
+        <View style={s.cardShadow}>
+          <View style={s.cardShell}>
+            <LinearGradient
+              colors={[...visual.gradient]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={s.accentStripe}
+            />
+            <View style={s.cardInner}>
+              <View style={s.zoneA}>
+                <View style={s.symbolCol}>
+                  <View style={s.categoryIconBubble} accessibilityLabel={m.categoryLabel?.trim() || '모임'}>
+                    <LinearGradient
+                      colors={[...visual.gradient]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 0, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Ionicons name={visual.icon} size={15} color={iconColor} style={s.categoryIconFg} />
+                  </View>
+                  {joined ? (
+                    <View style={s.joinedPill}>
+                      <Text style={s.joinedPillText}>참여</Text>
+                    </View>
                   ) : null}
                 </View>
-                <View style={s.symbolBarSection}>
-                  <View style={s.symbolParticipantTrack}>
-                    <View
-                      style={[
-                        s.symbolParticipantFill,
-                        { width: `${Math.round(capFill * 100)}%`, backgroundColor: barFillColor },
-                      ]}
-                    />
-                  </View>
-                  <Text style={s.symbolParticipantCaption} numberOfLines={1}>
-                    {peopleChip}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-          <View style={s.mainCol}>
-            <View style={s.titleRow}>
-              <Text style={s.heroTitle} numberOfLines={2}>
-                {m.title}
-              </Text>
-              <View style={s.cornerBadges}>
-                <View style={[s.statusBadgeBase, statusBadgeStyle.wrap]}>
-                  <Text style={[s.statusBadgeTextBase, statusBadgeStyle.text]} numberOfLines={1}>
-                    {statusCorner}
-                  </Text>
-                </View>
-                {joined ? (
-                  <View style={[s.progressBadge, { backgroundColor: GinitTheme.colors.primary }]}>
-                    <Text style={[s.progressBadgeText, s.progressBadgeTextLight]} numberOfLines={1}>
-                      참여중
+                <View style={s.zoneAMain}>
+                  <View style={s.titleRow}>
+                    <Text style={s.heroTitle} numberOfLines={2}>
+                      {m.title}
                     </Text>
+                    <View style={s.zoneARight}>
+                      <NeonHeadBadge statusLine={statusCorner} pulse={pulseCoordinating} />
+                    </View>
                   </View>
-                ) : null}
-              </View>
-            </View>
-            <View style={s.metaChipRow}>
-              <View style={s.metaChip}>
-                <Text style={s.metaChipText} numberOfLines={1}>
-                  {distanceChipText}
-                </Text>
-              </View>
-              {showDdayMeta ? (
-                <View style={[s.metaChip, s.metaDdayChip]}>
-                  <Text style={[s.metaChipText, s.metaDdayChipText]} numberOfLines={1}>
-                    {dday}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            {condChips.length > 0 ? (
-              <ScrollView
-                horizontal
-                nestedScrollEnabled
-                showsHorizontalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                style={s.condScrollView}
-                contentContainerStyle={s.condChipRow}>
-                {condChips.map((c) => (
-                  <View key={c.key} style={s.condChip} accessibilityLabel={c.label}>
-                    <Text style={s.condChipText} numberOfLines={1} ellipsizeMode="tail">
-                      {c.label}
+                  {m.isPublic === true && cfg ? (
+                    <View style={s.metaRow}>
+                      <Text style={[s.metaMuted, s.metaTextFlex]} numberOfLines={1} ellipsizeMode="tail">
+                        {[distanceLine, ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
+                      </Text>
+                      <View style={s.genderDock}>
+                        <GenderSymbolVisual
+                          ratio={cfg.genderRatio}
+                          hostGenderSnapshot={cfg.hostGenderSnapshot}
+                          compact
+                        />
+                      </View>
+                    </View>
+                  ) : (
+                    <Text style={s.metaMuted} numberOfLines={1}>
+                      {[distanceLine, m.isPublic === true && ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
                     </Text>
-                  </View>
-                ))}
-              </ScrollView>
-            ) : null}
-            <View style={s.distRow}>
+                  )}
+                </View>
+              </View>
+
               {m.isPublic === false ? (
-                <View style={s.lockPill}>
-                  <Text style={s.lockPillText}>비공개</Text>
+                <View style={s.privateRow}>
+                  <View style={s.infoChip}>
+                    <Ionicons name="lock-closed-outline" size={13} color={GinitTheme.colors.textSub} />
+                    <Text style={s.infoChipText}>비공개</Text>
+                  </View>
                 </View>
-              ) : null}
+              ) : cfg ? (
+                <>
+                  <View style={s.zoneB}>
+                    <View style={[s.infoChip, s.settlementChipShrink]}>
+                      <Ionicons name="wallet-outline" size={13} color={GinitTheme.colors.primary} />
+                      <Text style={[s.infoChipTextStrong, s.chipLabelMax]} numberOfLines={1}>
+                        {settlementCornerLabel(cfg)}
+                      </Text>
+                    </View>
+                    <View style={s.infoChip}>
+                      <Ionicons name="trending-up-outline" size={13} color={GinitTheme.colors.primary} />
+                      <Text style={s.infoChipTextStrong}>Lv.{cfg.minGLevel}+</Text>
+                    </View>
+                    {trustMin != null ? (
+                      <View style={s.infoChip}>
+                        <Ionicons name="ribbon-outline" size={13} color={GinitTheme.colors.primary} />
+                        <Text style={s.infoChipTextStrong}>신뢰≥{trustMin}</Text>
+                      </View>
+                    ) : null}
+                    {approvalParts ? (
+                      <View style={s.infoChip}>
+                        <Ionicons name={approvalParts.icon} size={13} color={GinitTheme.colors.primary} />
+                        <Text style={s.infoChipTextStrong}>{approvalParts.label}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </>
+              ) : (
+                <Text style={s.fallbackMeta} numberOfLines={1}>
+                  공개 조건을 불러올 수 없어요
+                </Text>
+              )}
             </View>
           </View>
         </View>
@@ -236,112 +340,64 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
 
 const s = StyleSheet.create({
   meetRowWrap: {
-    marginBottom: 14,
+    marginBottom: 10,
     borderRadius: GinitTheme.radius.card,
     backgroundColor: Platform.OS === 'android' ? GinitTheme.colors.surfaceStrong : 'transparent',
     ...GinitTheme.shadow.card,
   },
-  meetRowInner: {
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+  pressable: {
     borderRadius: GinitTheme.radius.card,
-    padding: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
-    gap: 7,
   },
-  topRow: {
+  cardShadow: {
+    borderRadius: GinitTheme.radius.card,
+    backgroundColor: GinitTheme.colors.surface,
+  },
+  cardShell: {
+    borderRadius: GinitTheme.radius.card,
+    overflow: 'hidden',
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  symbolCol: {
-    flexShrink: 0,
-  },
-  symbolCircle: {
-    width: 56,
-    borderRadius: 14,
-    overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
-    position: 'relative',
-  },
-  symbolCircleCompact: {
-    height: 70,
-    minHeight: 70,
-  },
-  symbolCircleTall: {
-    minHeight: 84,
-  },
-  symbolCircleColumn: {
-    flex: 1,
-    width: '100%',
-    minHeight: 0,
-    zIndex: 1,
-    flexDirection: 'column',
-  },
-  symbolCircleInner: {
-    flex: 1,
-    width: '100%',
-    minHeight: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-    gap: 2,
-  },
-  /** 막대 하단 고정 — 아이콘·카테고리명은 그 위 영역에서 세로 중앙 */
-  symbolCircleInnerWithCat: {
-    justifyContent: 'center',
-    paddingVertical: 4,
-  },
-  symbolGlyphWithLabel: {
-    marginTop: 0,
-  },
-  symbolCategoryText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#0f172a',
-    textAlign: 'center',
-    lineHeight: 11,
-    letterSpacing: -0.2,
-    opacity: 0.92,
-  },
-  symbolVeil: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.52)',
-  },
-  symbolBarSection: {
-    width: '100%',
     alignSelf: 'stretch',
-    flexShrink: 0,
-    paddingHorizontal: 6,
-    paddingTop: 4,
-    paddingBottom: 5,
-    gap: 3,
-    alignItems: 'stretch',
   },
-  symbolParticipantTrack: {
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: GinitTheme.colors.border,
-    overflow: 'hidden',
+  accentStripe: {
+    width: 4,
+    alignSelf: 'stretch',
   },
-  symbolParticipantFill: {
-    height: '100%',
-    borderRadius: 999,
-  },
-  symbolParticipantCaption: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: GinitTheme.colors.textMuted,
-    textAlign: 'center',
-    letterSpacing: -0.1,
-  },
-  mainCol: {
+  cardInner: {
     flex: 1,
     minWidth: 0,
-    gap: 5,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingLeft: 10,
+    gap: 6,
+    backgroundColor: GinitTheme.glassModal.inputFill,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: GinitTheme.colors.border,
+  },
+  zoneA: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  /** 카테고리 심볼 + 참여중 — 세로 스택(열 너비는 아이콘·pill 중 넓은 쪽), 아이콘은 가로 가운데 */
+  symbolCol: {
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 1,
+  },
+  zoneAMain: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  zoneARight: {
+    flexShrink: 0,
+    maxWidth: '44%',
+    alignItems: 'flex-end',
+    paddingTop: 1,
   },
   titleRow: {
     flexDirection: 'row',
@@ -349,137 +405,171 @@ const s = StyleSheet.create({
     gap: 8,
     minWidth: 0,
   },
+  categoryIconBubble: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+  },
+  categoryIconFg: {
+    zIndex: 1,
+  },
   heroTitle: {
     flex: 1,
     minWidth: 0,
-    fontSize: GinitTheme.typography.title.fontSize,
-    fontWeight: GinitTheme.typography.title.fontWeight,
-    letterSpacing: GinitTheme.typography.title.letterSpacing,
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+    lineHeight: 21,
     color: GinitTheme.colors.text,
   },
-  cornerBadges: {
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 1,
+  },
+  metaTextFlex: {
+    flex: 1,
+    minWidth: 0,
+  },
+  metaMuted: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.12,
+  },
+  genderDock: {
     flexShrink: 0,
-    alignItems: 'flex-end',
-    gap: 4,
-    maxWidth: 104,
-  },
-  statusBadgeBase: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 2,
+    paddingHorizontal: 5,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
     borderWidth: StyleSheet.hairlineWidth,
-    maxWidth: 104,
-  },
-  statusBadgeTomorrow: {
-    backgroundColor: GinitTheme.colors.accent2,
     borderColor: GinitTheme.colors.border,
   },
-  statusBadgeConfirmed: {
-    backgroundColor: GinitTheme.colors.primary,
-    borderColor: GinitTheme.colors.primary,
+  neonBadgeOuter: {
+    alignSelf: 'flex-end',
   },
-  statusBadgeCoordinating: {
-    backgroundColor: GinitTheme.colors.primarySoft,
-    borderColor: GinitTheme.colors.border,
+  neonBadgePulseWrap: {
+    shadowColor: 'rgba(134, 211, 183, 0.45)',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  statusBadgeTextBase: {
+  neonBadgeInner: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(134, 211, 183, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(134, 211, 183, 0.45)',
+    alignItems: 'flex-end',
+  },
+  neonBadgeStatus: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '900',
+    color: GinitTheme.colors.textSub,
+    letterSpacing: -0.2,
     textAlign: 'right',
   },
-  statusBadgeTextDark: {
-    color: GinitTheme.colors.text,
+  /** 카테고리 심볼(32)과 동일 너비로 정렬 */
+  joinedPill: {
+    width: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
   },
-  statusBadgeTextPrimary: {
+  joinedPillText: {
+    fontSize: 9,
+    fontWeight: '900',
     color: GinitTheme.colors.primary,
+    letterSpacing: -0.6,
+    lineHeight: 11,
   },
-  statusBadgeTextOnPrimary: {
-    color: GinitTheme.colors.textOnDark,
-  },
-  progressBadge: {
-    flexShrink: 0,
-    maxWidth: 104,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  progressBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  progressBadgeTextLight: { color: GinitTheme.colors.textOnDark },
-  metaChipRow: {
+  privateRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
-  metaDdayChip: {
-    backgroundColor: GinitTheme.colors.accent2,
-    borderColor: GinitTheme.colors.border,
+  zoneB: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    alignItems: 'center',
   },
-  metaDdayChipText: {
-    color: GinitTheme.colors.text,
-    fontWeight: '800',
-  },
-  metaChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: GinitTheme.colors.bgAlt,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    maxWidth: '100%',
-  },
-  metaChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: GinitTheme.colors.textSub,
-  },
-  condScrollView: {
-    flexGrow: 0,
-    maxHeight: 22,
-    marginTop: -1,
-  },
-  condChipRow: {
+  genderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingRight: 2,
+    justifyContent: 'center',
   },
-  condChip: {
-    flexShrink: 0,
-    maxWidth: 112,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+  genderIconPair: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  genderDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: GinitTheme.colors.borderStrong,
+  },
+  genderDotCompact: {
+    width: 2,
+    height: 2,
+    borderRadius: 1,
+    marginHorizontal: 1,
+    backgroundColor: GinitTheme.colors.borderStrong,
+  },
+  infoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: '100%',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: GinitTheme.colors.bgAlt,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
-  condChipText: {
+  infoChipText: {
     fontSize: 10,
     fontWeight: '800',
     color: GinitTheme.colors.textSub,
-    letterSpacing: -0.15,
+    letterSpacing: -0.12,
   },
-  distRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
-    minHeight: 0,
-  },
-  lockPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: GinitTheme.colors.primarySoft,
-  },
-  lockPillText: {
-    fontSize: 11,
-    fontWeight: '800',
+  infoChipTextStrong: {
+    fontSize: 10,
+    fontWeight: '900',
     color: GinitTheme.colors.primary,
+    letterSpacing: -0.12,
+  },
+  settlementChipShrink: {
+    flexShrink: 0,
+    maxWidth: '100%',
+  },
+  chipLabelMax: {
+    flexShrink: 1,
+    maxWidth: 120,
+  },
+  fallbackMeta: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
   },
 });

@@ -8,7 +8,7 @@ import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constant
 import { getHomeCategoryVisual, HOME_ORANGE, HOME_TRUST_BLUE, homeMeetingStatusBadgeLabel } from '@/src/lib/feed-home-visual';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import type { Meeting } from '@/src/lib/meetings';
-import { MEETING_CAPACITY_UNLIMITED, meetingParticipantCount } from '@/src/lib/meetings';
+import { MEETING_CAPACITY_UNLIMITED, meetingParticipantCount, meetingPrimaryStartMs } from '@/src/lib/meetings';
 
 const AnimatedView = Animated.createAnimatedComponent(View);
 
@@ -37,6 +37,27 @@ function glowAccentForMeeting(id: string): 'blue' | 'orange' {
   return Math.abs(h) % 2 === 0 ? 'blue' : 'orange';
 }
 
+/** 그리드·스트립 카드용 한 줄 일시(대표 일정 없으면 조율 중). */
+function formatMeetingScheduleLine(m: Meeting): string {
+  const date = m.scheduleDate?.trim() ?? '';
+  const time = m.scheduleTime?.trim() ?? '';
+  if (date && time) return `${date} ${time}`;
+  if (date) return date;
+  if (time) return time;
+  const ms = meetingPrimaryStartMs(m);
+  if (ms != null) {
+    return new Intl.DateTimeFormat('ko-KR', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(new Date(ms));
+  }
+  return '일정 조율 중';
+}
+
 export function HomeGlassMeetingGridCard({
   meeting: m,
   onPress,
@@ -53,6 +74,7 @@ export function HomeGlassMeetingGridCard({
 
   const isStrip = layout === 'strip';
   const metaLine = useMemo(() => capacitySummaryLine(m), [m]);
+  const scheduleLine = useMemo(() => formatMeetingScheduleLine(m), [m]);
 
   const glowAccent = glowAccentForMeeting(m.id);
   const pressed = useSharedValue(0);
@@ -85,7 +107,7 @@ export function HomeGlassMeetingGridCard({
         pressed.value = withTiming(0, { duration: 180 });
       }}
       accessibilityRole="button"
-      accessibilityLabel={`${m.title}, ${badgeLabel}`}
+      accessibilityLabel={`${m.title}, ${scheduleLine}, ${badgeLabel}`}
       style={isStrip ? styles.stripPressWrap : styles.gridPressWrap}>
       <AnimatedView style={[isStrip ? styles.cardStrip : styles.cardGrid, neonStyle]}>
         <LinearGradient colors={[...visual.gradient]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
@@ -117,8 +139,12 @@ export function HomeGlassMeetingGridCard({
                 { fontSize: titleSize, lineHeight: titleSize + 4 },
                 isStrip && styles.titleStrip,
               ]}
-              numberOfLines={isStrip ? 2 : 2}>
+              numberOfLines={1}
+              ellipsizeMode="tail">
               {m.title}
+            </Text>
+            <Text style={[styles.scheduleLine, { fontSize: metaSize }]} numberOfLines={1} ellipsizeMode="tail">
+              {scheduleLine}
             </Text>
             <Text style={[styles.distance, { fontSize: metaSize }]} numberOfLines={1}>
               {distLine}
@@ -226,6 +252,15 @@ const styles = StyleSheet.create({
   },
   titleStrip: {
     letterSpacing: -0.25,
+  },
+  scheduleLine: {
+    fontWeight: '700',
+    color: '#1e293b',
+    letterSpacing: -0.2,
+    textShadowColor: 'rgba(255, 255, 255, 0.85)',
+    textShadowOffset: { width: 0, height: 0.5 },
+    textShadowRadius: 2,
+    marginTop: 1,
   },
   distance: {
     fontWeight: '700',

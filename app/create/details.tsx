@@ -2,7 +2,7 @@
  * 모임 등록 — `/create/details`: `currentStep >= n`으로 이전 단계 카드도 유지(한눈에 수정 가능).
  * 확인 버튼만 해당 단계 `currentStep === n`일 때 표시. 카테고리 변경 시 Step 1로 리셋·하위 카드 제거.
  * 일정 확정(`scheduleStep`) 후 `placesStep`에서 장소 후보 카드를 채운 뒤 상세·등록(`detailStep`)으로 이동.
- * 단계 번호(표시): 영화 …→5(일정)→6(장소)→7(상세). 비영화 …→4(일정)→5(장소)→6(상세).
+ * 단계 번호: 4(일정)→5(장소)→6(상세). 영화도 동일(선행 장소 단계 없음 — 장소는 `placesStep` 한 번만).
  */
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -42,7 +42,6 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { EarlyPlaceSearch } from '@/components/create/EarlyPlaceSearch';
 import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { IntensityPicker } from '@/components/create/IntensityPicker';
@@ -87,14 +86,14 @@ import {
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import type { PublicMeetingDetailsConfig } from '@/src/lib/meetings';
-import { addMeeting } from '@/src/lib/meetings';
+import { addMeeting, normalizeProfileGenderToHostSnapshot } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
+import { getUserProfile, isGoogleSnsDemographicsIncomplete, type UserProfile } from '@/src/lib/user-profile';
 import { DateCandidateEditorCard, type DatePickerField } from '../../components/create/DateCandidateEditorCard';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
@@ -1920,8 +1919,6 @@ export default function CreateDetailsScreen() {
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
   const [movieCandidates, setMovieCandidates] = useState<SelectedMovieExtra[]>([]);
-  /** 영화 모임: 일정 단계 이전 선행 장소 후보 */
-  const [earlyPlaceCandidates, setEarlyPlaceCandidates] = useState<PlaceCandidate[]>([]);
   const [menuPreferences, setMenuPreferences] = useState<string[]>([]);
   const [sportIntensity, setSportIntensity] = useState<SportIntensityLevel>('normal');
   const [busy, setBusy] = useState(false);
@@ -1946,10 +1943,9 @@ export default function CreateDetailsScreen() {
     [paramCategoryLabel, selectedCategory?.label, specialtyKind],
   );
   const needsSpecialty = specialtyKind != null;
-  const needsMovieEarlyPlaces = specialtyKind === 'movie';
-  const scheduleStep: WizardStep = needsMovieEarlyPlaces ? 5 : 4;
-  const placesStep: WizardStep = needsMovieEarlyPlaces ? 6 : 5;
-  const detailStep: WizardStep = needsMovieEarlyPlaces ? 7 : 6;
+  const scheduleStep: WizardStep = 4;
+  const placesStep: WizardStep = 5;
+  const detailStep: WizardStep = 6;
 
   const resetWizardState = useCallback(() => {
     setTitle('');
@@ -1957,7 +1953,6 @@ export default function CreateDetailsScreen() {
     setMaxParticipants(4);
     setDescription('');
     setMovieCandidates([]);
-    setEarlyPlaceCandidates([]);
     setMenuPreferences([]);
     setSportIntensity('normal');
     setVotePayload(null);
@@ -2312,32 +2307,6 @@ export default function CreateDetailsScreen() {
     setCurrentStep(4);
   }, [effectiveMeetingTitle, isPublicMeeting, maxParticipants, minParticipants, title]);
 
-  const onEarlyPlacesFloatingConfirm = useCallback(() => {
-    setWizardError(null);
-    if (earlyPlaceCandidates.length === 0) {
-      setWizardError('장소 후보를 한 곳 이상 선택해 주세요.');
-      scrollToStep(4);
-      return;
-    }
-    animate();
-    setVotePayload({
-      placeCandidates: earlyPlaceCandidates.map((p) => ({
-        id: p.id,
-        placeName: p.placeName,
-        address: p.address,
-        latitude: p.latitude,
-        longitude: p.longitude,
-      })),
-      dateCandidates:
-        votePayload?.dateCandidates && votePayload.dateCandidates.length > 0
-          ? votePayload.dateCandidates.map((d) => ({ ...d }))
-          : [],
-    });
-    setVoteHydrateKey((k) => k + 1);
-    pendingScrollAfterStepRef.current = scheduleStep;
-    setCurrentStep(scheduleStep);
-  }, [earlyPlaceCandidates, scrollToStep, scheduleStep, seedDate, seedTime, votePayload?.dateCandidates]);
-
   const handleConfirmSchedule = useCallback(() => {
     setWizardError(null);
     const r = scheduleFormRef.current?.validateScheduleStep();
@@ -2445,9 +2414,10 @@ export default function CreateDetailsScreen() {
       return;
     }
 
+    let hostProfile: UserProfile | null = null;
     try {
-      const prof = await getUserProfile(userId.trim());
-      if (isGoogleSnsDemographicsIncomplete(prof)) {
+      hostProfile = await getUserProfile(userId.trim());
+      if (isGoogleSnsDemographicsIncomplete(hostProfile)) {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
@@ -2458,6 +2428,15 @@ export default function CreateDetailsScreen() {
     } catch {
       /* 네트워크 오류 시에는 등록 시도는 계속(서버/클라이언트 재검증) */
     }
+
+    const meetingConfigForSave: PublicMeetingDetailsConfig | null = isPublicMeeting
+      ? meetingConfig.genderRatio === 'SAME_GENDER_ONLY'
+        ? {
+            ...meetingConfig,
+            hostGenderSnapshot: normalizeProfileGenderToHostSnapshot(hostProfile?.gender ?? null),
+          }
+        : meetingConfig
+      : null;
 
     const vote = built.payload;
     const p0 = vote.placeCandidates[0];
@@ -2514,7 +2493,7 @@ export default function CreateDetailsScreen() {
         placeCandidates: vote.placeCandidates,
         dateCandidates: vote.dateCandidates,
         extraData,
-        meetingConfig: isPublicMeeting ? meetingConfig : null,
+        meetingConfig: meetingConfigForSave,
       });
       router.replace(`/meeting/${createdMeetingId}`);
     } catch (e) {
@@ -2594,8 +2573,6 @@ export default function CreateDetailsScreen() {
               contentContainerStyle={[
                 styles.scrollContent,
                 styles.wizardScrollPad,
-                needsMovieEarlyPlaces &&
-                  currentStep === 4 && { paddingBottom: 110 + insets.bottom },
                 currentStep === detailStep && { paddingBottom: 132 + insets.bottom },
               ]}>
               <View collapsable={false}>
@@ -2852,48 +2829,16 @@ export default function CreateDetailsScreen() {
                           style={StyleSheet.absoluteFillObject}
                         />
                       </View>
-                      <Text style={styles.wizardPrimaryBtnLabel}>
-                        {needsMovieEarlyPlaces ? '확인 · 장소 선택' : '확인 · 일정 설정'}
-                      </Text>
+                      <Text style={styles.wizardPrimaryBtnLabel}>확인 · 일정 설정</Text>
                     </Pressable>
                   ) : null}
                 </View>
               ) : null}
 
-              {currentStep >= 4 ? (
+              {currentStep >= scheduleStep ? (
                 <>
-                  {needsMovieEarlyPlaces ? (
-                    <View
-                      style={styles.wizardStepShell}
-                      onLayout={(e) => captureStepPosition(4, e)}>
-                      <Text style={styles.wizardStepBadge}>장소 선택</Text>
-                      <Text style={styles.wizardLockedHint}>
-                        모임 장소 후보를 검색해 추가하세요. 영화 모임은 주변 멀티플렉스를 먼저 보여 드려요.
-                      </Text>
-                      <VoteCandidateCard
-                        reduceHeavyEffects={reduceHeavyEffectsUI}
-                        outerStyle={[styles.wizardGlassCard, styles.earlyPlaceCardClip]}>
-                        <View style={styles.earlyPlaceSearchMount}>
-                          <EarlyPlaceSearch
-                            value={earlyPlaceCandidates}
-                            onChange={setEarlyPlaceCandidates}
-                            showCinemaPicks
-                            disabled={busy}
-                            parentScrollRef={mainScrollRef}
-                            parentScrollYRef={mainScrollYRef}
-                          />
-                        </View>
-                      </VoteCandidateCard>
-                    </View>
-                  ) : null}
-
-                  {currentStep >= scheduleStep ? (
                     <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(scheduleStep, e)}>
-                      <View
-                        style={[
-                          styles.scheduleStepHeader,
-                          needsMovieEarlyPlaces && currentStep < scheduleStep && styles.wizardFormHidden,
-                        ]}>
+                      <View style={styles.scheduleStepHeader}>
                         <Text style={styles.wizardStepBadge}>일정 설정</Text>
                         <Text style={styles.wizardLockedHint}>
                           {currentStep === scheduleStep
@@ -2905,10 +2850,7 @@ export default function CreateDetailsScreen() {
                       {currentStep === scheduleStep ? (
                         <>
                           <View
-                            style={[
-                              styles.wizardFormMount,
-                              needsMovieEarlyPlaces && currentStep < scheduleStep && styles.wizardFormHidden,
-                            ]}
+                            style={styles.wizardFormMount}
                             onLayout={(e) => {
                               formMountRelYRef.current = e.nativeEvent.layout.y;
                             }}>
@@ -2962,7 +2904,6 @@ export default function CreateDetailsScreen() {
                         </View>
                       ) : null}
                     </View>
-                  ) : null}
 
                   {currentStep >= placesStep ? (
                     <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(placesStep, e)}>
@@ -3046,6 +2987,25 @@ export default function CreateDetailsScreen() {
                           styles.detailStepDescriptionCardOuter,
                         ]}>
                         <View style={styles.detailDescriptionInputShell}>
+                          <View style={styles.detailDescriptionVoiceHeader}>
+                            <Pressable
+                              onPress={onPressVoiceInputDescription}
+                              disabled={busy}
+                              style={({ pressed }) => [
+                                styles.voiceBtn,
+                                busy && styles.addCandidateBtnDisabled,
+                                pressed && !busy && styles.voiceBtnPressed,
+                              ]}
+                              hitSlop={10}
+                              accessibilityRole="button"
+                              accessibilityLabel="모임 소개 음성 입력">
+                              {voiceDescriptionRecognizing ? (
+                                <VoiceWaveform active color={GinitTheme.colors.primary} />
+                              ) : (
+                                <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                              )}
+                            </Pressable>
+                          </View>
                           <TextInput
                             ref={detailDescriptionInputRef}
                             {...detailDescriptionDeferKb}
@@ -3055,7 +3015,6 @@ export default function CreateDetailsScreen() {
                             placeholderTextColor={INPUT_PLACEHOLDER}
                             style={[
                               styles.finalDescriptionInput,
-                              styles.finalDescriptionInputWithVoiceFab,
                               descFocused && styles.finalDescriptionInputFocused,
                             ]}
                             multiline
@@ -3064,24 +3023,6 @@ export default function CreateDetailsScreen() {
                             keyboardType="default"
                             inputMode="text"
                           />
-                          <Pressable
-                            onPress={onPressVoiceInputDescription}
-                            disabled={busy}
-                            style={({ pressed }) => [
-                              styles.voiceBtn,
-                              styles.detailDescriptionVoiceFab,
-                              busy && styles.addCandidateBtnDisabled,
-                              pressed && !busy && styles.voiceBtnPressed,
-                            ]}
-                            hitSlop={10}
-                            accessibilityRole="button"
-                            accessibilityLabel="모임 소개 음성 입력">
-                            {voiceDescriptionRecognizing ? (
-                              <VoiceWaveform active color={GinitTheme.colors.primary} />
-                            ) : (
-                              <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
-                            )}
-                          </Pressable>
                         </View>
                       </VoteCandidateCard>
                     </View>
@@ -3091,39 +3032,6 @@ export default function CreateDetailsScreen() {
               </View>
             </KeyboardAwareScreenScroll>
           </View>
-
-          {needsMovieEarlyPlaces && currentStep === 4 ? (
-            <Pressable
-              onPress={onEarlyPlacesFloatingConfirm}
-              disabled={earlyPlaceCandidates.length === 0 || busy}
-              style={({ pressed }) => [
-                styles.earlyPlaceFloatingBtn,
-                {
-                  bottom: (wizardError ? 88 : 28) + insets.bottom,
-                },
-                (earlyPlaceCandidates.length === 0 || busy) && styles.addCandidateBtnDisabled,
-                pressed &&
-                  earlyPlaceCandidates.length > 0 &&
-                  !busy &&
-                  styles.addCandidateBtnPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{
-                disabled: earlyPlaceCandidates.length === 0 || busy,
-              }}>
-              <View pointerEvents="none" style={styles.floatingCtaBg}>
-                <LinearGradient
-                  colors={GinitTheme.colors.ctaGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFillObject}
-                />
-              </View>
-              <Text style={styles.wizardPrimaryBtnLabel}>
-                {earlyPlaceCandidates.length}개의 장소로 일정 정하기
-              </Text>
-            </Pressable>
-          ) : null}
 
           {currentStep === detailStep ? (
             <Pressable
@@ -3959,25 +3867,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 4,
   },
-  /** 장소 단계: 페이지 스크롤과 중첩 스크롤 분리(flex 자식 shrink) */
-  earlyPlaceCardClip: {
-    minHeight: 0,
-    maxWidth: '100%',
-  },
-  earlyPlaceSearchMount: {
-    minHeight: 0,
-    flexShrink: 1,
-    alignSelf: 'stretch',
-    width: '100%',
-  },
-  wizardFormHidden: {
-    height: 0,
-    opacity: 0,
-    overflow: 'hidden',
-    pointerEvents: 'none',
-    marginTop: 0,
-    marginBottom: 0,
-  },
   aiTitlePickBlock: {
     marginTop: 10,
   },
@@ -4016,26 +3905,6 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     maxWidth: '100%',
   },
-  earlyPlaceFloatingBtn: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    zIndex: 50,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    borderRadius: 16,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: GinitTheme.glass.borderLight,
-    shadowColor: GinitTheme.glass.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 16,
-    elevation: 12,
-  },
   finalRegistrationGlass: {
     paddingVertical: 6,
     borderRadius: 22,
@@ -4049,15 +3918,14 @@ const styles = StyleSheet.create({
   detailDescriptionInputShell: {
     position: 'relative',
   },
-  detailDescriptionVoiceFab: {
-    position: 'absolute',
-    right: 6,
-    bottom: 6,
-    zIndex: 2,
-  },
-  finalDescriptionInputWithVoiceFab: {
-    paddingRight: 52,
-    paddingBottom: 48,
+  /** 상세 단계 소개 카드 — 음성 입력 우측 상단 */
+  detailDescriptionVoiceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingRight: 2,
+    paddingTop: 2,
+    marginBottom: 4,
   },
   finalDescriptionInput: {
     marginTop: 0,

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
 
-import type { Meeting } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, type Meeting } from '@/src/lib/meetings';
 
 /** 2026 홈 글래스 스펙 — Trust Blue / Energetic Orange */
 export const HOME_TRUST_BLUE = '#0052CC';
@@ -85,10 +85,15 @@ export function meetingIsTomorrowInSeoul(m: Meeting): boolean {
   return d === seoulTomorrowYmd();
 }
 
+/**
+ * 홈 카드 우측 상단 상태 한 줄( D-day 없음 ).
+ * 우선순위: 서울 기준 내일 일정 → 일정 확정 → 정원 마감(미확정) → 모집 중.
+ */
 export function homeMeetingStatusBadgeLabel(m: Meeting): string {
   if (meetingIsTomorrowInSeoul(m)) return '내일 모임';
-  if (m.scheduleConfirmed === true) return '확정';
-  return '조율 중';
+  if (m.scheduleConfirmed === true) return '일정 확정';
+  if (getMeetingRecruitmentPhase(m) === 'full') return '정원 마감';
+  return '모집 중';
 }
 
 /** 참가자 id → gLevel 대용 컬러(프로필 미조회 시 시각적 구분) */

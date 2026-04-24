@@ -588,7 +588,7 @@ export default function MeetingDetailScreen() {
       {
         icon: 'male-female-outline',
         label: '성별 비율',
-        value: formatPublicMeetingGenderSummary(d.genderRatio),
+        value: formatPublicMeetingGenderSummary(d.genderRatio, d.hostGenderSnapshot),
       },
       {
         icon: 'wallet-outline',

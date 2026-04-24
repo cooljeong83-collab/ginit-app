@@ -133,12 +133,12 @@ export function PublicMeetingDetailsCard({
 
   const setMembershipFeeDigits = useCallback(
     (raw: string) => {
-      const digits = raw.replace(/\D/g, '');
+      const digits = raw.replace(/\D/g, '').slice(0, 7);
       if (digits === '') {
         onChange({ ...value, membershipFeeWon: null });
         return;
       }
-      const n = Math.min(99_999_999, parseInt(digits, 10));
+      const n = Math.min(9_999_999, parseInt(digits, 10));
       onChange({ ...value, membershipFeeWon: Number.isFinite(n) ? n : null });
     },
     [onChange, value],
@@ -246,7 +246,7 @@ export function PublicMeetingDetailsCard({
                 placeholderTextColor={GinitTheme.glassModal.placeholder}
                 style={styles.feeInput}
                 keyboardType="number-pad"
-                maxLength={11}
+                maxLength={7}
                 editable
                 onFocus={() => setFocused('settlement')}
               />

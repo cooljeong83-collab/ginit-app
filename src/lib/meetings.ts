@@ -121,10 +121,15 @@ export type PublicMeetingGenderRatio = 'ALL' | 'SAME_GENDER_ONLY' | 'HALF_HALF';
 export type PublicMeetingSettlement = 'DUTCH' | 'HOST_PAYS' | 'INDIVIDUAL' | 'MEMBERSHIP_FEE';
 export type PublicMeetingApprovalType = 'INSTANT' | 'HOST_APPROVAL';
 
+/** `genderRatio === 'SAME_GENDER_ONLY'`일 때 주최자 성별(등록 시 스냅샷). 레거시 문서에는 없을 수 있음. */
+export type PublicMeetingHostGenderSnapshot = 'male' | 'female';
+
 export type PublicMeetingDetailsConfig = {
   /** 모집 연령대(멀티 선택). NONE이 있으면 제한 없음으로 해석 */
   ageLimit: PublicMeetingAgeLimit[];
   genderRatio: PublicMeetingGenderRatio;
+  /** 동성만 모집 시 주최자 성별(피드·상세 표시). 프로필 `gender`에서 등록 시 저장 */
+  hostGenderSnapshot?: PublicMeetingHostGenderSnapshot | null;
   settlement: PublicMeetingSettlement;
   /** `settlement === 'MEMBERSHIP_FEE'` 일 때 참가 회비(원, 정수) */
   membershipFeeWon?: number | null;
@@ -152,6 +157,23 @@ function isPublicMeetingApprovalType(x: unknown): x is PublicMeetingApprovalType
   return x === 'INSTANT' || x === 'HOST_APPROVAL';
 }
 
+function isPublicMeetingHostGenderSnapshot(x: unknown): x is PublicMeetingHostGenderSnapshot {
+  return x === 'male' || x === 'female';
+}
+
+/** 프로필·레거시 문자열 → 스냅샷. 알 수 없으면 null */
+export function normalizeProfileGenderToHostSnapshot(gender: string | null | undefined): PublicMeetingHostGenderSnapshot | null {
+  const raw = (gender ?? '').trim();
+  if (!raw) return null;
+  const u = raw.toUpperCase();
+  if (u === 'MALE' || u === 'M' || u === '남' || u === '남성') return 'male';
+  if (u === 'FEMALE' || u === 'F' || u === '여' || u === '여성') return 'female';
+  const l = raw.toLowerCase();
+  if (l === 'male') return 'male';
+  if (l === 'female') return 'female';
+  return null;
+}
+
 /**
  * Firestore `meetingConfig` → UI용. `null`이면 필드가 없거나 형식이 맞지 않음.
  */
@@ -171,7 +193,7 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
   if (settlement === 'MEMBERSHIP_FEE') {
     const raw = toFiniteInt(o.membershipFeeWon, NaN);
     membershipFeeWon =
-      Number.isFinite(raw) && raw >= 0 ? Math.min(99_999_999, Math.trunc(raw)) : null;
+      Number.isFinite(raw) && raw >= 0 ? Math.min(9_999_999, Math.trunc(raw)) : null;
   }
   const minGLevel = Math.max(1, Math.min(50, toFiniteInt(o.minGLevel, 1)));
   let minGTrust: number | null = null;
@@ -182,6 +204,17 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
   const requestMessageEnabled =
     o.requestMessageEnabled === true ? true : o.requestMessageEnabled === false ? false : null;
 
+  let hostGenderSnapshot: PublicMeetingHostGenderSnapshot | null = null;
+  let hasHostGenderKey = false;
+  if (Object.prototype.hasOwnProperty.call(o, 'hostGenderSnapshot')) {
+    hasHostGenderKey = true;
+    const h = o.hostGenderSnapshot;
+    if (h == null) hostGenderSnapshot = null;
+    else if (isPublicMeetingHostGenderSnapshot(h)) hostGenderSnapshot = h;
+    else if (typeof h === 'string') hostGenderSnapshot = normalizeProfileGenderToHostSnapshot(h);
+    else hostGenderSnapshot = null;
+  }
+
   return {
     ageLimit,
     genderRatio,
@@ -191,6 +224,7 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
     minGTrust,
     approvalType,
     requestMessageEnabled,
+    ...(hasHostGenderKey ? { hostGenderSnapshot } : {}),
   };
 }
 
@@ -249,9 +283,14 @@ export function formatPublicMeetingAgeSummary(ageLimit: PublicMeetingAgeLimit[])
     .join(', ');
 }
 
-export function formatPublicMeetingGenderSummary(g: PublicMeetingGenderRatio): string {
+export function formatPublicMeetingGenderSummary(
+  g: PublicMeetingGenderRatio,
+  hostGenderSnapshot?: PublicMeetingHostGenderSnapshot | null,
+): string {
   switch (g) {
     case 'SAME_GENDER_ONLY':
+      if (hostGenderSnapshot === 'male') return '남자';
+      if (hostGenderSnapshot === 'female') return '여자';
       return '동성만';
     case 'HALF_HALF':
       return '남녀 반반';

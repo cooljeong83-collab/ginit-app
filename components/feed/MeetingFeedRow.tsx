@@ -108,7 +108,7 @@ export function MeetingFeedRow({
     if (!cfg) return null;
     return [
       formatPublicMeetingAgeSummary(cfg.ageLimit),
-      formatPublicMeetingGenderSummary(cfg.genderRatio),
+      formatPublicMeetingGenderSummary(cfg.genderRatio, cfg.hostGenderSnapshot),
       formatPublicMeetingSettlementSummary(cfg.settlement, cfg.membershipFeeWon),
     ].join(' · ');
   }, [m]);
