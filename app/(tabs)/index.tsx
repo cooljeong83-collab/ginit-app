@@ -47,7 +47,8 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
-import { fetchMeetingsOnce, getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
 const MOCK_REGION_ROWS = [
@@ -142,7 +143,7 @@ export default function FeedScreen() {
 
   useEffect(() => {
     setLoading(true);
-    const unsub = subscribeMeetings(
+    const unsub = subscribeMeetingsHybrid(
       (list) => {
         setMeetings(list);
         setListError(null);
@@ -258,7 +259,7 @@ export default function FeedScreen() {
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const result = await fetchMeetingsOnce();
+      const result = await fetchMeetingsOnceHybrid();
       if (result.ok) {
         setMeetings(result.meetings);
         setListError(null);

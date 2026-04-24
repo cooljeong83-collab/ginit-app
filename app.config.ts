@@ -12,6 +12,10 @@ function pickExtra(): Record<string, string> {
 
   set('supabaseUrl', process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL);
   set('supabaseAnonKey', process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY);
+  set('meetingListSource', process.env.EXPO_PUBLIC_MEETING_LIST_SOURCE ?? process.env.MEETING_LIST_SOURCE);
+  set('categoriesSource', process.env.EXPO_PUBLIC_CATEGORIES_SOURCE ?? process.env.CATEGORIES_SOURCE);
+  set('profilesSource', process.env.EXPO_PUBLIC_PROFILE_SOURCE ?? process.env.PROFILE_SOURCE);
+  set('ledgerWrites', process.env.EXPO_PUBLIC_LEDGER_WRITES ?? process.env.LEDGER_WRITES);
   set('firebaseApiKey', process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? process.env.FIREBASE_API_KEY);
   set('firebaseAuthDomain', process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ?? process.env.FIREBASE_AUTH_DOMAIN);
   set('firebaseProjectId', process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? process.env.FIREBASE_PROJECT_ID);
@@ -114,7 +118,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       ...plugins,
       'expo-secure-store',
-      '@react-native-community/datetimepicker',
       '@react-native-google-signin/google-signin',
       [
         'expo-speech-recognition',
@@ -125,7 +128,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       [
-        '@mj-studio/react-native-naver-map',
+        '@mj-studio/react-native-naver-map/app.plugin.js',
         {
           client_id: naverClientId,
         },

@@ -41,8 +41,8 @@ import {
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, listAll, ref } from 'firebase/storage';
 
-import { publicEnv } from '@/src/config/public-env';
-import { ensureFirebaseAuthUserForStorage, getFirebaseAuth, getFirebaseStorage } from '@/src/lib/firebase';
+import { ensureFirebaseAuthUserForStorage, getFirebaseStorage } from '@/src/lib/firebase';
+import { uploadJpegBytesToFirebaseStorage } from '@/src/lib/firebase-storage-jpeg-upload';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirestoreDb, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -283,7 +283,7 @@ export async function sendMeetingChatTextMessage(
 const CHAT_IMAGE_MAX_WIDTH = 1280;
 const CHAT_IMAGE_JPEG_QUALITY = 0.68;
 
-/** RN `Blob`이 `Uint8Array`를 못 받아 Storage JS SDK 업로드가 실패하므로, SDK와 동일한 **resumable** REST 흐름을 씁니다. (`uploadType=media`는 이 API에서 404가 납니다.) */
+/** JPEG 바이트로 변환 후 `uploadBytes`(Firebase Storage JS SDK)로 업로드합니다. */
 function base64ToUint8Array(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
@@ -291,79 +291,6 @@ function base64ToUint8Array(b64: string): Uint8Array {
     out[i] = bin.charCodeAt(i);
   }
   return out;
-}
-
-function readStorageErrorDetail(res: Response, text: string): string {
-  let detail = `${res.status} ${res.statusText}`;
-  try {
-    const errJson = JSON.parse(text) as { error?: { message?: string } };
-    if (errJson.error?.message) detail = errJson.error.message;
-  } catch {
-    if (text?.trim()) detail = text.trim().slice(0, 200);
-  }
-  return detail;
-}
-
-async function uploadJpegViaFirebaseStorageRest(objectPath: string, bytes: Uint8Array): Promise<void> {
-  await ensureFirebaseAuthUserForStorage();
-  const user = getFirebaseAuth().currentUser;
-  if (!user) {
-    throw new Error('인증 준비에 실패했습니다. 잠시 후 다시 시도해 주세요.');
-  }
-  const idToken = await user.getIdToken();
-  const rawBucket = publicEnv.firebaseStorageBucket?.trim().replace(/^gs:\/\//, '') ?? '';
-  if (!rawBucket) {
-    throw new Error('Storage 버킷(EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET)이 설정되어 있지 않습니다.');
-  }
-
-  const bucketEnc = encodeURIComponent(rawBucket);
-  const nameEnc = encodeURIComponent(objectPath);
-  const startUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketEnc}/o?name=${nameEnc}`;
-
-  const metaBody = JSON.stringify({
-    name: objectPath,
-    contentType: 'image/jpeg',
-  });
-
-  const startRes = await fetch(startUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-      'X-Goog-Upload-Protocol': 'resumable',
-      'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(bytes.length),
-      'X-Goog-Upload-Header-Content-Type': 'image/jpeg',
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    body: metaBody,
-  });
-
-  if (!startRes.ok) {
-    const t = await startRes.text();
-    throw new Error(`Storage 업로드 실패: ${readStorageErrorDetail(startRes, t)}`);
-  }
-
-  const uploadUrl =
-    startRes.headers.get('x-goog-upload-url') ?? startRes.headers.get('X-Goog-Upload-URL') ?? '';
-  if (!uploadUrl.trim()) {
-    throw new Error('Storage 업로드 URL을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
-  }
-
-  const upRes = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'X-Goog-Upload-Command': 'upload, finalize',
-      'X-Goog-Upload-Offset': '0',
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': String(bytes.length),
-    },
-    body: bytes as unknown as BodyInit,
-  });
-
-  if (!upRes.ok) {
-    const t = await upRes.text();
-    throw new Error(`Storage 업로드 실패: ${readStorageErrorDetail(upRes, t)}`);
-  }
 }
 
 export type SendMeetingChatImageExtras = {
@@ -416,7 +343,7 @@ export async function sendMeetingChatImageMessage(
   const rand = Math.random().toString(36).slice(2, 10);
   const objectPath = `meetings/${mid}/chatImages/${Date.now()}_${rand}.jpg`;
   const storageRef = ref(getFirebaseStorage(), objectPath);
-  await uploadJpegViaFirebaseStorageRest(objectPath, bytes);
+  await uploadJpegBytesToFirebaseStorage(objectPath, bytes);
   const imageUrl = await getDownloadURL(storageRef);
 
   const msgRef = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);

@@ -31,6 +31,7 @@ import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { deleteFirebaseAuthUserBestEffort, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
+import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
@@ -110,8 +111,10 @@ export default function ProfileEditScreen() {
               : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
         setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
         setPhoneField(phoneDisplay);
-        const g = p.gender?.trim();
-        setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
+        const gRaw = p.gender?.trim() ?? '';
+        const gNorm =
+          gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
+        setGenderDemo(gNorm);
         const bd = p.birthDate as unknown;
         const bdDate =
           bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
@@ -162,8 +165,8 @@ export default function ProfileEditScreen() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
+        // allowsEditing 시 OS 크롭 화면에서 확인 버튼이 안 보이는 기기가 있어 끄고, 업로드 전에 정사각형 크롭합니다.
+        allowsEditing: false,
         quality: 1,
       });
       if (result.canceled) return;
@@ -175,6 +178,7 @@ export default function ProfileEditScreen() {
         userId: profilePk,
         localImageUri: uri,
         naturalWidth: asset?.width,
+        naturalHeight: asset?.height,
       });
       setPhotoUrl(url);
       await updateUserProfile(profilePk, { photoUrl: url });
@@ -196,12 +200,26 @@ export default function ProfileEditScreen() {
     setProfileBusy(true);
     try {
       await ensureUserProfile(profilePk);
-      await updateUserProfile(profilePk, {
+      const patch: Parameters<typeof updateUserProfile>[1] = {
         nickname: nickname.trim(),
         photoUrl: photoUrl.trim() || null,
-      });
+      };
+      /** SNS 가입 보완: 시트에서만 입력한 성별·생일은 별도 ‘인증 저장’ 전에도 닉네임 저장 시 함께 반영해야 뒤로 가도 사라지지 않음 */
+      if (
+        needsSnsDemographics &&
+        genderDemo &&
+        birthDemo.year > 0 &&
+        birthDemo.month > 0 &&
+        birthDemo.day > 0
+      ) {
+        patch.gender = genderDemo;
+        patch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
+      }
+      await updateUserProfile(profilePk, patch);
+      const p2 = await ensureUserProfile(profilePk);
+      setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p2));
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('저장됨', '닉네임을 반영했어요.');
+      Alert.alert('저장됨', '프로필을 반영했어요.');
       router.back();
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
@@ -209,7 +227,7 @@ export default function ProfileEditScreen() {
     } finally {
       setProfileBusy(false);
     }
-  }, [profilePk, nickname, photoUrl, router]);
+  }, [profilePk, nickname, photoUrl, router, needsSnsDemographics, genderDemo, birthDemo]);
 
   const canSendOtp = useMemo(() => {
     const normalized = normalizePhoneUserId(phoneField);

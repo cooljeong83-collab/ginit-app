@@ -2600,7 +2600,7 @@ export default function CreateDetailsScreen() {
                   </View>
                 ) : null}
                 {!catLoading && !catError && categories.length === 0 ? (
-                  <Text style={styles.wizardMuted}>등록된 카테고리가 없습니다. Firestore `categories`를 확인해 주세요.</Text>
+                  <Text style={styles.wizardMuted}>등록된 카테고리가 없습니다. Firestore `categories` 또는 Supabase `meeting_categories`를 확인해 주세요.</Text>
                 ) : null}
 
                 <View style={styles.catGrid}>

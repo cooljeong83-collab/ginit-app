@@ -20,7 +20,9 @@ import {
 
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { ensureFirestoreReadAuth, getFirebaseFirestore } from '@/src/lib/firebase';
+import { profilesSource } from '@/src/lib/hybrid-data-source';
 import { formatNormalizedPhoneKrDisplay } from '@/src/lib/phone-user-id';
+import { supabase } from '@/src/lib/supabase';
 
 export const USERS_COLLECTION = 'users';
 
@@ -499,9 +501,134 @@ export async function reactivateWithdrawnUserForOtpSignup(normalizedPhone: strin
   return phone;
 }
 
+function supabaseProfileJsonToFirestoreShape(row: Record<string, unknown>): Record<string, unknown> {
+  const sp = typeof row.signup_provider === 'string' ? row.signup_provider.trim().toLowerCase() : '';
+  return {
+    nickname: row.nickname,
+    photoUrl: row.photo_url,
+    phone: row.phone,
+    phoneVerifiedAt: row.phone_verified_at ?? null,
+    email: row.email,
+    displayName: row.display_name,
+    termsAgreedAt: row.terms_agreed_at ?? null,
+    gender: row.gender,
+    ageBand: row.age_band,
+    birthYear: row.birth_year,
+    birthMonth: row.birth_month,
+    birthDay: row.birth_day,
+    gLevel: row.g_level,
+    gXp: row.g_xp,
+    gTrust: row.g_trust,
+    gDna: row.g_dna,
+    meetingCount: row.meeting_count,
+    rankingPoints: row.ranking_points,
+    isWithdrawn: row.is_withdrawn === true,
+    status: row.is_withdrawn === true ? 'WITHDRAWN' : 'ACTIVE',
+    signupProvider: sp === 'google_sns' || sp === 'phone_otp' ? sp : null,
+  };
+}
+
+function tsToIsoOrNull(v: unknown): string | null {
+  const d = firestoreTimestampLikeToDate(v);
+  return d && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+function profilePatchToSupabaseJsonb(patch: {
+  nickname?: string;
+  photoUrl?: string | null;
+  gender?: string | null;
+  ageBand?: string | null;
+  birthYear?: number | null;
+  birthMonth?: number | null;
+  birthDay?: number | null;
+  birthDate?: unknown | null;
+  phone?: string | null;
+  phoneVerifiedAt?: unknown | null;
+  termsAgreedAt?: unknown | null;
+  rankingPoints?: number | null;
+  email?: string | null;
+  displayName?: string | null;
+}): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (patch.nickname !== undefined) {
+    const n = patch.nickname.trim();
+    if (!n) throw new Error('닉네임을 입력해 주세요.');
+    fields.nickname = n;
+  }
+  if (patch.photoUrl !== undefined) {
+    fields.photo_url =
+      patch.photoUrl === null || String(patch.photoUrl).trim() === '' ? null : String(patch.photoUrl).trim();
+  }
+  if (patch.gender !== undefined) {
+    fields.gender = patch.gender && String(patch.gender).trim() ? String(patch.gender).trim() : null;
+  }
+  if (patch.ageBand !== undefined) {
+    fields.age_band = patch.ageBand && String(patch.ageBand).trim() ? String(patch.ageBand).trim() : null;
+  }
+  if (patch.birthDate !== undefined) {
+    const d = firestoreTimestampLikeToDate(patch.birthDate);
+    if (d && Number.isFinite(d.getTime())) {
+      fields.birth_year = d.getUTCFullYear();
+      fields.birth_month = d.getUTCMonth() + 1;
+      fields.birth_day = d.getUTCDate();
+    }
+  }
+  if (patch.birthDate === undefined) {
+    if (patch.birthYear !== undefined && patch.birthYear != null && Number.isFinite(patch.birthYear)) {
+      fields.birth_year = Math.trunc(patch.birthYear);
+    }
+    if (patch.birthMonth !== undefined && patch.birthMonth != null && Number.isFinite(patch.birthMonth)) {
+      fields.birth_month = Math.trunc(patch.birthMonth);
+    }
+    if (patch.birthDay !== undefined && patch.birthDay != null && Number.isFinite(patch.birthDay)) {
+      fields.birth_day = Math.trunc(patch.birthDay);
+    }
+  }
+  if (patch.phone !== undefined) {
+    fields.phone = patch.phone && String(patch.phone).trim() ? String(patch.phone).trim() : null;
+  }
+  if (patch.phoneVerifiedAt !== undefined) {
+    const iso = tsToIsoOrNull(patch.phoneVerifiedAt);
+    if (iso != null) fields.phone_verified_at = iso;
+    else if (patch.phoneVerifiedAt === null) fields.phone_verified_at = null;
+  }
+  if (patch.termsAgreedAt !== undefined) {
+    const iso = tsToIsoOrNull(patch.termsAgreedAt);
+    if (iso != null) fields.terms_agreed_at = iso;
+    else if (patch.termsAgreedAt === null) fields.terms_agreed_at = null;
+  }
+  if (patch.rankingPoints !== undefined) {
+    const n = patch.rankingPoints;
+    fields.ranking_points = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  if (patch.email !== undefined) {
+    fields.email = patch.email && String(patch.email).trim() ? String(patch.email).trim() : null;
+  }
+  if (patch.displayName !== undefined) {
+    fields.display_name =
+      patch.displayName && String(patch.displayName).trim() ? String(patch.displayName).trim() : null;
+  }
+  return fields;
+}
+
+async function fetchUserProfileFromSupabaseRpc(appUserId: string): Promise<UserProfile | null> {
+  const id = appUserId.trim();
+  if (!id) return null;
+  const { data, error } = await supabase.rpc('get_profile_public_by_app_user_id', {
+    p_app_user_id: id,
+  });
+  if (error || data == null) return null;
+  const row = data as Record<string, unknown>;
+  if (typeof row === 'object' && !Array.isArray(row) && Object.keys(row).length === 0) return null;
+  return mapUserDoc(supabaseProfileJsonToFirestoreShape(row));
+}
+
 export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
   const id = phoneUserId.trim();
   if (!id) return null;
+  if (profilesSource() === 'supabase') {
+    return fetchUserProfileFromSupabaseRpc(id);
+  }
   const snap = await getDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id));
   if (!snap.exists()) return null;
   return mapUserDoc(snap.data() as Record<string, unknown>);
@@ -513,6 +640,14 @@ export async function getUserProfile(phoneUserId: string): Promise<UserProfile |
 export async function ensureUserProfile(phoneUserId: string): Promise<UserProfile> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
+  if (profilesSource() === 'supabase') {
+    const { error } = await supabase.rpc('ensure_profile_minimal', { p_app_user_id: id });
+    if (error) throw new Error(error.message);
+    const mapped = await getUserProfile(id);
+    if (!mapped) throw new Error('프로필을 불러올 수 없습니다.');
+    if (mapped.isWithdrawn === true) return mapped;
+    return mapped;
+  }
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const snap = await getDoc(dRef);
   if (snap.exists()) {
@@ -797,6 +932,20 @@ export async function updateUserProfile(
 ): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
+  if (profilesSource() === 'supabase') {
+    const mapped = await getUserProfile(id);
+    if (mapped?.isWithdrawn === true) {
+      throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
+    }
+    const fields = profilePatchToSupabaseJsonb(patch);
+    if (Object.keys(fields).length === 0) return;
+    const { error } = await supabase.rpc('upsert_profile_payload', {
+      p_app_user_id: id,
+      p_fields: fields,
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const existing = await getDoc(dRef);
   if (existing.exists()) {
@@ -936,6 +1085,24 @@ export async function updateUserProfile(
 export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
+  if (profilesSource() === 'supabase') {
+    const { error } = await supabase.rpc('upsert_profile_payload', {
+      p_app_user_id: id,
+      p_fields: {
+        is_withdrawn: true,
+        nickname: WITHDRAWN_NICKNAME,
+        photo_url: '',
+        phone: '',
+        email: '',
+        display_name: '',
+        gender: '',
+        age_band: '',
+        signup_provider: '',
+      },
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   await updateDoc(
     dRef,

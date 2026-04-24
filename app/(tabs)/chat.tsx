@@ -22,7 +22,7 @@ import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
-import { fetchMeetingsOnce, subscribeMeetings } from '@/src/lib/meetings';
+import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
@@ -57,7 +57,7 @@ export default function ChatTab() {
 
   useEffect(() => {
     setLoading(true);
-    const unsub = subscribeMeetings(
+    const unsub = subscribeMeetingsHybrid(
       (list) => {
         setMeetings(list);
         setListError(null);
@@ -157,7 +157,7 @@ export default function ChatTab() {
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const result = await fetchMeetingsOnce();
+      const result = await fetchMeetingsOnceHybrid();
       if (result.ok) {
         setMeetings(result.meetings);
         setListError(null);

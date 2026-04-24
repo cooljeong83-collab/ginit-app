@@ -7,6 +7,14 @@ import Constants from 'expo-constants';
 type Extra = {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
+  /** `firestore` | `supabase` — 공개 모임 피드 소스 */
+  meetingListSource?: string;
+  /** `firestore` | (비움=supabase) — 카테고리 마스터 소스 (Supabase URL·Anon 있으면 기본 supabase) */
+  categoriesSource?: string;
+  /** `firestore` | `supabase` — 프로필 읽기(getUserProfile) 소스 (기본 firestore) */
+  profilesSource?: string;
+  /** `firestore` 로 두면 모임·프로필을 Firestore에만 씀. 비우면 Supabase URL·Anon 있을 때 Ledger(Supabase) 사용 */
+  ledgerWrites?: string;
   firebaseApiKey?: string;
   firebaseAuthDomain?: string;
   firebaseProjectId?: string;
@@ -52,9 +60,45 @@ function extra(): Extra {
 const e = extra();
 
 /** 루트 `.env`의 EXPO_PUBLIC_* 폴백 (선택) */
-export const publicEnv = {
+export const publicEnv: {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  meetingListSource: string;
+  categoriesSource: string;
+  profilesSource: string;
+  ledgerWrites: string;
+  firebaseApiKey: string;
+  firebaseAuthDomain: string;
+  firebaseProjectId: string;
+  firebaseStorageBucket: string;
+  firebaseMessagingSenderId: string;
+  firebaseAppId: string;
+  publicAppEnv: string;
+  publicApiBaseUrl: string;
+  naverMapClientId: string;
+  naverLocalClientId: string;
+  naverLocalClientSecret: string;
+  naverLocalSearchCorsProxy: string;
+  naverMapsApiOrigin: string;
+  naverMapsGeocodePath: string;
+  naverSearchClientId: string;
+  naverSearchClientSecret: string;
+  googleWebClientId: string;
+  kobisKey: string;
+  tmdbApiKey: string;
+  expoAccessToken: string;
+  easProjectId: string;
+} = {
   supabaseUrl: e.supabaseUrl ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
   supabaseAnonKey: e.supabaseAnonKey ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
+  meetingListSource:
+    e.meetingListSource ?? process.env.EXPO_PUBLIC_MEETING_LIST_SOURCE ?? process.env.MEETING_LIST_SOURCE ?? '',
+  categoriesSource:
+    e.categoriesSource ?? process.env.EXPO_PUBLIC_CATEGORIES_SOURCE ?? process.env.CATEGORIES_SOURCE ?? '',
+  profilesSource:
+    e.profilesSource ?? process.env.EXPO_PUBLIC_PROFILE_SOURCE ?? process.env.PROFILE_SOURCE ?? '',
+  ledgerWrites:
+    e.ledgerWrites ?? process.env.EXPO_PUBLIC_LEDGER_WRITES ?? process.env.LEDGER_WRITES ?? '',
   firebaseApiKey: e.firebaseApiKey ?? process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? '',
   firebaseAuthDomain: e.firebaseAuthDomain ?? process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ?? '',
   firebaseProjectId: e.firebaseProjectId ?? process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? '',

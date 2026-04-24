@@ -9,7 +9,8 @@ import { deleteUser } from 'firebase/auth';
 
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { fetchMeetingsOnce, type Meeting } from '@/src/lib/meetings';
+import { fetchMeetingsOnceHybrid } from '@/src/lib/meetings-hybrid';
+import type { Meeting } from '@/src/lib/meetings';
 import { withdrawAnonymizeUserProfile, withdrawAnonymizeUserProfileByFirebaseUid } from '@/src/lib/user-profile';
 
 function isMeetingHost(meeting: Meeting, sessionUserIdNorm: string): boolean {
@@ -34,7 +35,7 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
   if (!raw) return { ok: false, message: '로그인 정보가 없습니다.' };
   const ns = normalizeParticipantId(raw);
 
-  const listRes = await fetchMeetingsOnce();
+  const listRes = await fetchMeetingsOnceHybrid();
   if (!listRes.ok) {
     return { ok: false, message: listRes.message };
   }
@@ -64,7 +65,7 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
   const uid = firebaseUid.trim();
   if (!uid) return { ok: false, message: '로그인 정보가 없습니다.' };
 
-  const listRes = await fetchMeetingsOnce();
+  const listRes = await fetchMeetingsOnceHybrid();
   if (!listRes.ok) {
     return { ok: false, message: listRes.message };
   }

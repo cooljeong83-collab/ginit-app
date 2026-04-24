@@ -1,0 +1,28 @@
+-- Firestore `categories` → Supabase `public.meeting_categories` 수동 반영용 SQL 템플릿입니다.
+--
+-- Firestore는 SQL에서 직접 SELECT 할 수 없습니다. 데이터를 SQL로 만들려면:
+--
+--   A) 자동 생성 (권장): Firestore를 읽어 INSERT 문을 stdout으로 냅니다.
+--        npm run print:categories-sql > supabase/seed/generated_categories.sql
+--      생성된 파일을 검토한 뒤 Supabase SQL Editor에서 실행하세요.
+--
+--   B) 자동 upsert (DB에 바로 씀): Node + 서비스 롤
+--        npm run migrate:categories:firestore-to-supabase
+--
+--   C) 수동: Firebase 콘솔에서 각 문서 id, label, emoji, order 를 보고
+--      아래 형식으로 한 줄씩 작성합니다. 작은따옴표는 '' 로 이스케이프.
+--
+-- 실행 전: `0006_meeting_categories.sql` 마이그레이션 적용 필요.
+--
+-- 예시 (주석 해제 후 값만 바꿔 한 문장으로 실행):
+--
+-- begin;
+-- insert into public.meeting_categories (id, label, emoji, sort_order)
+-- values
+--   ('문서ID', '표시이름', '이모지', 10)
+-- on conflict (id) do update set
+--   label = excluded.label,
+--   emoji = excluded.emoji,
+--   sort_order = excluded.sort_order,
+--   updated_at = now();
+-- commit;

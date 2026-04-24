@@ -40,7 +40,7 @@ import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
-import { subscribeMeetings } from '@/src/lib/meetings';
+import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 
 function previewLine(m: MeetingChatMessage): string {
@@ -128,7 +128,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!userId?.trim()) return;
-    return subscribeMeetings(
+    return subscribeMeetingsHybrid(
       (list) => setMeetings(list),
       () => {
         /* 목록 오류는 각 탭에서 처리 */

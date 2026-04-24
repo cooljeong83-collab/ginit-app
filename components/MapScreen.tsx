@@ -41,7 +41,8 @@ import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } fro
 import { centerRegionToNaverRegion, type CenterLatLngRegion } from '@/src/lib/naver-map-region';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 
 const MOCK_REGION_ROWS = [
   { id: 'gangnam', label: '강남구' },
@@ -225,7 +226,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     setLoading(true);
-    const unsub = subscribeMeetings(
+    const unsub = subscribeMeetingsHybrid(
       (list) => {
         setMeetings(list);
         setListError(null);

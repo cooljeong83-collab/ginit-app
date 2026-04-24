@@ -123,15 +123,18 @@ export async function ensureFirebaseAuthUserForStorage(): Promise<void> {
 export function getFirebaseFirestore(): Firestore {
   if (firestore) return firestore;
   const firebaseApp = getFirebaseApp();
-  // RN에서 Listen(WebChannel)이 불안정할 수 있어 long polling 자동 감지(필요 시 사용)
-  if (process.env.EXPO_OS === 'web') {
-    firestore = getFirestore(firebaseApp);
-    return firestore;
-  }
+  /**
+   * WebChannel 스트림(Listen)이 프록시·캐리어·일부 브라우저에서 끊기면
+   * `WebChannelConnection RPC 'Listen' transport errored` WARN이 반복될 수 있습니다.
+   * - iOS/Android: WebChannel을 쓰지 않고 long polling만 사용(안정·경고 감소).
+   * - Web: 자동 감지로 WebChannel 우선, 실패 시 long polling 전환(순수 getFirestore보다 유리).
+   */
+  const settings =
+    Platform.OS === 'web'
+      ? { experimentalAutoDetectLongPolling: true as const }
+      : { experimentalForceLongPolling: true as const };
   try {
-    firestore = initializeFirestore(firebaseApp, {
-      experimentalAutoDetectLongPolling: true,
-    });
+    firestore = initializeFirestore(firebaseApp, settings);
   } catch {
     firestore = getFirestore(firebaseApp);
   }

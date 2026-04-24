@@ -12,7 +12,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
-import { subscribeMeetings } from '@/src/lib/meetings';
+import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 
 export default function ProfileMeetingHistoryScreen() {
   const router = useRouter();
@@ -23,7 +23,7 @@ export default function ProfileMeetingHistoryScreen() {
 
   useEffect(() => {
     setLoading(true);
-    const unsub = subscribeMeetings(
+    const unsub = subscribeMeetingsHybrid(
       (list) => {
         setMeetings(list);
         setError(null);

@@ -53,6 +53,7 @@ import {
   PROFILE_REGISTER_INFO_QUERY,
 } from '@/src/lib/profile-register-info';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
+import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import {
   ensureUserProfile,
   firestoreTimestampLikeToDate,
@@ -146,8 +147,10 @@ export default function ProfileTab() {
             : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
       setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
       setPhoneField(phoneDisplay);
-      const g = p.gender?.trim();
-      setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
+      const gRaw = p.gender?.trim() ?? '';
+      const gNorm =
+        gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
+      setGenderDemo(gNorm);
       const bd = p.birthDate as unknown;
       const bdDate =
         bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
@@ -202,15 +205,24 @@ export default function ProfileTab() {
 
   useFocusEffect(
     useCallback(() => {
-      void refreshProfile();
+      let cancelled = false;
       let clearParamTimer: ReturnType<typeof setTimeout> | undefined;
-      if (isProfileRegisterInfoParamOn(registerInfoParam)) {
-        setAuthSheetVisible(true);
-        clearParamTimer = setTimeout(() => {
-          router.setParams({ [PROFILE_REGISTER_INFO_QUERY]: undefined });
-        }, 0);
-      }
+      void (async () => {
+        try {
+          await refreshProfile();
+        } catch {
+          /* refreshProfile 내부에서 상태 처리 */
+        }
+        if (cancelled) return;
+        if (isProfileRegisterInfoParamOn(registerInfoParam)) {
+          setAuthSheetVisible(true);
+          clearParamTimer = setTimeout(() => {
+            router.setParams({ [PROFILE_REGISTER_INFO_QUERY]: undefined });
+          }, 0);
+        }
+      })();
       return () => {
+        cancelled = true;
         if (clearParamTimer) clearTimeout(clearParamTimer);
       };
     }, [refreshProfile, registerInfoParam, router]),
@@ -273,8 +285,7 @@ export default function ProfileTab() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 1,
       });
       if (result.canceled) return;
@@ -286,6 +297,7 @@ export default function ProfileTab() {
         userId: profilePk,
         localImageUri: uri,
         naturalWidth: asset?.width,
+        naturalHeight: asset?.height,
       });
       await updateUserProfile(profilePk, { photoUrl: url });
       setPhotoUrl(url);
