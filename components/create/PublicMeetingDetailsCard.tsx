@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { GINIT_HIGH_TRUST_HOST_MIN } from '@/src/lib/ginit-trust';
 import type {
   PublicMeetingAgeLimit,
   PublicMeetingApprovalType,
@@ -23,7 +24,7 @@ const AGE_OPTIONS: { code: PublicMeetingAgeLimit; label: string }[] = [
   { code: 'NONE', label: '제한 없음' },
 ];
 
-type FocusKey = 'age' | 'gender' | 'settlement' | 'level' | 'approval' | null;
+type FocusKey = 'age' | 'gender' | 'settlement' | 'level' | 'trust' | 'approval' | null;
 
 function clampInt(n: number, min: number, max: number): number {
   const v = Number.isFinite(n) ? Math.trunc(n) : min;
@@ -239,6 +240,43 @@ export function PublicMeetingDetailsCard({
               style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
               accessibilityRole="button">
               <Text style={styles.stepBtnText}>+</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={[styles.block, blockFocusStyle(focused === 'trust', reduceHeavyEffects)]}>
+          <View style={styles.approvalRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>신뢰도 높은 모임</Text>
+              <Text style={styles.smallHint}>
+                켜면 gTrust <Text style={{ fontWeight: '900' }}>{GINIT_HIGH_TRUST_HOST_MIN}점</Text> 미만은 참여할 수
+                없어요.
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => {
+                setFocused('trust');
+                const on = typeof value.minGTrust === 'number' && value.minGTrust >= GINIT_HIGH_TRUST_HOST_MIN;
+                onChange({
+                  ...value,
+                  minGTrust: on ? null : GINIT_HIGH_TRUST_HOST_MIN,
+                });
+              }}
+              style={({ pressed }) => [
+                styles.toggleWrap,
+                typeof value.minGTrust === 'number' && value.minGTrust >= GINIT_HIGH_TRUST_HOST_MIN && styles.toggleWrapOn,
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="switch"
+              accessibilityState={{
+                checked: typeof value.minGTrust === 'number' && value.minGTrust >= GINIT_HIGH_TRUST_HOST_MIN,
+              }}>
+              <View
+                style={[
+                  styles.toggleKnob,
+                  typeof value.minGTrust === 'number' && value.minGTrust >= GINIT_HIGH_TRUST_HOST_MIN && styles.toggleKnobOn,
+                ]}
+              />
             </Pressable>
           </View>
         </View>

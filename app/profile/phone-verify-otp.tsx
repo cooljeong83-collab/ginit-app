@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { serverTimestamp } from 'firebase/firestore';
@@ -35,11 +35,6 @@ export default function ProfilePhoneVerifyOtpScreen() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const codeInputRef = useRef<TextInput>(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => codeInputRef.current?.focus(), 0);
-    return () => clearTimeout(t);
-  }, []);
 
   const canVerify = verificationId.trim().length > 0 && code.trim().length === 6 && !busy;
 

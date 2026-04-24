@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,11 +17,6 @@ export default function ProfilePhoneVerifyEntryScreen() {
   const [phoneDigits, setPhoneDigits] = useState('');
   const [busy, setBusy] = useState(false);
   const phoneInputRef = useRef<TextInput>(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => phoneInputRef.current?.focus(), 0);
-    return () => clearTimeout(t);
-  }, []);
 
   const phoneE164 = useMemo(() => {
     const local = phoneDigits.trim();

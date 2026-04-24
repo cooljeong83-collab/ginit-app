@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -26,12 +26,6 @@ export default function PhoneEntryScreen() {
   const [phoneDigits, setPhoneDigits] = useState('');
   const [busy, setBusy] = useState(false);
   const phoneInputRef = useRef<TextInput>(null);
-
-  useEffect(() => {
-    // 화면 진입 시 바로 입력 가능하도록 포커스
-    const t = setTimeout(() => phoneInputRef.current?.focus(), 0);
-    return () => clearTimeout(t);
-  }, []);
 
   const phoneE164 = useMemo(() => {
     // +82 + 010... 케이스를 normalizePhoneUserId에 맞춰 "0으로 시작하는 로컬" 형태로 조립
@@ -82,11 +76,7 @@ export default function PhoneEntryScreen() {
               <Text style={styles.dialText}>{dial}</Text>
               <Text style={styles.dialArrow}>▾</Text>
             </Pressable>
-            <Pressable
-              onPress={() => phoneInputRef.current?.focus()}
-              style={({ pressed }) => [styles.phonePress, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="전화번호 입력">
+            <View style={styles.phonePress}>
               <TextInput
                 ref={phoneInputRef}
                 value={phoneDigits}
@@ -102,9 +92,8 @@ export default function PhoneEntryScreen() {
                 enterKeyHint="done"
                 editable={!busy}
                 selectTextOnFocus
-                autoFocus
               />
-            </Pressable>
+            </View>
           </View>
 
           <Pressable

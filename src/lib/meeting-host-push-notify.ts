@@ -11,7 +11,8 @@ export type MeetingHostPushAction =
   | 'unconfirmed'
   | 'deleted'
   | 'dates_updated'
-  | 'places_updated';
+  | 'places_updated'
+  | 'auto_cancelled_unconfirmed';
 
 function hostNorm(hostUserId: string): string {
   return normalizeParticipantId(hostUserId.trim());
@@ -55,6 +56,11 @@ function copyForPush(action: MeetingHostPushAction, meetingTitle: string): { tit
       return { title: '일정 확정이 취소됐어요', body: `「${t}」확정이 취소됐습니다. 눌러서 확인해 보세요.` };
     case 'deleted':
       return { title: '모임이 삭제됐어요', body: `「${t}」모임이 주관자에 의해 삭제됐습니다.` };
+    case 'auto_cancelled_unconfirmed':
+      return {
+        title: '모임이 자동 종료됐어요',
+        body: `「${t}」모임이 확정되지 않아 자동 파기 됐습니다.`,
+      };
     case 'dates_updated':
       return { title: '일정 후보가 변경됐어요', body: `「${t}」일정 후보가 바뀌었습니다. 눌러서 확인해 보세요.` };
     default:

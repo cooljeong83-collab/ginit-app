@@ -57,6 +57,7 @@ import { resolveSpecialtyKind, specialtyStepBadge } from '@/src/lib/category-spe
 import {
   coerceDateCandidate,
   createPointCandidate,
+  fmtDateYmd,
   primaryScheduleFromDateCandidate,
   validateDateCandidate,
 } from '@/src/lib/date-candidate';
@@ -89,7 +90,6 @@ import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-can
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
-import { useAutoFocusOnStep } from '@/src/hooks/useAutoFocusOnStep';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 
@@ -277,18 +277,22 @@ function buildInitialEditorState(
   seedDate: string,
   seedTime: string,
 ): { placeCandidates: PlaceRowModel[]; dateCandidates: DateCandidate[] } {
+  const todayStr = fmtDateYmd(new Date());
+  const sdRaw = seedDate.trim();
+  const safeSeedDate = /^\d{4}-\d{2}-\d{2}$/.test(sdRaw) ? (sdRaw < todayStr ? todayStr : sdRaw) : todayStr;
+
   const hasPayload =
     (initialPayload?.placeCandidates?.length ?? 0) > 0 || (initialPayload?.dateCandidates?.length ?? 0) > 0;
   if (hasPayload && initialPayload) {
     const dateCandidates: DateCandidate[] =
       initialPayload.dateCandidates.length > 0
         ? initialPayload.dateCandidates.map((d) => {
-            const c = coerceDateCandidate(d, { startDate: seedDate, startTime: seedTime });
+            const c = coerceDateCandidate(d, { startDate: safeSeedDate, startTime: seedTime });
             const raw = d as { id?: string };
             const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : newId('date');
             return { ...c, id };
           })
-        : [createPointCandidate(newId('date'), seedDate, seedTime)];
+        : [createPointCandidate(newId('date'), safeSeedDate, seedTime)];
     const placeCandidates =
       initialPayload.placeCandidates.length > 0
         ? initialPayload.placeCandidates.map(placeRowFromCandidate)
@@ -297,7 +301,7 @@ function buildInitialEditorState(
   }
   return {
     placeCandidates: [],
-    dateCandidates: [createPointCandidate(newId('date'), seedDate, seedTime)],
+    dateCandidates: [createPointCandidate(newId('date'), safeSeedDate, seedTime)],
   };
 }
 
@@ -467,22 +471,25 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const dup = prev.some((d) => dateCandidateDupKey(d) === nextKey);
     if (dup) {
       Alert.alert('동일한 일정 후보가 있습니다.');
-      requestAnimationFrame(() => {
-        nlpIdeaInputRef.current?.focus?.();
-      });
       return;
     }
     const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsed);
+    for (let i = 0; i < next.length; i += 1) {
+      const err = validateDateCandidate(next[i], i);
+      if (err) {
+        Alert.alert(
+          '일시 확인',
+          `${err}\n\n자연어로 추가할 때도 오늘 이후이며, 지금부터 최소 1시간 이상 남은 일정만 등록할 수 있어요.`,
+        );
+        return;
+      }
+    }
     setDateCandidates(next);
     if (shouldAutoExpand && expandRowId) {
       setDateDetailExpanded((ex) => ({ ...ex, [expandRowId]: true }));
     }
     setNlpScheduleInput('');
     setNlpParsed(null);
-    // 후보를 추가/반영해도 입력 흐름이 끊기지 않게 포커스 유지
-    requestAnimationFrame(() => {
-      nlpIdeaInputRef.current?.focus?.();
-    });
     if (didAppend && !bare) {
       requestAnimationFrame(() => {
         InteractionManager.runAfterInteractions(() => {
@@ -555,20 +562,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: dateCandidatesOut } };
       },
-      focusScheduleIdeaInput: () => {
-        requestAnimationFrame(() => {
-          InteractionManager.runAfterInteractions(() => {
-            nlpIdeaInputRef.current?.focus?.();
-          });
-        });
-      },
-      focusPlaceQueryInput: () => {
-        requestAnimationFrame(() => {
-          InteractionManager.runAfterInteractions(() => {
-            placeQueryInputRef.current?.focus?.();
-          });
-        });
-      },
+      /** 키보드는 사용자가 입력창을 탭할 때만 뜨도록, 자동 포커스는 하지 않습니다. */
+      focusScheduleIdeaInput: () => {},
+      focusPlaceQueryInput: () => {},
       openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => {
         const q = suggestedQuery.trim() || '카페';
         setPlaceCandidates((prev) => {
@@ -771,7 +767,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   );
 
   useEffect(() => {
-    // 새 카드가 렌더된 다음 1회만 autoFocus 되도록 플래그를 정리합니다.
+    // 새 일정 행 추가 직후 `pendingAutoFocusDateIdRef` 정리(포커스는 사용자 탭 시에만).
     if (!pendingAutoFocusDateIdRef.current) return;
     const id = pendingAutoFocusDateIdRef.current;
     const hit = dateCandidates.some((d) => d.id === id);
@@ -792,11 +788,46 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     [dateCandidates],
   );
 
+  const iosPickerMinimumDate = useMemo(() => {
+    if (!picker) return undefined;
+    const row = dateCandidates.find((d) => d.id === picker.rowId);
+    const today0 = new Date();
+    today0.setHours(0, 0, 0, 0);
+    if (!row) return today0;
+    if (picker.field === 'startDate') return today0;
+    if (picker.field === 'endDate') {
+      const s = parseDateTimeStrings(row.startDate, row.startTime ?? '00:00');
+      const s0 = new Date(s.getFullYear(), s.getMonth(), s.getDate(), 0, 0, 0, 0);
+      return s0.getTime() > today0.getTime() ? s0 : today0;
+    }
+    return undefined;
+  }, [picker, dateCandidates]);
+
   const applyIosPicker = useCallback(() => {
     if (!picker) return;
     const { rowId, field } = picker;
+    const dates = dateCandidatesRef.current;
+    const row = dates.find((d) => d.id === rowId);
+    if (!row) {
+      setPicker(null);
+      return;
+    }
+    const idx = dates.findIndex((d) => d.id === rowId);
     const ymd = fmtDate(iosDraft);
     const hm = fmtTime(iosDraft);
+    const next: DateCandidate =
+      field === 'startDate'
+        ? { ...row, startDate: ymd }
+        : field === 'startTime'
+          ? { ...row, startTime: hm }
+          : field === 'endDate'
+            ? { ...row, endDate: ymd }
+            : { ...row, endTime: hm };
+    const err = validateDateCandidate(next, Math.max(0, idx));
+    if (err) {
+      Alert.alert('일시 확인', err);
+      return;
+    }
     if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
     else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
     else if (field === 'endDate') updateDateRow(rowId, { endDate: ymd });
@@ -806,32 +837,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
-
-  useEffect(() => {
-    if (wizardSegment !== 'schedule') return;
-    if (!showSchedule) return;
-    if (scheduleListOnly) return;
-    // 일정 후보 등록(자연어) 카드가 생성되면 바로 입력할 수 있게 포커스
-    const t = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        nlpIdeaInputRef.current?.focus?.();
-      });
-    }, Platform.OS === 'android' ? 140 : 80);
-    return () => clearTimeout(t);
-  }, [wizardSegment, showSchedule, scheduleListOnly]);
-
-  useEffect(() => {
-    if (wizardSegment !== 'places') return;
-    if (!showPlaces) return;
-    if (placesListOnly) return;
-    // 장소 후보 등록 카드가 생성되면 검색어 입력창에 바로 포커스
-    const t = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        placeQueryInputRef.current?.focus?.();
-      });
-    }, Platform.OS === 'android' ? 140 : 80);
-    return () => clearTimeout(t);
-  }, [wizardSegment, showPlaces, placesListOnly]);
 
   const placeThemeSeed = useMemo(() => {
     const label = (placeThemeLabel || '').trim();
@@ -1005,7 +1010,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           reduceHeavyEffects={reduceHeavyEffects}
           onOpenPicker={(field) => openPicker(d.id, field)}
           deadlineTick={deadlineTick}
-          autoFocusFirstInput={pendingAutoFocusDateIdRef.current === d.id}
           onSubmitLastFieldInCard={
             scheduleListOnly || Platform.OS !== 'web' ? undefined : () => focusNextDateCandidateAfterWebSubmit(d.id)
           }
@@ -1234,6 +1238,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 onChange={(_, date) => {
                   if (date) setIosDraft(date);
                 }}
+                minimumDate={iosPickerMinimumDate}
                 locale="ko-KR"
                 themeVariant="dark"
               />
@@ -1247,12 +1252,30 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           value={iosDraft}
           mode={picker.field === 'startDate' || picker.field === 'endDate' ? 'date' : 'time'}
           display={picker.field === 'startTime' || picker.field === 'endTime' ? 'spinner' : 'default'}
+          minimumDate={iosPickerMinimumDate}
           onChange={(event: DateTimePickerEvent, date) => {
             const { rowId, field } = picker;
             setPicker(null);
             if (event.type === 'dismissed' || !date) return;
             const ymd = fmtDate(date);
             const hm = fmtTime(date);
+            const dates = dateCandidatesRef.current;
+            const row = dates.find((d) => d.id === rowId);
+            if (!row) return;
+            const idx = dates.findIndex((d) => d.id === rowId);
+            const next: DateCandidate =
+              field === 'startDate'
+                ? { ...row, startDate: ymd }
+                : field === 'startTime'
+                  ? { ...row, startTime: hm }
+                  : field === 'endDate'
+                    ? { ...row, endDate: ymd }
+                    : { ...row, endTime: hm };
+            const err = validateDateCandidate(next, Math.max(0, idx));
+            if (err) {
+              Alert.alert('일시 확인', err);
+              return;
+            }
             if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
             else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
             else if (field === 'endDate') updateDateRow(rowId, { endDate: ymd });
@@ -1657,36 +1680,17 @@ export default function CreateDetailsScreen() {
     layoutAnimateEaseInEaseOut();
   }, [currentStep]);
 
-  useAutoFocusOnStep({
-    enabled: !busy && currentStep === 3,
-    targetRef: meetingTitleInputRef,
-  });
-
   useEffect(() => {
     if (busy) return;
     if (currentStep !== scheduleStep) return;
-    // 스텝 헤더를 위로 올린 뒤 첫 입력에 포커스
     scrollToStep(scheduleStep);
-    const t = setTimeout(() => {
-      scheduleFormRef.current?.focusScheduleIdeaInput?.();
-    }, Platform.OS === 'android' ? 140 : 80);
-    return () => clearTimeout(t);
   }, [busy, currentStep, scheduleStep, scrollToStep]);
 
   useEffect(() => {
     if (busy) return;
     if (currentStep !== placesStep) return;
     scrollToStep(placesStep);
-    const t = setTimeout(() => {
-      placesFormRef.current?.focusPlaceQueryInput?.();
-    }, Platform.OS === 'android' ? 160 : 90);
-    return () => clearTimeout(t);
   }, [busy, currentStep, placesStep, scrollToStep]);
-
-  useAutoFocusOnStep({
-    enabled: !busy && currentStep === detailStep,
-    targetRef: detailDescriptionInputRef,
-  });
 
   useEffect(() => {
     const target = pendingScrollAfterStepRef.current;
@@ -2207,7 +2211,6 @@ export default function CreateDetailsScreen() {
                         disabled={busy}
                         parentScrollRef={mainScrollRef}
                         parentScrollYRef={mainScrollYRef}
-                        autoFocusSearch={!busy && currentStep === 2}
                       />
                     ) : null}
                     {specialtyKind === 'food' ? (

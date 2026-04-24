@@ -44,6 +44,7 @@ import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-loc
 import type { LatLng } from '@/src/lib/geo-distance';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce, getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
 
@@ -173,6 +174,12 @@ export default function FeedScreen() {
     );
     return unsub;
   }, []);
+
+  useEffect(() => {
+    const uid = userId?.trim();
+    if (!uid || meetings.length === 0) return;
+    void sweepStalePublicUnconfirmedMeetingsForHost(uid, meetings);
+  }, [userId, meetings]);
 
   useEffect(() => {
     if (selectedCategoryId == null) return;

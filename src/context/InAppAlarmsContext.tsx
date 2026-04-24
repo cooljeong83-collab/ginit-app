@@ -38,6 +38,7 @@ import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-a
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
+import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetings } from '@/src/lib/meetings';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -142,6 +143,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       .sort()
       .join('\u0001');
   }, [meetings, userId]);
+
+  useEffect(() => {
+    const uid = userId?.trim();
+    if (!uid || meetings.length === 0) return;
+    void sweepStalePublicUnconfirmedMeetingsForHost(uid, meetings);
+  }, [userId, meetings]);
 
   useEffect(() => {
     if (!userId?.trim() || !persistReady) return;

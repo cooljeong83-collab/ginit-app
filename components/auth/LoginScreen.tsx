@@ -23,6 +23,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
 import { phoneOtpInlineStyles as otpStyles } from '@/components/auth/phoneOtpStyles';
@@ -133,6 +134,7 @@ export default function LoginScreen() {
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
   const otpInputRef = useRef<TextInput | null>(null);
+  const loginScrollRef = useRef<KeyboardAwareScrollView | null>(null);
   const fade = useRef(new Animated.Value(1)).current;
   const intro = useRef(new Animated.Value(0)).current;
   /** -1…1 → 좌우 갸우뚱(인사) */
@@ -219,7 +221,11 @@ export default function LoginScreen() {
     try {
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
-      requestAnimationFrame(() => otpInputRef.current?.focus());
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => {
+          loginScrollRef.current?.scrollToEnd?.(true);
+        });
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setOtpError(msg);
@@ -532,6 +538,7 @@ export default function LoginScreen() {
       <ScreenShell padded={false} style={styles.screen}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           <KeyboardAwareScreenScroll
+            ref={loginScrollRef}
             contentContainerStyle={[styles.scroll, loginScreenStyles.scrollTweak]}
             extraScrollHeight={12}
             extraHeight={22}>

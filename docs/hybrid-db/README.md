@@ -29,4 +29,5 @@
 
 ### 초기 스키마/마이그레이션
 - `supabase/migrations/0001_hybrid_init.sql` 참고
+- `supabase/migrations/0002_trust_penalty.sql`: `g_trust`·`penalty_count`·`is_restricted`·`trust_recovery_streak` 및 패널티/회복 RPC. **일반 클라이언트 JWT로는 `profiles`의 지표 컬럼을 직접 바꿀 수 없도록** `BEFORE UPDATE` 트리거로 막고, `apply_vote_xp`·패널티 RPC는 `set_config('ginit.skip_profile_metric_guard','1')`로 같은 트랜잭션 내에서만 갱신합니다. 패널티·회복 RPC의 `GRANT EXECUTE`는 **`service_role` 전용**이므로 앱에서는 호출하지 말고, Cloud Functions 등 백엔드에서만 호출하세요. 앱의 참가 제한은 Firestore `users`와 `joinMeeting` 게이트를 따릅니다.
 

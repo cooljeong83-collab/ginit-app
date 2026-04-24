@@ -10,6 +10,7 @@ import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetings } from '@/src/lib/meetings';
 
@@ -35,6 +36,12 @@ export default function ProfileMeetingHistoryScreen() {
     );
     return unsub;
   }, []);
+
+  useEffect(() => {
+    const uid = userId?.trim();
+    if (!uid || meetings.length === 0) return;
+    void sweepStalePublicUnconfirmedMeetingsForHost(uid, meetings);
+  }, [userId, meetings]);
 
   const joinedMeetings = useMemo(
     () => filterJoinedMeetings(meetings, userId),

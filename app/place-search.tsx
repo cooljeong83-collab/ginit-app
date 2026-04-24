@@ -69,14 +69,6 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
   const canConfirm =
     selected != null && selected.latitude != null && selected.longitude != null && !resolving;
 
-  useEffect(() => {
-    // 장소 후보 추가 직후 진입: 검색창에 즉시 포커스
-    const id = setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 160);
-    return () => clearTimeout(id);
-  }, []);
-
   const runSearch = useCallback(
     async (raw: string, opts?: { signal?: AbortSignal }) => {
       Keyboard.dismiss();
@@ -121,27 +113,17 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
       if (!seed) return undefined;
 
       const ac = new AbortController();
-      let focusTimer: ReturnType<typeof setTimeout> | undefined;
       const interaction = InteractionManager.runAfterInteractions(() => {
         void (async () => {
           setSelected(null);
           setError(null);
           await runSearch(seed, { signal: ac.signal });
-          if (ac.signal.aborted) return;
-          focusTimer = setTimeout(() => {
-            searchInputRef.current?.focus();
-            const len = seed.length;
-            searchInputRef.current?.setNativeProps({
-              selection: { start: len, end: len },
-            });
-          }, 140);
         })();
       });
 
       return () => {
         ac.abort();
         interaction.cancel?.();
-        if (focusTimer) clearTimeout(focusTimer);
       };
     }, [initialQuery, runSearch]),
   );

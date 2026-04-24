@@ -6,7 +6,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useIsFocused } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,6 +28,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
+import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
@@ -565,6 +566,57 @@ export default function MeetingDetailScreen() {
     if (!meeting || meeting.isPublic === false) return null;
     return parsePublicMeetingDetailsConfig(meeting.meetingConfig);
   }, [meeting]);
+
+  type PublicConditionRow = {
+    icon: ComponentProps<typeof Ionicons>['name'];
+    label: string;
+    value: string;
+    variant?: 'default' | 'trust';
+  };
+
+  const publicConditionRows = useMemo((): PublicConditionRow[] => {
+    if (!publicMeetingDetails) return [];
+    const d = publicMeetingDetails;
+    const highTrust = isHighTrustPublicMeeting(d);
+    const rows: PublicConditionRow[] = [
+      {
+        icon: 'calendar-outline',
+        label: '모집 연령대',
+        value: formatPublicMeetingAgeSummary(d.ageLimit),
+      },
+      {
+        icon: 'male-female-outline',
+        label: '성별 비율',
+        value: formatPublicMeetingGenderSummary(d.genderRatio),
+      },
+      {
+        icon: 'wallet-outline',
+        label: '정산 방식',
+        value: formatPublicMeetingSettlementSummary(d.settlement),
+      },
+      {
+        icon: 'ribbon-outline',
+        label: '참가 레벨',
+        value: `최소 Lv ${d.minGLevel}`,
+      },
+    ];
+    if (typeof d.minGTrust === 'number') {
+      rows.push({
+        icon: 'shield-checkmark-outline',
+        label: highTrust ? '신뢰도 (높은 모임)' : '최소 gTrust',
+        value: highTrust
+          ? `${d.minGTrust}점 이상 · 약속 이행이 검증된 멤버`
+          : `${d.minGTrust}점 이상`,
+        variant: highTrust ? 'trust' : 'default',
+      });
+    }
+    rows.push({
+      icon: 'checkmark-done-outline',
+      label: '승인 방식',
+      value: formatPublicMeetingApprovalSummary(d.approvalType),
+    });
+    return rows;
+  }, [publicMeetingDetails]);
 
   const representativeScheduleText = useMemo(() => {
     if (!meeting) return null;
@@ -1422,59 +1474,108 @@ export default function MeetingDetailScreen() {
             </View>
 
             <View style={styles.infoCard}>
-              <Text style={styles.infoCardTitle}>모임 등록 정보</Text>
-              <Text style={styles.infoRow}>
-                <Text style={styles.infoLabel}>카테고리 </Text>
-                {meeting.categoryLabel?.trim() || '—'}
-              </Text>
+              <View style={styles.infoCardHead}>
+                <LinearGradient
+                  colors={['#86D3B7', '#73C7FF']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.infoCardHeadAccent}
+                />
+                <View style={styles.infoCardHeadText}>
+                  <Text style={styles.infoCardTitle}>모임 등록 정보</Text>
+                  <Text style={styles.infoCardKicker}>호스트가 남긴 모집 조건을 한눈에 확인해요</Text>
+                </View>
+              </View>
+
+              <View style={styles.infoCategoryCard}>
+                <View style={styles.infoCategoryIconWrap}>
+                  <Ionicons name="pricetag-outline" size={20} color={GinitTheme.colors.primary} />
+                </View>
+                <View style={styles.infoCategoryTextCol}>
+                  <Text style={styles.infoMetaLabel}>카테고리</Text>
+                  <Text style={styles.infoMetaValue}>{meeting.categoryLabel?.trim() || '—'}</Text>
+                </View>
+              </View>
+
               <View style={styles.publicBadgeRow}>
                 <View style={[styles.miniBadge, meeting.isPublic === false && styles.miniBadgeMuted]}>
+                  <Ionicons
+                    name={meeting.isPublic === false ? 'lock-closed-outline' : 'globe-outline'}
+                    size={14}
+                    color={meeting.isPublic === false ? '#64748B' : GinitTheme.colors.primary}
+                    style={styles.miniBadgeIcon}
+                  />
                   <Text style={[styles.miniBadgeText, meeting.isPublic === false && styles.miniBadgeTextMuted]}>
                     {meeting.isPublic === false ? '비공개' : '공개 모집'}
                   </Text>
                 </View>
                 <View style={styles.miniBadge}>
+                  <Ionicons name="people-outline" size={14} color={GinitTheme.colors.primary} style={styles.miniBadgeIcon} />
                   <Text style={styles.miniBadgeText}>인원 {formatCapacityLine(meeting)}</Text>
                 </View>
               </View>
               {representativeScheduleText ? (
-                <Text style={styles.infoRowMuted}>{representativeScheduleText}</Text>
+                <View style={styles.scheduleHintRow}>
+                  <Ionicons name="time-outline" size={16} color="#64748B" />
+                  <Text style={[styles.infoRowMuted, styles.scheduleHintText]}>{representativeScheduleText}</Text>
+                </View>
               ) : null}
-              <Text style={styles.infoSectionLabel}>소개</Text>
+
+              <View style={styles.infoDivider} />
+
+              <Text style={styles.infoSectionLabelStrong}>소개</Text>
               {meeting.description?.trim() ? (
                 <Text style={styles.infoDescription}>{meeting.description.trim()}</Text>
               ) : (
                 <Text style={styles.infoRowMuted}>등록된 소개가 없어요.</Text>
               )}
 
-              {publicMeetingDetails ? (
-                <>
-                  <Text style={styles.infoSectionLabel}>상세 조건</Text>
-                  <Text style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>모집 연령대 </Text>
-                    {formatPublicMeetingAgeSummary(publicMeetingDetails.ageLimit)}
-                  </Text>
-                  <Text style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>성별 비율 </Text>
-                    {formatPublicMeetingGenderSummary(publicMeetingDetails.genderRatio)}
-                  </Text>
-                  <Text style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>정산 </Text>
-                    {formatPublicMeetingSettlementSummary(publicMeetingDetails.settlement)}
-                  </Text>
-                  <Text style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>참가 자격 </Text>
-                    {`최소 Lv ${publicMeetingDetails.minGLevel}`}
-                  </Text>
-                  <Text style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>승인 </Text>
-                    {formatPublicMeetingApprovalSummary(publicMeetingDetails.approvalType)}
-                  </Text>
+              {publicMeetingDetails && publicConditionRows.length > 0 ? (
+                <LinearGradient
+                  colors={['rgba(134, 211, 183, 0.28)', 'rgba(115, 199, 255, 0.14)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.conditionsPanel}>
+                  <View style={styles.conditionsPanelHeader}>
+                    <View style={styles.conditionsPanelTitleIcon}>
+                      <Ionicons name="sparkles-outline" size={18} color="#0f172a" />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.conditionsPanelTitle}>상세 조건</Text>
+                      <Text style={styles.conditionsPanelSubtitle}>참여 전 꼭 확인해 주세요</Text>
+                    </View>
+                  </View>
+                  <View style={styles.conditionsList}>
+                    {publicConditionRows.map((row, idx) => {
+                      const isTrust = row.variant === 'trust';
+                      const isLast = idx === publicConditionRows.length - 1;
+                      return (
+                        <View
+                          key={`${row.label}-${idx}`}
+                          style={[
+                            styles.condRow,
+                            !isLast && styles.condRowBorder,
+                            isTrust && styles.condRowTrust,
+                          ]}>
+                          <View style={[styles.condIconWrap, isTrust && styles.condIconWrapTrust]}>
+                            <Ionicons name={row.icon} size={19} color={isTrust ? '#9a3412' : '#0f172a'} />
+                          </View>
+                          <View style={styles.condTextCol}>
+                            <Text style={[styles.condLabel, isTrust && styles.condLabelTrust]}>{row.label}</Text>
+                            <Text style={[styles.condValue, isTrust && styles.condValueTrust]}>{row.value}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
                   {publicMeetingDetails.approvalType === 'HOST_APPROVAL' &&
                   publicMeetingDetails.requestMessageEnabled === true ? (
-                    <Text style={styles.infoRowMuted}>참가 신청 시 한 줄 메시지를 받아요.</Text>
+                    <View style={styles.condCallout}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={18} color="#0369a1" />
+                      <Text style={styles.condCalloutText}>참가 신청 시 호스트가 한 줄 메시지를 받아요.</Text>
+                    </View>
                   ) : null}
-                </>
+                </LinearGradient>
               ) : null}
 
               {(specialtyKind === 'food' || extraMenus.length > 0) && (
@@ -2513,30 +2614,146 @@ const styles = StyleSheet.create({
   sectionSpacedTight: { marginTop: 4, marginBottom: 0 },
   infoCard: {
     backgroundColor: '#fff',
-    borderRadius: 18,
-    padding: 16,
+    borderRadius: 20,
+    padding: 18,
     marginBottom: 20,
-    gap: 6,
-    shadowColor: 'rgba(15, 23, 42, 0.08)',
-    shadowOffset: { width: 0, height: 4 },
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+    shadowColor: 'rgba(15, 23, 42, 0.1)',
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowRadius: 20,
+    elevation: 4,
   },
-  infoCardTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+  infoCardHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
+  infoCardHeadAccent: { width: 5, height: 44, borderRadius: 3 },
+  infoCardHeadText: { flex: 1, minWidth: 0 },
+  infoCardTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  infoCardKicker: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#64748b', lineHeight: 17 },
+  infoCategoryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(248, 250, 252, 0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  infoCategoryIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(134, 211, 183, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoCategoryTextCol: { flex: 1, minWidth: 0 },
+  infoMetaLabel: { fontSize: 11, fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6 },
+  infoMetaValue: { marginTop: 4, fontSize: 16, fontWeight: '800', color: '#0f172a', letterSpacing: -0.2 },
+  scheduleHintRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  infoDivider: {
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    marginTop: 14,
+    marginBottom: 4,
+    borderRadius: 2,
+  },
+  infoSectionLabelStrong: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#64748b',
+    letterSpacing: 0.8,
+    marginTop: 8,
+    textTransform: 'uppercase',
+  },
   infoLabel: { fontWeight: '700', color: '#64748B' },
   infoRow: { fontSize: 14, color: '#1A1A1A', lineHeight: 21 },
-  infoRowMuted: { fontSize: 13, color: '#8B95A1', lineHeight: 19 },
+  infoRowMuted: { fontSize: 13, color: '#64748b', lineHeight: 19 },
+  scheduleHintText: { flex: 1 },
   infoSectionLabel: { fontSize: 12, fontWeight: '700', color: '#8B95A1', marginTop: 10 },
-  infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22 },
-  publicBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22, marginTop: 6 },
+  conditionsPanel: {
+    marginTop: 14,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(134, 211, 183, 0.5)',
+    overflow: 'hidden',
+  },
+  conditionsPanelHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  conditionsPanelTitleIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  conditionsPanelTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.35 },
+  conditionsPanelSubtitle: { marginTop: 2, fontSize: 12, fontWeight: '600', color: '#475569' },
+  conditionsList: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.95)',
+    overflow: 'hidden',
+  },
+  condRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 12 },
+  condRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth * 2, borderBottomColor: 'rgba(15, 23, 42, 0.06)' },
+  condRowTrust: {
+    backgroundColor: 'rgba(255, 237, 213, 0.55)',
+  },
+  condIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: 'rgba(241, 245, 249, 0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  condIconWrapTrust: {
+    backgroundColor: 'rgba(255, 247, 237, 0.98)',
+    borderColor: 'rgba(251, 146, 60, 0.35)',
+  },
+  condTextCol: { flex: 1, minWidth: 0 },
+  condLabel: { fontSize: 11, fontWeight: '800', color: '#64748b', letterSpacing: 0.4, textTransform: 'uppercase' },
+  condLabelTrust: { color: '#9a3412' },
+  condValue: { marginTop: 4, fontSize: 15, fontWeight: '800', color: '#0f172a', lineHeight: 21, letterSpacing: -0.2 },
+  condValueTrust: { color: '#7c2d12' },
+  condCallout: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(224, 242, 254, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+  },
+  condCalloutText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#0c4a6e', lineHeight: 19 },
+  publicBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   miniBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(0, 82, 204, 0.1)',
   },
+  miniBadgeIcon: { marginTop: 0 },
   miniBadgeMuted: { backgroundColor: '#F1F5F9' },
   miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.primary },
   miniBadgeTextMuted: { color: '#64748B' },

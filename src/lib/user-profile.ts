@@ -75,6 +75,13 @@ export type UserProfile = {
   gLevel?: number | null;
   gXp?: number | null;
   gTrust?: number | null;
+  /** 누적 패널티(노쇼·신고 승인 등) */
+  penaltyCount?: number | null;
+  /** 신뢰 정책상 모임 참여 제한 */
+  isRestricted?: boolean | null;
+  /** 체크인 완료 연속 횟수(3회마다 gTrust +5 회복) */
+  trustRecoveryStreak?: number | null;
+  trustRecoveryMeetingIds?: string[] | null;
   gDna?: string | null;
   meetingCount?: number | null;
   /** 시즌 랭킹 포인트 */
@@ -143,7 +150,7 @@ export function generateRandomNickname(): string {
   return `${a}${b}`;
 }
 
-function mapUserDoc(data: Record<string, unknown>): UserProfile {
+export function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const isPlainObject = (v: unknown): v is Record<string, unknown> =>
     !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -180,6 +187,17 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const gLevel = typeof data.gLevel === 'number' ? Math.trunc(data.gLevel) : null;
   const gXp = typeof data.gXp === 'number' ? Math.trunc(data.gXp) : null;
   const gTrust = typeof data.gTrust === 'number' ? Math.trunc(data.gTrust) : null;
+  const penaltyCount = typeof data.penaltyCount === 'number' ? Math.max(0, Math.trunc(data.penaltyCount)) : null;
+  const isRestricted = data.isRestricted === true ? true : data.isRestricted === false ? false : null;
+  const trustRecoveryStreak =
+    typeof data.trustRecoveryStreak === 'number' && Number.isFinite(data.trustRecoveryStreak)
+      ? Math.max(0, Math.trunc(data.trustRecoveryStreak))
+      : null;
+  const trustRecoveryMeetingIds = Array.isArray(data.trustRecoveryMeetingIds)
+    ? (data.trustRecoveryMeetingIds as unknown[])
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .map((x) => x.trim())
+    : null;
   const gDna = typeof data.gDna === 'string' ? data.gDna.trim() : '';
   const meetingCount = typeof data.meetingCount === 'number' ? Math.trunc(data.meetingCount) : null;
   const rankingPoints = typeof data.rankingPoints === 'number' ? Math.trunc(data.rankingPoints) : null;
@@ -238,6 +256,10 @@ function mapUserDoc(data: Record<string, unknown>): UserProfile {
     gLevel,
     gXp,
     gTrust,
+    penaltyCount,
+    isRestricted,
+    trustRecoveryStreak,
+    trustRecoveryMeetingIds,
     gDna: gDna || null,
     meetingCount,
     rankingPoints,
@@ -484,6 +506,10 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
     gLevel: 1,
     gXp: 0,
     gTrust: 100,
+    penaltyCount: 0,
+    isRestricted: false,
+    trustRecoveryStreak: 0,
+    trustRecoveryMeetingIds: [],
     gDna: 'Explorer',
     meetingCount: 0,
     rankingPoints: 0,
@@ -517,6 +543,10 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
     gLevel: 1,
     gXp: 0,
     gTrust: 100,
+    penaltyCount: 0,
+    isRestricted: false,
+    trustRecoveryStreak: 0,
+    trustRecoveryMeetingIds: [],
     gDna: 'Explorer',
     meetingCount: 0,
     rankingPoints: 0,
@@ -661,6 +691,10 @@ export async function applyGoogleSignupProfile(
     if (payload.gLevel === undefined) payload.gLevel = 1;
     if (payload.gXp === undefined) payload.gXp = 0;
     if (payload.gTrust === undefined) payload.gTrust = 100;
+    if (payload.penaltyCount === undefined) payload.penaltyCount = 0;
+    if (payload.isRestricted === undefined) payload.isRestricted = false;
+    if (payload.trustRecoveryStreak === undefined) payload.trustRecoveryStreak = 0;
+    if (payload.trustRecoveryMeetingIds === undefined) payload.trustRecoveryMeetingIds = [];
     if (payload.gDna === undefined) payload.gDna = 'Explorer';
     if (payload.meetingCount === undefined) payload.meetingCount = 0;
     if (payload.rankingPoints === undefined) payload.rankingPoints = 0;

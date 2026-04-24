@@ -77,6 +77,8 @@ export default function SignUpScreen() {
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
   const [verifiedFirebaseUid, setVerifiedFirebaseUid] = useState<string | null>(null);
+  const [displayNameBlockY, setDisplayNameBlockY] = useState<number | null>(null);
+  const [phoneBlockY, setPhoneBlockY] = useState<number | null>(null);
   const [genderY, setGenderY] = useState<number | null>(null);
   const [ageBandY, setAgeBandY] = useState<number | null>(null);
   const [submitY, setSubmitY] = useState<number | null>(null);
@@ -88,19 +90,15 @@ export default function SignUpScreen() {
     return `${left}@${emailDomain}`;
   }, [emailDomainMode, emailFull, emailLocal, emailDomain]);
 
-  const focusName = useCallback(() => {
-    requestAnimationFrame(() => {
-      displayNameInputRef.current?.focus();
-      if (Platform.OS === 'android') {
-        requestAnimationFrame(() => hintKoreanImeForFocusedInput());
-        setTimeout(() => hintKoreanImeForFocusedInput(), 60);
-      }
-    });
-  }, []);
+  const scrollToDisplayNameBlock = useCallback(() => {
+    if (displayNameBlockY == null) return;
+    scrollRef.current?.scrollToPosition(0, Math.max(0, displayNameBlockY - 14), true);
+  }, [displayNameBlockY]);
 
-  const focusPhone = useCallback(() => {
-    requestAnimationFrame(() => phoneInputRef.current?.focus());
-  }, []);
+  const scrollToPhoneBlock = useCallback(() => {
+    if (phoneBlockY == null) return;
+    scrollRef.current?.scrollToPosition(0, Math.max(0, phoneBlockY - 14), true);
+  }, [phoneBlockY]);
 
   const scrollToGender = useCallback(() => {
     if (genderY == null) return;
@@ -223,7 +221,11 @@ export default function SignUpScreen() {
       }
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
-      requestAnimationFrame(() => otpInputRef.current?.focus());
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollToEnd?.(true);
+        });
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setOtpError(msg);
@@ -362,9 +364,7 @@ export default function SignUpScreen() {
                 <View style={emailCombo.row}>
                   {emailDomainMode === 'manual' ? (
                     <>
-                      <Pressable
-                        onPress={() => emailInputRef.current?.focus()}
-                        style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
+                      <View style={emailCombo.leftWrap}>
                         <TextInput
                           ref={emailInputRef}
                           value={emailFull}
@@ -382,12 +382,12 @@ export default function SignUpScreen() {
                           returnKeyType="next"
                           enterKeyHint="next"
                           submitBehavior="blurAndSubmit"
-                      onFocus={() => scrollToFocused(emailInputRef)}
-                          onSubmitEditing={focusName}
+                          onFocus={() => scrollToFocused(emailInputRef)}
+                          onSubmitEditing={scrollToDisplayNameBlock}
                           editable={!busy}
                           selectTextOnFocus
                         />
-                      </Pressable>
+                      </View>
                       <Pressable
                         onPress={() => setDomainPickerOpen(true)}
                         disabled={busy}
@@ -400,9 +400,7 @@ export default function SignUpScreen() {
                     </>
                   ) : (
                     <>
-                      <Pressable
-                        onPress={() => emailInputRef.current?.focus()}
-                        style={({ pressed }) => [emailCombo.leftWrap, pressed && styles.pressed]}>
+                      <View style={emailCombo.leftWrap}>
                         <TextInput
                           ref={emailInputRef}
                           value={emailLocal}
@@ -421,11 +419,11 @@ export default function SignUpScreen() {
                           enterKeyHint="next"
                           submitBehavior="blurAndSubmit"
                           onFocus={() => scrollToFocused(emailInputRef)}
-                          onSubmitEditing={focusName}
+                          onSubmitEditing={scrollToDisplayNameBlock}
                           editable={!busy}
                           selectTextOnFocus
                         />
-                      </Pressable>
+                      </View>
                       <Text style={emailCombo.at}>@</Text>
                       <Pressable
                         onPress={() => setDomainPickerOpen(true)}
@@ -442,10 +440,10 @@ export default function SignUpScreen() {
                 <Text style={emailCombo.hint}>이메일은 로그인 아이디로 사용됩니다.</Text>
               </View>
 
-              <View style={styles.fieldBlock}>
+              <View style={styles.fieldBlock} onLayout={(e) => setDisplayNameBlockY(e.nativeEvent.layout.y)}>
                 <Text style={styles.fieldLabel}>이름 (필수)</Text>
                 <Pressable
-                  onPress={focusName}
+                  onPress={scrollToDisplayNameBlock}
                   style={({ pressed }) => [pressed && styles.pressed]}>
                   <TextInput
                     ref={displayNameInputRef}
@@ -470,7 +468,7 @@ export default function SignUpScreen() {
                     returnKeyType="next"
                     enterKeyHint="next"
                     blurOnSubmit={false}
-                    onSubmitEditing={focusPhone}
+                    onSubmitEditing={scrollToPhoneBlock}
                     {...(Platform.OS === 'web' ? ({ lang: 'ko' } as const) : {})}
                     editable={!busy}
                     selectTextOnFocus
@@ -478,7 +476,7 @@ export default function SignUpScreen() {
                 </Pressable>
               </View>
 
-              <View style={styles.fieldBlock}>
+              <View style={styles.fieldBlock} onLayout={(e) => setPhoneBlockY(e.nativeEvent.layout.y)}>
                 <Text style={styles.fieldLabel}>전화번호 (필수)</Text>
                 <View style={styles.phoneRow}>
                   <TextInput

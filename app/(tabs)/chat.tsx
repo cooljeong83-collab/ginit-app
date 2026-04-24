@@ -36,6 +36,7 @@ import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
+import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { fetchMeetingsOnce, subscribeMeetings } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -149,6 +150,12 @@ export default function ChatTab() {
     );
     return unsub;
   }, []);
+
+  useEffect(() => {
+    const uid = userId?.trim();
+    if (!uid || meetings.length === 0) return;
+    void sweepStalePublicUnconfirmedMeetingsForHost(uid, meetings);
+  }, [userId, meetings]);
 
   useEffect(() => {
     if (selectedCategoryId == null) return;

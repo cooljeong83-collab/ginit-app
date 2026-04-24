@@ -36,9 +36,17 @@ import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './f
 import { getFirebaseFirestore } from './firebase';
 import { notifyMeetingParticipantsOfHostActionFireAndForget } from './meeting-host-push-notify';
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
+import { validateDateCandidatesForSave, validatePrimaryScheduleForSave } from './date-candidate';
 import type { DateCandidate } from './meeting-place-bridge';
 import { normalizeParticipantId } from './app-user-id';
-import { getUserProfile, isUserPhoneVerified } from './user-profile';
+import {
+  effectiveGLevel,
+  effectiveGTrust,
+  GINIT_HIGH_TRUST_HOST_MIN,
+  isHighTrustPublicMeeting,
+  isUserTrustRestricted,
+} from './ginit-trust';
+import { getUserProfile, isUserPhoneVerified, type UserProfile } from './user-profile';
 
 export const MEETINGS_COLLECTION = 'meetings';
 
@@ -158,11 +166,52 @@ export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDeta
   const genderRatio = isPublicMeetingGenderRatio(o.genderRatio) ? o.genderRatio : 'ALL';
   const settlement = isPublicMeetingSettlement(o.settlement) ? o.settlement : 'DUTCH';
   const minGLevel = Math.max(1, Math.min(50, toFiniteInt(o.minGLevel, 1)));
+  let minGTrust: number | null = null;
+  if (typeof o.minGTrust === 'number' && Number.isFinite(o.minGTrust)) {
+    minGTrust = Math.max(0, Math.min(100, Math.trunc(o.minGTrust)));
+  }
   const approvalType = isPublicMeetingApprovalType(o.approvalType) ? o.approvalType : 'INSTANT';
   const requestMessageEnabled =
     o.requestMessageEnabled === true ? true : o.requestMessageEnabled === false ? false : null;
 
-  return { ageLimit, genderRatio, settlement, minGLevel, approvalType, requestMessageEnabled };
+  return { ageLimit, genderRatio, settlement, minGLevel, minGTrust, approvalType, requestMessageEnabled };
+}
+
+/**
+ * 공개 모임 참가 자격 (`joinMeeting` 게이트).
+ * @returns 막힐 때 사용자에게 보여줄 한국어 메시지, 통과 시 null
+ */
+export function getJoinGamificationBlockReason(
+  profile: UserProfile | null | undefined,
+  meetingData: Record<string, unknown>,
+): string | null {
+  if (isUserTrustRestricted(profile)) {
+    return '신뢰도 정책에 따라 일시적으로 모임 참여가 제한된 계정이에요. 고객센터 또는 안내를 확인해 주세요.';
+  }
+
+  if (meetingData.isPublic !== true) return null;
+
+  const cfg = parsePublicMeetingDetailsConfig(meetingData.meetingConfig);
+  if (!cfg) return null;
+
+  const gLevel = effectiveGLevel(profile);
+  if (gLevel < cfg.minGLevel) {
+    return `이 모임은 최소 Lv ${cfg.minGLevel} 이상만 참여할 수 있어요.`;
+  }
+
+  const trust = effectiveGTrust(profile);
+  const minT = cfg.minGTrust;
+  if (typeof minT === 'number' && Number.isFinite(minT)) {
+    const hostMin = Math.trunc(minT);
+    const needFinal = isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
+    if (trust < needFinal) {
+      return isHighTrustPublicMeeting(cfg)
+        ? `이 모임은 신뢰도 높은 모임으로, gTrust ${needFinal}점 이상만 참여할 수 있어요.`
+        : `이 모임은 최소 gTrust ${needFinal}점 이상만 참여할 수 있어요.`;
+    }
+  }
+
+  return null;
 }
 
 const AGE_SUMMARY_ORDER: PublicMeetingAgeLimit[] = ['TWENTIES', 'THIRTIES', 'FORTY_PLUS'];
@@ -607,6 +656,8 @@ export async function updateMeetingDateCandidates(
 ): Promise<void> {
   const id = meetingId.trim();
   if (!id) return;
+  const dateErr = validateDateCandidatesForSave(dateCandidates);
+  if (dateErr) throw new Error(dateErr);
   await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
     dateCandidates: dateCandidates.length ? stripUndefinedDeep(dateCandidates) : null,
   });
@@ -653,6 +704,11 @@ export async function joinMeeting(
   if (!isUserPhoneVerified(profile)) {
     throw new Error('전화번호 인증을 완료한 사용자만 모임에 참여할 수 있어요. 프로필에서 인증을 진행해 주세요.');
   }
+
+  const preSnap = await getDoc(ref);
+  if (!preSnap.exists()) throw new Error('모임을 찾을 수 없어요.');
+  const joinBlock = getJoinGamificationBlockReason(profile, preSnap.data() as Record<string, unknown>);
+  if (joinBlock) throw new Error(joinBlock);
 
   await runTransaction(getFirestoreDb(), async (transaction) => {
     const snap = await transaction.get(ref);
@@ -945,6 +1001,49 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
  * 채팅 서브컬렉션·Storage는 호출 측에서 먼저 비운 뒤 호출하세요.
  * 확정 여부와 관계없이 삭제합니다.
  */
+/** 모임 대표 일시(상단 `scheduledAt` 또는 scheduleDate+scheduleTime)의 epoch ms. 없으면 null. */
+export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>): number | null {
+  const ts = m.scheduledAt;
+  if (ts != null && typeof (ts as Timestamp).toMillis === 'function') {
+    return (ts as Timestamp).toMillis();
+  }
+  const d = m.scheduleDate?.trim() ?? '';
+  const t = m.scheduleTime?.trim() ?? '';
+  const parsed = parseScheduleToTimestamp(d, t);
+  return parsed ? parsed.toMillis() : null;
+}
+
+/**
+ * 공개·미확정이며 대표 일시가 이미 지난 모임을 주관자 세션에서 삭제합니다.
+ * 참가자에게는 `auto_cancelled_unconfirmed` 푸시가 발송됩니다.
+ */
+export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
+  meetingId: string,
+  hostPhoneUserId: string,
+): Promise<boolean> {
+  const mid = meetingId.trim();
+  const uid = hostPhoneUserId.trim();
+  if (!mid || !uid) return false;
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return false;
+  const data = snap.data() as Record<string, unknown>;
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsHost = normalizeParticipantId(uid) ?? uid;
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) return false;
+  if (data.isPublic !== true) return false;
+  if (data.scheduleConfirmed === true) return false;
+
+  const m = mapFirestoreMeetingDoc(snap.id, data);
+  const startMs = meetingPrimaryStartMs(m);
+  if (startMs == null || Date.now() < startMs) return false;
+
+  notifyMeetingParticipantsOfHostActionFireAndForget(m, 'auto_cancelled_unconfirmed', uid);
+  await deleteDoc(ref);
+  return true;
+}
+
 export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPhoneUserId: string): Promise<void> {
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
@@ -965,6 +1064,12 @@ export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPh
 }
 
 export async function addMeeting(input: CreateMeetingInput): Promise<string> {
+  const primaryErr = validatePrimaryScheduleForSave(input.scheduleDate, input.scheduleTime);
+  if (primaryErr) throw new Error(primaryErr);
+  if (input.dateCandidates?.length) {
+    const candErr = validateDateCandidatesForSave(input.dateCandidates);
+    if (candErr) throw new Error(candErr);
+  }
   const scheduledAt = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
 

@@ -1,7 +1,7 @@
 /**
  * 일시 후보 카드 — 8가지 type별 글래스 UI (VoteCandidatesForm 전용).
  */
-import { useCallback, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
+import { useCallback, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import {
   Platform,
   Pressable,
@@ -284,7 +284,6 @@ export function DateCandidateEditorCard({
   reduceHeavyEffects,
   onOpenPicker,
   deadlineTick,
-  autoFocusFirstInput = false,
   onSubmitLastFieldInCard,
 }: {
   d: DateCandidate;
@@ -297,7 +296,6 @@ export function DateCandidateEditorCard({
   reduceHeavyEffects: boolean;
   onOpenPicker: (field: DatePickerField) => void;
   deadlineTick: number;
-  autoFocusFirstInput?: boolean;
   /** 웹 텍스트 입력에서 마지막 필드의 Submit(엔터) — 다음 카드/필드로 넘길 때 */
   onSubmitLastFieldInCard?: () => void;
 }) {
@@ -327,20 +325,8 @@ export function DateCandidateEditorCard({
   const deferFor = (r: RefObject<TextInput | null> | undefined) =>
     r ? (deferKbByRef.get(r) ?? {}) : {};
 
-  const focusWebRef = useCallback((r: RefObject<TextInput | null> | null) => {
-    requestAnimationFrame(() => {
-      r?.current?.focus?.();
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!autoFocusFirstInput) return;
-    if (!expanded) return;
-    const id = requestAnimationFrame(() => {
-      firstInputRef.current?.focus?.();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [autoFocusFirstInput, expanded, d.type]);
+  /** 웹에서 엔터로 다음 칸으로 넘기던 자동 포커스는 제거했습니다(스크롤·탭으로 이동). */
+  const focusWebRef = useCallback((_r: RefObject<TextInput | null> | null) => {}, []);
 
   const renderWebPair = (
     dateVal: string,

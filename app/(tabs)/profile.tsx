@@ -1,10 +1,16 @@
+import { useFocusEffect } from '@react-navigation/native';
+import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   BackHandler,
+  Easing,
   Platform,
   Pressable,
   ScrollView,
@@ -33,9 +39,16 @@ import {
   wipeLocalAppData,
 } from '@/src/lib/account-deletion';
 import {
+  effectiveGTrust,
+  levelBarFillColorForTrust,
+  trustTierForUser,
+  xpProgressWithinLevel,
+} from '@/src/lib/ginit-trust';
+import {
   ensureUserProfile,
   isGoogleSnsDemographicsIncomplete,
   isUserPhoneVerified,
+  type UserProfile,
   updateUserProfile,
 } from '@/src/lib/user-profile';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -76,55 +89,121 @@ export default function ProfileTab() {
   const [otpError, setOtpError] = useState<string | null>(null);
   const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
 
-  useEffect(() => {
+  const [gTrust, setGTrust] = useState(100);
+  const [gXp, setGXp] = useState(0);
+  const [gLevel, setGLevel] = useState(1);
+  const [penaltyCount, setPenaltyCount] = useState(0);
+  const [isRestricted, setIsRestricted] = useState(false);
+  const prevTrustRef = useRef<number | null>(null);
+  const [trustDropFx, setTrustDropFx] = useState<{ delta: number; id: number } | null>(null);
+  const trustDropOpacity = useRef(new Animated.Value(0)).current;
+  const trustDropTranslate = useRef(new Animated.Value(0)).current;
+
+  const refreshProfile = useCallback(async () => {
     if (!profilePk) return;
+    try {
+      const p = await ensureUserProfile(profilePk);
+      setNickname(p.nickname);
+      setPhotoUrl(p.photoUrl ?? '');
+      setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+      setIsPhoneVerified(isUserPhoneVerified(p));
+      const phone = p.phone?.trim();
+      setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
+      setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
+      const g = p.gender?.trim();
+      setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
+      const bd = p.birthDate as unknown;
+      const bdDate =
+        bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
+          ? (bd as { toDate: () => Date }).toDate()
+          : null;
+      if (bdDate) {
+        setBirthDemo({ year: bdDate.getFullYear(), month: bdDate.getMonth() + 1, day: bdDate.getDate() });
+      } else {
+        const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+        const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+        const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+        if (y && m && d) setBirthDemo({ year: y, month: m, day: d });
+      }
+      const nextTrust = effectiveGTrust(p);
+      setGTrust(nextTrust);
+      setGXp(typeof p.gXp === 'number' && Number.isFinite(p.gXp) ? Math.trunc(p.gXp) : 0);
+      setGLevel(typeof p.gLevel === 'number' && Number.isFinite(p.gLevel) ? Math.max(1, Math.trunc(p.gLevel)) : 1);
+      setPenaltyCount(typeof p.penaltyCount === 'number' && Number.isFinite(p.penaltyCount) ? Math.max(0, Math.trunc(p.penaltyCount)) : 0);
+      setIsRestricted(p.isRestricted === true);
+    } catch {
+      setNickname('');
+      setPhotoUrl('');
+      setNeedsSnsDemographics(false);
+      setIsPhoneVerified(false);
+      setVerifiedPhoneLabel(null);
+      setPhoneField('');
+      setOtpVerificationId(null);
+      setOtpCode('');
+      setOtpError(null);
+      setGenderDemo(null);
+    }
+  }, [profilePk]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (!profilePk) return;
       try {
-        const p = await ensureUserProfile(profilePk);
+        await refreshProfile();
+      } finally {
         if (cancelled) return;
-        setNickname(p.nickname);
-        setPhotoUrl(p.photoUrl ?? '');
-        setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
-        setIsPhoneVerified(isUserPhoneVerified(p));
-        const phone = p.phone?.trim();
-        setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
-        setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
-        const g = p.gender?.trim();
-        setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
-        const bd = p.birthDate as unknown;
-        const bdDate =
-          bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
-            ? (bd as { toDate: () => Date }).toDate()
-            : null;
-        if (bdDate) {
-          setBirthDemo({ year: bdDate.getFullYear(), month: bdDate.getMonth() + 1, day: bdDate.getDate() });
-        } else {
-          const y = typeof p.birthYear === 'number' ? p.birthYear : null;
-          const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
-          const d = typeof p.birthDay === 'number' ? p.birthDay : null;
-          if (y && m && d) setBirthDemo({ year: y, month: m, day: d });
-        }
-      } catch {
-        if (!cancelled) {
-          setNickname('');
-          setPhotoUrl('');
-          setNeedsSnsDemographics(false);
-          setIsPhoneVerified(false);
-          setVerifiedPhoneLabel(null);
-          setPhoneField('');
-          setOtpVerificationId(null);
-          setOtpCode('');
-          setOtpError(null);
-          setGenderDemo(null);
-          // 기본값 유지
-        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [profilePk]);
+  }, [profilePk, refreshProfile]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshProfile();
+    }, [refreshProfile]),
+  );
+
+  useEffect(() => {
+    const prev = prevTrustRef.current;
+    if (prev != null && gTrust < prev) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setTrustDropFx({ delta: prev - gTrust, id: Date.now() });
+    }
+    prevTrustRef.current = gTrust;
+  }, [gTrust]);
+
+  useEffect(() => {
+    if (!trustDropFx) return;
+    trustDropOpacity.setValue(1);
+    trustDropTranslate.setValue(0);
+    Animated.parallel([
+      Animated.timing(trustDropTranslate, {
+        toValue: -28,
+        duration: 900,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(trustDropOpacity, {
+        toValue: 0,
+        duration: 900,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => setTrustDropFx(null));
+  }, [trustDropFx, trustDropOpacity, trustDropTranslate]);
+
+  const trustTier = useMemo(
+    () => trustTierForUser({ nickname: '', photoUrl: null, gTrust, isRestricted } as UserProfile),
+    [gTrust, isRestricted],
+  );
+  const xpBar = useMemo(
+    () => xpProgressWithinLevel({ nickname: '', photoUrl: null, gLevel, gXp } as UserProfile),
+    [gLevel, gXp],
+  );
+  const levelBarColor = useMemo(() => levelBarFillColorForTrust(gTrust), [gTrust]);
 
   const onSaveProfile = useCallback(async () => {
     if (!profilePk) {
@@ -397,6 +476,55 @@ export default function ProfileTab() {
           showsVerticalScrollIndicator={false}>
           <Text style={styles.screenTitle}>프로필</Text>
 
+          <View style={styles.trustCardWrap}>
+            <BlurView
+              intensity={Platform.OS === 'ios' ? 58 : 36}
+              tint="light"
+              style={StyleSheet.absoluteFillObject}
+              experimentalBlurMethod={Platform.OS === 'ios' ? 'dimezisBlurView' : undefined}
+            />
+            <LinearGradient
+              colors={['rgba(255,255,255,0.55)', 'rgba(255,255,255,0.1)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.trustCardInner}>
+              <View style={styles.trustCardTop}>
+                <Text style={styles.trustCardTitle}>나의 신뢰도</Text>
+                <View style={styles.trustTierPill}>
+                  <Text style={styles.trustTierPillText}>{trustTier.label}</Text>
+                </View>
+              </View>
+              <Text style={styles.trustScoreBig}>{gTrust}</Text>
+              <Text style={styles.trustScoreUnit}>gTrust 점수</Text>
+              {penaltyCount > 0 ? (
+                <Text style={styles.trustPenaltyHint}>누적 패널티 {penaltyCount}회 · 체크인 완료로 신뢰를 회복할 수 있어요</Text>
+              ) : (
+                <Text style={styles.trustPenaltyHint}>약속을 지키면 신뢰 점수가 유지돼요</Text>
+              )}
+              {isRestricted ? <Text style={styles.trustRestricted}>현재 모임 참여가 제한된 상태예요.</Text> : null}
+
+              <Text style={[styles.label, { marginTop: 14, color: '#475569' }]}>레벨 진행</Text>
+              <Text style={styles.levelLine}>
+                Lv {gLevel} · XP {gXp} / {xpBar.nextAt}
+              </Text>
+              <View style={styles.levelTrack}>
+                <View
+                  style={[styles.levelFill, { width: `${Math.round(xpBar.ratio * 100)}%`, backgroundColor: levelBarColor }]}
+                />
+              </View>
+            </LinearGradient>
+            {trustDropFx ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.trustDropFx,
+                  { opacity: trustDropOpacity, transform: [{ translateY: trustDropTranslate }] },
+                ]}>
+                <Text style={styles.trustDropFxText}>−{trustDropFx.delta}</Text>
+              </Animated.View>
+            ) : null}
+          </View>
+
           <GinitCard appearance="light" style={styles.snsGuideCard}>
             <Text style={styles.title}>모임 이용을 위한 정보</Text>
             <Text style={styles.hint}>
@@ -604,6 +732,94 @@ const styles = StyleSheet.create({
   scrollBottom: {
     paddingTop: 8,
     paddingBottom: 32,
+  },
+  trustCardWrap: {
+    marginBottom: 14,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    minHeight: 168,
+  },
+  trustCardInner: {
+    padding: 16,
+    paddingBottom: 18,
+  },
+  trustCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  trustCardTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  trustTierPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+  },
+  trustTierPillText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  trustScoreBig: {
+    fontSize: 44,
+    fontWeight: '900',
+    color: '#0f172a',
+    letterSpacing: -1,
+  },
+  trustScoreUnit: {
+    marginTop: -4,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  trustPenaltyHint: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+    lineHeight: 17,
+  },
+  trustRestricted: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#b91c1c',
+  },
+  levelLine: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  levelTrack: {
+    marginTop: 8,
+    height: 9,
+    borderRadius: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    overflow: 'hidden',
+  },
+  levelFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  trustDropFx: {
+    position: 'absolute',
+    right: 18,
+    top: 52,
+  },
+  trustDropFxText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#FF3B30',
   },
   screenTitle: {
     fontSize: 22,

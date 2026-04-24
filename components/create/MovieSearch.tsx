@@ -14,7 +14,6 @@ import {
 import {
   ActivityIndicator,
   Dimensions,
-  InteractionManager,
   Platform,
   Pressable,
   ScrollView,
@@ -247,8 +246,6 @@ export type MovieSearchProps = {
   parentScrollRef?: RefObject<ScrollView | null>;
   /** 부모 ScrollView의 `contentOffset.y` — `onScroll`에서 갱신 */
   parentScrollYRef?: RefObject<number>;
-  /** 마운트/패널 오픈 직후 검색 input에 포커스 */
-  autoFocusSearch?: boolean;
 };
 
 export function MovieSearch({
@@ -258,7 +255,6 @@ export function MovieSearch({
   disabled,
   parentScrollRef,
   parentScrollYRef,
-  autoFocusSearch = false,
 }: MovieSearchProps) {
   const [query, setQuery] = useState('');
   const [addingMore, setAddingMore] = useState(false);
@@ -286,17 +282,6 @@ export function MovieSearch({
   }, []);
 
   const pickerOpen = value.length === 0 || addingMore;
-
-  useEffect(() => {
-    if (!autoFocusSearch || disabled) return;
-    if (!pickerOpen) return;
-    const t = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        searchInputRef.current?.focus?.();
-      });
-    }, Platform.OS === 'android' ? 140 : 80);
-    return () => clearTimeout(t);
-  }, [autoFocusSearch, disabled, pickerOpen]);
 
   useEffect(() => {
     if (value.length === 0) {

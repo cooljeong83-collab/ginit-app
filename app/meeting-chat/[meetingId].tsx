@@ -250,9 +250,6 @@ export default function MeetingChatRoomScreen() {
     if (Platform.OS === 'android') {
       setAndroidEmojiIme((v) => !v);
     }
-    requestAnimationFrame(() => {
-      messageInputRef.current?.focus();
-    });
   }, []);
 
   useEffect(() => {
@@ -790,7 +787,6 @@ export default function MeetingChatRoomScreen() {
                     onPress={() => {
                       setPlusMenuOpen(false);
                       setDraft((v) => (v.trim() ? v : '정산 요청합니다. 각자 확인 부탁드려요!'));
-                      requestAnimationFrame(() => messageInputRef.current?.focus());
                     }}
                     style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
                     accessibilityRole="button">
