@@ -1,7 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -10,6 +10,7 @@ import {
   BackHandler,
   Easing,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -64,7 +65,6 @@ import { AuthService } from '@/src/services/AuthService';
 import { Timestamp, serverTimestamp } from 'firebase/firestore';
 
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
-import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 
 export default function ProfileTab() {
   const router = useRouter();
@@ -72,6 +72,7 @@ export default function ProfileTab() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { userId, authProfile, signOutSession } = useUserSession();
+  const scrollRef = useRef<ScrollView>(null);
   const profilePk = useMemo(() => {
     const u = userId?.trim();
     if (u) return u;
@@ -97,7 +98,6 @@ export default function ProfileTab() {
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
-  const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
   const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
@@ -121,6 +121,7 @@ export default function ProfileTab() {
   const [trustDropFx, setTrustDropFx] = useState<{ delta: number; id: number } | null>(null);
   const trustDropOpacity = useRef(new Animated.Value(0)).current;
   const trustDropTranslate = useRef(new Animated.Value(0)).current;
+  const [trustSectionY, setTrustSectionY] = useState<number | null>(null);
 
   const refreshProfile = useCallback(async () => {
     if (!profilePk) return;
@@ -242,26 +243,14 @@ export default function ProfileTab() {
   );
   const levelBarColor = useMemo(() => levelBarFillColorForTrust(gTrust), [gTrust]);
 
-  const onSaveProfile = useCallback(async () => {
-    if (!profilePk) {
-      Alert.alert('안내', '로그인 후 프로필을 저장할 수 있어요.');
-      return;
-    }
-    setProfileBusy(true);
-    try {
-      await ensureUserProfile(profilePk);
-      await updateUserProfile(profilePk, {
-        nickname: nickname.trim(),
-        photoUrl: photoUrl.trim() || null,
-      });
-      Alert.alert('저장됨', '닉네임과 프로필 사진 설정을 반영했어요.');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
-      Alert.alert('저장 실패', msg);
-    } finally {
-      setProfileBusy(false);
-    }
-  }, [profilePk, nickname, photoUrl]);
+  const onGoEditProfile = useCallback(() => {
+    router.push('/profile/edit');
+  }, [router]);
+
+  const onGoTrust = useCallback(() => {
+    if (trustSectionY == null) return;
+    scrollRef.current?.scrollTo({ y: Math.max(0, trustSectionY - 8), animated: true });
+  }, [trustSectionY]);
 
   useEffect(() => {
     if (authSheetVisible) setTermsConsentChecked(false);
@@ -416,44 +405,7 @@ export default function ProfileTab() {
     }
   }, [profilePk, otpVerificationId, otpCode, phoneField]);
 
-  const onPickAndUploadPhoto = useCallback(async () => {
-    if (!profilePk) {
-      Alert.alert('안내', '로그인 후 업로드할 수 있어요.');
-      return;
-    }
-    setPhotoUploadBusy(true);
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('권한 필요', '사진을 선택하려면 사진 보관함 권한이 필요합니다.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
-      });
-      if (result.canceled) return;
-      const asset = result.assets?.[0];
-      const uri = asset?.uri?.trim() ?? '';
-      if (!uri) throw new Error('이미지 정보를 가져오지 못했습니다.');
-
-      const url = await uploadProfilePhoto({
-        userId: profilePk,
-        localImageUri: uri,
-        naturalWidth: asset?.width,
-      });
-      setPhotoUrl(url);
-      await updateUserProfile(profilePk, { photoUrl: url });
-      Alert.alert('업로드 완료', '프로필 사진을 업데이트했어요.');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-      Alert.alert('업로드 실패', msg);
-    } finally {
-      setPhotoUploadBusy(false);
-    }
-  }, [profilePk]);
+  // 프로필 편집(닉네임/사진 업로드 등)은 `/profile/edit`에서 수행합니다.
 
   const onSignOut = useCallback(async () => {
     setBusy(true);
@@ -540,19 +492,110 @@ export default function ProfileTab() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <Text style={styles.screenTitle}>프로필</Text>
+          <View style={styles.headerWrap}>
+            <View style={styles.headerRow}>
+              <View style={styles.avatarWrap} accessibilityLabel="프로필 사진">
+                {photoUrl.trim() ? (
+                  <Image source={{ uri: photoUrl.trim() }} style={styles.avatar} contentFit="cover" />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarFallbackText}>{(nickname?.trim() || 'G').slice(0, 1)}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.headerTextCol}>
+                <Text style={styles.headerName} numberOfLines={1}>
+                  {nickname?.trim() || '사용자'}
+                </Text>
+                <Text style={styles.headerSub} numberOfLines={1}>
+                  {userId?.trim()
+                    ? userId
+                    : authProfile?.email?.trim()
+                      ? authProfile.email
+                      : authProfile?.firebaseUid?.trim()
+                        ? authProfile.firebaseUid
+                        : '(세션 없음)'}
+                </Text>
+              </View>
+              <Pressable
+                onPress={onGoEditProfile}
+                style={({ pressed }) => [styles.headerEditBtn, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="프로필 편집">
+                <Text style={styles.headerEditText}>프로필 편집</Text>
+              </Pressable>
+            </View>
+          </View>
 
-          <GinitCard appearance="light" style={styles.profileCard}>
-            <Text style={styles.title}>계정 정보</Text>
-            <Text style={styles.hint}>
-              {needsSnsDemographics
-                ? '닉네임과 프로필 사진은 SNS 연동 시 자동으로 채워질 수 있어요. 아래 서비스 이용 인증에서 성별·생년월일을 함께 저장할 수 있어요.'
-                : '닉네임과 프로필 사진(이미지 주소)을 변경할 수 있어요. 가입 직후에는 닉네임이 자동 생성될 수 있어요.'}
-            </Text>
+          <View style={styles.quickGrid}>
+            <Pressable
+              onPress={() => router.push('/profile/meeting-history')}
+              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="모임 히스토리">
+              <Ionicons name="time-outline" size={18} color={GinitTheme.colors.primary} />
+              <Text style={styles.quickLabel}>히스토리</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setAuthSheetVisible(true)}
+              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="서비스 이용 인증">
+              <Ionicons name="shield-checkmark-outline" size={18} color={GinitTheme.colors.primary} />
+              <Text style={styles.quickLabel}>정보 등록</Text>
+            </Pressable>
+            <Pressable
+              onPress={onGoTrust}
+              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="나의 신뢰도">
+              <Ionicons name="pulse-outline" size={18} color={GinitTheme.colors.primary} />
+              <Text style={styles.quickLabel}>신뢰도</Text>
+            </Pressable>
+            <Pressable
+              onPress={onSignOut}
+              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="로그아웃">
+              <Ionicons name="log-out-outline" size={18} color={GinitTheme.colors.primary} />
+              <Text style={styles.quickLabel}>로그아웃</Text>
+            </Pressable>
+            <Pressable
+              onPress={onRequestDeleteAccount}
+              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="회원 탈퇴">
+              <Ionicons name="trash-outline" size={18} color={GinitTheme.colors.primary} />
+              <Text style={styles.quickLabel}>회원 탈퇴</Text>
+            </Pressable>
+          </View>
 
+          {meetingAuthGateReady && !meetingAuthComplete ? (
+            <Pressable
+              onPress={() => setAuthSheetVisible(true)}
+              style={({ pressed }) => [styles.authMenuRow, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="서비스 이용 인증">
+              <View style={styles.authMenuOrangeBadge}>
+                <View style={styles.authMenuOrangeInner} />
+              </View>
+              <View style={styles.authMenuTextCol}>
+                <Text style={styles.authMenuTitle}>서비스 이용 인증</Text>
+                <Text style={styles.authMenuSub}>모임 이용 동의와 전화 인증을 완료해 주세요</Text>
+              </View>
+              <Text style={styles.authMenuChevron}>›</Text>
+            </Pressable>
+          ) : null}
+
+          <GinitCard
+            appearance="light"
+            style={styles.profileCard}
+            onLayout={(e: LayoutChangeEvent) => setTrustSectionY(e.nativeEvent.layout.y)}>
+            <Text style={styles.sectionTitle}>나의 신뢰도</Text>
             <View style={styles.trustInlineSection}>
               {trustDropFx ? (
                 <Animated.View
@@ -565,7 +608,7 @@ export default function ProfileTab() {
                 </Animated.View>
               ) : null}
               <View style={styles.trustCardTop}>
-                <Text style={styles.trustCardTitle}>나의 신뢰도</Text>
+                <Text style={styles.trustCardTitle}>현재 점수</Text>
                 <View style={styles.trustTierPill}>
                   <Text style={styles.trustTierPillText}>{trustTier.label}</Text>
                 </View>
@@ -585,96 +628,23 @@ export default function ProfileTab() {
               </Text>
               <View style={styles.levelTrack}>
                 <View
-                  style={[styles.levelFill, { width: `${Math.round(xpBar.ratio * 100)}%`, backgroundColor: levelBarColor }]}
+                  style={[
+                    styles.levelFill,
+                    { width: `${Math.round(xpBar.ratio * 100)}%`, backgroundColor: levelBarColor },
+                  ]}
                 />
               </View>
             </View>
-
-            <Text style={styles.label}>회원 ID</Text>
-            <Text style={styles.phone}>
-              {userId?.trim()
-                ? userId
-                : authProfile?.email?.trim()
-                  ? authProfile.email
-                  : authProfile?.firebaseUid?.trim()
-                    ? authProfile.firebaseUid
-                    : '(없음)'}
-            </Text>
-
-            <Text style={styles.label}>닉네임</Text>
-            <TextInput
-              value={nickname}
-              onChangeText={setNickname}
-              placeholder="모임에서 보이는 이름"
-              placeholderTextColor="#94a3b8"
-              style={styles.input}
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={24}
-              keyboardType="default"
-              inputMode="text"
-            />
-
-            <Text style={styles.label}>프로필 사진 URL (선택)</Text>
-            <Text style={styles.subHint}>HTTPS 이미지 주소를 넣으면 모임 참여자 목록에 표시돼요.</Text>
-            <GinitButton
-              title={photoUploadBusy ? '사진 업로드 중…' : '프로필 사진 업로드'}
-              variant="secondary"
-              onPress={() => void onPickAndUploadPhoto()}
-              disabled={photoUploadBusy || profileBusy || deleteBusy || busy}
-            />
-            <TextInput
-              value={photoUrl}
-              onChangeText={setPhotoUrl}
-              placeholder="https://…"
-              placeholderTextColor="#94a3b8"
-              style={styles.input}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
-            {photoUrl.trim() ? (
-              <View style={styles.previewWrap}>
-                <Image source={{ uri: photoUrl.trim() }} style={styles.preview} contentFit="cover" />
-              </View>
-            ) : null}
-
-            <GinitButton title="프로필 저장" variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
-            <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy || deleteBusy} />
-            <Pressable
-              onPress={onRequestDeleteAccount}
-              disabled={deleteBusy || profileBusy}
-              style={({ pressed }) => [styles.deleteAccountBtn, pressed && styles.deleteAccountBtnPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="회원 탈퇴">
-              <Text style={styles.deleteAccountLabel}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
-            </Pressable>
           </GinitCard>
 
-          {meetingAuthGateReady && !meetingAuthComplete ? (
-            <Pressable
-              onPress={() => setAuthSheetVisible(true)}
-              style={({ pressed }) => [styles.authMenuRow, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="서비스 이용 인증">
-              <View style={styles.authMenuOrangeBadge}>
-                <View style={styles.authMenuOrangeInner} />
-              </View>
-              <View style={styles.authMenuTextCol}>
-                <Text style={styles.authMenuTitle}>서비스 이용 인증</Text>
-                <Text style={styles.authMenuSub}>모임 이용 동의와 전화 인증을 완료해 주세요</Text>
-              </View>
-              <Text style={styles.authMenuChevron}>›</Text>
-            </Pressable>
-          ) : null}
-
-          <GinitButton
-            title="히스토리"
-            variant="secondary"
+          <Pressable
             onPress={() => router.push('/profile/meeting-history')}
-            style={styles.historyBtn}
-          />
-          <Text style={styles.historyHint}>참가했던 모임(참여 중인 모임)을 모아서 확인해요.</Text>
+            style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="모임 히스토리">
+            <Text style={styles.menuTitle}>모임 히스토리</Text>
+            <Text style={styles.menuChevron}>›</Text>
+          </Pressable>
         </ScrollView>
 
         <Modal
@@ -862,6 +832,124 @@ const styles = StyleSheet.create({
   scrollBottom: {
     paddingTop: 8,
     paddingBottom: 32,
+  },
+  headerWrap: {
+    marginBottom: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: 'rgba(255, 255, 255, 0.78)',
+    padding: 14,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  avatar: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarFallbackText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  headerTextCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  headerName: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0f172a',
+    letterSpacing: -0.3,
+  },
+  headerSub: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  headerEditBtn: {
+    flexShrink: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+  },
+  headerEditText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  quickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
+  },
+  quickItem: {
+    width: '31%',
+    minWidth: 92,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  quickLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0f172a',
+    marginBottom: 10,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    marginTop: 12,
+  },
+  menuTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  menuChevron: {
+    fontSize: 28,
+    fontWeight: '300',
+    color: '#94a3b8',
+    marginLeft: 4,
   },
   trustInlineSection: {
     position: 'relative',
