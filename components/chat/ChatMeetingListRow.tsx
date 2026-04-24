@@ -72,6 +72,8 @@ type Props = {
   hostWithdrawn?: boolean;
   /** `undefined`이면 아직 로딩 중, `null`이면 메시지 없음 */
   latestMessage: MeetingChatMessage | null | undefined;
+  /** 조율/확정 등 진행중 상태 강조 */
+  ongoing?: boolean;
   onPress: () => void;
 };
 
@@ -81,6 +83,7 @@ export function ChatMeetingListRow({
   hostNickname,
   hostWithdrawn,
   latestMessage,
+  ongoing,
   onPress,
 }: Props) {
   const title = meeting.title?.trim() || '모임';
@@ -109,7 +112,7 @@ export function ChatMeetingListRow({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      style={({ pressed }) => [styles.row, ongoing ? styles.rowOngoing : null, pressed && styles.rowPressed]}
       accessibilityRole="button"
       accessibilityLabel={`${title} 채팅`}>
       <View style={styles.avatarWrap}>
@@ -133,6 +136,11 @@ export function ChatMeetingListRow({
               <Text style={styles.title} numberOfLines={1}>
                 {title}
               </Text>
+              {ongoing ? (
+                <View style={styles.ongoingPill} accessibilityLabel="진행 중">
+                  <Text style={styles.ongoingPillText}>진행 중</Text>
+                </View>
+              ) : null}
               <Text style={styles.participantCount} accessibilityLabel={`참여자 ${pCount}명`}>
                 {pCount}
               </Text>
@@ -161,15 +169,25 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255, 255, 255, 0.86)',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e8eaed',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
     gap: 12,
+    marginBottom: 12,
   },
   rowPressed: {
-    backgroundColor: '#f8fafc',
+    opacity: 0.9,
+  },
+  rowOngoing: {
+    borderColor: 'rgba(255, 138, 0, 0.32)',
+    shadowColor: 'rgba(255, 138, 0, 0.22)',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    elevation: 6,
   },
   avatarWrap: {
     flexShrink: 0,
@@ -221,6 +239,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minWidth: 0,
+  },
+  ongoingPill: {
+    marginLeft: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 138, 0, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 138, 0, 0.28)',
+  },
+  ongoingPillText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FF8A00',
+    letterSpacing: -0.2,
   },
   meetingIcon: {
     marginRight: 4,

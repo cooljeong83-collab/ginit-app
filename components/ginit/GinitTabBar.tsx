@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -21,7 +22,7 @@ import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 
-const ORDER = ['index', 'map', 'chat', 'profile'] as const;
+const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
 function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
   switch (routeName) {
@@ -29,6 +30,8 @@ function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.gly
       return focused ? 'people' : 'people-outline';
     case 'map':
       return focused ? 'map' : 'map-outline';
+    case 'friends':
+      return focused ? 'people-circle' : 'people-circle-outline';
     case 'chat':
       return focused ? 'chatbubbles' : 'chatbubbles-outline';
     case 'profile':
@@ -46,11 +49,18 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
   const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
   const routes = ORDER.map((name) => state.routes.find((r) => r.name === name)).filter(Boolean) as (typeof state.routes)[number][];
-  const leftRoutes = routes.slice(0, 2);
-  const rightRoutes = routes.slice(2);
   const fabDocked = useSharedValue(0);
   const fabFloat = useSharedValue(0);
-  const [fabDockedUi, setFabDockedUi] = useState(false);
+  const [, setFabDockedUi] = useState(false);
+  const activeRouteName = state.routes[state.index]?.name ?? '';
+  const showFab = activeRouteName === 'index';
+  const fabSafeBottom = useMemo(() => {
+    // 탭바(콘텐츠 영역) + wrap의 paddingBottom 위로 확실히 띄웁니다.
+    const tabBarH = 52 + 8; // row minHeight + paddingTop
+    const wrapPad = Math.max(insets.bottom, 10);
+    const gap = 12;
+    return wrapPad + tabBarH + gap;
+  }, [insets.bottom]);
 
   const onTabPress = (route: (typeof state.routes)[number], routeIndex: number) => {
     const event = navigation.emit({
@@ -122,14 +132,22 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     const f = fabFloat.value; // 0..1..0..
     // undocked: -3..-1 정도로만 떠있게 (상단으로 과하게 올라가지 않게 제한)
     const floatY = -4 + (f - 0.5) * 6; // [-7, -1]
-    const translateY = dock * 18 + (1 - dock) * floatY;
-    const opacity = dock > 0.98 ? 0 : 1;
-    const baseScale = (1 - dock) * 1 + dock * 0.05;
+    const translateY = (1 - dock) * floatY;
+    const opacity = 1;
+    const baseScale = (1 - dock) * 1 + dock * 0.84;
     const breathe = 1 + (1 - dock) * ((f - 0.5) * 0.04); // +/- 2%
     const scale = baseScale * breathe;
     return {
       transform: [{ translateY }, { scale }],
       opacity,
+    };
+  });
+
+  const fabLabelStyle = useAnimatedStyle(() => {
+    const dock = fabDocked.value;
+    return {
+      opacity: 1 - dock,
+      transform: [{ scaleX: 1 - dock * 0.12 }],
     };
   });
 
@@ -150,7 +168,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
       <View style={styles.row}>
         <View style={styles.sideGroup}>
-          {leftRoutes.map((route) => {
+          {routes.map((route) => {
             const originalIndex = state.routes.findIndex((r) => r.key === route.key);
             const focused = state.index === originalIndex;
             const { options } = descriptors[route.key];
@@ -164,73 +182,11 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                     ? '모임'
                     : route.name === 'map'
                       ? '지도'
-                      : route.name === 'chat'
-                        ? '채팅'
-                        : '프로필';
-
-            return (
-              <Pressable
-                key={route.key}
-                accessibilityRole="button"
-                accessibilityState={focused ? { selected: true } : {}}
-                onPress={() => onTabPress(route, originalIndex)}
-                style={styles.tab}>
-                <Ionicons
-                  name={iconFor(route.name, focused)}
-                  size={24}
-                  color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
-                />
-                <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* 중앙 슬롯: 스크롤 시(도킹)에는 하단 메뉴 가운데 버튼으로 들어갑니다. */}
-        {fabDockedUi ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="모임 만들기"
-            onPress={onFabPress}
-            style={({ pressed }) => [styles.centerTab, pressed && styles.centerTabPressed]}>
-            <View style={styles.centerTabIconWrap}>
-              <LinearGradient
-                colors={GinitTheme.colors.ctaGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
-                pointerEvents="none"
-              />
-              <Ionicons name="add" size={18} color="#FFFFFF" />
-            </View>
-            <Text style={styles.centerTabLabel} numberOfLines={1}>
-              모임
-            </Text>
-          </Pressable>
-        ) : (
-          <View pointerEvents="none" style={styles.centerGap} />
-        )}
-
-        <View style={styles.sideGroup}>
-          {rightRoutes.map((route) => {
-            const originalIndex = state.routes.findIndex((r) => r.key === route.key);
-            const focused = state.index === originalIndex;
-            const { options } = descriptors[route.key];
-            const rawLabel = options.tabBarLabel;
-            const label =
-              typeof rawLabel === 'string'
-                ? rawLabel
-                : typeof options.title === 'string'
-                  ? options.title
-                  : route.name === 'index'
-                    ? '모임'
-                    : route.name === 'map'
-                      ? '지도'
-                      : route.name === 'chat'
-                        ? '채팅'
-                        : '프로필';
+                      : route.name === 'friends'
+                        ? '친구'
+                        : route.name === 'chat'
+                          ? '채팅'
+                          : '프로필';
 
             return (
               <Pressable
@@ -253,31 +209,42 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
         </View>
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="모임 만들기"
-        onPress={onFabPress}
-        disabled={fabDockedUi}
-        // 도킹 시에는 가운데 탭 Pressable이 동작해야 함. disabled만으로는 히트가 아래로 통과하지 않을 수 있음.
-        pointerEvents={fabDockedUi ? 'none' : 'auto'}
-        style={[
-          styles.fab,
-          {
-            bottom: Math.max(insets.bottom, 10) + 18,
-          },
-        ]}>
-        <Animated.View style={[styles.fabShadow, fabShadowStyle]} pointerEvents="none" />
-        <Animated.View style={[styles.fabInner, fabAnimStyle]}>
-          <LinearGradient
-            colors={GinitTheme.colors.ctaGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.fabBg}
-            pointerEvents="none"
-          />
-          <Ionicons name="add" size={32} color="#FFFFFF" />
-        </Animated.View>
-      </Pressable>
+      {showFab ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="모임 만들기"
+          onPress={onFabPress}
+          style={[
+            styles.fab,
+            {
+              bottom: fabSafeBottom,
+            },
+          ]}>
+          <Animated.View style={[styles.fabShadow, fabShadowStyle]} pointerEvents="none" />
+          <Animated.View style={[styles.fabInner, fabAnimStyle]}>
+            <LinearGradient
+              colors={GinitTheme.colors.ctaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.fabBg}
+              pointerEvents="none"
+            />
+            <View style={styles.fabContent}>
+              <Image
+                source={require('@/assets/images/logo-symbol.png')}
+                style={styles.fabLogo}
+                contentFit="contain"
+                accessibilityIgnoresInvertColors
+              />
+              <Animated.View style={[styles.fabLabelWrap, fabLabelStyle]}>
+                <Text style={styles.fabLabelText} numberOfLines={1}>
+                  모임 생성
+                </Text>
+              </Animated.View>
+            </View>
+          </Animated.View>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -309,43 +276,10 @@ const styles = StyleSheet.create({
   },
   tab: {
     flexGrow: 0,
-    minWidth: 72,
+    minWidth: 64,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-  },
-  centerGap: {
-    width: 84,
-  },
-  centerTab: {
-    width: 84,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-  },
-  centerTabPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.98 }],
-  },
-  centerTabIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.75)',
-    shadowColor: 'rgba(15, 23, 42, 0.12)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  centerTabLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: GinitTheme.colors.primary,
   },
   tabLabel: {
     fontSize: 11,
@@ -357,8 +291,8 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    alignSelf: 'center',
-    width: 58,
+    right: 18,
+    width: 112,
     height: 58,
     borderRadius: 29,
     alignItems: 'center',
@@ -370,7 +304,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   fabInner: {
-    width: 58,
+    width: 112,
     height: 58,
     borderRadius: 29,
     overflow: 'hidden',
@@ -390,5 +324,25 @@ const styles = StyleSheet.create({
   },
   fabBg: {
     ...StyleSheet.absoluteFillObject,
+  },
+  fabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  fabLogo: {
+    width: 28,
+    height: 28,
+  },
+  fabLabelWrap: {
+    overflow: 'hidden',
+  },
+  fabLabelText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
   },
 });

@@ -3,22 +3,50 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Alert,
+  BackHandler,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { authScreenStyles as authFormStyles } from '@/components/auth/authScreenStyles';
+import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { deleteFirebaseAuthUserBestEffort, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
-import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
+import { Timestamp, serverTimestamp } from 'firebase/firestore';
+import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
+import { AuthService } from '@/src/services/AuthService';
+import {
+  ensureUserProfile,
+  firestoreTimestampLikeToDate,
+  isGoogleSnsDemographicsIncomplete,
+  isUserPhoneVerified,
+  updateUserProfile,
+} from '@/src/lib/user-profile';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
   const { userId, authProfile, signOutSession } = useUserSession();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const profilePk = useMemo(() => {
     const u = userId?.trim();
     if (u) return u;
@@ -35,6 +63,28 @@ export default function ProfileEditScreen() {
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
 
+  // 서비스 이용 인증(정보 등록) 모달
+  const [needsSnsDemographics, setNeedsSnsDemographics] = useState(false);
+  const [genderDemo, setGenderDemo] = useState<'MALE' | 'FEMALE' | null>(null);
+  const [birthDemo, setBirthDemo] = useState<{ year: number; month: number; day: number }>(() => ({ year: 1983, month: 1, day: 1 }));
+  const [verifiedPhoneLabel, setVerifiedPhoneLabel] = useState<string | null>(null);
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  const [phoneField, setPhoneField] = useState('');
+  const [otpVerificationId, setOtpVerificationId] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [authSheetVisible, setAuthSheetVisible] = useState(false);
+  const [termsConsentChecked, setTermsConsentChecked] = useState(false);
+  const [complianceBusy, setComplianceBusy] = useState(false);
+
+  const authSheetLayout = useMemo(() => {
+    const panelMax = Math.floor(windowHeight * 0.96);
+    const panelPadBottom = Math.max(16, insets.bottom);
+    const scrollMax = Math.max(280, panelMax - 18 - panelPadBottom - 12);
+    return { panelMax, panelPadBottom, scrollMax };
+  }, [windowHeight, insets.bottom]);
+
   useEffect(() => {
     let alive = true;
     void (async () => {
@@ -44,16 +94,43 @@ export default function ProfileEditScreen() {
         if (!alive) return;
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
+        setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+        setIsPhoneVerified(isUserPhoneVerified(p));
+        const phone = p.phone?.trim();
+        setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
+        setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
+        const g = p.gender?.trim();
+        setGenderDemo(g === 'MALE' || g === 'FEMALE' ? g : null);
+        const bd = p.birthDate as unknown;
+        const bdDate =
+          bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
+            ? (bd as { toDate: () => Date }).toDate()
+            : null;
+        if (bdDate) {
+          setBirthDemo({ year: bdDate.getFullYear(), month: bdDate.getMonth() + 1, day: bdDate.getDate() });
+        }
       } catch {
         if (!alive) return;
         setNickname('');
         setPhotoUrl('');
+        setNeedsSnsDemographics(false);
+        setIsPhoneVerified(false);
+        setVerifiedPhoneLabel(null);
+        setPhoneField('');
+        setOtpVerificationId(null);
+        setOtpCode('');
+        setOtpError(null);
+        setGenderDemo(null);
       }
     })();
     return () => {
       alive = false;
     };
   }, [profilePk]);
+
+  useEffect(() => {
+    if (authSheetVisible) setTermsConsentChecked(false);
+  }, [authSheetVisible]);
 
   const onPickAndUploadPhoto = useCallback(async () => {
     if (!profilePk) {
@@ -117,6 +194,156 @@ export default function ProfileEditScreen() {
       setProfileBusy(false);
     }
   }, [profilePk, nickname, photoUrl, router]);
+
+  const canSendOtp = useMemo(() => {
+    const normalized = normalizePhoneUserId(phoneField);
+    return !!profilePk && !!normalized && !profileBusy && !otpBusy && !complianceBusy;
+  }, [profilePk, phoneField, profileBusy, otpBusy, complianceBusy]);
+
+  const canConfirmOtp = useMemo(() => {
+    return !!profilePk && !!otpVerificationId && otpCode.replace(/\D/g, '').length === 6 && !profileBusy && !otpBusy && !complianceBusy;
+  }, [profilePk, otpVerificationId, otpCode, profileBusy, otpBusy, complianceBusy]);
+
+  const onSendOtp = useCallback(async () => {
+    if (!profilePk) {
+      Alert.alert('안내', '로그인 후 인증할 수 있어요.');
+      return;
+    }
+    const normalized = normalizePhoneUserId(phoneField);
+    if (!normalized) {
+      Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
+      return;
+    }
+    setOtpError(null);
+    setOtpBusy(true);
+    try {
+      const { verificationId } = await AuthService.verifyPhoneNumber(normalized);
+      setOtpVerificationId(verificationId);
+      setOtpCode('');
+      if (Platform.OS === 'android') ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '인증번호 전송에 실패했습니다.';
+      setOtpError(msg);
+      Alert.alert('인증 실패', msg);
+    } finally {
+      setOtpBusy(false);
+    }
+  }, [profilePk, phoneField]);
+
+  const onConfirmOtp = useCallback(async () => {
+    if (!profilePk) {
+      Alert.alert('안내', '로그인 후 인증할 수 있어요.');
+      return;
+    }
+    if (!otpVerificationId) return;
+    const normalized = normalizePhoneUserId(phoneField);
+    if (!normalized) {
+      Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
+      return;
+    }
+    const code = otpCode.replace(/\D/g, '').slice(0, 6);
+    if (code.length !== 6) {
+      Alert.alert('입력 확인', '인증번호 6자리를 입력해 주세요.');
+      return;
+    }
+    setOtpError(null);
+    setOtpBusy(true);
+    try {
+      await AuthService.linkPhoneWithCode(otpVerificationId, code);
+      await updateUserProfile(profilePk, { phone: normalized, phoneVerifiedAt: serverTimestamp() });
+      const label = formatNormalizedPhoneKrDisplay(normalized);
+      setIsPhoneVerified(true);
+      setVerifiedPhoneLabel(label);
+      setOtpVerificationId(null);
+      setOtpCode('');
+      if (Platform.OS === 'android') ToastAndroid.show('전화번호 인증이 완료됐어요.', ToastAndroid.SHORT);
+      else Alert.alert('인증 완료', '전화번호 인증이 완료됐어요.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '인증 확인에 실패했습니다.';
+      setOtpError(msg);
+      Alert.alert('인증 실패', msg);
+    } finally {
+      setOtpBusy(false);
+    }
+  }, [profilePk, otpVerificationId, otpCode, phoneField]);
+
+  const refreshEditProfile = useCallback(async () => {
+    if (!profilePk) return;
+    const p = await ensureUserProfile(profilePk);
+    setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+    setIsPhoneVerified(isUserPhoneVerified(p));
+    const phone = p.phone?.trim();
+    setVerifiedPhoneLabel(phone ? formatNormalizedPhoneKrDisplay(phone) : null);
+    setPhoneField(phone ? formatNormalizedPhoneKrDisplay(phone) : '');
+  }, [profilePk]);
+
+  const onSubmitMeetingCompliance = useCallback(async () => {
+    if (!profilePk) {
+      Alert.alert('안내', '로그인 후 진행할 수 있어요.');
+      return;
+    }
+    if (!termsConsentChecked) {
+      Alert.alert('동의 필요', '모임 이용 정보 수집 및 이용에 동의해 주세요.');
+      return;
+    }
+    if (needsSnsDemographics) {
+      if (!genderDemo || !birthDemo.year || !birthDemo.month || !birthDemo.day) {
+        Alert.alert('입력 확인', '성별과 생년월일을 모두 선택해 주세요.');
+        return;
+      }
+    }
+    if (!isPhoneVerified) {
+      Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
+      return;
+    }
+    setComplianceBusy(true);
+    try {
+      await ensureUserProfile(profilePk);
+      const compliancePatch: Parameters<typeof updateUserProfile>[1] = { termsAgreedAt: serverTimestamp() };
+      if (needsSnsDemographics && genderDemo) {
+        compliancePatch.gender = genderDemo;
+        compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
+      }
+      await updateUserProfile(profilePk, compliancePatch);
+      const p = await ensureUserProfile(profilePk);
+      const phoneE164 = p.phone?.trim() ?? normalizePhoneUserId(phoneField)?.trim() ?? '';
+      if (!phoneE164 || !phoneE164.startsWith('+')) throw new Error('전화번호 정보를 찾지 못했습니다.');
+      const verifiedDate = firestoreTimestampLikeToDate(p.phoneVerifiedAt) ?? new Date();
+      const termsDate = firestoreTimestampLikeToDate(p.termsAgreedAt) ?? new Date();
+      const sync = await syncMeetingComplianceToSupabase({
+        appUserId: profilePk,
+        nickname: nickname.trim() || p.nickname,
+        phoneE164,
+        phoneVerifiedAtIso: verifiedDate.toISOString(),
+        termsAgreedAtIso: termsDate.toISOString(),
+      });
+      if (!sync.ok) {
+        Alert.alert('동기화 안내', `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}`);
+      }
+      await refreshEditProfile();
+      setAuthSheetVisible(false);
+      const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
+      if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
+      else Alert.alert('완료', doneMsg);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
+      Alert.alert('저장 실패', msg);
+    } finally {
+      setComplianceBusy(false);
+    }
+  }, [
+    profilePk,
+    termsConsentChecked,
+    needsSnsDemographics,
+    genderDemo,
+    birthDemo.year,
+    birthDemo.month,
+    birthDemo.day,
+    isPhoneVerified,
+    phoneField,
+    nickname,
+    refreshEditProfile,
+  ]);
 
   const onSignOut = useCallback(async () => {
     setBusy(true);
@@ -247,6 +474,15 @@ export default function ProfileEditScreen() {
             ) : null}
 
             <GinitButton title={profileBusy ? '저장 중…' : '저장'} variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
+
+            <View style={{ marginTop: 10 }}>
+              <GinitButton
+                title="서비스 이용 인증(정보 등록)"
+                variant="secondary"
+                onPress={() => setAuthSheetVisible(true)}
+                disabled={complianceBusy || otpBusy || profileBusy}
+              />
+            </View>
           </GinitCard>
 
           <GinitCard appearance="light" style={styles.card}>
@@ -261,6 +497,166 @@ export default function ProfileEditScreen() {
             </Pressable>
           </GinitCard>
         </ScrollView>
+
+        <Modal
+          visible={authSheetVisible}
+          animationType="fade"
+          transparent
+          onRequestClose={() => {
+            if (!complianceBusy) setAuthSheetVisible(false);
+          }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetKbWrap}>
+            <View style={styles.sheetRoot}>
+              <Pressable
+                style={styles.sheetBackdropFill}
+                onPress={() => {
+                  if (!complianceBusy) setAuthSheetVisible(false);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="닫기"
+              />
+              <View style={styles.sheetCenterWrap} pointerEvents="box-none">
+                <View style={[styles.sheetPanel, { maxHeight: authSheetLayout.panelMax, paddingBottom: authSheetLayout.panelPadBottom }]}>
+                  <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                    style={{ maxHeight: authSheetLayout.scrollMax }}
+                    contentContainerStyle={styles.sheetScrollContent}>
+                    <Text style={styles.sheetTitle}>서비스 이용 인증</Text>
+                    <Text style={styles.sheetLead}>모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.</Text>
+
+                    <Pressable
+                      onPress={() => !complianceBusy && setTermsConsentChecked(!termsConsentChecked)}
+                      style={({ pressed }) => [styles.termsRow, pressed && !complianceBusy && styles.pressed]}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: termsConsentChecked }}
+                      accessibilityLabel="모임 이용 정보 수집 및 이용 동의">
+                      <View
+                        style={[
+                          styles.termsBox,
+                          termsConsentChecked ? styles.termsBoxChecked : styles.termsBoxUnchecked,
+                        ]}>
+                        {termsConsentChecked ? <Text style={styles.termsCheckMark}>✓</Text> : null}
+                      </View>
+                      <Text style={styles.termsLabel}>모임 이용 정보 수집 및 이용 동의 (필수)</Text>
+                    </Pressable>
+
+                    {needsSnsDemographics ? (
+                      <>
+                        <Text style={[styles.label, { marginTop: 14 }]}>성별 (필수)</Text>
+                        <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
+                          {(
+                            [
+                              { code: 'MALE' as const, label: '남자' },
+                              { code: 'FEMALE' as const, label: '여자' },
+                            ] as const
+                          ).map(({ code, label }) => {
+                            const selected = genderDemo === code;
+                            return (
+                              <Pressable
+                                key={code}
+                                disabled={profileBusy || complianceBusy}
+                                onPress={() => setGenderDemo(code)}
+                                style={({ pressed }) => [
+                                  authFormStyles.genderBinaryBtn,
+                                  selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
+                                  pressed && !(profileBusy || complianceBusy) && authFormStyles.pressed,
+                                ]}
+                                accessibilityRole="radio"
+                                accessibilityState={{ selected, checked: selected }}
+                                accessibilityLabel={label}>
+                                <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
+                                  {label}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                        <Text style={[styles.label, { marginTop: 14 }]}>생년월일 (필수)</Text>
+                        <BirthdateWheel value={birthDemo} onChange={setBirthDemo} disabled={profileBusy || complianceBusy} />
+                      </>
+                    ) : null}
+
+                    <Text style={[styles.label, { marginTop: 16 }]}>전화번호 인증 (필수)</Text>
+                    <Text style={styles.subHint}>
+                      {isPhoneVerified ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}` : '아직 인증되지 않았어요.'}
+                    </Text>
+
+                    <View style={styles.otpBlock}>
+                      <Text style={styles.otpLabel}>전화번호</Text>
+                      <View style={styles.otpRow}>
+                        <TextInput
+                          value={phoneField}
+                          onChangeText={(t) => {
+                            const digits = t.replace(/\\D/g, '').slice(0, 11);
+                            const v =
+                              digits.length <= 3
+                                ? digits
+                                : digits.length <= 7
+                                  ? `${digits.slice(0, 3)}-${digits.slice(3)}`
+                                  : `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+                            setPhoneField(v);
+                          }}
+                          placeholder="010-1234-5678"
+                          placeholderTextColor="#94a3b8"
+                          style={styles.otpPhoneInput}
+                          keyboardType="phone-pad"
+                          inputMode="tel"
+                          editable={!otpBusy && !profileBusy && !complianceBusy}
+                        />
+                        <Pressable
+                          onPress={() => void onSendOtp()}
+                          disabled={!canSendOtp}
+                          style={({ pressed }) => [styles.otpSendBtn, !canSendOtp && styles.otpBtnDisabled, pressed && canSendOtp && styles.pressed]}
+                          accessibilityRole="button"
+                          accessibilityLabel="인증번호 받기">
+                          <Text style={styles.otpSendText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
+                        </Pressable>
+                      </View>
+
+                      {otpVerificationId ? (
+                        <View style={[styles.otpRow, { marginTop: 8 }]}>
+                          <TextInput
+                            value={otpCode}
+                            onChangeText={(t) => setOtpCode(t.replace(/\\D/g, '').slice(0, 6))}
+                            placeholder="인증번호 6자리"
+                            placeholderTextColor="#94a3b8"
+                            style={styles.otpCodeInput}
+                            keyboardType="number-pad"
+                            inputMode="numeric"
+                            textContentType="oneTimeCode"
+                            editable={!otpBusy && !profileBusy && !complianceBusy}
+                          />
+                          <Pressable
+                            onPress={() => void onConfirmOtp()}
+                            disabled={!canConfirmOtp}
+                            style={({ pressed }) => [
+                              styles.otpConfirmBtn,
+                              !canConfirmOtp && styles.otpBtnDisabled,
+                              pressed && canConfirmOtp && styles.pressed,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="인증 확인">
+                            <Text style={styles.otpConfirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+
+                      {otpError ? <Text style={styles.otpError}>{otpError}</Text> : null}
+                    </View>
+
+                    <GinitButton
+                      title={complianceBusy ? '저장 중…' : '인증 및 정보 저장'}
+                      variant="primary"
+                      onPress={() => void onSubmitMeetingCompliance()}
+                      disabled={complianceBusy || otpBusy || profileBusy}
+                    />
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
       </SafeAreaView>
     </ScreenShell>
   );
@@ -308,5 +704,93 @@ const styles = StyleSheet.create({
   },
   deleteAccountBtnPressed: { opacity: 0.88 },
   deleteAccountLabel: { fontSize: 14, fontWeight: '900', color: '#b91c1c' },
+
+  sheetKbWrap: { flex: 1 },
+  sheetRoot: { flex: 1 },
+  sheetBackdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.45)' },
+  sheetCenterWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+  },
+  sheetPanel: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.65)',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  sheetScrollContent: { paddingBottom: 4 },
+  sheetTitle: { fontSize: 20, fontWeight: '900', color: '#0f172a', marginBottom: 6 },
+  sheetLead: { fontSize: 14, fontWeight: '600', color: '#64748b', lineHeight: 20, marginBottom: 14 },
+  termsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4 },
+  termsBox: { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  termsBoxUnchecked: { borderColor: '#FF8A00', backgroundColor: 'rgba(255, 138, 0, 0.08)' },
+  termsBoxChecked: { borderColor: '#0052CC', backgroundColor: 'rgba(0, 82, 204, 0.12)' },
+  termsCheckMark: { fontSize: 16, fontWeight: '900', color: '#0052CC' },
+  termsLabel: { flex: 1, fontSize: 14, fontWeight: '800', color: '#0f172a', lineHeight: 20 },
+  otpBlock: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  otpLabel: { fontSize: 13, fontWeight: '900', color: '#0f172a', marginBottom: 8 },
+  otpRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  otpPhoneInput: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    color: '#0f172a',
+    fontWeight: '800',
+  },
+  otpCodeInput: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    color: '#0f172a',
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  otpSendBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(0, 82, 204, 0.16)',
+  },
+  otpSendText: { fontSize: 13, fontWeight: '900', color: '#061a3b' },
+  otpConfirmBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(0, 82, 204, 0.16)',
+  },
+  otpConfirmText: { fontSize: 13, fontWeight: '900', color: '#061a3b' },
+  otpBtnDisabled: { opacity: 0.35 },
+  otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: '#b91c1c' },
 });
 

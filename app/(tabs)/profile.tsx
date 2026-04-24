@@ -541,14 +541,6 @@ export default function ProfileTab() {
               <Text style={styles.quickLabel}>히스토리</Text>
             </Pressable>
             <Pressable
-              onPress={() => setAuthSheetVisible(true)}
-              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="서비스 이용 인증">
-              <Ionicons name="shield-checkmark-outline" size={18} color={GinitTheme.colors.primary} />
-              <Text style={styles.quickLabel}>정보 등록</Text>
-            </Pressable>
-            <Pressable
               onPress={onGoTrust}
               style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
               accessibilityRole="button"
@@ -556,40 +548,7 @@ export default function ProfileTab() {
               <Ionicons name="pulse-outline" size={18} color={GinitTheme.colors.primary} />
               <Text style={styles.quickLabel}>신뢰도</Text>
             </Pressable>
-            <Pressable
-              onPress={onSignOut}
-              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="로그아웃">
-              <Ionicons name="log-out-outline" size={18} color={GinitTheme.colors.primary} />
-              <Text style={styles.quickLabel}>로그아웃</Text>
-            </Pressable>
-            <Pressable
-              onPress={onRequestDeleteAccount}
-              style={({ pressed }) => [styles.quickItem, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="회원 탈퇴">
-              <Ionicons name="trash-outline" size={18} color={GinitTheme.colors.primary} />
-              <Text style={styles.quickLabel}>회원 탈퇴</Text>
-            </Pressable>
           </View>
-
-          {meetingAuthGateReady && !meetingAuthComplete ? (
-            <Pressable
-              onPress={() => setAuthSheetVisible(true)}
-              style={({ pressed }) => [styles.authMenuRow, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="서비스 이용 인증">
-              <View style={styles.authMenuOrangeBadge}>
-                <View style={styles.authMenuOrangeInner} />
-              </View>
-              <View style={styles.authMenuTextCol}>
-                <Text style={styles.authMenuTitle}>서비스 이용 인증</Text>
-                <Text style={styles.authMenuSub}>모임 이용 동의와 전화 인증을 완료해 주세요</Text>
-              </View>
-              <Text style={styles.authMenuChevron}>›</Text>
-            </Pressable>
-          ) : null}
 
           <GinitCard
             appearance="light"

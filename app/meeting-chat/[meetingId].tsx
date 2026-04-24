@@ -24,7 +24,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { Swipeable } from 'react-native-gesture-handler';
 
-import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -611,10 +610,6 @@ export default function MeetingChatRoomScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.meetingInfoOuter}>
-          <MeetingFeedRow meeting={meeting} userCoords={userCoords} onPress={goMeetingDetail} />
-        </View>
-
         <View style={styles.listWrap}>
           {chatError ? (
             <View style={styles.chatErrorBanner}>
@@ -953,12 +948,7 @@ const styles = StyleSheet.create({
     minWidth: 22,
     textAlign: 'right',
   },
-  meetingInfoOuter: {
-    paddingHorizontal: 8,
-    paddingTop: 6,
-    paddingBottom: 4,
-    backgroundColor: '#ECEFF1',
-  },
+  // meetingInfoOuter: 상단 모임 스냅샷(요약 카드) 섹션 제거됨
   listWrap: {
     flex: 1,
     position: 'relative',
