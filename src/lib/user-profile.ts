@@ -351,6 +351,35 @@ export function isUserPhoneVerified(p: UserProfile | null | undefined): boolean 
   return p.phoneVerifiedAt != null;
 }
 
+/** Firestore `Timestamp` 등을 `Date`로 변환(실패 시 null). */
+export function firestoreTimestampLikeToDate(v: unknown): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return Number.isFinite(v.getTime()) ? v : null;
+  if (typeof v === 'object' && 'toDate' in v && typeof (v as { toDate?: unknown }).toDate === 'function') {
+    try {
+      const d = (v as { toDate: () => Date }).toDate();
+      return d instanceof Date && Number.isFinite(d.getTime()) ? d : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function hasTermsAgreementRecorded(p: UserProfile | null | undefined): boolean {
+  if (!p || p.isWithdrawn === true) return false;
+  return p.termsAgreedAt != null;
+}
+
+/** 모임 이용 동의·전화 인증·(SNS 시) 성별·생년까지 갖춘 경우 */
+export function isMeetingServiceComplianceComplete(p: UserProfile | null | undefined): boolean {
+  if (!p || p.isWithdrawn === true) return false;
+  if (!isUserPhoneVerified(p)) return false;
+  if (!hasTermsAgreementRecorded(p)) return false;
+  if (isGoogleSnsDemographicsIncomplete(p)) return false;
+  return true;
+}
+
 /** 프로필 문서가 없을 때 표시용(다른 사용자 문서 미생성 등) */
 export function fallbackProfileLabel(userId: string): UserProfile {
   const t = userId.trim();
@@ -746,6 +775,7 @@ export async function updateUserProfile(
     badges?: string[] | null;
     phone?: string | null;
     phoneVerifiedAt?: unknown | null;
+    termsAgreedAt?: unknown | null;
     preferences?: Record<string, unknown> | null;
     blockedKeywords?: string[] | null;
     lastLocation?: unknown | null;
@@ -835,6 +865,9 @@ export async function updateUserProfile(
   }
   if (patch.phoneVerifiedAt !== undefined) {
     updates.phoneVerifiedAt = patch.phoneVerifiedAt;
+  }
+  if (patch.termsAgreedAt !== undefined) {
+    updates.termsAgreedAt = patch.termsAgreedAt;
   }
   if (patch.preferences !== undefined) {
     updates.preferences = patch.preferences && typeof patch.preferences === 'object' && !Array.isArray(patch.preferences) ? patch.preferences : patch.preferences == null ? null : {};

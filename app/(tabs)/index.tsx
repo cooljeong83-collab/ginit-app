@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
+  FlatList,
   Modal,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
-import { MeetingFeedRow } from '@/components/feed/MeetingFeedRow';
+import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
@@ -43,7 +43,7 @@ import {
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce, getMeetingRecruitmentPhase, subscribeMeetings } from '@/src/lib/meetings';
@@ -60,8 +60,12 @@ export default function FeedScreen() {
   const router = useRouter();
   const { userId } = useUserSession();
   const { width: windowWidth } = useWindowDimensions();
-  /** 가로 칩이 화면에 맞게 읽히도록 최대 너비 (패딩·여백 반영) */
-  const categoryChipMaxWidth = Math.min(200, Math.max(100, windowWidth * 0.42));
+  /** 탐색·내 모임 칩 — 예전 카테고리 칩과 동일 컴포넌트·유사 maxWidth */
+  /** 탐색·내 모임 칩 라벨 폭 — 카테고리 칩과 동일 상한 규칙 */
+  const tabChipMaxWidth = useMemo(
+    () => Math.min(200, Math.max(100, Math.floor(windowWidth * 0.38))),
+    [windowWidth],
+  );
 
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
   const regionLabelRef = useRef(FEED_LOCATION_FALLBACK_SHORT);
@@ -78,28 +82,15 @@ export default function FeedScreen() {
   const [feedSearchModalOpen, setFeedSearchModalOpen] = useState(false);
   const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
   const [draftFeedSearch, setDraftFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
+  /** 홈 상단 탭: 공개 모임 탐색 vs 내 참여 모임 */
+  const [homeTab, setHomeTab] = useState<'explore' | 'mine'>('explore');
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [chipsMoreRight, setChipsMoreRight] = useState(false);
-  const chipsOffsetXRef = useRef(0);
-  const chipsLayoutWRef = useRef(0);
-  const chipsContentWRef = useRef(0);
-
-  const recomputeChipsMoreRight = useCallback(() => {
-    const x = chipsOffsetXRef.current;
-    const cw = chipsContentWRef.current;
-    const lw = chipsLayoutWRef.current;
-    if (lw <= 0 || cw <= 0) {
-      setChipsMoreRight(false);
-      return;
-    }
-    const more = cw > lw + 4 && cw - x - lw > 8;
-    setChipsMoreRight(more);
-  }, []);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
 
   useEffect(() => {
     regionLabelRef.current = regionLabel;
@@ -108,17 +99,6 @@ export default function FeedScreen() {
   useEffect(() => {
     userCoordsRef.current = userCoords;
   }, [userCoords]);
-
-  const onCategoryChipsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    chipsOffsetXRef.current = contentOffset.x;
-    chipsContentWRef.current = contentSize.width;
-    chipsLayoutWRef.current = layoutMeasurement.width;
-    const more =
-      contentSize.width > layoutMeasurement.width + 4 &&
-      contentSize.width - contentOffset.x - layoutMeasurement.width > 8;
-    setChipsMoreRight(more);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,6 +192,28 @@ export default function FeedScreen() {
     [filteredMeetings, listSortMode, userCoords],
   );
 
+  const exploreFeedMeetings = useMemo(
+    () => sortedFilteredMeetings.filter((m) => m.isPublic !== false),
+    [sortedFilteredMeetings],
+  );
+
+  const joinedFilteredMeetings = useMemo(() => {
+    const base = filterJoinedMeetings(meetingsWithinRadius, userId);
+    return base.filter((m) => {
+      if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
+      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
+      if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
+      return true;
+    });
+  }, [meetingsWithinRadius, userId, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
+
+  const sortedJoinedMeetings = useMemo(
+    () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, userCoords),
+    [joinedFilteredMeetings, listSortMode, userCoords],
+  );
+
+  const homeListData = homeTab === 'explore' ? exploreFeedMeetings : sortedJoinedMeetings;
+
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
   const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
   const pickRegion = useCallback((shortLabel: string) => {
@@ -227,10 +229,15 @@ export default function FeedScreen() {
     return categories.find((c) => c.id === selectedCategoryId)?.label ?? null;
   }, [categories, selectedCategoryId]);
 
+  const categoryDropdownLabel = selectedFilterLabel ?? '전체';
+
   const sortComboLabel = useMemo(() => listSortModeLabel(listSortMode), [listSortMode]);
 
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
+
+  const openCategoryPicker = useCallback(() => setCategoryPickerOpen(true), []);
+  const closeCategoryPicker = useCallback(() => setCategoryPickerOpen(false), []);
 
   const openFeedSearch = useCallback(() => {
     setDraftFeedSearch(appliedFeedSearch);
@@ -262,13 +269,185 @@ export default function FeedScreen() {
     emitTabBarFabDocked(y > 6);
   }, []);
 
+  const renderHomeItem = useCallback(
+    ({ item }: { item: Meeting }) => (
+      <HomeMeetingListItem
+        meeting={item}
+        userCoords={userCoords}
+        joined={isUserJoinedMeeting(item, userId)}
+        onPress={() => router.push(`/meeting/${item.id}`)}
+      />
+    ),
+    [userCoords, userId, router],
+  );
+
+  const listHeader = (
+    <>
+      <View style={styles.feedHeader}>
+        <View style={styles.feedHeaderTopRow}>
+          <View style={styles.locationCluster}>
+            <Text style={styles.locationText} numberOfLines={1} accessibilityLabel={`현재 표시 지역 ${regionLabel}`}>
+              {regionLabel}
+            </Text>
+            <Pressable
+              onPress={openRegionModal}
+              style={styles.locationExpandBtn}
+              accessibilityRole="button"
+              accessibilityLabel="지역 설정 열기"
+              hitSlop={8}>
+              <Ionicons name="chevron-down" size={20} color={GinitTheme.colors.primary} />
+            </Pressable>
+          </View>
+          <View style={styles.headerActions}>
+            <Pressable
+              onPress={openFeedSearch}
+              accessibilityRole="button"
+              accessibilityLabel="검색 및 조건 필터"
+              hitSlop={10}
+              style={styles.searchIconWrap}>
+              <Ionicons name="search-outline" size={24} color="#0f172a" />
+              {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
+            </Pressable>
+            <InAppAlarmsBellButton />
+          </View>
+        </View>
+        <View style={styles.tabCategoryBar}>
+          <View style={styles.tabPair}>
+            <GlassCategoryChip
+              label="탐색"
+              active={homeTab === 'explore'}
+              onPress={() => setHomeTab('explore')}
+              maxLabelWidth={tabChipMaxWidth}
+              accessibilityLabel="탐색"
+            />
+            <GlassCategoryChip
+              label="내 모임"
+              active={homeTab === 'mine'}
+              onPress={() => setHomeTab('mine')}
+              maxLabelWidth={tabChipMaxWidth}
+              accessibilityLabel="내 모임"
+            />
+          </View>
+          <Pressable
+            onPress={openCategoryPicker}
+            style={({ pressed }) => [styles.categoryDropdown, pressed && styles.categoryDropdownPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`카테고리, 현재 ${categoryDropdownLabel}`}
+            accessibilityHint="탭하면 카테고리를 선택할 수 있어요"
+            accessibilityState={{ expanded: categoryPickerOpen }}>
+            <Text style={styles.categoryDropdownText} numberOfLines={1} ellipsizeMode="tail">
+              {categoryDropdownLabel}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#475569" />
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionLabel}>
+          {homeTab === 'explore'
+            ? `모임${selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}`
+            : `내 모임${selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}`}
+        </Text>
+        <View style={styles.sectionHeaderControls}>
+          <Pressable
+            onPress={() => setRecruitingOnly((v) => !v)}
+            style={[styles.recruitTogglePill, recruitingOnly && styles.recruitTogglePillOn]}
+            accessibilityRole="button"
+            accessibilityLabel="모집중만 보기"
+            accessibilityState={{ selected: recruitingOnly }}>
+            <Text style={[styles.recruitTogglePillLabel, recruitingOnly && styles.recruitTogglePillLabelOn]}>
+              모집중
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={openSortFilterModal}
+            style={({ pressed }) => [styles.sortComboTrigger, pressed && styles.sortComboTriggerPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`정렬, 현재 ${sortComboLabel}`}
+            accessibilityHint="탭하면 정렬 방식을 바꿀 수 있어요">
+            <Text style={styles.sortComboTriggerText} numberOfLines={1} ellipsizeMode="tail">
+              {sortComboLabel}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#475569" />
+          </Pressable>
+        </View>
+      </View>
+
+      {loading ? (
+        <View style={styles.centerRow}>
+          <ActivityIndicator />
+          <Text style={styles.muted}>불러오는 중…</Text>
+        </View>
+      ) : null}
+
+      {listError ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
+          <Text style={styles.errorBody}>{listError}</Text>
+        </View>
+      ) : null}
+
+      {!loading && !listError && meetings.length === 0 ? (
+        <Text style={styles.empty}>등록된 모임이 없습니다. + 버튼으로 첫 모임을 만들어 보세요.</Text>
+      ) : null}
+
+      {!loading && !listError && meetings.length > 0 && meetingsWithinRadius.length === 0 && userCoords ? (
+        <Text style={styles.empty}>내 위치 기준 반경 5km 안에 등록된 모임이 없어요.</Text>
+      ) : null}
+
+      {!loading &&
+      !listError &&
+      meetingsWithinRadius.length > 0 &&
+      filteredMeetings.length === 0 &&
+      homeTab === 'explore' ? (
+        <Text style={styles.empty}>
+          {feedSearchFiltersActive(appliedFeedSearch)
+            ? '검색·조건에 맞는 모임이 없어요. 검색을 열어 필터를 바꿔 보세요.'
+            : selectedFilterLabel
+              ? `「${selectedFilterLabel}」 카테고리 모임이 아직 없어요. 다른 카테고리를 선택해 보세요.`
+              : recruitingOnly
+                ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 모집 완료·확정 모임도 볼 수 있어요.'
+                : '조건에 맞는 모임이 없어요.'}
+        </Text>
+      ) : null}
+
+      {!loading && !listError && meetingsWithinRadius.length > 0 && joinedFilteredMeetings.length === 0 && homeTab === 'mine' ? (
+        <Text style={styles.empty}>조건에 맞는 내 모임이 없어요. 필터를 바꾸거나 탐색에서 모임에 참여해 보세요.</Text>
+      ) : null}
+
+      {!loading &&
+      !listError &&
+      homeTab === 'explore' &&
+      meetingsWithinRadius.length > 0 &&
+      filteredMeetings.length > 0 &&
+      exploreFeedMeetings.length === 0 ? (
+        <Text style={styles.empty}>현재 필터에서 보여줄 공개 모임이 없어요.</Text>
+      ) : null}
+    </>
+  );
+
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView
+        <FlatList
+          data={homeListData}
+          keyExtractor={(m) => m.id}
+          extraData={{
+            homeTab,
+            listSortMode,
+            recruitingOnly,
+            selectedCategoryId,
+            appliedFeedSearch,
+            exploreLen: exploreFeedMeetings.length,
+          }}
+          renderItem={renderHomeItem}
+          ListHeaderComponent={listHeader}
           contentContainerStyle={styles.scroll}
+          style={styles.listFlex}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
           onScroll={onMainScroll}
           scrollEventThrottle={16}
           refreshControl={
@@ -278,147 +457,8 @@ export default function FeedScreen() {
               tintColor={GinitTheme.colors.primary}
               colors={[GinitTheme.colors.primary]}
             />
-          }>
-          <View style={styles.feedHeader}>
-            <View style={styles.feedHeaderTopRow}>
-              <View style={styles.locationCluster}>
-                <Text style={styles.locationText} numberOfLines={1} accessibilityLabel={`현재 표시 지역 ${regionLabel}`}>
-                  {regionLabel}
-                </Text>
-                <Pressable
-                  onPress={openRegionModal}
-                  style={styles.locationExpandBtn}
-                  accessibilityRole="button"
-                  accessibilityLabel="지역 설정 열기"
-                  hitSlop={8}>
-                  <Ionicons name="chevron-down" size={20} color={GinitTheme.colors.primary} />
-                </Pressable>
-              </View>
-              <View style={styles.headerActions}>
-                <Pressable
-                  onPress={openFeedSearch}
-                  accessibilityRole="button"
-                  accessibilityLabel="검색 및 조건 필터"
-                  hitSlop={10}
-                  style={styles.searchIconWrap}>
-                  <Ionicons name="search-outline" size={24} color="#0f172a" />
-                  {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
-                </Pressable>
-                <InAppAlarmsBellButton />
-              </View>
-            </View>
-            <View style={styles.chipsFullBleed}>
-              <View style={styles.chipsStripWrap}>
-                <ScrollView
-                  horizontal
-                  nestedScrollEnabled
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipsRow}
-                  style={styles.chipsScroll}
-                  onScroll={onCategoryChipsScroll}
-                  scrollEventThrottle={16}
-                  onContentSizeChange={(w) => {
-                    chipsContentWRef.current = w;
-                    recomputeChipsMoreRight();
-                  }}
-                  onLayout={(e) => {
-                    chipsLayoutWRef.current = e.nativeEvent.layout.width;
-                    recomputeChipsMoreRight();
-                  }}>
-                  {feedChips.map((chip) => {
-                    const active = chip.filterId === selectedCategoryId;
-                    return (
-                      <GlassCategoryChip
-                        key={chip.filterId ?? 'all'}
-                        label={chip.label}
-                        active={active}
-                        maxLabelWidth={categoryChipMaxWidth}
-                        onPress={() => setSelectedCategoryId(chip.filterId)}
-                      />
-                    );
-                  })}
-                </ScrollView>
-                {chipsMoreRight ? <View pointerEvents="none" accessibilityElementsHidden style={styles.chipsScrollEdgeFade} /> : null}
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionLabel}>
-              모임{selectedFilterLabel ? ` · ${selectedFilterLabel}` : ''}
-            </Text>
-            <View style={styles.sectionHeaderControls}>
-              <Pressable
-                onPress={() => setRecruitingOnly((v) => !v)}
-                style={[styles.recruitTogglePill, recruitingOnly && styles.recruitTogglePillOn]}
-                accessibilityRole="button"
-                accessibilityLabel="모집중만 보기"
-                accessibilityState={{ selected: recruitingOnly }}>
-                <Text style={[styles.recruitTogglePillLabel, recruitingOnly && styles.recruitTogglePillLabelOn]}>
-                  모집중
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={openSortFilterModal}
-                style={({ pressed }) => [styles.sortComboTrigger, pressed && styles.sortComboTriggerPressed]}
-                accessibilityRole="button"
-                accessibilityLabel={`정렬, 현재 ${sortComboLabel}`}
-                accessibilityHint="탭하면 정렬 방식을 바꿀 수 있어요">
-                <Text style={styles.sortComboTriggerText} numberOfLines={1} ellipsizeMode="tail">
-                  {sortComboLabel}
-                </Text>
-                <Ionicons name="chevron-down" size={18} color="#475569" />
-              </Pressable>
-            </View>
-          </View>
-
-          {loading ? (
-            <View style={styles.centerRow}>
-              <ActivityIndicator />
-              <Text style={styles.muted}>불러오는 중…</Text>
-            </View>
-          ) : null}
-
-          {listError ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
-              <Text style={styles.errorBody}>{listError}</Text>
-            </View>
-          ) : null}
-
-          {!loading && !listError && meetings.length === 0 ? (
-            <Text style={styles.empty}>등록된 모임이 없습니다. + 버튼으로 첫 모임을 만들어 보세요.</Text>
-          ) : null}
-
-          {!loading && !listError && meetings.length > 0 && meetingsWithinRadius.length === 0 && userCoords ? (
-            <Text style={styles.empty}>내 위치 기준 반경 5km 안에 등록된 모임이 없어요.</Text>
-          ) : null}
-
-          {!loading &&
-          !listError &&
-          meetingsWithinRadius.length > 0 &&
-          filteredMeetings.length === 0 ? (
-            <Text style={styles.empty}>
-              {feedSearchFiltersActive(appliedFeedSearch)
-                ? '검색·조건에 맞는 모임이 없어요. 검색을 열어 필터를 바꿔 보세요.'
-                : selectedFilterLabel
-                  ? `「${selectedFilterLabel}」 카테고리 모임이 아직 없어요. 다른 칩을 선택해 보세요.`
-                  : recruitingOnly
-                    ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 모집 완료·확정 모임도 볼 수 있어요.'
-                    : '조건에 맞는 모임이 없어요.'}
-            </Text>
-          ) : null}
-
-          {sortedFilteredMeetings.map((m) => (
-            <MeetingFeedRow
-              key={m.id}
-              meeting={m}
-              userCoords={userCoords}
-              joined={isUserJoinedMeeting(m, userId)}
-              onPress={() => router.push(`/meeting/${m.id}`)}
-            />
-          ))}
-        </ScrollView>
+          }
+        />
 
         <Modal
           visible={sortFilterModalOpen}
@@ -507,6 +547,49 @@ export default function FeedScreen() {
             </View>
           </View>
         </Modal>
+
+        <Modal
+          visible={categoryPickerOpen}
+          animationType="fade"
+          transparent
+          onRequestClose={closeCategoryPicker}>
+          <View style={styles.modalRoot}>
+            <Pressable
+              style={StyleSheet.absoluteFillObject}
+              onPress={closeCategoryPicker}
+              accessibilityRole="button"
+              accessibilityLabel="카테고리 선택 닫기"
+            />
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>카테고리</Text>
+              <Text style={styles.modalHint}>표시할 모임 종류를 선택하세요.</Text>
+              {feedChips.map((chip) => {
+                const selected = chip.filterId === selectedCategoryId;
+                return (
+                  <Pressable
+                    key={chip.filterId ?? 'all'}
+                    onPress={() => {
+                      setSelectedCategoryId(chip.filterId);
+                      closeCategoryPicker();
+                    }}
+                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}>
+                    <Text style={styles.modalRowLabel}>{chip.label}</Text>
+                    {selected ? (
+                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                    ) : (
+                      <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
+                    )}
+                  </Pressable>
+                );
+              })}
+              <Pressable onPress={closeCategoryPicker} style={styles.modalCloseBtn} accessibilityRole="button">
+                <Text style={styles.modalCloseLabel}>닫기</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </ScreenShell>
   );
@@ -517,9 +600,52 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
   },
+  listFlex: {
+    flex: 1,
+  },
   scroll: {
     paddingHorizontal: 20,
     paddingBottom: 28,
+    flexGrow: 1,
+  },
+  tabCategoryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 2,
+  },
+  tabPair: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  categoryDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+    maxWidth: 150,
+    minWidth: 96,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  categoryDropdownPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderColor: 'rgba(0, 82, 204, 0.25)',
+  },
+  categoryDropdownText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
   },
   feedHeader: {
     marginBottom: 16,
@@ -573,34 +699,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#EF4444',
     borderWidth: 1.5,
     borderColor: '#fff',
-  },
-  chipsFullBleed: {
-    alignSelf: 'stretch',
-    marginHorizontal: -20,
-    paddingHorizontal: 20,
-  },
-  chipsStripWrap: {
-    position: 'relative',
-  },
-  chipsScroll: {
-    width: '100%',
-  },
-  chipsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 2,
-    /** 다음 칩이 살짝 비치도록 — 페이드만 얹고 가짜 UI는 쓰지 않음 */
-    paddingRight: 14,
-  },
-  /** 피드 상단 그라데이션(#DCEEFF→#F6FAFF)에 맞춘 좁은 스크롤 엣지 페이드 */
-  chipsScrollEdgeFade: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 28,
-    backgroundColor: 'rgba(246, 250, 255, 0.88)',
   },
   sectionHeaderRow: {
     flexDirection: 'row',

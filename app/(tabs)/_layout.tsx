@@ -58,7 +58,7 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
       }}>
-      <Tabs.Screen name="index" options={{ title: '홈' }} />
+      <Tabs.Screen name="index" options={{ title: '모임' }} />
       <Tabs.Screen name="map" options={{ title: '지도' }} />
       <Tabs.Screen name="chat" options={{ title: '채팅' }} />
       <Tabs.Screen name="profile" options={{ title: '프로필' }} />

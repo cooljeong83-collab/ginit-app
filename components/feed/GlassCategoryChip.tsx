@@ -9,17 +9,20 @@ type Props = {
   active: boolean;
   onPress: () => void;
   maxLabelWidth: number;
+  /** 미지정 시 「{label} 카테고리 필터」 */
+  accessibilityLabel?: string;
 };
 
 /**
  * 홈 피드 상단 카테고리 필터와 동일한 글래스 칩 (채팅 탭 미니 카드 등에서 재사용)
  */
-export function GlassCategoryChip({ label, active, onPress, maxLabelWidth }: Props) {
+export function GlassCategoryChip({ label, active, onPress, maxLabelWidth, accessibilityLabel }: Props) {
+  const a11yLabel = accessibilityLabel ?? `${label} 카테고리 필터`;
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${label} 카테고리 필터`}
+      accessibilityLabel={a11yLabel}
       accessibilityState={{ selected: active }}
       style={({ pressed }) => [
         styles.chipPressable,

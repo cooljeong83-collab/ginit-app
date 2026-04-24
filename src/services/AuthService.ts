@@ -1,4 +1,9 @@
 import {
+  PhoneAuthProvider as JsPhoneAuthProvider,
+  linkWithCredential,
+  type UserCredential,
+} from 'firebase/auth';
+import {
   FirebaseAuthTypes,
   PhoneAuthProvider,
   getAuth,
@@ -7,6 +12,8 @@ import {
   signOut as firebaseSignOut,
   verifyPhoneNumber as startFirebasePhoneVerification,
 } from '@react-native-firebase/auth';
+
+import { getFirebaseAuth } from '@/src/lib/firebase';
 
 export type PhoneVerificationResult = { verificationId: string };
 
@@ -93,17 +100,28 @@ export class AuthService {
    * - Google SNS 가입자가 프로필에서 전화번호 인증을 진행할 때 사용
    * - 이미 phone이 연결된 계정이면 에러 메시지를 사람이 읽기 쉽게 throw
    */
-  static async linkPhoneWithCode(verificationId: string, code: string): Promise<FirebaseAuthTypes.UserCredential> {
+  /**
+   * 구글 등은 `firebase/auth`(getFirebaseAuth) 세션만 있고 RN Firebase `getAuth().currentUser`는 비어 있을 수 있음.
+   * 전화 OTP 전용 로그인은 반대로 RN 세션만 있는 경우가 있어 둘 다 시도합니다.
+   */
+  static async linkPhoneWithCode(verificationId: string, code: string): Promise<UserCredential> {
     try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-      if (!user) throw new Error('로그인 상태를 확인할 수 없습니다.');
-      const credential = PhoneAuthProvider.credential(verificationId, code.trim());
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-      const linked = await (user as unknown as { linkWithCredential: (c: unknown) => Promise<FirebaseAuthTypes.UserCredential> }).linkWithCredential(
-        credential,
-      );
-      return linked;
+      const trimmed = code.trim();
+      const jsUser = getFirebaseAuth().currentUser;
+      if (jsUser && !jsUser.isAnonymous) {
+        const credential = JsPhoneAuthProvider.credential(verificationId, trimmed);
+        return await linkWithCredential(jsUser, credential);
+      }
+      const rnUser = getAuth().currentUser;
+      if (rnUser) {
+        const credential = PhoneAuthProvider.credential(verificationId, trimmed);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        const linked = await (rnUser as unknown as { linkWithCredential: (c: unknown) => Promise<FirebaseAuthTypes.UserCredential> }).linkWithCredential(
+          credential,
+        );
+        return linked as unknown as UserCredential;
+      }
+      throw new Error('로그인 상태를 확인할 수 없습니다.');
     } catch (e) {
       throw new Error(AuthService.humanizeError(e));
     }

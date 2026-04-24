@@ -58,6 +58,7 @@ import {
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
   WITHDRAWN_NICKNAME,
   ensureUserProfile,
@@ -1026,7 +1027,7 @@ export default function MeetingDetailScreen() {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
-          [{ text: '프로필로 이동', onPress: () => router.push('/(tabs)/profile') }],
+          [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
         );
         return;
       }

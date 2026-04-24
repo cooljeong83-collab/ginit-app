@@ -84,6 +84,7 @@ import {
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting } from '@/src/lib/meetings';
 import type { PublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
@@ -1963,7 +1964,7 @@ export default function CreateDetailsScreen() {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
-          [{ text: '프로필로 이동', onPress: () => router.push('/(tabs)/profile') }],
+          [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
         );
         return;
       }
@@ -2076,11 +2077,11 @@ export default function CreateDetailsScreen() {
                 SNS 간편 가입 계정은 프로필에서 입력을 마친 뒤 모임을 만들 수 있어요. 앱 소개 투어는 그대로 이용할 수 있어요.
               </Text>
               <Pressable
-                onPress={() => router.push('/(tabs)/profile')}
+                onPress={() => pushProfileOpenRegisterInfo(router)}
                 style={({ pressed }) => [styles.snsGateBtn, pressed && { opacity: 0.88 }]}
                 accessibilityRole="button"
-                accessibilityLabel="프로필 탭으로 이동">
-                <Text style={styles.snsGateBtnLabel}>프로필로 이동</Text>
+                accessibilityLabel="정보 등록 화면으로 이동">
+                <Text style={styles.snsGateBtnLabel}>정보 등록하기</Text>
               </Pressable>
             </View>
           ) : null}

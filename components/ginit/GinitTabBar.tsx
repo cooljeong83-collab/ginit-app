@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 
@@ -25,7 +26,7 @@ const ORDER = ['index', 'map', 'chat', 'profile'] as const;
 function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
   switch (routeName) {
     case 'index':
-      return focused ? 'home' : 'home-outline';
+      return focused ? 'people' : 'people-outline';
     case 'map':
       return focused ? 'map' : 'map-outline';
     case 'chat':
@@ -78,7 +79,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             Alert.alert(
               '프로필을 완성해 주세요',
               'SNS로 가입한 계정은 모임을 만들기 전에 프로필에서 성별과 연령대를 입력해야 해요.',
-              [{ text: '프로필로 이동', onPress: () => router.push('/(tabs)/profile') }],
+              [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
             );
             return;
           }
@@ -160,7 +161,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                 : typeof options.title === 'string'
                   ? options.title
                   : route.name === 'index'
-                    ? '홈'
+                    ? '모임'
                     : route.name === 'map'
                       ? '지도'
                       : route.name === 'chat'
@@ -224,7 +225,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                 : typeof options.title === 'string'
                   ? options.title
                   : route.name === 'index'
-                    ? '홈'
+                    ? '모임'
                     : route.name === 'map'
                       ? '지도'
                       : route.name === 'chat'
