@@ -1,5 +1,7 @@
 import type { Category } from '@/src/lib/categories';
 import { meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import type { MeetingExtraData } from '@/src/lib/meeting-extra-data';
 import type {
   Meeting,
   PublicMeetingAgeLimit,
@@ -8,7 +10,9 @@ import type {
   PublicMeetingGenderRatio,
   PublicMeetingSettlement,
 } from '@/src/lib/meetings';
-import { parsePublicMeetingDetailsConfig, parseScheduleToTimestamp } from '@/src/lib/meetings';
+import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
+import { parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import type { UserProfile } from '@/src/lib/user-profile';
 
 export type MeetingListSortMode = 'distance' | 'latest' | 'soon';
 
@@ -30,18 +34,6 @@ export function meetingCreatedAtMs(m: Meeting): number {
     return (t as { toMillis: () => number }).toMillis();
   }
   return 0;
-}
-
-export function meetingScheduleStartMs(m: Meeting): number | null {
-  const sa = m.scheduledAt;
-  if (sa && typeof (sa as { toMillis?: () => number }).toMillis === 'function') {
-    return (sa as { toMillis: () => number }).toMillis();
-  }
-  const d = m.scheduleDate?.trim() ?? '';
-  const t = m.scheduleTime?.trim() ?? '';
-  if (!d || !t) return null;
-  const ts = parseScheduleToTimestamp(d, t);
-  return ts ? ts.toMillis() : null;
 }
 
 /** 홈 검색 모달 — 글자 검색 + 공개 모임 `meetingConfig` 조건 */
@@ -199,4 +191,43 @@ export function sortMeetingsForFeed(
     return a.title.localeCompare(b.title, 'ko');
   });
   return list;
+}
+
+/** 홈 리스트 심볼 박스: 영화 포스터 우선, 없으면 주관자 프로필 사진 */
+export type FeedMeetingSymbolBox =
+  | { source: 'movie_poster'; url: string }
+  | { source: 'host_profile'; url: string };
+
+function firstMoviePosterUrl(extra: MeetingExtraData): string | null {
+  const fromMovie = extra.movie?.posterUrl?.trim();
+  if (fromMovie) return fromMovie;
+  const list = extra.movies;
+  if (!Array.isArray(list)) return null;
+  for (const mv of list) {
+    const u = mv?.posterUrl?.trim();
+    if (u) return u;
+  }
+  return null;
+}
+
+export function feedMeetingSymbolBox(
+  m: Meeting,
+  hostProfiles: ReadonlyMap<string, UserProfile>,
+): FeedMeetingSymbolBox | null {
+  const raw = m.extraData;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const extra = raw as MeetingExtraData;
+    if (extra.specialtyKind === 'movie') {
+      const poster = firstMoviePosterUrl(extra);
+      if (poster) return { source: 'movie_poster', url: poster };
+    }
+  }
+
+  const hostRaw = m.createdBy?.trim();
+  if (!hostRaw) return null;
+  const hostKey = normalizeParticipantId(hostRaw) ?? hostRaw;
+  const prof = hostProfiles.get(hostKey) ?? hostProfiles.get(hostRaw);
+  const url = prof?.photoUrl?.trim();
+  if (url) return { source: 'host_profile', url };
+  return null;
 }

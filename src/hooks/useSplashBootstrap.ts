@@ -19,6 +19,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([p.finally(() => (t ? clearTimeout(t) : undefined)), timeout]);
 }
 
+/** 부트는 막지 않음 — 홈·프로필 화면에서 `ensureUserProfile` 재시도 가능 */
+async function tryEnsureProfileDuringBoot(pk: string): Promise<void> {
+  try {
+    await withTimeout(ensureUserProfile(pk), 10000, 'ensureUserProfile');
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.warn('[useSplashBootstrap] ensureUserProfile failed (continuing to app):', detail);
+  }
+}
+
 /**
  * 앱 부트: Secure 세션 / AsyncStorage 사용자 PK / 전화번호(레거시) → 회원 여부 확인 후 탭 또는 로그인으로 분기.
  * 온보딩은 스플래시 경로에 포함하지 않습니다(회원가입 완료 후에만 표시).
@@ -92,7 +102,7 @@ export function useSplashBootstrap() {
       if (cancelled) return false;
       if (!ok) return false;
       await setUserId(pk);
-      await withTimeout(ensureUserProfile(pk), 10000, 'ensureUserProfile');
+      await tryEnsureProfileDuringBoot(pk);
       if (!cancelled) {
         finishedRef.current = true;
         goTabs();
@@ -114,7 +124,7 @@ export function useSplashBootstrap() {
           const emailNorm = firebaseUser.email ? normalizeUserId(firebaseUser.email) : null;
           if (emailNorm) {
             await setUserId(emailNorm);
-            await withTimeout(ensureUserProfile(emailNorm), 10000, 'ensureUserProfile');
+            await tryEnsureProfileDuringBoot(emailNorm);
           }
           finishedRef.current = true;
           goTabs();
@@ -132,7 +142,7 @@ export function useSplashBootstrap() {
             return;
           }
           await setUserId(pk);
-          await withTimeout(ensureUserProfile(pk), 10000, 'ensureUserProfile');
+          await tryEnsureProfileDuringBoot(pk);
           if (!cancelled) {
             finishedRef.current = true;
             goTabs();

@@ -35,10 +35,17 @@ export function categoriesSource(): 'firestore' | 'supabase' {
   return 'supabase';
 }
 
-/** 프로필 읽기: Ledger 시 `supabase` 고정, 아니면 `EXPO_PUBLIC_PROFILE_SOURCE` + RPC `0007` */
+/**
+ * 프로필 읽기·`ensureUserProfile` 경로.
+ * - `EXPO_PUBLIC_PROFILE_SOURCE=firestore` → Ledger(Supabase)와 무관하게 Firestore `users` 사용.
+ *   (`ensure_profile_minimal` RPC가 프로젝트에 없거나 PostgREST 캐시에 안 잡힐 때 임시 우회)
+ * - `EXPO_PUBLIC_PROFILE_SOURCE=supabase` + Supabase 준비됨 → 항상 RPC
+ * - 그 외: Ledger 켜지면 supabase, 아니면 firestore
+ */
 export function profilesSource(): 'firestore' | 'supabase' {
-  if (ledgerWritesToSupabase()) return 'supabase';
   const v = (publicEnv.profilesSource ?? '').trim().toLowerCase();
+  if (v === 'firestore') return 'firestore';
   if (v === 'supabase' && supabasePublicReady()) return 'supabase';
+  if (ledgerWritesToSupabase()) return 'supabase';
   return 'firestore';
 }

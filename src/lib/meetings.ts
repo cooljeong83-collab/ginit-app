@@ -44,7 +44,18 @@ import {
 } from './meetings-ledger';
 import { notifyMeetingParticipantsOfHostActionFireAndForget } from './meeting-host-push-notify';
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
-import { validateDateCandidatesForSave, validatePrimaryScheduleForSave } from './date-candidate';
+import {
+  fmtDateYmd,
+  fmtTimeHm,
+  getDateCandidateScheduleInstant,
+  primaryScheduleFromDateCandidate,
+  validateDateCandidatesForSave,
+  validatePrimaryScheduleForSave,
+} from './date-candidate';
+import {
+  assertNoConfirmedScheduleOverlapHybrid,
+  getScheduleOverlapBufferHours,
+} from './meeting-schedule-overlap';
 import type { DateCandidate } from './meeting-place-bridge';
 import { normalizeParticipantId } from './app-user-id';
 import {
@@ -371,19 +382,9 @@ export type CreateMeetingInput = {
   meetingConfig?: PublicMeetingDetailsConfig | null;
 };
 
-/** `YYYY-MM-DD` + `H:mm` 또는 `HH:mm` → Firestore Timestamp (파싱 실패 시 null). */
-export function parseScheduleToTimestamp(dateStr: string, timeStr: string): Timestamp | null {
-  const d = dateStr.trim();
-  const t = timeStr.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
-  if (!m) return null;
-  const hh = m[1].padStart(2, '0');
-  const mm = m[2].padStart(2, '0');
-  const dt = new Date(`${d}T${hh}:${mm}:00`);
-  if (Number.isNaN(dt.getTime())) return null;
-  return Timestamp.fromDate(dt);
-}
+import { parseScheduleToTimestamp } from './meeting-schedule-times';
+
+export { parseScheduleToTimestamp };
 
 function parseVoteIntMap(raw: unknown): Record<string, number> | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
@@ -844,6 +845,19 @@ export async function joinMeeting(
     if (!data) throw new Error('모임을 찾을 수 없어요.');
     const joinBlock = getJoinGamificationBlockReason(profile, data);
     if (joinBlock) throw new Error(joinBlock);
+    const mPre = mapFirestoreMeetingDoc(mid, data);
+    if (mPre.scheduleConfirmed === true) {
+      const startMs = meetingPrimaryStartMs(mPre);
+      if (startMs != null) {
+        const buf = getScheduleOverlapBufferHours(profile);
+        await assertNoConfirmedScheduleOverlapHybrid({
+          appUserId: uid,
+          startMs,
+          bufferHours: buf,
+          excludeMeetingId: mid,
+        });
+      }
+    }
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
@@ -878,6 +892,19 @@ export async function joinMeeting(
   if (!preSnap.exists()) throw new Error('모임을 찾을 수 없어요.');
   const joinBlock = getJoinGamificationBlockReason(profile, preSnap.data() as Record<string, unknown>);
   if (joinBlock) throw new Error(joinBlock);
+  const mPreFs = mapFirestoreMeetingDoc(mid, preSnap.data() as Record<string, unknown>);
+  if (mPreFs.scheduleConfirmed === true) {
+    const startMs = meetingPrimaryStartMs(mPreFs);
+    if (startMs != null) {
+      const buf = getScheduleOverlapBufferHours(profile);
+      await assertNoConfirmedScheduleOverlapHybrid({
+        appUserId: uid,
+        startMs,
+        bufferHours: buf,
+        excludeMeetingId: mid,
+      });
+    }
+  }
 
   await runTransaction(getFirestoreDb(), async (transaction) => {
     const snap = await transaction.get(ref);
@@ -1224,16 +1251,30 @@ export async function confirmMeetingSchedule(
       throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
     }
     const rp = analysis.resolvedPicks;
-    await ledgerMeetingPutRawDoc(
-      mid,
-      stripUndefinedDeep({
-        ...data,
-        scheduleConfirmed: true,
-        confirmedDateChipId: rp.dateChipId,
-        confirmedPlaceChipId: rp.placeChipId,
-        confirmedMovieChipId: rp.movieChipId,
-      }) as Record<string, unknown>,
-    );
+    const sch = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
+    if (sch) {
+      const hostProf = await getUserProfile(uid);
+      const buf = getScheduleOverlapBufferHours(hostProf);
+      await assertNoConfirmedScheduleOverlapHybrid({
+        appUserId: uid,
+        startMs: sch.scheduledAt.toMillis(),
+        bufferHours: buf,
+        excludeMeetingId: mid,
+      });
+    }
+    const nextLedgerDoc: Record<string, unknown> = {
+      ...data,
+      scheduleConfirmed: true,
+      confirmedDateChipId: rp.dateChipId,
+      confirmedPlaceChipId: rp.placeChipId,
+      confirmedMovieChipId: rp.movieChipId,
+    };
+    if (sch) {
+      nextLedgerDoc.scheduleDate = sch.scheduleDate;
+      nextLedgerDoc.scheduleTime = sch.scheduleTime;
+      nextLedgerDoc.scheduledAt = sch.scheduledAt;
+    }
+    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextLedgerDoc) as Record<string, unknown>);
     notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
     return;
   }
@@ -1253,12 +1294,29 @@ export async function confirmMeetingSchedule(
     throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
   }
   const rp = analysis.resolvedPicks;
-  await updateDoc(ref, {
+  const schFs = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
+  if (schFs) {
+    const hostProf = await getUserProfile(uid);
+    const buf = getScheduleOverlapBufferHours(hostProf);
+    await assertNoConfirmedScheduleOverlapHybrid({
+      appUserId: uid,
+      startMs: schFs.scheduledAt.toMillis(),
+      bufferHours: buf,
+      excludeMeetingId: mid,
+    });
+  }
+  const fsPatch: Record<string, unknown> = {
     scheduleConfirmed: true,
     confirmedDateChipId: rp.dateChipId,
     confirmedPlaceChipId: rp.placeChipId,
     confirmedMovieChipId: rp.movieChipId,
-  });
+  };
+  if (schFs) {
+    fsPatch.scheduleDate = schFs.scheduleDate;
+    fsPatch.scheduleTime = schFs.scheduleTime;
+    fsPatch.scheduledAt = schFs.scheduledAt;
+  }
+  await updateDoc(ref, fsPatch);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
 }
 
@@ -1361,6 +1419,48 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
  * 채팅 서브컬렉션·Storage는 호출 측에서 먼저 비운 뒤 호출하세요.
  * 확정 여부와 관계없이 삭제합니다.
  */
+/** 주관자 확정 시 선택된 일시 칩 기준 대표 시각(ms). 후보 없으면 `meetingPrimaryStartMs`로 대체. */
+export function meetingStartMsForResolvedDateChip(m: Meeting, dateChipId: string | null): number | null {
+  if (!dateChipId?.trim()) return meetingPrimaryStartMs(m);
+  const id = dateChipId.trim();
+  const cands = m.dateCandidates ?? [];
+  for (let i = 0; i < cands.length; i++) {
+    const cid = cands[i].id?.trim() || `dc-${i}`;
+    if (cid === id) {
+      const inst = getDateCandidateScheduleInstant(cands[i]);
+      return inst ? inst.getTime() : null;
+    }
+  }
+  return meetingPrimaryStartMs(m);
+}
+
+function scheduleFieldsAfterHostConfirm(m: Meeting, dateChipId: string | null): {
+  scheduleDate: string;
+  scheduleTime: string;
+  scheduledAt: Timestamp;
+} | null {
+  const ms = meetingStartMsForResolvedDateChip(m, dateChipId);
+  if (ms == null) return null;
+  const cands = m.dateCandidates ?? [];
+  if (dateChipId?.trim() && cands.length > 0) {
+    for (let i = 0; i < cands.length; i++) {
+      const cid = cands[i].id?.trim() || `dc-${i}`;
+      if (cid === dateChipId.trim()) {
+        const prim = primaryScheduleFromDateCandidate(cands[i]);
+        const ts = parseScheduleToTimestamp(prim.scheduleDate, prim.scheduleTime);
+        if (ts) return { scheduleDate: prim.scheduleDate, scheduleTime: prim.scheduleTime, scheduledAt: ts };
+        return { scheduleDate: prim.scheduleDate, scheduleTime: prim.scheduleTime, scheduledAt: Timestamp.fromMillis(ms) };
+      }
+    }
+  }
+  const d = new Date(ms);
+  return {
+    scheduleDate: fmtDateYmd(d),
+    scheduleTime: fmtTimeHm(d),
+    scheduledAt: Timestamp.fromMillis(ms),
+  };
+}
+
 /** 모임 대표 일시(상단 `scheduledAt` 또는 scheduleDate+scheduleTime)의 epoch ms. 없으면 null. */
 export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>): number | null {
   const ts = m.scheduledAt;
@@ -1500,6 +1600,20 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   };
 
   const cleaned = stripUndefinedDeep(docFields) as Record<string, unknown>;
+
+  const hostPk = input.createdBy?.trim();
+  if (hostPk) {
+    const hostProf = await getUserProfile(hostPk);
+    const buf = getScheduleOverlapBufferHours(hostProf);
+    if (scheduledAt) {
+      await assertNoConfirmedScheduleOverlapHybrid({
+        appUserId: hostPk,
+        startMs: scheduledAt.toMillis(),
+        bufferHours: buf,
+        excludeMeetingId: null,
+      });
+    }
+  }
 
   if (ledgerWritesToSupabase()) {
     const host = input.createdBy?.trim();

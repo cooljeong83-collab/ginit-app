@@ -29,9 +29,11 @@ import {
   FEED_LOCATION_FALLBACK_SHORT,
   resolveFeedLocationContext,
 } from '@/src/lib/feed-display-location';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
   buildFeedChips,
   defaultFeedSearchFilters,
+  feedMeetingSymbolBox,
   feedSearchFiltersActive,
   listSortModeLabel,
   meetingMatchesCategoryFilter,
@@ -45,9 +47,15 @@ import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-loc
 import type { LatLng } from '@/src/lib/geo-distance';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import {
+  collectUserConfirmedScheduleSlots,
+  getScheduleOverlapBufferHours,
+  meetingOverlapsUserConfirmedSlots,
+} from '@/src/lib/meeting-schedule-overlap';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { getUserProfile, getUserProfilesForIds, type UserProfile } from '@/src/lib/user-profile';
 import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 
 /** 지역 설정 UI용 샘플 — 구 단위(추후 지도·검색과 연동) */
@@ -93,6 +101,60 @@ export default function FeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const [feedUserProfile, setFeedUserProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    if (!userId?.trim()) {
+      setFeedUserProfile(null);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const p = await getUserProfile(userId.trim());
+        if (alive) setFeedUserProfile(p);
+      } catch {
+        if (alive) setFeedUserProfile(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
+
+  const overlapBufferHours = useMemo(() => getScheduleOverlapBufferHours(feedUserProfile), [feedUserProfile]);
+
+  const myConfirmedScheduleSlots = useMemo(
+    () => collectUserConfirmedScheduleSlots(meetings, userId),
+    [meetings, userId],
+  );
+
+  const feedHostIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of meetings) {
+      const r = m.createdBy?.trim();
+      if (!r) continue;
+      set.add(normalizeParticipantId(r) ?? r);
+    }
+    return [...set];
+  }, [meetings]);
+
+  const [feedHostProfileMap, setFeedHostProfileMap] = useState<Map<string, UserProfile>>(() => new Map());
+
+  useEffect(() => {
+    if (feedHostIds.length === 0) {
+      setFeedHostProfileMap(new Map());
+      return;
+    }
+    let alive = true;
+    void getUserProfilesForIds(feedHostIds).then((map) => {
+      if (!alive) return;
+      setFeedHostProfileMap(map);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [feedHostIds]);
 
   useEffect(() => {
     regionLabelRef.current = regionLabel;
@@ -283,9 +345,13 @@ export default function FeedScreen() {
         userCoords={userCoords}
         joined={isUserJoinedMeeting(item, userId)}
         onPress={() => router.push(`/meeting/${item.id}`)}
+        scheduleOverlapWarning={
+          Boolean(userId) && meetingOverlapsUserConfirmedSlots(item, myConfirmedScheduleSlots, overlapBufferHours)
+        }
+        symbolBox={feedMeetingSymbolBox(item, feedHostProfileMap)}
       />
     ),
-    [userCoords, userId, router],
+    [userCoords, userId, router, myConfirmedScheduleSlots, overlapBufferHours, feedHostProfileMap],
   );
 
   const listHeader = (

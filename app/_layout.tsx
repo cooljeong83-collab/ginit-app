@@ -7,8 +7,16 @@ import { PushNotificationBootstrap } from '@/components/PushNotificationBootstra
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
-/** 네이티브 스플래시가 JS 부트 화면과 맞물릴 때까지 유지 → `SplashBootstrapScreen`에서 hideAsync */
-void SplashScreen.preventAutoHideAsync().catch(() => {});
+/**
+ * 네이티브 스플래시가 JS 부트 화면과 맞물릴 때까지 유지 → `SplashBootstrapScreen`에서 hideAsync
+ * - 웹: keep-awake 미지원 → `Unable to activate keep awake` 방지
+ * - Strict Mode 등으로 이 파일이 두 번 평가될 때 중복 호출 방지
+ */
+let didScheduleSplashPrevent = false;
+if (Platform.OS !== 'web' && !didScheduleSplashPrevent) {
+  didScheduleSplashPrevent = true;
+  void SplashScreen.preventAutoHideAsync().catch(() => {});
+}
 
 /**
  * 전역 유저는 `UserSessionContext`(전화 PK, 구글 프로필 스냅샷)로 제공됩니다.

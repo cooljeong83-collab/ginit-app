@@ -46,6 +46,7 @@ import {
 } from '@/src/lib/google-sign-in';
 import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import {
@@ -403,6 +404,13 @@ export default function LoginScreen() {
         birthYear: people?.birthYear ?? null,
         ageBand: null,
       });
+
+      const introSeen = await readAppIntroComplete();
+      if (introSeen) {
+        router.replace('/(tabs)');
+      } else {
+        router.replace({ pathname: '/onboarding', params: { next: 'tabs', flow: 'postGoogleSignup' } });
+      }
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
       const message = e instanceof Error ? e.message : '알 수 없는 오류';
@@ -412,7 +420,7 @@ export default function LoginScreen() {
     } finally {
       setBusyGoogle(false);
     }
-  }, [setAuthProfile, setUserId]);
+  }, [setAuthProfile, setUserId, router]);
 
   const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -613,7 +621,8 @@ export default function LoginScreen() {
                       setPendingConsentAction(async () => {
                         await onGoogleSignUp();
                       });
-                      router.push({ pathname: '/terms-agreement', params: { next: '/(tabs)' } });
+                      /* next 없음: 약관 후 이동은 onGoogleSignUp 안에서 온보딩 여부에 따라 처리 */
+                      router.push({ pathname: '/terms-agreement' });
                     }}
                     googleDisabled={isExpoGo && Platform.OS !== 'web'}
                     googleLoading={busyGoogle}

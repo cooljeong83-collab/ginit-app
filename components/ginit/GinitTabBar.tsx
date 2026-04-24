@@ -21,7 +21,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
-import { getUserProfile, isGoogleSnsDemographicsIncomplete } from '@/src/lib/user-profile';
+import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
@@ -86,7 +86,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
       if (pk) {
         try {
           const p = await getUserProfile(pk);
-          if (isGoogleSnsDemographicsIncomplete(p)) {
+          if (meetingDemographicsIncomplete(p, pk)) {
             Alert.alert(
               '프로필을 완성해 주세요',
               'SNS로 가입한 계정은 모임을 만들기 전에 프로필에서 성별과 연령대를 입력해야 해요.',

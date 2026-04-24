@@ -8,6 +8,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { AuthService } from '@/src/services/AuthService';
+import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
   ensureUserProfile,
@@ -56,7 +57,12 @@ export default function OtpVerifyScreen() {
     async (resolvedUserId: string) => {
       await setUserId(resolvedUserId);
       await ensureUserProfile(resolvedUserId);
-      router.replace('/(tabs)');
+      const introSeen = await readAppIntroComplete();
+      if (introSeen) {
+        router.replace('/(tabs)');
+        return;
+      }
+      router.replace({ pathname: '/onboarding', params: { next: 'tabs', flow: 'postOtpSignup' } });
     },
     [setUserId, router],
   );

@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Image } from 'expo-image';
+
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
@@ -24,6 +26,7 @@ import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { socialDmRoomId, subscribeMySocialChatRooms, type SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -42,10 +45,12 @@ function profileForCreatedBy(
   return undefined;
 }
 
+type ChatKind = 'gather' | 'social';
+
 export default function ChatTab() {
   const router = useRouter();
   const { userId } = useUserSession();
-  const [chatKind, setChatKind] = useState<'dm' | 'meeting'>('meeting');
+  const [chatKind, setChatKind] = useState<ChatKind>('gather');
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,6 +59,9 @@ export default function ChatTab() {
     Record<string, MeetingChatMessage | null | undefined>
   >({});
   const [hostProfiles, setHostProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [socialRooms, setSocialRooms] = useState<SocialChatRoomSummary[]>([]);
+  const [socialProfiles, setSocialProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [socialRoomsError, setSocialRoomsError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -112,6 +120,40 @@ export default function ChatTab() {
   const signedIn = Boolean(userId?.trim());
 
   const chatRowMeetingKey = useMemo(() => sortedMeetingChats.map((m) => m.id).join('\u0001'), [sortedMeetingChats]);
+
+  const socialRoomKey = useMemo(() => socialRooms.map((r) => r.roomId).join('\u0001'), [socialRooms]);
+
+  useEffect(() => {
+    if (!signedIn || chatKind !== 'social') {
+      return () => {};
+    }
+    const uid = userId?.trim();
+    if (!uid) return () => {};
+    const unsub = subscribeMySocialChatRooms(
+      uid,
+      (rooms) => {
+        setSocialRooms(rooms);
+        setSocialRoomsError(null);
+      },
+      (msg) => setSocialRoomsError(msg),
+    );
+    return unsub;
+  }, [signedIn, chatKind, userId]);
+
+  useEffect(() => {
+    if (chatKind !== 'social' || socialRooms.length === 0) {
+      setSocialProfiles(new Map());
+      return;
+    }
+    const peers = [...new Set(socialRooms.map((r) => r.peerAppUserId))];
+    let cancelled = false;
+    void getUserProfilesForIds(peers).then((map) => {
+      if (!cancelled) setSocialProfiles(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatKind, socialRoomKey]);
 
   useEffect(() => {
     if (!signedIn || sortedMeetingChats.length === 0) {
@@ -173,8 +215,8 @@ export default function ChatTab() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <FlatList
-          data={chatKind === 'meeting' ? sortedMeetingChats : []}
-          keyExtractor={(m) => m.id}
+          data={chatKind === 'gather' ? sortedMeetingChats : socialRooms}
+          keyExtractor={(item) => (chatKind === 'gather' ? (item as Meeting).id : (item as SocialChatRoomSummary).roomId)}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.scroll}
@@ -202,22 +244,49 @@ export default function ChatTab() {
 
               <View style={styles.kindTabsRow} accessibilityRole="tablist">
                 <Pressable
-                  onPress={() => setChatKind('dm')}
-                  style={({ pressed }) => [styles.kindTab, chatKind === 'dm' && styles.kindTabActive, pressed && styles.kindTabPressed]}
+                  onPress={() => setChatKind('gather')}
+                  style={({ pressed }) => [
+                    styles.kindTab,
+                    chatKind === 'gather' && styles.kindTabActive,
+                    pressed && styles.kindTabPressed,
+                  ]}
                   accessibilityRole="tab"
-                  accessibilityState={{ selected: chatKind === 'dm' }}
-                  accessibilityLabel="친구 채팅">
-                  <Text style={[styles.kindTabText, chatKind === 'dm' && styles.kindTabTextActive]}>친구(1:1)</Text>
+                  accessibilityState={{ selected: chatKind === 'gather' }}
+                  accessibilityLabel="모임 채팅 Gather">
+                  <Text style={[styles.kindTabText, chatKind === 'gather' && styles.kindTabTextActive]}>Gather(모임)</Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => setChatKind('meeting')}
-                  style={({ pressed }) => [styles.kindTab, chatKind === 'meeting' && styles.kindTabActive, pressed && styles.kindTabPressed]}
+                  onPress={() => setChatKind('social')}
+                  style={({ pressed }) => [
+                    styles.kindTab,
+                    chatKind === 'social' && styles.kindTabActive,
+                    pressed && styles.kindTabPressed,
+                  ]}
                   accessibilityRole="tab"
-                  accessibilityState={{ selected: chatKind === 'meeting' }}
-                  accessibilityLabel="모임 채팅">
-                  <Text style={[styles.kindTabText, chatKind === 'meeting' && styles.kindTabTextActive]}>모임(그룹)</Text>
+                  accessibilityState={{ selected: chatKind === 'social' }}
+                  accessibilityLabel="친구 채팅 Social">
+                  <Text style={[styles.kindTabText, chatKind === 'social' && styles.kindTabTextActive]}>Social(친구)</Text>
                 </Pressable>
               </View>
+
+              {signedIn && chatKind === 'social' ? (
+                <View style={styles.socialShortcuts}>
+                  <Pressable
+                    style={styles.shortcutBtn}
+                    onPress={() => router.push('/social/connections')}
+                    accessibilityRole="button"
+                    accessibilityLabel="친구 관리">
+                    <Text style={styles.shortcutBtnText}>My Connections</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.shortcutBtn}
+                    onPress={() => router.push('/social/discovery')}
+                    accessibilityRole="button"
+                    accessibilityLabel="지닛 디스커버리">
+                    <Text style={styles.shortcutBtnText}>디스커버리</Text>
+                  </Pressable>
+                </View>
+              ) : null}
 
               {loading ? (
                 <View style={styles.centerRow}>
@@ -233,33 +302,74 @@ export default function ChatTab() {
                 </View>
               ) : null}
 
+              {chatKind === 'social' && socialRoomsError ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorTitle}>Social 목록 오류</Text>
+                  <Text style={styles.errorBody}>{socialRoomsError}</Text>
+                </View>
+              ) : null}
+
               {!loading && !listError && !signedIn ? (
                 <Text style={styles.empty}>로그인하면 채팅 목록이 여기에 표시돼요.</Text>
               ) : null}
 
-              {!loading && !listError && signedIn && chatKind === 'meeting' && joinedMeetings.length === 0 ? (
+              {!loading && !listError && signedIn && chatKind === 'gather' && joinedMeetings.length === 0 ? (
                 <Text style={styles.empty}>참여 중인 모임이 없어요. 홈에서 모임에 참여해 보세요.</Text>
               ) : null}
 
-              {!loading && !listError && signedIn && chatKind === 'dm' ? (
-                <Text style={styles.empty}>친구 채팅은 준비 중이에요.</Text>
+              {!loading && !listError && signedIn && chatKind === 'social' && socialRooms.length === 0 ? (
+                <Text style={styles.empty}>Social 대화가 없어요. 디스커버리에서 지닛을 보내 보세요.</Text>
               ) : null}
             </View>
           }
-          renderItem={({ item: m }) => {
-            const host = profileForCreatedBy(hostProfiles, m.createdBy);
-            const phase = getMeetingRecruitmentPhase(m);
-            const ongoing = phase === 'recruiting' || phase === 'full' || phase === 'confirmed';
+          renderItem={({ item }) => {
+            if (chatKind === 'gather') {
+              const m = item as Meeting;
+              const host = profileForCreatedBy(hostProfiles, m.createdBy);
+              const phase = getMeetingRecruitmentPhase(m);
+              const ongoing = phase === 'recruiting' || phase === 'full' || phase === 'confirmed';
+              return (
+                <ChatMeetingListRow
+                  meeting={m}
+                  hostPhotoUrl={host?.photoUrl ?? null}
+                  hostNickname={host?.nickname ?? '주관자'}
+                  hostWithdrawn={isUserProfileWithdrawn(host)}
+                  latestMessage={latestByMeetingId[m.id]}
+                  ongoing={ongoing}
+                  onPress={() => router.push(`/meeting-chat/${m.id}`)}
+                />
+              );
+            }
+            const row = item as SocialChatRoomSummary;
+            const prof = socialProfiles.get(row.peerAppUserId);
+            const uri = prof?.photoUrl?.trim();
+            const nick = prof?.nickname ?? '친구';
+            const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
             return (
-              <ChatMeetingListRow
-                meeting={m}
-                hostPhotoUrl={host?.photoUrl ?? null}
-                hostNickname={host?.nickname ?? '주관자'}
-                hostWithdrawn={isUserProfileWithdrawn(host)}
-                latestMessage={latestByMeetingId[m.id]}
-                ongoing={ongoing}
-                onPress={() => router.push(`/meeting-chat/${m.id}`)}
-              />
+              <Pressable
+                style={({ pressed }) => [styles.socialRow, pressed && styles.socialRowPressed]}
+                onPress={() =>
+                  router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`${nick}와 채팅`}>
+                {uri ? (
+                  <Image source={{ uri }} style={styles.socialAvatar} contentFit="cover" />
+                ) : (
+                  <View style={styles.socialAvatarFallback}>
+                    <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                  </View>
+                )}
+                <View style={styles.socialMid}>
+                  <Text style={styles.socialNick} numberOfLines={1}>
+                    {nick}
+                  </Text>
+                  <Text style={styles.socialSub} numberOfLines={1}>
+                    1:1 Social
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
+              </Pressable>
             );
           }}
         />
@@ -332,6 +442,53 @@ const styles = StyleSheet.create({
   kindTabTextActive: {
     color: GinitTheme.colors.primary,
   },
+  socialShortcuts: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 4,
+  },
+  shortcutBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 82, 204, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.18)',
+    alignItems: 'center',
+  },
+  shortcutBtnText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
+  },
+  socialRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  socialRowPressed: { opacity: 0.92 },
+  socialAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#e2e8f0',
+  },
+  socialAvatarFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 82, 204, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  socialAvatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
+  socialMid: { flex: 1, minWidth: 0, gap: 4 },
+  socialNick: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
+  socialSub: { fontSize: 13, fontWeight: '600', color: '#64748b' },
   centerRow: {
     flexDirection: 'row',
     alignItems: 'center',

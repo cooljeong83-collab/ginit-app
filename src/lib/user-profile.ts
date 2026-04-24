@@ -333,16 +333,37 @@ export function isUserProfileWithdrawn(p: UserProfile | null | undefined): boole
   return p?.isWithdrawn === true;
 }
 
-/** SNS(Google) 간편 가입자가 성별·연령대를 모두 채우기 전인지 — 모임 생성/참여 제한에 사용 */
-export function isGoogleSnsDemographicsIncomplete(p: UserProfile | null | undefined): boolean {
-  if (!p || p.signupProvider !== 'google_sns') return false;
+/** 성별·생년(또는 생년월일 분필드) 미입력 여부 */
+export function isDemographicsIncomplete(p: UserProfile | null | undefined): boolean {
+  if (!p) return true;
   const g = p.gender?.trim();
   const bd = p.birthDate ?? null;
-  // birthDate가 없으면(레거시) 기존 필드로도 체크
   const y = p.birthYear ?? null;
   const m = p.birthMonth ?? null;
   const d = p.birthDay ?? null;
   return !g || (!bd && (!y || !m || !d));
+}
+
+/**
+ * 모임 인증·생성·참여에서 성별·생년을 요구할지.
+ * - `google_sns` + 미입력
+ * - 이메일 PK(`app_user_id`에 `@`)인데 `phone_otp`가 아니고 가입 경로가 비어 있거나 미동기화된 경우(구글 간편가입 등)
+ */
+export function meetingDemographicsIncomplete(
+  p: UserProfile | null | undefined,
+  appUserId?: string | null,
+): boolean {
+  if (!p || p.isWithdrawn === true) return false;
+  if (!isDemographicsIncomplete(p)) return false;
+  if (p.signupProvider === 'phone_otp') return false;
+  if (p.signupProvider === 'google_sns') return true;
+  const id = appUserId?.trim() ?? '';
+  return id.includes('@');
+}
+
+/** SNS(Google) 간편 가입자가 성별·생년을 모두 채우기 전인지 — 레거시 호환·명시적 구글만 */
+export function isGoogleSnsDemographicsIncomplete(p: UserProfile | null | undefined): boolean {
+  return p?.signupProvider === 'google_sns' && isDemographicsIncomplete(p);
 }
 
 /** 모임 참여 제한용: 전화번호 인증 완료 사용자 여부 */
@@ -373,12 +394,15 @@ export function hasTermsAgreementRecorded(p: UserProfile | null | undefined): bo
   return p.termsAgreedAt != null;
 }
 
-/** 모임 이용 동의·전화 인증·(SNS 시) 성별·생년까지 갖춘 경우 */
-export function isMeetingServiceComplianceComplete(p: UserProfile | null | undefined): boolean {
+/** 모임 이용 동의·전화 인증·(간편가입 등) 성별·생년까지 갖춘 경우 */
+export function isMeetingServiceComplianceComplete(
+  p: UserProfile | null | undefined,
+  appUserId?: string | null,
+): boolean {
   if (!p || p.isWithdrawn === true) return false;
   if (!isUserPhoneVerified(p)) return false;
   if (!hasTermsAgreementRecorded(p)) return false;
-  if (isGoogleSnsDemographicsIncomplete(p)) return false;
+  if (meetingDemographicsIncomplete(p, appUserId)) return false;
   return true;
 }
 
@@ -548,6 +572,9 @@ function profilePatchToSupabaseJsonb(patch: {
   rankingPoints?: number | null;
   email?: string | null;
   displayName?: string | null;
+  signupProvider?: 'google_sns' | 'phone_otp' | null;
+  isWithdrawn?: boolean | null;
+  withdrawnAt?: unknown | null;
 }): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   if (patch.nickname !== undefined) {
@@ -608,30 +635,120 @@ function profilePatchToSupabaseJsonb(patch: {
     fields.display_name =
       patch.displayName && String(patch.displayName).trim() ? String(patch.displayName).trim() : null;
   }
+  if (patch.signupProvider !== undefined) {
+    const sp = patch.signupProvider;
+    fields.signup_provider =
+      sp === 'google_sns' || sp === 'phone_otp' ? sp : sp == null ? null : String(sp).trim() || null;
+  }
+  if (patch.isWithdrawn !== undefined) {
+    fields.is_withdrawn = patch.isWithdrawn === true;
+  }
+  if (patch.withdrawnAt !== undefined) {
+    const iso = tsToIsoOrNull(patch.withdrawnAt);
+    if (iso != null) fields.withdrawn_at = iso;
+    else if (patch.withdrawnAt === null) fields.withdrawn_at = null;
+  }
   return fields;
 }
 
-async function fetchUserProfileFromSupabaseRpc(appUserId: string): Promise<UserProfile | null> {
-  const id = appUserId.trim();
-  if (!id) return null;
-  const { data, error } = await supabase.rpc('get_profile_public_by_app_user_id', {
-    p_app_user_id: id,
-  });
-  if (error || data == null) return null;
+function isPostgrestSchemaCacheOrMissingRpcError(message: string, code?: string): boolean {
+  const m = message.toLowerCase();
+  if (m.includes('schema cache')) return true;
+  if (m.includes('could not find the function')) return true;
+  // PostgREST: 함수를 스키마 캐시에서 찾지 못함
+  if (code === 'PGRST202' || code === '42883') return true;
+  return false;
+}
+
+const RPC_SCHEMA_CACHE_RETRY_WAITS_MS = [0, 800, 2500, 6000, 14000] as const;
+
+function parseProfileRpcPayload(data: unknown): UserProfile | null {
+  if (data == null) return null;
   const row = data as Record<string, unknown>;
   if (typeof row === 'object' && !Array.isArray(row) && Object.keys(row).length === 0) return null;
   return mapUserDoc(supabaseProfileJsonToFirestoreShape(row));
+}
+
+type SupabasePublicProfileFetch =
+  | { ok: true; profile: UserProfile }
+  | { ok: false; message: string };
+
+/** `get_profile_public_by_app_user_id` — 스키마 캐시 지연·빈 응답 시 재시도 */
+async function fetchUserProfileFromSupabaseRpcDetailed(appUserId: string): Promise<SupabasePublicProfileFetch> {
+  const id = appUserId.trim();
+  if (!id) return { ok: false, message: '사용자 ID가 없습니다.' };
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { data, error } = await supabase.rpc('get_profile_public_by_app_user_id', {
+      p_app_user_id: id,
+    });
+    if (!error) {
+      const profile = parseProfileRpcPayload(data);
+      if (profile) return { ok: true, profile };
+      lastMessage =
+        '프로필을 불러올 수 없습니다. Supabase profiles 행이 없거나 공개 조회 RPC(get_profile_public_by_app_user_id) 결과가 비어 있습니다.';
+      continue;
+    }
+    const msg = error.message?.trim() || 'get_profile_public_by_app_user_id failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    lastMessage = msg;
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(msg, code);
+    if (!retryable) {
+      return { ok: false, message: msg };
+    }
+  }
+  return { ok: false, message: lastMessage || '프로필을 불러올 수 없습니다.' };
 }
 
 export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
   const id = phoneUserId.trim();
   if (!id) return null;
   if (profilesSource() === 'supabase') {
-    return fetchUserProfileFromSupabaseRpc(id);
+    const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+    return r.ok ? r.profile : null;
   }
   const snap = await getDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id));
   if (!snap.exists()) return null;
   return mapUserDoc(snap.data() as Record<string, unknown>);
+}
+
+/** `ensure_profile_minimal` — PostgREST 스키마 캐시 지연 시 여러 번 재시도 */
+async function rpcEnsureProfileMinimalWithRetry(id: string): Promise<void> {
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('ensure_profile_minimal', { p_app_user_id: id });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'ensure_profile_minimal failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
+    if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
+}
+
+/** `upsert_profile_payload` — 탈퇴·프로필 수정, 스키마 캐시 지연 시 재시도 */
+async function rpcUpsertProfilePayloadWithRetry(id: string, fields: Record<string, unknown>): Promise<void> {
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('upsert_profile_payload', {
+      p_app_user_id: id,
+      p_fields: fields,
+    });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'upsert_profile_payload failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
+    if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
 }
 
 /**
@@ -641,12 +758,11 @@ export async function ensureUserProfile(phoneUserId: string): Promise<UserProfil
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
   if (profilesSource() === 'supabase') {
-    const { error } = await supabase.rpc('ensure_profile_minimal', { p_app_user_id: id });
-    if (error) throw new Error(error.message);
-    const mapped = await getUserProfile(id);
-    if (!mapped) throw new Error('프로필을 불러올 수 없습니다.');
-    if (mapped.isWithdrawn === true) return mapped;
-    return mapped;
+    await rpcEnsureProfileMinimalWithRetry(id);
+    const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+    if (!r.ok) throw new Error(r.message);
+    if (r.profile.isWithdrawn === true) return r.profile;
+    return r.profile;
   }
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const snap = await getDoc(dRef);
@@ -883,7 +999,29 @@ export async function applyGoogleSignupProfile(
   }
   await setDoc(dRef, stripUndefinedDeep(payload) as Record<string, unknown>, { merge: true });
   const after = await getDoc(dRef);
-  return mapUserDoc((after.data() ?? {}) as Record<string, unknown>);
+  const mapped = mapUserDoc((after.data() ?? {}) as Record<string, unknown>);
+
+  /** Ledger/프로필 소스가 Supabase일 때는 RPC 조회 경로에 구글 등 가입 필드를 맞춰 둡니다. */
+  if (profilesSource() === 'supabase') {
+    await rpcEnsureProfileMinimalWithRetry(id);
+    await updateUserProfile(id, {
+      nickname: mapped.nickname,
+      photoUrl: mapped.photoUrl,
+      email: mapped.email ?? null,
+      displayName: mapped.displayName ?? null,
+      gender: mapped.gender ?? null,
+      birthDate: mapped.birthDate ?? null,
+      birthYear: mapped.birthYear ?? null,
+      birthMonth: mapped.birthMonth ?? null,
+      birthDay: mapped.birthDay ?? null,
+      signupProvider: mapped.signupProvider ?? patch.signupProvider ?? null,
+      // 탈퇴 행이 Ledger에 남아 있으면 조회는 여전히 withdrawn — 재가입 병합 시 Supabase 도 재활성화
+      isWithdrawn: false,
+      withdrawnAt: null,
+    });
+  }
+
+  return mapped;
 }
 
 export async function updateUserProfile(
@@ -928,29 +1066,29 @@ export async function updateUserProfile(
     joinPath?: string | null;
     appVersion?: string | null;
     metadata?: Record<string, unknown> | null;
+    signupProvider?: 'google_sns' | 'phone_otp' | null;
+    /** `false` + `withdrawnAt: null` 이면 탈퇴 행 재활성화(재가입 등) */
+    isWithdrawn?: boolean | null;
+    withdrawnAt?: unknown | null;
   },
 ): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
   if (profilesSource() === 'supabase') {
     const mapped = await getUserProfile(id);
-    if (mapped?.isWithdrawn === true) {
+    if (mapped?.isWithdrawn === true && patch.isWithdrawn !== false) {
       throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
     }
     const fields = profilePatchToSupabaseJsonb(patch);
     if (Object.keys(fields).length === 0) return;
-    const { error } = await supabase.rpc('upsert_profile_payload', {
-      p_app_user_id: id,
-      p_fields: fields,
-    });
-    if (error) throw new Error(error.message);
+    await rpcUpsertProfilePayloadWithRetry(id, fields);
     return;
   }
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
   const existing = await getDoc(dRef);
   if (existing.exists()) {
     const mapped = mapUserDoc(existing.data() as Record<string, unknown>);
-    if (mapped.isWithdrawn === true) {
+    if (mapped.isWithdrawn === true && patch.isWithdrawn !== false) {
       throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
     }
   }
@@ -990,6 +1128,12 @@ export async function updateUserProfile(
   }
   if (patch.status !== undefined) {
     updates.status = patch.status;
+  }
+  if (patch.isWithdrawn !== undefined) {
+    updates.isWithdrawn = patch.isWithdrawn === true;
+  }
+  if (patch.withdrawnAt !== undefined) {
+    updates.withdrawnAt = patch.withdrawnAt;
   }
   if (patch.isMarketingAgreed !== undefined) {
     updates.isMarketingAgreed = patch.isMarketingAgreed;
@@ -1086,21 +1230,17 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
   if (profilesSource() === 'supabase') {
-    const { error } = await supabase.rpc('upsert_profile_payload', {
-      p_app_user_id: id,
-      p_fields: {
-        is_withdrawn: true,
-        nickname: WITHDRAWN_NICKNAME,
-        photo_url: '',
-        phone: '',
-        email: '',
-        display_name: '',
-        gender: '',
-        age_band: '',
-        signup_provider: '',
-      },
+    await rpcUpsertProfilePayloadWithRetry(id, {
+      is_withdrawn: true,
+      nickname: WITHDRAWN_NICKNAME,
+      photo_url: '',
+      phone: '',
+      email: '',
+      display_name: '',
+      gender: '',
+      age_band: '',
+      signup_provider: '',
     });
-    if (error) throw new Error(error.message);
     return;
   }
   const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);

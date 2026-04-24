@@ -57,8 +57,8 @@ import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-ex
 import {
   ensureUserProfile,
   firestoreTimestampLikeToDate,
-  isGoogleSnsDemographicsIncomplete,
   isMeetingServiceComplianceComplete,
+  meetingDemographicsIncomplete,
   isUserPhoneVerified,
   updateUserProfile,
   type UserProfile,
@@ -134,7 +134,7 @@ export default function ProfileTab() {
       const p = await ensureUserProfile(profilePk);
       setNickname(p.nickname);
       setPhotoUrl(p.photoUrl ?? '');
-      setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+      setNeedsSnsDemographics(meetingDemographicsIncomplete(p, profilePk));
       setIsPhoneVerified(isUserPhoneVerified(p));
       const phone = p.phone?.trim();
       const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
@@ -170,7 +170,7 @@ export default function ProfileTab() {
       setGLevel(typeof p.gLevel === 'number' && Number.isFinite(p.gLevel) ? Math.max(1, Math.trunc(p.gLevel)) : 1);
       setPenaltyCount(typeof p.penaltyCount === 'number' && Number.isFinite(p.penaltyCount) ? Math.max(0, Math.trunc(p.penaltyCount)) : 0);
       setIsRestricted(p.isRestricted === true);
-      setMeetingAuthComplete(isMeetingServiceComplianceComplete(p));
+      setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
       setMeetingAuthGateReady(true);
     } catch {
       setNickname('');
@@ -284,7 +284,7 @@ export default function ProfileTab() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: false,
         quality: 1,
       });
@@ -342,8 +342,15 @@ export default function ProfileTab() {
     }
     setComplianceBusy(true);
     try {
-      await ensureUserProfile(profilePk);
+      const p0 = await ensureUserProfile(profilePk);
       const compliancePatch: Parameters<typeof updateUserProfile>[1] = { termsAgreedAt: serverTimestamp() };
+      if (
+        profilePk.includes('@') &&
+        (p0.signupProvider == null || String(p0.signupProvider).trim() === '') &&
+        needsSnsDemographics
+      ) {
+        compliancePatch.signupProvider = 'google_sns';
+      }
       if (needsSnsDemographics && genderDemo) {
         compliancePatch.gender = genderDemo;
         compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));

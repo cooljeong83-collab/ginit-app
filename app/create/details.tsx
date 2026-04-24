@@ -93,7 +93,7 @@ import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { getUserProfile, isGoogleSnsDemographicsIncomplete, type UserProfile } from '@/src/lib/user-profile';
+import { getUserProfile, meetingDemographicsIncomplete, type UserProfile } from '@/src/lib/user-profile';
 import { DateCandidateEditorCard, type DatePickerField } from '../../components/create/DateCandidateEditorCard';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
@@ -1707,7 +1707,7 @@ export default function CreateDetailsScreen() {
       }
       let cancelled = false;
       void getUserProfile(uid).then((p) => {
-        if (!cancelled) setSnsDemographicsBlocked(isGoogleSnsDemographicsIncomplete(p));
+        if (!cancelled) setSnsDemographicsBlocked(meetingDemographicsIncomplete(p, uid));
       });
       return () => {
         cancelled = true;
@@ -2424,7 +2424,7 @@ export default function CreateDetailsScreen() {
     let hostProfile: UserProfile | null = null;
     try {
       hostProfile = await getUserProfile(userId.trim());
-      if (isGoogleSnsDemographicsIncomplete(hostProfile)) {
+      if (meetingDemographicsIncomplete(hostProfile, userId.trim())) {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',

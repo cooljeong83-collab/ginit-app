@@ -34,6 +34,12 @@ import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  assertNoConfirmedScheduleOverlapHybrid,
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+  getScheduleOverlapBufferHours,
+  isConfirmedScheduleOverlapErrorMessage,
+} from '@/src/lib/meeting-schedule-overlap';
+import {
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
   deleteMeetingByHost,
@@ -46,6 +52,7 @@ import {
   getParticipantVoteSnapshot,
   joinMeeting,
   leaveMeeting,
+  meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
   subscribeMeetingById,
@@ -64,7 +71,7 @@ import {
   ensureUserProfile,
   getUserProfile,
   getUserProfilesForIds,
-  isGoogleSnsDemographicsIncomplete,
+  meetingDemographicsIncomplete,
   isUserProfileWithdrawn,
   type UserProfile,
 } from '@/src/lib/user-profile';
@@ -353,6 +360,8 @@ export default function MeetingDetailScreen() {
   const [retryNonce, setRetryNonce] = useState(0);
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
   const [joinBusy, setJoinBusy] = useState(false);
+  const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
+  const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState<2 | 3>(3);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
   const [deleteMeetingBusy, setDeleteMeetingBusy] = useState(false);
@@ -786,6 +795,52 @@ export default function MeetingDetailScreen() {
     return orderedParticipantIdsList.includes(sessionPk);
   }, [sessionPk, orderedParticipantIdsList]);
 
+  useEffect(() => {
+    if (!meeting || !sessionPk) {
+      setJoinScheduleOverlapBlock(false);
+      return;
+    }
+    if (alreadyJoinedMeeting || isHost) {
+      setJoinScheduleOverlapBlock(false);
+      return;
+    }
+    if (meeting.scheduleConfirmed !== true) {
+      setJoinScheduleOverlapBlock(false);
+      return;
+    }
+    const startMs = meetingPrimaryStartMs(meeting);
+    if (startMs == null) {
+      setJoinScheduleOverlapBlock(false);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      let buf: 2 | 3 = 3;
+      try {
+        const prof = await getUserProfile(sessionPk);
+        buf = getScheduleOverlapBufferHours(prof);
+        await assertNoConfirmedScheduleOverlapHybrid({
+          appUserId: sessionPk,
+          startMs,
+          bufferHours: buf,
+          excludeMeetingId: meeting.id,
+        });
+        if (alive) {
+          setJoinOverlapBufferHours(buf);
+          setJoinScheduleOverlapBlock(false);
+        }
+      } catch {
+        if (alive) {
+          setJoinOverlapBufferHours(buf);
+          setJoinScheduleOverlapBlock(true);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [meeting, sessionPk, alreadyJoinedMeeting, isHost, meeting?.id, meeting?.scheduleConfirmed]);
+
   /** 게스트 참여 조건: 화면에 있는 각 투표 구역마다 최소 1개 선택 */
   const needsDatePick = dateChips.length > 0;
   const needsPlacePick = placeChips.length > 0;
@@ -1023,7 +1078,7 @@ export default function MeetingDetailScreen() {
     try {
       await ensureUserProfile(sessionPk);
       const profGate = await getUserProfile(sessionPk);
-      if (isGoogleSnsDemographicsIncomplete(profGate)) {
+      if (meetingDemographicsIncomplete(profGate, sessionPk)) {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
@@ -1042,7 +1097,12 @@ export default function MeetingDetailScreen() {
       await joinMeeting(meeting.id, sessionPk, joinVotes);
       router.replace('/(tabs)');
     } catch (e) {
-      Alert.alert('참여 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+      const msg = e instanceof Error ? e.message : '';
+      if (isConfirmedScheduleOverlapErrorMessage(msg)) {
+        Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+      } else {
+        Alert.alert('참여 실패', msg || '다시 시도해 주세요.');
+      }
     } finally {
       setJoinBusy(false);
     }
@@ -1340,7 +1400,12 @@ export default function MeetingDetailScreen() {
               try {
                 await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
               } catch (e) {
-                Alert.alert('확정 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                const msg = e instanceof Error ? e.message : '';
+                if (isConfirmedScheduleOverlapErrorMessage(msg)) {
+                  Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+                } else {
+                  Alert.alert('확정 실패', msg || '다시 시도해 주세요.');
+                }
               } finally {
                 setConfirmScheduleBusy(false);
               }
@@ -2322,39 +2387,49 @@ export default function MeetingDetailScreen() {
                 </Pressable>
               </View>
             ) : (
-              <View style={styles.bottomBarEqualRow}>
-                {recruitmentPhase === 'recruiting' ? (
+              <View style={styles.guestJoinBottomCol}>
+                <View style={styles.bottomBarEqualRow}>
+                  {recruitmentPhase === 'recruiting' ? (
+                    <Pressable
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="초대">
+                      <Ionicons name="mail-outline" size={18} color="#fff" />
+                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                        초대
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
-                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    onPress={() => void handleJoinMeeting()}
+                    disabled={joinBusy || !guestVotesReady || joinScheduleOverlapBlock}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillOrange,
+                      styles.bottomPillFlex,
+                      (joinBusy || !guestVotesReady || joinScheduleOverlapBlock) && { opacity: 0.75 },
+                      pressed &&
+                        !joinBusy &&
+                        guestVotesReady &&
+                        !joinScheduleOverlapBlock && { opacity: 0.9 },
+                    ]}
                     accessibilityRole="button"
-                    accessibilityLabel="초대">
-                    <Ionicons name="mail-outline" size={18} color="#fff" />
+                    accessibilityLabel="모임 참여">
+                    {joinBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                    )}
                     <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      초대
+                      참여
                     </Text>
                   </Pressable>
-                ) : null}
-                <Pressable
-                  onPress={() => void handleJoinMeeting()}
-                  disabled={joinBusy || !guestVotesReady}
-                  style={({ pressed }) => [
-                    styles.bottomPill,
-                    styles.pillOrange,
-                    styles.bottomPillFlex,
-                    (joinBusy || !guestVotesReady) && { opacity: 0.75 },
-                    pressed && !joinBusy && guestVotesReady && { opacity: 0.9 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="모임 참여">
-                  {joinBusy ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Ionicons name="hand-right-outline" size={18} color="#fff" />
-                  )}
-                  <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                    참여
+                </View>
+                {joinScheduleOverlapBlock ? (
+                  <Text style={styles.joinOverlapCaption}>
+                    기존 약속과 시간이 겹쳐 참여가 어렵습니다. ({joinOverlapBufferHours}시간 이내)
                   </Text>
-                </Pressable>
+                ) : null}
               </View>
             )}
           </View>
@@ -3159,6 +3234,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 12,
     backgroundColor: 'transparent',
+  },
+  guestJoinBottomCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+    alignItems: 'stretch',
+  },
+  joinOverlapCaption: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 14,
+    paddingHorizontal: 4,
   },
   /** 보이는 버튼만큼 동일 비율(flex 1)로 화면 너비 분배 */
   bottomBarEqualRow: {

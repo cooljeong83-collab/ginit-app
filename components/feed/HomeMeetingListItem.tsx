@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -22,6 +23,7 @@ import type {
   PublicMeetingGenderRatio,
   PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
+import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import {
   formatPublicMeetingAgeSummary,
   MEETING_CAPACITY_UNLIMITED,
@@ -243,18 +245,43 @@ function NeonHeadBadge({ statusLine, pulse }: { statusLine: string; pulse: boole
   );
 }
 
+const OVERLAP_NEON = '#FF8A00';
+
+function OverlapScheduleNeonBadge() {
+  return (
+    <View style={s.overlapNeonOuter}>
+      <View style={s.overlapNeonInner}>
+        <Text style={s.overlapNeonText} numberOfLines={1}>
+          시간 중복 주의
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 type Props = {
   meeting: Meeting;
   userCoords: LatLng | null;
   joined: boolean;
   onPress: () => void;
+  /** 내 확정 일정과 ±버퍼 이내 겹침(피드 안내) */
+  scheduleOverlapWarning?: boolean;
+  /** 영화 포스터 또는 주관자 프로필 — 없으면 카테고리 아이콘 */
+  symbolBox?: FeedMeetingSymbolBox | null;
 };
 
 /**
  * 홈 모임 리스트 카드 — 모임 생성(`VoteCandidateCard`/wizard)과 동일한 밝은 글래스·보더 패턴,
  * 정산 칩을 자격 칩열 최앞, 성별은 거리·연령 메타 줄 우측 캡슐(심볼만).
  */
-export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }: Props) {
+export function HomeMeetingListItem({
+  meeting: m,
+  userCoords,
+  joined,
+  onPress,
+  scheduleOverlapWarning = false,
+  symbolBox = null,
+}: Props) {
   const visual = useMemo(() => getHomeCategoryVisual(m), [m]);
   const statusCorner = useMemo(() => homeMeetingStatusBadgeLabel(m), [m]);
   const iconColor = useMemo(() => contrastIconColorFromGradient(visual.gradient), [visual.gradient]);
@@ -285,6 +312,13 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
   const pulseCoordinating = statusCorner === '모집 중';
   const approvalParts = cfg ? approvalChipParts(cfg.approvalType) : null;
 
+  const symbolAccessibilityLabel =
+    symbolBox?.source === 'movie_poster'
+      ? '영화 포스터'
+      : symbolBox?.source === 'host_profile'
+        ? '주관자 프로필'
+        : m.categoryLabel?.trim() || '모임';
+
   return (
     <View style={s.meetRowWrap}>
       <Pressable
@@ -304,14 +338,24 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
             <View style={[s.cardInner, joined && s.cardInnerJoined]}>
               <View style={s.zoneA}>
                 <View style={s.symbolCol}>
-                  <View style={s.categoryIconBubble} accessibilityLabel={m.categoryLabel?.trim() || '모임'}>
+                  <View style={s.categoryIconBubble} accessibilityLabel={symbolAccessibilityLabel}>
                     <LinearGradient
                       colors={[...visual.gradient]}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 0, y: 1 }}
                       style={StyleSheet.absoluteFillObject}
                     />
-                    <Ionicons name={visual.icon} size={15} color={iconColor} style={s.categoryIconFg} />
+                    {symbolBox ? (
+                      <Image
+                        source={{ uri: symbolBox.url }}
+                        style={s.categoryIconPhoto}
+                        contentFit="cover"
+                        transition={140}
+                        accessibilityIgnoresInvertColors
+                      />
+                    ) : (
+                      <Ionicons name={visual.icon} size={15} color={iconColor} style={s.categoryIconFg} />
+                    )}
                   </View>
                   {showCapacityBar ? (
                     <>
@@ -332,8 +376,9 @@ export function HomeMeetingListItem({ meeting: m, userCoords, joined, onPress }:
                       <Text style={s.heroTitle} numberOfLines={1} ellipsizeMode="tail">
                         {m.title}
                       </Text>
-                      <View style={s.zoneARight}>
+                      <View style={s.zoneARightCol}>
                         <NeonHeadBadge statusLine={statusCorner} pulse={pulseCoordinating} />
+                        {scheduleOverlapWarning ? <OverlapScheduleNeonBadge /> : null}
                       </View>
                     </View>
                     {scheduleLine ? (
@@ -479,11 +524,36 @@ const s = StyleSheet.create({
     minWidth: 0,
     gap: 1,
   },
-  zoneARight: {
+  zoneARightCol: {
     flexShrink: 0,
     maxWidth: '44%',
     alignItems: 'flex-end',
     paddingTop: 1,
+    gap: 6,
+  },
+  overlapNeonOuter: {
+    alignSelf: 'flex-end',
+    shadowColor: 'rgba(255, 138, 0, 0.55)',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  overlapNeonInner: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 138, 0, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 138, 0, 0.55)',
+    alignItems: 'flex-end',
+  },
+  overlapNeonText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: OVERLAP_NEON,
+    letterSpacing: -0.2,
+    textAlign: 'right',
   },
   titleRow: {
     flexDirection: 'row',
@@ -505,6 +575,11 @@ const s = StyleSheet.create({
   },
   categoryIconFg: {
     zIndex: 1,
+  },
+  categoryIconPhoto: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 9,
+    zIndex: 2,
   },
   heroTitle: {
     flex: 1,

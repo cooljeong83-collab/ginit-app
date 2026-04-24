@@ -38,7 +38,7 @@ import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-comp
 import {
   ensureUserProfile,
   firestoreTimestampLikeToDate,
-  isGoogleSnsDemographicsIncomplete,
+  meetingDemographicsIncomplete,
   isUserPhoneVerified,
   updateUserProfile,
 } from '@/src/lib/user-profile';
@@ -98,7 +98,7 @@ export default function ProfileEditScreen() {
         if (!alive) return;
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
-        setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+        setNeedsSnsDemographics(meetingDemographicsIncomplete(p, profilePk));
         setIsPhoneVerified(isUserPhoneVerified(p));
         const phone = p.phone?.trim();
         const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
@@ -164,7 +164,7 @@ export default function ProfileEditScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         // allowsEditing 시 OS 크롭 화면에서 확인 버튼이 안 보이는 기기가 있어 끄고, 업로드 전에 정사각형 크롭합니다.
         allowsEditing: false,
         quality: 1,
@@ -217,7 +217,7 @@ export default function ProfileEditScreen() {
       }
       await updateUserProfile(profilePk, patch);
       const p2 = await ensureUserProfile(profilePk);
-      setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p2));
+      setNeedsSnsDemographics(meetingDemographicsIncomplete(p2, profilePk));
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('저장됨', '프로필을 반영했어요.');
       router.back();
@@ -320,7 +320,7 @@ export default function ProfileEditScreen() {
   const refreshEditProfile = useCallback(async () => {
     if (!profilePk) return;
     const p = await ensureUserProfile(profilePk);
-    setNeedsSnsDemographics(isGoogleSnsDemographicsIncomplete(p));
+    setNeedsSnsDemographics(meetingDemographicsIncomplete(p, profilePk));
     setIsPhoneVerified(isUserPhoneVerified(p));
     const phone = p.phone?.trim();
     const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
@@ -356,8 +356,15 @@ export default function ProfileEditScreen() {
     }
     setComplianceBusy(true);
     try {
-      await ensureUserProfile(profilePk);
+      const p0 = await ensureUserProfile(profilePk);
       const compliancePatch: Parameters<typeof updateUserProfile>[1] = { termsAgreedAt: serverTimestamp() };
+      if (
+        profilePk.includes('@') &&
+        (p0.signupProvider == null || String(p0.signupProvider).trim() === '') &&
+        needsSnsDemographics
+      ) {
+        compliancePatch.signupProvider = 'google_sns';
+      }
       if (needsSnsDemographics && genderDemo) {
         compliancePatch.gender = genderDemo;
         compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
