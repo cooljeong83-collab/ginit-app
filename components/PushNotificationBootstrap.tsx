@@ -12,7 +12,6 @@ import { saveUserExpoPushToken } from '@/src/lib/user-expo-push-token';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,

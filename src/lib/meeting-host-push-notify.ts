@@ -68,6 +68,19 @@ function copyForPush(action: MeetingHostPushAction, meetingTitle: string): { tit
   }
 }
 
+function copyForHostParticipantEvent(
+  action: 'joined' | 'left',
+  meetingTitle: string,
+  participantNickname: string,
+): { title: string; body: string } {
+  const t = meetingTitle.trim() || '모임';
+  const who = participantNickname.trim() || '참여자';
+  if (action === 'joined') {
+    return { title: '참여자가 들어왔어요', body: `「${t}」에 ${who}님이 참여했습니다.` };
+  }
+  return { title: '참여자가 나갔어요', body: `「${t}」에서 ${who}님이 나갔습니다.` };
+}
+
 /**
  * 주관자 액션 후 참가자(주관자 제외)에게 푸시. 실패는 삼키고 로그만(호출부 UX 유지).
  */
@@ -106,6 +119,102 @@ export function notifyMeetingParticipantsOfHostActionFireAndForget(
   hostPhoneUserId: string,
 ): void {
   void notifyMeetingParticipantsOfHostAction(meeting, action, hostPhoneUserId).catch((err) => {
+    if (__DEV__) {
+      console.warn('[meeting-push]', err);
+    }
+  });
+}
+
+function copyForNewHostAssigned(meetingTitle: string): { title: string; body: string } {
+  const t = meetingTitle.trim() || '모임';
+  return {
+    title: '방장 권한이 이관됐어요',
+    body: `「${t}」모임의 방장 권한이 회원님에게 이관됐습니다. 눌러서 확인해 보세요.`,
+  };
+}
+
+/**
+ * 방장 이관: 새 방장 1명에게만 푸시 알림을 보냅니다.
+ * 실패는 삼키고 로그만(탈퇴 UX 유지).
+ */
+export async function notifyMeetingNewHostAssigned(
+  meeting: Meeting,
+  newHostUserId: string,
+): Promise<void> {
+  const nid = normalizeParticipantId(newHostUserId.trim());
+  if (!nid) return;
+  const tokens = await fetchExpoPushTokensForUsers([nid]);
+  if (tokens.length === 0) return;
+
+  const { title, body } = copyForNewHostAssigned(meeting.title);
+  const data: Record<string, unknown> = {
+    meetingId: meeting.id,
+    action: 'host_transferred',
+    url: `ginitapp://meeting/${meeting.id}`,
+  };
+  const messages: ExpoPushMessage[] = tokens.map((to) => ({
+    to,
+    title,
+    body,
+    sound: 'default',
+    channelId: 'default',
+    data,
+  }));
+  await sendExpoPushMessages(messages);
+}
+
+export function notifyMeetingNewHostAssignedFireAndForget(meeting: Meeting, newHostUserId: string): void {
+  void notifyMeetingNewHostAssigned(meeting, newHostUserId).catch((err) => {
+    if (__DEV__) {
+      console.warn('[meeting-push]', err);
+    }
+  });
+}
+
+/**
+ * 호스트에게: 참여자 입장/퇴장 알림(호스트 1명에게만).
+ */
+export async function notifyMeetingHostParticipantEvent(
+  meeting: Meeting,
+  hostUserId: string,
+  participantUserId: string,
+  event: 'joined' | 'left',
+  participantNickname: string,
+): Promise<void> {
+  const host = normalizeParticipantId(hostUserId.trim());
+  const participant = normalizeParticipantId(participantUserId.trim());
+  if (!host || !participant) return;
+  if (host === participant) return;
+
+  const tokens = await fetchExpoPushTokensForUsers([host]);
+  if (tokens.length === 0) return;
+
+  const { title, body } = copyForHostParticipantEvent(event, meeting.title, participantNickname);
+  const data: Record<string, unknown> = {
+    meetingId: meeting.id,
+    action: event === 'joined' ? 'participant_joined' : 'participant_left',
+    participantId: participant,
+    url: `ginitapp://meeting/${meeting.id}`,
+  };
+  const messages: ExpoPushMessage[] = tokens.map((to) => ({
+    to,
+    title,
+    body,
+    sound: 'default',
+    channelId: 'default',
+    data,
+  }));
+  await sendExpoPushMessages(messages);
+}
+
+export function notifyMeetingHostParticipantEventFireAndForget(
+  meeting: Meeting,
+  hostUserId: string,
+  participantUserId: string,
+  event: 'joined' | 'left',
+  participantNickname: string,
+): void {
+  void notifyMeetingHostParticipantEvent(meeting, hostUserId, participantUserId, event, participantNickname).catch((err) => {
     if (__DEV__) {
       console.warn('[meeting-push]', err);
     }

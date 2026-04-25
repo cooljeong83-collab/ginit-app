@@ -12,6 +12,8 @@ import { getFirebaseAuth } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { fetchMeetingsOnceHybrid } from '@/src/lib/meetings-hybrid';
 import type { Meeting } from '@/src/lib/meetings';
+import { deleteMeetingDocumentByHostForce, leaveMeeting, transferMeetingHost } from '@/src/lib/meetings';
+import { purgeAllFollowRelations } from '@/src/lib/follow';
 import { withdrawAnonymizeUserProfile, withdrawAnonymizeUserProfileByFirebaseUid } from '@/src/lib/user-profile';
 
 function isMeetingHost(meeting: Meeting, sessionUserIdNorm: string): boolean {
@@ -24,8 +26,14 @@ export type AccountDeletionResult =
   | { ok: true }
   | { ok: false; message: string };
 
-const HOST_BLOCK_MESSAGE =
-  '진행 중인 모임의 방장은 탈퇴할 수 없습니다. 모임을 폐쇄하거나 방장 권한을 위임한 후 다시 시도해주세요.';
+function pickNextHostFromParticipants(m: Meeting, nsHost: string): string | null {
+  const list = Array.isArray(m.participantIds) ? m.participantIds : [];
+  for (const raw of list) {
+    const ns = normalizeParticipantId(raw) ?? raw.trim();
+    if (ns && ns !== nsHost) return raw.trim();
+  }
+  return null;
+}
 
 /**
  * 서버(Firestore)에서 계정 프로필을 익명화합니다.
@@ -42,9 +50,45 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
   }
   const meetings = listRes.meetings;
 
+  // 1) 내가 방장인 모임 처리
   const hosted = meetings.filter((m) => isMeetingHost(m, ns));
-  if (hosted.length > 0) {
-    return { ok: false, message: HOST_BLOCK_MESSAGE };
+  try {
+    for (const m of hosted) {
+      const mid = m.id?.trim();
+      if (!mid) continue;
+      const participants = Array.isArray(m.participantIds) ? m.participantIds : [];
+      const uniqueNs = Array.from(
+        new Set(
+          participants
+            .map((x) => (normalizeParticipantId(x) ?? x.trim()))
+            .filter((x) => x.trim().length > 0),
+        ),
+      );
+      // 방에 본인만 있으면 모임 자동 삭제(확정 여부와 무관)
+      if (uniqueNs.length <= 1) {
+        await deleteMeetingDocumentByHostForce(mid, raw);
+        continue;
+      }
+      // 두 명 이상이면 방장 이관 후 본인은 탈퇴
+      const nextHost = pickNextHostFromParticipants(m, ns);
+      if (!nextHost) {
+        await deleteMeetingDocumentByHostForce(mid, raw);
+        continue;
+      }
+      await transferMeetingHost(mid, raw, nextHost);
+      await leaveMeeting(mid, raw);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.';
+    return { ok: false, message: msg };
+  }
+
+  // 2) 팔로우 관계 삭제
+  try {
+    await purgeAllFollowRelations(raw);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.';
+    return { ok: false, message: msg };
   }
 
   try {
@@ -72,8 +116,41 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
   }
   const meetings = listRes.meetings;
   const hosted = meetings.filter((m) => (m.createdBy?.trim() ?? '') === uid);
-  if (hosted.length > 0) {
-    return { ok: false, message: HOST_BLOCK_MESSAGE };
+  const nsUid = normalizeParticipantId(uid) ?? uid;
+  try {
+    for (const m of hosted) {
+      const mid = m.id?.trim();
+      if (!mid) continue;
+      const participants = Array.isArray(m.participantIds) ? m.participantIds : [];
+      const uniqueNs = Array.from(
+        new Set(
+          participants
+            .map((x) => (normalizeParticipantId(x) ?? x.trim()))
+            .filter((x) => x.trim().length > 0),
+        ),
+      );
+      if (uniqueNs.length <= 1) {
+        await deleteMeetingDocumentByHostForce(mid, uid);
+        continue;
+      }
+      const nextHost = pickNextHostFromParticipants(m, nsUid);
+      if (!nextHost) {
+        await deleteMeetingDocumentByHostForce(mid, uid);
+        continue;
+      }
+      await transferMeetingHost(mid, uid, nextHost);
+      await leaveMeeting(mid, uid);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.';
+    return { ok: false, message: msg };
+  }
+
+  try {
+    await purgeAllFollowRelations(uid);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.';
+    return { ok: false, message: msg };
   }
 
   try {
@@ -103,12 +180,10 @@ function humanizeAuthDeleteError(e: unknown): string {
  */
 export async function deleteFirebaseAuthUserStrict(): Promise<AccountDeletionResult> {
   let lastErr: unknown = null;
-  let attempted = false;
 
   try {
     const jsUser = getFirebaseAuth().currentUser;
     if (jsUser) {
-      attempted = true;
       await deleteUser(jsUser);
     }
   } catch (e) {
@@ -118,8 +193,6 @@ export async function deleteFirebaseAuthUserStrict(): Promise<AccountDeletionRes
   try {
     const rnUser = getAuth().currentUser;
     if (rnUser) {
-      attempted = true;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await (rnUser as unknown as { delete: () => Promise<void> }).delete();
     }
   } catch (e) {

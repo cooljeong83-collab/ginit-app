@@ -122,3 +122,11 @@ export async function fetchFollowPendingOutbox(meAppUserId: string): Promise<Fol
   return parseJsonbArray<FollowPendingOutboxRow>(data);
 }
 
+/** 회원 탈퇴: 팔로워/팔로잉/맞팔(요청 포함) 관계를 모두 삭제합니다. */
+export async function purgeAllFollowRelations(meAppUserId: string): Promise<void> {
+  const me = meAppUserId.trim();
+  if (!me) return;
+  const { error } = await supabase.rpc('follow_purge_user', { p_me: me });
+  if (error) throw new Error(error.message);
+}
+

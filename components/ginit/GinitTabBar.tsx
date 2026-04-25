@@ -90,7 +90,10 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             Alert.alert(
               '프로필을 완성해 주세요',
               'SNS로 가입한 계정은 모임을 만들기 전에 프로필에서 성별과 연령대를 입력해야 해요.',
-              [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
+              [
+                { text: '닫기', style: 'cancel' },
+                { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+              ],
             );
             return;
           }

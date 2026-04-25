@@ -42,7 +42,11 @@ import {
   ledgerMeetingPutRawDoc,
   ledgerTryLoadMeetingDoc,
 } from './meetings-ledger';
-import { notifyMeetingParticipantsOfHostActionFireAndForget } from './meeting-host-push-notify';
+import {
+  notifyMeetingNewHostAssignedFireAndForget,
+  notifyMeetingHostParticipantEventFireAndForget,
+  notifyMeetingParticipantsOfHostActionFireAndForget,
+} from './meeting-host-push-notify';
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
 import {
   fmtDateYmd,
@@ -923,6 +927,16 @@ export async function joinMeeting(
       participantVoteLog: stripUndefinedDeep(nextLog),
     };
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
+    const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    if (hostId) {
+      notifyMeetingHostParticipantEventFireAndForget(
+        mapFirestoreMeetingDoc(mid, nextDoc as Record<string, unknown>),
+        hostId,
+        uid,
+        'joined',
+        profile.nickname || profile.displayName || '참여자',
+      );
+    }
     return;
   }
 
@@ -992,6 +1006,18 @@ export async function joinMeeting(
       participantVoteLog: stripUndefinedDeep(nextLog),
     });
   });
+
+  const after = await getMeetingById(mid);
+  const hostId = after?.createdBy?.trim() ?? '';
+  if (after && hostId) {
+    notifyMeetingHostParticipantEventFireAndForget(
+      after,
+      hostId,
+      uid,
+      'joined',
+      profile.nickname || profile.displayName || '참여자',
+    );
+  }
 }
 
 /** 참여자가 투표를 바꿀 때 집계·이력 갱신 */
@@ -1256,6 +1282,23 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
       patch.participantIds = rawList.filter((x) => x !== removeToken);
     }
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(patch) as Record<string, unknown>);
+    const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    if (hostId && (normalizeParticipantId(hostId) ?? hostId) !== nsUid) {
+      let nick = '참여자';
+      try {
+        const p = await getUserProfile(uid);
+        nick = p.nickname || p.displayName || nick;
+      } catch {
+        /* ignore */
+      }
+      notifyMeetingHostParticipantEventFireAndForget(
+        mapFirestoreMeetingDoc(mid, patch as Record<string, unknown>),
+        hostId,
+        uid,
+        'left',
+        nick,
+      );
+    }
     return;
   }
 
@@ -1295,6 +1338,19 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
     }
     transaction.update(ref, patch);
   });
+
+  const after = await getMeetingById(mid);
+  const hostId = after?.createdBy?.trim() ?? '';
+  if (after && hostId && (normalizeParticipantId(hostId) ?? hostId) !== nsUid) {
+    let nick = '참여자';
+    try {
+      const p = await getUserProfile(uid);
+      nick = p.nickname || p.displayName || nick;
+    } catch {
+      /* ignore */
+    }
+    notifyMeetingHostParticipantEventFireAndForget(after, hostId, uid, 'left', nick);
+  }
 }
 
 /** 모임 주관자가 집계 투표(+동점 시 주관자 선택)로 일정·모집 확정 */
@@ -1622,6 +1678,62 @@ export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPh
   const m = mapFirestoreMeetingDoc(snap.id, data);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
   await deleteDoc(ref);
+}
+
+/**
+ * 회원 탈퇴 등: 모임 주관자(createdBy)를 다른 참여자에게 이관합니다.
+ * - 참여자가 2명 이상인 모임에서만 호출하세요.
+ * - 확정 여부와 무관하게 createdBy만 갱신합니다(이관 후 탈퇴는 leaveMeeting로 처리).
+ */
+export async function transferMeetingHost(meetingId: string, currentHostUserId: string, nextHostUserId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const cur = currentHostUserId.trim();
+  const next = nextHostUserId.trim();
+  if (!mid || !cur || !next) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const nsCur = normalizeParticipantId(cur) ?? cur;
+  const nsNext = normalizeParticipantId(next) ?? next;
+  if (nsCur === nsNext) throw new Error('다음 방장이 유효하지 않습니다.');
+
+  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
+    const data = await ledgerTryLoadMeetingDoc(mid);
+    if (!data) throw new Error('모임을 찾을 수 없어요.');
+    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+    if (!nsCreated || nsCreated !== nsCur) {
+      throw new Error('모임 주관자만 방장을 이관할 수 있어요.');
+    }
+    // participantIds에 next가 없더라도 createdBy는 이관(이후 참여자 목록/권한은 별도 정책으로 정리)
+    const nextDoc = stripUndefinedDeep({
+      ...data,
+      createdBy: next,
+    }) as Record<string, unknown>;
+    await ledgerMeetingPutRawDoc(
+      mid,
+      nextDoc,
+    );
+    const after = mapFirestoreMeetingDoc(mid, nextDoc);
+    notifyMeetingNewHostAssignedFireAndForget(after, next);
+    return;
+  }
+
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  let before: Record<string, unknown> | null = null;
+  await runTransaction(getFirestoreDb(), async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+    const data = snap.data() as Record<string, unknown>;
+    before = data;
+    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+    if (!nsCreated || nsCreated !== nsCur) {
+      throw new Error('모임 주관자만 방장을 이관할 수 있어요.');
+    }
+    tx.update(ref, { createdBy: next });
+  });
+  if (before) {
+    const after = mapFirestoreMeetingDoc(mid, stripUndefinedDeep({ ...before, createdBy: next }) as Record<string, unknown>);
+    notifyMeetingNewHostAssignedFireAndForget(after, next);
+  }
 }
 
 function collectCreateMeetingProposedStartMs(input: CreateMeetingInput): number[] {

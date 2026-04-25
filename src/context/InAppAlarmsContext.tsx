@@ -42,6 +42,7 @@ import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-ex
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { getUserProfilesForIds } from '@/src/lib/user-profile';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -95,6 +96,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [persistReady, setPersistReady] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [meetingAlarmSinceMs, setMeetingAlarmSinceMs] = useState<Record<string, number>>({});
+  const [meetingChangeSubtitleById, setMeetingChangeSubtitleById] = useState<Record<string, string>>({});
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
@@ -103,6 +105,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
   const pushDedupeRef = useRef<Set<string>>(new Set());
+  const prevParticipantSetRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     if (!userId?.trim()) {
@@ -295,6 +298,59 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (pushDedupeRef.current.has(dedupeKey)) continue;
         pushDedupeRef.current.add(dedupeKey);
 
+        // 호스트인 경우: 참여자 입장/퇴장 변동은 이름 포함 알림으로 보강합니다.
+        const myIsHost = normalizeParticipantId(m.createdBy?.trim() ?? '') === myPk;
+        const prevLine = prevParticipantSetRef.current[mid] ?? '';
+        const nextLine = (Array.isArray(m.participantIds) ? m.participantIds : [])
+          .map((x) => normalizeParticipantId(String(x)) || '')
+          .filter(Boolean)
+          .sort()
+          .join('|');
+
+        // 최초 관측 시에는 기준만 잡고 알림을 만들지 않습니다(초기화/구독 타이밍 레이스로 잘못된 "나감" 방지).
+        if (!prevLine) {
+          prevParticipantSetRef.current[mid] = nextLine;
+        } else if (myIsHost && prevLine !== nextLine) {
+          const prevSet = new Set(prevLine ? prevLine.split('|').filter(Boolean) : []);
+          const nextSet = new Set(nextLine ? nextLine.split('|').filter(Boolean) : []);
+          const added = [...nextSet].filter((x) => !prevSet.has(x));
+          const removed = [...prevSet].filter((x) => !nextSet.has(x));
+          const delta = [...added, ...removed];
+          if (delta.length > 0) {
+            void (async () => {
+              const map = await getUserProfilesForIds(delta);
+              const nick = (id: string) => map.get(id)?.nickname?.trim() || '참여자';
+              let msg = '';
+              if (added.length > 0 && removed.length === 0) {
+                msg =
+                  added.length === 1
+                    ? `${nick(added[0])}님이 참여하셨습니다.`
+                    : `${added.length}명이 참여하셨습니다.`;
+              } else if (removed.length > 0 && added.length === 0) {
+                msg =
+                  removed.length === 1
+                    ? `${nick(removed[0])}님이 나갔습니다.`
+                    : `${removed.length}명이 나갔습니다.`;
+              } else if (added.length > 0 && removed.length > 0) {
+                msg = '참여자가 변경되었습니다.';
+              }
+              if (msg) {
+                setMeetingChangeSubtitleById((p) => ({ ...p, [mid]: msg }));
+                notifyInAppAlarmHeadsUpFireAndForget({
+                  userId,
+                  kind: 'meeting_change',
+                  meetingId: mid,
+                  meetingTitle: m.title?.trim() || '모임',
+                  preview: msg,
+                });
+              }
+            })();
+            prevParticipantSetRef.current[mid] = nextLine;
+            continue;
+          }
+        }
+        prevParticipantSetRef.current[mid] = nextLine;
+
         notifyInAppAlarmHeadsUpFireAndForget({
           userId,
           kind: 'meeting_change',
@@ -335,14 +391,14 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           kind: 'meeting_change',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
-          subtitle: '참여 중인 모임 정보가 바뀌었어요.',
+          subtitle: meetingChangeSubtitleById[mid] ?? '참여 중인 모임 정보가 바뀌었어요.',
           sortMs: meetingAlarmSinceMs[mid] ?? Date.now(),
         });
       }
     }
     rows.sort((a, b) => b.sortMs - a.sortMs);
     return rows;
-  }, [meetings, userId, latestById, readState, meetingAlarmSinceMs]);
+  }, [meetings, userId, latestById, readState, meetingAlarmSinceMs, meetingChangeSubtitleById]);
 
   const hasUnread = alarms.length > 0;
 

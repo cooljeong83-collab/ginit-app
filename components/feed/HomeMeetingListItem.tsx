@@ -203,6 +203,8 @@ type Props = {
   meeting: Meeting;
   userCoords: LatLng | null;
   joined: boolean;
+  /** 홈 피드 목록에서 내 역할에 따른 색상 구분 */
+  ownership?: 'hosted' | 'joined' | 'none';
   onPress: () => void;
   /** 내 확정 일정과 ±버퍼 이내 겹침(피드 안내) */
   scheduleOverlapWarning?: boolean;
@@ -220,6 +222,7 @@ export function HomeMeetingListItem({
   meeting: m,
   userCoords,
   joined,
+  ownership = 'none',
   onPress,
   scheduleOverlapWarning = false,
   symbolBox = null,
@@ -275,15 +278,25 @@ export function HomeMeetingListItem({
         accessibilityHint="모임 상세로 이동"
         accessibilityState={{ selected: joined }}
         style={s.pressable}>
-        <View style={[s.cardShadow, joined && s.cardShadowJoined]}>
-          <View style={s.cardShell}>
+        <View
+          style={[
+            s.cardShadow,
+            ownership === 'joined' && s.cardShadowJoined,
+            ownership === 'hosted' && s.cardShadowHosted,
+          ]}>
+          <View style={[s.cardShell, ownership === 'hosted' && s.cardShellHosted]}>
             <LinearGradient
               colors={[...visual.gradient]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={s.accentStripe}
             />
-            <View style={[s.cardInner, joined && s.cardInnerJoined]}>
+            <View
+              style={[
+                s.cardInner,
+                ownership === 'joined' && s.cardInnerJoined,
+                ownership === 'hosted' && s.cardInnerHosted,
+              ]}>
               <View style={s.zoneA}>
                 <View style={s.symbolCol}>
                   <View style={s.categoryIconBubble} accessibilityLabel={symbolAccessibilityLabel}>
@@ -427,6 +440,11 @@ const s = StyleSheet.create({
   cardShadowJoined: {
     backgroundColor: GinitTheme.colors.bgAlt,
   },
+  /** 주관(방장) 모임 — 따뜻한 오렌지 톤 */
+  cardShadowHosted: {
+    // 모임 생성 CTA(블루 톤) 쪽을 아주 옅게 반영
+    backgroundColor: 'rgba(115, 199, 255, 0.10)',
+  },
   cardShell: {
     borderRadius: GinitTheme.radius.card,
     overflow: 'hidden',
@@ -434,6 +452,9 @@ const s = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
     alignSelf: 'stretch',
+  },
+  cardShellHosted: {
+    borderColor: 'rgba(115, 199, 255, 0.24)',
   },
   accentStripe: {
     width: 4,
@@ -452,6 +473,10 @@ const s = StyleSheet.create({
   },
   cardInnerJoined: {
     backgroundColor: GinitTheme.colors.primarySoft,
+  },
+  cardInnerHosted: {
+    backgroundColor: 'rgba(115, 199, 255, 0.11)',
+    borderLeftColor: 'rgba(115, 199, 255, 0.20)',
   },
   zoneA: {
     flexDirection: 'row',

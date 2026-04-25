@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DEFAULT_MS = 2000;
 
-type EmitFn = (message: string, durationMs: number) => void;
+type EmitFn = (message: string, durationMs: number, bottomOffsetPx: number) => void;
 
 let emit: EmitFn | undefined;
 
@@ -12,14 +12,21 @@ let emit: EmitFn | undefined;
  * 루트에 `<TransientBottomMessageHost />`가 마운트된 경우에만 동작합니다.
  * 일정 겹침 안내 등 짧은 하단 메시지(기본 2초 후 자동 제거).
  */
-export function showTransientBottomMessage(message: string, durationMs: number = DEFAULT_MS) {
+export function showTransientBottomMessage(
+  message: string,
+  durationMs: number = DEFAULT_MS,
+  bottomOffsetPx: number = 0,
+) {
   const trimmed = message.trim();
   if (!trimmed) return;
-  emit?.(trimmed, Math.max(800, Math.min(8000, durationMs)));
+  const ms = Math.max(800, Math.min(8000, durationMs));
+  const offset = Number.isFinite(bottomOffsetPx) ? Math.max(0, Math.min(240, Math.trunc(bottomOffsetPx))) : 0;
+  emit?.(trimmed, ms, offset);
 }
 
 export function TransientBottomMessageHost() {
   const [text, setText] = useState<string | null>(null);
+  const [bottomOffset, setBottomOffset] = useState(0);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
 
@@ -32,8 +39,9 @@ export function TransientBottomMessageHost() {
   }, []);
 
   useEffect(() => {
-    const handler: EmitFn = (message, ms) => {
+    const handler: EmitFn = (message, ms, offsetPx) => {
       setText(message);
+      setBottomOffset(offsetPx);
       scheduleClear(ms);
     };
     emit = handler;
@@ -53,7 +61,7 @@ export function TransientBottomMessageHost() {
         style={[
           styles.banner,
           {
-            bottom: Math.max(16, insets.bottom + 8),
+            bottom: Math.max(16, insets.bottom + 8 + bottomOffset),
             left: 16,
             right: 16,
           },
@@ -72,7 +80,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(30, 58, 138, 0.94)',
+    // 조금 더 투명하게(배경 가림 최소화)
+    backgroundColor: 'rgba(30, 58, 138, 0.86)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
     maxHeight: 200,

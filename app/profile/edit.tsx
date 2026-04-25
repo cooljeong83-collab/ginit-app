@@ -8,8 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -18,12 +16,10 @@ import {
   TextInput,
   ToastAndroid,
   useWindowDimensions,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { authScreenStyles as authFormStyles } from '@/components/auth/authScreenStyles';
-import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
 import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -213,8 +209,9 @@ export default function ProfileEditScreen() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        // allowsEditing 시 OS 크롭 화면에서 확인 버튼이 안 보이는 기기가 있어 끄고, 업로드 전에 정사각형 크롭합니다.
-        allowsEditing: false,
+        // 선택 후 크롭(영역 지정) → 확인 버튼으로 진행
+        allowsEditing: true,
+        aspect: [1, 1],
         quality: 1,
       });
       if (result.canceled) return;
@@ -531,7 +528,9 @@ export default function ProfileEditScreen() {
       '회원 탈퇴',
       '탈퇴 시 이름·연락처·이메일·프로필 사진 등 개인 식별 정보는 서버에서 즉시 삭제(비식별화)됩니다.\n\n' +
         '• 채팅·투표·모임 참여 기록은 서비스 운영을 위해 익명 상태로 보관될 수 있습니다.\n' +
-        '• 진행 중인 모임의 방장인 경우 탈퇴할 수 없습니다(모임 폐쇄 또는 방장 위임 후 가능).\n' +
+        '• 내가 만든 모임에 나 혼자만 있다면 해당 모임은 자동으로 삭제됩니다.\n' +
+        '• 내가 만든 모임에 참여자가 2명 이상 있다면, 방장 권한이 다음 참여자에게 자동으로 이관되고 저는 모임에서 탈퇴합니다.\n' +
+        '• 팔로워/팔로잉/맞팔(요청 포함) 관계는 모두 삭제됩니다.\n' +
         '• 이 기기에 저장된 로그인·캐시 등은 모두 지워집니다.',
       [
         { text: '취소', style: 'cancel' },
@@ -597,7 +596,7 @@ export default function ProfileEditScreen() {
                   </View>
                 </View>
               </Pressable>
-              <Text style={styles.avatarHint}>사진을 눌러 선택하면 바로 업로드·저장돼요</Text>
+              <Text style={styles.avatarHint}></Text>
             </View>
           </View>
 

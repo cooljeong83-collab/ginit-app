@@ -1,4 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -285,7 +286,8 @@ export default function ProfileTab() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: false,
+        allowsEditing: true,
+        aspect: [1, 1],
         quality: 1,
       });
       if (result.canceled) return;
@@ -646,7 +648,9 @@ export default function ProfileTab() {
       '회원 탈퇴',
       '탈퇴 시 이름·연락처·이메일·프로필 사진 등 개인 식별 정보는 서버에서 즉시 삭제(비식별화)됩니다.\n\n' +
         '• 채팅·투표·모임 참여 기록은 서비스 운영을 위해 익명 상태로 보관될 수 있습니다.\n' +
-        '• 진행 중인 모임의 방장인 경우 탈퇴할 수 없습니다(모임 폐쇄 또는 방장 위임 후 가능).\n' +
+        '• 내가 만든 모임에 나 혼자만 있다면 해당 모임은 자동으로 삭제됩니다.\n' +
+        '• 내가 만든 모임에 참여자가 2명 이상 있다면, 방장 권한이 다음 참여자에게 자동으로 이관되고 저는 모임에서 탈퇴합니다.\n' +
+        '• 팔로워/팔로잉/맞팔(요청 포함) 관계는 모두 삭제됩니다.\n' +
         '• 이 기기에 저장된 로그인·캐시 등은 모두 지워집니다.',
       [
         { text: '취소', style: 'cancel' },
@@ -765,6 +769,22 @@ export default function ProfileTab() {
           </GinitCard>
 
           <Pressable
+            onPress={() => router.push('/profile/meeting-history')}
+            style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="모임 히스토리">
+            <View style={styles.menuLeft}>
+              <View style={styles.menuIconWrap}>
+                <Ionicons name="time-outline" size={18} color="#0f172a" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuTitle}>모임 히스토리</Text>
+              </View>
+            </View>
+            <Text style={styles.menuChevron}>›</Text>
+          </Pressable>
+
+          <Pressable
             onPress={() => setAuthSheetVisible(true)}
             disabled={complianceBusy || otpBusy || profileBusy}
             style={({ pressed }) => [
@@ -774,22 +794,18 @@ export default function ProfileTab() {
             ]}
             accessibilityRole="button"
             accessibilityLabel="인증 정보 등록">
-            <View style={styles.menuTextCol}>
-              <Text style={styles.menuTitle}>인증 정보 등록</Text>
-              <Text style={[styles.menuSub, meetingAuthComplete ? styles.menuSubOk : styles.menuSubWarn]} numberOfLines={1}>
-                {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
-              </Text>
-            </View>
-            <Text style={styles.menuChevron}>›</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => router.push('/profile/meeting-history')}
-            style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="모임 히스토리">
-            <View style={styles.menuTextCol}>
-              <Text style={styles.menuTitle}>모임 히스토리</Text>
+            <View style={styles.menuLeft}>
+              <View style={styles.menuIconWrap}>
+                <Ionicons name="shield-checkmark-outline" size={18} color="#0f172a" />
+              </View>
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuTitle}>인증 정보 등록</Text>
+                <Text
+                  style={[styles.menuSub, meetingAuthComplete ? styles.menuSubOk : styles.menuSubWarn]}
+                  numberOfLines={1}>
+                  {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
+                </Text>
+              </View>
             </View>
             <Text style={styles.menuChevron}>›</Text>
           </Pressable>
@@ -806,8 +822,13 @@ export default function ProfileTab() {
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel="로그아웃">
-                <View style={styles.menuTextCol}>
-                  <Text style={styles.menuTitle}>로그아웃</Text>
+                <View style={styles.menuLeft}>
+                  <View style={styles.menuIconWrap}>
+                    <Ionicons name="log-out-outline" size={18} color="#0f172a" />
+                  </View>
+                  <View style={styles.menuTextCol}>
+                    <Text style={styles.menuTitle}>로그아웃</Text>
+                  </View>
                 </View>
                 <Text style={styles.menuChevron}>›</Text>
               </Pressable>
@@ -822,8 +843,13 @@ export default function ProfileTab() {
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel="회원 탈퇴">
-                <View style={styles.menuTextCol}>
-                  <Text style={styles.menuTitleDanger}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
+                <View style={styles.menuLeft}>
+                  <View style={[styles.menuIconWrap, styles.menuIconWrapDanger]}>
+                    <Ionicons name="warning-outline" size={18} color="#b91c1c" />
+                  </View>
+                  <View style={styles.menuTextCol}>
+                    <Text style={styles.menuTitleDanger}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
+                  </View>
                 </View>
                 <Text style={styles.menuChevronDanger}>›</Text>
               </Pressable>
@@ -834,8 +860,13 @@ export default function ProfileTab() {
               style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
               accessibilityRole="button"
               accessibilityLabel="로그인">
-              <View style={styles.menuTextCol}>
-                <Text style={styles.menuTitle}>로그인</Text>
+              <View style={styles.menuLeft}>
+                <View style={styles.menuIconWrap}>
+                  <Ionicons name="log-in-outline" size={18} color="#0f172a" />
+                </View>
+                <View style={styles.menuTextCol}>
+                  <Text style={styles.menuTitle}>로그인</Text>
+                </View>
               </View>
               <Text style={styles.menuChevron}>›</Text>
             </Pressable>
@@ -1168,6 +1199,21 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   menuRowDisabled: { opacity: 0.55 },
+  menuLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  menuIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.10)',
+  },
+  menuIconWrapDanger: {
+    backgroundColor: 'rgba(185, 28, 28, 0.06)',
+    borderColor: 'rgba(185, 28, 28, 0.18)',
+  },
   menuTextCol: { flex: 1, minWidth: 0, gap: 2 },
   menuTitle: {
     fontSize: 15,

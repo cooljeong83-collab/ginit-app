@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { StatusBar } from 'expo-status-bar';
 
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
@@ -27,6 +28,7 @@ if (Platform.OS !== 'web' && !didScheduleSplashPrevent) {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
         <UserSessionProvider>
           <InAppAlarmsProvider>

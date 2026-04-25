@@ -66,7 +66,7 @@ export default function SplashBootstrapScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: bg }]} onLayout={onRootLayout}>
-      <StatusBar style={lightChrome ? 'dark' : 'light'} translucent backgroundColor="transparent" />
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
 
       <View style={styles.logoLayer} pointerEvents="none">
         {androidPlainSplash ? (

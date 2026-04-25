@@ -39,7 +39,7 @@ export type SendInAppAlarmPushParams = {
   kind: InAppAlarmPushKind;
   meetingId: string;
   meetingTitle: string;
-  /** 채팅일 때 본문 미리보기 */
+  /** 채팅 본문 미리보기 또는 모임 변경 상세 문구 */
   preview?: string;
 };
 
@@ -64,9 +64,11 @@ function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
       url: `ginitapp://meeting-chat/${mid}`,
     };
   }
+  const override = (params.preview ?? '').trim();
   return {
-    title: '모임 소식',
-    body: `「${mt}」참여 중인 모임 정보가 바뀌었어요.`,
+    title: `「${mt}」`,
+    subtitle: '모임 소식',
+    body: override || `참여 중인 모임 정보가 바뀌었어요.`,
     meetingId: mid,
     action: 'in_app_meeting',
     url: `ginitapp://meeting/${mid}`,

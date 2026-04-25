@@ -2,9 +2,9 @@ import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useIsFocused } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
@@ -22,27 +22,31 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
-import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
-import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
+import { fetchFollowRelationStatus, sendFollowRequest, type FollowRelationStatus } from '@/src/lib/follow';
+import { notifyFollowRequestReceivedFireAndForget } from '@/src/lib/follow-push-notify';
+import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
-import type { Meeting } from '@/src/lib/meetings';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
   assertNoConfirmedScheduleOverlapHybrid,
   DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
   getScheduleOverlapBufferHours,
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
   isConfirmedScheduleOverlapErrorMessage,
 } from '@/src/lib/meeting-schedule-overlap';
+import type { Meeting } from '@/src/lib/meetings';
 import {
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
@@ -66,19 +70,16 @@ import {
   updateParticipantVotes,
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { fetchFollowRelationStatus, sendFollowRequest, type FollowRelationStatus } from '@/src/lib/follow';
-import { notifyFollowRequestReceivedFireAndForget } from '@/src/lib/follow-push-notify';
-import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
-  WITHDRAWN_NICKNAME,
   ensureUserProfile,
   getUserProfile,
   getUserProfilesForIds,
-  meetingDemographicsIncomplete,
+  isMeetingServiceComplianceComplete,
   isUserProfileWithdrawn,
+  meetingDemographicsIncomplete,
+  WITHDRAWN_NICKNAME,
   type UserProfile,
 } from '@/src/lib/user-profile';
 
@@ -379,6 +380,8 @@ export default function MeetingDetailScreen() {
   const [profilePopupUserId, setProfilePopupUserId] = useState<string | null>(null);
   const [sendGinitBusy, setSendGinitBusy] = useState(false);
   const [followRelationStatus, setFollowRelationStatus] = useState<FollowRelationStatus>('none');
+  const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
+  const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
 
   useEffect(() => {
     if (!id.trim()) {
@@ -522,7 +525,10 @@ export default function MeetingDetailScreen() {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           '팔로우 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
-          [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
+          [
+            { text: '닫기', style: 'cancel' },
+            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+          ],
         );
         return;
       }
@@ -911,6 +917,35 @@ export default function MeetingDetailScreen() {
     [userId],
   );
 
+  // 모임 상세 열람 게이트: 모임 이용 인증(약관+전화+성별/생년월일)이 완료되지 않으면 상세를 숨깁니다.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!sessionPk) {
+        setMeetingAuthComplete(false);
+        setMeetingAuthGateReady(true);
+        return;
+      }
+      try {
+        await ensureUserProfile(sessionPk);
+        const p = await getUserProfile(sessionPk);
+        const ok = isMeetingServiceComplianceComplete(p, sessionPk);
+        if (!cancelled) {
+          setMeetingAuthComplete(ok);
+          setMeetingAuthGateReady(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setMeetingAuthComplete(false);
+          setMeetingAuthGateReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionPk]);
+
   const alreadyJoinedMeeting = useMemo(() => {
     if (!sessionPk) return false;
     return orderedParticipantIdsList.includes(sessionPk);
@@ -999,6 +1034,25 @@ export default function MeetingDetailScreen() {
     selectedPlaceIds.length,
     selectedMovieIds.length,
   ]);
+
+  // 게스트(미참여)에서 “참여 가능” 상태가 되면, 하단 버튼 영역을 밀지 않도록
+  // 안내 문구는 배너(2초)로만 잠깐 노출합니다.
+  const guestReadyBannerKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (!meeting || !sessionPk || isHost) return;
+    if (alreadyJoinedMeeting) return;
+    if (!guestVotesReady) return;
+    const key = `${meeting.id}\u0001${meeting.scheduleConfirmed === true ? 'confirmed' : 'ready'}`;
+    if (guestReadyBannerKeyRef.current === key) return;
+    guestReadyBannerKeyRef.current = key;
+    showTransientBottomMessage(
+      meeting.scheduleConfirmed === true
+        ? '일정이 확정되었어요. 아래 참여를 눌러 주세요.'
+        : '투표를 모두 골랐어요. 아래 참여를 눌러 주세요.',
+      2000,
+      74,
+    );
+  }, [meeting, sessionPk, isHost, alreadyJoinedMeeting, guestVotesReady]);
 
   useEffect(() => {
     if (!meeting || meeting.scheduleConfirmed === true) return;
@@ -1211,7 +1265,10 @@ export default function MeetingDetailScreen() {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
-          [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
+          [
+            { text: '닫기', style: 'cancel' },
+            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+          ],
         );
         return;
       }
@@ -1590,6 +1647,8 @@ export default function MeetingDetailScreen() {
 
   const notFound = !loading && !loadError && meeting === null;
 
+  const viewBlockedByCompliance = meetingAuthGateReady && !meetingAuthComplete;
+
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -1635,6 +1694,29 @@ export default function MeetingDetailScreen() {
           </View>
         ) : null}
 
+        {viewBlockedByCompliance ? (
+          <View style={styles.centerFill}>
+            <Text style={styles.errorTitle}>프로필 인증이 필요해요</Text>
+            <Text style={styles.muted}>
+              모임 상세를 보려면 모임 이용을 위한 인증 정보 등록을 먼저 완료해 주세요.
+            </Text>
+            <Pressable
+              onPress={() => pushProfileOpenRegisterInfo(router)}
+              style={styles.retryBtn}
+              accessibilityRole="button"
+              accessibilityLabel="정보 등록하기">
+              <LinearGradient
+                colors={GinitTheme.colors.ctaGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.btnGradientBg}
+                pointerEvents="none"
+              />
+              <Text style={styles.retryText}>정보 등록하기</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {notFound ? (
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>모임을 찾을 수 없어요</Text>
@@ -1655,7 +1737,7 @@ export default function MeetingDetailScreen() {
           <ScrollView
             ref={mainScrollRef}
             style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 + insets.bottom }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled">
             <View style={styles.titleCard}>
@@ -1663,9 +1745,6 @@ export default function MeetingDetailScreen() {
                 <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
               <Text style={styles.titleCardText}>{meeting.title || '제목 없음'}</Text>
-              <View style={styles.mascotLogoWrap} pointerEvents="none" accessibilityElementsHidden>
-                <Image source={require('@/assets/images/logo-symbol.png')} style={styles.mascotLogo} contentFit="contain" />
-              </View>
             </View>
 
             <View style={styles.infoCard}>
@@ -2066,7 +2145,10 @@ export default function MeetingDetailScreen() {
                   </>
                 ) : extraMovies.length > 0 ? (
                   <>
-                    <View style={styles.candidateListV}>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.movieScrollContent}>
                       {movieRowsShown.map(({ mv, chipId }) => {
                         const chipSelected = movieHostPickMode
                           ? hostTieMovieId === chipId
@@ -2077,48 +2159,37 @@ export default function MeetingDetailScreen() {
                             key={chipId}
                             onPress={() => onMovieChipPress(chipId)}
                             style={({ pressed }) => [
-                              styles.movieVoteCard,
-                              styles.movieVoteCardV,
-                              chipSelected ? styles.movieVoteCardSelected : null,
-                              pressed ? styles.dateChipPressed : null,
+                              styles.moviePosterThumbWrap,
+                              chipSelected && styles.moviePosterThumbWrapSelected,
+                              pressed && styles.moviePosterThumbWrapPressed,
                             ]}
-                            accessibilityRole="radio"
+                            accessibilityRole={movieHostPickMode ? 'radio' : 'checkbox'}
                             accessibilityState={{ checked: chipSelected, selected: chipSelected }}
                             accessibilityLabel={`${mv.title}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
-                            <View style={[styles.voteTallyBadge, styles.voteTallyBadgeMovie]} pointerEvents="none">
+                            {mv.posterUrl?.trim() ? (
+                              <Image
+                                source={{ uri: mv.posterUrl.trim() }}
+                                style={styles.moviePosterThumb}
+                                contentFit="cover"
+                                transition={120}
+                              />
+                            ) : (
+                              <View style={[styles.moviePosterThumb, styles.moviePosterPlaceholder]}>
+                                <Ionicons name="film-outline" size={22} color="#94A3B8" />
+                              </View>
+                            )}
+                            <View style={[styles.voteTallyBadge, styles.voteTallyBadgeMoviePoster]} pointerEvents="none">
                               <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                             </View>
                             {chipSelected ? (
-                              <View style={styles.movieVoteCheckWrapLeft} pointerEvents="none">
+                              <View style={styles.moviePosterThumbCheck} pointerEvents="none">
                                 <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                               </View>
                             ) : null}
-                            <View style={styles.movieRowLeft}>
-                              {mv.posterUrl?.trim() ? (
-                                <Image
-                                  source={{ uri: mv.posterUrl.trim() }}
-                                  style={styles.moviePoster}
-                                  contentFit="cover"
-                                  transition={120}
-                                />
-                              ) : (
-                                <View style={[styles.moviePoster, styles.moviePosterPlaceholder]}>
-                                  <Ionicons name="film-outline" size={28} color="#94A3B8" />
-                                </View>
-                              )}
-                              <View style={styles.movieRowTextCol}>
-                                <Text
-                                  style={[styles.moviePosterTitle, styles.moviePosterTitleV, chipSelected && styles.moviePosterTitleSelected]}
-                                  numberOfLines={2}>
-                                  {mv.title}
-                                  {mv.year ? ` (${mv.year})` : ''}
-                                </Text>
-                              </View>
-                            </View>
                           </Pressable>
                         );
                       })}
-                    </View>
+                    </ScrollView>
                     <Text
                       style={
                         movieHostPickMode
@@ -2334,35 +2405,7 @@ export default function MeetingDetailScreen() {
           </ScrollView>
         ) : null}
 
-        {!loading && !loadError && meeting !== null && !isHost ? (
-          <View style={styles.guestJoinHintWrap}>
-            {!alreadyJoinedMeeting ? (
-              <Text style={guestVotesReady ? styles.guestJoinHintDone : styles.guestJoinHintPending}>
-                {meeting.scheduleConfirmed === true
-                  ? '일정이 확정되었어요. 아래 참여를 눌러 주세요.'
-                  : guestVotesReady
-                    ? '투표를 모두 골랐어요. 아래 참여를 눌러 주세요.'
-                    : '참여하려면 일시·장소' +
-                        (needsMoviePick ? '·영화' : '') +
-                        ' 투표에서 각각 최소 한 가지 이상 선택해 주세요.'}
-              </Text>
-            ) : participantVoteLogMissing ? (
-              <Text style={styles.guestJoinHintPending}>
-                이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 탈퇴 후 다시 참여해 주세요.
-              </Text>
-            ) : meeting.scheduleConfirmed === true ? (
-              <Text style={styles.guestJoinHintDone}>일정이 확정된 모임이에요.</Text>
-            ) : (
-              <Text style={guestVotesReady ? styles.guestJoinHintDone : styles.guestJoinHintPending}>
-                {guestVotesReady
-                  ? '투표를 바꾼 뒤 아래 수정으로 저장해 주세요.'
-                  : '저장하려면 일시·장소' +
-                      (needsMoviePick ? '·영화' : '') +
-                      ' 투표에서 각각 최소 한 가지 이상 선택해 주세요.'}
-              </Text>
-            )}
-          </View>
-        ) : null}
+        {/* 게스트 안내 문구는 배너로만 표시(버튼 영역 침범 방지) */}
 
         {!loading && !loadError && meeting !== null ? (
           <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
@@ -2527,27 +2570,13 @@ export default function MeetingDetailScreen() {
                     style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
                     numberOfLines={1}
                     ellipsizeMode="tail">
-                    탈퇴
+                    나가기
                   </Text>
                 </Pressable>
               </View>
             ) : (
               <View style={styles.guestJoinBottomCol}>
                 <View style={styles.bottomBarEqualRow}>
-                  {recruitmentPhase === 'recruiting' ? (
-                    <Pressable
-                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                      accessibilityRole="button"
-                      accessibilityLabel="초대">
-                      <Ionicons name="mail-outline" size={18} color="#fff" />
-                      <Text
-                        style={[styles.pillText, styles.bottomPillLabel, { color: '#fff' }]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        초대
-                      </Text>
-                    </Pressable>
-                  ) : null}
                   <Pressable
                     onPress={() => void handleJoinMeeting()}
                     disabled={joinBusy || !guestVotesReady || joinScheduleOverlapBlock}
@@ -2618,9 +2647,7 @@ export default function MeetingDetailScreen() {
                   <Text style={styles.proposeModalTitle}>날짜 제안</Text>
                 </View>
               </View>
-              <Text style={[styles.proposeModalSub, styles.proposeModalSubDateCompact]}>
-                AI 미리보기를 탭하면 여기서 보이는 일정 후보 1만 바뀌어요. 저장하면 모임 일정 후보에 반영돼요.
-              </Text>
+              
               {proposeInitialPayload ? (
                 <KeyboardAwareScreenScroll
                   style={[
@@ -2943,25 +2970,6 @@ const styles = StyleSheet.create({
   },
   pencilAbs: { position: 'absolute', top: 14, right: 14, zIndex: 2, padding: 4 },
   titleCardText: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', lineHeight: 26 },
-  mascotLogoWrap: {
-    position: 'absolute',
-    right: 8,
-    bottom: -4,
-    width: 48,
-    height: 48,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: 'rgba(15, 23, 42, 0.14)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  mascotLogo: { width: 38, height: 38, opacity: 0.96 },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3123,6 +3131,22 @@ const styles = StyleSheet.create({
   miniBadgeUnknown: { backgroundColor: 'rgba(100, 116, 139, 0.14)' },
   miniBadgeUnknownText: { fontSize: 12, fontWeight: '800', color: '#475569' },
   movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
+  moviePosterThumbWrap: {
+    width: 108,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#E4E9EF',
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  moviePosterThumbWrapSelected: {
+    borderColor: GinitTheme.colors.primary,
+  },
+  moviePosterThumbWrapPressed: { opacity: 0.9 },
+  moviePosterThumb: { width: '100%', height: 148, backgroundColor: '#E2E8F0' },
+  moviePosterThumbCheck: { position: 'absolute', top: 6, left: 6, zIndex: 4 },
+  voteTallyBadgeMoviePoster: { top: 6, right: 6 },
   movieVoteCard: {
     width: 108,
     padding: 4,
@@ -3502,6 +3526,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'center',
@@ -3534,7 +3562,8 @@ const styles = StyleSheet.create({
   },
   bottomPillLabel: {
     flexShrink: 1,
-    minWidth: 0,
+    // 버튼 폭이 좁을 때(특히 2~3개 버튼 배치) 라벨이 0으로 줄어 "글자가 사라지는" 케이스 방지
+    minWidth: 26,
     textAlign: 'center',
   },
   bottomPill: {
@@ -3543,7 +3572,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 13,
+    minHeight: 50,
     borderRadius: 22,
   },
   /** 게스트 2버튼일 때 가로 폭 균등 */
@@ -3551,9 +3581,9 @@ const styles = StyleSheet.create({
   pillBlue: { backgroundColor: GinitTheme.colors.primary },
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillDanger: { backgroundColor: '#DC2626' },
-  pillText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pillText: { color: '#fff', fontWeight: '700', fontSize: 14, lineHeight: 18 },
   pillTextOnOrange: { color: GinitTheme.colors.text },
-  pillTextCompact: { fontSize: 12 },
+  pillTextCompact: { fontSize: 12, lineHeight: 16 },
 
   profileModalRoot: {
     flex: 1,

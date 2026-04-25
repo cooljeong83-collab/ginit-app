@@ -1680,7 +1680,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <Modal visible transparent animationType="slide" onRequestClose={() => setPicker(null)}>
           <View style={GinitStyles.modalRoot}>
             <Pressable style={GinitStyles.modalBackdrop} onPress={() => setPicker(null)} accessibilityRole="button" />
-            <View style={GinitStyles.modalSheet}>
+            <View
+              style={[
+                GinitStyles.modalSheet,
+                // 일정 후보가 1개만 등록 가능한 플로우에서는 시트가 과하게 커지며 "시트 자체 스크롤"처럼 보이는 UX가 있어 높이를 제한합니다.
+                { maxHeight: Math.min(420, Math.floor(windowHeight * 0.55)), overflow: 'hidden' },
+              ]}>
               <View style={GinitStyles.modalHeader}>
                 <Pressable onPress={() => setPicker(null)} hitSlop={10}>
                   <Text style={GinitStyles.modalCancel}>취소</Text>
@@ -2039,7 +2044,12 @@ export default function CreateDetailsScreen() {
               setSelectedCategoryId(id);
               setCurrentStep(1);
               requestAnimationFrame(() => {
-                mainScrollRef.current?.scrollTo({ y: 0, animated: true });
+                const scroller = mainScrollRef.current as any;
+                if (typeof scroller?.scrollToPosition === 'function') {
+                  scroller.scrollToPosition(0, 0, true);
+                  return;
+                }
+                scroller?.scrollTo?.({ y: 0, animated: true });
               });
             },
           },
@@ -2490,7 +2500,10 @@ export default function CreateDetailsScreen() {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
           'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
-          [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
+          [
+            { text: '닫기', style: 'cancel' },
+            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+          ],
         );
         return;
       }

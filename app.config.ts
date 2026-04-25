@@ -95,10 +95,18 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ? (config.extra as Record<string, unknown>)
       : {};
 
-  return {
+  const out: any = {
     ...config,
     name: config.name ?? 'ginit-app',
     slug: config.slug ?? 'ginit-app',
+    statusBar: {
+      ...(typeof (config as { statusBar?: Record<string, unknown> }).statusBar === 'object'
+        ? ((config as { statusBar?: Record<string, unknown> }).statusBar as Record<string, unknown>)
+        : {}),
+      style: 'dark',
+      translucent: true,
+      backgroundColor: 'transparent',
+    },
     ios: {
       ...config.ios,
       bundleIdentifier: 'com.ginit.app',
@@ -120,6 +128,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       package: 'com.ginit.app',
       googleServicesFile: './env/google-services.json',
+    },
+    androidStatusBar: {
+      ...(typeof (config as { androidStatusBar?: Record<string, unknown> }).androidStatusBar === 'object'
+        ? ((config as { androidStatusBar?: Record<string, unknown> }).androidStatusBar as Record<string, unknown>)
+        : {}),
+      barStyle: 'dark-content',
+      translucent: true,
+      backgroundColor: 'transparent',
     },
     plugins: [
       ...plugins,
@@ -186,4 +202,5 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     },
   };
+  return out as ExpoConfig;
 };
