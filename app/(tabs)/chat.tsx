@@ -39,24 +39,41 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 /** 친구 채팅 행 좌측 액센트 — 홈 카드 톤과 어울리는 블루·민트 그라데이션 */
 const SOCIAL_CHAT_LIST_ACCENT = ['rgba(0, 82, 204, 0.28)', 'rgba(134, 211, 183, 0.18)'] as const;
 
+/** 모임 문서의 `chatReadMessageIdBy`에서 내 마지막 읽은 메시지 id (키 형식이 달라도 정규화로 매칭) */
+function readMessageIdFromMeetingDoc(m: Meeting, userPk: string, rawUid: string): string {
+  const by = m.chatReadMessageIdBy;
+  if (!by || typeof by !== 'object') return '';
+  const tryKey = (k: string) => (k ? String((by as Record<string, string>)[k] ?? '').trim() : '');
+  let s = userPk ? tryKey(userPk) : '';
+  if (s) return s;
+  const raw = rawUid.trim();
+  if (raw) {
+    s = tryKey(raw);
+    if (s) return s;
+  }
+  if (userPk) {
+    for (const [k, v] of Object.entries(by)) {
+      if (typeof v !== 'string' || !v.trim()) continue;
+      if ((normalizeParticipantId(k) ?? k.trim()) === userPk) return v.trim();
+    }
+  }
+  return '';
+}
+
 function effectiveMeetingChatReadId(
   m: Meeting,
   userPk: string,
   rawUid: string,
   localMap: Record<string, string>,
+  latestMessageId?: string | null,
 ): string {
+  const fromDoc = readMessageIdFromMeetingDoc(m, userPk, rawUid);
+  const latest = (latestMessageId ?? '').trim();
+  // 다른 기기/세션에서 이미 최신까지 읽음이 반영된 경우, 로컬 캐시보다 서버를 우선
+  if (latest && fromDoc === latest) return fromDoc;
   const local = (localMap[m.id] ?? '').trim();
   if (local) return local;
-  const by = m.chatReadMessageIdBy;
-  if (!by || typeof by !== 'object') return '';
-  const s1 = userPk ? String(by[userPk] ?? '').trim() : '';
-  if (s1) return s1;
-  const raw = rawUid.trim();
-  if (raw) {
-    const s2 = String(by[raw] ?? '').trim();
-    if (s2) return s2;
-  }
-  return '';
+  return fromDoc;
 }
 
 function profileForCreatedBy(
@@ -163,7 +180,7 @@ export default function ChatTab() {
     return sortedMeetingChats
       .map((m) => {
         const lm = latestByMeetingId[m.id];
-        const read = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap);
+        const read = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap, lm?.id);
         return `${m.id}:${lm?.id ?? ''}:${read}`;
       })
       .join('|');
@@ -235,7 +252,7 @@ export default function ChatTab() {
       const next: Record<string, number> = {};
       for (const m of sortedMeetingChats) {
         if (cancelled) return;
-        const readId = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap);
+        const readId = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap, latestByMeetingId[m.id]?.id);
         try {
           next[m.id] = await fetchMeetingChatUnreadCount(m.id, readId || null);
         } catch {

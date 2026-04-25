@@ -43,7 +43,9 @@ import {
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
+import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { getFirestoreDb, MEETINGS_COLLECTION } from '@/src/lib/meetings';
+import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 export const MEETING_MESSAGES_SUBCOLLECTION = 'messages';
@@ -66,16 +68,38 @@ export type MeetingChatMessage = {
   createdAt: Timestamp | null;
 };
 
+function shallowUnknownRecord(v: unknown): Record<string, unknown> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  return { ...(v as Record<string, unknown>) };
+}
+
 /**
  * 채팅 읽음 영수증(참여자별) 기록.
- * - `meetings/{meetingId}.chatReadAtBy.{userId}`: serverTimestamp
+ * - `meetings/{meetingId}.chatReadAtBy.{userId}`: serverTimestamp (Firestore) / ISO 문자열(Ledger)
  * - `meetings/{meetingId}.chatReadMessageIdBy.{userId}`: 마지막으로 본 메시지 id
+ *
+ * Ledger 모임은 `subscribeMeetingById`가 Supabase 문서를 쓰므로, 읽음도 동일 문서에 병합해야 말풍선 안읽음이 갱신됩니다.
  */
 export async function writeMeetingChatReadReceipt(meetingId: string, userId: string, lastMessageId: string): Promise<void> {
   const mid = meetingId.trim();
   const uid = userId.trim();
   const lid = lastMessageId.trim();
   if (!mid || !uid || !lid) return;
+
+  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
+    const cur = await ledgerTryLoadMeetingDoc(mid);
+    if (!cur) return;
+    const prevAt = shallowUnknownRecord(cur.chatReadAtBy);
+    const prevMid = shallowUnknownRecord(cur.chatReadMessageIdBy);
+    const next: Record<string, unknown> = {
+      ...cur,
+      chatReadAtBy: { ...prevAt, [uid]: new Date().toISOString() },
+      chatReadMessageIdBy: { ...prevMid, [uid]: lid },
+    };
+    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(next) as Record<string, unknown>);
+    return;
+  }
+
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
   await updateDoc(ref, {
     [`chatReadAtBy.${uid}`]: serverTimestamp(),

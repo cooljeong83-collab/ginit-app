@@ -161,11 +161,11 @@ export function ChatMeetingListRow({
                   </Text>
                 ) : null}
                 {unreadCount > 0 ? (
-                  <Text
-                    style={[styles.unreadListCount, !rightTime && styles.unreadListCountSolo]}
+                  <View
+                    style={[styles.unreadBadge, !rightTime && styles.unreadBadgeSolo]}
                     accessibilityLabel={`읽지 않은 메시지 ${unreadCount > 99 ? '99개 이상' : `${unreadCount}개`}`}>
-                    {unreadCount > 99 ? '99+' : String(unreadCount)}
-                  </Text>
+                    <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? '99+' : String(unreadCount)}</Text>
+                  </View>
                 ) : null}
               </View>
             ) : null}
@@ -279,15 +279,26 @@ const styles = StyleSheet.create({
     marginTop: 1,
     textAlign: 'right',
   },
-  unreadListCount: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#FA3E3E',
-    letterSpacing: -0.2,
-    textAlign: 'right',
+  unreadBadge: {
+    marginTop: 2,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 999,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-end',
   },
-  unreadListCountSolo: {
+  unreadBadgeSolo: {
     marginTop: 1,
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+    lineHeight: 12,
   },
   previewLine: {
     fontSize: 13,

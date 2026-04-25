@@ -94,6 +94,44 @@ function formatImageViewerSentAt(ts: Timestamp | null | undefined): string {
   }
 }
 
+/** Firestore Timestamp · `{ seconds }` · Ledger ISO 문자열 → ms */
+function coalesceFirestoreTimeMs(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === 'string' && v.trim()) {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : 0;
+  }
+  if (typeof (v as Timestamp).toMillis === 'function') {
+    try {
+      return (v as Timestamp).toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  if (typeof v === 'object' && v !== null && 'seconds' in v) {
+    const s = Number((v as { seconds: unknown }).seconds);
+    if (!Number.isFinite(s)) return 0;
+    const n = Number((v as { nanoseconds?: unknown }).nanoseconds);
+    return s * 1000 + (Number.isFinite(n) ? Math.floor(n / 1e6) : 0);
+  }
+  return 0;
+}
+
+/** `chatReadMessageIdBy` 키가 이메일/전화 등 여러 형태여도 정규화된 pid로 마지막 읽은 메시지 id */
+function lastReadMessageIdForParticipant(readBy: Meeting['chatReadMessageIdBy'], pid: string): string {
+  if (!readBy || typeof readBy !== 'object') return '';
+  const pick = (val: unknown) => (typeof val === 'string' ? val.trim() : String(val ?? '').trim());
+  const direct = pick((readBy as Record<string, unknown>)[pid]);
+  if (direct) return direct;
+  for (const [k, v] of Object.entries(readBy)) {
+    const id = pick(v);
+    if (!id) continue;
+    const nk = normalizeParticipantId(k) ?? k.trim();
+    if (nk === pid) return id;
+  }
+  return '';
+}
+
 function meetingImageViewerMeta(
   item: MeetingChatMessage,
   profiles: Map<string, UserProfile>,
@@ -861,26 +899,43 @@ export default function MeetingChatRoomScreen() {
     for (const [k, v] of Object.entries(raw)) {
       const uid = normalizeParticipantId(k) ?? k.trim();
       if (!uid) continue;
-      const ms = v && typeof (v as any).toMillis === 'function' ? (v as any).toMillis() : 0;
-      if (ms > 0) map[uid] = ms;
+      const ms = coalesceFirestoreTimeMs(v);
+      if (ms > 0) map[uid] = Math.max(map[uid] ?? 0, ms);
     }
     return map;
   }, [meeting?.chatReadAtBy]);
 
-  const unreadCountForMessageMs = useCallback(
-    (messageCreatedAtMs: number): number => {
+  const messageIndexById = useMemo(() => {
+    const m = new Map<string, number>();
+    messages.forEach((msg, i) => {
+      if (msg.id) m.set(msg.id, i);
+    });
+    return m;
+  }, [messages]);
+
+  const unreadCountForMessage = useCallback(
+    (message: MeetingChatMessage, messageIndex: number): number => {
       if (allowed !== true) return 0;
       if (!meeting) return 0;
-      if (!messageCreatedAtMs) return 0;
+      const messageMs =
+        message.createdAt && typeof message.createdAt.toMillis === 'function' ? message.createdAt.toMillis() : 0;
+      if (!messageMs) return 0;
+      const readMsgBy = meeting.chatReadMessageIdBy;
       let unread = 0;
+      const idxMsg = messageIndex;
       for (const pid of participantIdsForReadCount) {
         if (myId && pid === myId) continue;
+        const lastId = lastReadMessageIdForParticipant(readMsgBy, pid);
+        if (lastId) {
+          const readIdx = messageIndexById.get(lastId);
+          if (readIdx != null && readIdx >= idxMsg) continue;
+        }
         const ms = readAtMsByUser[pid] ?? 0;
-        if (!ms || ms < messageCreatedAtMs) unread += 1;
+        if (!ms || ms < messageMs) unread += 1;
       }
       return unread;
     },
-    [allowed, meeting, participantIdsForReadCount, readAtMsByUser, myId],
+    [allowed, meeting, participantIdsForReadCount, readAtMsByUser, myId, messageIndexById],
   );
 
   const openMeetingChatImageViewer = useCallback((item: MeetingChatMessage) => {
@@ -936,8 +991,7 @@ export default function MeetingChatRoomScreen() {
       const caption = item.text?.trim();
 
       if (isMine) {
-        const ms = item.createdAt && typeof item.createdAt.toMillis === 'function' ? item.createdAt.toMillis() : 0;
-        const unread = ms ? unreadCountForMessageMs(ms) : 0;
+        const unread = unreadCountForMessage(item, index);
         const bubble = (
           <View style={styles.rowMine}>
             <View style={styles.timeMineCol}>
@@ -1080,7 +1134,7 @@ export default function MeetingChatRoomScreen() {
         </View>
       );
     },
-    [myId, messages, profiles, hostNorm, unreadCountForMessageMs, openMeetingChatImageViewer],
+    [myId, messages, profiles, hostNorm, unreadCountForMessage, openMeetingChatImageViewer],
   );
 
   if (!meetingId) {
