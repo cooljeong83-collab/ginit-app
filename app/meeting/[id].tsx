@@ -35,7 +35,9 @@ import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  assertDateCandidatesNoOverlapWithOtherMeetings,
   assertNoConfirmedScheduleOverlapHybrid,
+  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
   getScheduleOverlapBufferHours,
   isConfirmedScheduleOverlapErrorMessage,
@@ -690,6 +692,22 @@ export default function MeetingDetailScreen() {
       return;
     }
 
+    const uid = userId?.trim();
+    if (uid) {
+      try {
+        await assertDateCandidatesNoOverlapWithOtherMeetings({
+          appUserId: uid,
+          candidates: additions,
+          bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+          excludeMeetingId: meeting.id,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+        return;
+      }
+    }
+
     setProposeSaving(true);
     try {
       await updateMeetingDateCandidates(meeting.id, merged);
@@ -717,7 +735,7 @@ export default function MeetingDetailScreen() {
     } finally {
       setProposeSaving(false);
     }
-  }, [meeting]);
+  }, [meeting, userId]);
 
   const confirmPlaceProposals = useCallback(async () => {
     if (!meeting) return;
@@ -2463,7 +2481,11 @@ export default function MeetingDetailScreen() {
               style={[
                 styles.proposeModalSheet,
                 styles.proposeModalSheetDateCompact,
-                { maxHeight: Math.round(Math.min(windowHeight * 0.76, windowHeight - 48)) },
+                {
+                  maxHeight: Math.round(
+                    Math.min(windowHeight * 0.62, windowHeight - 56),
+                  ),
+                },
               ]}>
               <View style={styles.proposeModalHeaderRow}>
                 <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
@@ -2478,13 +2500,17 @@ export default function MeetingDetailScreen() {
               </Text>
               {proposeInitialPayload ? (
                 <KeyboardAwareScreenScroll
-                  style={[styles.proposeModalFormScroll, styles.proposeModalFormScrollDate]}
+                  style={[
+                    styles.proposeModalFormScroll,
+                    styles.proposeModalFormScrollDate,
+                    { maxHeight: Math.round(windowHeight * 0.36) },
+                  ]}
                   contentContainerStyle={[
                     styles.proposeModalFormScrollContent,
                     styles.proposeModalFormScrollContentDateCompact,
                   ]}
-                  extraScrollHeight={18}
-                  extraHeight={44}
+                  extraScrollHeight={10}
+                  extraHeight={28}
                   scrollProps={{
                     nestedScrollEnabled: true,
                     showsVerticalScrollIndicator: false,
@@ -3075,16 +3101,16 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     ...GinitTheme.shadow.card,
   },
-  /** 날짜 제안만 — 시트 패딩 살짝 줄임(높이는 maxHeight·스크롤 minHeight로 확보) */
+  /** 날짜 제안만 — 시트 패딩·전체 높이를 줄여 한 화면에 맞춤 */
   proposeModalSheetDateCompact: {
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 14,
   },
   proposeModalHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
+    gap: 10,
+    marginBottom: 6,
   },
   proposeModalIconWrap: {
     width: 44,
@@ -3105,22 +3131,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
-    lineHeight: 20,
+    lineHeight: 19,
     marginBottom: 10,
   },
   proposeModalSubDateCompact: {
-    marginBottom: 6,
+    marginBottom: 4,
+    fontSize: 12,
+    lineHeight: 17,
   },
   proposeModalFormScroll: { flexGrow: 0 },
-  /** 날짜 제안: 일정 후보 카드·AI 미리보기가 한 화면에 들어오도록 최소 높이 확보 */
+  /** 날짜 제안: flex는 인라인 maxHeight(화면 비율)로 스크롤 영역 상한만 둠 */
   proposeModalFormScrollDate: {
-    minHeight: 360,
-    flexGrow: 1,
+    flexGrow: 0,
   },
   proposeModalFormScrollContent: { paddingBottom: 12 },
   proposeModalFormScrollContentDateCompact: {
-    paddingBottom: 8,
-    flexGrow: 1,
+    paddingBottom: 4,
+    flexGrow: 0,
   },
   proposeModalFooter: {
     flexDirection: 'row',
@@ -3133,8 +3160,8 @@ const styles = StyleSheet.create({
     borderTopColor: GinitTheme.colors.border,
   },
   proposeModalFooterDateCompact: {
-    marginTop: 8,
-    paddingTop: 8,
+    marginTop: 6,
+    paddingTop: 6,
   },
   proposeModalGhostBtn: {
     paddingVertical: 12,

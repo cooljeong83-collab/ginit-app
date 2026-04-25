@@ -8,16 +8,3 @@ index c91836f..a3b4105 100644
 +    package="com.reactcommunity.rndatetimepicker">
    <application />
  </manifest>
-diff --git a/node_modules/@react-native-community/datetimepicker/src/index.js b/node_modules/@react-native-community/datetimepicker/src/index.js
-index ca4ff88..58f7a05 100644
---- a/node_modules/@react-native-community/datetimepicker/src/index.js
-+++ b/node_modules/@react-native-community/datetimepicker/src/index.js
-@@ -2,7 +2,7 @@
-  * @format
-  * @flow strict-local
-  */
--import RNDateTimePicker from './datetimepicker';
-+import RNDateTimePicker from './datetimepicker.js';
- export * from './eventCreators';
- export {DateTimePickerAndroid} from './DateTimePickerAndroid';
- 

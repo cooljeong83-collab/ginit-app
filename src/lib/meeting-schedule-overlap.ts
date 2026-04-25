@@ -1,4 +1,5 @@
 import { publicEnv } from '@/src/config/public-env';
+import { isSupabaseRpcMissingOrStaleSchema } from '@/src/lib/supabase-rpc-schema';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import { getDateCandidateScheduleInstant } from '@/src/lib/date-candidate';
@@ -213,7 +214,21 @@ export async function loadOverlapMeetingScans(appUserId: string): Promise<Overla
     const { data, error } = await supabase.rpc('ledger_list_my_meetings_for_overlap', {
       p_app_user_id: uid,
     });
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (isSupabaseRpcMissingOrStaleSchema(error.message)) {
+        if (__DEV__) {
+          console.warn(
+            '[meeting-schedule-overlap] ledger_list_my_meetings_for_overlap unavailable; falling back to Firestore list.',
+            error.message,
+          );
+        }
+        const { fetchMeetingsOnce } = await import('@/src/lib/meetings');
+        const fr = await fetchMeetingsOnce();
+        if (!fr.ok) return [];
+        return fr.meetings.map((m) => scanFromFirestoreMeeting(m));
+      }
+      throw new Error(error.message);
+    }
     const rows = Array.isArray(data) ? data : [];
     const out: OverlapMeetingScan[] = [];
     for (const raw of rows) {
@@ -229,6 +244,40 @@ export async function loadOverlapMeetingScans(appUserId: string): Promise<Overla
   const fr = await fetchMeetingsOnce();
   if (!fr.ok) return [];
   return fr.meetings.map((m) => scanFromFirestoreMeeting(m));
+}
+
+/**
+ * 모임 만들기·일정 후보 UI — 다른 참여 약속과의 겹침 검사 시 사용하는 버퍼(시간).
+ * (`getScheduleOverlapBufferHours` 정책 완화와 별도로 후보 입력 단계에서는 3시간 고정)
+ */
+export const DATE_CANDIDATE_OVERLAP_BUFFER_HOURS = 3;
+
+export function collectScheduleInstantMsFromDateCandidates(candidates: readonly DateCandidate[]): number[] {
+  const raw: number[] = [];
+  for (const c of candidates) {
+    const inst = getDateCandidateScheduleInstant(c);
+    if (inst && Number.isFinite(inst.getTime())) raw.push(inst.getTime());
+  }
+  return [...new Set(raw)];
+}
+
+/** 일시 후보 목록의 각 대표 시각이, 다른 모임 약속과 ±bufferHours 이내로 겹치면 throw */
+export async function assertDateCandidatesNoOverlapWithOtherMeetings(opts: {
+  appUserId: string | null | undefined;
+  candidates: readonly DateCandidate[];
+  bufferHours: number;
+  excludeMeetingId?: string | null;
+}): Promise<void> {
+  const uid = opts.appUserId?.trim() ?? '';
+  if (!uid) return;
+  const starts = collectScheduleInstantMsFromDateCandidates(opts.candidates);
+  if (starts.length === 0) return;
+  await assertProposedStartsOverlapHybrid({
+    appUserId: uid,
+    startMsList: starts,
+    bufferHours: opts.bufferHours,
+    excludeMeetingId: opts.excludeMeetingId ?? null,
+  });
 }
 
 /**
@@ -261,7 +310,16 @@ export async function assertProposedStartsOverlapHybrid(opts: {
         p_exclude_meeting_id: excludeUuid,
       });
       if (error) {
-        throw new Error(normalizeRpcOverlapError(error.message, bufferHours));
+        if (isSupabaseRpcMissingOrStaleSchema(error.message)) {
+          if (__DEV__) {
+            console.warn(
+              '[meeting-schedule-overlap] assert_no_confirmed_schedule_overlap unavailable; using client-side scans only.',
+              error.message,
+            );
+          }
+        } else {
+          throw new Error(normalizeRpcOverlapError(error.message, bufferHours));
+        }
       }
     }
 

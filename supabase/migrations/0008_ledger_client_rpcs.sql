@@ -277,3 +277,5 @@ $$;
 
 revoke all on function public.ledger_meeting_delete(text) from public;
 grant execute on function public.ledger_meeting_delete(text) to anon, authenticated;
+
+notify pgrst, 'reload schema';

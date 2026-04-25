@@ -91,6 +91,11 @@ import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natura
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import {
+  assertDateCandidatesNoOverlapWithOtherMeetings,
+  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+} from '@/src/lib/meeting-schedule-overlap';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, meetingDemographicsIncomplete, type UserProfile } from '@/src/lib/user-profile';
@@ -487,7 +492,7 @@ export type VoteCandidatesFormProps = {
   parentScrollRef?: RefObject<any>;
   /** 상위 `ScrollView`의 `contentOffset.y` (onScroll로 갱신) */
   parentScrollYRef?: RefObject<number>;
-  /** true면 AI 미리보기/주말 미리보기 탭 시 새 행이 아니라 첫 번째 일정 후보만 덮어씀(날짜 제안 모달 등) */
+  /** true면 AI 미리보기/주말 미리보기 탭 시 새 행이 아니라 첫 번째 일정 후보만 덮어씀(날짜 제안 모달 등). `+ 일자 후보 등록` 버튼도 숨김 */
   scheduleAiReplacesFirstCandidate?: boolean;
 };
 
@@ -499,7 +504,7 @@ export type VoteCandidatesGateResult = { ok: true } | { ok: false; error: string
 
 export type VoteCandidatesFormHandle = {
   buildPayload: () => VoteCandidatesBuildResult;
-  validateScheduleStep: () => VoteCandidatesGateResult;
+  validateScheduleStep: () => Promise<VoteCandidatesGateResult>;
   validatePlacesStep: () => VoteCandidatesGateResult;
   /** 일정 스텝 첫 입력(자연어) 포커스 */
   focusScheduleIdeaInput: () => void;
@@ -647,6 +652,23 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   }, [navigation]);
 
   const reduceHeavyEffects = !isFocused || stackTransitionCoversScreen;
+  const { userId: sessionUserId } = useUserSession();
+
+  const guardDateCandidatesOverlapOrAlert = useCallback(async (nextDates: DateCandidate[]): Promise<boolean> => {
+    try {
+      await assertDateCandidatesNoOverlapWithOtherMeetings({
+        appUserId: sessionUserId,
+        candidates: nextDates,
+        bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+        excludeMeetingId: null,
+      });
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+      return false;
+    }
+  }, [sessionUserId]);
 
   const hasDeadlineRow = useMemo(() => dateCandidates.some((d) => d.type === 'deadline'), [dateCandidates]);
   useEffect(() => {
@@ -675,7 +697,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     return () => clearTimeout(t);
   }, [nlpScheduleInput]);
 
-  const applyNlpSuggestion = useCallback(() => {
+  const applyNlpSuggestion = useCallback(async () => {
     const trimmed = nlpScheduleInput.trim();
     if (weekendAnytimeMatches(trimmed)) {
       return;
@@ -723,7 +745,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           return;
         }
       }
-      setDateCandidates(next.map(forcePointCandidate));
+      const forcedNext = next.map(forcePointCandidate);
+      if (!(await guardDateCandidatesOverlapOrAlert(forcedNext))) return;
+      setDateCandidates(forcedNext);
       setNlpScheduleInput('');
       setNlpParsed(null);
       return;
@@ -745,7 +769,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         return;
       }
     }
-    setDateCandidates(next.map(forcePointCandidate));
+    const forcedAppend = next.map(forcePointCandidate);
+    if (!(await guardDateCandidatesOverlapOrAlert(forcedAppend))) return;
+    setDateCandidates(forcedAppend);
     if (shouldAutoExpand && expandRowId) {
       setDateDetailExpanded((ex) => ({ ...ex, [expandRowId]: true }));
     }
@@ -778,10 +804,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         });
       });
     }
-  }, [bare, nlpParsed, nlpScheduleInput, parentScrollRef, parentScrollYRef, scheduleAiReplacesFirstCandidate]);
+  }, [
+    bare,
+    guardDateCandidatesOverlapOrAlert,
+    nlpParsed,
+    nlpScheduleInput,
+    parentScrollRef,
+    parentScrollYRef,
+    scheduleAiReplacesFirstCandidate,
+  ]);
 
   const appendWeekendPreviewSlot = useCallback(
-    (slot: { ymd: string; hm: string }) => {
+    async (slot: { ymd: string; hm: string }) => {
       animate();
       const prev = dateCandidatesRef.current;
 
@@ -812,6 +846,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             return;
           }
         }
+        if (!(await guardDateCandidatesOverlapOrAlert(next))) return;
         setDateCandidates(next);
         setNlpScheduleInput('');
         setNlpParsed(null);
@@ -838,6 +873,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           return;
         }
       }
+      if (!(await guardDateCandidatesOverlapOrAlert(next))) return;
       setDateCandidates(next);
       setNlpScheduleInput('');
       setNlpParsed(null);
@@ -870,13 +906,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         });
       }
     },
-    [bare, parentScrollRef, parentScrollYRef, scheduleAiReplacesFirstCandidate],
+    [bare, guardDateCandidatesOverlapOrAlert, parentScrollRef, parentScrollYRef, scheduleAiReplacesFirstCandidate],
   );
 
   useImperativeHandle(
     ref,
     () => ({
-      validateScheduleStep: (): VoteCandidatesGateResult => {
+      validateScheduleStep: async (): Promise<VoteCandidatesGateResult> => {
         const dates = dateCandidatesRef.current;
         if (dates.length === 0) {
           return { ok: false, error: '일시 후보를 최소 1개 이상 등록해 주세요.' };
@@ -884,6 +920,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         for (let i = 0; i < dates.length; i += 1) {
           const err = validateDateCandidate(dates[i], i);
           if (err) return { ok: false, error: err };
+        }
+        try {
+          await assertDateCandidatesNoOverlapWithOtherMeetings({
+            appUserId: sessionUserId,
+            candidates: dates,
+            bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+            excludeMeetingId: null,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { ok: false, error: `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}` };
         }
         return { ok: true };
       },
@@ -996,7 +1043,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         setDateCandidates(next.dateCandidates);
       },
     }),
-    [router, seedQ, seedDate, seedTime],
+    [router, seedQ, seedDate, seedTime, sessionUserId],
   );
 
   useFocusEffect(
@@ -1157,7 +1204,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     return undefined;
   }, [picker, dateCandidates]);
 
-  const applyIosPicker = useCallback(() => {
+  const applyIosPicker = useCallback(async () => {
     if (!picker) return;
     const { rowId, field } = picker;
     const dates = dateCandidatesRef.current;
@@ -1180,10 +1227,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       Alert.alert('일시 확인', err);
       return;
     }
+    const nextDates = dates.map((d) => (d.id === rowId ? next : d));
+    if (!(await guardDateCandidatesOverlapOrAlert(nextDates))) return;
     if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
     else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
     setPicker(null);
-  }, [iosDraft, picker, updateDateRow]);
+  }, [guardDateCandidatesOverlapOrAlert, iosDraft, picker, updateDateRow]);
 
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
@@ -1381,15 +1430,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             )}
           </View>
 
-          <Pressable
-            onPress={addDateRow}
-            style={({ pressed }) => [styles.addCandidateBtn, pressed && styles.addCandidateBtnPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="일자 후보 등록">
-            <Text style={styles.addCandidateBtnLabel}>+ 일자 후보 등록</Text>
-          </Pressable>
+          {!scheduleAiReplacesFirstCandidate ? (
+            <Pressable
+              onPress={addDateRow}
+              style={({ pressed }) => [styles.addCandidateBtn, pressed && styles.addCandidateBtnPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="일자 후보 등록">
+              <Text style={styles.addCandidateBtnLabel}>+ 일자 후보 등록</Text>
+            </Pressable>
+          ) : null}
 
-          {/** 일반 일정은 AI 미리보기 카드 탭으로 추가할 수 있고, 위 버튼으로 빈 일자 행을 직접 추가할 수 있어요. */}
+          {/** 일반 일정은 AI 미리보기 카드 탭으로 추가할 수 있고, 위 버튼으로 빈 일자 행을 직접 추가할 수 있어요. (날짜 제안 모달은 첫 행만 덮어쓰므로 버튼 숨김) */}
         </View>
       ) : null}
 
@@ -1681,8 +1732,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               Alert.alert('일시 확인', err);
               return;
             }
-            if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
-            else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
+            const nextDates = dates.map((d) => (d.id === rowId ? next : d));
+            void (async () => {
+              if (!(await guardDateCandidatesOverlapOrAlert(nextDates))) return;
+              if (field === 'startDate') updateDateRow(rowId, { startDate: ymd });
+              else if (field === 'startTime') updateDateRow(rowId, { startTime: hm });
+            })();
           }}
         />
       ) : null}
@@ -2307,9 +2362,9 @@ export default function CreateDetailsScreen() {
     setCurrentStep(4);
   }, [effectiveMeetingTitle, isPublicMeeting, maxParticipants, minParticipants, title]);
 
-  const handleConfirmSchedule = useCallback(() => {
+  const handleConfirmSchedule = useCallback(async () => {
     setWizardError(null);
-    const r = scheduleFormRef.current?.validateScheduleStep();
+    const r = await scheduleFormRef.current?.validateScheduleStep();
     if (!r?.ok) {
       setWizardError(r?.error ?? '일정 후보를 확인해 주세요.');
       return;

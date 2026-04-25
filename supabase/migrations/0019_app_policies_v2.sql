@@ -125,8 +125,8 @@ begin
     and mt.schedule_confirmed is true
     and mt.scheduled_at is not null
     and (p_exclude_meeting_id is null or mt.id <> p_exclude_meeting_id)
-    and mt.scheduled_at >= (p_start - make_interval(mins => round(v_buf * 60.0)))
-    and mt.scheduled_at <= (p_start + make_interval(mins => round(v_buf * 60.0)));
+    and mt.scheduled_at >= (p_start - (v_buf * interval '1 hour'))
+    and mt.scheduled_at <= (p_start + (v_buf * interval '1 hour'));
 
   if v_cnt > 0 then
     v_hours := greatest(1, round(v_buf))::int;

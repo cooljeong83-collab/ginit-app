@@ -1,5 +1,5 @@
--- 일정 겹침 검사용: 로그인 프로필과 무관하게 app_user_id 기준으로 참여 중인 모임 행을 반환합니다.
--- 클라이언트가 미확정 모임의 `dateCandidates`(extra_data.fs)까지 스캔할 때 사용합니다.
+-- 0017 적용 후에도 PostgREST가 RPC를 못 찾는 경우(schema cache) 대비: 함수 재정의 + 캐시 리로드.
+-- 원격 DB에 0017이 빠졌다면 이 파일만으로도 함수가 생성됩니다.
 
 create or replace function public.ledger_list_my_meetings_for_overlap(p_app_user_id text)
 returns table (
