@@ -8,6 +8,8 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 export type InAppAlarmKind = 'chat' | 'meeting_change';
 
 export type InAppAlarmRow = {
+  /** FlatList 키(누적 알람 지원) */
+  id: string;
   kind: InAppAlarmKind;
   meetingId: string;
   meetingTitle: string;

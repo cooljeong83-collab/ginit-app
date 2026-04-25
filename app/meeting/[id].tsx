@@ -416,6 +416,9 @@ export default function MeetingDetailScreen() {
   useEffect(() => {
     if (!isFocused || !meeting || !userId?.trim()) return;
     if (!isUserJoinedMeeting(meeting, userId)) return;
+    // 호스트는 모임 변동(입장/퇴장 등)을 "새 소식"으로 계속 받아야 해서
+    // 상세 화면에 들어와 있다고 자동으로 확인 처리(sync ack)하지 않습니다.
+    if (isMeetingHost(userId, meeting.createdBy)) return;
     syncMeetingAckFromMeeting(meeting);
   }, [isFocused, meeting, userId, syncMeetingAckFromMeeting]);
 

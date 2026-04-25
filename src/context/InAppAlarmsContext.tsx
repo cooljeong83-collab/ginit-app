@@ -96,7 +96,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [persistReady, setPersistReady] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [meetingAlarmSinceMs, setMeetingAlarmSinceMs] = useState<Record<string, number>>({});
-  const [meetingChangeSubtitleById, setMeetingChangeSubtitleById] = useState<Record<string, string>>({});
+  /** 호스트: 참여자 입장/퇴장 이벤트는 모임별로 누적(새 소식에 계속 쌓임) */
+  const [hostParticipantEventLog, setHostParticipantEventLog] = useState<
+    Record<string, { id: string; subtitle: string; sortMs: number }[]>
+  >({});
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
@@ -114,8 +117,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       setLatestById({});
       setReadState(defaultInAppAlarmReadState());
       setMeetingAlarmSinceMs({});
+      setHostParticipantEventLog({});
       setPanelOpen(false);
       pushDedupeRef.current = new Set();
+      prevParticipantSetRef.current = {};
       return;
     }
     let cancelled = false;
@@ -128,6 +133,29 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [userId]);
+
+  // 참여자 변동 알람을 위해, "첫 변동"이 아니라 "첫 관측" 시점에 기준 participantIds를 잡아둡니다.
+  useEffect(() => {
+    if (!persistReady || !userId?.trim()) return;
+    const joined = filterJoinedMeetings(meetings, userId);
+    const nextBaseline: Record<string, string> = { ...prevParticipantSetRef.current };
+    for (const m of joined) {
+      const mid = m.id;
+      if (Object.prototype.hasOwnProperty.call(nextBaseline, mid)) continue;
+      const line = (Array.isArray(m.participantIds) ? m.participantIds : [])
+        .map((x) => normalizeParticipantId(String(x)) || '')
+        .filter(Boolean)
+        .sort()
+        .join('|');
+      nextBaseline[mid] = line;
+    }
+    // 더 이상 참여 중이 아닌 모임은 baseline도 정리
+    const joinedSet = new Set(joined.map((m) => m.id));
+    for (const k of Object.keys(nextBaseline)) {
+      if (!joinedSet.has(k)) delete nextBaseline[k];
+    }
+    prevParticipantSetRef.current = nextBaseline;
+  }, [persistReady, meetings, userId]);
 
   useEffect(() => {
     if (!userId?.trim()) return;
@@ -171,7 +199,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [userId, persistReady, joinedKey]);
+  }, [userId, persistReady, joinedKey, meetings]);
 
   useEffect(() => {
     if (!persistReady || !userId?.trim()) return;
@@ -268,49 +296,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       const mid = j.id;
       const m = meetingById.get(mid);
       if (!m) continue;
-      if (!(mid in latestById)) continue;
-      const latest = latestById[mid];
-      const readChatId = readState.chatReadMessageId[mid] ?? '';
-      const latestId = latest?.id ?? '';
-
-      if (latestId && latestId !== readChatId) {
-        const senderRaw = latest?.senderId?.trim() ?? '';
-        const senderPk = senderRaw ? normalizeParticipantId(senderRaw) : '';
-        if (senderPk && senderPk === myPk) continue;
-
-        const dedupeKey = `c:${mid}:${latestId}`;
-        if (pushDedupeRef.current.has(dedupeKey)) continue;
-        pushDedupeRef.current.add(dedupeKey);
-
-        notifyInAppAlarmHeadsUpFireAndForget({
-          userId,
-          kind: 'chat',
-          meetingId: mid,
-          meetingTitle: m.title?.trim() || '모임',
-          preview: latest ? previewLine(latest) : undefined,
-        });
-      }
-
-      const fp = meetingChangeFingerprint(m);
-      const ack = readState.meetingAckFingerprint[mid];
-      if (ack !== undefined && fp !== ack) {
-        const dedupeKey = `m:${mid}:${fp}`;
-        if (pushDedupeRef.current.has(dedupeKey)) continue;
-        pushDedupeRef.current.add(dedupeKey);
-
-        // 호스트인 경우: 참여자 입장/퇴장 변동은 이름 포함 알림으로 보강합니다.
-        const myIsHost = normalizeParticipantId(m.createdBy?.trim() ?? '') === myPk;
-        const prevLine = prevParticipantSetRef.current[mid] ?? '';
+      // 1) 호스트: 참여자 입장/퇴장 이벤트는 ACK와 무관하게 누적 알림/새소식으로 남깁니다.
+      const myIsHost = normalizeParticipantId(m.createdBy?.trim() ?? '') === myPk;
+      if (myIsHost) {
+        const hasPrev = Object.prototype.hasOwnProperty.call(prevParticipantSetRef.current, mid);
+        const prevLine = hasPrev ? (prevParticipantSetRef.current[mid] ?? '') : '';
         const nextLine = (Array.isArray(m.participantIds) ? m.participantIds : [])
           .map((x) => normalizeParticipantId(String(x)) || '')
           .filter(Boolean)
           .sort()
           .join('|');
-
-        // 최초 관측 시에는 기준만 잡고 알림을 만들지 않습니다(초기화/구독 타이밍 레이스로 잘못된 "나감" 방지).
-        if (!prevLine) {
-          prevParticipantSetRef.current[mid] = nextLine;
-        } else if (myIsHost && prevLine !== nextLine) {
+        if (hasPrev && prevLine !== nextLine) {
           const prevSet = new Set(prevLine ? prevLine.split('|').filter(Boolean) : []);
           const nextSet = new Set(nextLine ? nextLine.split('|').filter(Boolean) : []);
           const added = [...nextSet].filter((x) => !prevSet.has(x));
@@ -321,7 +317,19 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
               const map = await getUserProfilesForIds(delta);
               const nick = (id: string) => map.get(id)?.nickname?.trim() || '참여자';
               let msg = '';
-              if (added.length > 0 && removed.length === 0) {
+              const prevN = prevSet.size;
+              const nextN = nextSet.size;
+              if (nextN > prevN && added.length > 0) {
+                msg =
+                  added.length === 1
+                    ? `${nick(added[0])}님이 참여하셨습니다.`
+                    : `${added.length}명이 참여하셨습니다.`;
+              } else if (nextN < prevN && removed.length > 0) {
+                msg =
+                  removed.length === 1
+                    ? `${nick(removed[0])}님이 나갔습니다.`
+                    : `${removed.length}명이 나갔습니다.`;
+              } else if (added.length > 0 && removed.length === 0) {
                 msg =
                   added.length === 1
                     ? `${nick(added[0])}님이 참여하셨습니다.`
@@ -335,7 +343,13 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                 msg = '참여자가 변경되었습니다.';
               }
               if (msg) {
-                setMeetingChangeSubtitleById((p) => ({ ...p, [mid]: msg }));
+                const now = Date.now();
+                const evId = `${mid}:${now}:${Math.random().toString(36).slice(2)}`;
+                setHostParticipantEventLog((prev) => {
+                  const cur = prev[mid] ?? [];
+                  const next = [{ id: evId, subtitle: msg, sortMs: now }, ...cur].slice(0, 50);
+                  return { ...prev, [mid]: next };
+                });
                 notifyInAppAlarmHeadsUpFireAndForget({
                   userId,
                   kind: 'meeting_change',
@@ -345,11 +359,41 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                 });
               }
             })();
-            prevParticipantSetRef.current[mid] = nextLine;
-            continue;
           }
         }
         prevParticipantSetRef.current[mid] = nextLine;
+      }
+
+      // 2) 채팅 헤드업
+      if (mid in latestById) {
+        const latest = latestById[mid];
+        const readChatId = readState.chatReadMessageId[mid] ?? '';
+        const latestId = latest?.id ?? '';
+        if (latestId && latestId !== readChatId) {
+          const senderRaw = latest?.senderId?.trim() ?? '';
+          const senderPk = senderRaw ? normalizeParticipantId(senderRaw) : '';
+          if (senderPk && senderPk === myPk) continue;
+
+          const dedupeKey = `c:${mid}:${latestId}`;
+          if (pushDedupeRef.current.has(dedupeKey)) continue;
+          pushDedupeRef.current.add(dedupeKey);
+
+          notifyInAppAlarmHeadsUpFireAndForget({
+            userId,
+            kind: 'chat',
+            meetingId: mid,
+            meetingTitle: m.title?.trim() || '모임',
+            preview: latest ? previewLine(latest) : undefined,
+          });
+        }
+      }
+
+      const fp = meetingChangeFingerprint(m);
+      const ack = readState.meetingAckFingerprint[mid];
+      if (ack !== undefined && fp !== ack) {
+        const dedupeKey = `m:${mid}:${fp}`;
+        if (pushDedupeRef.current.has(dedupeKey)) continue;
+        pushDedupeRef.current.add(dedupeKey);
 
         notifyInAppAlarmHeadsUpFireAndForget({
           userId,
@@ -364,41 +408,59 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const alarms = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
+    const myPk = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
     const rows: InAppAlarmRow[] = [];
     for (const j of joined) {
       const mid = j.id;
       const m = meetingById.get(mid);
       if (!m) continue;
-      if (!(mid in latestById)) continue;
-      const latest = latestById[mid];
-      const readChatId = readState.chatReadMessageId[mid] ?? '';
-      const latestId = latest?.id ?? '';
-      if (latestId && latestId !== readChatId) {
-        const chatTs = chatMessageTimeMs(latest ?? null);
-        rows.push({
-          kind: 'chat',
-          meetingId: mid,
-          meetingTitle: m.title?.trim() || '모임',
-          subtitle: latest ? previewLine(latest) : '새 메시지',
-          sortMs: chatTs > 0 ? chatTs : Date.now(),
-          latestMessageId: latestId,
-        });
+      if (mid in latestById) {
+        const latest = latestById[mid];
+        const readChatId = readState.chatReadMessageId[mid] ?? '';
+        const latestId = latest?.id ?? '';
+        if (latestId && latestId !== readChatId) {
+          const chatTs = chatMessageTimeMs(latest ?? null);
+          rows.push({
+            id: `chat:${mid}:${latestId}`,
+            kind: 'chat',
+            meetingId: mid,
+            meetingTitle: m.title?.trim() || '모임',
+            subtitle: latest ? previewLine(latest) : '새 메시지',
+            sortMs: chatTs > 0 ? chatTs : Date.now(),
+            latestMessageId: latestId,
+          });
+        }
       }
       const fp = meetingChangeFingerprint(m);
       const ack = readState.meetingAckFingerprint[mid];
+      const isHost = Boolean(myPk) && normalizeParticipantId(m.createdBy?.trim() ?? '') === myPk;
+      if (isHost) {
+        const evs = hostParticipantEventLog[mid] ?? [];
+        for (const ev of evs) {
+          rows.push({
+            id: `host:${ev.id}`,
+            kind: 'meeting_change',
+            meetingId: mid,
+            meetingTitle: m.title?.trim() || '모임',
+            subtitle: ev.subtitle,
+            sortMs: ev.sortMs,
+          });
+        }
+      }
       if (ack !== undefined && fp !== ack) {
         rows.push({
+          id: `meeting:${mid}:${fp}`,
           kind: 'meeting_change',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
-          subtitle: meetingChangeSubtitleById[mid] ?? '참여 중인 모임 정보가 바뀌었어요.',
+          subtitle: '참여 중인 모임 정보가 바뀌었어요.',
           sortMs: meetingAlarmSinceMs[mid] ?? Date.now(),
         });
       }
     }
     rows.sort((a, b) => b.sortMs - a.sortMs);
     return rows;
-  }, [meetings, userId, latestById, readState, meetingAlarmSinceMs, meetingChangeSubtitleById]);
+  }, [meetings, userId, latestById, readState, meetingAlarmSinceMs, hostParticipantEventLog]);
 
   const hasUnread = alarms.length > 0;
 
@@ -444,6 +506,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       }
       return { chatReadMessageId, meetingAckFingerprint };
     });
+    setHostParticipantEventLog({});
   }, [meetings, userId, latestById]);
 
   const onPressAlarmRow = useCallback(
@@ -468,6 +531,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           meetingAckFingerprint: { ...p.meetingAckFingerprint, [row.meetingId]: fp },
         }));
       }
+      setHostParticipantEventLog((prev) => {
+        if (!prev[row.meetingId]?.length) return prev;
+        const next = { ...prev };
+        delete next[row.meetingId];
+        return next;
+      });
       closeAlarmPanel();
       router.push(`/meeting/${row.meetingId}`);
     },
@@ -524,7 +593,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
             ) : (
               <FlatList
                 data={alarms}
-                keyExtractor={(item) => `${item.kind}:${item.meetingId}`}
+                keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContent}
                 renderItem={({ item }) => (
                   <Pressable
