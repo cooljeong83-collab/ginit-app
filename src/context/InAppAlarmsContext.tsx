@@ -42,6 +42,7 @@ import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-ex
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
 
 function previewLine(m: MeetingChatMessage): string {
@@ -115,6 +116,28 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
   const pushDedupeRef = useRef<Set<string>>(new Set());
   const prevParticipantSetRef = useRef<Record<string, string>>({});
+  const prevMeetingSnapshotRef = useRef<Record<string, Meeting>>({});
+  const meetingChangePreviewRef = useRef<Record<string, string>>({});
+
+  const buildMeetingChangePreview = useCallback((prev: Meeting | null, next: Meeting): string => {
+    if (!prev) return '모임 정보가 업데이트되었습니다.';
+    if (prev.scheduleConfirmed !== true && next.scheduleConfirmed === true) return '일정이 확정되었습니다.';
+    if (prev.scheduleConfirmed === true && next.scheduleConfirmed !== true) return '일정 확정이 취소되었습니다.';
+    if ((prev.scheduleDate ?? '') !== (next.scheduleDate ?? '') || (prev.scheduleTime ?? '') !== (next.scheduleTime ?? '')) {
+      return '일시가 변경되었습니다.';
+    }
+    if ((prev.placeName ?? '') !== (next.placeName ?? '') || (prev.address ?? '') !== (next.address ?? '')) {
+      return '장소가 변경되었습니다.';
+    }
+    const prevDates = prev.dateCandidates?.length ?? 0;
+    const nextDates = next.dateCandidates?.length ?? 0;
+    if (nextDates > prevDates) return `일정 후보가 ${nextDates - prevDates}개 추가되었습니다.`;
+    const prevPlaces = prev.placeCandidates?.length ?? 0;
+    const nextPlaces = next.placeCandidates?.length ?? 0;
+    if (nextPlaces > prevPlaces) return `장소 후보가 ${nextPlaces - prevPlaces}개 추가되었습니다.`;
+    if ((prev.title ?? '') !== (next.title ?? '')) return '모임 제목이 변경되었습니다.';
+    return '모임 정보가 변경되었습니다.';
+  }, []);
 
   useEffect(() => {
     if (!userId?.trim()) {
@@ -298,6 +321,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
 
+    sweepStaleSelfMeetingChanges();
+
     for (const j of joined) {
       const mid = j.id;
       const m = meetingById.get(mid);
@@ -397,19 +422,44 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       const fp = meetingChangeFingerprint(m);
       const ack = readState.meetingAckFingerprint[mid];
       if (ack !== undefined && fp !== ack) {
+        // 내가 방금(상세 화면에서) 바꾼 모임이면: 알람/푸시는 띄우지 않고 ACK만 갱신합니다.
+        if (wasRecentSelfMeetingChange(mid)) {
+          setReadState((prev) => ({
+            ...prev,
+            meetingAckFingerprint: { ...prev.meetingAckFingerprint, [mid]: fp },
+          }));
+          prevMeetingSnapshotRef.current[mid] = m;
+          continue;
+        }
+
         const dedupeKey = `m:${mid}:${fp}`;
         if (pushDedupeRef.current.has(dedupeKey)) continue;
         pushDedupeRef.current.add(dedupeKey);
+
+        const prevSnap = prevMeetingSnapshotRef.current[mid] ?? null;
+        const preview = buildMeetingChangePreview(prevSnap, m);
+        meetingChangePreviewRef.current[mid] = preview;
 
         notifyInAppAlarmHeadsUpFireAndForget({
           userId,
           kind: 'meeting_change',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
+          preview,
         });
       }
+
+      prevMeetingSnapshotRef.current[mid] = m;
     }
-  }, [persistReady, userId, meetings, latestById, readState.chatReadMessageId, readState.meetingAckFingerprint]);
+  }, [
+    persistReady,
+    userId,
+    meetings,
+    latestById,
+    readState.chatReadMessageId,
+    readState.meetingAckFingerprint,
+    buildMeetingChangePreview,
+  ]);
 
   const alarms = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, userId);
@@ -459,7 +509,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           kind: 'meeting_change',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
-          subtitle: '참여 중인 모임 정보가 바뀌었어요.',
+          subtitle: meetingChangePreviewRef.current[mid] ?? '참여 중인 모임 정보가 바뀌었어요.',
           sortMs: meetingAlarmSinceMs[mid] ?? Date.now(),
         });
       }

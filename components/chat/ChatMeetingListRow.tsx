@@ -121,7 +121,13 @@ export function ChatMeetingListRow({
             <Ionicons name="person" size={20} color="#94a3b8" />
           </View>
         ) : hostPhotoUrl ? (
-          <Image source={{ uri: hostPhotoUrl }} style={styles.avatar} contentFit="cover" />
+          <Image
+            source={{ uri: hostPhotoUrl }}
+            style={styles.avatar}
+            contentFit="cover"
+            cachePolicy="disk"
+            recyclingKey={hostPhotoUrl}
+          />
         ) : (
           <View style={styles.avatarFallback}>
             <Text style={styles.avatarFallbackText}>{initial}</Text>

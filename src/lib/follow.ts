@@ -122,11 +122,41 @@ export async function fetchFollowPendingOutbox(meAppUserId: string): Promise<Fol
   return parseJsonbArray<FollowPendingOutboxRow>(data);
 }
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isFollowPurgeTransientRpcError(message: string): boolean {
+  const s = message.toLowerCase();
+  return (
+    s.includes('schema cache') ||
+    s.includes('could not find the function') ||
+    (s.includes('pgrst') && s.includes('function'))
+  );
+}
+
 /** 회원 탈퇴: 팔로워/팔로잉/맞팔(요청 포함) 관계를 모두 삭제합니다. */
 export async function purgeAllFollowRelations(meAppUserId: string): Promise<void> {
   const me = meAppUserId.trim();
   if (!me) return;
-  const { error } = await supabase.rpc('follow_purge_user', { p_me: me });
-  if (error) throw new Error(error.message);
+  let lastMessage = '';
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { error } = await supabase.rpc('follow_purge_user', { p_me: me });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'follow_purge_user failed';
+    if (isFollowPurgeTransientRpcError(lastMessage) && attempt < 5) {
+      await sleepMs(280 + attempt * 220);
+      continue;
+    }
+    break;
+  }
+  if (lastMessage.toLowerCase().includes('could not find the function')) {
+    throw new Error(
+      `${lastMessage}\n\n` +
+        'Supabase에 `public.follow_purge_user` RPC가 아직 반영되지 않았을 수 있어요. ' +
+        '로컬/원격 DB에 `supabase/migrations/0037_follow_purge_user_rpc.sql` 마이그레이션을 적용한 뒤 다시 시도해 주세요.',
+    );
+  }
+  throw new Error(lastMessage);
 }
 

@@ -40,6 +40,7 @@ import {
 import type { Meeting } from '@/src/lib/meetings';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
+import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
@@ -102,6 +103,13 @@ export default function MeetingChatRoomScreen() {
   const { markChatReadUpTo } = useInAppAlarms();
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setCurrentChatRoomId(meetingId);
+      return () => setCurrentChatRoomId(null);
+    }, [meetingId]),
+  );
 
   messagesRef.current = messages;
 

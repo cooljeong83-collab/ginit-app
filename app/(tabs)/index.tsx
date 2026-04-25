@@ -750,6 +750,10 @@ export default function FeedScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
+          removeClippedSubviews
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={9}
           onScroll={onMainScroll}
           scrollEventThrottle={16}
           refreshControl={

@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  BackHandler,
   Platform,
   Pressable,
   ScrollView,
@@ -27,6 +26,7 @@ import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
+import { safeRouterBack } from '@/src/lib/router-safe';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
@@ -264,7 +264,7 @@ export default function ProfileEditScreen() {
       await ensureUserProfile(profilePk);
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('저장됨', '프로필을 반영했어요.');
-      router.back();
+      safeRouterBack(router);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
       Alert.alert('저장 실패', msg);
@@ -505,10 +505,10 @@ export default function ProfileEditScreen() {
       const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
       if (Platform.OS === 'android') {
         ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-        setTimeout(() => BackHandler.exitApp(), 400);
-        return;
+        router.replace('/login');
+      } else {
+        Alert.alert('탈퇴 완료', doneMsg, [{ text: '확인', onPress: () => router.replace('/login') }]);
       }
-      Alert.alert('탈퇴 완료', doneMsg, [{ text: '확인', onPress: () => router.replace('/login') }]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
       Alert.alert('탈퇴 실패', msg);
@@ -562,7 +562,7 @@ export default function ProfileEditScreen() {
             <View style={styles.heroInner}>
               <View style={styles.heroTopRow}>
                 <Pressable
-                  onPress={() => router.back()}
+                  onPress={() => safeRouterBack(router)}
                   style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
                   accessibilityRole="button"
                   accessibilityLabel="뒤로">

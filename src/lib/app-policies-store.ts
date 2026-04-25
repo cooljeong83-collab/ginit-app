@@ -22,6 +22,8 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     default_score: 100,
     penalty_noshow: { xp: -100, trust: -50, restricted_below: 30 },
     penalty_late_cancel: { xp: -30, trust: -10 },
+    /** 확정 일정 모임에서 참여자 나가기(모임당 1회, Supabase RPC) */
+    penalty_leave_confirmed: { xp: -30, trust: -12, restricted_below: 30 },
     penalty_report_approved: { trust: -20, restricted_below: 30 },
     recovery_checkin: { streak_need: 3, trust_delta: 5, cap: 100 },
     min_join_score: 70,

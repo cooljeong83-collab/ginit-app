@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
+import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
@@ -145,11 +146,14 @@ function regionCenteredOnUserRadius(lat: number, lng: number, radiusKm: number):
 export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { addCleanup } = useUnmountCleanup();
   const meetingListRef = useRef<FlatList<Meeting>>(null);
   const listScrollY = useRef(0);
   const listContentH = useRef(0);
   const listLayoutH = useRef(0);
   const listScrollRaf = useRef<number | null>(null);
+  const scrollAfterInteractionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollAfterInteractionCancelRef = useRef<(() => void) | null>(null);
 
   const sheetExpanded = useMemo(() => Math.min(440, Math.round(WINDOW_H * 0.42)), []);
   const sheetCollapsed = useMemo(() => {
@@ -338,13 +342,21 @@ export default function MapScreen() {
   );
 
   useEffect(() => {
-    return () => {
+    addCleanup(() => {
       if (listScrollRaf.current != null) {
         cancelAnimationFrame(listScrollRaf.current);
         listScrollRaf.current = null;
       }
-    };
-  }, []);
+      if (scrollAfterInteractionTimeoutRef.current != null) {
+        clearTimeout(scrollAfterInteractionTimeoutRef.current);
+        scrollAfterInteractionTimeoutRef.current = null;
+      }
+      if (scrollAfterInteractionCancelRef.current) {
+        scrollAfterInteractionCancelRef.current();
+        scrollAfterInteractionCancelRef.current = null;
+      }
+    });
+  }, [addCleanup]);
 
   const smoothScrollListToY = useCallback((targetY: number, durationMs = 480) => {
     const list = meetingListRef.current;
@@ -398,9 +410,21 @@ export default function MapScreen() {
   const onMeetingMarkerPress = useCallback(
     (meetingId: string) => {
       setSelectedMeetingId(meetingId);
-      InteractionManager.runAfterInteractions(() => {
-        setTimeout(() => scrollListToMeetingId(meetingId), 56);
+      if (scrollAfterInteractionTimeoutRef.current != null) {
+        clearTimeout(scrollAfterInteractionTimeoutRef.current);
+        scrollAfterInteractionTimeoutRef.current = null;
+      }
+      if (scrollAfterInteractionCancelRef.current) {
+        scrollAfterInteractionCancelRef.current();
+        scrollAfterInteractionCancelRef.current = null;
+      }
+      const handle = InteractionManager.runAfterInteractions(() => {
+        scrollAfterInteractionTimeoutRef.current = setTimeout(() => {
+          scrollAfterInteractionTimeoutRef.current = null;
+          scrollListToMeetingId(meetingId);
+        }, 56);
       });
+      scrollAfterInteractionCancelRef.current = typeof handle?.cancel === 'function' ? () => handle.cancel() : null;
     },
     [scrollListToMeetingId],
   );
@@ -581,6 +605,10 @@ export default function MapScreen() {
           contentContainerStyle={styles.listScrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          removeClippedSubviews
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
           scrollEventThrottle={16}
           onScroll={onMeetingListScroll}
           onContentSizeChange={(_, h) => {

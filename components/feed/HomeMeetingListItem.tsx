@@ -153,6 +153,7 @@ function GenderSymbolVisual({
 
 function NeonHeadBadge({ statusLine, pulse }: { statusLine: string; pulse: boolean }) {
   const scale = useSharedValue(1);
+  const confirmed = statusLine === '일정 확정';
 
   useEffect(() => {
     if (pulse) {
@@ -176,8 +177,8 @@ function NeonHeadBadge({ statusLine, pulse }: { statusLine: string; pulse: boole
 
   return (
     <AnimatedView style={[s.neonBadgeOuter, pulse && s.neonBadgePulseWrap, pulseStyle]}>
-      <View style={s.neonBadgeInner}>
-        <Text style={s.neonBadgeStatus} numberOfLines={2}>
+      <View style={[s.neonBadgeInner, confirmed && s.neonBadgeInnerConfirmed]}>
+        <Text style={[s.neonBadgeStatus, confirmed && s.neonBadgeStatusConfirmed]} numberOfLines={2}>
           {statusLine}
         </Text>
       </View>
@@ -312,6 +313,8 @@ export function HomeMeetingListItem({
                         style={s.categoryIconPhoto}
                         contentFit="cover"
                         transition={140}
+                        cachePolicy="disk"
+                        recyclingKey={symbolBox.url}
                         accessibilityIgnoresInvertColors
                       />
                     ) : (
@@ -651,12 +654,19 @@ const s = StyleSheet.create({
     borderColor: 'rgba(134, 211, 183, 0.45)',
     alignItems: 'flex-end',
   },
+  neonBadgeInnerConfirmed: {
+    backgroundColor: 'rgba(0, 82, 204, 0.14)',
+    borderColor: 'rgba(0, 82, 204, 0.46)',
+  },
   neonBadgeStatus: {
     fontSize: 10,
     fontWeight: '900',
     color: GinitTheme.colors.textSub,
     letterSpacing: -0.2,
     textAlign: 'right',
+  },
+  neonBadgeStatusConfirmed: {
+    color: GinitTheme.colors.primary,
   },
   privateRow: {
     flexDirection: 'row',

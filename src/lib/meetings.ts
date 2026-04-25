@@ -1243,6 +1243,42 @@ async function grantMeetingConfirmXpIfLedger(hostAppUserId: string, meetingId: s
   }
 }
 
+const LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS = [0, 800, 2500, 6000] as const;
+
+function isRetryableLeaveConfirmedTrustRpcError(message: string, code?: string): boolean {
+  const m = message.toLowerCase();
+  if (m.includes('schema cache') || m.includes('pgrst202')) return true;
+  return code === 'PGRST202';
+}
+
+/**
+ * 확정 일정 모임에서 나간 뒤 Supabase 프로필에 신뢰 패널티 반영(모임당 1회, idempotent).
+ */
+export async function applyTrustPenaltyLeaveConfirmedMeeting(
+  phoneUserId: string,
+  meetingFirestoreId: string,
+): Promise<void> {
+  const uid = phoneUserId.trim();
+  const mid = meetingFirestoreId.trim();
+  if (!uid || !mid) throw new Error('사용자 또는 모임 정보가 없습니다.');
+  let lastMessage = '';
+  for (let i = 0; i < LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS.length; i += 1) {
+    const wait = LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('apply_trust_penalty_leave_confirmed_meeting', {
+      p_app_user_id: uid,
+      p_meeting_firestore_id: mid,
+    });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'apply_trust_penalty_leave_confirmed_meeting failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isRetryableLeaveConfirmedTrustRpcError(lastMessage, code);
+    if (!retryable || i === LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
+}
+
 export async function leaveMeeting(meetingId: string, phoneUserId: string): Promise<void> {
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();

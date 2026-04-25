@@ -1,44 +1,78 @@
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import { getMeetingById } from '@/src/lib/meetings';
+import { TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION } from '@/src/lib/trust-penalty-notify';
 import { saveUserExpoPushToken } from '@/src/lib/user-expo-push-token';
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (n) => {
+    try {
+      const data = n?.request?.content?.data as Record<string, unknown> | undefined;
+      const action = typeof data?.action === 'string' ? String(data.action).trim() : '';
+      const meetingId = typeof data?.meetingId === 'string' ? String(data.meetingId).trim() : '';
+      if (action === 'in_app_chat' && meetingId) {
+        const cur = getCurrentChatRoomId();
+        if (cur && cur === meetingId) {
+          return {
+            shouldShowBanner: false,
+            shouldShowList: false,
+            shouldPlaySound: false,
+            shouldSetBadge: false,
+          };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return {
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 function navigateFromPushData(
   router: ReturnType<typeof useRouter>,
   data: Record<string, unknown> | undefined,
+  opts?: { replace?: boolean; currentPathname?: string },
 ): void {
   if (!data || typeof data !== 'object') return;
+  const replace = Boolean(opts?.replace);
+  const navTo = (path: string) => {
+    const cur = (opts?.currentPathname ?? '').trim();
+    if (cur && cur === path) return; // 이미 해당 화면이면 스택을 쌓지 않음
+    if (replace) router.replace(path);
+    else router.push(path);
+  };
   const actionAny = typeof (data as { action?: unknown }).action === 'string' ? String((data as { action: string }).action).trim() : '';
+  if (actionAny === TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION) {
+    navTo('/(tabs)/profile');
+    return;
+  }
   if (actionAny === 'friend_request' || actionAny === 'follow_request') {
-    router.push('/social/connections');
+    navTo('/social/connections');
     return;
   }
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   if (meetingId && action === 'in_app_chat') {
-    router.push(`/meeting-chat/${meetingId}`);
+    navTo(`/meeting-chat/${meetingId}`);
     return;
   }
   if (meetingId && action === 'in_app_meeting') {
-    router.push(`/meeting/${meetingId}`);
+    navTo(`/meeting/${meetingId}`);
     return;
   }
   if (!meetingId) {
@@ -50,7 +84,7 @@ function navigateFromPushData(
     router.replace('/(tabs)');
     return;
   }
-  router.push(`/meeting/${meetingId}`);
+  navTo(`/meeting/${meetingId}`);
 }
 
 async function markAlarmReadFromPushData(
@@ -79,6 +113,7 @@ async function markAlarmReadFromPushData(
  */
 export function PushNotificationBootstrap() {
   const router = useRouter();
+  const pathname = usePathname();
   const { userId } = useUserSession();
   const { markMeetingAlarmsReadByPushTap } = useInAppAlarms();
   const bootHandled = useRef(false);
@@ -131,11 +166,11 @@ export function PushNotificationBootstrap() {
         return;
       }
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
-      navigateFromPushData(router, data);
+      navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
       void markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap);
     });
     return () => sub.remove();
-  }, [router, markMeetingAlarmsReadByPushTap]);
+  }, [router, markMeetingAlarmsReadByPushTap, pathname]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -146,10 +181,10 @@ export function PushNotificationBootstrap() {
       if (!last) return;
       if (last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
       const data = last.notification.request.content.data as Record<string, unknown> | undefined;
-      navigateFromPushData(router, data);
+      navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
       await markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap);
     })();
-  }, [router, markMeetingAlarmsReadByPushTap]);
+  }, [router, markMeetingAlarmsReadByPushTap, pathname]);
 
   return null;
 }

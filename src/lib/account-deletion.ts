@@ -1,6 +1,7 @@
 /**
- * 회원 탈퇴 — Firestore `users` 문서만 익명화하고, 모임·채팅·투표 등 활동 데이터는 유지합니다.
- * 방장으로 진행 중인 모임이 있으면 탈퇴를 막습니다.
+ * 회원 탈퇴 — 프로필 익명화 전에 모임·팔로우 관계를 정리합니다.
+ * - 방장인 모임: 단독이면 삭제, 복수면 이관 후 나가기
+ * - 게스트로만 참여 중인 모임: `leaveMeeting`으로 나가기
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, cacheDirectory } from 'expo-file-system/legacy';
@@ -12,6 +13,7 @@ import { getFirebaseAuth } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { fetchMeetingsOnceHybrid } from '@/src/lib/meetings-hybrid';
 import type { Meeting } from '@/src/lib/meetings';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { deleteMeetingDocumentByHostForce, leaveMeeting, transferMeetingHost } from '@/src/lib/meetings';
 import { purgeAllFollowRelations } from '@/src/lib/follow';
 import { withdrawAnonymizeUserProfile, withdrawAnonymizeUserProfileByFirebaseUid } from '@/src/lib/user-profile';
@@ -33,6 +35,33 @@ function pickNextHostFromParticipants(m: Meeting, nsHost: string): string | null
     if (ns && ns !== nsHost) return raw.trim();
   }
   return null;
+}
+
+/** Firebase UID 로그인 계정: `createdBy`가 세션 UID와 같은지(호스트 여부) */
+function isMeetingHostByFirebaseUid(m: Meeting, firebaseUid: string): boolean {
+  const c = m.createdBy?.trim() ?? '';
+  const u = firebaseUid.trim();
+  if (!c || !u) return false;
+  if (c === u) return true;
+  return normalizeParticipantId(c) === (normalizeParticipantId(u) ?? u);
+}
+
+async function leaveGuestMeetingsForUser(meetings: readonly Meeting[], userRaw: string, isHost: (m: Meeting) => boolean): Promise<void> {
+  const uid = userRaw.trim();
+  if (!uid) return;
+  const asGuest = meetings.filter((m) => isUserJoinedMeeting(m, uid) && !isHost(m));
+  for (const m of asGuest) {
+    const mid = m.id?.trim();
+    if (!mid) continue;
+    try {
+      await leaveMeeting(mid, uid);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // 목록 스냅샷 직후 모임이 삭제·정리된 경우 등은 탈퇴 전체를 막지 않습니다.
+      if (/모임을 찾을 수 없|찾을 수 없어요|not found/i.test(msg)) continue;
+      throw e;
+    }
+  }
 }
 
 /**
@@ -83,7 +112,15 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
     return { ok: false, message: msg };
   }
 
-  // 2) 팔로우 관계 삭제
+  // 2) 게스트로만 참여 중인 모임에서 나가기
+  try {
+    await leaveGuestMeetingsForUser(meetings, raw, (m) => isMeetingHost(m, ns));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '참여 모임에서 나가는 중 오류가 발생했습니다.';
+    return { ok: false, message: msg };
+  }
+
+  // 3) 팔로우 관계 삭제
   try {
     await purgeAllFollowRelations(raw);
   } catch (e) {
@@ -103,8 +140,7 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
 
 /**
  * 구글/UID 로그인 사용자용 서버 탈퇴 처리.
- * - 진행 중 모임 방장(firebaseUid 기반) 이면 차단
- * - users 문서는 firebaseUid로 역조회 후 익명화 (없으면 no-op)
+ * - 방장·게스트 모임 정리 후 프로필 익명화
  */
 export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): Promise<AccountDeletionResult> {
   const uid = firebaseUid.trim();
@@ -115,7 +151,7 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
     return { ok: false, message: listRes.message };
   }
   const meetings = listRes.meetings;
-  const hosted = meetings.filter((m) => (m.createdBy?.trim() ?? '') === uid);
+  const hosted = meetings.filter((m) => isMeetingHostByFirebaseUid(m, uid));
   const nsUid = normalizeParticipantId(uid) ?? uid;
   try {
     for (const m of hosted) {
@@ -143,6 +179,13 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.';
+    return { ok: false, message: msg };
+  }
+
+  try {
+    await leaveGuestMeetingsForUser(meetings, uid, (m) => isMeetingHostByFirebaseUid(m, uid));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '참여 모임에서 나가는 중 오류가 발생했습니다.';
     return { ok: false, message: msg };
   }
 

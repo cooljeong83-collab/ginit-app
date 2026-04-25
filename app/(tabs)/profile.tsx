@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  BackHandler,
   Easing,
   KeyboardAvoidingView,
   LayoutChangeEvent,
@@ -620,15 +619,12 @@ export default function ProfileTab() {
       const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
       if (Platform.OS === 'android') {
         ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-        setTimeout(() => BackHandler.exitApp(), 400);
-        return;
+        // Android에서 `BackHandler.exitApp()` 직후 네비게이터가 GO_BACK을 처리하려다
+        // "The action 'GO_BACK' was not handled" 경고가 나는 케이스가 있어, 로그인으로만 전환합니다.
+        router.replace('/login');
+      } else {
+        Alert.alert('탈퇴 완료', doneMsg, [{ text: '확인', onPress: () => router.replace('/login') }]);
       }
-      Alert.alert('탈퇴 완료', doneMsg, [
-        {
-          text: '확인',
-          onPress: () => router.replace('/login'),
-        },
-      ]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
       Alert.alert('탈퇴 실패', msg);

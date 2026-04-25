@@ -11,6 +11,20 @@ import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
 /**
+ * 릴리스(프로덕션)에서는 과도한 console.* 호출이 JS 스레드를 점유해
+ * 장시간 실행 시 체감 성능 저하로 이어질 수 있어, 정보성 로그를 비활성화합니다.
+ * - error는 유지(크래시/리포팅 용도)
+ */
+let didDisableConsoleInProd = false;
+if (!__DEV__ && !didDisableConsoleInProd) {
+  didDisableConsoleInProd = true;
+  console.log = () => {};
+  console.info = () => {};
+  console.debug = () => {};
+  console.warn = () => {};
+}
+
+/**
  * 네이티브 스플래시가 JS 부트 화면과 맞물릴 때까지 유지 → `SplashBootstrapScreen`에서 hideAsync
  * - 웹: keep-awake 미지원 → `Unable to activate keep awake` 방지
  * - Strict Mode 등으로 이 파일이 두 번 평가될 때 중복 호출 방지

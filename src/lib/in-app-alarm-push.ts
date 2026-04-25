@@ -5,6 +5,7 @@ import { AppState, Platform } from 'react-native';
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 /** Android 헤드업 배너용 — `HIGH` 이상이어야 다른 앱 사용 중에도 상단 배너가 뜨는 경우가 많습니다. */
@@ -126,6 +127,11 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
       if (Platform.OS === 'web') return;
       await ensureGinitInAppAndroidChannel();
       if (AppState.currentState === 'active') {
+        // 카카오톡처럼: 현재 보고 있는 채팅방이면 포그라운드 헤드업/배너를 띄우지 않습니다.
+        if (params.kind === 'chat') {
+          const cur = getCurrentChatRoomId();
+          if (cur && cur === params.meetingId.trim()) return;
+        }
         await presentLocalHeadsUp(params);
         return;
       }

@@ -29,7 +29,10 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { getPolicy } from '@/src/lib/app-policies-store';
+import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { fetchFollowRelationStatus, sendFollowRequest, type FollowRelationStatus } from '@/src/lib/follow';
@@ -58,6 +61,7 @@ import {
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
+  applyTrustPenaltyLeaveConfirmedMeeting,
   joinMeeting,
   leaveMeeting,
   meetingPrimaryStartMs,
@@ -344,6 +348,18 @@ export default function MeetingDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
 
+  const safeBack = useCallback(() => {
+    try {
+      if (typeof (router as any)?.canGoBack === 'function' && (router as any).canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)');
+      }
+    } catch {
+      router.replace('/(tabs)');
+    }
+  }, [router]);
+
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -371,6 +387,8 @@ export default function MeetingDetailScreen() {
   const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
   const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(3);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
+  /** ref만 갱신해도 `votesDirty` useMemo가 다시 계산되도록 */
+  const [votePersistNonce, setVotePersistNonce] = useState(0);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
   const [deleteMeetingBusy, setDeleteMeetingBusy] = useState(false);
   const [hostTieDateId, setHostTieDateId] = useState<string | null>(null);
@@ -820,6 +838,7 @@ export default function MeetingDetailScreen() {
 
     setProposeSaving(true);
     try {
+      markRecentSelfMeetingChange(meeting.id);
       await updateMeetingDateCandidates(meeting.id, merged);
       let refreshed: Meeting | null = null;
       try {
@@ -866,6 +885,7 @@ export default function MeetingDetailScreen() {
 
     setPlaceProposeSaving(true);
     try {
+      markRecentSelfMeetingChange(meeting.id);
       await updateMeetingPlaceCandidates(meeting.id, merged);
       let refreshed: Meeting | null = null;
       try {
@@ -1110,10 +1130,10 @@ export default function MeetingDetailScreen() {
 
   const participantVoteLogMissing = isParticipantGuest && serverVoteFingerprint === 'legacy';
 
-  // 저장 버튼 비활성화: 변경 사항이 없으면 disable
   const votesBaselineFpRef = useRef<string | null>(null);
   useEffect(() => {
     votesBaselineFpRef.current = null;
+    setVotePersistNonce(0);
   }, [meeting?.id, sessionPk]);
 
   const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
@@ -1160,13 +1180,11 @@ export default function MeetingDetailScreen() {
   ]);
 
   const votesDirty = useMemo(() => {
+    void votePersistNonce;
     const base = votesBaselineFpRef.current;
     if (!base) return false;
     return base !== currentVotesFp;
-  }, [currentVotesFp]);
-
-  const participantSaveDisabled = participantVoteBusy || !guestVotesReady || participantVoteLogMissing || !votesDirty;
-  const hostSaveDisabled = participantVoteBusy || !guestVotesReady || !votesDirty;
+  }, [currentVotesFp, votePersistNonce]);
 
   const hostTiePicks = useMemo(
     () => ({ dateChipId: hostTieDateId, placeChipId: hostTiePlaceId, movieChipId: hostTieMovieId }),
@@ -1284,7 +1302,7 @@ export default function MeetingDetailScreen() {
               movieChipIds: effectiveMovieIds,
             };
       await joinMeeting(meeting.id, sessionPk, joinVotes);
-      router.replace('/(tabs)');
+      // 참여 직후에도 이 모임 상세에 머무름(구독 스냅샷으로 참여자 UI로 전환)
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       if (isConfirmedScheduleOverlapErrorMessage(msg)) {
@@ -1315,11 +1333,12 @@ export default function MeetingDetailScreen() {
     selectedMovieIds,
   ]);
 
-  const handleSaveParticipantVotes = useCallback(async () => {
-    if (!meeting) return;
+  /** 투표 선택을 서버에 반영(호스트/참여자 공통, 자동 저장에서 호출) */
+  const flushVoteSelectionsToServer = useCallback(async (): Promise<boolean> => {
+    if (!meeting) return false;
     if (!sessionPk) {
-      Alert.alert('안내', '로그인 후 수정할 수 있어요.');
-      return;
+      Alert.alert('안내', '로그인 후 투표를 반영할 수 있어요.');
+      return false;
     }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
     const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
@@ -1333,85 +1352,60 @@ export default function MeetingDetailScreen() {
       Alert.alert(
         '투표를 완료해 주세요',
         parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 저장할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 저장할 수 있어요.',
+          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.`
+          : '각 투표에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.',
       );
-      return;
+      return false;
     }
-    if (!getParticipantVoteSnapshot(meeting, sessionPk)) {
+    if (!isHost && !getParticipantVoteSnapshot(meeting, sessionPk)) {
       Alert.alert(
         '투표 내역을 불러올 수 없어요',
         '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.',
       );
-      return;
+      return false;
     }
+
     setParticipantVoteBusy(true);
     try {
       await ensureUserProfile(sessionPk);
-      await updateParticipantVotes(meeting.id, sessionPk, {
-        dateChipIds: effectiveDateIds,
-        placeChipIds: effectivePlaceIds,
-        movieChipIds: effectiveMovieIds,
+      markRecentSelfMeetingChange(meeting.id);
+      if (isHost) {
+        await upsertParticipantVotes(meeting.id, sessionPk, {
+          dateChipIds: effectiveDateIds,
+          placeChipIds: effectivePlaceIds,
+          movieChipIds: effectiveMovieIds,
+        });
+      } else {
+        await updateParticipantVotes(meeting.id, sessionPk, {
+          dateChipIds: effectiveDateIds,
+          placeChipIds: effectivePlaceIds,
+          movieChipIds: effectiveMovieIds,
+        });
+      }
+      votesBaselineFpRef.current = votesFingerprint({
+        date: effectiveDateIds,
+        place: effectivePlaceIds,
+        movie: effectiveMovieIds,
       });
-      Alert.alert('저장됨', '투표가 반영되었어요.');
+      setVotePersistNonce((n) => n + 1);
+      // 하단 버튼 영역을 가리지 않도록 오프셋을 둡니다.
+      showTransientBottomMessage('투표가 저장됐어요.', 1600, 74);
+      return true;
     } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+      const msg = e instanceof Error ? e.message : '';
+      if (isConfirmedScheduleOverlapErrorMessage(msg)) {
+        showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+      } else {
+        Alert.alert('저장 실패', msg || '다시 시도해 주세요.');
+      }
+      return false;
     } finally {
       setParticipantVoteBusy(false);
     }
   }, [
     meeting,
     sessionPk,
-    guestVotesReady,
-    needsDatePick,
-    needsPlacePick,
-    needsMoviePick,
-    selectedDateIds,
-    selectedPlaceIds,
-    selectedMovieIds,
-  ]);
-
-  const handleSaveHostVotes = useCallback(async () => {
-    if (!meeting) return;
-    if (!sessionPk) {
-      Alert.alert('안내', '로그인 후 저장할 수 있어요.');
-      return;
-    }
-    const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
-    const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
-    const effectiveMovieIds = autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
-
-    if (!guestVotesReady) {
-      const parts: string[] = [];
-      if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
-      if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
-      if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
-      Alert.alert(
-        '투표를 완료해 주세요',
-        parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 저장할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 저장할 수 있어요.',
-      );
-      return;
-    }
-
-    setParticipantVoteBusy(true);
-    try {
-      await ensureUserProfile(sessionPk);
-      await upsertParticipantVotes(meeting.id, sessionPk, {
-        dateChipIds: effectiveDateIds,
-        placeChipIds: effectivePlaceIds,
-        movieChipIds: effectiveMovieIds,
-      });
-      Alert.alert('저장됨', '투표가 반영되었어요.');
-    } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-    } finally {
-      setParticipantVoteBusy(false);
-    }
-  }, [
-    meeting,
-    sessionPk,
+    isHost,
     guestVotesReady,
     needsDatePick,
     needsPlacePick,
@@ -1425,6 +1419,30 @@ export default function MeetingDetailScreen() {
     selectedDateIds,
     selectedPlaceIds,
     selectedMovieIds,
+    votesFingerprint,
+  ]);
+
+  useEffect(() => {
+    if (!meeting || !sessionPk) return;
+    if (!(isHost || alreadyJoinedMeeting)) return;
+    if (!votesDirty || !guestVotesReady) return;
+    if (participantVoteLogMissing) return;
+    if (participantVoteBusy) return;
+
+    const t = setTimeout(() => {
+      void flushVoteSelectionsToServer();
+    }, 480);
+    return () => clearTimeout(t);
+  }, [
+    meeting,
+    sessionPk,
+    isHost,
+    alreadyJoinedMeeting,
+    votesDirty,
+    guestVotesReady,
+    participantVoteLogMissing,
+    participantVoteBusy,
+    flushVoteSelectionsToServer,
   ]);
 
   const handleLeaveParticipant = useCallback(() => {
@@ -1432,30 +1450,77 @@ export default function MeetingDetailScreen() {
       Alert.alert('안내', '로그인 후 탈퇴할 수 있어요.');
       return;
     }
-    Alert.alert(
-      '모임에서 나가기',
-      '참여를 취소하면 내가 넣었던 투표는 집계에서 빠져요. 다시 들어오려면 참여 절차가 필요해요.',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '나가기',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setParticipantVoteBusy(true);
-              try {
-                await leaveMeeting(meeting.id, sessionPk);
-                router.replace('/(tabs)');
-              } catch (e) {
-                Alert.alert('탈퇴 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-              } finally {
-                setParticipantVoteBusy(false);
+    const confirmed = meeting.scheduleConfirmed === true;
+    const penaltyCfg = confirmed
+      ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_leave_confirmed', {
+          xp: -30,
+          trust: -12,
+        })
+      : null;
+    const trustDrop =
+      confirmed && penaltyCfg && typeof penaltyCfg.trust === 'number' && Number.isFinite(penaltyCfg.trust)
+        ? Math.abs(Math.trunc(penaltyCfg.trust))
+        : 12;
+    const xpDrop =
+      confirmed && penaltyCfg && typeof penaltyCfg.xp === 'number' && Number.isFinite(penaltyCfg.xp)
+        ? Math.abs(Math.trunc(penaltyCfg.xp))
+        : 30;
+    const baseMsg =
+      '참여를 취소하면 내가 넣었던 투표는 집계에서 빠져요. 다시 들어오려면 참여 절차가 필요해요.';
+    const penaltyMsg = confirmed
+      ? `\n\n일정이 확정된 모임이에요. 나가면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
+      : '';
+    Alert.alert('모임에서 나가기', baseMsg + penaltyMsg, [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '나가기',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setParticipantVoteBusy(true);
+            try {
+              await leaveMeeting(meeting.id, sessionPk);
+              let penaltyLedgerOk = false;
+              if (confirmed) {
+                try {
+                  await applyTrustPenaltyLeaveConfirmedMeeting(sessionPk, meeting.id);
+                  penaltyLedgerOk = true;
+                } catch {
+                  Alert.alert(
+                    '안내',
+                    '모임에서는 나갔지만 신뢰 점수 반영이 잠시 실패했어요. 프로필을 새로고침한 뒤에도 이상하면 고객 지원에 문의해 주세요.',
+                  );
+                }
               }
-            })();
-          },
+              router.replace('/(tabs)');
+              if (penaltyLedgerOk) {
+                if (Platform.OS === 'web') {
+                  setTimeout(() => {
+                    Alert.alert(
+                      '신뢰 패널티가 반영됐어요',
+                      `gTrust ${trustDrop}점·XP ${xpDrop}가 차감됐고, 누적 패널티가 1회 늘었어요.`,
+                      [
+                        { text: '닫기', style: 'cancel' },
+                        { text: '프로필로', onPress: () => router.push('/(tabs)/profile') },
+                      ],
+                    );
+                  }, 400);
+                } else {
+                  notifyTrustPenaltyAppliedFireAndForget({
+                    trustPoints: trustDrop,
+                    xpPoints: xpDrop,
+                  });
+                }
+              }
+            } catch (e) {
+              Alert.alert('탈퇴 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+            } finally {
+              setParticipantVoteBusy(false);
+            }
+          })();
         },
-      ],
-    );
+      },
+    ]);
   }, [meeting, sessionPk, router]);
 
   const recruitmentPhase = useMemo(
@@ -1549,6 +1614,7 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setConfirmScheduleBusy(true);
               try {
+                markRecentSelfMeetingChange(meeting.id);
                 await unconfirmMeetingSchedule(meeting.id, userId.trim());
               } catch (e) {
                 Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
@@ -1587,6 +1653,7 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setConfirmScheduleBusy(true);
               try {
+                markRecentSelfMeetingChange(meeting.id);
                 await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
               } catch (e) {
                 const msg = e instanceof Error ? e.message : '';
@@ -1623,8 +1690,9 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setDeleteMeetingBusy(true);
               try {
+                markRecentSelfMeetingChange(meeting.id);
                 await deleteMeetingByHost(meeting.id, userId.trim());
-                router.back();
+                safeBack();
               } catch (e) {
                 Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -1635,7 +1703,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, router]);
+  }, [meeting, userId, safeBack]);
 
   const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
     if (!meeting || !confirmedPlaceCoords) return;
@@ -1657,7 +1725,7 @@ export default function MeetingDetailScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <View style={styles.topBar}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={safeBack}
             style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
@@ -1723,7 +1791,7 @@ export default function MeetingDetailScreen() {
         {notFound ? (
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>모임을 찾을 수 없어요</Text>
-            <Pressable onPress={() => router.back()} style={styles.retryBtn} accessibilityRole="button">
+            <Pressable onPress={safeBack} style={styles.retryBtn} accessibilityRole="button">
               <LinearGradient
                 colors={GinitTheme.colors.ctaGradient}
                 start={{ x: 0, y: 0 }}
@@ -2415,15 +2483,27 @@ export default function MeetingDetailScreen() {
             {isHost ? (
               <View style={styles.bottomBarEqualRow}>
                 {recruitmentPhase === 'recruiting' ? (
-                  <Pressable
-                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                    accessibilityRole="button"
-                    accessibilityLabel="초대">
-                    <Ionicons name="mail-outline" size={18} color="#fff" />
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      초대
-                    </Text>
-                  </Pressable>
+                  <>
+                    <Pressable
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="초대">
+                      <Ionicons name="mail-outline" size={18} color="#fff" />
+                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                        초대
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="모임 채팅">
+                      <Ionicons name="chatbubbles-outline" size={18} color="#fff" />
+                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                        채팅
+                      </Text>
+                    </Pressable>
+                  </>
                 ) : null}
                 {meeting.scheduleConfirmed !== true ? (
                   <Pressable
@@ -2445,32 +2525,6 @@ export default function MeetingDetailScreen() {
                     )}
                     <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                       삭제
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {recruitmentPhase === 'recruiting' || recruitmentPhase === 'full' ? (
-                  <Pressable
-                    onPress={() => void handleSaveHostVotes()}
-                    disabled={hostSaveDisabled}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillOrange,
-                      styles.bottomPillFlex,
-                      hostSaveDisabled && { opacity: 0.75 },
-                      pressed && !hostSaveDisabled && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="투표 저장">
-                    {participantVoteBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="save-outline" size={18} color={GinitTheme.colors.text} />
-                    )}
-                    <Text
-                      style={[styles.pillText, styles.pillTextOnOrange, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      저장
                     </Text>
                   </Pressable>
                 ) : null}
@@ -2517,44 +2571,33 @@ export default function MeetingDetailScreen() {
             ) : alreadyJoinedMeeting ? (
               <View style={styles.bottomBarEqualRow}>
                 {recruitmentPhase === 'recruiting' ? (
-                  <Pressable
-                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                    accessibilityRole="button"
-                    accessibilityLabel="초대">
-                    <Ionicons name="mail-outline" size={16} color="#fff" />
-                    <Text
-                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      초대
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {meeting.scheduleConfirmed !== true ? (
-                  <Pressable
-                    onPress={() => void handleSaveParticipantVotes()}
-                    disabled={participantSaveDisabled}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      styles.bottomPillFlex,
-                      participantSaveDisabled && { opacity: 0.75 },
-                      pressed && !participantSaveDisabled && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="투표 수정 저장">
-                    {participantVoteBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="save-outline" size={16} color="#fff" />
-                    )}
-                    <Text
-                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      수정
-                    </Text>
-                  </Pressable>
+                  <>
+                    <Pressable
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="초대">
+                      <Ionicons name="mail-outline" size={16} color="#fff" />
+                      <Text
+                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
+                        초대
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="모임 채팅">
+                      <Ionicons name="chatbubbles-outline" size={16} color="#fff" />
+                      <Text
+                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
+                        채팅
+                      </Text>
+                    </Pressable>
+                  </>
                 ) : null}
                 <Pressable
                   onPress={handleLeaveParticipant}
@@ -2706,7 +2749,7 @@ export default function MeetingDetailScreen() {
                   {proposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.proposeModalPrimaryBtnText}>후보 저장</Text>
+                    <Text style={styles.proposeModalPrimaryBtnText}>후보 추가</Text>
                   )}
                 </Pressable>
               </View>
@@ -2787,7 +2830,7 @@ export default function MeetingDetailScreen() {
                   {placeProposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.proposeModalPrimaryBtnText}>후보 저장</Text>
+                    <Text style={styles.proposeModalPrimaryBtnText}>후보 추가</Text>
                   )}
                 </Pressable>
               </View>

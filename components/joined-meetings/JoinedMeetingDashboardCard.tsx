@@ -34,7 +34,13 @@ export function JoinedMeetingDashboardCard({ meeting }: Props) {
       style={({ pressed }) => [HomeGlassStyles.dashboardCard, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel={`${meeting.title} 상세`}>
-      <Image source={{ uri }} style={HomeGlassStyles.dashboardImage} contentFit="cover" />
+      <Image
+        source={{ uri }}
+        style={HomeGlassStyles.dashboardImage}
+        contentFit="cover"
+        cachePolicy="disk"
+        recyclingKey={meeting.id}
+      />
       {shouldUseStaticGlassInsteadOfBlur() ? (
         <View style={[StyleSheet.absoluteFillObject, styles.staticGlass]} />
       ) : (
