@@ -8,19 +8,24 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Image } from 'expo-image';
 
+import { ChatListCardShell } from '@/components/chat/ChatListCardShell';
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
+import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
-import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
+import { fetchMeetingChatUnreadCount, subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
@@ -30,6 +35,29 @@ import { socialDmRoomId, subscribeMySocialChatRooms, type SocialChatRoomSummary 
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { useUserSession } from '@/src/context/UserSessionContext';
+
+/** 친구 채팅 행 좌측 액센트 — 홈 카드 톤과 어울리는 블루·민트 그라데이션 */
+const SOCIAL_CHAT_LIST_ACCENT = ['rgba(0, 82, 204, 0.28)', 'rgba(134, 211, 183, 0.18)'] as const;
+
+function effectiveMeetingChatReadId(
+  m: Meeting,
+  userPk: string,
+  rawUid: string,
+  localMap: Record<string, string>,
+): string {
+  const local = (localMap[m.id] ?? '').trim();
+  if (local) return local;
+  const by = m.chatReadMessageIdBy;
+  if (!by || typeof by !== 'object') return '';
+  const s1 = userPk ? String(by[userPk] ?? '').trim() : '';
+  if (s1) return s1;
+  const raw = rawUid.trim();
+  if (raw) {
+    const s2 = String(by[raw] ?? '').trim();
+    if (s2) return s2;
+  }
+  return '';
+}
 
 function profileForCreatedBy(
   map: Map<string, UserProfile>,
@@ -50,6 +78,13 @@ type ChatKind = 'gather' | 'social';
 export default function ChatTab() {
   const router = useRouter();
   const { userId } = useUserSession();
+  const { meetingChatReadMessageIdMap } = useInAppAlarms();
+  const { width: windowWidth } = useWindowDimensions();
+  /** 홈 피드 상단 칩과 동일한 라벨 폭 상한 */
+  const tabChipMaxWidth = useMemo(
+    () => Math.min(200, Math.max(100, Math.floor(windowWidth * 0.38))),
+    [windowWidth],
+  );
   const [chatKind, setChatKind] = useState<ChatKind>('gather');
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +97,7 @@ export default function ChatTab() {
   const [socialRooms, setSocialRooms] = useState<SocialChatRoomSummary[]>([]);
   const [socialProfiles, setSocialProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [socialRoomsError, setSocialRoomsError] = useState<string | null>(null);
+  const [unreadByMeetingId, setUnreadByMeetingId] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setLoading(true);
@@ -121,6 +157,18 @@ export default function ChatTab() {
 
   const chatRowMeetingKey = useMemo(() => sortedMeetingChats.map((m) => m.id).join('\u0001'), [sortedMeetingChats]);
 
+  const unreadRefreshSig = useMemo(() => {
+    const pk = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
+    const raw = userId?.trim() ?? '';
+    return sortedMeetingChats
+      .map((m) => {
+        const lm = latestByMeetingId[m.id];
+        const read = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap);
+        return `${m.id}:${lm?.id ?? ''}:${read}`;
+      })
+      .join('|');
+  }, [sortedMeetingChats, latestByMeetingId, meetingChatReadMessageIdMap, userId]);
+
   const socialRoomKey = useMemo(() => socialRooms.map((r) => r.roomId).join('\u0001'), [socialRooms]);
 
   useEffect(() => {
@@ -174,6 +222,32 @@ export default function ChatTab() {
       unsubs.forEach((u) => u());
     };
   }, [chatRowMeetingKey, signedIn]);
+
+  useEffect(() => {
+    if (chatKind !== 'gather' || !signedIn || sortedMeetingChats.length === 0) {
+      setUnreadByMeetingId({});
+      return;
+    }
+    const pk = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
+    const raw = userId?.trim() ?? '';
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, number> = {};
+      for (const m of sortedMeetingChats) {
+        if (cancelled) return;
+        const readId = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap);
+        try {
+          next[m.id] = await fetchMeetingChatUnreadCount(m.id, readId || null);
+        } catch {
+          next[m.id] = 0;
+        }
+      }
+      if (!cancelled) setUnreadByMeetingId(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatKind, signedIn, unreadRefreshSig]);
 
   useEffect(() => {
     const hosts = [
@@ -230,43 +304,47 @@ export default function ChatTab() {
           }
           ListHeaderComponent={
             <View style={styles.feedHeader}>
-              <View style={styles.chatHeaderRow}>
-                <Text style={styles.chatTitle} accessibilityRole="header">
-                  채팅
-                </Text>
+              <View style={styles.feedHeaderTopRow}>
+                <View style={styles.chatTitlePressable} accessibilityRole="header">
+                  <View style={styles.chatTitleCluster}>
+                    <Text style={styles.chatTitle} numberOfLines={1}>
+                      채팅
+                    </Text>
+                  </View>
+                </View>
                 <View style={styles.headerActions}>
+                  <View style={styles.searchIconWrap} pointerEvents="none">
+                    <Ionicons name="search-outline" size={24} color="transparent" />
+                  </View>
                   <InAppAlarmsBellButton />
-                  <Pressable accessibilityRole="button" hitSlop={10} accessibilityLabel="채팅 설정">
+                  <Pressable
+                    accessibilityRole="button"
+                    hitSlop={10}
+                    accessibilityLabel="채팅 설정"
+                    style={styles.settingsIconWrap}>
                     <Ionicons name="settings-outline" size={24} color="#0f172a" />
                   </Pressable>
                 </View>
               </View>
 
-              <View style={styles.kindTabsRow} accessibilityRole="tablist">
-                <Pressable
-                  onPress={() => setChatKind('gather')}
-                  style={({ pressed }) => [
-                    styles.kindTab,
-                    chatKind === 'gather' && styles.kindTabActive,
-                    pressed && styles.kindTabPressed,
-                  ]}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: chatKind === 'gather' }}
-                  accessibilityLabel="모임 채팅 Gather">
-                  <Text style={[styles.kindTabText, chatKind === 'gather' && styles.kindTabTextActive]}>Gather(모임)</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setChatKind('social')}
-                  style={({ pressed }) => [
-                    styles.kindTab,
-                    chatKind === 'social' && styles.kindTabActive,
-                    pressed && styles.kindTabPressed,
-                  ]}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: chatKind === 'social' }}
-                  accessibilityLabel="친구 채팅 Social">
-                  <Text style={[styles.kindTabText, chatKind === 'social' && styles.kindTabTextActive]}>Social(친구)</Text>
-                </Pressable>
+              <View style={styles.tabCategoryBar} accessibilityRole="tablist">
+                <View style={styles.tabPair}>
+                  <GlassCategoryChip
+                    label="모임"
+                    active={chatKind === 'gather'}
+                    onPress={() => setChatKind('gather')}
+                    maxLabelWidth={tabChipMaxWidth}
+                    accessibilityLabel="모임"
+                  />
+                  <GlassCategoryChip
+                    label="친구"
+                    active={chatKind === 'social'}
+                    onPress={() => setChatKind('social')}
+                    maxLabelWidth={tabChipMaxWidth}
+                    accessibilityLabel="친구"
+                  />
+                </View>
+                <View style={styles.categoryDropdownSpacer} pointerEvents="none" />
               </View>
 
               {signedIn && chatKind === 'social' ? (
@@ -276,7 +354,7 @@ export default function ChatTab() {
                     onPress={() => router.push('/social/connections')}
                     accessibilityRole="button"
                     accessibilityLabel="친구 관리">
-                    <Text style={styles.shortcutBtnText}>My Connections</Text>
+                    <Text style={styles.shortcutBtnText}>친구 관리</Text>
                   </Pressable>
                   <Pressable
                     style={styles.shortcutBtn}
@@ -326,8 +404,6 @@ export default function ChatTab() {
             if (chatKind === 'gather') {
               const m = item as Meeting;
               const host = profileForCreatedBy(hostProfiles, m.createdBy);
-              const phase = getMeetingRecruitmentPhase(m);
-              const ongoing = phase === 'recruiting' || phase === 'full' || phase === 'confirmed';
               return (
                 <ChatMeetingListRow
                   meeting={m}
@@ -335,7 +411,7 @@ export default function ChatTab() {
                   hostNickname={host?.nickname ?? '주관자'}
                   hostWithdrawn={isUserProfileWithdrawn(host)}
                   latestMessage={latestByMeetingId[m.id]}
-                  ongoing={ongoing}
+                  unreadCount={unreadByMeetingId[m.id] ?? 0}
                   onPress={() => router.push(`/meeting-chat/${m.id}`)}
                 />
               );
@@ -346,30 +422,39 @@ export default function ChatTab() {
             const nick = prof?.nickname ?? '친구';
             const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
             return (
-              <Pressable
-                style={({ pressed }) => [styles.socialRow, pressed && styles.socialRowPressed]}
+              <ChatListCardShell
+                accentGradient={SOCIAL_CHAT_LIST_ACCENT}
                 onPress={() =>
                   router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`)
                 }
-                accessibilityRole="button"
                 accessibilityLabel={`${nick}와 채팅`}>
-                {uri ? (
-                  <Image source={{ uri }} style={styles.socialAvatar} contentFit="cover" />
-                ) : (
-                  <View style={styles.socialAvatarFallback}>
-                    <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                <View style={styles.socialZoneA}>
+                  <View style={styles.socialSymbolCol}>
+                    {uri ? (
+                      <View style={styles.socialAvatarBubble}>
+                        <Image source={{ uri }} style={styles.socialAvatarImg} contentFit="cover" />
+                      </View>
+                    ) : (
+                      <View style={styles.socialAvatarBubble}>
+                        <View style={styles.socialAvatarFallback}>
+                          <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                        </View>
+                      </View>
+                    )}
+                    <Text style={styles.socialKindUnder} numberOfLines={1}>
+                      1:1
+                    </Text>
                   </View>
-                )}
-                <View style={styles.socialMid}>
-                  <Text style={styles.socialNick} numberOfLines={1}>
-                    {nick}
-                  </Text>
-                  <Text style={styles.socialSub} numberOfLines={1}>
-                    1:1 Social
-                  </Text>
+                  <View style={styles.socialZoneMain}>
+                    <Text style={styles.socialHeroTitle} numberOfLines={1}>
+                      {nick}
+                    </Text>
+                    <Text style={styles.socialMetaMuted} numberOfLines={1}>
+                      친구 채팅
+                    </Text>
+                  </View>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-              </Pressable>
+              </ChatListCardShell>
             );
           }}
         />
@@ -390,20 +475,31 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     gap: 12,
   },
-  chatHeaderRow: {
+  feedHeaderTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
   },
   chatTitle: {
-    fontSize: 26,
-    fontWeight: '900',
-    color: '#0f172a',
-    letterSpacing: -0.6,
-    textShadowColor: 'rgba(255, 255, 255, 0.7)',
-    textShadowOffset: { width: 0, height: 0.5 },
-    textShadowRadius: 2,
+    flexShrink: 1,
+    fontSize: 20,
+    fontWeight: '700',
+    color: GinitTheme.trustBlue,
+    minWidth: 0,
+  },
+  chatTitleCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+    gap: 4,
+  },
+  chatTitlePressable: {
+    alignSelf: 'flex-start',
+    maxWidth: 220,
+    borderRadius: 10,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
   },
   headerActions: {
     flexDirection: 'row',
@@ -411,36 +507,41 @@ const styles = StyleSheet.create({
     gap: 16,
     flexShrink: 0,
   },
-  kindTabsRow: {
+  searchIconWrap: {
+    position: 'relative',
+    padding: 2,
+  },
+  settingsIconWrap: {
+    position: 'relative',
+    padding: 2,
+  },
+  tabCategoryBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
+    marginTop: 2,
   },
-  kindTab: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+  tabPair: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 8,
+    flexShrink: 1,
+    minWidth: 0,
   },
-  kindTabActive: {
-    borderColor: 'rgba(0, 82, 204, 0.28)',
-    backgroundColor: 'rgba(0, 82, 204, 0.10)',
-  },
-  kindTabPressed: {
-    opacity: 0.9,
-  },
-  kindTabText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#334155',
-    letterSpacing: -0.2,
-  },
-  kindTabTextActive: {
-    color: GinitTheme.colors.primary,
+  /** 홈 카테고리 드롭다운과 동일 레이아웃 폭·패딩(채팅 탭은 우측 컨트롤 없음) */
+  categoryDropdownSpacer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    maxWidth: 150,
+    minWidth: 96,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
+    opacity: 0,
   },
   socialShortcuts: {
     flexDirection: 'row',
@@ -461,34 +562,67 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: GinitTheme.colors.primary,
   },
-  socialRow: {
+  socialZoneA: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
+    alignItems: 'flex-start',
+    gap: 10,
   },
-  socialRowPressed: { opacity: 0.92 },
-  socialAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e2e8f0',
+  socialSymbolCol: {
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 1,
+  },
+  socialAvatarBubble: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  socialAvatarImg: {
+    width: '100%',
+    height: '100%',
   },
   socialAvatarFallback: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: '100%',
+    height: '100%',
     backgroundColor: 'rgba(0, 82, 204, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  socialAvatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
-  socialMid: { flex: 1, minWidth: 0, gap: 4 },
-  socialNick: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
-  socialSub: { fontSize: 13, fontWeight: '600', color: '#64748b' },
+  socialAvatarLetter: { fontSize: 13, fontWeight: '900', color: GinitTheme.trustBlue },
+  socialKindUnder: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.35,
+    textAlign: 'center',
+    maxWidth: 40,
+  },
+  socialZoneMain: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+    paddingTop: 1,
+  },
+  socialHeroTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+    lineHeight: 18,
+    color: GinitTheme.colors.text,
+  },
+  socialMetaMuted: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.12,
+  },
   centerRow: {
     flexDirection: 'row',
     alignItems: 'center',

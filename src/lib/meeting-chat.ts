@@ -22,6 +22,7 @@ import {
   addDoc,
   collection,
   documentId,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -29,6 +30,9 @@ import {
   query,
   serverTimestamp,
   startAfter,
+  updateDoc,
+  doc,
+  type DocumentSnapshot,
   type Timestamp,
   type Unsubscribe,
   writeBatch,
@@ -62,6 +66,23 @@ export type MeetingChatMessage = {
   createdAt: Timestamp | null;
 };
 
+/**
+ * 채팅 읽음 영수증(참여자별) 기록.
+ * - `meetings/{meetingId}.chatReadAtBy.{userId}`: serverTimestamp
+ * - `meetings/{meetingId}.chatReadMessageIdBy.{userId}`: 마지막으로 본 메시지 id
+ */
+export async function writeMeetingChatReadReceipt(meetingId: string, userId: string, lastMessageId: string): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = userId.trim();
+  const lid = lastMessageId.trim();
+  if (!mid || !uid || !lid) return;
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  await updateDoc(ref, {
+    [`chatReadAtBy.${uid}`]: serverTimestamp(),
+    [`chatReadMessageIdBy.${uid}`]: lid,
+  });
+}
+
 const CHAT_PAGE_SIZE = 120;
 
 function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMessage {
@@ -91,6 +112,70 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
         }
       : null;
   return { id, senderId, text, kind, imageUrl, replyTo: replyTo?.messageId ? replyTo : null, createdAt };
+}
+
+/** 대화 검색·미리보기용 텍스트(소문자 비교는 호출 측에서) */
+export function meetingChatMessageSearchHaystack(m: MeetingChatMessage): string {
+  if (m.kind === 'system') return (m.text ?? '').trim();
+  if (m.kind === 'image') {
+    const cap = (m.text ?? '').trim();
+    return cap ? `사진 ${cap}` : '사진';
+  }
+  return (m.text ?? '').trim();
+}
+
+const SEARCH_PAGE = 120;
+
+/**
+ * 모임 채팅에서 `needle`이 포함된 메시지를 과거 방향으로 페이지네이션하며 찾습니다.
+ * Firestore에 전문 검색이 없어 클라이언트에서 문자열 포함 여부를 검사합니다.
+ */
+export async function searchMeetingChatMessages(
+  meetingId: string,
+  needle: string,
+  opts?: { maxDocsScanned?: number },
+): Promise<MeetingChatMessage[]> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const raw = typeof needle === 'string' ? needle.trim() : '';
+  if (!mid || !raw) return [];
+
+  const maxDocs = Math.min(Math.max(200, opts?.maxDocsScanned ?? 2500), 8000);
+  const norm = raw.toLowerCase();
+
+  const db = getFirestoreDb();
+  const cref = collection(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+
+  const matches: MeetingChatMessage[] = [];
+  const seen = new Set<string>();
+  let lastSnap: DocumentSnapshot | undefined;
+  let scanned = 0;
+
+  while (scanned < maxDocs) {
+    const q = lastSnap
+      ? query(cref, orderBy('createdAt', 'desc'), startAfter(lastSnap), limit(SEARCH_PAGE))
+      : query(cref, orderBy('createdAt', 'desc'), limit(SEARCH_PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    for (const d of snap.docs) {
+      scanned++;
+      const m = mapMessageDoc(d.id, d.data() as Record<string, unknown>);
+      const hay = meetingChatMessageSearchHaystack(m).toLowerCase();
+      if (hay.includes(norm) && !seen.has(m.id)) {
+        seen.add(m.id);
+        matches.push(m);
+      }
+    }
+    lastSnap = snap.docs[snap.docs.length - 1]!;
+    if (snap.size < SEARCH_PAGE) break;
+  }
+
+  matches.sort((a, b) => {
+    const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
+    const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
+    if (ta !== tb) return ta - tb;
+    return a.id.localeCompare(b.id);
+  });
+  return matches;
 }
 
 /**
@@ -126,6 +211,44 @@ const LATEST_PREVIEW_LIMIT = 1;
 /**
  * 채팅 탭 목록용 — 해당 모임의 **가장 최근 메시지 1건**만 구독합니다.
  */
+/** 목록 배지용 — 표시 상한(카카오톡 등과 유사) */
+export const MEETING_CHAT_UNREAD_LIST_CAP = 999;
+
+const UNREAD_COUNT_PAGE = 250;
+
+/**
+ * 읽음 포인터(`readMessageId`) **다음**에 쌓인 메시지 개수.
+ * `RunAggregationQuery` + `startAfter(문서)` 조합이 invalid-argument로 실패하는 경우가 있어
+ * `getDocs` 페이지 누적으로 집계합니다.
+ */
+export async function fetchMeetingChatUnreadCount(meetingId: string, readMessageId: string | null | undefined): Promise<number> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) return 0;
+  const rid = typeof readMessageId === 'string' ? readMessageId.trim() : '';
+  if (!rid) return 0;
+
+  const db = getFirestoreDb();
+  const cref = collection(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const readRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, rid);
+  const readSnap = await getDoc(readRef);
+  if (!readSnap.exists()) {
+    return 0;
+  }
+
+  let total = 0;
+  let cursor: DocumentSnapshot = readSnap;
+  for (;;) {
+    const q = query(cref, orderBy('createdAt', 'asc'), startAfter(cursor), limit(UNREAD_COUNT_PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    total += snap.size;
+    if (total >= MEETING_CHAT_UNREAD_LIST_CAP) return MEETING_CHAT_UNREAD_LIST_CAP;
+    cursor = snap.docs[snap.docs.length - 1]!;
+    if (snap.size < UNREAD_COUNT_PAGE) break;
+  }
+  return total;
+}
+
 export function subscribeMeetingChatLatestMessage(
   meetingId: string,
   onLatest: (message: MeetingChatMessage | null) => void,

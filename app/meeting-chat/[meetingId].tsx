@@ -1,18 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
+  Easing,
+  FlatList,
   Keyboard,
   type KeyboardEvent,
+  type LayoutChangeEvent,
+  Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -20,27 +26,31 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { Swipeable } from 'react-native-gesture-handler';
+import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
+import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
+  meetingChatMessageSearchHaystack,
+  searchMeetingChatMessages,
   sendMeetingChatImageMessage,
   sendMeetingChatTextMessage,
   subscribeMeetingChatMessages,
+  writeMeetingChatReadReceipt,
 } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
-import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
@@ -67,6 +77,196 @@ function formatChatTime(ts: Timestamp | null | undefined): string {
   }
 }
 
+/** 사진 크게 보기 상단 — 보낸 시각(날짜·시간) */
+function formatImageViewerSentAt(ts: Timestamp | null | undefined): string {
+  if (!ts || typeof ts.toDate !== 'function') return '';
+  try {
+    return ts.toDate().toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return '';
+  }
+}
+
+function meetingImageViewerMeta(
+  item: MeetingChatMessage,
+  profiles: Map<string, UserProfile>,
+): { senderLabel: string; sentAtLabel: string } {
+  const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
+  const prof = sid ? profileForSender(profiles, sid) : undefined;
+  const withdrawn = isUserProfileWithdrawn(prof);
+  const senderLabel = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
+  const sentAtLabel = formatImageViewerSentAt(item.createdAt);
+  return { senderLabel, sentAtLabel };
+}
+
+/** 검색 결과 한 줄 미리보기 — 검색어 주변만 잘라 표시 */
+function splitSearchSnippet(full: string, needle: string): { head: string; mid: string; tail: string } {
+  const f = full;
+  const n = needle.trim();
+  if (!f) return { head: '', mid: '', tail: '' };
+  if (!n) return { head: f.length > 120 ? `${f.slice(0, 120)}…` : f, mid: '', tail: '' };
+  const lower = f.toLowerCase();
+  const idx = lower.indexOf(n.toLowerCase());
+  if (idx < 0) return { head: f.length > 120 ? `${f.slice(0, 120)}…` : f, mid: '', tail: '' };
+  const pad = 28;
+  const start = Math.max(0, idx - pad);
+  const end = Math.min(f.length, idx + n.length + pad);
+  const slice = f.slice(start, end);
+  const local = slice.toLowerCase().indexOf(n.toLowerCase());
+  if (local < 0) return { head: (start > 0 ? '…' : '') + slice, mid: '', tail: end < f.length ? '…' : '' };
+  const headRaw = slice.slice(0, local);
+  const midRaw = slice.slice(local, local + n.length);
+  const tailRaw = slice.slice(local + n.length);
+  return {
+    head: (start > 0 ? '…' : '') + headRaw,
+    mid: midRaw,
+    tail: tailRaw + (end < f.length ? '…' : ''),
+  };
+}
+
+/** 탭바「모임 생성」FAB·마법사 primary CTA와 동일 높이 느낌(bottomPill min 50) */
+const PLUS_QUICK_ROW_H = 50;
+const PLUS_QUICK_ICON = 22;
+/** 펼침 시 좌·우 패딩(마법사 primary 버튼과 유사) */
+const PLUS_QUICK_PAD_X = 14;
+/** 아이콘과 라벨 사이 — `plusFanLabelMorph.marginLeft` 과 맞출 것 */
+const PLUS_QUICK_ICON_LABEL_GAP = 8;
+/** 퀵 버튼 캡슐 라운딩(높이의 절반 — 좌우 완전 둥근 알약 형태) */
+const PLUS_QUICK_BORDER_RADIUS = PLUS_QUICK_ROW_H / 2;
+/** 측정 폭보다 살짝 넓혀 글자가 답답하지 않게 */
+const PLUS_QUICK_PILL_EXTRA_W = 12;
+/** `GinitTheme.colors.primary` (#1F2A44)와 동일 RGB — 캡슐만 반투명 */
+const PLUS_QUICK_PILL_BG = 'rgba(31, 42, 68, 0.8)';
+
+function estimateQuickLabelPx(label: string): number {
+  if (!label) return 24;
+  return [...label].reduce((acc, ch) => acc + ((ch.codePointAt(0) ?? 0) > 0x007f ? 15 : 9), 0);
+}
+
+type MeetingChatQuickActionDef = {
+  key: string;
+  label: string;
+  icon: ComponentProps<typeof Ionicons>['name'];
+  onPress: () => void;
+};
+
+function MeetingChatQuickActionRow({
+  action,
+  progress,
+  pillMaxW,
+}: {
+  action: MeetingChatQuickActionDef;
+  progress: Animated.Value;
+  pillMaxW: number;
+}) {
+  const p = progress;
+  const basePillContentW = (textPx: number) =>
+    PLUS_QUICK_PAD_X + PLUS_QUICK_ICON + PLUS_QUICK_ICON_LABEL_GAP + textPx + PLUS_QUICK_PAD_X + PLUS_QUICK_PILL_EXTRA_W;
+
+  const [pillTargetW, setPillTargetW] = useState(() =>
+    Math.min(pillMaxW, Math.max(PLUS_QUICK_ROW_H, basePillContentW(estimateQuickLabelPx(action.label)))),
+  );
+
+  useEffect(() => {
+    setPillTargetW(
+      Math.min(pillMaxW, Math.max(PLUS_QUICK_ROW_H, basePillContentW(estimateQuickLabelPx(action.label)))),
+    );
+  }, [action.label, pillMaxW]);
+
+  const onMeasureLabelTextLayout = useCallback(
+    (e: { nativeEvent: { lines: { width: number }[] } }) => {
+      const tw = e.nativeEvent.lines[0]?.width;
+      if (tw == null || !Number.isFinite(tw)) return;
+      const total = Math.ceil(basePillContentW(tw));
+      setPillTargetW((prev) => {
+        const next = Math.min(pillMaxW, Math.max(PLUS_QUICK_ROW_H, total));
+        return prev === next ? prev : next;
+      });
+    },
+    [pillMaxW],
+  );
+
+  /** 전체 진행에 맞춰 천천히 떠오르고 페이드 — 애니메이션 이징은 부모 timing에서 처리 */
+  const rowLift = p.interpolate({
+    inputRange: [0, 1],
+    outputRange: [20, 0],
+    extrapolate: 'clamp',
+  });
+  const rowOp = p.interpolate({
+    inputRange: [0, 0.14, 0.62],
+    outputRange: [0, 1, 1],
+    extrapolate: 'clamp',
+  });
+  const rowScale = p.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.93, 1],
+    extrapolate: 'clamp',
+  });
+
+  return (
+    <Animated.View
+      style={{
+        marginBottom: 10,
+        alignSelf: 'flex-start',
+        opacity: rowOp,
+        transform: [{ translateY: rowLift }, { scale: rowScale }],
+      }}>
+      <View
+        style={[styles.plusQuickMeasureHost, { width: pillMaxW }]}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants">
+        <Text style={styles.plusFanLabelMorph} onTextLayout={onMeasureLabelTextLayout} numberOfLines={1}>
+          {action.label}
+        </Text>
+      </View>
+      <Pressable
+        onPress={action.onPress}
+        accessibilityRole="button"
+        accessibilityLabel={action.label}
+        hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}>
+        <View
+          style={{
+            width: pillTargetW,
+            minWidth: PLUS_QUICK_ROW_H,
+            height: PLUS_QUICK_ROW_H,
+            borderRadius: PLUS_QUICK_BORDER_RADIUS,
+            backgroundColor: 'transparent',
+            ...GinitTheme.shadow.float,
+          }}>
+          <View
+            style={{
+              width: '100%',
+              height: '100%',
+              borderRadius: PLUS_QUICK_BORDER_RADIUS,
+              overflow: 'hidden',
+              borderWidth: 0,
+              backgroundColor: PLUS_QUICK_PILL_BG,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: PLUS_QUICK_PAD_X,
+            }}>
+            <View style={styles.plusQuickIconLabelRow}>
+              <Ionicons name={action.icon} size={PLUS_QUICK_ICON} color="#FFFFFF" />
+              <Text style={styles.plusFanLabelMorph} numberOfLines={1}>
+                {action.label}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export default function MeetingChatRoomScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -90,12 +290,36 @@ export default function MeetingChatRoomScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
-  const plusAnim = useRef(new Animated.Value(0)).current;
+  /** + 퀵 메뉴 행별 진행 0→1 (아래에서 올라오며 페이드), 닫을 때 역재생 */
+  const plusRowAnims = useRef([
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+  ]).current;
+  /** 0 = +, 1 = × — 스프링으로 회전·스케일 교차 */
+  const plusIconMorph = useRef(new Animated.Value(0)).current;
   /** 키보드 본체 + IME 상단(이모지/툴바 등)까지 포함해 입력창을 올리기 위한 하단 여백 */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   /** Android 삼성 등: IME `defaultInputmode=emoji` — 토글 후 포커스 */
   const [androidEmojiIme, setAndroidEmojiIme] = useState(false);
+  const [imageViewer, setImageViewer] = useState<{
+    url: string;
+    senderLabel: string;
+    sentAtLabel: string;
+  } | null>(null);
+  const [imageViewerBusy, setImageViewerBusy] = useState(false);
+  /** 맨 아래에서 조금이라도 위로 올라왔을 때만「최신으로」FAB 표시 */
+  const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [chatSearchResults, setChatSearchResults] = useState<MeetingChatMessage[]>([]);
+  const [chatSearchBusy, setChatSearchBusy] = useState(false);
+  /** 퀵 메뉴·닫기 레이어를 입력창(composerDock) 바로 위에 붙이기 위한 높이 */
+  const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
+  const chatSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatSearchInputRef = useRef<TextInput>(null);
   const listRef = useRef<any>(null);
   const messageInputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MeetingChatMessage[]>([]);
@@ -162,7 +386,12 @@ export default function MeetingChatRoomScreen() {
     if (prev && prev.meetingId === meetingId && prev.messageId === last.id) return;
     lastMarkedReadRef.current = { meetingId, messageId: last.id };
     markChatReadUpTo(meetingId, last.id);
-  }, [allowed, meetingId, messages, markChatReadUpTo]);
+    if (myId) {
+      void writeMeetingChatReadReceipt(meetingId, myId, last.id).catch(() => {
+        /* best-effort */
+      });
+    }
+  }, [allowed, meetingId, messages, markChatReadUpTo, myId]);
 
   useEffect(() => {
     if (!meetingId || allowed !== true) return;
@@ -186,12 +415,35 @@ export default function MeetingChatRoomScreen() {
 
   const scrollToBottom = useCallback(() => {
     if (messages.length === 0) return;
+    setShowJumpToBottomFab(false);
     requestAnimationFrame(() => {
       listRef.current?.scrollToEnd({ animated: true });
     });
   }, [messages.length]);
 
+  const onChatScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    const viewH = layoutMeasurement.height;
+    const contentH = contentSize.height;
+    if (viewH <= 0 || contentH <= 0) {
+      setShowJumpToBottomFab(false);
+      return;
+    }
+    /** 스크롤이 생기지 않으면(내용이 짧으면) FAB 숨김 */
+    if (contentH <= viewH + 4) {
+      setShowJumpToBottomFab(false);
+      return;
+    }
+    const distanceFromBottom = contentH - (contentOffset.y + viewH);
+    const threshold = 56;
+    setShowJumpToBottomFab(distanceFromBottom > threshold);
+  }, []);
+
   useEffect(() => {
+    if (messages.length === 0) {
+      setShowJumpToBottomFab(false);
+      return;
+    }
     scrollToBottom();
   }, [messages.length, scrollToBottom]);
 
@@ -253,6 +505,154 @@ export default function MeetingChatRoomScreen() {
     router.push(`/meeting/${meetingId}`);
   }, [router, meetingId]);
 
+  const closeChatSearch = useCallback(() => {
+    setChatSearchOpen(false);
+    setChatSearchQuery('');
+    setChatSearchResults([]);
+    setChatSearchBusy(false);
+    if (chatSearchDebounceRef.current) {
+      clearTimeout(chatSearchDebounceRef.current);
+      chatSearchDebounceRef.current = null;
+    }
+  }, []);
+
+  const runChatSearch = useCallback(
+    async (q: string) => {
+      const t = q.trim();
+      if (!meetingId) {
+        setChatSearchResults([]);
+        return;
+      }
+      if (!t) {
+        setChatSearchResults([]);
+        setChatSearchBusy(false);
+        return;
+      }
+      setChatSearchBusy(true);
+      try {
+        const rows = await searchMeetingChatMessages(meetingId, t, { maxDocsScanned: 3000 });
+        setChatSearchResults(rows);
+      } catch {
+        setChatSearchResults([]);
+        Alert.alert('검색 실패', '네트워크 상태를 확인한 뒤 다시 시도해 주세요.');
+      } finally {
+        setChatSearchBusy(false);
+      }
+    },
+    [meetingId],
+  );
+
+  useEffect(() => {
+    if (!chatSearchOpen) return;
+    if (chatSearchDebounceRef.current) clearTimeout(chatSearchDebounceRef.current);
+    chatSearchDebounceRef.current = setTimeout(() => {
+      void runChatSearch(chatSearchQuery);
+    }, 320);
+    return () => {
+      if (chatSearchDebounceRef.current) {
+        clearTimeout(chatSearchDebounceRef.current);
+        chatSearchDebounceRef.current = null;
+      }
+    };
+  }, [chatSearchQuery, chatSearchOpen, runChatSearch]);
+
+  useEffect(() => {
+    if (!chatSearchOpen) return;
+    const t = setTimeout(() => chatSearchInputRef.current?.focus(), 280);
+    return () => clearTimeout(t);
+  }, [chatSearchOpen]);
+
+  const jumpToSearchResult = useCallback(
+    (msg: MeetingChatMessage) => {
+      closeChatSearch();
+      Keyboard.dismiss();
+      const idx = messages.findIndex((m) => m.id === msg.id);
+      requestAnimationFrame(() => {
+        if (idx >= 0) {
+          try {
+            listRef.current?.scrollToIndex({
+              index: idx,
+              viewPosition: 0.35,
+              animated: true,
+            });
+          } catch {
+            listRef.current?.scrollToEnd({ animated: true });
+          }
+        } else {
+          const d = msg.createdAt && typeof msg.createdAt.toDate === 'function' ? msg.createdAt.toDate() : null;
+          const when = d
+            ? d.toLocaleString('ko-KR', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })
+            : '';
+          Alert.alert(
+            '대화 위치',
+            when
+              ? `이 메시지는 ${when}에 보내진 내용이에요.\n현재 화면에 불러온 최근 대화 범위 밖이라 바로 이동할 수 없어요. 위로 더 스크롤한 뒤 다시 검색해 보세요.`
+              : '현재 화면에 불러온 최근 대화 범위 밖이에요. 위로 더 스크롤한 뒤 다시 검색해 보세요.',
+          );
+        }
+      });
+    },
+    [messages, closeChatSearch],
+  );
+
+  const openChatSearch = useCallback(() => {
+    Keyboard.dismiss();
+    setDrawerOpen(false);
+    setPlusMenuOpen(false);
+    setChatSearchOpen(true);
+    setChatSearchQuery('');
+    setChatSearchResults([]);
+  }, []);
+
+  const renderChatSearchRow = useCallback(
+    ({ item }: { item: MeetingChatMessage }) => {
+      const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
+      const prof = sid ? profileForSender(profiles, sid) : undefined;
+      const withdrawn = isUserProfileWithdrawn(prof);
+      const nick =
+        item.kind === 'system' ? '알림' : withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
+      const hay = meetingChatMessageSearchHaystack(item);
+      const parts = splitSearchSnippet(hay, chatSearchQuery);
+      const when =
+        item.createdAt && typeof item.createdAt.toDate === 'function'
+          ? item.createdAt.toDate().toLocaleString('ko-KR', {
+              month: 'numeric',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            })
+          : '';
+      return (
+        <Pressable
+          style={({ pressed }) => [styles.chatSearchRow, pressed && styles.chatSearchRowPressed]}
+          onPress={() => jumpToSearchResult(item)}
+          accessibilityRole="button"
+          accessibilityLabel={`${nick}, ${when}`}>
+          <View style={styles.chatSearchRowTop}>
+            <Text style={styles.chatSearchNick} numberOfLines={1}>
+              {nick}
+            </Text>
+            <Text style={styles.chatSearchWhen} numberOfLines={1}>
+              {when}
+            </Text>
+          </View>
+          <Text style={styles.chatSearchSnippet} numberOfLines={2}>
+            {parts.head}
+            {parts.mid ? <Text style={styles.chatSearchSnippetHit}>{parts.mid}</Text> : null}
+            {parts.tail}
+          </Text>
+        </Pressable>
+      );
+    },
+    [profiles, chatSearchQuery, jumpToSearchResult],
+  );
+
   const onEmojiToolbarPress = useCallback(() => {
     if (Platform.OS === 'android') {
       setAndroidEmojiIme((v) => !v);
@@ -266,14 +666,6 @@ export default function MeetingChatRoomScreen() {
       useNativeDriver: true,
     }).start();
   }, [drawerOpen, drawerAnim]);
-
-  useEffect(() => {
-    Animated.timing(plusAnim, {
-      toValue: plusMenuOpen ? 1 : 0,
-      duration: plusMenuOpen ? 180 : 140,
-      useNativeDriver: true,
-    }).start();
-  }, [plusMenuOpen, plusAnim]);
 
   const onSend = useCallback(async () => {
     if (!meetingId || !userId?.trim()) {
@@ -293,11 +685,6 @@ export default function MeetingChatRoomScreen() {
       setSending(false);
     }
   }, [meetingId, userId, draft, sending, uploadingImage, replyTo]);
-
-  const openPlusMenu = useCallback(() => {
-    if (uploadingImage || sending) return;
-    setPlusMenuOpen(true);
-  }, [uploadingImage, sending]);
 
   const onPickImage = useCallback(async () => {
     if (!meetingId || !userId?.trim()) {
@@ -333,6 +720,121 @@ export default function MeetingChatRoomScreen() {
     }
   }, [meetingId, userId, draft, uploadingImage]);
 
+  const plusPillMaxWidth = useMemo(
+    () => Math.max(200, Math.floor(Dimensions.get('window').width - 40)),
+    [],
+  );
+
+  const closePlusMenuThen = useCallback(
+    (after?: () => void) => {
+      if (!plusMenuOpen) {
+        after?.();
+        return;
+      }
+      plusRowAnims.forEach((v) => {
+        v.stopAnimation();
+      });
+      const duration = 680;
+      const timings = plusRowAnims.map((v) =>
+        Animated.timing(v, {
+          toValue: 0,
+          duration,
+          easing: Easing.bezier(0.4, 0, 0.58, 1),
+          useNativeDriver: true,
+        }),
+      );
+      Animated.stagger(44, [timings[0], timings[1], timings[2], timings[3]]).start(({ finished }) => {
+        setPlusMenuOpen(false);
+        if (finished) after?.();
+      });
+    },
+    [plusMenuOpen, plusRowAnims],
+  );
+
+  const openPlusMenu = useCallback(() => {
+    if (uploadingImage || sending) return;
+    if (plusMenuOpen) {
+      closePlusMenuThen();
+    } else {
+      setPlusMenuOpen(true);
+    }
+  }, [uploadingImage, sending, plusMenuOpen, closePlusMenuThen]);
+
+  const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0) setComposerDockBlockHeight(h);
+  }, []);
+
+  const plusQuickActions: MeetingChatQuickActionDef[] = useMemo(
+    () => [
+      {
+        key: 'photo',
+        label: '사진',
+        icon: 'image-outline',
+        onPress: () => closePlusMenuThen(() => void onPickImage()),
+      },
+      {
+        key: 'place',
+        label: '장소',
+        icon: 'sparkles-outline',
+        onPress: () =>
+          closePlusMenuThen(() => {
+            Alert.alert('AI 장소추천', '곧 채팅에서 바로 추천을 띄워드릴게요.');
+          }),
+      },
+      {
+        key: 'poll',
+        label: '투표',
+        icon: 'bar-chart-outline',
+        onPress: () =>
+          closePlusMenuThen(() => {
+            Alert.alert('투표 생성', '곧 제공됩니다. (다음 단계: 채팅에서 투표 카드 생성)');
+          }),
+      },
+      {
+        key: 'settle',
+        label: '정산',
+        icon: 'card-outline',
+        onPress: () =>
+          closePlusMenuThen(() => {
+            setDraft((v) => (v.trim() ? v : '정산 요청합니다. 각자 확인 부탁드려요!'));
+          }),
+      },
+    ],
+    [onPickImage, closePlusMenuThen],
+  );
+
+  useEffect(() => {
+    if (!plusMenuOpen) {
+      plusRowAnims.forEach((v) => v.setValue(0));
+      return;
+    }
+    plusRowAnims.forEach((v) => {
+      v.stopAnimation();
+      v.setValue(0);
+    });
+    const duration = 900;
+    const timings = plusRowAnims.map((v) =>
+      Animated.timing(v, {
+        toValue: 1,
+        duration,
+        easing: Easing.bezier(0.22, 0.99, 0.26, 0.99),
+        useNativeDriver: true,
+      }),
+    );
+    Animated.stagger(56, [timings[3], timings[2], timings[1], timings[0]]).start();
+  }, [plusMenuOpen, plusRowAnims]);
+
+  useEffect(() => {
+    plusIconMorph.stopAnimation();
+    Animated.spring(plusIconMorph, {
+      toValue: plusMenuOpen ? 1 : 0,
+      friction: 9,
+      tension: 168,
+      useNativeDriver: true,
+    }).start();
+  }, [plusMenuOpen, plusIconMorph]);
+
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
 
   const announcementText = useMemo(() => {
@@ -344,6 +846,49 @@ export default function MeetingChatRoomScreen() {
     const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
     return parts.length ? `확정: ${parts.join(' · ')}` : '';
   }, [meeting]);
+
+  const participantIdsForReadCount = useMemo(() => {
+    if (!meeting) return [] as string[];
+    const ids = [...(meeting.participantIds ?? [])];
+    if (meeting.createdBy?.trim()) ids.push(meeting.createdBy);
+    return [...new Set(ids.map((x) => normalizeParticipantId(String(x)) ?? String(x).trim()).filter(Boolean))];
+  }, [meeting]);
+
+  const readAtMsByUser = useMemo(() => {
+    const map: Record<string, number> = {};
+    const raw = meeting?.chatReadAtBy ?? null;
+    if (!raw) return map;
+    for (const [k, v] of Object.entries(raw)) {
+      const uid = normalizeParticipantId(k) ?? k.trim();
+      if (!uid) continue;
+      const ms = v && typeof (v as any).toMillis === 'function' ? (v as any).toMillis() : 0;
+      if (ms > 0) map[uid] = ms;
+    }
+    return map;
+  }, [meeting?.chatReadAtBy]);
+
+  const unreadCountForMessageMs = useCallback(
+    (messageCreatedAtMs: number): number => {
+      if (allowed !== true) return 0;
+      if (!meeting) return 0;
+      if (!messageCreatedAtMs) return 0;
+      let unread = 0;
+      for (const pid of participantIdsForReadCount) {
+        if (myId && pid === myId) continue;
+        const ms = readAtMsByUser[pid] ?? 0;
+        if (!ms || ms < messageCreatedAtMs) unread += 1;
+      }
+      return unread;
+    },
+    [allowed, meeting, participantIdsForReadCount, readAtMsByUser, myId],
+  );
+
+  const openMeetingChatImageViewer = useCallback((item: MeetingChatMessage) => {
+    const url = item.imageUrl?.trim();
+    if (!url || item.kind !== 'image') return;
+    const { senderLabel, sentAtLabel } = meetingImageViewerMeta(item, profiles);
+    setImageViewer({ url, senderLabel, sentAtLabel });
+  }, [profiles]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: MeetingChatMessage; index: number }) => {
@@ -391,9 +936,18 @@ export default function MeetingChatRoomScreen() {
       const caption = item.text?.trim();
 
       if (isMine) {
+        const ms = item.createdAt && typeof item.createdAt.toMillis === 'function' ? item.createdAt.toMillis() : 0;
+        const unread = ms ? unreadCountForMessageMs(ms) : 0;
         const bubble = (
           <View style={styles.rowMine}>
-            <Text style={styles.timeMine}>{formatChatTime(item.createdAt)}</Text>
+            <View style={styles.timeMineCol}>
+              {unread > 0 ? (
+                <Text style={styles.unreadBubbleCount} accessibilityLabel={`안 읽은 사람 ${unread}명`}>
+                  {unread}
+                </Text>
+              ) : null}
+              <Text style={styles.timeMine}>{formatChatTime(item.createdAt)}</Text>
+            </View>
             <View style={[styles.bubbleMineWrap, isImage && styles.bubbleMineMedia]}>
               <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
                 {item.replyTo?.messageId ? (
@@ -406,7 +960,13 @@ export default function MeetingChatRoomScreen() {
                 ) : null}
                 {isImage ? (
                   item.imageUrl ? (
-                    <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                    <Pressable
+                      onPress={() => openMeetingChatImageViewer(item)}
+                      style={({ pressed }) => [pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="사진 크게 보기">
+                      <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                    </Pressable>
                   ) : (
                     <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
                   )
@@ -479,7 +1039,13 @@ export default function MeetingChatRoomScreen() {
                   ) : null}
                   {isImage ? (
                     item.imageUrl ? (
-                      <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                      <Pressable
+                        onPress={() => openMeetingChatImageViewer(item)}
+                        style={({ pressed }) => [pressed && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="사진 크게 보기">
+                        <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
+                      </Pressable>
                     ) : (
                       <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
                     )
@@ -514,7 +1080,7 @@ export default function MeetingChatRoomScreen() {
         </View>
       );
     },
-    [myId, messages, profiles, hostNorm],
+    [myId, messages, profiles, hostNorm, unreadCountForMessageMs, openMeetingChatImageViewer],
   );
 
   if (!meetingId) {
@@ -588,8 +1154,8 @@ export default function MeetingChatRoomScreen() {
             <Pressable
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="검색"
-              onPress={() => Alert.alert('안내', '채팅 검색은 곧 제공됩니다.')}>
+              accessibilityLabel="대화 검색"
+              onPress={openChatSearch}>
               <Ionicons name="search-outline" size={22} color="#475569" />
             </Pressable>
             <Pressable
@@ -618,36 +1184,70 @@ export default function MeetingChatRoomScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.listWrap}>
-          {chatError ? (
-            <View style={styles.chatErrorBanner}>
-              <Text style={styles.chatErrorText}>{chatError}</Text>
+        <View style={styles.chatMainColumn}>
+          <View style={styles.listWrap}>
+            {chatError ? (
+              <View style={styles.chatErrorBanner}>
+                <Text style={styles.chatErrorText}>{chatError}</Text>
+              </View>
+            ) : null}
+            <KeyboardAwareFlatList
+              ref={listRef}
+              data={messages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              contentContainerStyle={styles.listContent}
+              onContentSizeChange={scrollToBottom}
+              onScroll={onChatScroll}
+              scrollEventThrottle={16}
+              keyboardShouldPersistTaps="handled"
+              enableOnAndroid
+              extraScrollHeight={12}
+              onScrollToIndexFailed={(info) => {
+                const h = Math.max(100, info.averageItemLength || 140);
+                listRef.current?.scrollToOffset({ offset: Math.max(0, h * info.index), animated: true });
+              }}
+              ListEmptyComponent={
+                <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
+              }
+            />
+            {showJumpToBottomFab && !plusMenuOpen ? (
+              <Pressable
+                style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
+                onPress={scrollToBottom}
+                accessibilityRole="button"
+                accessibilityLabel="최신 메시지로">
+                <Ionicons name="chevron-down" size={22} color="#334155" />
+              </Pressable>
+            ) : null}
+          </View>
+          {plusMenuOpen ? (
+            <Pressable
+              style={[styles.plusListDismissLayer, { bottom: composerDockBlockHeight }]}
+              onPress={() => closePlusMenuThen()}
+              accessibilityRole="button"
+              accessibilityLabel="퀵 메뉴 닫기"
+            />
+          ) : null}
+          {plusMenuOpen ? (
+            <View
+              style={[styles.plusFanFloating, { bottom: composerDockBlockHeight }]}
+              pointerEvents="box-none">
+              <View style={styles.plusFanInner} pointerEvents="box-none">
+                {plusQuickActions.map((action, i) => (
+                  <MeetingChatQuickActionRow
+                    key={action.key}
+                    action={action}
+                    progress={plusRowAnims[i]}
+                    pillMaxW={plusPillMaxWidth}
+                  />
+                ))}
+              </View>
             </View>
           ) : null}
-          <KeyboardAwareFlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
-            onContentSizeChange={scrollToBottom}
-            keyboardShouldPersistTaps="handled"
-            enableOnAndroid
-            extraScrollHeight={12}
-            ListEmptyComponent={
-              <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
-            }
-          />
-          <Pressable
-            style={[styles.jumpFab, { bottom: 12 + composerBottomPad }]}
-            onPress={scrollToBottom}
-            accessibilityRole="button"
-            accessibilityLabel="최신 메시지로">
-            <Ionicons name="chevron-down" size={22} color="#334155" />
-          </Pressable>
-        </View>
-
-        <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]}>
+          <View
+            style={[styles.composerDock, { paddingBottom: composerBottomPad }]}
+            onLayout={onComposerDockLayout}>
           {replyTo?.messageId ? (
             <View style={styles.replyPreviewRow}>
               <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
@@ -665,142 +1265,132 @@ export default function MeetingChatRoomScreen() {
               </BlurView>
             </View>
           ) : null}
-          <View style={styles.composer}>
-            <Pressable
-              style={styles.plusBtn}
-              onPress={openPlusMenu}
-              disabled={uploadingImage}
-              accessibilityRole="button"
-              accessibilityLabel="퀵 액션 열기">
-              {uploadingImage ? (
-                <ActivityIndicator size="small" color="#475569" />
-              ) : (
-                <Ionicons name="add" size={28} color="#475569" />
-              )}
-            </Pressable>
-            <View style={styles.inputShell}>
-              <TextInput
-                ref={messageInputRef}
-                style={styles.input}
-                placeholder="메시지 보내기"
-                placeholderTextColor="#94a3b8"
-                value={draft}
-                onChangeText={setDraft}
-                multiline
-                maxLength={4000}
-                editable={!sending && !uploadingImage}
-                {...(Platform.OS === 'android'
-                  ? ({
-                      privateImeOptions: androidEmojiIme ? 'defaultInputmode=emoji' : undefined,
-                    } as Record<string, unknown>)
-                  : {})}
-              />
+          <View style={styles.composerCluster}>
+            <View style={styles.composer}>
               <Pressable
-                style={styles.emojiBtn}
-                onPress={onEmojiToolbarPress}
+                style={styles.plusBtn}
+                onPress={openPlusMenu}
+                disabled={uploadingImage}
                 accessibilityRole="button"
-                accessibilityLabel={
-                  Platform.OS === 'android' && androidEmojiIme
-                    ? '글자 키보드로 전환'
-                    : '이모지 키보드'
-                }
-                accessibilityHint={
-                  Platform.OS === 'android'
-                    ? androidEmojiIme
-                      ? '한글·영문 입력으로 돌아갑니다.'
-                      : '삼성 키보드 이모지 입력으로 전환합니다.'
-                    : undefined
-                }>
-                <Ionicons
-                  name={Platform.OS === 'android' && androidEmojiIme ? 'keypad-outline' : 'happy-outline'}
-                  size={22}
-                  color={Platform.OS === 'android' && androidEmojiIme ? GinitTheme.colors.primary : '#64748b'}
+                accessibilityLabel={plusMenuOpen ? '퀵 액션 닫기' : '퀵 액션 열기'}
+                accessibilityState={{ expanded: plusMenuOpen }}>
+                {uploadingImage ? (
+                  <ActivityIndicator size="small" color="#475569" />
+                ) : (
+                  <View style={styles.plusBtnIconSlot} pointerEvents="none">
+                    <Animated.View
+                      style={[
+                        styles.plusBtnIconLayer,
+                        {
+                          opacity: plusIconMorph.interpolate({
+                            inputRange: [0, 0.42],
+                            outputRange: [1, 0],
+                            extrapolate: 'clamp',
+                          }),
+                          transform: [
+                            {
+                              scale: plusIconMorph.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [1, 0.45],
+                              }),
+                            },
+                            {
+                              rotate: plusIconMorph.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: ['0deg', '45deg'],
+                              }),
+                            },
+                          ],
+                        },
+                      ]}>
+                      <Ionicons name="add-sharp" size={26} color="#475569" />
+                    </Animated.View>
+                    <Animated.View
+                      style={[
+                        styles.plusBtnIconLayer,
+                        {
+                          opacity: plusIconMorph.interpolate({
+                            inputRange: [0.38, 1],
+                            outputRange: [0, 1],
+                            extrapolate: 'clamp',
+                          }),
+                          transform: [
+                            {
+                              scale: plusIconMorph.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0.45, 1],
+                              }),
+                            },
+                            {
+                              rotate: plusIconMorph.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: ['-45deg', '0deg'],
+                              }),
+                            },
+                          ],
+                        },
+                      ]}>
+                      <Ionicons name="close-sharp" size={26} color="#475569" />
+                    </Animated.View>
+                  </View>
+                )}
+              </Pressable>
+              <View style={styles.inputShell}>
+                <TextInput
+                  ref={messageInputRef}
+                  style={styles.input}
+                  placeholder="메시지 보내기"
+                  placeholderTextColor="#94a3b8"
+                  value={draft}
+                  onChangeText={setDraft}
+                  multiline
+                  maxLength={4000}
+                  editable={!sending && !uploadingImage}
+                  {...(Platform.OS === 'android'
+                    ? ({
+                        privateImeOptions: androidEmojiIme ? 'defaultInputmode=emoji' : undefined,
+                      } as Record<string, unknown>)
+                    : {})}
                 />
+                <Pressable
+                  style={styles.emojiBtn}
+                  onPress={onEmojiToolbarPress}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    Platform.OS === 'android' && androidEmojiIme
+                      ? '글자 키보드로 전환'
+                      : '이모지 키보드'
+                  }
+                  accessibilityHint={
+                    Platform.OS === 'android'
+                      ? androidEmojiIme
+                        ? '한글·영문 입력으로 돌아갑니다.'
+                        : '삼성 키보드 이모지 입력으로 전환합니다.'
+                      : undefined
+                  }>
+                  <Ionicons
+                    name={Platform.OS === 'android' && androidEmojiIme ? 'keypad-outline' : 'happy-outline'}
+                    size={22}
+                    color={Platform.OS === 'android' && androidEmojiIme ? GinitTheme.colors.primary : '#64748b'}
+                  />
+                </Pressable>
+              </View>
+              <Pressable
+                onPress={() => void onSend()}
+                style={[styles.sendBtn, (sending || uploadingImage) && styles.sendBtnDisabled]}
+                disabled={sending || uploadingImage || !draft.trim()}
+                accessibilityRole="button"
+                accessibilityLabel="보내기">
+                {sending || uploadingImage ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="send" size={20} color="#fff" />
+                )}
               </Pressable>
             </View>
-            <Pressable
-              onPress={() => void onSend()}
-              style={[styles.sendBtn, (sending || uploadingImage) && styles.sendBtnDisabled]}
-              disabled={sending || uploadingImage || !draft.trim()}
-              accessibilityRole="button"
-              accessibilityLabel="보내기">
-              {sending || uploadingImage ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="send" size={20} color="#fff" />
-              )}
-            </Pressable>
           </View>
         </View>
-
-        {/* + 퀵 액션 */}
-        {plusMenuOpen ? (
-          <Pressable style={styles.overlayDim} onPress={() => setPlusMenuOpen(false)} accessibilityRole="button">
-            <Animated.View
-              style={[
-                styles.plusSheet,
-                {
-                  opacity: plusAnim,
-                  transform: [
-                    {
-                      translateY: plusAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [14, 0],
-                      }),
-                    },
-                  ],
-                },
-              ]}>
-              <BlurView tint="light" intensity={60} style={styles.plusSheetInner}>
-                <Text style={styles.plusTitle}>퀵 액션</Text>
-                <View style={styles.plusRow}>
-                  <Pressable
-                    onPress={() => {
-                      setPlusMenuOpen(false);
-                      void onPickImage();
-                    }}
-                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
-                    accessibilityRole="button">
-                    <Ionicons name="image-outline" size={18} color="#0052CC" />
-                    <Text style={styles.plusActionText}>사진</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      setPlusMenuOpen(false);
-                      Alert.alert('AI 장소추천', '곧 채팅에서 바로 추천을 띄워드릴게요.');
-                    }}
-                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
-                    accessibilityRole="button">
-                    <Ionicons name="sparkles-outline" size={18} color="#FF8A00" />
-                    <Text style={styles.plusActionText}>AI 장소추천</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.plusRow}>
-                  <Pressable
-                    onPress={() => {
-                      setPlusMenuOpen(false);
-                      Alert.alert('투표 만들기', '곧 제공됩니다. (다음 단계: 채팅에서 투표 카드 생성)');
-                    }}
-                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
-                    accessibilityRole="button">
-                    <Ionicons name="bar-chart-outline" size={18} color="#0052CC" />
-                    <Text style={styles.plusActionText}>투표 만들기</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      setPlusMenuOpen(false);
-                      setDraft((v) => (v.trim() ? v : '정산 요청합니다. 각자 확인 부탁드려요!'));
-                    }}
-                    style={({ pressed }) => [styles.plusAction, pressed && styles.pressed]}
-                    accessibilityRole="button">
-                    <Ionicons name="card-outline" size={18} color="#FF8A00" />
-                    <Text style={styles.plusActionText}>정산 요청</Text>
-                  </Pressable>
-                </View>
-              </BlurView>
-            </Animated.View>
-          </Pressable>
-        ) : null}
+        </View>
 
         {/* 우측 드로어: 멤버 리스트 */}
         {drawerOpen ? (
@@ -868,6 +1458,146 @@ export default function MeetingChatRoomScreen() {
             </Animated.View>
           </Pressable>
         ) : null}
+
+        {/* 대화 검색 */}
+        <Modal
+          visible={chatSearchOpen}
+          animationType="slide"
+          presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : undefined}
+          onRequestClose={closeChatSearch}>
+          <SafeAreaView style={styles.chatSearchSafe} edges={['top', 'bottom']}>
+            <View style={styles.chatSearchHeader}>
+              <Pressable
+                onPress={closeChatSearch}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="닫기">
+                <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+              </Pressable>
+              <Text style={styles.chatSearchTitle}>대화 검색</Text>
+              <View style={styles.chatSearchHeaderSpacer} />
+            </View>
+            <View style={styles.chatSearchFieldWrap}>
+              <Ionicons name="search-outline" size={20} color="#94a3b8" style={styles.chatSearchFieldIcon} />
+              <TextInput
+                ref={chatSearchInputRef}
+                style={styles.chatSearchInput}
+                placeholder="대화 내용을 입력하세요"
+                placeholderTextColor="#94a3b8"
+                value={chatSearchQuery}
+                onChangeText={setChatSearchQuery}
+                autoCorrect={false}
+                autoCapitalize="none"
+                clearButtonMode="while-editing"
+                returnKeyType="search"
+              />
+            </View>
+            {chatSearchBusy ? (
+              <View style={styles.chatSearchBusyRow}>
+                <ActivityIndicator color={GinitTheme.colors.primary} />
+                <Text style={styles.chatSearchBusyText}>검색 중…</Text>
+              </View>
+            ) : null}
+            <FlatList
+              data={chatSearchResults}
+              keyExtractor={(it) => it.id}
+              renderItem={renderChatSearchRow}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.chatSearchListContent}
+              ListEmptyComponent={
+                !chatSearchBusy ? (
+                  <Text style={styles.chatSearchEmpty}>
+                    {chatSearchQuery.trim()
+                      ? '검색 결과가 없어요.\n다른 단어로 검색해 보세요.'
+                      : '검색할 단어를 입력하면\n과거 대화에서 찾아 드려요.'}
+                  </Text>
+                ) : null
+              }
+            />
+          </SafeAreaView>
+        </Modal>
+
+        {/* 사진 크게 보기 */}
+        <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
+          <View style={styles.viewerRoot}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => !imageViewerBusy && setImageViewer(null)}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+            />
+            <View style={styles.viewerSheet} pointerEvents="box-none">
+              <View style={[styles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
+                <Pressable
+                  onPress={() => setImageViewer(null)}
+                  hitSlop={10}
+                  disabled={imageViewerBusy}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기">
+                  <Ionicons name="close" size={26} color="#fff" />
+                </Pressable>
+                <View style={styles.viewerMetaCol} pointerEvents="none">
+                  <Text style={styles.viewerMetaName} numberOfLines={1}>
+                    {imageViewer?.senderLabel ?? ''}
+                  </Text>
+                  {imageViewer?.sentAtLabel ? (
+                    <Text style={styles.viewerMetaTime} numberOfLines={1}>
+                      {imageViewer.sentAtLabel}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={styles.viewerActions}>
+                  <Pressable
+                    onPress={() => {
+                      const u = imageViewer?.url.trim() ?? '';
+                      if (!u) return;
+                      void (async () => {
+                        setImageViewerBusy(true);
+                        try {
+                          await shareRemoteImageUrl(u);
+                        } catch (e) {
+                          Alert.alert('공유 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                        } finally {
+                          setImageViewerBusy(false);
+                        }
+                      })();
+                    }}
+                    hitSlop={10}
+                    disabled={imageViewerBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel="공유">
+                    <Ionicons name="share-outline" size={24} color="#fff" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      const u = imageViewer?.url.trim() ?? '';
+                      if (!u) return;
+                      void (async () => {
+                        setImageViewerBusy(true);
+                        try {
+                          await saveRemoteImageUrlToLibrary(u);
+                          Alert.alert('저장됨', '사진이 저장되었어요.');
+                        } catch (e) {
+                          Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                        } finally {
+                          setImageViewerBusy(false);
+                        }
+                      })();
+                    }}
+                    hitSlop={10}
+                    disabled={imageViewerBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel="저장">
+                    <Ionicons name="download-outline" size={24} color="#fff" />
+                  </Pressable>
+                </View>
+              </View>
+              {imageViewer?.url ? (
+                <Image source={{ uri: imageViewer.url }} style={styles.viewerImage} contentFit="contain" />
+              ) : null}
+            </View>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -876,6 +1606,12 @@ export default function MeetingChatRoomScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#ECEFF1' },
   flexColumn: { flex: 1, flexDirection: 'column' },
+  /** 리스트 + 퀵 메뉴(입력창 위) + composerDock — 퀵 메뉴 bottom을 입력 블록 높이에 맞춤 */
+  chatMainColumn: {
+    flex: 1,
+    minHeight: 0,
+    position: 'relative',
+  },
   composerDock: {
     width: '100%',
     flexShrink: 0,
@@ -956,11 +1692,37 @@ const styles = StyleSheet.create({
     minWidth: 22,
     textAlign: 'right',
   },
+  timeMineCol: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  unreadBubbleCount: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#000000',
+    marginBottom: 2,
+  },
   // meetingInfoOuter: 상단 모임 스냅샷(요약 카드) 섹션 제거됨
   listWrap: {
     flex: 1,
     position: 'relative',
     backgroundColor: '#ECEFF1',
+  },
+  /** 퀵 메뉴 열릴 때 바깥 탭 — bottom은 입력 블록 높이로 JS에서 지정 */
+  plusListDismissLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 4,
+    backgroundColor: 'transparent',
+  },
+  /** 입력창 블록 바로 위에 붙는 퀵 메뉴 — bottom은 composerDock 높이로 지정 */
+  plusFanFloating: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 7,
   },
   dateChipRow: {
     alignItems: 'center',
@@ -1014,6 +1776,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 4,
     elevation: 3,
+    zIndex: 8,
   },
   systemRow: {
     alignItems: 'center',
@@ -1223,35 +1986,36 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(15, 23, 42, 0.25)',
   },
-  plusSheet: {
+  /** + 퀵 메뉴 + 입력창 묶음 (퀵 메뉴는 배경 없이 아이콘·라벨만) */
+  composerCluster: {
+    width: '100%',
+  },
+  plusFanInner: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  /** 퀵 라벨 실제 너비 측정(화면 밖, 터치 불가) */
+  plusQuickMeasureHost: {
     position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 92,
-    borderRadius: 16,
-    overflow: 'hidden',
+    left: -8000,
+    top: 0,
+    opacity: 0,
   },
-  plusSheetInner: {
-    padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.62)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+  /** 보내기 버튼과 동일 primary 배경 위 흰 라벨 (아이콘 간격은 `plusQuickIconLabelRow` gap) */
+  plusFanLabelMorph: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+    flexShrink: 1,
   },
-  plusTitle: { fontSize: 13, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
-  plusRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  plusAction: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+  /** 버튼 안에서 아이콘·라벨을 한 덩어리로 가운데 정렬 */
+  plusQuickIconLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
   },
-  plusActionText: { fontSize: 13, fontWeight: '900', color: '#0f172a' },
   drawer: {
     position: 'absolute',
     top: 0,
@@ -1304,6 +2068,157 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.85,
   },
+  viewerRoot: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'stretch',
+  },
+  viewerSheet: {
+    flex: 1,
+    paddingBottom: 12,
+  },
+  viewerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  viewerMetaCol: {
+    flex: 1,
+    marginLeft: 6,
+    marginRight: 8,
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  viewerMetaName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  viewerMetaTime: {
+    marginTop: 2,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  viewerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  viewerImage: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: 'transparent',
+  },
+  chatSearchSafe: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  chatSearchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  chatSearchTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  chatSearchHeaderSpacer: {
+    width: 34,
+  },
+  chatSearchFieldWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 14,
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  chatSearchFieldIcon: {
+    marginRight: 8,
+  },
+  chatSearchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#0f172a',
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+  },
+  chatSearchBusyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  chatSearchBusyText: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  chatSearchListContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  chatSearchEmpty: {
+    marginTop: 48,
+    textAlign: 'center',
+    fontSize: 15,
+    color: '#94a3b8',
+    lineHeight: 22,
+    fontWeight: '600',
+  },
+  chatSearchRow: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  chatSearchRowPressed: {
+    backgroundColor: 'rgba(15, 23, 42, 0.04)',
+  },
+  chatSearchRowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6,
+  },
+  chatSearchNick: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  chatSearchWhen: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94a3b8',
+  },
+  chatSearchSnippet: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#475569',
+    fontWeight: '500',
+  },
+  chatSearchSnippetHit: {
+    fontWeight: '900',
+    color: '#0f172a',
+    backgroundColor: 'rgba(255, 235, 59, 0.35)',
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -1312,9 +2227,24 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
+  /** 보내기 버튼과 동일 44 고정 — +/× 전환 시 입력창 폭이 흔들리지 않게 */
   plusBtn: {
-    paddingBottom: 10,
-    paddingHorizontal: 2,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  plusBtnIconSlot: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusBtnIconLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   inputShell: {
     flex: 1,

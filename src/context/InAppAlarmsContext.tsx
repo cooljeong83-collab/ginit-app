@@ -69,6 +69,8 @@ type InAppAlarmsContextValue = {
   openAlarmPanel: () => void;
   closeAlarmPanel: () => void;
   alarmPanelVisible: boolean;
+  /** 모임별 마지막으로 읽음 처리한 채팅 메시지 id(로컬) — 채팅 탭 미읽음 배지 집계에 사용 */
+  meetingChatReadMessageIdMap: Record<string, string>;
   /** 채팅방에서 나갈 때 등 — 마지막으로 본 메시지까지 읽음 처리 */
   markChatReadUpTo: (meetingId: string, messageId: string | undefined) => void;
   /** 모임 상세를 봤을 때 현재 스냅샷을 확인 처리 */
@@ -628,6 +630,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       openAlarmPanel,
       closeAlarmPanel,
       alarmPanelVisible: panelOpen,
+      meetingChatReadMessageIdMap: readState.chatReadMessageId,
       markChatReadUpTo,
       syncMeetingAckFromMeeting,
       markMeetingAlarmsReadByPushTap,
@@ -638,6 +641,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       openAlarmPanel,
       closeAlarmPanel,
       panelOpen,
+      readState.chatReadMessageId,
       markChatReadUpTo,
       syncMeetingAckFromMeeting,
       markMeetingAlarmsReadByPushTap,

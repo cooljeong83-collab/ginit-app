@@ -140,6 +140,12 @@ export type Meeting = {
   confirmedMovieChipId?: string | null;
   /** 공개 모임 상세 조건(필터/추천/승인 정책) */
   meetingConfig?: PublicMeetingDetailsConfig | Record<string, unknown> | null;
+  /**
+   * 채팅 읽음 상태(참여자별). 서버 스냅샷 기반으로 채팅 화면에서 "안 읽은 사람 수" 표시 등에 사용합니다.
+   * - 키는 app user id(정규화 PK)
+   */
+  chatReadAtBy?: Record<string, Timestamp | null> | null;
+  chatReadMessageIdBy?: Record<string, string> | null;
 };
 
 /**
@@ -665,6 +671,12 @@ export function computeMeetingConfirmAnalysis(
 }
 
 export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
+  const readAtRaw = (data.chatReadAtBy ?? null) as unknown;
+  const chatReadAtBy =
+    readAtRaw && typeof readAtRaw === 'object' && !Array.isArray(readAtRaw) ? (readAtRaw as Record<string, Timestamp | null>) : null;
+  const readIdRaw = (data.chatReadMessageIdBy ?? null) as unknown;
+  const chatReadMessageIdBy =
+    readIdRaw && typeof readIdRaw === 'object' && !Array.isArray(readIdRaw) ? (readIdRaw as Record<string, string>) : null;
   return {
     id,
     title: typeof data.title === 'string' ? data.title : '',
@@ -712,6 +724,8 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
       typeof data.confirmedMovieChipId === 'string' && data.confirmedMovieChipId.trim()
         ? data.confirmedMovieChipId.trim()
         : null,
+    chatReadAtBy,
+    chatReadMessageIdBy,
   };
 }
 

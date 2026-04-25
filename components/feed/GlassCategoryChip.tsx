@@ -86,9 +86,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    /** 홈 피드 `categoryDropdown`(paddingVertical 10 + 13pt 라벨)과 동일한 터치·시각 높이 */
+    paddingVertical: 10,
     justifyContent: 'center',
-    minHeight: 32,
+    minHeight: 38,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255, 255, 255, 0.55)',
     shadowColor: '#0f172a',

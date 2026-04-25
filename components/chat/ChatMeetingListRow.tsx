@@ -1,9 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import type { Timestamp } from 'firebase/firestore';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { ChatListCardShell } from '@/components/chat/ChatListCardShell';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { getHomeCategoryVisual } from '@/src/lib/feed-home-visual';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
@@ -72,8 +75,8 @@ type Props = {
   hostWithdrawn?: boolean;
   /** `undefined`이면 아직 로딩 중, `null`이면 메시지 없음 */
   latestMessage: MeetingChatMessage | null | undefined;
-  /** 조율/확정 등 진행중 상태 강조 */
-  ongoing?: boolean;
+  /** 읽지 않은 새 메시지 수(목록 우측 시간 아래) */
+  unreadCount?: number;
   onPress: () => void;
 };
 
@@ -83,18 +86,17 @@ export function ChatMeetingListRow({
   hostNickname,
   hostWithdrawn,
   latestMessage,
-  ongoing,
+  unreadCount = 0,
   onPress,
 }: Props) {
+  const visual = useMemo(() => getHomeCategoryVisual(meeting), [meeting]);
   const title = meeting.title?.trim() || '모임';
   const place = placeLine(meeting);
   const pCount = meetingParticipantCount(meeting);
 
   const hasMessage = latestMessage != null;
   const loadingPreview = latestMessage === undefined;
-  /** 대화가 없으면 당근 예시처럼 장소·시간 줄은 숨기고 모임명·소개만 둡니다. */
   const showMetaRow = loadingPreview || hasMessage;
-  /** 장소 오른쪽(메타 줄) 시간은 마지막 채팅 시각만 사용 */
   const chatRel =
     hasMessage && latestMessage.createdAt ? formatRelativeFrom(latestMessage.createdAt) : '';
   const metaBits = [place, chatRel].filter(Boolean);
@@ -104,200 +106,194 @@ export function ChatMeetingListRow({
     ? previewFromMessage(latestMessage)
     : (meeting.description?.trim() || '모임 소개가 아직 없어요.');
 
-  /** 우측 상단 시각도 마지막 채팅 기준(대화 있을 때만) */
   const rightTime = hasMessage ? formatRightTime(latestMessage.createdAt) : '';
 
   const initial = (hostNickname?.trim() || '모').slice(0, 1);
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, ongoing ? styles.rowOngoing : null, pressed && styles.rowPressed]}
-      accessibilityRole="button"
-      accessibilityLabel={`${title} 채팅`}>
-      <View style={styles.avatarWrap}>
-        {hostWithdrawn ? (
-          <View style={styles.avatarWithdrawn}>
-            <Ionicons name="person" size={20} color="#94a3b8" />
-          </View>
-        ) : hostPhotoUrl ? (
-          <Image
-            source={{ uri: hostPhotoUrl }}
-            style={styles.avatar}
-            contentFit="cover"
-            cachePolicy="disk"
-            recyclingKey={hostPhotoUrl}
-          />
-        ) : (
-          <View style={styles.avatarFallback}>
-            <Text style={styles.avatarFallbackText}>{initial}</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.body}>
-        <View style={styles.topRow}>
-          <View style={styles.titleBlock}>
-            <View style={styles.titleWithIcon}>
-              <Ionicons name="people" size={15} color="#94a3b8" style={styles.meetingIcon} />
-              <Text style={styles.title} numberOfLines={1}>
+    <ChatListCardShell accentGradient={visual.gradient} onPress={onPress} accessibilityLabel={`${title} 채팅`}>
+      <View style={styles.zoneA}>
+        <View style={styles.symbolCol}>
+          {hostWithdrawn ? (
+            <View style={styles.hostBubble}>
+              <View style={styles.hostWithdrawnInner}>
+                <Ionicons name="person" size={16} color="#94a3b8" />
+              </View>
+            </View>
+          ) : hostPhotoUrl ? (
+            <View style={styles.hostBubble}>
+              <Image
+                source={{ uri: hostPhotoUrl }}
+                style={styles.hostBubbleImg}
+                contentFit="cover"
+                cachePolicy="disk"
+                recyclingKey={hostPhotoUrl}
+              />
+            </View>
+          ) : (
+            <View style={styles.hostBubble}>
+              <View style={styles.hostFallback}>
+                <Text style={styles.hostFallbackText}>{initial}</Text>
+              </View>
+            </View>
+          )}
+          <Text style={styles.capacityCountLabel} numberOfLines={1} accessibilityLabel={`참여자 ${pCount}명`}>
+            {pCount}명
+          </Text>
+        </View>
+        <View style={styles.zoneAMain}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleBlock}>
+              <Text style={styles.heroTitle} numberOfLines={1}>
                 {title}
               </Text>
-              {ongoing ? (
-                <View style={styles.ongoingPill} accessibilityLabel="진행 중">
-                  <Text style={styles.ongoingPillText}>진행 중</Text>
-                </View>
+              {showMetaRow && metaText ? (
+                <Text style={styles.metaMuted} numberOfLines={1}>
+                  {metaText}
+                </Text>
               ) : null}
-              <Text style={styles.participantCount} accessibilityLabel={`참여자 ${pCount}명`}>
-                {pCount}
-              </Text>
             </View>
-            {showMetaRow && metaText ? (
-              <Text style={styles.meta} numberOfLines={1}>
-                {metaText}
-              </Text>
+            {rightTime || unreadCount > 0 ? (
+              <View style={styles.timeColumn}>
+                {rightTime ? (
+                  <Text style={styles.timeRight} numberOfLines={1}>
+                    {rightTime}
+                  </Text>
+                ) : null}
+                {unreadCount > 0 ? (
+                  <Text
+                    style={[styles.unreadListCount, !rightTime && styles.unreadListCountSolo]}
+                    accessibilityLabel={`읽지 않은 메시지 ${unreadCount > 99 ? '99개 이상' : `${unreadCount}개`}`}>
+                    {unreadCount > 99 ? '99+' : String(unreadCount)}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
           </View>
-          {rightTime ? (
-            <Text style={styles.timeRight} numberOfLines={1}>
-              {rightTime}
-            </Text>
-          ) : null}
+          <Text style={styles.previewLine} numberOfLines={2}>
+            {loadingPreview ? '불러오는 중…' : subtitle}
+          </Text>
         </View>
-        <Text style={styles.subtitle} numberOfLines={2}>
-          {loadingPreview ? '불러오는 중…' : subtitle}
-        </Text>
       </View>
-    </Pressable>
+    </ChatListCardShell>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
+  zoneA: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(255, 255, 255, 0.86)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    gap: 12,
-    marginBottom: 12,
+    gap: 10,
   },
-  rowPressed: {
-    opacity: 0.9,
-  },
-  rowOngoing: {
-    borderColor: 'rgba(255, 138, 0, 0.32)',
-    shadowColor: 'rgba(255, 138, 0, 0.22)',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 1,
-    shadowRadius: 18,
-    elevation: 6,
-  },
-  avatarWrap: {
+  symbolCol: {
     flexShrink: 0,
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 1,
   },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: '#e2e8f0',
+  hostBubble: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatarWithdrawn: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
+  hostBubbleImg: {
+    width: '100%',
+    height: '100%',
+  },
+  hostWithdrawnInner: {
+    width: '100%',
+    height: '100%',
     backgroundColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
+  hostFallback: {
+    width: '100%',
+    height: '100%',
     backgroundColor: 'rgba(0, 82, 204, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarFallbackText: {
-    fontSize: 20,
-    fontWeight: '800',
+  hostFallbackText: {
+    fontSize: 13,
+    fontWeight: '900',
     color: GinitTheme.trustBlue,
   },
-  body: {
-    flex: 1,
-    minWidth: 0,
-    gap: 4,
+  capacityCountLabel: {
+    marginTop: 0,
+    fontSize: 9,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.35,
+    textAlign: 'center',
+    maxWidth: 40,
   },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  titleBlock: {
+  zoneAMain: {
     flex: 1,
     minWidth: 0,
     gap: 2,
   },
-  titleWithIcon: {
+  titleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
     minWidth: 0,
   },
-  ongoingPill: {
-    marginLeft: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 138, 0, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 138, 0, 0.28)',
-  },
-  ongoingPillText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#FF8A00',
-    letterSpacing: -0.2,
-  },
-  meetingIcon: {
-    marginRight: 4,
-    marginTop: 1,
-  },
-  title: {
+  titleBlock: {
     flex: 1,
     minWidth: 0,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
+    gap: 1,
+  },
+  heroTitle: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: '900',
     letterSpacing: -0.2,
+    lineHeight: 18,
+    color: GinitTheme.colors.text,
   },
-  participantCount: {
-    flexShrink: 0,
-    marginLeft: 6,
-    fontSize: 14,
+  metaMuted: {
+    fontSize: 11,
     fontWeight: '600',
-    color: '#9ca3af',
-    minWidth: 18,
-    textAlign: 'right',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.12,
   },
-  meta: {
-    fontSize: 12,
-    color: '#94a3b8',
-    fontWeight: '500',
+  timeColumn: {
+    flexShrink: 0,
+    maxWidth: '38%',
+    alignItems: 'flex-end',
+    gap: 2,
   },
   timeRight: {
-    flexShrink: 0,
-    fontSize: 12,
-    color: '#9ca3af',
-    fontWeight: '500',
-    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.12,
+    marginTop: 1,
+    textAlign: 'right',
   },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 19,
-    color: '#6b7280',
-    fontWeight: '400',
+  unreadListCount: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#FA3E3E',
+    letterSpacing: -0.2,
+    textAlign: 'right',
+  },
+  unreadListCountSolo: {
+    marginTop: 1,
+  },
+  previewLine: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 17,
+    color: GinitTheme.colors.textSub,
+    letterSpacing: -0.1,
   },
 });
