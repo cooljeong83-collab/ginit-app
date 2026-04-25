@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
+import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
@@ -25,22 +26,24 @@ if (Platform.OS !== 'web' && !didScheduleSplashPrevent) {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <UserSessionProvider>
-        <InAppAlarmsProvider>
-          <PushNotificationBootstrap />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: '#F6FAFF' },
-              freezeOnBlur: true,
-              animation: 'slide_from_right',
-              gestureEnabled: true,
-              fullScreenGestureEnabled: true,
-              ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
-            }}
-          />
-        </InAppAlarmsProvider>
-      </UserSessionProvider>
+      <AppPoliciesProvider>
+        <UserSessionProvider>
+          <InAppAlarmsProvider>
+            <PushNotificationBootstrap />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: '#F6FAFF' },
+                freezeOnBlur: true,
+                animation: 'slide_from_right',
+                gestureEnabled: true,
+                fullScreenGestureEnabled: true,
+                ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
+              }}
+            />
+          </InAppAlarmsProvider>
+        </UserSessionProvider>
+      </AppPoliciesProvider>
     </GestureHandlerRootView>
   );
 }

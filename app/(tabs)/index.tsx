@@ -45,6 +45,7 @@ import {
 } from '@/src/lib/feed-meeting-utils';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
+import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import {
@@ -69,6 +70,7 @@ const MOCK_REGION_ROWS = [
 export default function FeedScreen() {
   const router = useRouter();
   const { userId } = useUserSession();
+  const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth } = useWindowDimensions();
   /** 탐색·내 모임 칩 — 예전 카테고리 칩과 동일 컴포넌트·유사 maxWidth */
   /** 탐색·내 모임 칩 라벨 폭 — 카테고리 칩과 동일 상한 규칙 */
@@ -122,7 +124,10 @@ export default function FeedScreen() {
     };
   }, [userId]);
 
-  const overlapBufferHours = useMemo(() => getScheduleOverlapBufferHours(feedUserProfile), [feedUserProfile]);
+  const overlapBufferHours = useMemo(
+    () => getScheduleOverlapBufferHours(feedUserProfile),
+    [feedUserProfile, appPoliciesVersion],
+  );
 
   const myConfirmedScheduleSlots = useMemo(
     () => collectUserConfirmedScheduleSlots(meetings, userId),

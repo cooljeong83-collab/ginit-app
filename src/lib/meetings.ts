@@ -54,9 +54,11 @@ import {
 } from './date-candidate';
 import {
   assertNoConfirmedScheduleOverlapHybrid,
+  assertProposedStartsOverlapHybrid,
   getScheduleOverlapBufferHours,
 } from './meeting-schedule-overlap';
 import type { DateCandidate } from './meeting-place-bridge';
+import { getPolicyNumeric } from './app-policies-store';
 import { normalizeParticipantId } from './app-user-id';
 import {
   effectiveGLevel,
@@ -260,6 +262,12 @@ export function getJoinGamificationBlockReason(
     return '신뢰도 정책에 따라 일시적으로 모임 참여가 제한된 계정이에요. 고객센터 또는 안내를 확인해 주세요.';
   }
 
+  const trust = effectiveGTrust(profile);
+  const globalMinTrust = Math.trunc(getPolicyNumeric('trust', 'min_join_score', 70));
+  if (trust < globalMinTrust) {
+    return `서비스 운영 정책상 gTrust ${globalMinTrust}점 이상만 모임에 참여할 수 있어요.`;
+  }
+
   if (meetingData.isPublic !== true) return null;
 
   const cfg = parsePublicMeetingDetailsConfig(meetingData.meetingConfig);
@@ -270,11 +278,11 @@ export function getJoinGamificationBlockReason(
     return `이 모임은 최소 Lv ${cfg.minGLevel} 이상만 참여할 수 있어요.`;
   }
 
-  const trust = effectiveGTrust(profile);
   const minT = cfg.minGTrust;
   if (typeof minT === 'number' && Number.isFinite(minT)) {
     const hostMin = Math.trunc(minT);
-    const needFinal = isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
+    const baseNeed = isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
+    const needFinal = Math.max(globalMinTrust, baseNeed);
     if (trust < needFinal) {
       return isHighTrustPublicMeeting(cfg)
         ? `이 모임은 신뢰도 높은 모임으로, gTrust ${needFinal}점 이상만 참여할 수 있어요.`
@@ -846,14 +854,28 @@ export async function joinMeeting(
     const joinBlock = getJoinGamificationBlockReason(profile, data);
     if (joinBlock) throw new Error(joinBlock);
     const mPre = mapFirestoreMeetingDoc(mid, data);
+    const overlapBuf = getScheduleOverlapBufferHours(profile);
     if (mPre.scheduleConfirmed === true) {
       const startMs = meetingPrimaryStartMs(mPre);
       if (startMs != null) {
-        const buf = getScheduleOverlapBufferHours(profile);
-        await assertNoConfirmedScheduleOverlapHybrid({
+        await assertProposedStartsOverlapHybrid({
           appUserId: uid,
-          startMs,
-          bufferHours: buf,
+          startMsList: [startMs],
+          bufferHours: overlapBuf,
+          excludeMeetingId: mid,
+        });
+      }
+    } else {
+      const chipStarts: number[] = [];
+      for (const chipId of votes.dateChipIds) {
+        const ms = meetingStartMsForResolvedDateChip(mPre, chipId);
+        if (ms != null) chipStarts.push(ms);
+      }
+      if (chipStarts.length > 0) {
+        await assertProposedStartsOverlapHybrid({
+          appUserId: uid,
+          startMsList: chipStarts,
+          bufferHours: overlapBuf,
           excludeMeetingId: mid,
         });
       }
@@ -893,14 +915,28 @@ export async function joinMeeting(
   const joinBlock = getJoinGamificationBlockReason(profile, preSnap.data() as Record<string, unknown>);
   if (joinBlock) throw new Error(joinBlock);
   const mPreFs = mapFirestoreMeetingDoc(mid, preSnap.data() as Record<string, unknown>);
+  const overlapBufFs = getScheduleOverlapBufferHours(profile);
   if (mPreFs.scheduleConfirmed === true) {
     const startMs = meetingPrimaryStartMs(mPreFs);
     if (startMs != null) {
-      const buf = getScheduleOverlapBufferHours(profile);
-      await assertNoConfirmedScheduleOverlapHybrid({
+      await assertProposedStartsOverlapHybrid({
         appUserId: uid,
-        startMs,
-        bufferHours: buf,
+        startMsList: [startMs],
+        bufferHours: overlapBufFs,
+        excludeMeetingId: mid,
+      });
+    }
+  } else {
+    const chipStartsFs: number[] = [];
+    for (const chipId of votes.dateChipIds) {
+      const ms = meetingStartMsForResolvedDateChip(mPreFs, chipId);
+      if (ms != null) chipStartsFs.push(ms);
+    }
+    if (chipStartsFs.length > 0) {
+      await assertProposedStartsOverlapHybrid({
+        appUserId: uid,
+        startMsList: chipStartsFs,
+        bufferHours: overlapBufFs,
         excludeMeetingId: mid,
       });
     }
@@ -1147,6 +1183,24 @@ export async function upsertParticipantVotes(
 }
 
 /** 참여 취소: 참여자 제거 + 해당 사용자 투표 집계 롤백 */
+/** Supabase `meetings` 행이 있는 레저 모임 확정 시 주최자 XP — 실패해도 확정은 유지합니다. */
+async function grantMeetingConfirmXpIfLedger(hostAppUserId: string, meetingId: string): Promise<void> {
+  if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meetingId)) return;
+  try {
+    const { error } = await supabase.rpc('apply_meeting_confirm_xp', {
+      p_app_user_id: hostAppUserId.trim(),
+      p_meeting_id: meetingId.trim(),
+    });
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[meetings] apply_meeting_confirm_xp:', error.message);
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[meetings] apply_meeting_confirm_xp', e);
+  }
+}
+
 export async function leaveMeeting(meetingId: string, phoneUserId: string): Promise<void> {
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
@@ -1276,6 +1330,7 @@ export async function confirmMeetingSchedule(
     }
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextLedgerDoc) as Record<string, unknown>);
     notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
+    await grantMeetingConfirmXpIfLedger(uid, mid);
     return;
   }
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
@@ -1553,6 +1608,17 @@ export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPh
   await deleteDoc(ref);
 }
 
+function collectCreateMeetingProposedStartMs(input: CreateMeetingInput): number[] {
+  const set = new Set<number>();
+  const prim = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
+  if (prim) set.add(prim.toMillis());
+  for (const c of input.dateCandidates ?? []) {
+    const inst = getDateCandidateScheduleInstant(c);
+    if (inst && Number.isFinite(inst.getTime())) set.add(inst.getTime());
+  }
+  return [...set];
+}
+
 export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   const primaryErr = validatePrimaryScheduleForSave(input.scheduleDate, input.scheduleTime);
   if (primaryErr) throw new Error(primaryErr);
@@ -1605,10 +1671,11 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   if (hostPk) {
     const hostProf = await getUserProfile(hostPk);
     const buf = getScheduleOverlapBufferHours(hostProf);
-    if (scheduledAt) {
-      await assertNoConfirmedScheduleOverlapHybrid({
+    const starts = collectCreateMeetingProposedStartMs(input);
+    if (starts.length > 0) {
+      await assertProposedStartsOverlapHybrid({
         appUserId: hostPk,
-        startMs: scheduledAt.toMillis(),
+        startMsList: starts,
         bufferHours: buf,
         excludeMeetingId: null,
       });

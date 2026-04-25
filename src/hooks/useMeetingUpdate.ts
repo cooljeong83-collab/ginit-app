@@ -48,7 +48,7 @@ export type UseMeetingUpdateOptions = {
 export type VoteCompletedPayload = {
   meetingId: string;
   userId: string;
-  /** Supabase에 반영할 XP 증가량(서버 RPC가 알아서 처리하면 0이어도 됨) */
+  /** 레거시 필드 — Supabase `apply_vote_xp`는 `app_policies` xp.meeting_vote 를 사용합니다. */
   xpDelta?: number;
   /** RPC 인자로 그대로 전달할 추가 컨텍스트(선택) */
   rpcArgs?: Record<string, unknown>;

@@ -25,6 +25,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
@@ -331,6 +332,7 @@ export default function MeetingDetailScreen() {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
+  const { version: appPoliciesVersion } = useAppPolicies();
   const { syncMeetingAckFromMeeting } = useInAppAlarms();
   const isFocused = useIsFocused();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
@@ -361,7 +363,7 @@ export default function MeetingDetailScreen() {
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
-  const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState<2 | 3>(3);
+  const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(3);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
   const [deleteMeetingBusy, setDeleteMeetingBusy] = useState(false);
@@ -815,7 +817,7 @@ export default function MeetingDetailScreen() {
     }
     let alive = true;
     void (async () => {
-      let buf: 2 | 3 = 3;
+      let buf = 3;
       try {
         const prof = await getUserProfile(sessionPk);
         buf = getScheduleOverlapBufferHours(prof);
@@ -839,7 +841,15 @@ export default function MeetingDetailScreen() {
     return () => {
       alive = false;
     };
-  }, [meeting, sessionPk, alreadyJoinedMeeting, isHost, meeting?.id, meeting?.scheduleConfirmed]);
+  }, [
+    meeting,
+    sessionPk,
+    alreadyJoinedMeeting,
+    isHost,
+    meeting?.id,
+    meeting?.scheduleConfirmed,
+    appPoliciesVersion,
+  ]);
 
   /** 게스트 참여 조건: 화면에 있는 각 투표 구역마다 최소 1개 선택 */
   const needsDatePick = dateChips.length > 0;
