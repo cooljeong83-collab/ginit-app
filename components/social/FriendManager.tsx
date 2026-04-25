@@ -166,7 +166,7 @@ export function FriendManager({ userId, onOpenChatWithPeer }: Props) {
       try {
         await acceptGinitRequest(me, row.id);
         await reload();
-        onOpenChatWithPeer(row.requester_app_user_id, prof?.nickname);
+        onOpenChatWithPeer(row.requester_app_user_id);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }

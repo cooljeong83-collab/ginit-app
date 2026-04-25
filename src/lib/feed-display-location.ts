@@ -4,6 +4,14 @@ import type { LocationGeocodedAddress } from 'expo-location';
 /** 위치 권한 거부·역지오 실패 등일 때 피드 상단 기본 라벨(구 단위) */
 export const FEED_LOCATION_FALLBACK_SHORT = '영등포구';
 
+/** 피드/모임 탭 상단 표기용(시 + 구) */
+export function formatSeoulGuLabel(gu: string): string {
+  const g = (gu ?? '').trim();
+  if (!g) return `서울시 ${FEED_LOCATION_FALLBACK_SHORT}`;
+  if (g.includes('시')) return g;
+  return `서울시 ${g}`;
+}
+
 /**
  * 한국 주소 문자열에서 첫 번째 `○○구` 행정구명을 추출합니다.
  */
@@ -71,7 +79,8 @@ export async function resolveFeedLocationContext(): Promise<FeedLocationContext>
     }
 
     const pos = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
+      // GPS + Wi‑Fi/셀룰러를 활용해 가능한 정확히(피드 상단 지역 표기/거리 정렬 기준).
+      accuracy: Location.Accuracy.High,
     });
 
     const coords = {

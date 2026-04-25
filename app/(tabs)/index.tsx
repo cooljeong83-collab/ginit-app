@@ -27,6 +27,7 @@ import { subscribeCategories } from '@/src/lib/categories';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
+  formatSeoulGuLabel,
   resolveFeedLocationContext,
 } from '@/src/lib/feed-display-location';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -267,14 +268,15 @@ export default function FeedScreen() {
   );
 
   const joinedFilteredMeetings = useMemo(() => {
-    const base = filterJoinedMeetings(meetingsWithinRadius, userId);
+    // 내 모임 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
+    const base = filterJoinedMeetings(meetings, userId);
     return base.filter((m) => {
       if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
       if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
       if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
       return true;
     });
-  }, [meetingsWithinRadius, userId, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
+  }, [meetings, userId, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
 
   const sortedJoinedMeetings = useMemo(
     () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, userCoords),
@@ -354,9 +356,10 @@ export default function FeedScreen() {
           Boolean(userId) && meetingOverlapsUserConfirmedSlots(item, myConfirmedScheduleSlots, overlapBufferHours)
         }
         symbolBox={feedMeetingSymbolBox(item, feedHostProfileMap)}
+        categories={categories}
       />
     ),
-    [userCoords, userId, router, myConfirmedScheduleSlots, overlapBufferHours, feedHostProfileMap],
+    [userCoords, userId, router, myConfirmedScheduleSlots, overlapBufferHours, feedHostProfileMap, categories],
   );
 
   const listHeader = (
@@ -364,8 +367,11 @@ export default function FeedScreen() {
       <View style={styles.feedHeader}>
         <View style={styles.feedHeaderTopRow}>
           <View style={styles.locationCluster}>
-            <Text style={styles.locationText} numberOfLines={1} accessibilityLabel={`현재 표시 지역 ${regionLabel}`}>
-              {regionLabel}
+            <Text
+              style={styles.locationText}
+              numberOfLines={1}
+              accessibilityLabel={`현재 표시 지역 ${formatSeoulGuLabel(regionLabel)}`}>
+              {formatSeoulGuLabel(regionLabel)}
             </Text>
             <Pressable
               onPress={openRegionModal}

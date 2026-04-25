@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
+import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
@@ -41,6 +42,7 @@ export default function RootLayout() {
                 ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
               }}
             />
+            <TransientBottomMessageHost />
           </InAppAlarmsProvider>
         </UserSessionProvider>
       </AppPoliciesProvider>

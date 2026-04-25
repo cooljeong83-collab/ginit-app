@@ -23,6 +23,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
@@ -66,6 +67,8 @@ import {
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { fetchFollowRelationStatus, sendFollowRequest, type FollowRelationStatus } from '@/src/lib/follow';
+import { notifyFollowRequestReceivedFireAndForget } from '@/src/lib/follow-push-notify';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -373,6 +376,10 @@ export default function MeetingDetailScreen() {
   const [hostTiePlaceId, setHostTiePlaceId] = useState<string | null>(null);
   const [hostTieMovieId, setHostTieMovieId] = useState<string | null>(null);
 
+  const [profilePopupUserId, setProfilePopupUserId] = useState<string | null>(null);
+  const [sendGinitBusy, setSendGinitBusy] = useState(false);
+  const [followRelationStatus, setFollowRelationStatus] = useState<FollowRelationStatus>('none');
+
   useEffect(() => {
     if (!id.trim()) {
       setMeeting(null);
@@ -445,6 +452,100 @@ export default function MeetingDetailScreen() {
     if (v.includes('여')) return 'female';
     return null;
   }, []);
+
+  const openParticipantProfile = useCallback((peerAppUserId: string) => {
+    const pid = peerAppUserId.trim();
+    if (!pid) return;
+    setProfilePopupUserId(pid);
+  }, []);
+
+  const closeParticipantProfile = useCallback(() => {
+    setProfilePopupUserId(null);
+    setFollowRelationStatus('none');
+  }, []);
+
+  useEffect(() => {
+    const pid = profilePopupUserId?.trim() ?? '';
+    if (!pid) return;
+    if (participantProfiles[pid]) return;
+    let alive = true;
+    void getUserProfile(pid).then((p) => {
+      if (!alive) return;
+      if (!p) return;
+      setParticipantProfiles((prev) => (prev[pid] ? prev : { ...prev, [pid]: p }));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [participantProfiles, profilePopupUserId]);
+
+  useEffect(() => {
+    const me = userId?.trim() ?? '';
+    const peer = profilePopupUserId?.trim() ?? '';
+    if (!me || !peer) {
+      setFollowRelationStatus('none');
+      return;
+    }
+    if (normalizeParticipantId(me) === normalizeParticipantId(peer)) {
+      setFollowRelationStatus('none');
+      return;
+    }
+    let alive = true;
+    void fetchFollowRelationStatus(me, peer)
+      .then((r) => {
+        if (!alive) return;
+        setFollowRelationStatus(r.status);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setFollowRelationStatus('none');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [profilePopupUserId, userId]);
+
+  const onFollow = useCallback(async () => {
+    const me = userId?.trim() ?? '';
+    const peer = profilePopupUserId?.trim() ?? '';
+    if (!peer) return;
+    if (!me) {
+      Alert.alert('로그인이 필요해요', '친구 요청은 로그인 후 보낼 수 있어요.');
+      return;
+    }
+    if (normalizeParticipantId(me) === normalizeParticipantId(peer)) return;
+    setSendGinitBusy(true);
+    try {
+      await ensureUserProfile(me);
+      const profGate = await getUserProfile(me);
+      if (meetingDemographicsIncomplete(profGate, me)) {
+        Alert.alert(
+          '프로필을 먼저 완성해 주세요',
+          '팔로우 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
+          [{ text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) }],
+        );
+        return;
+      }
+      await sendFollowRequest(me, peer);
+      const next = await fetchFollowRelationStatus(me, peer).catch(() => null);
+      if (next) setFollowRelationStatus(next.status);
+      if (next?.status === 'requested_out') {
+        const meNick = participantProfiles[normalizeParticipantId(me) ?? me]?.nickname?.trim() ?? '';
+        notifyFollowRequestReceivedFireAndForget({
+          followeeAppUserId: peer,
+          followerAppUserId: me,
+          followerDisplayName: meNick || '팔로워',
+        });
+      }
+      showTransientBottomMessage(
+        next?.status === 'following' || next?.status === 'mutual' ? '팔로우했어요.' : '팔로우 요청을 보냈어요.',
+      );
+    } catch (e) {
+      Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSendGinitBusy(false);
+    }
+  }, [participantProfiles, profilePopupUserId, router, userId]);
 
   useEffect(() => {
     setSelectedDateIds([]);
@@ -703,7 +804,7 @@ export default function MeetingDetailScreen() {
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+        showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
         return;
       }
     }
@@ -1127,7 +1228,7 @@ export default function MeetingDetailScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-        Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+        showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
       } else {
         Alert.alert('참여 실패', msg || '다시 시도해 주세요.');
       }
@@ -1430,7 +1531,7 @@ export default function MeetingDetailScreen() {
               } catch (e) {
                 const msg = e instanceof Error ? e.message : '';
                 if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-                  Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+                  showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
                 } else {
                   Alert.alert('확정 실패', msg || '다시 시도해 주세요.');
                 }
@@ -2192,7 +2293,13 @@ export default function MeetingDetailScreen() {
                     const isHostUser = Boolean(hostPk && hostPk === userId);
                     const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
                     return (
-                      <View key={userId} style={styles.avatarCol} pointerEvents={withdrawn ? 'none' : 'auto'}>
+                      <Pressable
+                        key={userId}
+                        onPress={() => openParticipantProfile(userId)}
+                        style={({ pressed }) => [styles.avatarCol, pressed && !withdrawn && { opacity: 0.92 }]}
+                        pointerEvents={withdrawn ? 'none' : 'auto'}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${nickname} 프로필 열기`}>
                         <View
                           style={[
                             styles.avatarCircle,
@@ -2211,7 +2318,7 @@ export default function MeetingDetailScreen() {
                         <Text style={styles.avatarLabel} numberOfLines={2}>
                           {isHostUser ? `${nickname}\n(호스트)` : nickname}
                         </Text>
-                      </View>
+                      </Pressable>
                     );
                   })}
                   {recruitmentPhase === 'recruiting' ? (
@@ -2311,9 +2418,12 @@ export default function MeetingDetailScreen() {
                     {participantVoteBusy ? (
                       <ActivityIndicator color="#fff" size="small" />
                     ) : (
-                      <Ionicons name="save-outline" size={18} color="#fff" />
+                      <Ionicons name="save-outline" size={18} color={GinitTheme.colors.text} />
                     )}
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    <Text
+                      style={[styles.pillText, styles.pillTextOnOrange, styles.bottomPillLabel]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
                       저장
                     </Text>
                   </Pressable>
@@ -2342,10 +2452,17 @@ export default function MeetingDetailScreen() {
                       <Ionicons
                         name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
                         size={18}
-                        color="#fff"
+                        color={meeting.scheduleConfirmed === true ? '#fff' : GinitTheme.colors.text}
                       />
                     )}
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    <Text
+                      style={[
+                        styles.pillText,
+                        meeting.scheduleConfirmed === true ? null : styles.pillTextOnOrange,
+                        styles.bottomPillLabel,
+                      ]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
                       {meeting.scheduleConfirmed === true ? '취소' : '확정'}
                     </Text>
                   </Pressable>
@@ -2423,7 +2540,10 @@ export default function MeetingDetailScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="초대">
                       <Ionicons name="mail-outline" size={18} color="#fff" />
-                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      <Text
+                        style={[styles.pillText, styles.bottomPillLabel, { color: '#fff' }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
                         초대
                       </Text>
                     </Pressable>
@@ -2446,9 +2566,12 @@ export default function MeetingDetailScreen() {
                     {joinBusy ? (
                       <ActivityIndicator color="#fff" size="small" />
                     ) : (
-                      <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                      <Ionicons name="hand-right-outline" size={18} color={GinitTheme.colors.text} />
                     )}
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    <Text
+                      style={[styles.pillText, styles.pillTextOnOrange, styles.bottomPillLabel, { color: GinitTheme.colors.text }]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
                       참여
                     </Text>
                   </Pressable>
@@ -2640,6 +2763,121 @@ export default function MeetingDetailScreen() {
               </View>
             </View>
           </KeyboardAvoidingView>
+        </Modal>
+
+        <Modal
+          visible={profilePopupUserId != null}
+          animationType="fade"
+          transparent
+          onRequestClose={closeParticipantProfile}>
+          <View style={styles.profileModalRoot}>
+            <Pressable
+              style={StyleSheet.absoluteFillObject}
+              onPress={closeParticipantProfile}
+              accessibilityRole="button"
+              accessibilityLabel="프로필 닫기"
+            />
+            <View style={styles.profileModalCard}>
+              {(() => {
+                const pid = profilePopupUserId?.trim() ?? '';
+                const prof = pid ? participantProfiles[pid] : undefined;
+                const withdrawn = isUserProfileWithdrawn(prof);
+                const isLoading = Boolean(pid) && prof == null;
+                const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname?.trim() ?? '회원');
+                const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
+                const trust = typeof prof?.gTrust === 'number' ? prof.gTrust : null;
+                const dna = withdrawn ? '' : (prof?.gDna?.trim() ?? '');
+                const isMe =
+                  Boolean(userId?.trim() && pid) && normalizeParticipantId(userId ?? '') === normalizeParticipantId(pid);
+                const gender = withdrawn ? '' : (prof?.gender?.trim() ?? '');
+                const ageBand = withdrawn ? '' : (prof?.ageBand?.trim() ?? '');
+                const metaParts = [
+                  trust != null ? `gTrust ${trust}` : 'gTrust —',
+                  dna ? dna : '',
+                  [ageBand, gender].filter(Boolean).join(' · '),
+                ].filter(Boolean);
+                const relationLabel =
+                  followRelationStatus === 'mutual'
+                    ? '맞팔로우'
+                    : followRelationStatus === 'following'
+                      ? '팔로잉'
+                      : followRelationStatus === 'requested_out' || followRelationStatus === 'requested_in'
+                        ? '요청중'
+                        : '팔로우';
+                const relationDisabled =
+                  sendGinitBusy ||
+                  withdrawn ||
+                  isMe ||
+                  followRelationStatus === 'mutual' ||
+                  followRelationStatus === 'following' ||
+                  followRelationStatus === 'requested_out' ||
+                  followRelationStatus === 'requested_in';
+                return (
+                  <>
+                    <View style={styles.profileModalTop}>
+                      <View style={styles.profileAvatarWrap}>
+                        {photo ? (
+                          <Image source={{ uri: photo }} style={styles.profileAvatarImg} contentFit="cover" />
+                        ) : (
+                          <View style={styles.profileAvatarFallback}>
+                            <Text style={styles.profileAvatarLetter}>{nicknameInitial(nick)}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.profileModalTopText}>
+                        <Text style={styles.profileModalNick} numberOfLines={1}>
+                          {nick}
+                        </Text>
+                        <Text style={styles.profileModalMeta} numberOfLines={1}>
+                          {isLoading ? '프로필 불러오는 중…' : metaParts.join(' · ')}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={closeParticipantProfile}
+                        style={({ pressed }) => [styles.profileModalCloseBtn, pressed && { opacity: 0.9 }]}
+                        accessibilityRole="button"
+                        accessibilityLabel="닫기">
+                        <Ionicons name="close" size={18} color={GinitTheme.colors.textMuted} />
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.profileModalActions}>
+                      <Pressable
+                        onPress={onFollow}
+                        disabled={relationDisabled}
+                        style={({ pressed }) => [
+                          styles.profileActionBtn,
+                          styles.profileActionPrimary,
+                          relationDisabled && { opacity: 0.65 },
+                          pressed && !relationDisabled && { opacity: 0.9 },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={isMe ? '내 프로필' : relationLabel}>
+                        {sendGinitBusy ? (
+                          <ActivityIndicator color="#fff" size="small" />
+                        ) : (
+                          <Ionicons
+                            name={
+                              isMe
+                                ? 'person'
+                                : followRelationStatus === 'mutual' || followRelationStatus === 'following'
+                                  ? 'people'
+                                  : followRelationStatus === 'requested_out' || followRelationStatus === 'requested_in'
+                                    ? 'time'
+                                    : 'person-add'
+                            }
+                            size={16}
+                            color="#fff"
+                          />
+                        )}
+                        <Text style={styles.profileActionPrimaryText}>{isMe ? '내 프로필' : relationLabel}</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                );
+              })()}
+            </View>
+          </View>
         </Modal>
       </SafeAreaView>
     </ScreenShell>
@@ -3314,5 +3552,62 @@ const styles = StyleSheet.create({
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillDanger: { backgroundColor: '#DC2626' },
   pillText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pillTextOnOrange: { color: GinitTheme.colors.text },
   pillTextCompact: { fontSize: 12 },
+
+  profileModalRoot: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.48)',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+  profileModalCard: {
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    padding: 18,
+    ...GinitTheme.shadow.card,
+  },
+  profileModalTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  profileAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(226, 232, 240, 0.8)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+  },
+  profileAvatarImg: { width: '100%', height: '100%' },
+  profileAvatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  profileAvatarLetter: { fontSize: 20, fontWeight: '900', color: GinitTheme.colors.primary },
+  profileModalTopText: { flex: 1, minWidth: 0, gap: 4 },
+  profileModalNick: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.text, letterSpacing: -0.2 },
+  profileModalMeta: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.textMuted },
+  profileModalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  profileModalActions: { marginTop: 14 },
+  profileActionBtn: {
+    height: 44,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  profileActionPrimary: { backgroundColor: GinitTheme.colors.primary },
+  profileActionPrimaryText: { fontSize: 15, fontWeight: '900', color: '#fff' },
 });

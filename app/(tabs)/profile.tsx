@@ -341,6 +341,19 @@ export default function ProfileTab() {
       Alert.alert('안내', '로그인 후 진행할 수 있어요.');
       return;
     }
+
+    const ok = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        '저장 전 확인',
+        '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?',
+        [
+          { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+          { text: '저장', style: 'destructive', onPress: () => resolve(true) },
+        ],
+      );
+    });
+    if (!ok) return;
+
     const p0 = await ensureUserProfile(profilePk);
     if (!hasTermsAgreementRecorded(p0) && !termsConsentChecked) {
       Alert.alert('동의 필요', '모임 이용 정보 수집 및 이용에 동의해 주세요.');
@@ -803,7 +816,7 @@ export default function ProfileTab() {
                 </>
 
                 <Text style={[styles.label, { marginTop: 16 }]}>전화번호 인증 (필수)</Text>
-                {meetingAuthComplete ? (
+                {isPhoneVerified ? (
                   <Text style={styles.phoneVerifiedDone}>
                     전화번호 인증 완료{verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}
                   </Text>
@@ -834,15 +847,15 @@ export default function ProfileTab() {
                           style={styles.otpPhoneInput}
                           keyboardType="phone-pad"
                           inputMode="tel"
-                          editable={!otpBusy && !profileBusy && !complianceBusy}
+                          editable={!otpBusy && !profileBusy && !complianceBusy && !isPhoneVerified}
                         />
                         <Pressable
                           onPress={() => void onSendOtp()}
-                          disabled={!canSendOtp}
+                          disabled={!canSendOtp || isPhoneVerified}
                           style={({ pressed }) => [
                             styles.otpSendBtn,
-                            !canSendOtp && styles.otpBtnDisabled,
-                            pressed && canSendOtp && styles.pressed,
+                            (!canSendOtp || isPhoneVerified) && styles.otpBtnDisabled,
+                            pressed && canSendOtp && !isPhoneVerified && styles.pressed,
                           ]}
                           accessibilityRole="button"
                           accessibilityLabel="인증번호 받기">

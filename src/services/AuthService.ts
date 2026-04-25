@@ -161,6 +161,11 @@ export class AuthService {
       );
     }
 
+    // 현재 계정에 이미 phone provider가 연결된 상태에서 link를 다시 시도한 경우
+    if (hay.includes('provider-already-linked')) {
+      return '이미 전화번호 인증이 완료된 계정입니다.';
+    }
+
     // Firebase Phone Auth는 프로젝트 설정/요금제에 따라 "billing not enabled" 류 에러가 발생할 수 있음.
     // 일부 환경에서는 message로만 `billing_hot_enabled` 같은 키가 노출되기도 함.
     if (hay.includes('billing') || hay.includes('billing_hot_enabled') || hay.includes('billing-not-enabled')) {

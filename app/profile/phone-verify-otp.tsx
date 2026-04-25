@@ -59,6 +59,19 @@ export default function ProfilePhoneVerifyOtpScreen() {
       router.replace('/(tabs)/profile');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const hay = msg.toLowerCase();
+      if (hay.includes('provider-already-linked')) {
+        const normalized = phoneE164Param ? normalizePhoneUserId(phoneE164Param) : null;
+        if (!normalized) {
+          Alert.alert('인증 실패', msg);
+          return;
+        }
+        await ensureUserProfile(profilePk);
+        await updateUserProfile(profilePk, { phone: normalized, phoneVerifiedAt: serverTimestamp() });
+        Alert.alert('인증 완료', '전화번호 인증이 완료되었습니다.');
+        router.replace('/(tabs)/profile');
+        return;
+      }
       Alert.alert('인증 실패', msg);
     } finally {
       setBusy(false);

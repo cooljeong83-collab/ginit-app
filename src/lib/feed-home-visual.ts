@@ -65,6 +65,70 @@ export function getHomeCategoryVisual(m: Meeting): HomeCategoryVisual {
   return alt[h % alt.length];
 }
 
+function rgbaFromCssColor(c: string): { r: number; g: number; b: number; a: number } | null {
+  const s = (c ?? '').trim();
+  if (!s) return null;
+  if (s.startsWith('#')) {
+    const hex = s.slice(1);
+    if (hex.length === 3) {
+      const r = parseInt(hex[0] + hex[0], 16);
+      const g = parseInt(hex[1] + hex[1], 16);
+      const b = parseInt(hex[2] + hex[2], 16);
+      if ([r, g, b].every(Number.isFinite)) return { r, g, b, a: 1 };
+    }
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      if ([r, g, b].every(Number.isFinite)) return { r, g, b, a: 1 };
+    }
+    return null;
+  }
+  const m = s.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+  if (!m) return null;
+  const r = Math.max(0, Math.min(255, Math.round(Number(m[1]))));
+  const g = Math.max(0, Math.min(255, Math.round(Number(m[2]))));
+  const b = Math.max(0, Math.min(255, Math.round(Number(m[3]))));
+  if (![r, g, b].every(Number.isFinite)) return null;
+  const aRaw = m[4] == null ? 1 : Number(m[4]);
+  const a = Number.isFinite(aRaw) ? Math.max(0, Math.min(1, aRaw)) : 1;
+  return { r, g, b, a };
+}
+
+function blendOverWhite(rgb: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number } {
+  const a = Math.max(0, Math.min(1, rgb.a));
+  return {
+    r: Math.round(rgb.r * a + 255 * (1 - a)),
+    g: Math.round(rgb.g * a + 255 * (1 - a)),
+    b: Math.round(rgb.b * a + 255 * (1 - a)),
+  };
+}
+
+function luminance01(rgb: { r: number; g: number; b: number }): number {
+  const toLinear = (x: number) => {
+    const v = x / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const r = toLinear(rgb.r);
+  const g = toLinear(rgb.g);
+  const b = toLinear(rgb.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 카테고리 그라데이션 위에 올릴 아이콘 색(홈·지도 마커 공통) */
+export function homeCategoryMarkerIconColor(gradient: readonly [string, string]): string {
+  const a = rgbaFromCssColor(gradient[0]);
+  const b = rgbaFromCssColor(gradient[1]);
+  const avgRgba =
+    a && b
+      ? { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2, a: (a.a + b.a) / 2 }
+      : a ?? b;
+  if (!avgRgba) return '#FFFFFF';
+  const blended = blendOverWhite(avgRgba);
+  const L = luminance01(blended);
+  return L >= 0.62 ? '#0b1220' : '#FFFFFF';
+}
+
 function seoulYmdFromMs(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Seoul',

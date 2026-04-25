@@ -34,11 +34,19 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
   if (fs && typeof fs === 'object' && !Array.isArray(fs) && Object.keys(fs as object).length > 0) {
     const docId = legacy || rowId;
     const merged = mapFirestoreMeetingDoc(docId, { ...(fs as Record<string, unknown>), id: docId });
-    if (!merged.createdAt && row.created_at != null) {
+    const sqlCategoryId = typeof row.category_id === 'string' && row.category_id.trim() ? row.category_id.trim() : null;
+    const sqlCategoryLabel =
+      typeof row.category_label === 'string' && row.category_label.trim() ? row.category_label.trim() : null;
+    const withSqlCategories = {
+      ...merged,
+      categoryId: sqlCategoryId ?? merged.categoryId ?? null,
+      categoryLabel: sqlCategoryLabel ?? merged.categoryLabel ?? null,
+    };
+    if (!withSqlCategories.createdAt && row.created_at != null) {
       const c = parseCreatedAt(row.created_at);
-      if (c) return { ...merged, createdAt: c };
+      if (c) return { ...withSqlCategories, createdAt: c };
     }
-    return merged;
+    return withSqlCategories;
   }
 
   return {
@@ -111,19 +119,30 @@ export function subscribeMeetingsFromSupabase(
     });
   };
 
+  // Realtime 연결이 실패해도, 목록 자체는 polling으로라도 유지합니다(최초 pull은 항상 수행).
+  // 보통 이 에러는 publication 누락 / 네트워크 / Supabase Realtime 비활성 등 환경 이슈입니다.
+  let fallbackPollId: ReturnType<typeof setInterval> | null = null;
+
   const channel = supabase
     .channel(`realtime:public-meetings:${Date.now()}:${Math.random().toString(36).slice(2)}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings' }, () => {
       pull();
     })
     .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') onError?.('Supabase Realtime 연결 오류');
+      if (status === 'CHANNEL_ERROR') {
+        onError?.('Supabase Realtime 연결 오류');
+        if (!fallbackPollId) {
+          // Realtime 없이도 새로고침이 되도록 30초 폴백 폴링.
+          fallbackPollId = setInterval(pull, 30_000);
+        }
+      }
     });
 
   pull();
 
   return () => {
     cancelled = true;
+    if (fallbackPollId) clearInterval(fallbackPollId);
     void supabase.removeChannel(channel);
   };
 }

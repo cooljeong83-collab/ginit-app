@@ -49,6 +49,7 @@ import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -665,7 +666,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('일정 안내', `${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+      showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
       return false;
     }
   }, [sessionUserId]);
@@ -1979,6 +1980,12 @@ export default function CreateDetailsScreen() {
   const [busy, setBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
+
+  useEffect(() => {
+    if (!wizardError) return undefined;
+    const t = setTimeout(() => setWizardError(null), 2000);
+    return () => clearTimeout(t);
+  }, [wizardError]);
 
   const selectedCategory = useMemo(
     () => categories.find((c) => c.id === selectedCategoryId) ?? null,

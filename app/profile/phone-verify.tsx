@@ -1,12 +1,15 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeUserId } from '@/src/lib/app-user-id';
 import { AuthService } from '@/src/services/AuthService';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { getUserProfile, isUserPhoneVerified, type UserProfile } from '@/src/lib/user-profile';
 
 function digitsOnly(s: string): string {
   return s.replace(/\D/g, '');
@@ -14,9 +17,37 @@ function digitsOnly(s: string): string {
 
 export default function ProfilePhoneVerifyEntryScreen() {
   const router = useRouter();
+  const { userId, authProfile } = useUserSession();
   const [phoneDigits, setPhoneDigits] = useState('');
   const [busy, setBusy] = useState(false);
+  const [myProfile, setMyProfile] = useState<UserProfile | null>(null);
   const phoneInputRef = useRef<TextInput>(null);
+
+  const profilePk = useMemo(() => {
+    const u = userId?.trim();
+    if (u) return u;
+    const em = authProfile?.email?.trim();
+    if (em) return normalizeUserId(em) ?? '';
+    return '';
+  }, [userId, authProfile?.email]);
+
+  useEffect(() => {
+    const pk = profilePk.trim();
+    if (!pk) {
+      setMyProfile(null);
+      return;
+    }
+    let alive = true;
+    void getUserProfile(pk).then((p) => {
+      if (!alive) return;
+      setMyProfile(p);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [profilePk]);
+
+  const isVerified = useMemo(() => isUserPhoneVerified(myProfile), [myProfile]);
 
   const phoneE164 = useMemo(() => {
     const local = phoneDigits.trim();
@@ -26,7 +57,7 @@ export default function ProfilePhoneVerifyEntryScreen() {
     return normalizePhoneUserId(with0);
   }, [phoneDigits]);
 
-  const canNext = !!phoneE164 && !busy;
+  const canNext = !!phoneE164 && !busy && !isVerified;
 
   const onNext = useCallback(async () => {
     if (!phoneE164 || busy) return;
@@ -67,12 +98,14 @@ export default function ProfilePhoneVerifyEntryScreen() {
               autoComplete="tel"
               textContentType="telephoneNumber"
               style={styles.phoneInput}
-              editable={!busy}
+              editable={!busy && !isVerified}
               returnKeyType="done"
               enterKeyHint="done"
               onSubmitEditing={() => void onNext()}
             />
           </View>
+
+          {isVerified ? <Text style={styles.verifiedText}>인증 완료</Text> : null}
 
           <Pressable
             onPress={() => void onNext()}
@@ -84,7 +117,9 @@ export default function ProfilePhoneVerifyEntryScreen() {
             ]}
             accessibilityRole="button"
             accessibilityLabel="인증번호 받기">
-            <Text style={styles.nextText}>{busy ? '전송 중…' : '인증번호 받기'}</Text>
+            <Text style={styles.nextText}>
+              {isVerified ? '인증 완료' : busy ? '전송 중…' : '인증번호 받기'}
+            </Text>
           </Pressable>
 
           <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
@@ -139,6 +174,7 @@ const styles = StyleSheet.create({
   },
   nextBtnDisabled: { opacity: 0.35 },
   nextText: { fontSize: 16, fontWeight: '900', color: '#fff' },
+  verifiedText: { fontSize: 13, fontWeight: '800', color: GinitTheme.colors.primary, marginTop: -2 },
   cancelBtn: { height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   cancelText: { fontSize: 14, fontWeight: '800', color: '#475569' },
 });

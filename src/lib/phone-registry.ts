@@ -1,8 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { getFirebaseFirestore } from '@/src/lib/firebase';
-import { USERS_COLLECTION, getUserProfile, isUserProfileWithdrawn } from '@/src/lib/user-profile';
-import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { supabase } from '@/src/lib/supabase';
+import { getUserProfile, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
 /** 로컬에 등록된 사용자 PK(전화 E.164 또는 이메일) 목록 — 오프라인 시 가입 여부 보조 */
 const REGISTRY_KEY = 'ginit.phoneRegistry.v1';
@@ -28,13 +27,12 @@ async function hasActiveUserWithPhoneField(normalizedPhone: string): Promise<boo
   const phone = normalizedPhone.trim();
   if (!phone) return false;
   try {
-    const db = getFirebaseFirestore();
-    const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(5)));
-    for (const d of qs.docs) {
-      const p = await getUserProfile(d.id);
-      if (p && !isUserProfileWithdrawn(p)) return true;
-    }
-    return false;
+    const { data, error } = await supabase.rpc('has_profile_for_phone_e164', { p_phone: phone });
+    if (error) return false;
+    if (typeof data === 'boolean') return data;
+    // 방어적 처리: rpc 결과가 예상과 다르면 최소 조회로 폴백
+    const p = await getUserProfile(phone);
+    return Boolean(p && !isUserProfileWithdrawn(p));
   } catch {
     return false;
   }

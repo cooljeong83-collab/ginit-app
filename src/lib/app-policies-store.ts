@@ -15,7 +15,7 @@ type PolicyEntry = { value: unknown; isActive: boolean };
 
 /** 오프라인·마이그레이션 전 기본값(서버 시드와 맞출 것) */
 const DEFAULTS: Record<string, Record<string, unknown>> = {
-  meeting: { overlap_hours: 3 },
+  meeting: { overlap_hours: 3, map_radius_km: 5 },
   xp: { meeting_confirm: 50, meeting_vote: 20 },
   trust: {
     /** 서버 `ensure_profile_minimal`이 신규 `g_trust`에 사용(폴백). */

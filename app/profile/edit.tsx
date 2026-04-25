@@ -358,6 +358,19 @@ export default function ProfileEditScreen() {
       Alert.alert('안내', '로그인 후 진행할 수 있어요.');
       return;
     }
+
+    const ok = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        '저장 전 확인',
+        '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?',
+        [
+          { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+          { text: '저장', style: 'destructive', onPress: () => resolve(true) },
+        ],
+      );
+    });
+    if (!ok) return;
+
     const p0 = await ensureUserProfile(profilePk);
     if (!hasTermsAgreementRecorded(p0) && !termsConsentChecked) {
       Alert.alert('동의 필요', '모임 이용 정보 수집 및 이용에 동의해 주세요.');
@@ -713,10 +726,13 @@ export default function ProfileEditScreen() {
                     </>
 
                     <Text style={[styles.label, { marginTop: 16 }]}>전화번호 인증 (필수)</Text>
-                    {meetingAuthComplete ? (
-                      <Text style={styles.phoneVerifiedDone}>
-                        전화번호 인증 완료{verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}
-                      </Text>
+                    {isPhoneVerified ? (
+                      <View style={styles.phoneVerifiedBanner} accessibilityRole="text">
+                        <Text style={styles.phoneVerifiedBadge}>인증 완료</Text>
+                        <Text style={styles.phoneVerifiedText}>
+                          휴대전화 인증이 완료되었어요{verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}
+                        </Text>
+                      </View>
                     ) : (
                       <>
                         <Text style={styles.subHint}>
@@ -745,15 +761,15 @@ export default function ProfileEditScreen() {
                               style={styles.otpPhoneInput}
                               keyboardType="phone-pad"
                               inputMode="tel"
-                              editable={!otpBusy && !profileBusy && !complianceBusy}
+                              editable={!otpBusy && !profileBusy && !complianceBusy && !isPhoneVerified}
                             />
                             <Pressable
                               onPress={() => void onSendOtp()}
-                              disabled={!canSendOtp}
+                              disabled={!canSendOtp || isPhoneVerified}
                               style={({ pressed }) => [
                                 styles.otpSendBtn,
-                                !canSendOtp && styles.otpBtnDisabled,
-                                pressed && canSendOtp && styles.pressed,
+                                (!canSendOtp || isPhoneVerified) && styles.otpBtnDisabled,
+                                pressed && canSendOtp && !isPhoneVerified && styles.pressed,
                               ]}
                               accessibilityRole="button"
                               accessibilityLabel="인증번호 받기">
@@ -1095,6 +1111,36 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0f766e',
     lineHeight: 22,
+  },
+  phoneVerifiedBanner: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(134, 211, 183, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(134, 211, 183, 0.28)',
+  },
+  phoneVerifiedBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 118, 110, 0.14)',
+    color: '#0f766e',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: -0.1,
+    overflow: 'hidden',
+  },
+  phoneVerifiedText: {
+    flex: 1,
+    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   otpBlock: {
     marginTop: 10,

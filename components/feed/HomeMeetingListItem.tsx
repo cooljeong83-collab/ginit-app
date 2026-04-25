@@ -15,13 +15,18 @@ import Animated, {
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { getHomeCategoryVisual, homeMeetingStatusBadgeLabel } from '@/src/lib/feed-home-visual';
+import {
+  getHomeCategoryVisual,
+  homeCategoryMarkerIconColor,
+  homeMeetingStatusBadgeLabel,
+} from '@/src/lib/feed-home-visual';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
-import type {
-  Meeting,
-  PublicMeetingDetailsConfig,
-  PublicMeetingGenderRatio,
-  PublicMeetingHostGenderSnapshot,
+import {
+  meetingCategoryDisplayLabel,
+  type Meeting,
+  type PublicMeetingDetailsConfig,
+  type PublicMeetingGenderRatio,
+  type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
 import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import {
@@ -33,71 +38,6 @@ import {
 } from '@/src/lib/meetings';
 
 const AnimatedView = Animated.createAnimatedComponent(View);
-
-function rgbaFromCssColor(c: string): { r: number; g: number; b: number; a: number } | null {
-  const s = (c ?? '').trim();
-  if (!s) return null;
-  if (s.startsWith('#')) {
-    const hex = s.slice(1);
-    if (hex.length === 3) {
-      const r = parseInt(hex[0] + hex[0], 16);
-      const g = parseInt(hex[1] + hex[1], 16);
-      const b = parseInt(hex[2] + hex[2], 16);
-      if ([r, g, b].every(Number.isFinite)) return { r, g, b, a: 1 };
-    }
-    if (hex.length === 6) {
-      const r = parseInt(hex.slice(0, 2), 16);
-      const g = parseInt(hex.slice(2, 4), 16);
-      const b = parseInt(hex.slice(4, 6), 16);
-      if ([r, g, b].every(Number.isFinite)) return { r, g, b, a: 1 };
-    }
-    return null;
-  }
-  const m = s.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
-  if (!m) return null;
-  const r = Math.max(0, Math.min(255, Math.round(Number(m[1]))));
-  const g = Math.max(0, Math.min(255, Math.round(Number(m[2]))));
-  const b = Math.max(0, Math.min(255, Math.round(Number(m[3]))));
-  if (![r, g, b].every(Number.isFinite)) return null;
-  const aRaw = m[4] == null ? 1 : Number(m[4]);
-  const a = Number.isFinite(aRaw) ? Math.max(0, Math.min(1, aRaw)) : 1;
-  return { r, g, b, a };
-}
-
-function blendOverWhite(rgb: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number } {
-  // 실제 UI에서 그라데이션은 흰 글래스 위에 깔리므로, 대비 계산은 흰색 배경으로 블렌딩합니다.
-  const a = Math.max(0, Math.min(1, rgb.a));
-  return {
-    r: Math.round(rgb.r * a + 255 * (1 - a)),
-    g: Math.round(rgb.g * a + 255 * (1 - a)),
-    b: Math.round(rgb.b * a + 255 * (1 - a)),
-  };
-}
-
-function luminance01(rgb: { r: number; g: number; b: number }): number {
-  // sRGB relative luminance (gamma-corrected). Output 0..1
-  const toLinear = (x: number) => {
-    const v = x / 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-  };
-  const r = toLinear(rgb.r);
-  const g = toLinear(rgb.g);
-  const b = toLinear(rgb.b);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function contrastIconColorFromGradient(gradient: readonly [string, string]): string {
-  const a = rgbaFromCssColor(gradient[0]);
-  const b = rgbaFromCssColor(gradient[1]);
-  const avgRgba =
-    a && b
-      ? { r: (a.r + b.r) / 2, g: (a.g + b.g) / 2, b: (a.b + b.b) / 2, a: (a.a + b.a) / 2 }
-      : a ?? b;
-  if (!avgRgba) return '#FFFFFF';
-  const blended = blendOverWhite(avgRgba);
-  const L = luminance01(blended);
-  return L >= 0.62 ? '#0b1220' : '#FFFFFF';
-}
 
 function settlementCornerLabel(cfg: PublicMeetingDetailsConfig): string {
   switch (cfg.settlement) {
@@ -268,6 +208,8 @@ type Props = {
   scheduleOverlapWarning?: boolean;
   /** 영화 포스터 또는 주관자 프로필 — 없으면 카테고리 아이콘 */
   symbolBox?: FeedMeetingSymbolBox | null;
+  /** `categoryLabel` 없을 때 `categoryId`로 표시명 보강(피드 상단 카테고리 목록) */
+  categories?: readonly { id: string; label: string }[] | null;
 };
 
 /**
@@ -281,10 +223,11 @@ export function HomeMeetingListItem({
   onPress,
   scheduleOverlapWarning = false,
   symbolBox = null,
+  categories = null,
 }: Props) {
   const visual = useMemo(() => getHomeCategoryVisual(m), [m]);
   const statusCorner = useMemo(() => homeMeetingStatusBadgeLabel(m), [m]);
-  const iconColor = useMemo(() => contrastIconColorFromGradient(visual.gradient), [visual.gradient]);
+  const iconColor = useMemo(() => homeCategoryMarkerIconColor(visual.gradient), [visual.gradient]);
   const scheduleLine = useMemo(() => formatMeetingScheduleLine(m), [m]);
   const capFill = useMemo(() => capacityFillRatio(m), [m]);
   const showCapacityBar = useMemo(() => {
@@ -317,7 +260,12 @@ export function HomeMeetingListItem({
       ? '영화 포스터'
       : symbolBox?.source === 'host_profile'
         ? '주관자 프로필'
-        : m.categoryLabel?.trim() || '모임';
+        : meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() || '모임';
+
+  const categoryTitlePrefix = useMemo(
+    () => meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() ?? '',
+    [m, categories],
+  );
 
   return (
     <View style={s.meetRowWrap}>
@@ -374,6 +322,9 @@ export function HomeMeetingListItem({
                   <View style={s.titleScheduleStack}>
                     <View style={s.titleRow}>
                       <Text style={s.heroTitle} numberOfLines={1} ellipsizeMode="tail">
+                        {categoryTitlePrefix ? (
+                          <Text style={s.heroCategoryBracket}>[{categoryTitlePrefix}] </Text>
+                        ) : null}
                         {m.title}
                       </Text>
                       <View style={s.zoneARightCol}>
@@ -589,6 +540,12 @@ const s = StyleSheet.create({
     letterSpacing: -0.2,
     lineHeight: 18,
     color: GinitTheme.colors.text,
+  },
+  heroCategoryBracket: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: -0.15,
+    color: GinitTheme.colors.textSub,
   },
   scheduleLine: {
     fontSize: 12,

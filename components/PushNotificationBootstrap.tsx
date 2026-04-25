@@ -25,6 +25,11 @@ function navigateFromPushData(
   data: Record<string, unknown> | undefined,
 ): void {
   if (!data || typeof data !== 'object') return;
+  const actionAny = typeof (data as { action?: unknown }).action === 'string' ? String((data as { action: string }).action).trim() : '';
+  if (actionAny === 'friend_request' || actionAny === 'follow_request') {
+    router.push('/social/connections');
+    return;
+  }
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   if (meetingId && action === 'in_app_chat') {

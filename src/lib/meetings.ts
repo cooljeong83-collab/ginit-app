@@ -138,6 +138,22 @@ export type Meeting = {
   meetingConfig?: PublicMeetingDetailsConfig | Record<string, unknown> | null;
 };
 
+/**
+ * 피드·목록 제목 등: `categoryLabel`가 비어 있으면 `categoryId`로 카테고리 목록에서 표시명을 찾습니다.
+ */
+export function meetingCategoryDisplayLabel(
+  m: Pick<Meeting, 'categoryId' | 'categoryLabel'>,
+  categories?: readonly { id: string; label: string }[] | null | undefined,
+): string | null {
+  const direct = (m.categoryLabel ?? '').trim();
+  if (direct) return direct;
+  const id = (m.categoryId ?? '').trim();
+  if (!id || !categories?.length) return null;
+  const hit = categories.find((c) => String(c.id).trim() === id);
+  const lab = hit?.label?.trim();
+  return lab && lab.length > 0 ? lab : null;
+}
+
 export type PublicMeetingAgeLimit = 'TWENTIES' | 'THIRTIES' | 'FORTY_PLUS' | 'NONE';
 export type PublicMeetingGenderRatio = 'ALL' | 'SAME_GENDER_ONLY' | 'HALF_HALF';
 export type PublicMeetingSettlement = 'DUTCH' | 'HOST_PAYS' | 'INDIVIDUAL' | 'MEMBERSHIP_FEE';

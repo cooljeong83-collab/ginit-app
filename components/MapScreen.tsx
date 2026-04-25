@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -17,12 +18,18 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { NaverMapMarkerOverlay, NaverMapView } from '@mj-studio/react-native-naver-map';
+import {
+  NaverMapCircleOverlay,
+  NaverMapMarkerOverlay,
+  NaverMapView,
+} from '@mj-studio/react-native-naver-map';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useAppPolicies } from '@/src/context/AppPoliciesContext';
+import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import {
@@ -36,12 +43,13 @@ import {
   type MeetingListSortMode,
   sortMeetingsForFeed,
 } from '@/src/lib/feed-meeting-utils';
+import { getHomeCategoryVisual, homeCategoryMarkerIconColor } from '@/src/lib/feed-home-visual';
 import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { centerRegionToNaverRegion, type CenterLatLngRegion } from '@/src/lib/naver-map-region';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, meetingCategoryDisplayLabel } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 
 const MOCK_REGION_ROWS = [
@@ -59,6 +67,10 @@ const SPRING = { damping: 22, stiffness: 260, mass: 0.85 };
 const LIST_CARD_HEIGHT = 118;
 const LIST_CARD_GAP = 10;
 const LIST_ITEM_STRIDE = LIST_CARD_HEIGHT + LIST_CARD_GAP;
+
+/** 지도 마커(카테고리 그라데이션 버블) — NaverMapMarkerOverlay width/height와 맞출 것 */
+const MAP_MARKER_OUTER = 46;
+const MAP_MARKER_INNER = 40;
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -120,6 +132,16 @@ function computeMapRegion(meetings: Meeting[], userCoords: LatLng | null): Cente
   return { latitude: midLat, longitude: midLng, latitudeDelta: dLat, longitudeDelta: dLng };
 }
 
+/** 사용자 위치를 중심으로 반경(km) 원이 화면에 들어가도록 위도·경도 델타 계산 */
+function regionCenteredOnUserRadius(lat: number, lng: number, radiusKm: number): CenterLatLngRegion {
+  const radiusM = radiusKm * 1000;
+  const metersPerDegLat = 111320;
+  const dLat = Math.min(0.42, (radiusM * 2.25) / metersPerDegLat);
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  const dLng = Math.min(0.48, dLat / Math.max(0.22, Math.abs(cosLat)));
+  return { latitude: lat, longitude: lng, latitudeDelta: dLat, longitudeDelta: dLng };
+}
+
 export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -136,8 +158,8 @@ export default function MapScreen() {
     return Math.max(96, Math.min(peek, maxPeek));
   }, [insets.bottom, sheetExpanded]);
 
-  const sheetHeight = useSharedValue(sheetExpanded);
-  const dragStartHeight = useSharedValue(sheetExpanded);
+  const sheetHeight = useSharedValue(sheetCollapsed);
+  const dragStartHeight = useSharedValue(sheetCollapsed);
 
   const animatedSheetStyle = useAnimatedStyle(() => ({
     height: sheetHeight.value,
@@ -181,6 +203,12 @@ export default function MapScreen() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+
+  const { version: appPoliciesVersion } = useAppPolicies();
+  const mapRadiusKm = useMemo(() => {
+    const raw = getPolicyNumeric('meeting', 'map_radius_km', 5);
+    return Math.max(0.5, Math.min(80, raw));
+  }, [appPoliciesVersion]);
 
   useEffect(() => {
     regionLabelRef.current = regionLabel;
@@ -257,14 +285,29 @@ export default function MapScreen() {
     });
   }, [meetings, selectedCategoryId, categories, recruitingOnly]);
 
+  const radiusFilteredMeetings = useMemo(() => {
+    if (!userCoords) return filteredMeetings;
+    const maxM = mapRadiusKm * 1000;
+    return filteredMeetings.filter((m) => {
+      const d = meetingDistanceMetersFromUser(m, userCoords);
+      return d != null && d <= maxM;
+    });
+  }, [filteredMeetings, userCoords, mapRadiusKm]);
+
   const sortedFilteredMeetings = useMemo(
-    () => sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords),
-    [filteredMeetings, listSortMode, userCoords],
+    () => sortMeetingsForFeed(radiusFilteredMeetings, listSortMode, userCoords),
+    [radiusFilteredMeetings, listSortMode, userCoords],
   );
 
-  const mapRegion = useMemo(
-    () => computeMapRegion(sortedFilteredMeetings, userCoords),
-    [sortedFilteredMeetings, userCoords],
+  const mapRegion = useMemo(() => {
+    if (userCoords) {
+      return regionCenteredOnUserRadius(userCoords.latitude, userCoords.longitude, mapRadiusKm);
+    }
+    return computeMapRegion(sortedFilteredMeetings, userCoords);
+  }, [sortedFilteredMeetings, userCoords, mapRadiusKm]);
+
+  const hadMeetingsOutsideRadius = Boolean(
+    userCoords && filteredMeetings.length > 0 && radiusFilteredMeetings.length === 0,
   );
 
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
@@ -385,16 +428,45 @@ export default function MapScreen() {
           }
           {...(Platform.OS === 'android' ? { isUseTextureViewAndroid: true } : {})}
           accessibilityLabel="모임 지도">
+          {userCoords ? (
+            <NaverMapCircleOverlay
+              latitude={userCoords.latitude}
+              longitude={userCoords.longitude}
+              radius={mapRadiusKm * 1000}
+              // Brand identity: warm mint veil + trust-blue outline
+              color="rgba(134, 211, 183, 0.18)"
+              outlineColor={GinitTheme.colors.primary}
+              outlineWidth={2}
+              zIndex={500}
+            />
+          ) : null}
           {meetingsOnMap.map((m) => {
             const selected = m.id === selectedMeetingId;
+            const visual = getHomeCategoryVisual(m);
+            const iconColor = homeCategoryMarkerIconColor(visual.gradient);
             return (
               <NaverMapMarkerOverlay
                 key={m.id}
                 latitude={m.latitude as number}
                 longitude={m.longitude as number}
-                tintColor={selected ? GinitTheme.trustBlue : GinitTheme.pointOrange}
-                onTap={() => onMeetingMarkerPress(m.id)}
-              />
+                width={MAP_MARKER_OUTER}
+                height={MAP_MARKER_OUTER}
+                anchor={{ x: 0.5, y: 0.5 }}
+                zIndex={selected ? 1200 : 600}
+                onTap={() => onMeetingMarkerPress(m.id)}>
+                <View
+                  style={[styles.mapMarkerHit, selected && styles.mapMarkerHitSelected]}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants">
+                  <LinearGradient
+                    colors={[visual.gradient[0], visual.gradient[1]]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.mapMarkerGrad}>
+                    <Ionicons name={visual.icon} size={20} color={iconColor} />
+                  </LinearGradient>
+                </View>
+              </NaverMapMarkerOverlay>
             );
           })}
         </NaverMapView>
@@ -493,9 +565,11 @@ export default function MapScreen() {
 
         {!loading && !listError && sortedFilteredMeetings.length === 0 ? (
           <Text style={styles.sheetEmpty}>
-            {recruitingOnly
-              ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 더 많은 모임이 보여요.'
-              : '조건에 맞는 모임이 없어요.'}
+            {hadMeetingsOutsideRadius
+              ? `내 위치 기준 약 ${mapRadiusKm}km 안에 조건에 맞는 모임이 없어요.`
+              : recruitingOnly
+                ? '모집중인 모임이 없어요. 모집중만 표시를 끄면 더 많은 모임이 보여요.'
+                : '조건에 맞는 모임이 없어요.'}
           </Text>
         ) : null}
 
@@ -523,6 +597,11 @@ export default function MapScreen() {
           renderItem={({ item: m }) => {
             const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
             const selected = m.id === selectedMeetingId;
+            const categoryDisplay = meetingCategoryDisplayLabel(m, categories)?.trim() ?? '';
+            const metaSecond = m.capacity ? `최대 ${m.capacity}명` : '';
+            const listMetaText = categoryDisplay
+              ? metaSecond
+              : [m.categoryLabel, metaSecond].filter(Boolean).join(' · ');
             return (
               <Pressable
                 onPress={() => {
@@ -539,6 +618,9 @@ export default function MapScreen() {
                 <View style={styles.listCardBody}>
                   <View style={styles.listTitleRow}>
                     <Text style={styles.listTitle} numberOfLines={1} ellipsizeMode="tail">
+                      {categoryDisplay ? (
+                        <Text style={styles.listTitleCategory}>[{categoryDisplay}] </Text>
+                      ) : null}
                       {m.title}
                     </Text>
                     <View style={progressPill.wrap}>
@@ -548,7 +630,7 @@ export default function MapScreen() {
                     </View>
                   </View>
                   <Text style={styles.listMeta} numberOfLines={1}>
-                    {[m.categoryLabel, `최대 ${m.capacity}명`].filter(Boolean).join(' · ')}
+                    {listMetaText}
                   </Text>
                   <View style={styles.listFooter}>
                     <Text style={styles.listDist}>
@@ -704,6 +786,27 @@ const styles = StyleSheet.create({
   },
   filterIconBtnPressed: {
     opacity: 0.9,
+  },
+  mapMarkerHit: {
+    width: MAP_MARKER_OUTER,
+    height: MAP_MARKER_OUTER,
+    borderRadius: MAP_MARKER_OUTER / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  mapMarkerHitSelected: {
+    borderWidth: 3,
+    borderColor: GinitTheme.colors.primary,
+  },
+  mapMarkerGrad: {
+    width: MAP_MARKER_INNER,
+    height: MAP_MARKER_INNER,
+    borderRadius: MAP_MARKER_INNER / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
   },
   sheet: {
     backgroundColor: '#f8fafc',
@@ -878,11 +981,18 @@ const styles = StyleSheet.create({
   },
   listTitle: {
     flex: 1,
+    minWidth: 0,
     fontSize: 15,
     fontWeight: '900',
     letterSpacing: -0.2,
     lineHeight: 20,
     color: GinitTheme.colors.text,
+  },
+  listTitleCategory: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: -0.15,
+    color: '#64748b',
   },
   listMeta: {
     fontSize: 12,

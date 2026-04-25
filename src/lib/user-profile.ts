@@ -4,24 +4,13 @@
  * - 레거시: 문서 ID가 전화 PK인 계정(OTP 전용 가입 등)도 그대로 읽습니다.
  */
 import {
-  collection,
-  deleteDoc,
-  deleteField,
   doc,
   getDoc,
-  getDocs,
-  limit,
-  query,
   serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
 } from 'firebase/firestore';
 
-import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
-import { ensureFirestoreReadAuth, getFirebaseFirestore } from '@/src/lib/firebase';
+import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { profilesSource } from '@/src/lib/hybrid-data-source';
-import { formatNormalizedPhoneKrDisplay } from '@/src/lib/phone-user-id';
 import { supabase } from '@/src/lib/supabase';
 
 export const USERS_COLLECTION = 'users';
@@ -428,39 +417,17 @@ export function fallbackProfileLabel(userId: string): UserProfile {
 export async function findUserRowByPhoneE164(normalizedPhone: string): Promise<{ docId: string; profile: UserProfile } | null> {
   const phone = normalizedPhone.trim();
   if (!phone) return null;
-  await ensureFirestoreReadAuth();
-  const db = getFirebaseFirestore();
-  const legacyRef = doc(db, USERS_COLLECTION, phone);
-  const legacySnap = await getDoc(legacyRef);
-  if (legacySnap.exists()) {
-    return { docId: phone, profile: mapUserDoc(legacySnap.data() as Record<string, unknown>) };
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  try {
-    // 기존 데이터 마이그레이션 흔적: `users.phone` 값이 +82 / 82 / 010- / 010 등으로 섞여 있을 수 있어
-    // 가능한 표현들을 함께 조회합니다(`in`은 최대 10개 제한).
-    const kr = formatNormalizedPhoneKrDisplay(phone);
-    const digits = kr.replace(/\D/g, '');
-    const candidates = Array.from(
-      new Set(
-        [
-          phone,
-          phone.startsWith('+') ? phone.slice(1) : phone,
-          kr,
-          digits,
-        ].map((v) => String(v ?? '').trim()).filter(Boolean),
-      ),
-    ).slice(0, 10);
-    const qs =
-      candidates.length <= 1
-        ? await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(3)))
-        : await getDocs(query(collection(db, USERS_COLLECTION), where('phone', 'in', candidates), limit(3)));
-    if (qs.empty) return null;
-    const d0 = qs.docs[0];
-    return { docId: d0.id, profile: mapUserDoc(d0.data() as Record<string, unknown>) };
-  } catch (e) {
-    /** 권한/네트워크 등 → `null`(미가입)로 삼키면 재가입이 열리므로 그대로 전파 */
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+  // Supabase profiles.phone(E.164)로 app_user_id를 역조회합니다.
+  const { data, error } = await supabase.rpc('resolve_app_user_id_from_phone_e164', { p_phone: phone });
+  if (error) throw new Error(error.message || 'resolve_app_user_id_from_phone_e164 failed');
+  const docId = typeof data === 'string' ? data.trim() : '';
+  if (!docId) return null;
+  const profile = await getUserProfile(docId);
+  if (!profile) return null;
+  return { docId, profile };
 }
 
 /**
@@ -491,38 +458,19 @@ export async function hasLoginableUserForPhoneE164(normalizedPhone: string): Pro
 export async function reactivateWithdrawnUserForOtpSignup(normalizedPhone: string): Promise<string> {
   const phone = normalizedPhone.trim();
   if (!phone) throw new Error('전화번호가 없습니다.');
-  const db = getFirebaseFirestore();
-  const legacyRef = doc(db, USERS_COLLECTION, phone);
-  const legacySnap = await getDoc(legacyRef);
-  if (legacySnap.exists()) {
-    const mapped = mapUserDoc(legacySnap.data() as Record<string, unknown>);
-    if (mapped.isWithdrawn === true) {
-      await updateDoc(
-        legacyRef,
-        stripUndefinedDeep({
-          isWithdrawn: false,
-          withdrawnAt: deleteField(),
-          updatedAt: serverTimestamp(),
-        }) as Record<string, unknown>,
-      );
-    }
-    return phone;
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('phone', '==', phone), limit(5)));
-  for (const d of qs.docs) {
-    const mapped = mapUserDoc(d.data() as Record<string, unknown>);
-    if (mapped.isWithdrawn === true) {
-      await updateDoc(
-        d.ref,
-        stripUndefinedDeep({
-          isWithdrawn: false,
-          withdrawnAt: deleteField(),
-          updatedAt: serverTimestamp(),
-        }) as Record<string, unknown>,
-      );
-      return d.id;
-    }
-  }
+  // 레거시 OTP(전화 PK) 재가입 최소 동작: 해당 PK로 Supabase 행을 재활성화합니다.
+  await rpcEnsureProfileMinimalWithRetry(phone);
+  await rpcUpsertProfilePayloadWithRetry(
+    phone,
+    profilePatchToSupabaseJsonb({
+      phone,
+      isWithdrawn: false,
+      withdrawnAt: null,
+    }),
+  );
   return phone;
 }
 
@@ -555,7 +503,13 @@ function supabaseProfileJsonToFirestoreShape(row: Record<string, unknown>): Reco
 
 function tsToIsoOrNull(v: unknown): string | null {
   const d = firestoreTimestampLikeToDate(v);
-  return d && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+  if (d && Number.isFinite(d.getTime())) return d.toISOString();
+  // Firestore `serverTimestamp()` sentinel(클라이언트 사이드) → Supabase에는 즉시값이 필요하므로 now로 고정합니다.
+  if (v && typeof v === 'object' && '_methodName' in (v as object)) {
+    const m = String((v as { _methodName?: unknown })._methodName ?? '').trim().toLowerCase();
+    if (m === 'servertimestamp') return new Date().toISOString();
+  }
+  return null;
 }
 
 function profilePatchToSupabaseJsonb(patch: {
@@ -706,13 +660,11 @@ async function fetchUserProfileFromSupabaseRpcDetailed(appUserId: string): Promi
 export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
   const id = phoneUserId.trim();
   if (!id) return null;
-  if (profilesSource() === 'supabase') {
-    const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
-    return r.ok ? r.profile : null;
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  const snap = await getDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id));
-  if (!snap.exists()) return null;
-  return mapUserDoc(snap.data() as Record<string, unknown>);
+  const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  return r.ok ? r.profile : null;
 }
 
 /** `ensure_profile_minimal` — PostgREST 스키마 캐시 지연 시 여러 번 재시도 */
@@ -758,98 +710,16 @@ async function rpcUpsertProfilePayloadWithRetry(id: string, fields: Record<strin
 export async function ensureUserProfile(phoneUserId: string): Promise<UserProfile> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  if (profilesSource() === 'supabase') {
-    await rpcEnsureProfileMinimalWithRetry(id);
-    const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
-    if (!r.ok) throw new Error(r.message);
-    if (r.profile.isWithdrawn === true) return r.profile;
-    return r.profile;
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
-  const snap = await getDoc(dRef);
-  if (snap.exists()) {
-    const mapped = mapUserDoc(snap.data() as Record<string, unknown>);
-    // 탈퇴 계정은 자동으로 재활성화하지 않습니다(재가입 플로우에서만 명시적으로 처리).
-    if (mapped.isWithdrawn === true) return mapped;
-    return mapped;
-  }
-  const nickname = generateRandomNickname();
-  await setDoc(dRef, {
-    nickname,
-    photoUrl: null,
-    status: 'ACTIVE',
-    isMarketingAgreed: false,
-    fcmToken: null,
-    lastLoginAt: serverTimestamp(),
-    baseRegion: null,
-    interests: [],
-    bio: null,
-    gLevel: 1,
-    gXp: 0,
-    gTrust: 100,
-    penaltyCount: 0,
-    isRestricted: false,
-    trustRecoveryStreak: 0,
-    trustRecoveryMeetingIds: [],
-    gDna: 'Explorer',
-    meetingCount: 0,
-    rankingPoints: 0,
-    badges: [],
-    preferences: {},
-    blockedKeywords: [],
-    lastLocation: null,
-    favoriteStores: [],
-    isIdentityVerified: false,
-    reportCount: 0,
-    blockedUsers: [],
-    pointBalance: 0,
-    couponCount: 0,
-    billingCustomerId: null,
-    referralCode: null,
-    joinPath: null,
-    appVersion: null,
-    metadata: {},
-    createdAt: serverTimestamp(),
-  });
-  return {
-    nickname,
-    photoUrl: null,
-    status: 'ACTIVE',
-    isMarketingAgreed: false,
-    fcmToken: null,
-    lastLoginAt: null,
-    baseRegion: null,
-    interests: [],
-    bio: null,
-    gLevel: 1,
-    gXp: 0,
-    gTrust: 100,
-    penaltyCount: 0,
-    isRestricted: false,
-    trustRecoveryStreak: 0,
-    trustRecoveryMeetingIds: [],
-    gDna: 'Explorer',
-    meetingCount: 0,
-    rankingPoints: 0,
-    badges: [],
-    preferences: {},
-    blockedKeywords: [],
-    lastLocation: null,
-    favoriteStores: [],
-    isIdentityVerified: false,
-    reportCount: 0,
-    blockedUsers: [],
-    pointBalance: 0,
-    couponCount: 0,
-    billingCustomerId: null,
-    referralCode: null,
-    joinPath: null,
-    appVersion: null,
-    metadata: {},
-  };
+  await rpcEnsureProfileMinimalWithRetry(id);
+  const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  if (!r.ok) throw new Error(r.message);
+  return r.profile;
 }
 
-/** 구글 가입 직후: Firestore 사용자 문서에 계정·People API 정보 병합(신규는 생성). */
+/** 구글 가입 직후: Supabase profiles에 계정 정보를 병합(신규면 생성). */
 export async function applyGoogleSignupProfile(
   phoneUserId: string,
   patch: {
@@ -908,121 +778,36 @@ export async function applyGoogleSignupProfile(
 ): Promise<UserProfile> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
-  const snap = await getDoc(dRef);
-  const payload: Record<string, unknown> = {
-    nickname: patch.nickname.trim() || generateRandomNickname(),
-    photoUrl: patch.photoUrl,
-    updatedAt: serverTimestamp(),
-  };
-  if (patch.phone !== undefined) payload.phone = patch.phone;
-  if (patch.phoneVerifiedAt !== undefined) payload.phoneVerifiedAt = patch.phoneVerifiedAt;
-  if (patch.email !== undefined) payload.email = patch.email;
-  if (patch.displayName !== undefined) payload.displayName = patch.displayName;
-  if (patch.signupProvider !== undefined) payload.signupProvider = patch.signupProvider;
-  if (patch.gender !== undefined) payload.gender = patch.gender;
-  if (patch.ageBand !== undefined) payload.ageBand = patch.ageBand;
-  if (patch.birthDate !== undefined) payload.birthDate = patch.birthDate;
-  if (patch.birthYear !== undefined) payload.birthYear = patch.birthYear;
-  if (patch.birthMonth !== undefined) payload.birthMonth = patch.birthMonth;
-  if (patch.birthDay !== undefined) payload.birthDay = patch.birthDay;
-  if (patch.baseRegion !== undefined) payload.baseRegion = patch.baseRegion;
-  if (patch.interests !== undefined) payload.interests = patch.interests;
-  if (patch.bio !== undefined) payload.bio = patch.bio;
-  if (patch.firebaseUid !== undefined) payload.firebaseUid = patch.firebaseUid;
-  if (patch.gLevel !== undefined) payload.gLevel = patch.gLevel;
-  if (patch.gXp !== undefined) payload.gXp = patch.gXp;
-  if (patch.gTrust !== undefined) payload.gTrust = patch.gTrust;
-  if (patch.gDna !== undefined) payload.gDna = patch.gDna;
-  if (patch.meetingCount !== undefined) payload.meetingCount = patch.meetingCount;
-  if (patch.rankingPoints !== undefined) payload.rankingPoints = patch.rankingPoints;
-  if (patch.badges !== undefined) payload.badges = patch.badges;
-  if (patch.status !== undefined) payload.status = patch.status;
-  if (patch.isMarketingAgreed !== undefined) payload.isMarketingAgreed = patch.isMarketingAgreed;
-  if (patch.fcmToken !== undefined) payload.fcmToken = patch.fcmToken;
-  if (patch.lastLoginAt !== undefined) payload.lastLoginAt = patch.lastLoginAt;
-  if (patch.preferences !== undefined) payload.preferences = patch.preferences;
-  if (patch.blockedKeywords !== undefined) payload.blockedKeywords = patch.blockedKeywords;
-  if (patch.lastLocation !== undefined) payload.lastLocation = patch.lastLocation;
-  if (patch.favoriteStores !== undefined) payload.favoriteStores = patch.favoriteStores;
-  if (patch.isIdentityVerified !== undefined) payload.isIdentityVerified = patch.isIdentityVerified;
-  if (patch.reportCount !== undefined) payload.reportCount = patch.reportCount;
-  if (patch.blockedUsers !== undefined) payload.blockedUsers = patch.blockedUsers;
-  if (patch.pointBalance !== undefined) payload.pointBalance = patch.pointBalance;
-  if (patch.couponCount !== undefined) payload.couponCount = patch.couponCount;
-  if (patch.billingCustomerId !== undefined) payload.billingCustomerId = patch.billingCustomerId;
-  if (patch.referralCode !== undefined) payload.referralCode = patch.referralCode;
-  if (patch.joinPath !== undefined) payload.joinPath = patch.joinPath;
-  if (patch.appVersion !== undefined) payload.appVersion = patch.appVersion;
-  if (patch.metadata !== undefined) payload.metadata = patch.metadata;
-  if (snap.exists()) {
-    const prev = mapUserDoc(snap.data() as Record<string, unknown>);
-    if (prev.isWithdrawn === true) {
-      (payload as Record<string, unknown>).isWithdrawn = false;
-      (payload as Record<string, unknown>).withdrawnAt = deleteField();
-    }
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  if (!snap.exists()) {
-    payload.createdAt = serverTimestamp();
-    if (payload.status === undefined) payload.status = 'ACTIVE';
-    if (payload.isMarketingAgreed === undefined) payload.isMarketingAgreed = false;
-    if (payload.fcmToken === undefined) payload.fcmToken = null;
-    if (payload.lastLoginAt === undefined) payload.lastLoginAt = serverTimestamp();
-    if (payload.baseRegion === undefined) payload.baseRegion = null;
-    if (payload.interests === undefined) payload.interests = [];
-    if (payload.bio === undefined) payload.bio = null;
-    // 어떤 가입 방식이든 기본 게이미피케이션 컬럼을 생성합니다.
-    if (payload.gLevel === undefined) payload.gLevel = 1;
-    if (payload.gXp === undefined) payload.gXp = 0;
-    if (payload.gTrust === undefined) payload.gTrust = 100;
-    if (payload.penaltyCount === undefined) payload.penaltyCount = 0;
-    if (payload.isRestricted === undefined) payload.isRestricted = false;
-    if (payload.trustRecoveryStreak === undefined) payload.trustRecoveryStreak = 0;
-    if (payload.trustRecoveryMeetingIds === undefined) payload.trustRecoveryMeetingIds = [];
-    if (payload.gDna === undefined) payload.gDna = 'Explorer';
-    if (payload.meetingCount === undefined) payload.meetingCount = 0;
-    if (payload.rankingPoints === undefined) payload.rankingPoints = 0;
-    if (payload.badges === undefined) payload.badges = [];
-    if (payload.preferences === undefined) payload.preferences = {};
-    if (payload.blockedKeywords === undefined) payload.blockedKeywords = [];
-    if (payload.lastLocation === undefined) payload.lastLocation = null;
-    if (payload.favoriteStores === undefined) payload.favoriteStores = [];
-    if (payload.isIdentityVerified === undefined) payload.isIdentityVerified = false;
-    if (payload.reportCount === undefined) payload.reportCount = 0;
-    if (payload.blockedUsers === undefined) payload.blockedUsers = [];
-    if (payload.pointBalance === undefined) payload.pointBalance = 0;
-    if (payload.couponCount === undefined) payload.couponCount = 0;
-    if (payload.billingCustomerId === undefined) payload.billingCustomerId = null;
-    if (payload.referralCode === undefined) payload.referralCode = null;
-    if (payload.joinPath === undefined) payload.joinPath = null;
-    if (payload.appVersion === undefined) payload.appVersion = null;
-    if (payload.metadata === undefined) payload.metadata = {};
-  }
-  await setDoc(dRef, stripUndefinedDeep(payload) as Record<string, unknown>, { merge: true });
-  const after = await getDoc(dRef);
-  const mapped = mapUserDoc((after.data() ?? {}) as Record<string, unknown>);
 
-  /** Ledger/프로필 소스가 Supabase일 때는 RPC 조회 경로에 구글 등 가입 필드를 맞춰 둡니다. */
-  if (profilesSource() === 'supabase') {
-    await rpcEnsureProfileMinimalWithRetry(id);
-    await updateUserProfile(id, {
-      nickname: mapped.nickname,
-      photoUrl: mapped.photoUrl,
-      email: mapped.email ?? null,
-      displayName: mapped.displayName ?? null,
-      gender: mapped.gender ?? null,
-      birthDate: mapped.birthDate ?? null,
-      birthYear: mapped.birthYear ?? null,
-      birthMonth: mapped.birthMonth ?? null,
-      birthDay: mapped.birthDay ?? null,
-      signupProvider: mapped.signupProvider ?? patch.signupProvider ?? null,
-      // 탈퇴 행이 Ledger에 남아 있으면 조회는 여전히 withdrawn — 재가입 병합 시 Supabase 도 재활성화
+  await rpcEnsureProfileMinimalWithRetry(id);
+  await rpcUpsertProfilePayloadWithRetry(
+    id,
+    profilePatchToSupabaseJsonb({
+      nickname: patch.nickname,
+      photoUrl: patch.photoUrl,
+      phone: patch.phone ?? undefined,
+      phoneVerifiedAt: patch.phoneVerifiedAt ?? undefined,
+      email: patch.email ?? undefined,
+      displayName: patch.displayName ?? undefined,
+      gender: patch.gender ?? null,
+      ageBand: patch.ageBand ?? undefined,
+      birthDate: patch.birthDate ?? undefined,
+      birthYear: patch.birthYear ?? undefined,
+      birthMonth: patch.birthMonth ?? undefined,
+      birthDay: patch.birthDay ?? undefined,
+      signupProvider: patch.signupProvider ?? 'google_sns',
+      // 재가입/복구 케이스: withdrawn이면 재활성화
       isWithdrawn: false,
       withdrawnAt: null,
-    });
-  }
+    }),
+  );
 
-  return mapped;
+  const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  if (!r.ok) throw new Error(r.message);
+  return r.profile;
 }
 
 export async function updateUserProfile(
@@ -1075,212 +860,38 @@ export async function updateUserProfile(
 ): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  if (profilesSource() === 'supabase') {
-    const mapped = await getUserProfile(id);
-    if (mapped?.isWithdrawn === true && patch.isWithdrawn !== false) {
-      throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
-    }
-    const fields = profilePatchToSupabaseJsonb(patch);
-    if (Object.keys(fields).length === 0) return;
-    await rpcUpsertProfilePayloadWithRetry(id, fields);
-    return;
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
-  const existing = await getDoc(dRef);
-  if (existing.exists()) {
-    const mapped = mapUserDoc(existing.data() as Record<string, unknown>);
-    if (mapped.isWithdrawn === true && patch.isWithdrawn !== false) {
-      throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
-    }
+  const mapped = await getUserProfile(id);
+  if (mapped?.isWithdrawn === true && patch.isWithdrawn !== false) {
+    throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
   }
-  const updates: Record<string, unknown> = { updatedAt: serverTimestamp() };
-  if (patch.nickname !== undefined) {
-    const n = patch.nickname.trim();
-    if (!n) throw new Error('닉네임을 입력해 주세요.');
-    updates.nickname = n;
-  }
-  if (patch.photoUrl !== undefined) {
-    updates.photoUrl =
-      patch.photoUrl === null || String(patch.photoUrl).trim() === '' ? null : String(patch.photoUrl).trim();
-  }
-  if (patch.gender !== undefined) {
-    updates.gender = patch.gender && String(patch.gender).trim() ? String(patch.gender).trim() : null;
-  }
-  if (patch.ageBand !== undefined) {
-    updates.ageBand = patch.ageBand && String(patch.ageBand).trim() ? String(patch.ageBand).trim() : null;
-  }
-  if (patch.birthDate !== undefined) {
-    updates.birthDate = patch.birthDate;
-  }
-  if (patch.baseRegion !== undefined) {
-    const t = patch.baseRegion && String(patch.baseRegion).trim() ? String(patch.baseRegion).trim() : null;
-    updates.baseRegion = t;
-  }
-  if (patch.interests !== undefined) {
-    updates.interests = Array.isArray(patch.interests)
-      ? patch.interests.map((x) => String(x).trim()).filter(Boolean)
-      : patch.interests == null
-        ? null
-        : [];
-  }
-  if (patch.bio !== undefined) {
-    const t = patch.bio && String(patch.bio).trim() ? String(patch.bio).trim() : null;
-    updates.bio = t;
-  }
-  if (patch.status !== undefined) {
-    updates.status = patch.status;
-  }
-  if (patch.isWithdrawn !== undefined) {
-    updates.isWithdrawn = patch.isWithdrawn === true;
-  }
-  if (patch.withdrawnAt !== undefined) {
-    updates.withdrawnAt = patch.withdrawnAt;
-  }
-  if (patch.isMarketingAgreed !== undefined) {
-    updates.isMarketingAgreed = patch.isMarketingAgreed;
-  }
-  if (patch.fcmToken !== undefined) {
-    const t = patch.fcmToken && String(patch.fcmToken).trim() ? String(patch.fcmToken).trim() : null;
-    updates.fcmToken = t;
-  }
-  if (patch.lastLoginAt !== undefined) {
-    updates.lastLoginAt = patch.lastLoginAt;
-  }
-  if (patch.rankingPoints !== undefined) {
-    const n = patch.rankingPoints;
-    updates.rankingPoints = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
-  }
-  if (patch.badges !== undefined) {
-    updates.badges = Array.isArray(patch.badges)
-      ? patch.badges.map((x) => String(x).trim()).filter(Boolean)
-      : patch.badges == null
-        ? null
-        : [];
-  }
-  if (patch.phone !== undefined) {
-    updates.phone = patch.phone && String(patch.phone).trim() ? String(patch.phone).trim() : null;
-  }
-  if (patch.phoneVerifiedAt !== undefined) {
-    updates.phoneVerifiedAt = patch.phoneVerifiedAt;
-  }
-  if (patch.termsAgreedAt !== undefined) {
-    updates.termsAgreedAt = patch.termsAgreedAt;
-  }
-  if (patch.preferences !== undefined) {
-    updates.preferences = patch.preferences && typeof patch.preferences === 'object' && !Array.isArray(patch.preferences) ? patch.preferences : patch.preferences == null ? null : {};
-  }
-  if (patch.blockedKeywords !== undefined) {
-    updates.blockedKeywords = Array.isArray(patch.blockedKeywords)
-      ? patch.blockedKeywords.map((x) => String(x).trim()).filter(Boolean)
-      : patch.blockedKeywords == null
-        ? null
-        : [];
-  }
-  if (patch.lastLocation !== undefined) {
-    updates.lastLocation = patch.lastLocation;
-  }
-  if (patch.favoriteStores !== undefined) {
-    updates.favoriteStores = Array.isArray(patch.favoriteStores)
-      ? patch.favoriteStores.map((x) => String(x).trim()).filter(Boolean)
-      : patch.favoriteStores == null
-        ? null
-        : [];
-  }
-  if (patch.isIdentityVerified !== undefined) {
-    updates.isIdentityVerified = typeof patch.isIdentityVerified === 'boolean' ? patch.isIdentityVerified : null;
-  }
-  if (patch.reportCount !== undefined) {
-    const n = patch.reportCount;
-    updates.reportCount = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
-  }
-  if (patch.blockedUsers !== undefined) {
-    updates.blockedUsers = Array.isArray(patch.blockedUsers)
-      ? patch.blockedUsers.map((x) => String(x).trim()).filter(Boolean)
-      : patch.blockedUsers == null
-        ? null
-        : [];
-  }
-  if (patch.pointBalance !== undefined) {
-    const n = patch.pointBalance;
-    updates.pointBalance = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
-  }
-  if (patch.couponCount !== undefined) {
-    const n = patch.couponCount;
-    updates.couponCount = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : null;
-  }
-  if (patch.billingCustomerId !== undefined) {
-    updates.billingCustomerId = patch.billingCustomerId && String(patch.billingCustomerId).trim() ? String(patch.billingCustomerId).trim() : null;
-  }
-  if (patch.referralCode !== undefined) {
-    updates.referralCode = patch.referralCode && String(patch.referralCode).trim() ? String(patch.referralCode).trim() : null;
-  }
-  if (patch.joinPath !== undefined) {
-    updates.joinPath = patch.joinPath && String(patch.joinPath).trim() ? String(patch.joinPath).trim() : null;
-  }
-  if (patch.appVersion !== undefined) {
-    updates.appVersion = patch.appVersion && String(patch.appVersion).trim() ? String(patch.appVersion).trim() : null;
-  }
-  if (patch.metadata !== undefined) {
-    updates.metadata = patch.metadata && typeof patch.metadata === 'object' && !Array.isArray(patch.metadata) ? patch.metadata : patch.metadata == null ? null : {};
-  }
-  await updateDoc(dRef, stripUndefinedDeep(updates) as Record<string, unknown>);
+  const fields = profilePatchToSupabaseJsonb(patch);
+  if (Object.keys(fields).length === 0) return;
+  await rpcUpsertProfilePayloadWithRetry(id, fields);
+  return;
 }
 
 /** 탈퇴: 채팅·투표·모임 참여 기록은 유지하고, `users` 문서의 식별 정보를 비웁니다. */
 export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  if (profilesSource() === 'supabase') {
-    await rpcUpsertProfilePayloadWithRetry(id, {
-      is_withdrawn: true,
-      nickname: WITHDRAWN_NICKNAME,
-      photo_url: '',
-      phone: '',
-      email: '',
-      display_name: '',
-      gender: '',
-      age_band: '',
-      signup_provider: '',
-    });
-    return;
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
-  await updateDoc(
-    dRef,
-    stripUndefinedDeep({
-      isWithdrawn: true,
-      nickname: WITHDRAWN_NICKNAME,
-      photoUrl: null,
-      phone: null,
-      email: null,
-      displayName: null,
-      signupProvider: null,
-      termsAgreedAt: null,
-      gender: null,
-      ageBand: null,
-      birthYear: null,
-      birthMonth: null,
-      birthDay: null,
-      birthDate: null,
-      preferences: null,
-      blockedKeywords: null,
-      lastLocation: null,
-      favoriteStores: null,
-      isIdentityVerified: null,
-      reportCount: null,
-      blockedUsers: null,
-      pointBalance: null,
-      couponCount: null,
-      billingCustomerId: null,
-      referralCode: null,
-      joinPath: null,
-      appVersion: null,
-      metadata: null,
-      firebaseUid: null,
-      withdrawnAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }) as Record<string, unknown>,
-  );
+  await rpcUpsertProfilePayloadWithRetry(id, {
+    is_withdrawn: true,
+    nickname: WITHDRAWN_NICKNAME,
+    photo_url: '',
+    phone: '',
+    phone_verified_at: null,
+    email: '',
+    display_name: '',
+    gender: '',
+    age_band: '',
+    signup_provider: '',
+  });
 }
 
 /**
@@ -1291,70 +902,22 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
 export async function withdrawAnonymizeUserProfileByFirebaseUid(firebaseUid: string): Promise<void> {
   const uid = firebaseUid.trim();
   if (!uid) throw new Error('Firebase UID가 없습니다.');
-  const db = getFirebaseFirestore();
-  const qs = await getDocs(query(collection(db, USERS_COLLECTION), where('firebaseUid', '==', uid)));
-  if (qs.empty) return;
-  await Promise.all(
-    qs.docs.map(async (d) => {
-      await updateDoc(
-        d.ref,
-        stripUndefinedDeep({
-          isWithdrawn: true,
-          nickname: WITHDRAWN_NICKNAME,
-          photoUrl: null,
-          phone: null,
-          email: null,
-          displayName: null,
-          signupProvider: null,
-          termsAgreedAt: null,
-          gender: null,
-          ageBand: null,
-          birthYear: null,
-          birthMonth: null,
-          birthDay: null,
-          birthDate: null,
-          preferences: null,
-          blockedKeywords: null,
-          lastLocation: null,
-          favoriteStores: null,
-          isIdentityVerified: null,
-          reportCount: null,
-          blockedUsers: null,
-          pointBalance: null,
-          couponCount: null,
-          billingCustomerId: null,
-          referralCode: null,
-          joinPath: null,
-          appVersion: null,
-          metadata: null,
-          firebaseUid: null,
-          withdrawnAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        }) as Record<string, unknown>,
-      );
-    }),
-  );
+  // 구글/UID 기반 로그인 사용자는 앱 전반(모임 createdBy 등)에서 uid 자체를 사용자 PK로 사용합니다.
+  await withdrawAnonymizeUserProfile(uid);
 }
 
 /** 약관 동의 기록(서버 시각 기준). */
 export async function recordTermsAgreement(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  const dRef = doc(getFirebaseFirestore(), USERS_COLLECTION, id);
-  await updateDoc(
-    dRef,
-    stripUndefinedDeep({
-      termsAgreedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }) as Record<string, unknown>,
-  );
+  await rpcUpsertProfilePayloadWithRetry(id, profilePatchToSupabaseJsonb({ termsAgreedAt: serverTimestamp() }));
 }
 
 /** Firestore `users/{사용자 PK}` 문서를 삭제합니다(탈퇴 마지막 단계). */
 export async function deleteUserProfileDocument(phoneUserId: string): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  await deleteDoc(doc(getFirebaseFirestore(), USERS_COLLECTION, id));
+  throw new Error('[profiles] Firestore `users` 문서 삭제는 더 이상 지원하지 않습니다.');
 }
 
 export async function getUserProfilesForIds(phoneUserIds: string[]): Promise<Map<string, UserProfile>> {
