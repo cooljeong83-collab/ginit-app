@@ -14,13 +14,7 @@
  * 참가자만 쓰기·읽기를 엄격히 제한하려면 Cloud Function으로 검증하거나,
  * `participantIds` 배열과 토큰 클레임을 맞춰 규칙을 작성하세요.
  *
- * Storage(채팅 이미지) 예시 — 앱은 전화 로그인 시 **익명 Firebase Auth**로 토큰을 받으므로 `request.auth`가 채워집니다.
- * ```
- * match /meetings/{meetingId}/chatImages/{fileName} {
- *   allow read: if request.auth != null;
- *   allow write: if request.auth != null && request.resource.size < 5 * 1024 * 1024;
- * }
- * ```
+ * 채팅 이미지는 **Supabase Storage** 버킷 `meeting_chat` 에 저장합니다(`0021_meeting_chat_storage.sql`).
  */
 import * as ImageManipulator from 'expo-image-manipulator';
 import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
@@ -39,10 +33,11 @@ import {
   type Unsubscribe,
   writeBatch,
 } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, listAll, ref } from 'firebase/storage';
-
-import { ensureFirebaseAuthUserForStorage, getFirebaseStorage } from '@/src/lib/firebase';
-import { uploadJpegBytesToFirebaseStorage } from '@/src/lib/firebase-storage-jpeg-upload';
+import { supabase } from '@/src/lib/supabase';
+import {
+  SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
+  uploadJpegBase64ToSupabasePublicBucket,
+} from '@/src/lib/supabase-storage-upload';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirestoreDb, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -220,29 +215,33 @@ export async function deleteMeetingChatMessagesFromSender(meetingId: string, use
   }
 }
 
-/** 모임 채팅 이미지 Storage 경로(`meetings/{id}/chatImages/…`)를 비웁니다. 실패는 무시합니다. */
+/** 모임 채팅 이미지 Supabase 경로(`meetings/{id}/chatImages/…`)를 비웁니다. 실패는 무시합니다. */
 export async function deleteMeetingChatImagesStorageBestEffort(meetingId: string): Promise<void> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) return;
+  const prefix = `meetings/${mid}/chatImages`;
+  const bucket = supabase.storage.from(SUPABASE_STORAGE_BUCKET_MEETING_CHAT);
   try {
-    await ensureFirebaseAuthUserForStorage();
-  } catch {
-    return;
-  }
-  try {
-    const folder = ref(getFirebaseStorage(), `meetings/${mid}/chatImages`);
-    const { items, prefixes } = await listAll(folder);
-    for (const p of prefixes) {
-      const nested = await listAll(p);
-      for (const it of nested.items) {
-        await deleteObject(it).catch(() => {});
+    const paths: string[] = [];
+    const pageSize = 200;
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await bucket.list(prefix, { limit: pageSize, offset });
+      if (error || !data?.length) break;
+      for (const f of data) {
+        const name = typeof f.name === 'string' ? f.name.trim() : '';
+        if (!name) continue;
+        paths.push(`${prefix}/${name}`);
       }
+      if (data.length < pageSize) break;
+      offset += pageSize;
     }
-    for (const it of items) {
-      await deleteObject(it).catch(() => {});
+    const batch = 100;
+    for (let i = 0; i < paths.length; i += batch) {
+      await bucket.remove(paths.slice(i, i + batch)).catch(() => {});
     }
   } catch {
-    /* 규칙·권한으로 목록 불가 시 생략 */
+    /* 목록·삭제 불가 시 생략 */
   }
 }
 
@@ -282,16 +281,6 @@ export async function sendMeetingChatTextMessage(
 
 const CHAT_IMAGE_MAX_WIDTH = 1280;
 const CHAT_IMAGE_JPEG_QUALITY = 0.68;
-
-/** JPEG 바이트로 변환 후 `uploadBytes`(Firebase Storage JS SDK)로 업로드합니다. */
-function base64ToUint8Array(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) {
-    out[i] = bin.charCodeAt(i);
-  }
-  return out;
-}
 
 export type SendMeetingChatImageExtras = {
   /** 이미지 아래에 붙는 짧은 설명(선택) */
@@ -338,13 +327,14 @@ export async function sendMeetingChatImageMessage(
   if (!base64?.length) {
     throw new Error('압축된 이미지를 읽지 못했습니다. 다시 선택해 주세요.');
   }
-  const bytes = base64ToUint8Array(base64);
 
   const rand = Math.random().toString(36).slice(2, 10);
   const objectPath = `meetings/${mid}/chatImages/${Date.now()}_${rand}.jpg`;
-  const storageRef = ref(getFirebaseStorage(), objectPath);
-  await uploadJpegBytesToFirebaseStorage(objectPath, bytes);
-  const imageUrl = await getDownloadURL(storageRef);
+  const imageUrl = await uploadJpegBase64ToSupabasePublicBucket(
+    SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
+    objectPath,
+    base64,
+  );
 
   const msgRef = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
   await addDoc(

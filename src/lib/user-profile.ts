@@ -355,7 +355,8 @@ export function meetingDemographicsIncomplete(
 ): boolean {
   if (!p || p.isWithdrawn === true) return false;
   if (!isDemographicsIncomplete(p)) return false;
-  if (p.signupProvider === 'phone_otp') return false;
+  // phone_otp: 생년·성별 미입력이면 SNS와 동일하게 보완 대상(인증 시트·탭 게이트).
+  if (p.signupProvider === 'phone_otp') return true;
   if (p.signupProvider === 'google_sns') return true;
   const id = appUserId?.trim() ?? '';
   return id.includes('@');

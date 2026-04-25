@@ -33,6 +33,8 @@ alter table public.profiles
 -- (0001 hybrid_init 에서 unique 로 정의된 경우가 대부분입니다.)
 
 -- ─── 2) RPC: 최소 생성 + 페이로드 갱신(탈퇴 포함) + 공개 조회 ─────────────────
+-- ensure_profile_minimal 은 public.get_policy_numeric('trust','default_score',…) 를 씁니다.
+-- (app_policies v2 / get_policy_numeric 가 없으면 먼저 해당 마이그레이션을 적용하세요.)
 
 create or replace function public.ensure_profile_minimal(p_app_user_id text)
 returns void
@@ -42,12 +44,18 @@ set search_path = public
 as $$
 declare
   v_nick text := '모임친구' || substr(md5(random()::text), 1, 6);
+  v_initial_trust int;
+  v_raw numeric;
 begin
   if p_app_user_id is null or trim(p_app_user_id) = '' then
     raise exception 'app_user_id required';
   end if;
-  insert into public.profiles (app_user_id, nickname)
-  values (trim(p_app_user_id), v_nick)
+
+  v_raw := public.get_policy_numeric('trust', 'default_score', 100::numeric);
+  v_initial_trust := least(100, greatest(0, round(coalesce(v_raw, 100::numeric))::int));
+
+  insert into public.profiles (app_user_id, nickname, g_trust)
+  values (trim(p_app_user_id), v_nick, v_initial_trust)
   on conflict (app_user_id) do nothing;
 end;
 $$;

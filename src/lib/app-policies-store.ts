@@ -18,6 +18,7 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
   meeting: { overlap_hours: 3 },
   xp: { meeting_confirm: 50, meeting_vote: 20 },
   trust: {
+    /** 서버 `ensure_profile_minimal`이 신규 `g_trust`에 사용(폴백). */
     default_score: 100,
     penalty_noshow: { xp: -100, trust: -50, restricted_below: 30 },
     penalty_late_cancel: { xp: -30, trust: -10 },

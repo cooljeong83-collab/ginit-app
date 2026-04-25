@@ -57,52 +57,60 @@
 
 ---
 
-## 모임·모임 생성 UI — 디자인 시스템 (코드 기준)
+# Ginit UI Design Standards: Warm-Light Glassmorphism
 
-모임 상세(`app/meeting/[id].tsx`), 모임 등록/상세 마법사(`app/create/details.tsx`), 장소 검색 등은 **“Warm & Human Gathering” 시안 톤**의 글래스·밝은 서피스를 공유한다. 신규·수정 시 아래를 우선 따른다.
+모든 UI 작업 시 "Warm & Human Gathering" 시안 톤과 아래의 디자인 규약을 엄격히 준수한다.
 
-### 1. 토큰 소스 (하드코딩 지양)
-- **1순위**: `constants/ginit-theme.ts`의 `GinitTheme` — `colors`, `typography`, `spacing`, `radius`, `shadow`, `blur`, `glass`, `glassModal`, `fixedGlassCard`.
-- **공통 레이아웃·폼**: `constants/GinitStyles.ts`의 `GinitStyles` (스크린 루트, 글래스 카드, 상단 바, `primaryButton` + `LinearGradient` 래핑 패턴 등).
-- 배경·루트: 앱 셸과 동일하게 **`GinitTheme.colors.bg` (`#F6FAFF`)** 계열을 기본으로 한다 (`app/_layout.tsx`의 `contentStyle`과 정합).
+## 1. Core Principles
+- **Style Name**: 온기 있는 라이트 글래스 (Warm-Light Glassmorphism)
+- **Concept**: 차가운 미래형 글래스가 아닌, 햇살이 비치는 깨끗한 유리창 같은 따뜻함과 부드러운 연결성 강조.
+- **Rule**: 하드코딩 금지. 모든 수치와 색상은 지정된 토큰 소스에서 가져온다.
 
-### 2. 색·브랜드
-- **텍스트**: 본문 `colors.text` / `#0F172A`, 보조 `textSub`·`textMuted` (슬레이트 계열). 모임 상세 일부 레거시 블록은 `#1A1A1A` 등이 섞여 있으나, **신규는 `GinitTheme.colors.text`로 통일**하는 방향을 선호한다.
-- **액션·강조**: `primary` `#1F2A44`, 액센트 민트 `accent` `#86D3B7`, 포인트 옐로 `accent2` `#F4C84A`.
-- **주요 CTA**: `LinearGradient`에 **`GinitTheme.colors.ctaGradient`** (`#86D3B7` → `#73C7FF`) 또는 `brandGradient` + 보조색 조합(모임 생성 음성·AI 보더 등)을 사용한다.
-- **경고·게이트**: SNS/인구통계 게이트 등은 **호박색 반투명 배경 + 진한 브라운 텍스트** 패턴(`details.tsx`의 `snsGateBanner` 참고). 일반 에러는 `colors.danger` 계열.
+## 2. Token & Resource Reference
+- **Theme Source**: `constants/ginit-theme.ts`의 `GinitTheme`
+  - `colors`, `typography`, `spacing`, `radius`, `shadow`, `blur`, `glass`, `glassModal`, `fixedGlassCard` 사용.
+- **Global Styles**: `constants/GinitStyles.ts`의 `GinitStyles`
+  - 스크린 루트, 글래스 카드, 상단 바, `primaryButton` 패턴 사용.
+- **Root Background**: `GinitTheme.colors.bg` (`#F6FAFF`)를 기본으로 하며, 앱 셸(`app/_layout.tsx`)과 정합성을 유지한다.
 
-### 3. 타이포그래피
-- 제목·섹션: **`fontWeight` 800–900**, 제목에 **`letterSpacing` 음수**(-0.2 ~ -0.35)로 밀도감을 준다 (`GinitTheme.typography`와 생성 화면 `sectionTitle`/`screenTitle` 패턴).
-- 본문: 15–17pt, `600`–`700` 중심. 캡션·칩: 11–13pt.
+## 3. Color & Brand Identity
+- **Text**: 
+  - 본문: `colors.text` (`#0F172A`)
+  - 보조: `textSub`, `textMuted` (Slate 계열)
+  - 레거시 헥스 코드(`#1A1A1A`) 발견 시 `GinitTheme.colors.text`로 치환.
+- **Action/Highlight**:
+  - Primary: `#1F2A44` (네이비 계열)
+  - Accent Mint: `#86D3B7` (민트)
+  - Point Yellow: `#F4C84A` (옐로)
+- **Gradients**:
+  - 주요 CTA: `LinearGradient` 래퍼에 `GinitTheme.colors.ctaGradient` (`#86D3B7` → `#73C7FF`) 적용.
 
-### 4. 레이아웃·간격
-- 수직·수평 간격은 **`GinitTheme.spacing` (xs/sm/md/lg/xl, 8pt 그리드)** 를 우선한다. 모임 생성 `safeArea`는 `paddingHorizontal: spacing.md` 등 토큰과 맞춘다.
-- 카드 **모서리**: 카드·패널 **`GinitTheme.radius.card` (22)** , 버튼 **`radius.button` (16)** , 알약형 **`pill`**.
+## 4. Typography & Layout
+- **Headings**: `fontWeight: "800"`~`"900"`, `letterSpacing: -0.2`~`-0.35` (밀도감 강조).
+- **Body**: 15–17pt, `fontWeight: "600"`~`"700"` 중심.
+- **Spacing**: 8pt 그리드 기반 `GinitTheme.spacing` (xs, sm, md, lg, xl) 사용.
+- **Radius**:
+  - 카드/패널: `GinitTheme.radius.card` (22)
+  - 버튼: `radius.button` (16)
+  - 칩/뱃지: `pill` (완전 곡면)
 
-### 5. 서피스·글래스
-- **일반 카드**: 흰/반투명 서피스 + `colors.border` 헤어라인, **`GinitTheme.shadow.card`** 로 부유감.
-- **모달·장소 검색·등록 상세**: `GinitTheme.glassModal` (veil, inputFill, blurIntensity) + 필요 시 `expo-blur` `intensity={glassModal.blurIntensity}`.
-- **등록 베이스 카드(다크모드와 무관하게 밝게 유지)**: **`GinitStyles.fixedGlassCard` / `GinitTheme.fixedGlassCard`** 를 사용한다.
+## 5. Surface & Glass Effects
+- **Standard Card**: 흰색/반투명 서피스 + `colors.border` 헤어라인 + `GinitTheme.shadow.card` (부유감).
+- **Modal/Search**: `GinitTheme.glassModal` 토큰과 `expo-blur` (`intensity={glassModal.blurIntensity}`) 사용.
+- **Fixed Glass**: 다크모드와 무관하게 밝게 유지되는 섹션은 `GinitStyles.fixedGlassCard` 사용.
 
-### 6. 모임 상세 화면 패턴 (`meeting/[id].tsx`)
-- 루트: `ScreenShell` + **`backgroundColor: GinitTheme.colors.bg`**.
-- 상단: 중앙 정렬 **`topTitle` 17pt / 700`**, 뒤로는 `Ionicons` + `colors.text`.
-- **상태 뱃지**: 확정/진행/종료 등 **고정 헥스** (`#16A34A`, `#FACC15`, `#171717`) + 짧은 라벨; 텍스트 온 옐로는 `#422006`.
-- **콘텐츠 카드**: 흰 배경 `borderRadius` 18–20, 얕은 `shadowColor: rgba(15,23,42,0.12)` — 정보 블록은 **섹션별 카드 + 아이콘(아웃라인) + `colors.primary` 틴트** 패턴.
-- **미니 뱃지·메타**: 연한 파스텔 배경(`rgba(115,199,255,0.18)` 등) + 작은 굵은 라벨 — 성별/인원 등 구분에 재사용.
-- **주요 버튼**: CTA는 **`LinearGradient` + `ctaGradient`**, `Pressable` `pressed` 시 **opacity ~0.88** 정도.
+## 6. Specific Screen Patterns
+- **Meeting Detail (`app/meeting/[id].tsx`)**:
+  - 중앙 정렬 헤더 (17pt/700), 아웃라인 아이콘 + `colors.primary` 틴트 조합.
+  - 상태 뱃지: 고정 헥스(`진행:#FACC15`, `확정:#16A34A`, `종료:#171717`) 사용.
+- **Creation Wizard (`app/create/details.tsx`)**:
+  - `sectionTitle` + `sectionHint`(muted) 한 줄 설명 패턴 유지.
+  - AI 보더: `aiQuickInitBorder` (2px 그라데이션) → 내부 `surface` 중첩 라운드 구조.
 
-### 7. 모임 생성·등록 마법사 패턴 (`create/details.tsx`)
-- **상단 바**: 좌 `backLink`(primary 색 링크 스타일), 중앙 `screenTitle` 18/900, 우측 여백 밸런스.
-- **섹션**: `sectionTitle` + `sectionHint`(muted)로 **제목 + 한 줄 설명**을 고정한다.
-- **AI/자연어 일정**: `aiQuickInitBorder`에 **그라데이션 보더(2px)** → 내부 `surface` + `border` 인 **중첩 라운드** (“유리 칩” 느낌).
-- **음성 입력**: `VoiceWaveform` + `mic` 아이콘은 **`colors.primary`**, 로딩 스피너 동일.
+## 7. Interaction & Accessibility
+- **Feedback**: 눌림 효과는 `opacity: 0.7`~`0.88` 범위 내에서 구현 (과도한 스케일 변형 지양).
+- **Accessibility**: 주요 버튼에 `accessibilityRole="button"` 및 명확한 `accessibilityLabel` 부여.
 
-### 8. 상호작용·접근성
-- 눌림: **`opacity` 0.7–0.88** 또는 `pressed && { opacity }` — 과한 스케일 변형은 쓰지 않는다.
-- 주요 액션 버튼은 **`accessibilityRole="button"`** 및 `accessibilityLabel`을 유지한다.
-
-### 9. 작업 시 주의 (기존 `.cursorrules`와 합치기)
-- **요청 없는 여백·폰트·색 변경 금지** 규칙이 우선이다. 모임 UI를 건드릴 때는 **동일 파일 내 기존 토큰·수치를 복제**하지 말고, 위 토큰(`GinitTheme` / `GinitStyles`)으로 **치환·확장**하는 편이 낫다.
-- 한 화면 안에서 **배경만 토큰·카드만 로컬 헥스**처럼 이질감이 나지 않게, 새 블록은 가능한 **`colors.bg` / `surface` / `border`** 삼총사로 맞춘다.
+## 8. Development Constraints
+- 기존 파일의 토큰/수치를 단순히 복제하지 말고, 항상 `GinitTheme` 토큰으로 치환하여 확장성을 확보한다.
+- 배경과 카드의 이질감을 방지하기 위해 `colors.bg` / `surface` / `border` 삼총사 규칙을 엄수한다.

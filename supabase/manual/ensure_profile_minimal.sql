@@ -1,5 +1,6 @@
 -- =============================================================================
 -- Supabase Dashboard → SQL Editor 에서 전체를 붙여넣고 Run 하세요.
+-- ensure_profile_minimal 은 get_policy_numeric('trust','default_score') 가 필요합니다(0019+).
 -- 오류 예:
 --   could not find the function public.ensure_profile_minimal(p_app_user_id) in the schema cache
 --   could not find the function public.upsert_profile_payload(p_app_user_id, p_fields) in the schema cache
@@ -18,12 +19,18 @@ set search_path = public
 as $$
 declare
   v_nick text := '모임친구' || substr(md5(random()::text), 1, 6);
+  v_initial_trust int;
+  v_raw numeric;
 begin
   if p_app_user_id is null or trim(p_app_user_id) = '' then
     raise exception 'app_user_id required';
   end if;
-  insert into public.profiles (app_user_id, nickname)
-  values (trim(p_app_user_id), v_nick)
+
+  v_raw := public.get_policy_numeric('trust', 'default_score', 100::numeric);
+  v_initial_trust := least(100, greatest(0, round(coalesce(v_raw, 100::numeric))::int));
+
+  insert into public.profiles (app_user_id, nickname, g_trust)
+  values (trim(p_app_user_id), v_nick, v_initial_trust)
   on conflict (app_user_id) do nothing;
 end;
 $$;

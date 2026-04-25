@@ -1,22 +1,14 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
-import { getDownloadURL, ref } from 'firebase/storage';
 
-import { getFirebaseStorage } from '@/src/lib/firebase';
 import {
   storageSafeUserFolderSegment,
-  uploadJpegBytesToFirebaseStorage,
-} from '@/src/lib/firebase-storage-jpeg-upload';
+  SUPABASE_STORAGE_BUCKET_AVATARS,
+  uploadJpegBase64ToSupabasePublicBucket,
+} from '@/src/lib/supabase-storage-upload';
 
 const PROFILE_PHOTO_MAX_WIDTH = 768;
 const PROFILE_PHOTO_JPEG_QUALITY = 0.72;
-
-function base64ToUint8Array(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
-  return out;
-}
 
 export async function uploadProfilePhoto(params: {
   userId: string;
@@ -61,12 +53,9 @@ export async function uploadProfilePhoto(params: {
 
   const base64 = await readAsStringAsync(manipulated.uri, { encoding: EncodingType.Base64 });
   if (!base64?.length) throw new Error('이미지를 읽지 못했습니다. 다시 선택해 주세요.');
-  const bytes = base64ToUint8Array(base64);
 
   const rand = Math.random().toString(36).slice(2, 10);
   const folder = storageSafeUserFolderSegment(uid);
   const objectPath = `users/${folder}/profile_${Date.now()}_${rand}.jpg`;
-  const storageRef = ref(getFirebaseStorage(), objectPath);
-  await uploadJpegBytesToFirebaseStorage(objectPath, bytes);
-  return await getDownloadURL(storageRef);
+  return uploadJpegBase64ToSupabasePublicBucket(SUPABASE_STORAGE_BUCKET_AVATARS, objectPath, base64);
 }
