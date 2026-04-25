@@ -29,7 +29,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { deleteFirebaseAuthUserBestEffort, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
+import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -41,8 +41,8 @@ import {
   hasTermsAgreementRecorded,
   isDemographicsIncomplete,
   isMeetingServiceComplianceComplete,
-  meetingDemographicsIncomplete,
   isUserPhoneVerified,
+  meetingDemographicsIncomplete,
   updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
@@ -157,8 +157,37 @@ export default function ProfileEditScreen() {
       try {
         const p = await ensureUserProfile(profilePk);
         if (!alive) return;
-        setTermsConsentChecked(hasTermsAgreementRecorded(p));
-        setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
+        const complete = isMeetingServiceComplianceComplete(p, profilePk);
+        setMeetingAuthComplete(complete);
+        // 완료 상태면 체크가 항상 보이도록(terms_agreed_at 누락 등 예외에도 잠금 UI 유지)
+        setTermsConsentChecked(complete ? true : hasTermsAgreementRecorded(p));
+
+        // 인증 팝업 진입 시: 이미 저장된 정보를 state에 다시 세팅(로그아웃/재로그인 후에도 잠금 유지)
+        setIsPhoneVerified(isUserPhoneVerified(p));
+        const phone = p.phone?.trim();
+        const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
+        const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
+        const phoneDisplay =
+          phoneDigits.length <= 3
+            ? phoneDigits
+            : phoneDigits.length <= 7
+              ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
+              : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
+        setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
+        setPhoneField(phoneDisplay);
+
+        const gRaw = p.gender?.trim() ?? '';
+        const gNorm =
+          gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
+        setGenderDemo(gNorm);
+
+        const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+        const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+        const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+        if (y) {
+          // month/day가 비어 있어도 저장된 year는 반드시 표시합니다.
+          setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
+        }
       } catch {
         if (!alive) return;
         setTermsConsentChecked(false);
@@ -396,8 +425,10 @@ export default function ProfileEditScreen() {
       ) {
         compliancePatch.signupProvider = 'google_sns';
       }
-      if (isDemographicsIncomplete(p0) && genderDemo) {
+      if (genderDemo) {
         compliancePatch.gender = genderDemo;
+      }
+      if (birthDemo.year && birthDemo.month && birthDemo.day) {
         compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
       }
       await updateUserProfile(profilePk, compliancePatch);
@@ -467,7 +498,11 @@ export default function ProfileEditScreen() {
         Alert.alert('탈퇴를 완료하지 못했어요', res.message);
         return;
       }
-      await deleteFirebaseAuthUserBestEffort();
+      const authDel = await deleteFirebaseAuthUserStrict();
+      if (!authDel.ok) {
+        Alert.alert('탈퇴를 완료하지 못했어요', authDel.message);
+        return;
+      }
       await signOutSession();
       await wipeLocalAppData();
       const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
@@ -590,242 +625,7 @@ export default function ProfileEditScreen() {
               <GinitButton title={profileBusy ? '저장 중…' : '변경 사항 저장'} variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
             </View>
           </GinitCard>
-
-          <GinitCard appearance="light" style={styles.card}>
-            <View style={styles.complianceHeader}>
-              <View style={styles.complianceIconWrap}>
-                <Ionicons name="shield-checkmark-outline" size={22} color={GinitTheme.colors.primary} />
-              </View>
-              <View style={styles.complianceTextCol}>
-                <Text style={styles.complianceTitle}>모임 이용 인증</Text>
-                <Text style={styles.complianceSub}>모임 만들기·참여를 위해 동의와 전화 인증이 필요해요.</Text>
-              </View>
-            </View>
-            <GinitButton
-              title="인증·정보 등록 열기"
-              variant="secondary"
-              onPress={() => setAuthSheetVisible(true)}
-              disabled={complianceBusy || otpBusy || profileBusy}
-            />
-          </GinitCard>
-
-          <GinitCard appearance="light" style={styles.card}>
-            <Text style={styles.sectionEyebrow}>계정</Text>
-            <GinitButton title="로그아웃" variant="secondary" onPress={onSignOut} disabled={busy || deleteBusy} />
-            <View style={styles.divider} />
-            <Pressable
-              onPress={onRequestDeleteAccount}
-              disabled={deleteBusy || profileBusy}
-              style={({ pressed }) => [styles.deleteAccountBtn, pressed && styles.deleteAccountBtnPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="회원 탈퇴">
-              <Ionicons name="warning-outline" size={18} color={GinitTheme.colors.danger} style={styles.deleteIcon} />
-              <Text style={styles.deleteAccountLabel}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
-            </Pressable>
-          </GinitCard>
         </ScrollView>
-
-        <Modal
-          visible={authSheetVisible}
-          animationType="fade"
-          transparent
-          onRequestClose={() => {
-            if (!complianceBusy) setAuthSheetVisible(false);
-          }}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetKbWrap}>
-            <View style={styles.sheetRoot}>
-              <Pressable
-                style={styles.sheetBackdropFill}
-                onPress={() => {
-                  if (!complianceBusy) setAuthSheetVisible(false);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="닫기"
-              />
-              <View style={styles.sheetCenterWrap} pointerEvents="box-none">
-                <View style={[styles.sheetPanel, { maxHeight: authSheetLayout.panelMax, paddingBottom: authSheetLayout.panelPadBottom }]}>
-                  <ScrollView
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    style={{ maxHeight: authSheetLayout.scrollMax }}
-                    contentContainerStyle={styles.sheetScrollContent}>
-                    <View style={styles.sheetGrabber} accessibilityElementsHidden />
-                    <Text style={styles.sheetTitle}>서비스 이용 인증</Text>
-                    <Text style={styles.sheetLead}>
-                      {meetingAuthComplete
-                        ? '이용 인증이 완료된 계정이에요. 아래에서 등록된 정보를 확인할 수 있어요.'
-                        : '모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.'}
-                    </Text>
-
-                    <Pressable
-                      onPress={() =>
-                        !complianceBusy && !meetingAuthComplete && setTermsConsentChecked(!termsConsentChecked)
-                      }
-                      disabled={complianceBusy || meetingAuthComplete}
-                      style={({ pressed }) => [
-                        styles.termsRow,
-                        meetingAuthComplete && styles.termsRowLocked,
-                        pressed && !complianceBusy && !meetingAuthComplete && styles.pressed,
-                      ]}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{
-                        checked: termsConsentChecked || meetingAuthComplete,
-                        disabled: meetingAuthComplete,
-                      }}
-                      accessibilityLabel="모임 이용 정보 수집 및 이용 동의">
-                      <View
-                        style={[
-                          styles.termsBox,
-                          termsConsentChecked || meetingAuthComplete ? styles.termsBoxChecked : styles.termsBoxUnchecked,
-                        ]}>
-                        {termsConsentChecked || meetingAuthComplete ? <Text style={styles.termsCheckMark}>✓</Text> : null}
-                      </View>
-                      <Text style={[styles.termsLabel, meetingAuthComplete && styles.termsLabelLocked]}>
-                        모임 이용 정보 수집 및 이용 동의 (필수)
-                      </Text>
-                    </Pressable>
-
-                    <>
-                      <Text style={[styles.label, { marginTop: 14 }]}>성별 (필수)</Text>
-                      <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
-                        {(
-                          [
-                            { code: 'MALE' as const, label: '남자' },
-                            { code: 'FEMALE' as const, label: '여자' },
-                          ] as const
-                        ).map(({ code, label }) => {
-                          const selected = genderDemo === code;
-                          return (
-                            <Pressable
-                              key={code}
-                              disabled={profileBusy || complianceBusy || meetingAuthComplete}
-                              onPress={() => setGenderDemo(code)}
-                              style={({ pressed }) => [
-                                authFormStyles.genderBinaryBtn,
-                                selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
-                                pressed &&
-                                  !(profileBusy || complianceBusy || meetingAuthComplete) &&
-                                  authFormStyles.pressed,
-                              ]}
-                              accessibilityRole="radio"
-                              accessibilityState={{ selected, checked: selected }}
-                              accessibilityLabel={label}>
-                              <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
-                                {label}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                      <Text style={[styles.label, { marginTop: 14 }]}>생년월일 (필수)</Text>
-                      <BirthdateWheel
-                        value={birthDemo}
-                        onChange={setBirthDemo}
-                        disabled={profileBusy || complianceBusy || meetingAuthComplete}
-                      />
-                    </>
-
-                    <Text style={[styles.label, { marginTop: 16 }]}>전화번호 인증 (필수)</Text>
-                    {isPhoneVerified ? (
-                      <View style={styles.phoneVerifiedBanner} accessibilityRole="text">
-                        <Text style={styles.phoneVerifiedBadge}>인증 완료</Text>
-                        <Text style={styles.phoneVerifiedText}>
-                          휴대전화 인증이 완료되었어요{verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}
-                        </Text>
-                      </View>
-                    ) : (
-                      <>
-                        <Text style={styles.subHint}>
-                          {isPhoneVerified
-                            ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}`
-                            : '아직 인증되지 않았어요.'}
-                        </Text>
-
-                        <View style={styles.otpBlock}>
-                          <Text style={styles.otpLabel}>전화번호</Text>
-                          <View style={styles.otpRow}>
-                            <TextInput
-                              value={phoneField}
-                              onChangeText={(t) => {
-                                const digits = t.replace(/\\D/g, '').slice(0, 11);
-                                const v =
-                                  digits.length <= 3
-                                    ? digits
-                                    : digits.length <= 7
-                                      ? `${digits.slice(0, 3)}-${digits.slice(3)}`
-                                      : `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-                                setPhoneField(v);
-                              }}
-                              placeholder="010-1234-5678"
-                              placeholderTextColor="#94a3b8"
-                              style={styles.otpPhoneInput}
-                              keyboardType="phone-pad"
-                              inputMode="tel"
-                              editable={!otpBusy && !profileBusy && !complianceBusy && !isPhoneVerified}
-                            />
-                            <Pressable
-                              onPress={() => void onSendOtp()}
-                              disabled={!canSendOtp || isPhoneVerified}
-                              style={({ pressed }) => [
-                                styles.otpSendBtn,
-                                (!canSendOtp || isPhoneVerified) && styles.otpBtnDisabled,
-                                pressed && canSendOtp && !isPhoneVerified && styles.pressed,
-                              ]}
-                              accessibilityRole="button"
-                              accessibilityLabel="인증번호 받기">
-                              <Text style={styles.otpSendText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
-                            </Pressable>
-                          </View>
-
-                          {otpVerificationId ? (
-                            <View style={[styles.otpRow, { marginTop: 8 }]}>
-                              <TextInput
-                                value={otpCode}
-                                onChangeText={(t) => setOtpCode(t.replace(/\\D/g, '').slice(0, 6))}
-                                placeholder="인증번호 6자리"
-                                placeholderTextColor="#94a3b8"
-                                style={styles.otpCodeInput}
-                                keyboardType="number-pad"
-                                inputMode="numeric"
-                                textContentType="oneTimeCode"
-                                editable={!otpBusy && !profileBusy && !complianceBusy}
-                              />
-                              <Pressable
-                                onPress={() => void onConfirmOtp()}
-                                disabled={!canConfirmOtp}
-                                style={({ pressed }) => [
-                                  styles.otpConfirmBtn,
-                                  !canConfirmOtp && styles.otpBtnDisabled,
-                                  pressed && canConfirmOtp && styles.pressed,
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel="인증 확인">
-                                <Text style={styles.otpConfirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
-                              </Pressable>
-                            </View>
-                          ) : null}
-
-                          {otpError ? <Text style={styles.otpError}>{otpError}</Text> : null}
-                        </View>
-                      </>
-                    )}
-
-                    <GinitButton
-                      title={
-                        meetingAuthComplete ? '닫기' : complianceBusy ? '저장 중…' : '인증 및 정보 저장'
-                      }
-                      variant="primary"
-                      onPress={() =>
-                        meetingAuthComplete ? setAuthSheetVisible(false) : void onSubmitMeetingCompliance()
-                      }
-                      disabled={meetingAuthComplete ? complianceBusy : complianceBusy || otpBusy || profileBusy}
-                    />
-                  </ScrollView>
-                </View>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
       </SafeAreaView>
     </ScreenShell>
   );

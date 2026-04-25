@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteAsync, cacheDirectory } from 'expo-file-system/legacy';
 import { Image } from 'expo-image';
 import { deleteUser } from 'firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
 
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -84,16 +85,55 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
   return { ok: true };
 }
 
+function humanizeAuthDeleteError(e: unknown): string {
+  const code =
+    typeof e === 'object' && e !== null && 'code' in e ? String((e as { code?: unknown }).code) : '';
+  const message = e instanceof Error ? e.message : String(e);
+  const hay = `${code} ${message}`.toLowerCase();
+  if (hay.includes('requires-recent-login')) {
+    return '보안을 위해 최근 로그인 확인이 필요합니다.\n로그아웃 후 다시 로그인한 뒤, 회원 탈퇴를 다시 시도해 주세요.';
+  }
+  return message || 'Firebase 인증 계정 삭제에 실패했습니다.';
+}
+
+/**
+ * Firebase Auth 인증 정보를 삭제합니다.
+ * - JS(firebase/auth)와 RN Firebase(@react-native-firebase/auth) 세션이 공존할 수 있어 둘 다 시도합니다.
+ * - 실패 시 ok:false 로 반환해서 호출부에서 탈퇴를 중단할 수 있게 합니다.
+ */
+export async function deleteFirebaseAuthUserStrict(): Promise<AccountDeletionResult> {
+  let lastErr: unknown = null;
+  let attempted = false;
+
+  try {
+    const jsUser = getFirebaseAuth().currentUser;
+    if (jsUser) {
+      attempted = true;
+      await deleteUser(jsUser);
+    }
+  } catch (e) {
+    lastErr = e;
+  }
+
+  try {
+    const rnUser = getAuth().currentUser;
+    if (rnUser) {
+      attempted = true;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      await (rnUser as unknown as { delete: () => Promise<void> }).delete();
+    }
+  } catch (e) {
+    lastErr = lastErr ?? e;
+  }
+
+  if (lastErr) return { ok: false, message: humanizeAuthDeleteError(lastErr) };
+  // 세션이 없으면 서버 익명화 후 signOut으로 충분합니다.
+  return { ok: true };
+}
+
 /** Firebase Auth 현재 사용자가 있으면 삭제합니다(익명·일반). 실패는 무시합니다. */
 export async function deleteFirebaseAuthUserBestEffort(): Promise<void> {
-  try {
-    const u = getFirebaseAuth().currentUser;
-    if (u) {
-      await deleteUser(u);
-    }
-  } catch {
-    /* 최근 로그인 필요 등 — 로컬 세션은 별도 정리 */
-  }
+  void (await deleteFirebaseAuthUserStrict());
 }
 
 /** AsyncStorage 전체·이미지 디스크 캐시를 비웁니다. */

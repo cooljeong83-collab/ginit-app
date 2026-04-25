@@ -35,7 +35,7 @@ import {
   type SignUpGenderCode,
 } from '@/src/hooks/useSignUpFlow';
 import {
-  deleteFirebaseAuthUserBestEffort,
+  deleteFirebaseAuthUserStrict,
   purgeUserAccountRemote,
   purgeUserAccountRemoteByFirebaseUid,
   wipeLocalAppData,
@@ -52,7 +52,7 @@ import {
   isProfileRegisterInfoParamOn,
   PROFILE_REGISTER_INFO_QUERY,
 } from '@/src/lib/profile-register-info';
-import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
+import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import {
   ensureUserProfile,
@@ -128,6 +128,7 @@ export default function ProfileTab() {
   const trustDropOpacity = useRef(new Animated.Value(0)).current;
   const trustDropTranslate = useRef(new Animated.Value(0)).current;
   const [trustSectionY, setTrustSectionY] = useState<number | null>(null);
+  const isSignedIn = !!profilePk;
 
   const refreshProfile = useCallback(async () => {
     if (!profilePk) return;
@@ -323,8 +324,37 @@ export default function ProfileTab() {
       try {
         const p = await ensureUserProfile(profilePk);
         if (!alive) return;
-        setTermsConsentChecked(hasTermsAgreementRecorded(p));
-        setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
+        const complete = isMeetingServiceComplianceComplete(p, profilePk);
+        setMeetingAuthComplete(complete);
+        // 완료 상태면 체크가 항상 보이도록(terms_agreed_at 누락 등 예외에도 잠금 UI 유지)
+        setTermsConsentChecked(complete ? true : hasTermsAgreementRecorded(p));
+
+        // 인증 팝업 진입 시: 이미 저장된 정보를 state에 다시 세팅(로그아웃/재로그인 후에도 잠금 유지)
+        setIsPhoneVerified(isUserPhoneVerified(p));
+        const phone = p.phone?.trim();
+        const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
+        const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
+        const phoneDisplay =
+          phoneDigits.length <= 3
+            ? phoneDigits
+            : phoneDigits.length <= 7
+              ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
+              : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
+        setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
+        setPhoneField(phoneDisplay);
+
+        const gRaw = p.gender?.trim() ?? '';
+        const gNorm =
+          gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
+        setGenderDemo(gNorm);
+
+        const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+        const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+        const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+        if (y) {
+          // month/day가 비어 있어도 저장된 year는 반드시 표시합니다.
+          setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
+        }
       } catch {
         if (!alive) return;
         setTermsConsentChecked(false);
@@ -379,12 +409,20 @@ export default function ProfileTab() {
       ) {
         compliancePatch.signupProvider = 'google_sns';
       }
-      if (isDemographicsIncomplete(p0) && genderDemo) {
+      if (genderDemo) {
         compliancePatch.gender = genderDemo;
+      }
+      if (birthDemo.year && birthDemo.month && birthDemo.day) {
         compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
       }
       await updateUserProfile(profilePk, compliancePatch);
-      const p = await ensureUserProfile(profilePk);
+      // 일부 환경에서 RPC 배포 지연/스키마 캐시 문제로 demographic 필드가 반영되지 않는 케이스가 있어,
+      // 저장 직후 한 번 더 확인하고 누락이면 보강 저장합니다.
+      let p = await ensureUserProfile(profilePk);
+      if (!p.gender && genderDemo) {
+        await updateUserProfile(profilePk, { gender: genderDemo });
+        p = await ensureUserProfile(profilePk);
+      }
       const phoneE164 = p.phone?.trim() ?? normalizePhoneUserId(phoneField)?.trim() ?? '';
       if (!phoneE164 || !phoneE164.startsWith('+')) {
         throw new Error('전화번호 정보를 찾지 못했습니다.');
@@ -400,6 +438,21 @@ export default function ProfileTab() {
       });
       if (!sync.ok) {
         Alert.alert('동기화 안내', `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}`);
+      }
+
+      // 서버에 값이 정상인데도 재로그인 후 인증 정보가 사라져 보이는 케이스를 막기 위해,
+      // demographics(성별·생년월일)도 Supabase에 한 번 더 명시적으로 반영합니다.
+      if (genderDemo && birthDemo.year && birthDemo.month && birthDemo.day) {
+        const demoSync = await syncMeetingDemographicsToSupabase({
+          appUserId: profilePk,
+          gender: genderDemo,
+          birthYear: birthDemo.year,
+          birthMonth: birthDemo.month,
+          birthDay: birthDemo.day,
+        });
+        if (!demoSync.ok) {
+          Alert.alert('동기화 안내', `성별/생년월일 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${demoSync.message}`);
+        }
       }
       await refreshProfile();
       setAuthSheetVisible(false);
@@ -522,6 +575,10 @@ export default function ProfileTab() {
 
   // 프로필 편집(닉네임/사진 업로드 등)은 `/profile/edit`에서 수행합니다.
 
+  const onGoLogin = useCallback(() => {
+    router.replace('/login');
+  }, [router]);
+
   const onSignOut = useCallback(async () => {
     setBusy(true);
     try {
@@ -551,7 +608,11 @@ export default function ProfileTab() {
         Alert.alert('탈퇴를 완료하지 못했어요', res.message);
         return;
       }
-      await deleteFirebaseAuthUserBestEffort();
+      const authDel = await deleteFirebaseAuthUserStrict();
+      if (!authDel.ok) {
+        Alert.alert('탈퇴를 완료하지 못했어요', authDel.message);
+        return;
+      }
       await signOutSession();
       await wipeLocalAppData();
       const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
@@ -704,13 +765,81 @@ export default function ProfileTab() {
           </GinitCard>
 
           <Pressable
+            onPress={() => setAuthSheetVisible(true)}
+            disabled={complianceBusy || otpBusy || profileBusy}
+            style={({ pressed }) => [
+              styles.menuRow,
+              (complianceBusy || otpBusy || profileBusy) && styles.menuRowDisabled,
+              pressed && !(complianceBusy || otpBusy || profileBusy) && styles.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="인증 정보 등록">
+            <View style={styles.menuTextCol}>
+              <Text style={styles.menuTitle}>인증 정보 등록</Text>
+              <Text style={[styles.menuSub, meetingAuthComplete ? styles.menuSubOk : styles.menuSubWarn]} numberOfLines={1}>
+                {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
+              </Text>
+            </View>
+            <Text style={styles.menuChevron}>›</Text>
+          </Pressable>
+
+          <Pressable
             onPress={() => router.push('/profile/meeting-history')}
             style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="모임 히스토리">
-            <Text style={styles.menuTitle}>모임 히스토리</Text>
+            <View style={styles.menuTextCol}>
+              <Text style={styles.menuTitle}>모임 히스토리</Text>
+            </View>
             <Text style={styles.menuChevron}>›</Text>
           </Pressable>
+
+          {isSignedIn ? (
+            <>
+              <Pressable
+                onPress={onSignOut}
+                disabled={busy || deleteBusy}
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  (busy || deleteBusy) && styles.menuRowDisabled,
+                  pressed && !(busy || deleteBusy) && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="로그아웃">
+                <View style={styles.menuTextCol}>
+                  <Text style={styles.menuTitle}>로그아웃</Text>
+                </View>
+                <Text style={styles.menuChevron}>›</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={onRequestDeleteAccount}
+                disabled={deleteBusy || profileBusy}
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  (deleteBusy || profileBusy) && styles.menuRowDisabled,
+                  pressed && !(deleteBusy || profileBusy) && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="회원 탈퇴">
+                <View style={styles.menuTextCol}>
+                  <Text style={styles.menuTitleDanger}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
+                </View>
+                <Text style={styles.menuChevronDanger}>›</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable
+              onPress={onGoLogin}
+              style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="로그인">
+              <View style={styles.menuTextCol}>
+                <Text style={styles.menuTitle}>로그인</Text>
+              </View>
+              <Text style={styles.menuChevron}>›</Text>
+            </Pressable>
+          )}
         </ScrollView>
 
         <Modal
@@ -896,16 +1025,14 @@ export default function ProfileTab() {
                   </>
                 )}
 
-                    <GinitButton
-                      title={
-                        meetingAuthComplete ? '닫기' : complianceBusy ? '저장 중…' : '인증 및 정보 저장'
-                      }
-                      variant="primary"
-                      onPress={() =>
-                        meetingAuthComplete ? setAuthSheetVisible(false) : void onSubmitMeetingCompliance()
-                      }
-                      disabled={meetingAuthComplete ? complianceBusy : complianceBusy || otpBusy || profileBusy}
-                    />
+                    {!meetingAuthComplete ? (
+                      <GinitButton
+                        title={complianceBusy ? '저장 중…' : '인증 및 정보 저장'}
+                        variant="primary"
+                        onPress={() => void onSubmitMeetingCompliance()}
+                        disabled={complianceBusy || otpBusy || profileBusy}
+                      />
+                    ) : null}
                   </ScrollView>
                 </View>
               </View>
@@ -1032,7 +1159,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
+    paddingVertical: 11,
     paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1,
@@ -1040,15 +1167,39 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
     marginTop: 12,
   },
+  menuRowDisabled: { opacity: 0.55 },
+  menuTextCol: { flex: 1, minWidth: 0, gap: 2 },
   menuTitle: {
     fontSize: 15,
     fontWeight: '900',
     color: '#0f172a',
   },
+  menuTitleDanger: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#b91c1c',
+  },
+  menuSub: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#64748b',
+  },
+  menuSubOk: {
+    color: '#0f766e',
+  },
+  menuSubWarn: {
+    color: '#b91c1c',
+  },
   menuChevron: {
     fontSize: 28,
     fontWeight: '300',
     color: '#94a3b8',
+    marginLeft: 4,
+  },
+  menuChevronDanger: {
+    fontSize: 28,
+    fontWeight: '300',
+    color: 'rgba(185, 28, 28, 0.7)',
     marginLeft: 4,
   },
   trustInlineSection: {

@@ -105,6 +105,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     android: {
       ...config.android,
+      permissions: Array.from(
+        new Set([
+          ...(((config.android as { permissions?: string[] } | undefined)?.permissions ?? []) as string[]),
+          'WAKE_LOCK',
+        ]),
+      ),
       /** 키보드가 올라올 때 입력창이 가려지지 않도록(채팅 등) — app.json과 동일 권장값 */
       softwareKeyboardLayoutMode: 'resize',
       /** Adaptive icon 캐시 우회: foreground 이미지를 v2로 고정 */

@@ -296,6 +296,15 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
       interests: null,
       bio: null,
       firebaseUid: null,
+      gLevel: null,
+      gXp: null,
+      gTrust: null,
+      penaltyCount: null,
+      isRestricted: null,
+      trustRecoveryStreak: null,
+      trustRecoveryMeetingIds: null,
+      gDna: null,
+      meetingCount: null,
       rankingPoints: null,
       badges: null,
       preferences: null,
@@ -421,9 +430,32 @@ export async function findUserRowByPhoneE164(normalizedPhone: string): Promise<{
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
   // Supabase profiles.phone(E.164)로 app_user_id를 역조회합니다.
-  const { data, error } = await supabase.rpc('resolve_app_user_id_from_phone_e164', { p_phone: phone });
-  if (error) throw new Error(error.message || 'resolve_app_user_id_from_phone_e164 failed');
-  const docId = typeof data === 'string' ? data.trim() : '';
+  // 스키마 캐시 지연/일시적인 PostgREST 오류로 빈 값이 돌아오면 잘못된 PK(전화 PK)로 폴백하면서
+  // "저장은 됐는데 다시 로그인하면 정보가 사라진 것처럼 보이는" 문제가 생길 수 있어 재시도합니다.
+  let docId = '';
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { data, error } = await supabase.rpc('resolve_app_user_id_from_phone_e164', { p_phone: phone });
+    if (!error) {
+      docId = typeof data === 'string' ? data.trim() : '';
+      if (docId) break;
+      lastMessage = 'resolve_app_user_id_from_phone_e164 returned empty';
+      continue;
+    }
+    const msg = error.message?.trim() || 'resolve_app_user_id_from_phone_e164 failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    lastMessage = msg;
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(msg, code);
+    if (!retryable) {
+      throw new Error(msg);
+    }
+  }
+  if (!docId) {
+    // 역조회가 실패하면 null로 처리해서 호출부가 "전화 PK 폴백"으로 새 프로필을 만들지 않게 합니다.
+    return null;
+  }
   if (!docId) return null;
   const profile = await getUserProfile(docId);
   if (!profile) return null;
@@ -467,6 +499,8 @@ export async function reactivateWithdrawnUserForOtpSignup(normalizedPhone: strin
     phone,
     profilePatchToSupabaseJsonb({
       phone,
+      // 탈퇴 후 재가입 시, 예전 인증 완료 시각이 남아 "이미 인증됨"으로 보이지 않게 초기화합니다.
+      phoneVerifiedAt: null,
       isWithdrawn: false,
       withdrawnAt: null,
     }),
@@ -792,13 +826,14 @@ export async function applyGoogleSignupProfile(
       phoneVerifiedAt: patch.phoneVerifiedAt ?? undefined,
       email: patch.email ?? undefined,
       displayName: patch.displayName ?? undefined,
-      gender: patch.gender ?? null,
+      // undefined면 기존 값 유지(로그인/가입 플로우에서 People API 값이 없다고 기존 성별을 지우면 안 됨)
+      gender: patch.gender ?? undefined,
       ageBand: patch.ageBand ?? undefined,
       birthDate: patch.birthDate ?? undefined,
       birthYear: patch.birthYear ?? undefined,
       birthMonth: patch.birthMonth ?? undefined,
       birthDay: patch.birthDay ?? undefined,
-      signupProvider: patch.signupProvider ?? 'google_sns',
+      signupProvider: patch.signupProvider ?? undefined,
       // 재가입/복구 케이스: withdrawn이면 재활성화
       isWithdrawn: false,
       withdrawnAt: null,
@@ -883,14 +918,30 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
   await rpcUpsertProfilePayloadWithRetry(id, {
     is_withdrawn: true,
     nickname: WITHDRAWN_NICKNAME,
-    photo_url: '',
-    phone: '',
+    withdrawn_at: new Date().toISOString(),
+
+    // 개인정보/인증/동의/프로필성 정보는 모두 null 처리합니다.
+    photo_url: null,
+    phone: null,
     phone_verified_at: null,
-    email: '',
-    display_name: '',
-    gender: '',
-    age_band: '',
-    signup_provider: '',
+    email: null,
+    display_name: null,
+    terms_agreed_at: null,
+    gender: null,
+    age_band: null,
+    birth_year: null,
+    birth_month: null,
+    birth_day: null,
+    signup_provider: null,
+    // private 계정 플래그는 운영상 의미가 없으므로 기본값으로 되돌립니다.
+    is_private: false,
+
+    // 게이미피케이션/신뢰/개인화 데이터도 식별 정보에 준하여 초기화합니다.
+    g_level: 1,
+    g_xp: 0,
+    g_trust: 100,
+    g_dna: 'Explorer',
+    meeting_count: 0,
   });
 }
 
