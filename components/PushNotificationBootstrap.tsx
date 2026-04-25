@@ -55,7 +55,7 @@ function navigateFromPushData(
 
 async function markAlarmReadFromPushData(
   data: Record<string, unknown> | undefined,
-  syncMeetingAckFromMeeting: ReturnType<typeof useInAppAlarms>['syncMeetingAckFromMeeting'],
+  markMeetingAlarmsReadByPushTap: ReturnType<typeof useInAppAlarms>['markMeetingAlarmsReadByPushTap'],
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
@@ -71,7 +71,7 @@ async function markAlarmReadFromPushData(
   if (!shouldAckMeeting) return;
   const m = await getMeetingById(meetingId);
   if (!m) return;
-  syncMeetingAckFromMeeting(m);
+  markMeetingAlarmsReadByPushTap(m);
 }
 
 /**
@@ -80,7 +80,7 @@ async function markAlarmReadFromPushData(
 export function PushNotificationBootstrap() {
   const router = useRouter();
   const { userId } = useUserSession();
-  const { syncMeetingAckFromMeeting } = useInAppAlarms();
+  const { markMeetingAlarmsReadByPushTap } = useInAppAlarms();
   const bootHandled = useRef(false);
 
   useEffect(() => {
@@ -132,10 +132,10 @@ export function PushNotificationBootstrap() {
       }
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
       navigateFromPushData(router, data);
-      void markAlarmReadFromPushData(data, syncMeetingAckFromMeeting);
+      void markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap);
     });
     return () => sub.remove();
-  }, [router, syncMeetingAckFromMeeting]);
+  }, [router, markMeetingAlarmsReadByPushTap]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -147,9 +147,9 @@ export function PushNotificationBootstrap() {
       if (last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
       const data = last.notification.request.content.data as Record<string, unknown> | undefined;
       navigateFromPushData(router, data);
-      await markAlarmReadFromPushData(data, syncMeetingAckFromMeeting);
+      await markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap);
     })();
-  }, [router, syncMeetingAckFromMeeting]);
+  }, [router, markMeetingAlarmsReadByPushTap]);
 
   return null;
 }

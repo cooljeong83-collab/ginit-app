@@ -72,6 +72,12 @@ type InAppAlarmsContextValue = {
   markChatReadUpTo: (meetingId: string, messageId: string | undefined) => void;
   /** 모임 상세를 봤을 때 현재 스냅샷을 확인 처리 */
   syncMeetingAckFromMeeting: (meeting: Meeting) => void;
+  /**
+   * 시스템 푸시(알림)를 "탭해서" 상세로 진입한 경우:
+   * - 모임 변경 알람을 읽음 처리(ACK 갱신)
+   * - 호스트 참여/퇴장 누적 알람도 해당 모임에 한해 제거
+   */
+  markMeetingAlarmsReadByPushTap: (meeting: Meeting) => void;
 };
 
 const InAppAlarmsContext = createContext<InAppAlarmsContextValue | null>(null);
@@ -485,6 +491,28 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const markMeetingAlarmsReadByPushTap = useCallback((meeting: Meeting) => {
+    const mid = meeting.id?.trim();
+    if (!mid) return;
+    const fp = meetingChangeFingerprint(meeting);
+    setReadState((p) => ({
+      ...p,
+      meetingAckFingerprint: { ...p.meetingAckFingerprint, [mid]: fp },
+    }));
+    setMeetingAlarmSinceMs((prev) => {
+      if (!(mid in prev)) return prev;
+      const next = { ...prev };
+      delete next[mid];
+      return next;
+    });
+    setHostParticipantEventLog((prev) => {
+      if (!prev[mid]?.length) return prev;
+      const next = { ...prev };
+      delete next[mid];
+      return next;
+    });
+  }, []);
+
   const openAlarmPanel = useCallback(() => setPanelOpen(true), []);
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
@@ -552,8 +580,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       alarmPanelVisible: panelOpen,
       markChatReadUpTo,
       syncMeetingAckFromMeeting,
+      markMeetingAlarmsReadByPushTap,
     }),
-    [hasUnread, alarms, openAlarmPanel, closeAlarmPanel, panelOpen, markChatReadUpTo, syncMeetingAckFromMeeting],
+    [
+      hasUnread,
+      alarms,
+      openAlarmPanel,
+      closeAlarmPanel,
+      panelOpen,
+      markChatReadUpTo,
+      syncMeetingAckFromMeeting,
+      markMeetingAlarmsReadByPushTap,
+    ],
   );
 
   const modalMaxH = Math.min(520, Math.round(width * 0.85));
