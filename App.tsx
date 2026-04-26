@@ -1,3 +1,15 @@
+import { database } from 'App.tsx'; // 아까 만든 index.js 경로
+
+const checkDB = async () => {
+  try {
+    // 단순하게 메시지 개수를 세어보는 쿼리
+    const count = await database.get('messages').query().fetchCount();
+    console.log("✅ DB 설치 성공! 현재 메시지 수:", count);
+  } catch (error) {
+    console.error("❌ DB 연결 실패:", error.message);
+  }
+}
+
 import React from 'react';
 import { ImageBackground, StyleSheet, Text, View } from 'react-native';
 

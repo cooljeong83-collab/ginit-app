@@ -110,7 +110,8 @@ export async function writeMeetingChatReadReceipt(meetingId: string, userId: str
   });
 }
 
-const CHAT_PAGE_SIZE = 120;
+/** 실시간 tail + 과거 페이지 `getDocs`에서 공통으로 사용하는 페이지 크기 */
+export const MEETING_CHAT_PAGE_SIZE = 20;
 
 function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMessage {
   const senderRaw = data.senderId;
@@ -125,33 +126,22 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
     typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
   const rt = data.replyTo;
-  const replyTo =
-    rt && typeof rt === 'object' && !Array.isArray(rt)
-      ? {
-          messageId: typeof (rt as Record<string, unknown>).messageId === 'string' ? String((rt as Record<string, unknown>).messageId) : '',
-          senderId:
-            typeof (rt as Record<string, unknown>).senderId === 'string'
-              ? String((rt as Record<string, unknown>).senderId)
-              : (rt as Record<string, unknown>).senderId == null
-                ? null
-                : String((rt as Record<string, unknown>).senderId),
-          kind:
-            (rt as Record<string, unknown>).kind === 'system'
-              ? 'system'
-              : (rt as Record<string, unknown>).kind === 'image'
-                ? 'image'
-                : (rt as Record<string, unknown>).kind === 'text'
-                  ? 'text'
-                  : undefined,
-          imageUrl:
-            typeof (rt as Record<string, unknown>).imageUrl === 'string'
-              ? String((rt as Record<string, unknown>).imageUrl)
-              : (rt as Record<string, unknown>).imageUrl == null
-                ? null
-                : String((rt as Record<string, unknown>).imageUrl ?? ''),
-          text: typeof (rt as Record<string, unknown>).text === 'string' ? String((rt as Record<string, unknown>).text) : '',
-        }
-      : null;
+  let replyTo: MeetingChatMessage['replyTo'] = null;
+  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+    const r = rt as Record<string, unknown>;
+    const rk = r.kind;
+    const replyKind: MeetingChatMessageKind | undefined =
+      rk === 'system' ? 'system' : rk === 'image' ? 'image' : rk === 'text' ? 'text' : undefined;
+    replyTo = {
+      messageId: typeof r.messageId === 'string' ? String(r.messageId) : '',
+      senderId:
+        typeof r.senderId === 'string' ? String(r.senderId) : r.senderId == null ? null : String(r.senderId),
+      kind: replyKind,
+      imageUrl:
+        typeof r.imageUrl === 'string' ? String(r.imageUrl) : r.imageUrl == null ? null : String(r.imageUrl ?? ''),
+      text: typeof r.text === 'string' ? String(r.text) : '',
+    };
+  }
   return { id, senderId, text, kind, imageUrl, replyTo: replyTo?.messageId ? replyTo : null, createdAt };
 }
 
@@ -319,33 +309,127 @@ export async function searchMeetingChatMessages(
   return matches;
 }
 
+export type MeetingChatLiveTailEvent = {
+  /** `orderBy('createdAt','desc')` + `limit(MEETING_CHAT_PAGE_SIZE)` — 최신순, 최대 20건 */
+  tail: MeetingChatMessage[];
+  /** tail 구간에서 가장 과거(정렬상 마지막) 문서. 첫 `startAfter` 기준으로 쓰지 않고, 화면에서 `paging` 초기화 시 참고 가능 */
+  tailOldestDoc: DocumentSnapshot | null;
+  /** `limit(20)` 밖으로 밀려난 메시지(실시간으로 tail이 갱신될 때). UI의 과거 구간에 합치면 됩니다. */
+  evictedFromTail: MeetingChatMessage[];
+};
+
 /**
- * 최신 쪽부터 `CHAT_PAGE_SIZE`개 구독 후, **최신순(desc)** 배열로 돌려줍니다.
+ * 최신 `MEETING_CHAT_PAGE_SIZE`건만 `onSnapshot`으로 구독합니다.
+ * 새 메시지가 오면 tail이 갱신되고, 밀려난 문서는 `evictedFromTail`로 알려 줍니다.
  *
- * 채팅 UI는 `FlatList inverted` + 최신순 배열 조합을 기본으로 사용합니다.
+ * 채팅 UI는 `FlatList inverted` + tail을 앞쪽(최신)에 두는 배열을 기본으로 사용합니다.
  */
-export function subscribeMeetingChatMessages(
+export function subscribeMeetingChatLiveTail(
   meetingId: string,
-  onMessages: (messages: MeetingChatMessage[]) => void,
+  onEvent: (event: MeetingChatLiveTailEvent) => void,
   onError?: (message: string) => void,
 ): Unsubscribe {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) {
-    onMessages([]);
+    onEvent({ tail: [], tailOldestDoc: null, evictedFromTail: [] });
     return () => {};
   }
-  const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const q = query(ref, orderBy('createdAt', 'desc'), limit(CHAT_PAGE_SIZE));
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(MEETING_CHAT_PAGE_SIZE));
+
+  let prevDocs: DocumentSnapshot[] = [];
+
   return onSnapshot(
     q,
     (snap) => {
-      const rows = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-      onMessages(rows);
+      const currDocs = snap.docs;
+      const currIds = new Set(currDocs.map((d) => d.id));
+      const evictedSnaps: DocumentSnapshot[] = [];
+      for (const d of prevDocs) {
+        if (!currIds.has(d.id)) evictedSnaps.push(d);
+      }
+      prevDocs = currDocs;
+
+      const evictedFromTail = evictedSnaps.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
+      evictedFromTail.sort(meetingChatMessageDescComparator);
+
+      const tail = currDocs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
+      const tailOldestDoc = currDocs.length ? currDocs[currDocs.length - 1]! : null;
+
+      if (__DEV__) {
+        const newest = tail[0];
+        const oldest = tail[tail.length - 1];
+        console.log('[meeting-chat:paging] onSnapshot tail', {
+          meetingId: mid,
+          limit: MEETING_CHAT_PAGE_SIZE,
+          firestoreDocCount: currDocs.length,
+          tailMappedCount: tail.length,
+          evictedCount: evictedFromTail.length,
+          newestId: newest?.id,
+          oldestId: oldest?.id,
+        });
+      }
+
+      onEvent({ tail, tailOldestDoc, evictedFromTail });
     },
     (err) => {
       onError?.(err.message ?? '채팅을 불러오지 못했어요.');
     },
   );
+}
+
+function meetingChatMessageDescComparator(a: MeetingChatMessage, b: MeetingChatMessage): number {
+  const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
+  const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
+  if (ta !== tb) return tb - ta;
+  return b.id.localeCompare(a.id);
+}
+
+/**
+ * `lastVisible` 문서 **이후**(더 과거) `MEETING_CHAT_PAGE_SIZE`개를 한 번에 가져옵니다.
+ */
+export async function fetchMeetingChatOlderPage(
+  meetingId: string,
+  lastVisible: DocumentSnapshot,
+  pageSize: number = MEETING_CHAT_PAGE_SIZE,
+): Promise<{ messages: MeetingChatMessage[]; lastVisible: DocumentSnapshot | null; hasMore: boolean }> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) {
+    return { messages: [], lastVisible: null, hasMore: false };
+  }
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), startAfter(lastVisible), limit(pageSize));
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    if (__DEV__) {
+      console.log('[meeting-chat:paging] fetchOlderPage (empty)', {
+        meetingId: mid,
+        pageSize,
+        afterDocId: lastVisible.id,
+      });
+    }
+    return { messages: [], lastVisible: null, hasMore: false };
+  }
+  const messages = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
+  const lastDoc = snap.docs[snap.docs.length - 1]!;
+  if (__DEV__) {
+    const first = messages[0];
+    const last = messages[messages.length - 1];
+    console.log('[meeting-chat:paging] fetchOlderPage', {
+      meetingId: mid,
+      requestedPageSize: pageSize,
+      returnedCount: snap.size,
+      hasMore: snap.size >= pageSize,
+      afterDocId: lastVisible.id,
+      pageNewestId: first?.id,
+      pageOldestId: last?.id,
+    });
+  }
+  return {
+    messages,
+    lastVisible: lastDoc,
+    hasMore: snap.size >= pageSize,
+  };
 }
 
 const LATEST_PREVIEW_LIMIT = 1;
