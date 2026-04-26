@@ -105,7 +105,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         : {}),
       style: 'dark',
       translucent: true,
-      backgroundColor: 'transparent',
+      backgroundColor: '#00000000',
     },
     ios: {
       ...config.ios,
@@ -124,7 +124,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       /** Adaptive icon 캐시 우회: foreground 이미지를 v2로 고정 */
       adaptiveIcon: {
         ...((config.android as { adaptiveIcon?: Record<string, unknown> } | undefined)?.adaptiveIcon ?? {}),
-        foregroundImage: './assets/images/android-icon-foreground-v2.png',
+        foregroundImage: './assets/images/android_icon_foreground_v2.png',
       },
       package: 'com.ginit.app',
       googleServicesFile: './env/google-services.json',
@@ -135,7 +135,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         : {}),
       barStyle: 'dark-content',
       translucent: true,
-      backgroundColor: 'transparent',
+      backgroundColor: '#00000000',
     },
     plugins: [
       ...plugins,

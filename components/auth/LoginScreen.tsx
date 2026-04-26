@@ -582,7 +582,7 @@ export default function LoginScreen() {
                     : { opacity: 0 },
                 ]}>
                 <Animated.View style={{ transform: [{ rotate: logoTiltRotate }] }}>
-                  <Image source={require('@/assets/images/logo-symbol.png')} style={loginScreenStyles.logoImage} contentFit="contain" />
+                  <Image source={require('@/assets/images/logo_symbol.png')} style={loginScreenStyles.logoImage} contentFit="contain" />
                 </Animated.View>
               </Animated.View>
 

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
-import { useMemo, useRef } from 'react';
+import { type RefObject, useMemo, useRef } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -39,6 +39,8 @@ export type SocialChatProps = {
   onSend: () => void;
   sending?: boolean;
   onPressNotice?: () => void;
+  /** 검색 결과 탭 시 특정 메시지로 스크롤하기 위한 외부 ref(선택) */
+  listRef?: RefObject<FlatList<SocialChatMessage>>;
 };
 
 /**
@@ -54,9 +56,12 @@ export function SocialChat({
   onSend,
   sending,
   onPressNotice,
+  listRef: externalListRef,
 }: SocialChatProps) {
-  const listRef = useRef<FlatList<SocialChatMessage>>(null);
+  const innerListRef = useRef<FlatList<SocialChatMessage>>(null);
+  const listRef = externalListRef ?? innerListRef;
   const myNorm = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) ?? myUserId.trim() : ''), [myUserId]);
+  const didInitialAutoScrollRef = useRef(false);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -85,7 +90,23 @@ export function SocialChat({
           data={messages}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          /**
+           * 기존 구현은 content size가 변할 때마다 무조건 맨 아래로 점프해서,
+           * "검색 결과 탭 → 해당 메시지로 스크롤"을 바로 덮어써버리는 버그가 생깁니다.
+           * 초기 1회만 자동 스크롤하고, 이후에는 사용자의 스크롤/점프를 존중합니다.
+           */
+          onContentSizeChange={() => {
+            if (didInitialAutoScrollRef.current) return;
+            didInitialAutoScrollRef.current = true;
+            listRef.current?.scrollToEnd({ animated: false });
+          }}
+          onScrollToIndexFailed={(info) => {
+            const h = Math.max(100, info.averageItemLength || 120);
+            listRef.current?.scrollToOffset?.({ offset: Math.max(0, h * info.index), animated: true });
+            requestAnimationFrame(() => {
+              listRef.current?.scrollToIndex?.({ index: info.index, viewPosition: 0.35, animated: true });
+            });
+          }}
           renderItem={({ item }) => {
             const sid = item.senderId?.trim() ?? '';
             const mine = sid && (normalizeParticipantId(sid) ?? sid) === myNorm;

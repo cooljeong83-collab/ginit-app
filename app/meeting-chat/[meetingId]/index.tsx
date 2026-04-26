@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
-import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,7 +26,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, PanGestureHandler, type PanGestureHandlerGestureEvent, State } from 'react-native-gesture-handler';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -146,6 +146,19 @@ function meetingImageViewerMeta(
   const senderLabel = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
   const sentAtLabel = formatImageViewerSentAt(item.createdAt);
   return { senderLabel, sentAtLabel };
+}
+
+function replyTargetLabel(replyTo: MeetingChatMessage['replyTo'], profiles: Map<string, UserProfile>): string {
+  const sid = replyTo?.senderId?.trim() ? normalizeParticipantId(replyTo.senderId.trim()) : '';
+  const prof = sid ? profileForSender(profiles, sid) : undefined;
+  const withdrawn = isUserProfileWithdrawn(prof);
+  const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
+  return nick;
+}
+
+function replyPreviewText(replyTo: MeetingChatMessage['replyTo']): string {
+  if (!replyTo?.messageId) return '';
+  return replyTo.kind === 'image' || Boolean(replyTo.imageUrl?.trim()) ? '사진' : (replyTo.text || '메시지');
 }
 
 /** 검색 결과 한 줄 미리보기 — 검색어 주변만 잘라 표시 */
@@ -373,6 +386,27 @@ export default function MeetingChatRoomScreen() {
   }, []);
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
+
+  const scrollToMessageIndexBestEffort = useCallback((idx: number) => {
+    const index = Math.max(0, Math.floor(idx));
+    // 모달 닫힘/레이아웃 안정화 이후에 시도(특히 Android에서 즉시 호출 시 무시되는 케이스 방지)
+    setTimeout(() => {
+      try {
+        listRef.current?.scrollToIndex?.({ index, viewPosition: 0.35, animated: true });
+      } catch {
+        // inverted 리스트: index가 클수록 더 과거(위쪽) → offset도 증가하는 방향이라 대략치로 먼저 이동
+        const approx = Math.max(0, index * 140);
+        listRef.current?.scrollToOffset?.({ offset: approx, animated: true });
+        setTimeout(() => {
+          try {
+            listRef.current?.scrollToIndex?.({ index, viewPosition: 0.35, animated: true });
+          } catch {
+            /* best-effort */
+          }
+        }, 80);
+      }
+    }, 60);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -603,38 +637,28 @@ export default function MeetingChatRoomScreen() {
       closeChatSearch();
       Keyboard.dismiss();
       const idx = messages.findIndex((m) => m.id === msg.id);
-      requestAnimationFrame(() => {
-        if (idx >= 0) {
-          try {
-            listRef.current?.scrollToIndex({
-              index: idx,
-              viewPosition: 0.35,
-              animated: true,
-            });
-          } catch {
-            listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
-          }
-        } else {
-          const d = msg.createdAt && typeof msg.createdAt.toDate === 'function' ? msg.createdAt.toDate() : null;
-          const when = d
-            ? d.toLocaleString('ko-KR', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-              })
-            : '';
-          Alert.alert(
-            '대화 위치',
-            when
-              ? `이 메시지는 ${when}에 보내진 내용이에요.\n현재 화면에 불러온 최근 대화 범위 밖이라 바로 이동할 수 없어요. 위로 더 스크롤한 뒤 다시 검색해 보세요.`
-              : '현재 화면에 불러온 최근 대화 범위 밖이에요. 위로 더 스크롤한 뒤 다시 검색해 보세요.',
-          );
-        }
-      });
+      if (idx >= 0) {
+        scrollToMessageIndexBestEffort(idx);
+        return;
+      }
+      const d = msg.createdAt && typeof msg.createdAt.toDate === 'function' ? msg.createdAt.toDate() : null;
+      const when = d
+        ? d.toLocaleString('ko-KR', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })
+        : '';
+      Alert.alert(
+        '대화 위치',
+        when
+          ? `이 메시지는 ${when}에 보내진 내용이에요.\n현재 화면에 불러온 최근 대화 범위 밖이라 바로 이동할 수 없어요. 위로 더 스크롤한 뒤 다시 검색해 보세요.`
+          : '현재 화면에 불러온 최근 대화 범위 밖이에요. 위로 더 스크롤한 뒤 다시 검색해 보세요.',
+      );
     },
-    [messages, closeChatSearch],
+    [messages, closeChatSearch, scrollToMessageIndexBestEffort],
   );
 
   const openChatSearch = useCallback(() => {
@@ -898,6 +922,17 @@ export default function MeetingChatRoomScreen() {
     return m;
   }, [messages]);
 
+  const jumpToRepliedMessage = useCallback(
+    (replyMessageId: string) => {
+      const rid = String(replyMessageId ?? '').trim();
+      if (!rid) return;
+      const idx = messageIndexById.get(rid);
+      if (idx == null) return;
+      scrollToMessageIndexBestEffort(idx);
+    },
+    [messageIndexById, scrollToMessageIndexBestEffort],
+  );
+
   const unreadCountForMessage = useCallback(
     (message: MeetingChatMessage, messageIndex: number): number => {
       if (allowed !== true) return 0;
@@ -996,12 +1031,32 @@ export default function MeetingChatRoomScreen() {
               <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
                 {item.replyTo?.messageId ? (
                   <View style={styles.replyQuoteMine}>
-                    <Text style={styles.replyQuoteLabelMine}>답장</Text>
-                    <Text style={styles.replyQuoteTextMine} numberOfLines={2}>
-                      {item.replyTo.text || '메시지'}
-                    </Text>
+                    <Pressable
+                      onPress={() => jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
+                      style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="원글로 이동">
+                      <View style={styles.replyQuoteTopRow}>
+                        <View style={styles.replyQuoteTextCol}>
+                          <Text style={styles.replyQuoteLabelMine}>
+                            {replyTargetLabel(item.replyTo, profiles)}에게 답장
+                          </Text>
+                          <Text style={styles.replyQuoteTextMine} numberOfLines={2}>
+                            {replyPreviewText(item.replyTo)}
+                          </Text>
+                        </View>
+                        {item.replyTo.kind === 'image' && item.replyTo.imageUrl?.trim() ? (
+                          <Image
+                            source={{ uri: item.replyTo.imageUrl.trim() }}
+                            style={styles.replyQuoteThumb}
+                            contentFit="cover"
+                          />
+                        ) : null}
+                      </View>
+                    </Pressable>
                   </View>
                 ) : null}
+                {item.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                 {isImage ? (
                   item.imageUrl ? (
                     <Pressable
@@ -1031,13 +1086,19 @@ export default function MeetingChatRoomScreen() {
                 </View>
               </View>
             ) : null}
-            <Swipeable
-              renderLeftActions={() => <View style={{ width: 60 }} />}
-              onSwipeableOpen={() => {
-                setReplyTo({ messageId: item.id, senderId: item.senderId ?? null, text: item.text });
-              }}>
+            <SwipeToReply
+              onTriggerReply={() =>
+                setReplyTo({
+                  messageId: item.id,
+                  senderId: item.senderId ?? null,
+                  kind: item.kind,
+                  imageUrl: item.imageUrl ?? null,
+                  text: item.text,
+                })
+              }
+            >
               {bubble}
-            </Swipeable>
+            </SwipeToReply>
           </View>
         );
       }
@@ -1075,12 +1136,32 @@ export default function MeetingChatRoomScreen() {
                 <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
                   {item.replyTo?.messageId ? (
                     <View style={styles.replyQuoteOther}>
-                      <Text style={styles.replyQuoteLabelOther}>답장</Text>
-                      <Text style={styles.replyQuoteTextOther} numberOfLines={2}>
-                        {item.replyTo.text || '메시지'}
-                      </Text>
+                      <Pressable
+                        onPress={() => jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
+                        style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="원글로 이동">
+                        <View style={styles.replyQuoteTopRow}>
+                          <View style={styles.replyQuoteTextCol}>
+                            <Text style={styles.replyQuoteLabelOther}>
+                              {replyTargetLabel(item.replyTo, profiles)}에게 답장
+                            </Text>
+                            <Text style={styles.replyQuoteTextOther} numberOfLines={2}>
+                              {replyPreviewText(item.replyTo)}
+                            </Text>
+                          </View>
+                          {item.replyTo.kind === 'image' && item.replyTo.imageUrl?.trim() ? (
+                            <Image
+                              source={{ uri: item.replyTo.imageUrl.trim() }}
+                              style={styles.replyQuoteThumb}
+                              contentFit="cover"
+                            />
+                          ) : null}
+                        </View>
+                      </Pressable>
                     </View>
                   ) : null}
+                  {item.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                   {isImage ? (
                     item.imageUrl ? (
                       <Pressable
@@ -1114,13 +1195,19 @@ export default function MeetingChatRoomScreen() {
               </View>
             </View>
           ) : null}
-          <Swipeable
-            renderLeftActions={() => <View style={{ width: 60 }} />}
-            onSwipeableOpen={() => {
-              setReplyTo({ messageId: item.id, senderId: item.senderId ?? null, text: item.text });
-            }}>
+          <SwipeToReply
+            onTriggerReply={() =>
+              setReplyTo({
+                messageId: item.id,
+                senderId: item.senderId ?? null,
+                kind: item.kind,
+                imageUrl: item.imageUrl ?? null,
+                text: item.text,
+              })
+            }
+          >
             {otherBubble}
-          </Swipeable>
+          </SwipeToReply>
         </View>
       );
     },
@@ -1302,10 +1389,22 @@ export default function MeetingChatRoomScreen() {
           {replyTo?.messageId ? (
             <View style={styles.replyPreviewRow}>
               <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
-                <Text style={styles.replyPreviewTitle}>답장</Text>
-                <Text style={styles.replyPreviewBody} numberOfLines={1}>
-                  {replyTo.text || '메시지'}
-                </Text>
+                <View style={styles.replyPreviewIconWrap} accessibilityElementsHidden pointerEvents="none">
+                  <Ionicons name="return-up-back-outline" size={20} color="#0f172a" />
+                </View>
+                <View style={styles.replyPreviewTextCol} pointerEvents="none">
+                  <Text style={styles.replyPreviewTitle} numberOfLines={1}>
+                    {replyTargetLabel(replyTo, profiles)}에게 답장
+                  </Text>
+                  <Text style={styles.replyPreviewBody} numberOfLines={1}>
+                    {replyPreviewText(replyTo)}
+                  </Text>
+                </View>
+                {replyTo.kind === 'image' && replyTo.imageUrl?.trim() ? (
+                  <View style={styles.replyPreviewThumbOuter} pointerEvents="none" accessibilityElementsHidden>
+                    <Image source={{ uri: replyTo.imageUrl.trim() }} style={styles.replyPreviewThumb} contentFit="cover" />
+                  </View>
+                ) : null}
                 <Pressable
                   onPress={() => setReplyTo(null)}
                   hitSlop={10}
@@ -1595,6 +1694,88 @@ export default function MeetingChatRoomScreen() {
         </Modal>
       </View>
     </SafeAreaView>
+  );
+}
+
+function SwipeToReply({
+  children,
+  onTriggerReply,
+}: {
+  children: ReactNode;
+  onTriggerReply: () => void;
+}) {
+  /**
+   * 카카오톡처럼: 말풍선을 "왼쪽으로 당기면" 따라오고, 손을 놓으면 항상 원위치로 복귀.
+   * 임계치만 넘으면 답장 타겟만 설정하고(=quote preview), UI는 즉시 복귀합니다.
+   */
+  const dragX = useRef(new Animated.Value(0)).current;
+  const didTriggerRef = useRef(false);
+  const triggerRef = useRef(onTriggerReply);
+  triggerRef.current = onTriggerReply;
+
+  const onGestureEvent = useMemo(
+    () =>
+      Animated.event<PanGestureHandlerGestureEvent>(
+        [{ nativeEvent: { translationX: dragX } }],
+        {
+          useNativeDriver: true,
+          listener: (e) => {
+            const tx = (e as PanGestureHandlerGestureEvent).nativeEvent.translationX;
+            // 왼쪽(음수)로 당길 때만 reply 트리거. 드래그 중에 실시간으로 체크.
+            if (typeof tx === 'number' && tx < -56 && !didTriggerRef.current) {
+              didTriggerRef.current = true;
+              triggerRef.current();
+            }
+          },
+        },
+      ),
+    [dragX],
+  );
+
+  const reset = useCallback(() => {
+    dragX.stopAnimation();
+    Animated.spring(dragX, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 180,
+      friction: 18,
+    }).start();
+  }, [dragX]);
+
+  const onHandlerStateChange = useCallback(
+    (e: PanGestureHandlerGestureEvent) => {
+      const s = e.nativeEvent.state;
+
+      if (s === State.BEGAN) {
+        didTriggerRef.current = false;
+      }
+
+      if (s === State.END || s === State.CANCELLED || s === State.FAILED) {
+        reset();
+      }
+    },
+    [reset],
+  );
+
+  const translateX = useMemo(
+    () =>
+      dragX.interpolate({
+        inputRange: [-140, 0, 140],
+        outputRange: [-72, 0, 0],
+        extrapolate: 'clamp',
+      }),
+    [dragX],
+  );
+
+  return (
+    <PanGestureHandler
+      activeOffsetX={[-18, 18]}
+      failOffsetY={[-10, 10]}
+      onGestureEvent={onGestureEvent}
+      onHandlerStateChange={onHandlerStateChange}
+    >
+      <Animated.View style={{ transform: [{ translateX }] }}>{children}</Animated.View>
+    </PanGestureHandler>
   );
 }
 
@@ -1956,20 +2137,49 @@ const styles = StyleSheet.create({
   },
   replyQuoteMine: {
     marginBottom: 8,
-    paddingLeft: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: 'rgba(255,255,255,0.55)',
+    paddingLeft: 0,
+    borderLeftWidth: 0,
+    borderLeftColor: 'transparent',
   },
   replyQuoteOther: {
     marginBottom: 8,
-    paddingLeft: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: 'rgba(0, 82, 204, 0.35)',
+    paddingLeft: 0,
+    borderLeftWidth: 0,
+    borderLeftColor: 'transparent',
   },
-  replyQuoteLabelMine: { fontSize: 11, fontWeight: '900', color: 'rgba(255,255,255,0.92)' },
-  replyQuoteLabelOther: { fontSize: 11, fontWeight: '900', color: '#0052CC' },
-  replyQuoteTextMine: { marginTop: 2, fontSize: 12, color: 'rgba(255,255,255,0.92)' },
-  replyQuoteTextOther: { marginTop: 2, fontSize: 12, color: '#475569' },
+  replyQuoteLabelMine: { fontSize: 11, fontWeight: '900', color: '#0f172a' },
+  replyQuoteLabelOther: { fontSize: 11, fontWeight: '900', color: '#0f172a' },
+  /** 답장 말풍선 상단 원글(인용) 텍스트 — 카카오톡처럼 검정색 */
+  replyQuoteTextMine: { marginTop: 2, fontSize: 12, color: '#0f172a' },
+  replyQuoteTextOther: { marginTop: 2, fontSize: 12, color: '#0f172a' },
+  replyQuoteTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    /**
+     * 답장 인용 영역이 말풍선 폭을 "최대폭까지" 밀어버리는 케이스 방지:
+     * row가 기본 stretch로 잡히지 않게 하고, 내용 기반으로만 폭이 결정되게 함.
+     */
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  replyQuoteTextCol: { flexShrink: 1, minWidth: 0 },
+  replyQuoteThumb: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#e2e8f0',
+  },
+  replyQuotePressable: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  /** 답장 인용과 본문을 분리하는 --- 라인 */
+  replyDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(15, 23, 42, 0.16)',
+    marginBottom: 8,
+  },
   replyPreviewRow: {
     paddingHorizontal: 10,
     paddingTop: 10,
@@ -1986,8 +2196,36 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.22)',
     overflow: 'hidden',
   },
-  replyPreviewTitle: { fontSize: 12, fontWeight: '900', color: '#0052CC' },
-  replyPreviewBody: { flex: 1, fontSize: 12, fontWeight: '800', color: '#0f172a' },
+  replyPreviewIconWrap: {
+    /** composer의 + 버튼(44x44, marginBottom:2)과 동일 라인 정렬 */
+    width: 44,
+    height: 44,
+    marginBottom: 2,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  replyPreviewTextCol: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: 2,
+  },
+  replyPreviewTitle: { fontSize: 13, fontWeight: '900', color: '#0f172a' },
+  replyPreviewBody: { fontSize: 12, fontWeight: '600', color: '#0f172a' },
+  replyPreviewThumbOuter: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#e2e8f0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  replyPreviewThumb: { width: '100%', height: '100%' },
   /** + 퀵 메뉴 + 입력창 묶음 (퀵 메뉴는 배경 없이 아이콘·라벨만) */
   composerCluster: {
     width: '100%',

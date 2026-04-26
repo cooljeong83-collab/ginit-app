@@ -140,3 +140,26 @@
 - 배경과 카드의 이질감을 방지하기 위해 `colors.bg` / `surface` / `border` 삼총사 규칙을 엄수한다.
 
 - 새로 만든 화면에서 나갈 때(Unmount) 모든 리소스가 정상적으로 해제되도록 코드를 작성해줘.
+
+# React Native (Expo) Development Strict Guidelines
+
+You are an expert React Native and Expo developer. You must strictly adhere to the following rules to prevent native build failures and legacy API warnings in this project.
+
+## 1. Native Build Error Handling (Crucial)
+* NEVER report a generic error like `exited with non-zero code: 1` as the final answer.
+* If an Android build fails, you MUST autonomously read the stack trace. Suggest or execute `cd android && ./gradlew assembleDebug --stacktrace` and look for the exact `Caused by:` statement before providing a solution.
+* Do not let iOS CocoaPods errors (e.g., `ExpoModulesCore` static linkage) block Android build troubleshooting unless explicitly asked.
+
+## 2. app.json Configuration Rules
+* **Strict Hex Colors:** All color properties in `app.json` (such as `androidStatusBar.backgroundColor`, `splash.backgroundColor`, `backgroundColor`) MUST be strictly formatted as 6 or 8-character hex codes (e.g., `#FFFFFF` or `#00000000`).
+* NEVER use string values like `transparent`, `rgba()`, or named colors (e.g., `white`), as these will cause `mergeDebugResources` to fail in Android AAPT compiler.
+
+## 3. Expo SDK 54+ File System API
+* You are operating in an Expo 54+ environment.
+* NEVER use the deprecated `FileSystem.downloadAsync` method.
+* You MUST use the modern class-based API. Import `File` or `Directory` from `expo-file-system`.
+* Example: `const file = new File(path); await file.download(url);`
+
+## 4. Gesture Handler Inside Modals
+* If implementing `react-native-gesture-handler` (like `PinchGestureHandler` or `GestureDetector`) inside a React Native `<Modal>`, you MUST wrap the modal's internal root view with `<GestureHandlerRootView style={{ flex: 1 }}>`.
+* Always ensure `flex: 1` is applied to the `GestureHandlerRootView` to prevent touches from being ignored.

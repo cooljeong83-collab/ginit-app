@@ -118,7 +118,7 @@ function SlidePage({
       {item.showLogo ? (
         <View style={styles.logoRow}>
           <View style={styles.logoCard}>
-            <Image source={require('@/assets/images/logo-symbol.png')} style={styles.logoImg} contentFit="contain" />
+            <Image source={require('@/assets/images/logo_symbol.png')} style={styles.logoImg} contentFit="contain" />
           </View>
         </View>
       ) : null}

@@ -325,7 +325,7 @@ export default function SignUpScreen() {
             </View>
 
             <Pressable style={styles.topBrand} onPress={Keyboard.dismiss} accessible={false}>
-              <Image source={require('@/assets/images/logo-symbol.png')} style={styles.brandSymbol} contentFit="contain" />
+              <Image source={require('@/assets/images/logo_symbol.png')} style={styles.brandSymbol} contentFit="contain" />
               <Text style={styles.brandName}>Ginit</Text>
               <Text style={styles.greeting}>
                 필수 정보를 입력한 뒤{'\n'}회원가입 완료로 가입을 마쳐 주세요

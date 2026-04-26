@@ -64,6 +64,8 @@ export type MeetingChatMessage = {
   replyTo?: {
     messageId: string;
     senderId: string | null;
+    kind?: MeetingChatMessageKind;
+    imageUrl?: string | null;
     text: string;
   } | null;
   createdAt: Timestamp | null;
@@ -133,6 +135,20 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
               : (rt as Record<string, unknown>).senderId == null
                 ? null
                 : String((rt as Record<string, unknown>).senderId),
+          kind:
+            (rt as Record<string, unknown>).kind === 'system'
+              ? 'system'
+              : (rt as Record<string, unknown>).kind === 'image'
+                ? 'image'
+                : (rt as Record<string, unknown>).kind === 'text'
+                  ? 'text'
+                  : undefined,
+          imageUrl:
+            typeof (rt as Record<string, unknown>).imageUrl === 'string'
+              ? String((rt as Record<string, unknown>).imageUrl)
+              : (rt as Record<string, unknown>).imageUrl == null
+                ? null
+                : String((rt as Record<string, unknown>).imageUrl ?? ''),
           text: typeof (rt as Record<string, unknown>).text === 'string' ? String((rt as Record<string, unknown>).text) : '',
         }
       : null;
@@ -498,7 +514,7 @@ export async function sendMeetingChatTextMessage(
   meetingId: string,
   senderPhoneUserId: string,
   rawText: string,
-  replyTo?: { messageId: string; senderId: string | null; text: string } | null,
+  replyTo?: { messageId: string; senderId: string | null; kind?: MeetingChatMessageKind; imageUrl?: string | null; text: string } | null,
 ): Promise<void> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   const uid = typeof senderPhoneUserId === 'string' ? senderPhoneUserId.trim() : String(senderPhoneUserId ?? '').trim();
@@ -519,6 +535,8 @@ export async function sendMeetingChatTextMessage(
           ? {
               messageId: replyTo.messageId.trim(),
               senderId: replyTo.senderId ?? null,
+              kind: replyTo.kind ?? 'text',
+              imageUrl: replyTo.imageUrl ?? null,
               text: String(replyTo.text ?? '').trim().slice(0, 280),
             }
           : null,

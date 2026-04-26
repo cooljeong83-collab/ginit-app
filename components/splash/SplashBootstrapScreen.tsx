@@ -77,7 +77,7 @@ export default function SplashBootstrapScreen() {
           />
         ) : (
           <View style={[styles.logoMark, { backgroundColor: logoCardBg, borderColor: logoBorder }]}>
-            <Image source={require('@/assets/images/logo-symbol.png')} style={styles.logoImg} contentFit="contain" />
+            <Image source={require('@/assets/images/logo_symbol.png')} style={styles.logoImg} contentFit="contain" />
           </View>
         )}
       </View>

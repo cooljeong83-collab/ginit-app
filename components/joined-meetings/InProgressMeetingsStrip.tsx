@@ -94,7 +94,7 @@ export function InProgressMeetingsStrip({ meetings, onOpenMeeting }: Props) {
       <View style={styles.bubbleCol}>
         <View style={styles.heroArtSmall} accessibilityLabel="지닛 안내">
           <View style={styles.heroLogoSmallWrap} pointerEvents="none">
-            <Image source={require('@/assets/images/logo-symbol.png')} style={styles.heroLogoSmall} contentFit="contain" />
+            <Image source={require('@/assets/images/logo_symbol.png')} style={styles.heroLogoSmall} contentFit="contain" />
           </View>
         </View>
         <View style={HomeGlassStyles.agentBubble}>
