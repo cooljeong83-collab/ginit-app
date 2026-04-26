@@ -410,11 +410,11 @@ export default function MeetingChatRoomScreen() {
     return null;
   }, []);
 
-  const scrollToIndexSafe = useCallback((index: number, viewPosition = 0.35) => {
+  const scrollToIndexSafe = useCallback((index: number, viewPosition = 0.35, animated = true) => {
     const scroller = resolveListScroller();
     if (!scroller || typeof scroller.scrollToIndex !== 'function') return false;
     try {
-      scroller.scrollToIndex({ index, viewPosition, animated: true });
+      scroller.scrollToIndex({ index, viewPosition, animated });
       return true;
     } catch {
       return false;
@@ -440,7 +440,15 @@ export default function MeetingChatRoomScreen() {
       const from = Math.max(0, Math.floor(lastScrollOffsetRef.current || 0));
       const target = Math.max(0, Math.floor(targetOffset || 0));
       const dist = Math.abs(target - from);
-      const duration = Math.min(900, Math.max(220, Math.floor(dist * 0.65)));
+      /**
+       * 거리 기반 duration(속도) 조절:
+       * - 짧은 이동은 "너무 빠른 점프"처럼 느껴지지 않게 최소 시간을 보장
+       * - 긴 이동은 무한히 느려지지 않게 상한을 둠
+       * - 체감은 dist의 선형보다 완만한 곡선이 더 부드러움(제곱근/로그 계열)
+       */
+      const base = 180;
+      const curved = 90 * Math.sqrt(Math.max(0, dist)); // dist가 클수록 증가하되 완만
+      const duration = Math.min(1150, Math.max(240, Math.floor(base + curved)));
 
       smoothScrollAnimRef.stopAnimation();
       if (smoothScrollListenerIdRef.current) {
@@ -448,6 +456,12 @@ export default function MeetingChatRoomScreen() {
         smoothScrollListenerIdRef.current = null;
       }
       smoothScrollAnimRef.setValue(from);
+      // 첫 프레임 전 "시작 위치 고정" (초반 1틱 끊김 완화)
+      try {
+        scroller.scrollToOffset({ offset: from, animated: false });
+      } catch {
+        /* ignore */
+      }
       smoothScrollListenerIdRef.current = smoothScrollAnimRef.addListener(({ value }) => {
         try {
           scroller.scrollToOffset({ offset: value, animated: false });
@@ -459,18 +473,25 @@ export default function MeetingChatRoomScreen() {
       Animated.timing(smoothScrollAnimRef, {
         toValue: target,
         duration,
-        easing: Easing.out(Easing.cubic),
+        /**
+         * inOut은 시작/끝이 너무 느려 "멈칫"처럼 느껴질 수 있어
+         * 살짝 힘 있게 출발/감속하는 커브로 교체합니다.
+         */
+        easing: Easing.bezier(0.18, 0.92, 0.2, 1),
         useNativeDriver: false,
       }).start(() => {
         if (smoothScrollListenerIdRef.current) {
           smoothScrollAnimRef.removeListener(smoothScrollListenerIdRef.current);
           smoothScrollListenerIdRef.current = null;
         }
-        try {
-          scroller.scrollToOffset({ offset: target, animated: false });
-        } catch {
-          /* ignore */
-        }
+        // 마지막 프레임에서 미세한 오차가 남을 수 있어 다음 프레임에 한번 더 고정
+        requestAnimationFrame(() => {
+          try {
+            scroller.scrollToOffset({ offset: target, animated: false });
+          } catch {
+            /* ignore */
+          }
+        });
       });
     },
     [resolveListScroller, smoothScrollAnimRef],
@@ -478,9 +499,10 @@ export default function MeetingChatRoomScreen() {
   const jumpToLatest = useCallback(() => {
     setShowJumpToBottomFab(false);
     requestAnimationFrame(() => {
-      scrollToOffsetSafe(0, true);
+      // Android에서 멀리 이동 시 native animated가 점프처럼 보이는 케이스가 있어 JS 스무스 스크롤 사용
+      smoothScrollToOffset(0);
     });
-  }, [scrollToOffsetSafe]);
+  }, [smoothScrollToOffset]);
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
@@ -489,20 +511,16 @@ export default function MeetingChatRoomScreen() {
     // 모달 닫힘/레이아웃 안정화 이후에 시도(특히 Android에서 즉시 호출 시 무시되는 케이스 방지)
     InteractionManager.runAfterInteractions(() => {
       setTimeout(() => {
-        // 1) 가능하면 한 번에 "부드럽게" index로 스크롤
-        if (scrollToIndexSafe(index, 0.35)) return;
-
         /**
-         * 2) 스크롤 메서드가 아직 준비되지 않았거나(index 계산 실패) 등으로 실패하면,
-         * 먼저 대략 위치로 "애니메이션 스크롤"을 보내고(점프 X),
-         * 스크롤이 어느 정도 진행된 뒤 미세 보정만 합니다.
+         * 1) 항상 "스크롤링"으로 이동: index 기반 목표 offset으로 JS 스무스 스크롤.
+         *    (scrollToIndex(animated:true)가 플랫폼에 따라 점프처럼 보이는 문제 대응)
          */
         const approx = Math.max(0, index * 140);
         smoothScrollToOffset(approx);
 
-        // 보정은 충분히 늦게(스크롤 진행 후) 1회만
+        // 2) 스크롤이 진행된 뒤 미세 보정(원하는 메시지가 화면에 정확히 오도록)
         setTimeout(() => {
-          scrollToIndexSafe(index, 0.35);
+          scrollToIndexSafe(index, 0.35, false);
         }, 420);
       }, 90);
     });
@@ -632,9 +650,9 @@ export default function MeetingChatRoomScreen() {
     lastAutoScrolledMessageIdRef.current = latest.id;
     pendingAutoScrollToLatestRef.current = false;
     requestAnimationFrame(() => {
-      scrollToOffsetSafe(0, true);
+      smoothScrollToOffset(0);
     });
-  }, [messages, showJumpToBottomFab, scrollToOffsetSafe]);
+  }, [messages, showJumpToBottomFab, smoothScrollToOffset]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1471,7 +1489,7 @@ export default function MeetingChatRoomScreen() {
                 const h = Math.max(100, info.averageItemLength || 140);
                 scrollToOffsetSafe(Math.max(0, h * info.index), true);
                 setTimeout(() => {
-                  scrollToIndexSafe(info.index, 0.35);
+                  scrollToIndexSafe(info.index, 0.35, false);
                 }, 80);
               }}
               ListEmptyComponent={
