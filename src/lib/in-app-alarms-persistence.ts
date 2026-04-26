@@ -11,6 +11,7 @@ function keyForUser(phoneUserId: string): string {
 type StoredShape = {
   chatReadMessageId?: Record<string, string>;
   meetingAckFingerprint?: Record<string, string>;
+  friendRequestDismissedIds?: Record<string, true>;
 };
 
 export async function loadInAppAlarmReadState(phoneUserId: string): Promise<InAppAlarmReadState> {
@@ -28,6 +29,10 @@ export async function loadInAppAlarmReadState(phoneUserId: string): Promise<InAp
       meetingAckFingerprint:
         parsed.meetingAckFingerprint && typeof parsed.meetingAckFingerprint === 'object'
           ? parsed.meetingAckFingerprint
+          : {},
+      friendRequestDismissedIds:
+        parsed.friendRequestDismissedIds && typeof parsed.friendRequestDismissedIds === 'object'
+          ? parsed.friendRequestDismissedIds
           : {},
     };
   } catch {

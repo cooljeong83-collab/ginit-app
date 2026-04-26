@@ -61,7 +61,11 @@ function navigateFromPushData(
     navTo('/(tabs)/profile');
     return;
   }
-  if (actionAny === 'friend_request' || actionAny === 'follow_request') {
+  if (actionAny === 'friend_request' || actionAny === 'in_app_friend_request') {
+    navTo('/(tabs)/friends');
+    return;
+  }
+  if (actionAny === 'follow_request') {
     navTo('/social/connections');
     return;
   }
@@ -90,11 +94,16 @@ function navigateFromPushData(
 async function markAlarmReadFromPushData(
   data: Record<string, unknown> | undefined,
   markMeetingAlarmsReadByPushTap: ReturnType<typeof useInAppAlarms>['markMeetingAlarmsReadByPushTap'],
+  markFriendRequestAlarmDismissed: ReturnType<typeof useInAppAlarms>['markFriendRequestAlarmDismissed'],
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
-  if (!meetingId) return;
   const action = typeof data.action === 'string' ? data.action.trim() : '';
+  if (action === 'in_app_friend_request' && meetingId) {
+    markFriendRequestAlarmDismissed(meetingId);
+    return;
+  }
+  if (!meetingId) return;
   // 채팅은 messageId가 없어서 여기서 정확한 read up to 처리는 어려움.
   // 모임 변경/상세 알람은 현재 모임 스냅샷으로 ack를 갱신해 읽음 처리합니다.
   const shouldAckMeeting =
@@ -115,7 +124,7 @@ export function PushNotificationBootstrap() {
   const router = useRouter();
   const pathname = usePathname();
   const { userId } = useUserSession();
-  const { markMeetingAlarmsReadByPushTap } = useInAppAlarms();
+  const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed } = useInAppAlarms();
   const bootHandled = useRef(false);
 
   useEffect(() => {
@@ -167,10 +176,10 @@ export function PushNotificationBootstrap() {
       }
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
-      void markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap);
+      void markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed);
     });
     return () => sub.remove();
-  }, [router, markMeetingAlarmsReadByPushTap, pathname]);
+  }, [router, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, pathname]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -182,9 +191,9 @@ export function PushNotificationBootstrap() {
       if (last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
       const data = last.notification.request.content.data as Record<string, unknown> | undefined;
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
-      await markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap);
+      await markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed);
     })();
-  }, [router, markMeetingAlarmsReadByPushTap, pathname]);
+  }, [router, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, pathname]);
 
   return null;
 }

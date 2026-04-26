@@ -37,8 +37,13 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
-import { fetchFollowRelationStatus, sendFollowRequest, type FollowRelationStatus } from '@/src/lib/follow';
-import { notifyFollowRequestReceivedFireAndForget } from '@/src/lib/follow-push-notify';
+import {
+  acceptGinitRequest,
+  fetchFriendRelationStatus,
+  sendGinitRequest,
+  type FriendRelationStatusRow,
+} from '@/src/lib/friends';
+import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
@@ -77,6 +82,7 @@ import {
 } from '@/src/lib/meetings';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -396,8 +402,13 @@ export default function MeetingDetailScreen() {
   const [hostTieMovieId, setHostTieMovieId] = useState<string | null>(null);
 
   const [profilePopupUserId, setProfilePopupUserId] = useState<string | null>(null);
-  const [sendGinitBusy, setSendGinitBusy] = useState(false);
-  const [followRelationStatus, setFollowRelationStatus] = useState<FollowRelationStatus>('none');
+  const [friendRequestBusy, setFriendRequestBusy] = useState(false);
+  const [friendRelation, setFriendRelation] = useState<FriendRelationStatusRow>({
+    status: 'none',
+    friendship_id: null,
+  });
+  /** 친구 관계 조회 응답이 늦게 도착해 요청 직후 상태를 덮어쓰지 않도록 세대를 맞춥니다. */
+  const friendsRelationFetchGenRef = useRef(0);
   const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
 
@@ -455,7 +466,7 @@ export default function MeetingDetailScreen() {
 
   const closeParticipantProfile = useCallback(() => {
     setProfilePopupUserId(null);
-    setFollowRelationStatus('none');
+    setFriendRelation({ status: 'none', friendship_id: null });
   }, []);
 
   useEffect(() => {
@@ -477,29 +488,32 @@ export default function MeetingDetailScreen() {
     const me = userId?.trim() ?? '';
     const peer = profilePopupUserId?.trim() ?? '';
     if (!me || !peer) {
-      setFollowRelationStatus('none');
+      setFriendRelation({ status: 'none', friendship_id: null });
       return;
     }
     if (normalizeParticipantId(me) === normalizeParticipantId(peer)) {
-      setFollowRelationStatus('none');
+      setFriendRelation({ status: 'none', friendship_id: null });
       return;
     }
+    const snapshot = friendsRelationFetchGenRef.current;
     let alive = true;
-    void fetchFollowRelationStatus(me, peer)
-      .then((r) => {
+    void fetchFriendRelationStatus(me, peer)
+      .then((gr) => {
         if (!alive) return;
-        setFollowRelationStatus(r.status);
+        if (snapshot !== friendsRelationFetchGenRef.current) return;
+        setFriendRelation(gr);
       })
       .catch(() => {
         if (!alive) return;
-        setFollowRelationStatus('none');
+        if (snapshot !== friendsRelationFetchGenRef.current) return;
+        setFriendRelation({ status: 'none', friendship_id: null });
       });
     return () => {
       alive = false;
     };
   }, [profilePopupUserId, userId]);
 
-  const onFollow = useCallback(async () => {
+  const onSendFriendGinit = useCallback(async () => {
     const me = userId?.trim() ?? '';
     const peer = profilePopupUserId?.trim() ?? '';
     if (!peer) return;
@@ -508,14 +522,14 @@ export default function MeetingDetailScreen() {
       return;
     }
     if (normalizeParticipantId(me) === normalizeParticipantId(peer)) return;
-    setSendGinitBusy(true);
+    setFriendRequestBusy(true);
     try {
       await ensureUserProfile(me);
       const profGate = await getUserProfile(me);
       if (meetingDemographicsIncomplete(profGate, me)) {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',
-          '팔로우 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
+          '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
           [
             { text: '닫기', style: 'cancel' },
             { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
@@ -523,26 +537,84 @@ export default function MeetingDetailScreen() {
         );
         return;
       }
-      await sendFollowRequest(me, peer);
-      const next = await fetchFollowRelationStatus(me, peer).catch(() => null);
-      if (next) setFollowRelationStatus(next.status);
-      if (next?.status === 'requested_out') {
-        const meNick = participantProfiles[normalizeParticipantId(me) ?? me]?.nickname?.trim() ?? '';
-        notifyFollowRequestReceivedFireAndForget({
-          followeeAppUserId: peer,
-          followerAppUserId: me,
-          followerDisplayName: meNick || '팔로워',
-        });
+      const pre = await fetchFriendRelationStatus(me, peer).catch(() => null);
+      if (pre?.status === 'pending_out' || pre?.status === 'accepted') {
+        friendsRelationFetchGenRef.current += 1;
+        setFriendRelation(pre);
+        showTransientBottomMessage(
+          pre.status === 'accepted' ? '이미 친구로 연결되어 있어요.' : '이미 친구 요청을 보냈어요.',
+        );
+        return;
       }
-      showTransientBottomMessage(
-        next?.status === 'following' || next?.status === 'mutual' ? '팔로우했어요.' : '팔로우 요청을 보냈어요.',
-      );
+      const returnedId = (await sendGinitRequest(me, peer)).trim();
+      friendsRelationFetchGenRef.current += 1;
+      const next = await fetchFriendRelationStatus(me, peer).catch(() => null);
+      const resolved: FriendRelationStatusRow =
+        next &&
+        (next.status === 'pending_out' || next.status === 'pending_in' || next.status === 'accepted')
+          ? next
+          : returnedId
+            ? {
+                status: 'pending_out',
+                friendship_id: returnedId,
+                requester_app_user_id: me,
+                addressee_app_user_id: peer,
+              }
+            : (next ?? { status: 'none', friendship_id: null });
+      setFriendRelation(resolved);
+      showTransientBottomMessage('친구 요청을 보냈어요.');
+      void getUserProfile(me)
+        .then((p) =>
+          notifyFriendRequestReceivedFireAndForget({
+            addresseeAppUserId: peer,
+            requesterAppUserId: me,
+            requesterDisplayName: p?.nickname ?? undefined,
+          }),
+        )
+        .catch(() =>
+          notifyFriendRequestReceivedFireAndForget({
+            addresseeAppUserId: peer,
+            requesterAppUserId: me,
+          }),
+        );
     } catch (e) {
       Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
     } finally {
-      setSendGinitBusy(false);
+      setFriendRequestBusy(false);
     }
-  }, [participantProfiles, profilePopupUserId, router, userId]);
+  }, [profilePopupUserId, router, userId]);
+
+  const onAcceptFriendGinit = useCallback(async () => {
+    const me = userId?.trim() ?? '';
+    const peer = profilePopupUserId?.trim() ?? '';
+    const fid = friendRelation.friendship_id?.trim();
+    if (!me || !peer || !fid) return;
+    setFriendRequestBusy(true);
+    try {
+      await ensureUserProfile(me);
+      await acceptGinitRequest(me, fid);
+      friendsRelationFetchGenRef.current += 1;
+      const next = await fetchFriendRelationStatus(me, peer).catch(() => null);
+      if (next) setFriendRelation(next);
+      const nick =
+        participantProfiles[normalizeParticipantId(peer) ?? peer]?.nickname?.trim() ?? '친구';
+      const rid = socialDmRoomId(me, peer);
+      showTransientBottomMessage('친구 요청을 수락했어요.');
+      closeParticipantProfile();
+      router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
+    } catch (e) {
+      Alert.alert('수락 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setFriendRequestBusy(false);
+    }
+  }, [
+    closeParticipantProfile,
+    friendRelation.friendship_id,
+    participantProfiles,
+    profilePopupUserId,
+    router,
+    userId,
+  ]);
 
   useEffect(() => {
     setSelectedDateIds([]);
@@ -2855,22 +2927,30 @@ export default function MeetingDetailScreen() {
                   dna ? dna : '',
                   [ageBand, gender].filter(Boolean).join(' · '),
                 ].filter(Boolean);
-                const relationLabel =
-                  followRelationStatus === 'mutual'
-                    ? '맞팔로우'
-                    : followRelationStatus === 'following'
-                      ? '팔로잉'
-                      : followRelationStatus === 'requested_out' || followRelationStatus === 'requested_in'
-                        ? '요청중'
-                        : '팔로우';
-                const relationDisabled =
-                  sendGinitBusy ||
+                const friendGinitDisabled =
+                  friendRequestBusy ||
                   withdrawn ||
                   isMe ||
-                  followRelationStatus === 'mutual' ||
-                  followRelationStatus === 'following' ||
-                  followRelationStatus === 'requested_out' ||
-                  followRelationStatus === 'requested_in';
+                  friendRelation.status === 'accepted' ||
+                  friendRelation.status === 'pending_out';
+                const friendLabel =
+                  friendRelation.status === 'accepted'
+                    ? '친구'
+                    : friendRelation.status === 'pending_out'
+                      ? '신청 중'
+                      : friendRelation.status === 'pending_in'
+                        ? '친구 요청 수락'
+                        : '친구 요청';
+                const friendIconName: keyof typeof Ionicons.glyphMap =
+                  friendRelation.status === 'accepted'
+                    ? 'checkmark-circle'
+                    : friendRelation.status === 'pending_out'
+                      ? 'time'
+                      : friendRelation.status === 'pending_in'
+                        ? 'checkmark-done'
+                        : 'person-add';
+                const friendInMissingId =
+                  friendRelation.status === 'pending_in' && !friendRelation.friendship_id?.trim();
                 return (
                   <>
                     <View style={styles.profileModalTop}>
@@ -2901,36 +2981,47 @@ export default function MeetingDetailScreen() {
                     </View>
 
                     <View style={styles.profileModalActions}>
-                      <Pressable
-                        onPress={onFollow}
-                        disabled={relationDisabled}
-                        style={({ pressed }) => [
-                          styles.profileActionBtn,
-                          styles.profileActionPrimary,
-                          relationDisabled && { opacity: 0.65 },
-                          pressed && !relationDisabled && { opacity: 0.9 },
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={isMe ? '내 프로필' : relationLabel}>
-                        {sendGinitBusy ? (
-                          <ActivityIndicator color="#fff" size="small" />
-                        ) : (
-                          <Ionicons
-                            name={
-                              isMe
-                                ? 'person'
-                                : followRelationStatus === 'mutual' || followRelationStatus === 'following'
-                                  ? 'people'
-                                  : followRelationStatus === 'requested_out' || followRelationStatus === 'requested_in'
-                                    ? 'time'
-                                    : 'person-add'
-                            }
-                            size={16}
-                            color="#fff"
-                          />
-                        )}
-                        <Text style={styles.profileActionPrimaryText}>{isMe ? '내 프로필' : relationLabel}</Text>
-                      </Pressable>
+                      {isMe ? (
+                        <Pressable
+                          disabled
+                          style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
+                          accessibilityRole="button"
+                          accessibilityLabel="내 프로필">
+                          <Ionicons name="person" size={16} color="#fff" />
+                          <Text style={styles.profileActionPrimaryText}>내 프로필</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          onPress={
+                            friendRelation.status === 'pending_in' ? onAcceptFriendGinit : onSendFriendGinit
+                          }
+                          disabled={
+                            (friendGinitDisabled && friendRelation.status !== 'pending_in') || friendInMissingId
+                          }
+                          style={({ pressed }) => [
+                            styles.profileActionBtn,
+                            styles.profileActionPrimary,
+                            ((friendGinitDisabled && friendRelation.status !== 'pending_in') || friendInMissingId) && {
+                              opacity: 0.55,
+                            },
+                            pressed &&
+                              !(
+                                (friendGinitDisabled && friendRelation.status !== 'pending_in') ||
+                                friendInMissingId
+                              ) && { opacity: 0.9 },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={friendLabel}>
+                          {friendRequestBusy ? (
+                            <ActivityIndicator color="#fff" size="small" />
+                          ) : (
+                            <Ionicons name={friendIconName} size={16} color="#fff" />
+                          )}
+                          <Text style={styles.profileActionPrimaryText} numberOfLines={1}>
+                            {friendLabel}
+                          </Text>
+                        </Pressable>
+                      )}
                     </View>
                   </>
                 );

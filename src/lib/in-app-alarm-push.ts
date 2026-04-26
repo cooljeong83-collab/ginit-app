@@ -23,7 +23,7 @@ export async function ensureGinitInAppAndroidChannel(): Promise<void> {
   });
 }
 
-export type InAppAlarmPushKind = 'chat' | 'meeting_change';
+export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request';
 
 async function fetchExpoPushTokenForUser(userId: string): Promise<string | null> {
   const uid = normalizeParticipantId(userId.trim());
@@ -55,6 +55,18 @@ function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
 } {
   const mt = params.meetingTitle.trim() || '모임';
   const mid = params.meetingId.trim();
+  if (params.kind === 'friend_request') {
+    const name = mt || '친구';
+    const body = (params.preview ?? '').trim() || `${name}님이 친구 요청을 보냈어요.`;
+    return {
+      title: '친구 요청',
+      subtitle: name,
+      body,
+      meetingId: mid,
+      action: 'in_app_friend_request',
+      url: 'ginitapp://friends',
+    };
+  }
   if (params.kind === 'chat') {
     const preview = (params.preview ?? '').trim().slice(0, 500) || '새 글이 도착했어요.';
     return {

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { SocialDiscovery, type DiscoveryCardProfile } from '@/components/social/SocialDiscovery';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import { sendGinitRequest } from '@/src/lib/friends';
 
 const DEMO: DiscoveryCardProfile[] = [
@@ -41,13 +42,19 @@ export default function SocialDiscoveryScreen() {
       }
       try {
         await sendGinitRequest(me, peerId);
+        const card = deck.find((x) => x.userId === peerId);
+        notifyFriendRequestReceivedFireAndForget({
+          addresseeAppUserId: peerId,
+          requesterAppUserId: me,
+          requesterDisplayName: card?.displayName,
+        });
         Alert.alert('지닛 전송', '상대에게 친구 요청을 보냈어요.');
       } catch (e) {
         Alert.alert('오류', e instanceof Error ? e.message : String(e));
       }
       setDeck((d) => d.filter((x) => x.userId !== peerId));
     },
-    [userId],
+    [userId, deck],
   );
 
   const onPass = useCallback((peerId: string) => {

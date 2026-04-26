@@ -33,7 +33,9 @@ import {
   type InAppAlarmRow,
   meetingChangeFingerprint,
 } from '@/src/lib/in-app-alarms';
+import { fetchFriendsPendingInbox, type FriendInboxRow } from '@/src/lib/friends';
 import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
+import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
@@ -84,6 +86,8 @@ type InAppAlarmsContextValue = {
    * - 호스트 참여/퇴장 누적 알람도 해당 모임에 한해 제거
    */
   markMeetingAlarmsReadByPushTap: (meeting: Meeting) => void;
+  /** 친구 요청 알람(인앱·로컬 헤드업)을 확인 처리 — 푸시 탭 시 등 */
+  markFriendRequestAlarmDismissed: (friendshipId: string) => void;
 };
 
 const InAppAlarmsContext = createContext<InAppAlarmsContextValue | null>(null);
@@ -113,6 +117,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     Record<string, { id: string; subtitle: string; sortMs: number }[]>
   >({});
   const [chatTabUnreadTotal, setChatTabUnreadTotal] = useState(0);
+  const [friendInbox, setFriendInbox] = useState<FriendInboxRow[]>([]);
+  const [friendRequesterNickById, setFriendRequesterNickById] = useState<Map<string, string>>(() => new Map());
+  const friendHeadsUpNotifiedIdsRef = useRef<Set<string>>(new Set());
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
@@ -153,6 +160,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       setReadState(defaultInAppAlarmReadState());
       setMeetingAlarmSinceMs({});
       setHostParticipantEventLog({});
+      setFriendInbox([]);
+      setFriendRequesterNickById(new Map());
+      friendHeadsUpNotifiedIdsRef.current = new Set();
       setPanelOpen(false);
       pushDedupeRef.current = new Set();
       prevParticipantSetRef.current = {};
@@ -201,6 +211,71 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       },
     );
   }, [userId]);
+
+  useEffect(() => {
+    if (!persistReady || !userId?.trim()) {
+      setFriendInbox([]);
+      return;
+    }
+    const uid = userId.trim();
+    const load = () => {
+      void fetchFriendsPendingInbox(uid)
+        .then((rows) => setFriendInbox(rows))
+        .catch(() => setFriendInbox([]));
+    };
+    load();
+    const unsubRt = subscribeFriendsTableChanges(load);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') load();
+    });
+    return () => {
+      unsubRt();
+      sub.remove();
+    };
+  }, [persistReady, userId]);
+
+  useEffect(() => {
+    if (friendInbox.length === 0) {
+      setFriendRequesterNickById(new Map());
+      return;
+    }
+    const ids = [...new Set(friendInbox.map((r) => r.requester_app_user_id))];
+    let cancelled = false;
+    void getUserProfilesForIds(ids).then((map) => {
+      if (cancelled) return;
+      const next = new Map<string, string>();
+      for (const id of ids) {
+        next.set(id, map.get(id)?.nickname?.trim() || '친구');
+      }
+      setFriendRequesterNickById(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [friendInbox]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!persistReady || !userId?.trim()) return;
+
+    for (const fr of friendInbox) {
+      if (readState.friendRequestDismissedIds[fr.id]) continue;
+      if (friendHeadsUpNotifiedIdsRef.current.has(fr.id)) continue;
+      friendHeadsUpNotifiedIdsRef.current.add(fr.id);
+      const title = friendRequesterNickById.get(fr.requester_app_user_id) ?? '친구';
+      notifyInAppAlarmHeadsUpFireAndForget({
+        userId,
+        kind: 'friend_request',
+        meetingId: fr.id,
+        meetingTitle: title,
+        preview: '친구 요청이 왔어요. 눌러서 확인해 보세요.',
+      });
+    }
+    const cur = new Set(friendInbox.map((r) => r.id));
+    for (const id of [...friendHeadsUpNotifiedIdsRef.current]) {
+      if (!cur.has(id)) friendHeadsUpNotifiedIdsRef.current.delete(id);
+    }
+  }, [persistReady, userId, friendInbox, readState.friendRequestDismissedIds, friendRequesterNickById]);
 
   const joinedKey = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, userId);
@@ -260,7 +335,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       }
 
       if (!changed) return prev;
-      return { chatReadMessageId, meetingAckFingerprint };
+      return { ...prev, chatReadMessageId, meetingAckFingerprint };
     });
   }, [persistReady, userId, meetings, latestById]);
 
@@ -520,9 +595,33 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         });
       }
     }
+    for (const fr of friendInbox) {
+      if (readState.friendRequestDismissedIds[fr.id]) continue;
+      const createdMs = fr.created_at ? Date.parse(fr.created_at) : NaN;
+      const sortMs = Number.isFinite(createdMs) ? createdMs : Date.now();
+      const nick = friendRequesterNickById.get(fr.requester_app_user_id) ?? '친구';
+      rows.push({
+        id: `friend:${fr.id}`,
+        kind: 'friend_request',
+        meetingId: fr.id,
+        meetingTitle: nick,
+        subtitle: '친구 요청이 왔어요',
+        sortMs,
+        requesterAppUserId: fr.requester_app_user_id,
+      });
+    }
     rows.sort((a, b) => b.sortMs - a.sortMs);
     return rows;
-  }, [meetings, userId, latestById, readState, meetingAlarmSinceMs, hostParticipantEventLog]);
+  }, [
+    meetings,
+    userId,
+    latestById,
+    readState,
+    meetingAlarmSinceMs,
+    hostParticipantEventLog,
+    friendInbox,
+    friendRequesterNickById,
+  ]);
 
   const hasUnread = alarms.length > 0;
 
@@ -614,6 +713,15 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const markFriendRequestAlarmDismissed = useCallback((friendshipId: string) => {
+    const fid = friendshipId.trim();
+    if (!fid) return;
+    setReadState((p) => ({
+      ...p,
+      friendRequestDismissedIds: { ...p.friendRequestDismissedIds, [fid]: true },
+    }));
+  }, []);
+
   const openAlarmPanel = useCallback(() => setPanelOpen(true), []);
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
@@ -623,6 +731,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     setReadState((prev) => {
       const chatReadMessageId = { ...prev.chatReadMessageId };
       const meetingAckFingerprint = { ...prev.meetingAckFingerprint };
+      const friendRequestDismissedIds = { ...prev.friendRequestDismissedIds };
       for (const j of joined) {
         const mid = j.id;
         const m = meetingById.get(mid);
@@ -633,13 +742,28 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           chatReadMessageId[mid] = latest?.id ?? '';
         }
       }
-      return { chatReadMessageId, meetingAckFingerprint };
+      for (const fr of friendInbox) {
+        friendRequestDismissedIds[fr.id] = true;
+      }
+      return { ...prev, chatReadMessageId, meetingAckFingerprint, friendRequestDismissedIds };
     });
     setHostParticipantEventLog({});
-  }, [meetings, userId, latestById]);
+  }, [meetings, userId, latestById, friendInbox]);
 
   const onPressAlarmRow = useCallback(
     (row: InAppAlarmRow) => {
+      if (row.kind === 'friend_request') {
+        const fid = row.meetingId.trim();
+        if (fid) {
+          setReadState((p) => ({
+            ...p,
+            friendRequestDismissedIds: { ...p.friendRequestDismissedIds, [fid]: true },
+          }));
+        }
+        closeAlarmPanel();
+        router.push('/(tabs)/friends');
+        return;
+      }
       if (row.kind === 'chat') {
         const lid = row.latestMessageId?.trim() ?? '';
         if (lid) {
@@ -684,6 +808,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       markChatReadUpTo,
       syncMeetingAckFromMeeting,
       markMeetingAlarmsReadByPushTap,
+      markFriendRequestAlarmDismissed,
     }),
     [
       hasUnread,
@@ -696,6 +821,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       markChatReadUpTo,
       syncMeetingAckFromMeeting,
       markMeetingAlarmsReadByPushTap,
+      markFriendRequestAlarmDismissed,
     ],
   );
 
@@ -744,7 +870,13 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                     onPress={() => onPressAlarmRow(item)}>
                     <View style={styles.alarmIconWrap}>
                       <Ionicons
-                        name={item.kind === 'chat' ? 'chatbubble-ellipses-outline' : 'calendar-outline'}
+                        name={
+                          item.kind === 'chat'
+                            ? 'chatbubble-ellipses-outline'
+                            : item.kind === 'friend_request'
+                              ? 'person-add-outline'
+                              : 'calendar-outline'
+                        }
                         size={22}
                         color={GinitTheme.trustBlue}
                       />

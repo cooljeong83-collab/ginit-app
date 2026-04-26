@@ -5,7 +5,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
-export type InAppAlarmKind = 'chat' | 'meeting_change';
+export type InAppAlarmKind = 'chat' | 'meeting_change' | 'friend_request';
 
 export type InAppAlarmRow = {
   /** FlatList 키(누적 알람 지원) */
@@ -17,6 +17,8 @@ export type InAppAlarmRow = {
   sortMs: number;
   /** 채팅 알림일 때 읽음 처리에 사용 */
   latestMessageId?: string;
+  /** kind === 'friend_request' — 요청자 앱 사용자 id */
+  requesterAppUserId?: string;
 };
 
 export type InAppAlarmReadState = {
@@ -24,10 +26,12 @@ export type InAppAlarmReadState = {
   chatReadMessageId: Record<string, string>;
   /** 마지막으로 확인한 모임 문서 지문 */
   meetingAckFingerprint: Record<string, string>;
+  /** 수락/거절 전에 알람 패널에서 확인한 친구 요청(friendships.id) */
+  friendRequestDismissedIds: Record<string, true>;
 };
 
 export function defaultInAppAlarmReadState(): InAppAlarmReadState {
-  return { chatReadMessageId: {}, meetingAckFingerprint: {} };
+  return { chatReadMessageId: {}, meetingAckFingerprint: {}, friendRequestDismissedIds: {} };
 }
 
 export function chatMessageTimeMs(m: MeetingChatMessage | null | undefined): number {

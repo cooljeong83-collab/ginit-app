@@ -7,12 +7,16 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
+  startAfter,
   where,
+  type DocumentSnapshot,
   type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -83,6 +87,58 @@ export async function ensureSocialChatRoomDoc(roomId: string, participantA: stri
   );
 }
 
+const SOCIAL_SEARCH_PAGE = 80;
+
+/**
+ * 1:1 채팅에서 `needle`이 본문에 포함된 메시지를 과거 방향으로 스캔합니다(클라이언트 부분 문자열).
+ */
+export async function searchSocialChatMessages(
+  roomId: string,
+  needle: string,
+  opts?: { maxDocsScanned?: number },
+): Promise<SocialChatMessage[]> {
+  const rid = roomId.trim();
+  const raw = typeof needle === 'string' ? needle.trim() : '';
+  if (!rid || !raw) return [];
+
+  const maxDocs = Math.min(Math.max(100, opts?.maxDocsScanned ?? 2000), 6000);
+  const norm = raw.toLowerCase();
+
+  const matches: SocialChatMessage[] = [];
+  const seen = new Set<string>();
+  let lastSnap: DocumentSnapshot | undefined;
+  let scanned = 0;
+
+  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+
+  while (scanned < maxDocs) {
+    const q = lastSnap
+      ? query(cref, orderBy('createdAt', 'desc'), startAfter(lastSnap), limit(SOCIAL_SEARCH_PAGE))
+      : query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_SEARCH_PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    for (const d of snap.docs) {
+      scanned++;
+      const m = mapSocialMessage(d.id, d.data() as Record<string, unknown>);
+      const hay = (m.text ?? '').trim().toLowerCase();
+      if (hay.includes(norm) && !seen.has(m.id)) {
+        seen.add(m.id);
+        matches.push(m);
+      }
+    }
+    lastSnap = snap.docs[snap.docs.length - 1]!;
+    if (snap.size < SOCIAL_SEARCH_PAGE) break;
+  }
+
+  matches.sort((a, b) => {
+    const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
+    const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
+    if (ta !== tb) return ta - tb;
+    return a.id.localeCompare(b.id);
+  });
+  return matches;
+}
+
 export function subscribeSocialChatMessages(
   roomId: string,
   onMessages: (messages: SocialChatMessage[]) => void,
@@ -135,7 +191,7 @@ export function subscribeMySocialChatRooms(
         const data = d.data() as Record<string, unknown>;
         if (data.isGroup === true) continue;
         const ids = Array.isArray(data.participantIds)
-          ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim())
+          ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
           : [];
         const peer = ids.find((x) => (normalizePhoneUserId(x) ?? x) !== me) ?? '';
         if (peer) out.push({ roomId: d.id, peerAppUserId: normalizePhoneUserId(peer) ?? peer });
