@@ -28,6 +28,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "@lovesworking/watermelondb-expo-plugin-sdk-52-plus",
       "expo-router",
       [
         "expo-image-picker",
@@ -64,10 +65,23 @@
       [
         "expo-build-properties",
         {
+          "ios": {
+            "extraPods": [
+              {
+                "name": "simdjson",
+                "configurations": ["Debug", "Release"],
+                "path": "../node_modules/@nozbe/simdjson",
+                "modular_headers": true
+              }
+            ]
+          },
           "android": {
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
-            "buildToolsVersion": "35.0.0"
+            "buildToolsVersion": "35.0.0",
+            "packagingOptions": {
+              "pickFirst": ["**/libc++_shared.so"]
+            }
           }
         }
       ],
