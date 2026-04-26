@@ -36,8 +36,9 @@ import {
 import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
-import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
+import { fetchMeetingChatUnreadCount, subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
@@ -69,6 +70,8 @@ type InAppAlarmsContextValue = {
   openAlarmPanel: () => void;
   closeAlarmPanel: () => void;
   alarmPanelVisible: boolean;
+  /** 모임 채팅 미읽음 합(탭 배지). 친구 1:1은 미집계 */
+  chatTabUnreadTotal: number;
   /** 모임별 마지막으로 읽음 처리한 채팅 메시지 id(로컬) — 채팅 탭 미읽음 배지 집계에 사용 */
   meetingChatReadMessageIdMap: Record<string, string>;
   /** 채팅방에서 나갈 때 등 — 마지막으로 본 메시지까지 읽음 처리 */
@@ -109,6 +112,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [hostParticipantEventLog, setHostParticipantEventLog] = useState<
     Record<string, { id: string; subtitle: string; sortMs: number }[]>
   >({});
+  const [chatTabUnreadTotal, setChatTabUnreadTotal] = useState(0);
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
@@ -522,6 +526,51 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const hasUnread = alarms.length > 0;
 
+  const chatTabUnreadRefreshSig = useMemo(() => {
+    const uid = userId?.trim();
+    if (!uid) return '';
+    const joined = filterJoinedMeetings(meetings, userId);
+    const pk = normalizeParticipantId(uid);
+    const raw = uid;
+    const localMap = readState.chatReadMessageId;
+    return joined
+      .map((m) => {
+        const lm = latestById[m.id];
+        const read = effectiveMeetingChatReadId(m, pk, raw, localMap, lm?.id);
+        return `${m.id}:${lm?.id ?? ''}:${read}`;
+      })
+      .join('|');
+  }, [meetings, userId, latestById, readState.chatReadMessageId]);
+
+  useEffect(() => {
+    if (!persistReady || !userId?.trim()) {
+      setChatTabUnreadTotal(0);
+      return;
+    }
+    const joined = filterJoinedMeetings(meetings, userId);
+    const pk = normalizeParticipantId(userId.trim());
+    const raw = userId.trim();
+    const localMap = readState.chatReadMessageId;
+    let cancelled = false;
+    void (async () => {
+      let sum = 0;
+      for (const m of joined) {
+        if (cancelled) return;
+        const lm = latestById[m.id];
+        const readId = effectiveMeetingChatReadId(m, pk, raw, localMap, lm?.id);
+        try {
+          sum += await fetchMeetingChatUnreadCount(m.id, readId || null);
+        } catch {
+          /* 한 방 실패는 건너뜀 */
+        }
+      }
+      if (!cancelled) setChatTabUnreadTotal(sum);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [persistReady, userId, meetings, chatTabUnreadRefreshSig]);
+
   const markChatReadUpTo = useCallback((meetingId: string, messageId: string | undefined) => {
     const mid = meetingId.trim();
     if (!mid) return;
@@ -630,6 +679,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       openAlarmPanel,
       closeAlarmPanel,
       alarmPanelVisible: panelOpen,
+      chatTabUnreadTotal,
       meetingChatReadMessageIdMap: readState.chatReadMessageId,
       markChatReadUpTo,
       syncMeetingAckFromMeeting,
@@ -641,6 +691,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       openAlarmPanel,
       closeAlarmPanel,
       panelOpen,
+      chatTabUnreadTotal,
       readState.chatReadMessageId,
       markChatReadUpTo,
       syncMeetingAckFromMeeting,

@@ -18,6 +18,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
@@ -48,6 +49,7 @@ function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.gly
 export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const router = useRouter();
   const { userId } = useUserSession();
+  const { chatTabUnreadTotal } = useInAppAlarms();
   const insets = useSafeAreaInsets();
   const routes = ORDER.map((name) => state.routes.find((r) => r.name === name)).filter(Boolean) as (typeof state.routes)[number][];
   const fabDocked = useSharedValue(0);
@@ -201,18 +203,39 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                           ? '채팅'
                           : '프로필';
 
+            const chatBadge =
+              route.name === 'chat' && chatTabUnreadTotal > 0
+                ? chatTabUnreadTotal > 99
+                  ? '99+'
+                  : String(chatTabUnreadTotal)
+                : null;
+
             return (
               <Pressable
                 key={route.key}
                 accessibilityRole="button"
                 accessibilityState={focused ? { selected: true } : {}}
+                accessibilityLabel={
+                  chatBadge
+                    ? `${label}, 읽지 않은 모임 채팅 ${chatTabUnreadTotal > 99 ? '99개 이상' : `${chatTabUnreadTotal}개`}`
+                    : label
+                }
                 onPress={() => onTabPress(route, originalIndex)}
                 style={styles.tab}>
-                <Ionicons
-                  name={iconFor(route.name, focused)}
-                  size={24}
-                  color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
-                />
+                <View style={styles.tabIconCluster}>
+                  <Ionicons
+                    name={iconFor(route.name, focused)}
+                    size={24}
+                    color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
+                  />
+                  {chatBadge ? (
+                    <View style={styles.tabUnreadBadge} accessibilityElementsHidden>
+                      <Text style={styles.tabUnreadBadgeText} numberOfLines={1}>
+                        {chatBadge}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
                   {label}
                 </Text>
@@ -288,6 +311,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
+  },
+  tabIconCluster: {
+    width: 40,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabUnreadBadge: {
+    position: 'absolute',
+    top: -2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  tabUnreadBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: -0.35,
+    lineHeight: 12,
   },
   tabLabel: {
     fontSize: 11,

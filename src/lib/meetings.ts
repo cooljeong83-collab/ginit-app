@@ -37,6 +37,7 @@ import { getFirebaseFirestore } from './firebase';
 import { ledgerWritesToSupabase } from './hybrid-data-source';
 import {
   isLedgerMeetingId,
+  ledgerGetMeetingDocOutcome,
   ledgerMeetingCreate,
   ledgerMeetingDelete,
   ledgerMeetingPutRawDoc,
@@ -761,10 +762,11 @@ export function subscribeMeetingById(
     let cancelled = false;
     const emit = () => {
       if (cancelled) return;
-      void ledgerTryLoadMeetingDoc(id).then((data) => {
+      void ledgerGetMeetingDocOutcome(id).then((outcome) => {
         if (cancelled) return;
-        if (!data) onMeeting(null);
-        else onMeeting(mapFirestoreMeetingDoc(id, data));
+        if (outcome.status === 'failed') return;
+        if (outcome.status === 'missing') onMeeting(null);
+        else onMeeting(mapFirestoreMeetingDoc(id, outcome.doc));
       });
     };
     emit();

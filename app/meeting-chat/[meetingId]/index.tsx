@@ -1512,14 +1512,12 @@ export default function MeetingChatRoomScreen() {
               maxToRenderPerBatch={10}
               windowSize={11}
               updateCellsBatchingPeriod={50}
-              {...(Platform.OS !== 'web'
-                ? {
-                    maintainVisibleContentPosition: {
-                      minIndexForVisible: 1,
-                      autoscrollToTopThreshold: 96,
-                    },
-                  }
-                : {})}
+              /**
+               * inverted + 과거 페이지 prepend 시 `maintainVisibleContentPosition`은
+               * Android/iOS에서 네이티브 SIGABRT/강제 종료가 보고되는 경우가 많아 사용하지 않습니다.
+               * 과거 로드 직후 스크롤이 약간 움직일 수 있으나 크래시를 막는 쪽을 택합니다.
+               */
+              removeClippedSubviews={false}
               />
             </View>
             {showJumpToBottomFab && !plusMenuOpen ? (

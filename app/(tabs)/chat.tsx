@@ -23,59 +23,23 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { fetchMeetingChatUnreadCount, subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
-import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { socialDmRoomId, type SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
+import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { useUserSession } from '@/src/context/UserSessionContext';
 
 /** 친구 채팅 행 좌측 액센트 — 홈 카드 톤과 어울리는 블루·민트 그라데이션 */
 const SOCIAL_CHAT_LIST_ACCENT = ['rgba(0, 82, 204, 0.28)', 'rgba(134, 211, 183, 0.18)'] as const;
-
-/** 모임 문서의 `chatReadMessageIdBy`에서 내 마지막 읽은 메시지 id (키 형식이 달라도 정규화로 매칭) */
-function readMessageIdFromMeetingDoc(m: Meeting, userPk: string, rawUid: string): string {
-  const by = m.chatReadMessageIdBy;
-  if (!by || typeof by !== 'object') return '';
-  const tryKey = (k: string) => (k ? String((by as Record<string, string>)[k] ?? '').trim() : '');
-  let s = userPk ? tryKey(userPk) : '';
-  if (s) return s;
-  const raw = rawUid.trim();
-  if (raw) {
-    s = tryKey(raw);
-    if (s) return s;
-  }
-  if (userPk) {
-    for (const [k, v] of Object.entries(by)) {
-      if (typeof v !== 'string' || !v.trim()) continue;
-      if ((normalizeParticipantId(k) ?? k.trim()) === userPk) return v.trim();
-    }
-  }
-  return '';
-}
-
-function effectiveMeetingChatReadId(
-  m: Meeting,
-  userPk: string,
-  rawUid: string,
-  localMap: Record<string, string>,
-  latestMessageId?: string | null,
-): string {
-  const fromDoc = readMessageIdFromMeetingDoc(m, userPk, rawUid);
-  const latest = (latestMessageId ?? '').trim();
-  // 다른 기기/세션에서 이미 최신까지 읽음이 반영된 경우, 로컬 캐시보다 서버를 우선
-  if (latest && fromDoc === latest) return fromDoc;
-  const local = (localMap[m.id] ?? '').trim();
-  if (local) return local;
-  return fromDoc;
-}
 
 function profileForCreatedBy(
   map: Map<string, UserProfile>,
@@ -104,10 +68,7 @@ export default function ChatTab() {
     [windowWidth],
   );
   const [chatKind, setChatKind] = useState<ChatKind>('gather');
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
   const [latestByMeetingId, setLatestByMeetingId] = useState<
     Record<string, MeetingChatMessage | null | undefined>
   >({});
@@ -115,21 +76,27 @@ export default function ChatTab() {
   const [socialProfiles, setSocialProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [unreadByMeetingId, setUnreadByMeetingId] = useState<Record<string, number>>({});
 
-  useEffect(() => {
-    setLoading(true);
-    const unsub = subscribeMeetingsHybrid(
-      (list) => {
-        setMeetings(list);
-        setListError(null);
-        setLoading(false);
-      },
-      (msg) => {
-        setListError(msg);
-        setLoading(false);
-      },
-    );
-    return unsub;
-  }, []);
+  const signedIn = Boolean(userId?.trim());
+
+  const {
+    meetings,
+    listError: gatherListError,
+    refetch: refetchMeetingsFeed,
+    fetchNextPage: fetchNextMeetingsFeedPage,
+    hasNextPage: hasMoreMeetingsFeed,
+    isFetchingNextPage: isFetchingMoreMeetingsFeed,
+    showFooterSpinner: showMeetingsFeedFooterSpinner,
+    isInitialListLoading: meetingsFeedInitialLoading,
+  } = useMeetingsFeedInfiniteQuery({
+    enabled: signedIn && chatKind === 'gather',
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  const fetchNextMeetingsFeedPageGuarded = useCallback(async () => {
+    if (!hasMoreMeetingsFeed || isFetchingMoreMeetingsFeed) return;
+    await fetchNextMeetingsFeedPage();
+  }, [hasMoreMeetingsFeed, isFetchingMoreMeetingsFeed, fetchNextMeetingsFeedPage]);
 
   useEffect(() => {
     const uid = userId?.trim();
@@ -168,8 +135,6 @@ export default function ChatTab() {
     });
     return list;
   }, [joinedMeetings, latestByMeetingId]);
-
-  const signedIn = Boolean(userId?.trim());
 
   const {
     rooms: socialRooms,
@@ -285,18 +250,22 @@ export default function ChatTab() {
       if (chatKind === 'social') {
         await refetchSocialRooms();
       } else {
-        const result = await fetchMeetingsOnceHybrid();
-        if (result.ok) {
-          setMeetings(result.meetings);
-          setListError(null);
-        } else {
-          setListError(result.message);
-        }
+        await refetchMeetingsFeed();
       }
     } finally {
       setRefreshing(false);
     }
-  }, [chatKind, refetchSocialRooms]);
+  }, [chatKind, refetchSocialRooms, refetchMeetingsFeed]);
+
+  const gatherListFooter = useMemo(() => {
+    if (chatKind !== 'gather') return null;
+    if (!showMeetingsFeedFooterSpinner || refreshing) return null;
+    return (
+      <View style={styles.listFooterSpinner} accessibilityLabel="모임 목록 로딩">
+        <ActivityIndicator color={GinitTheme.colors.primary} />
+      </View>
+    );
+  }, [chatKind, showMeetingsFeedFooterSpinner, refreshing]);
 
   const socialListFooter = useMemo(() => {
     if (chatKind !== 'social') return null;
@@ -389,17 +358,17 @@ export default function ChatTab() {
                 </View>
               ) : null}
 
-              {loading ? (
+              {chatKind === 'gather' && meetingsFeedInitialLoading && meetings.length === 0 ? (
                 <View style={styles.centerRow}>
                   <ActivityIndicator color={GinitTheme.colors.primary} />
                   <Text style={styles.muted}>불러오는 중…</Text>
                 </View>
               ) : null}
 
-              {listError ? (
+              {chatKind === 'gather' && gatherListError ? (
                 <View style={styles.errorBox}>
                   <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
-                  <Text style={styles.errorBody}>{listError}</Text>
+                  <Text style={styles.errorBody}>{gatherListError}</Text>
                 </View>
               ) : null}
 
@@ -410,27 +379,35 @@ export default function ChatTab() {
                 </View>
               ) : null}
 
-              {!loading && !listError && !signedIn ? (
+              {!signedIn &&
+              (chatKind === 'gather'
+                ? !(meetingsFeedInitialLoading && meetings.length === 0) && !gatherListError
+                : !(socialRoomsInitialLoading && socialRooms.length === 0) && !socialListError) ? (
                 <Text style={styles.empty}>로그인하면 채팅 목록이 여기에 표시돼요.</Text>
               ) : null}
 
-              {!loading && !listError && signedIn && chatKind === 'gather' && joinedMeetings.length === 0 ? (
+              {chatKind === 'gather' &&
+              !(meetingsFeedInitialLoading && meetings.length === 0) &&
+              !gatherListError &&
+              signedIn &&
+              joinedMeetings.length === 0 ? (
                 <Text style={styles.empty}>참여 중인 모임이 없어요. 홈에서 모임에 참여해 보세요.</Text>
               ) : null}
 
-              {!loading && !listError && signedIn && chatKind === 'social' && socialRooms.length === 0 ? (
+              {chatKind === 'social' &&
+              !(socialRoomsInitialLoading && socialRooms.length === 0) &&
+              !socialListError &&
+              signedIn &&
+              socialRooms.length === 0 ? (
                 <Text style={styles.empty}>Social 대화가 없어요. 디스커버리에서 지닛을 보내 보세요.</Text>
               ) : null}
             </View>
           }
-          ListFooterComponent={socialListFooter}
-          onEndReached={
-            chatKind === 'social' && hasMoreSocialRooms
-              ? () => {
-                  void fetchNextSocialRoomsPage();
-                }
-              : undefined
-          }
+          ListFooterComponent={chatKind === 'social' ? socialListFooter : gatherListFooter}
+          onEndReached={() => {
+            if (chatKind === 'social' && hasMoreSocialRooms) void fetchNextSocialRoomsPage();
+            else if (chatKind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
+          }}
           onEndReachedThreshold={0.6}
           renderItem={({ item }) => {
             if (chatKind === 'gather') {

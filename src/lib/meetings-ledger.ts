@@ -50,17 +50,36 @@ function normalizeRpcCreatedAt(doc: Record<string, unknown>): Record<string, unk
   return o;
 }
 
-/** `ledger_meeting_get_doc` — 행 없으면 null */
-export async function ledgerTryLoadMeetingDoc(meetingId: string): Promise<Record<string, unknown> | null> {
+/** RPC 성공 시 문서, 행 없음, 네트워크·RPC 실패(재시도 가능) 구분 */
+export type LedgerMeetingDocLoadOutcome =
+  | { status: 'ok'; doc: Record<string, unknown> }
+  | { status: 'missing' }
+  | { status: 'failed' };
+
+export async function ledgerGetMeetingDocOutcome(meetingId: string): Promise<LedgerMeetingDocLoadOutcome> {
   const id = meetingId.trim();
-  if (!id) return null;
-  const { data, error } = await supabase.rpc('ledger_meeting_get_doc', { p_meeting_id: id });
-  if (error) throw new Error(error.message);
-  if (data == null) return null;
-  if (typeof data !== 'object' || Array.isArray(data)) return null;
-  const row = data as Record<string, unknown>;
-  if (Object.keys(row).length === 0) return null;
-  return normalizeRpcCreatedAt(row);
+  if (!id) return { status: 'missing' };
+  try {
+    const { data, error } = await supabase.rpc('ledger_meeting_get_doc', { p_meeting_id: id });
+    if (error) {
+      if (__DEV__) console.warn('[ledger] ledger_meeting_get_doc', id, error.message);
+      return { status: 'failed' };
+    }
+    if (data == null) return { status: 'missing' };
+    if (typeof data !== 'object' || Array.isArray(data)) return { status: 'missing' };
+    const row = data as Record<string, unknown>;
+    if (Object.keys(row).length === 0) return { status: 'missing' };
+    return { status: 'ok', doc: normalizeRpcCreatedAt(row) };
+  } catch (e) {
+    if (__DEV__) console.warn('[ledger] ledger_meeting_get_doc', id, e);
+    return { status: 'failed' };
+  }
+}
+
+/** `ledger_meeting_get_doc` — ok일 때만 문서; missing·failed는 null (throw 없음) */
+export async function ledgerTryLoadMeetingDoc(meetingId: string): Promise<Record<string, unknown> | null> {
+  const o = await ledgerGetMeetingDocOutcome(meetingId);
+  return o.status === 'ok' ? o.doc : null;
 }
 
 export async function ledgerMeetingPutRawDoc(meetingId: string, doc: Record<string, unknown>): Promise<void> {

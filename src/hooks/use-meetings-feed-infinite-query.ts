@@ -11,6 +11,14 @@ import {
 
 type Page = { meetings: Meeting[]; hasMore: boolean };
 
+export type UseMeetingsFeedInfiniteQueryOptions = {
+  /** false면 fetch·Realtime 구독 안 함(채팅 탭 친구 전용일 때 등). 기본 true */
+  enabled?: boolean;
+  /** 미지정 시 QueryClient 기본값(예: 홈 피드) */
+  staleTime?: number;
+  refetchOnWindowFocus?: boolean;
+};
+
 export function meetingsFeedInfiniteQueryKey() {
   return ['meetings', 'feed', meetingListSource()] as const;
 }
@@ -30,7 +38,10 @@ async function fetchMeetingsFeedPage(pageParam: number): Promise<Page> {
   return { meetings: res.meetings, hasMore: res.hasMore };
 }
 
-export function useMeetingsFeedInfiniteQuery() {
+export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQueryOptions) {
+  const enabled = options?.enabled ?? true;
+  const staleTimeOpt = options?.staleTime;
+  const refetchOnWindowFocusOpt = options?.refetchOnWindowFocus;
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -39,31 +50,22 @@ export function useMeetingsFeedInfiniteQuery() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     if (meetingListSource() !== 'supabase') return;
-    let updateDebounce: ReturnType<typeof setTimeout> | null = null;
     const flushInvalidate = () => {
       void queryClient.invalidateQueries({ queryKey: ['meetings', 'feed'] });
     };
     const unsub = subscribePublicMeetingsListInvalidate(
       (payload) => {
         /**
-         * `meetings` 행의 UPDATE는 채팅 읽음·부분 필드만 바뀌는 경우가 많아,
-         * 즉시 무효화하면 채팅방 진입만으로도 피드가 매번 서버 재조회됩니다.
-         * INSERT/DELETE는 목록 구성에 직접 영향 → 즉시 무효화.
+         * `meetings` UPDATE는 채팅 읽음(`writeMeetingChatReadReceipt`)·ledger 문서 병합 등
+         * 피드 카드와 무관한 변경이 대부분이라 무효화하면 채팅방 재진입만으로도
+         * 홈 피드가 `fetchPublicMeetingsPageFromSupabase`를 반복 호출합니다.
+         * 목록에 새 행이 생기거나 사라질 때만 무효화하고, 그 외 갱신은 당겨서 새로고침에 맡깁니다.
          */
         if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
-          if (updateDebounce) {
-            clearTimeout(updateDebounce);
-            updateDebounce = null;
-          }
           flushInvalidate();
-          return;
         }
-        if (updateDebounce) clearTimeout(updateDebounce);
-        updateDebounce = setTimeout(() => {
-          updateDebounce = null;
-          flushInvalidate();
-        }, 2000);
       },
       () => {
         /* Realtime 오류는 피드에서 별도 배너 없이 무시 가능 */
@@ -71,15 +73,17 @@ export function useMeetingsFeedInfiniteQuery() {
     );
     return () => {
       unsub();
-      if (updateDebounce) clearTimeout(updateDebounce);
     };
-  }, [queryClient]);
+  }, [queryClient, enabled]);
 
   const queryKey = useMemo(() => meetingsFeedInfiniteQueryKey(), []);
 
   const query = useInfiniteQuery({
     queryKey,
+    enabled,
     initialPageParam: 0,
+    ...(staleTimeOpt !== undefined ? { staleTime: staleTimeOpt } : {}),
+    ...(refetchOnWindowFocusOpt !== undefined ? { refetchOnWindowFocus: refetchOnWindowFocusOpt } : {}),
     queryFn: ({ pageParam }) => fetchMeetingsFeedPage(pageParam as number),
     getNextPageParam: (lastPage, allPages) => (lastPage.hasMore ? allPages.length : undefined),
   });
