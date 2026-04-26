@@ -67,7 +67,7 @@ import {
   isMeetingServiceComplianceComplete,
   type UserProfile,
 } from '@/src/lib/user-profile';
-import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
+import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 
 type SeoulGuLabel =
   | '강남구'
@@ -210,10 +210,17 @@ export default function FeedScreen() {
   const [homeTab, setHomeTab] = useState<'explore' | 'guest' | 'host'>('explore');
 
   const [categories, setCategories] = useState<Category[]>([]);
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
+  const {
+    meetings,
+    listError,
+    refetch: refetchMeetingsFeed,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    showFooterSpinner,
+    isInitialListLoading,
+  } = useMeetingsFeedInfiniteQuery();
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [feedUserProfile, setFeedUserProfile] = useState<UserProfile | null>(null);
 
@@ -322,22 +329,6 @@ export default function FeedScreen() {
       (list) => setCategories(list),
       () => {
         /* 피드는 카테고리 없이도 동작 */
-      },
-    );
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    setLoading(true);
-    const unsub = subscribeMeetingsHybrid(
-      (list) => {
-        setMeetings(list);
-        setListError(null);
-        setLoading(false);
-      },
-      (msg) => {
-        setListError(msg);
-        setLoading(false);
       },
     );
     return unsub;
@@ -510,17 +501,25 @@ export default function FeedScreen() {
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const result = await fetchMeetingsOnceHybrid();
-      if (result.ok) {
-        setMeetings(result.meetings);
-        setListError(null);
-      } else {
-        setListError(result.message);
-      }
+      await refetchMeetingsFeed();
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [refetchMeetingsFeed]);
+
+  const onEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const listFooter = useMemo(
+    () =>
+      showFooterSpinner && !refreshing ? (
+        <View style={styles.listFooterLoading}>
+          <ActivityIndicator />
+        </View>
+      ) : null,
+    [showFooterSpinner, refreshing],
+  );
 
   const onMainScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y;
@@ -676,13 +675,6 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {loading ? (
-        <View style={styles.centerRow}>
-          <ActivityIndicator />
-          <Text style={styles.muted}>불러오는 중…</Text>
-        </View>
-      ) : null}
-
       {listError ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
@@ -690,15 +682,15 @@ export default function FeedScreen() {
         </View>
       ) : null}
 
-      {!loading && !listError && meetings.length === 0 ? (
+      {!isInitialListLoading && !listError && meetings.length === 0 ? (
         <Text style={styles.empty}>등록된 모임이 없습니다. + 버튼으로 첫 모임을 만들어 보세요.</Text>
       ) : null}
 
-      {!loading && !listError && meetings.length > 0 && meetingsWithinRadius.length === 0 && userCoords ? (
+      {!isInitialListLoading && !listError && meetings.length > 0 && meetingsWithinRadius.length === 0 && userCoords ? (
         <Text style={styles.empty}>내 위치 기준 반경 5km 안에 등록된 모임이 없어요.</Text>
       ) : null}
 
-      {!loading &&
+      {!isInitialListLoading &&
       !listError &&
       meetingsWithinRadius.length > 0 &&
       filteredMeetings.length === 0 &&
@@ -714,11 +706,11 @@ export default function FeedScreen() {
         </Text>
       ) : null}
 
-      {!loading && !listError && meetingsWithinRadius.length > 0 && joinedFilteredMeetings.length === 0 && homeTab === 'mine' ? (
+      {!isInitialListLoading && !listError && meetingsWithinRadius.length > 0 && joinedFilteredMeetings.length === 0 && homeTab === 'mine' ? (
         <Text style={styles.empty}>조건에 맞는 내 모임이 없어요. 필터를 바꾸거나 탐색에서 모임에 참여해 보세요.</Text>
       ) : null}
 
-      {!loading &&
+      {!isInitialListLoading &&
       !listError &&
       homeTab === 'explore' &&
       meetingsWithinRadius.length > 0 &&
@@ -745,6 +737,7 @@ export default function FeedScreen() {
           }}
           renderItem={renderHomeItem}
           ListHeaderComponent={listHeader}
+          ListFooterComponent={listFooter}
           contentContainerStyle={styles.scroll}
           style={styles.listFlex}
           showsVerticalScrollIndicator={false}
@@ -756,6 +749,8 @@ export default function FeedScreen() {
           windowSize={9}
           onScroll={onMainScroll}
           scrollEventThrottle={16}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.6}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1073,11 +1068,10 @@ const styles = StyleSheet.create({
   recruitTogglePillLabelOn: {
     color: '#FFFFFF',
   },
-  centerRow: {
-    flexDirection: 'row',
+  listFooterLoading: {
+    paddingVertical: 16,
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
+    justifyContent: 'center',
   },
   muted: {
     fontSize: 14,

@@ -4,7 +4,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
+import type { Timestamp } from 'firebase/firestore';
 import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -47,15 +47,13 @@ import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { getMeetingChatImageUploadQuality } from '@/src/lib/meeting-chat-image-quality-preference';
 import {
   deleteMeetingChatImageMessageBestEffort,
-  fetchMeetingChatOlderPage,
   meetingChatMessageSearchHaystack,
-  MEETING_CHAT_PAGE_SIZE,
   searchMeetingChatMessages,
   sendMeetingChatImageMessage,
   sendMeetingChatTextMessage,
-  subscribeMeetingChatLiveTail,
   writeMeetingChatReadReceipt,
 } from '@/src/lib/meeting-chat';
+import { useMeetingChatMessagesInfiniteQuery } from '@/src/hooks/use-meeting-chat-messages-infinite-query';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -338,29 +336,6 @@ export default function MeetingChatRoomScreen() {
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [meetingError, setMeetingError] = useState<string | null>(null);
-  const [tailMessages, setTailMessages] = useState<MeetingChatMessage[]>([]);
-  const [olderMessages, setOlderMessages] = useState<MeetingChatMessage[]>([]);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMoreOlder, setHasMoreOlder] = useState(false);
-  const pagingCursorRef = useRef<DocumentSnapshot | null>(null);
-  const pagingInitializedRef = useRef(false);
-  const loadingOlderRef = useRef(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-
-  const messages = useMemo(() => {
-    const seen = new Set<string>();
-    const out: MeetingChatMessage[] = [];
-    for (const m of tailMessages) {
-      seen.add(m.id);
-      out.push(m);
-    }
-    for (const m of olderMessages) {
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
-      out.push(m);
-    }
-    return out;
-  }, [tailMessages, olderMessages]);
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -556,8 +531,6 @@ export default function MeetingChatRoomScreen() {
     }, [meetingId]),
   );
 
-  messagesRef.current = messages;
-
   useEffect(() => {
     if (!meetingId) {
       setMeeting(null);
@@ -579,6 +552,19 @@ export default function MeetingChatRoomScreen() {
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
   }, [meeting, userId]);
+
+  const {
+    messages,
+    listError: chatError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useMeetingChatMessagesInfiniteQuery({
+    meetingId,
+    enabled: allowed === true,
+  });
+
+  messagesRef.current = messages;
 
   useEffect(() => {
     lastMarkedReadRef.current = null;
@@ -614,98 +600,10 @@ export default function MeetingChatRoomScreen() {
     }
   }, [allowed, meetingId, messages, markChatReadUpTo, myId]);
 
-  useEffect(() => {
-    if (!meetingId || allowed !== true) {
-      if (allowed === false) {
-        setTailMessages([]);
-        setOlderMessages([]);
-        setHasMoreOlder(false);
-        pagingCursorRef.current = null;
-        pagingInitializedRef.current = false;
-        loadingOlderRef.current = false;
-        setLoadingOlder(false);
-      }
-      return;
-    }
-
-    setTailMessages([]);
-    setOlderMessages([]);
-    setHasMoreOlder(false);
-    setChatError(null);
-    pagingCursorRef.current = null;
-    pagingInitializedRef.current = false;
-    loadingOlderRef.current = false;
-    setLoadingOlder(false);
-
-    const unsub = subscribeMeetingChatLiveTail(
-      meetingId,
-      (e) => {
-        setTailMessages(e.tail);
-        if (e.evictedFromTail.length) {
-          setOlderMessages((prev) => {
-            const seen = new Set(prev.map((p) => p.id));
-            const toAdd = e.evictedFromTail.filter((m) => !seen.has(m.id));
-            toAdd.sort((a, b) => {
-              const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
-              const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
-              if (ta !== tb) return tb - ta;
-              return b.id.localeCompare(a.id);
-            });
-            return [...toAdd, ...prev];
-          });
-        }
-        setHasMoreOlder((prev) => {
-          if (e.evictedFromTail.length > 0) return prev;
-          return e.tail.length >= MEETING_CHAT_PAGE_SIZE;
-        });
-        if (!pagingInitializedRef.current && e.tailOldestDoc) {
-          pagingCursorRef.current = e.tailOldestDoc;
-          pagingInitializedRef.current = true;
-        }
-        setChatError(null);
-      },
-      (msg) => setChatError(msg),
-    );
-    return () => {
-      unsub();
-      pagingCursorRef.current = null;
-      pagingInitializedRef.current = false;
-    };
-  }, [meetingId, allowed]);
-
-  const onEndReachedLoadOlder = useCallback(() => {
-    if (!meetingId || !hasMoreOlder || loadingOlderRef.current) return;
-    const cur = pagingCursorRef.current;
-    if (!cur) return;
-    if (__DEV__) {
-      console.log('[meeting-chat:paging] UI onEndReached → fetchOlderPage', {
-        meetingId,
-        pageSize: MEETING_CHAT_PAGE_SIZE,
-        startAfterDocId: cur.id,
-      });
-    }
-    loadingOlderRef.current = true;
-    setLoadingOlder(true);
-    void (async () => {
-      try {
-        const { messages: page, lastVisible, hasMore } = await fetchMeetingChatOlderPage(meetingId, cur);
-        if (lastVisible) {
-          pagingCursorRef.current = lastVisible;
-        }
-        setHasMoreOlder(hasMore);
-        setOlderMessages((prev) => {
-          const seen = new Set(prev.map((p) => p.id));
-          const add = page.filter((m) => !seen.has(m.id));
-          return [...prev, ...add];
-        });
-      } catch {
-        setChatError('이전 메시지를 불러오지 못했어요.');
-      } finally {
-        loadingOlderRef.current = false;
-        setLoadingOlder(false);
-      }
-    })();
-  }, [meetingId, hasMoreOlder]);
+  /** inverted 리스트에서 상단(과거) 근접 시 훅 내부에서 중복 요청 방지 + 미리 불러오기 */
+  const onPrefetchOlderMessages = useCallback(() => {
+    void fetchNextPage();
+  }, [fetchNextPage]);
 
   const listFooterLoading = useMemo(
     () => (
@@ -1607,9 +1505,21 @@ export default function MeetingChatRoomScreen() {
               ListEmptyComponent={
                 <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
               }
-              ListFooterComponent={loadingOlder ? listFooterLoading : null}
-              onEndReached={hasMoreOlder ? onEndReachedLoadOlder : undefined}
-              onEndReachedThreshold={0.3}
+              ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
+              onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
+              onEndReachedThreshold={0.55}
+              initialNumToRender={14}
+              maxToRenderPerBatch={10}
+              windowSize={11}
+              updateCellsBatchingPeriod={50}
+              {...(Platform.OS !== 'web'
+                ? {
+                    maintainVisibleContentPosition: {
+                      minIndexForVisible: 1,
+                      autoscrollToTopThreshold: 96,
+                    },
+                  }
+                : {})}
               />
             </View>
             {showJumpToBottomFab && !plusMenuOpen ? (

@@ -8,6 +8,7 @@ import { PushNotificationBootstrap } from '@/components/PushNotificationBootstra
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
+import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 
 /**
@@ -44,23 +45,25 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
-        <UserSessionProvider>
-          <InAppAlarmsProvider>
-            <PushNotificationBootstrap />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: '#F6FAFF' },
-                freezeOnBlur: true,
-                animation: 'slide_from_right',
-                gestureEnabled: true,
-                fullScreenGestureEnabled: true,
-                ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
-              }}
-            />
-            <TransientBottomMessageHost />
-          </InAppAlarmsProvider>
-        </UserSessionProvider>
+        <QueryClientPersistProvider>
+          <UserSessionProvider>
+            <InAppAlarmsProvider>
+              <PushNotificationBootstrap />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: '#F6FAFF' },
+                  freezeOnBlur: true,
+                  animation: 'slide_from_right',
+                  gestureEnabled: true,
+                  fullScreenGestureEnabled: true,
+                  ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
+                }}
+              />
+              <TransientBottomMessageHost />
+            </InAppAlarmsProvider>
+          </UserSessionProvider>
+        </QueryClientPersistProvider>
       </AppPoliciesProvider>
     </GestureHandlerRootView>
   );

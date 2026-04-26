@@ -378,11 +378,74 @@ export function subscribeMeetingChatLiveTail(
   );
 }
 
-function meetingChatMessageDescComparator(a: MeetingChatMessage, b: MeetingChatMessage): number {
+export function meetingChatMessageDescComparator(a: MeetingChatMessage, b: MeetingChatMessage): number {
   const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
   const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
   if (ta !== tb) return tb - ta;
   return b.id.localeCompare(a.id);
+}
+
+/** `useInfiniteQuery` 페이지 단위 + AsyncStorage persist용(문서 스냅샷 대신 id 커서) */
+export type MeetingChatFetchedMessagesPage = {
+  messages: MeetingChatMessage[];
+  /** 이 페이지에서 가장 과거(배열 마지막) 메시지 id — 다음 `startAfter` 앵커 */
+  oldestMessageId: string | null;
+  hasMore: boolean;
+};
+
+/** `subscribeMeetingChatLiveTail` 과 동일한 최신 20건 스냅샷을 한 번 `getDocs`로 가져옵니다. */
+export async function fetchMeetingChatLatestPage(meetingId: string): Promise<MeetingChatFetchedMessagesPage> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) {
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(MEETING_CHAT_PAGE_SIZE));
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
+  const messages = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
+  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
+  return {
+    messages,
+    oldestMessageId,
+    hasMore: snap.size >= MEETING_CHAT_PAGE_SIZE,
+  };
+}
+
+/**
+ * `afterMessageId` 문서 직후(더 과거)부터 `MEETING_CHAT_PAGE_SIZE`건.
+ * Persist용 `useInfiniteQuery`에서 `DocumentSnapshot` 대신 메시지 id로 커서를 둡니다.
+ */
+export async function fetchMeetingChatOlderPageAfterMessageId(
+  meetingId: string,
+  afterMessageId: string,
+  pageSize: number = MEETING_CHAT_PAGE_SIZE,
+): Promise<MeetingChatFetchedMessagesPage> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const aid = typeof afterMessageId === 'string' ? afterMessageId.trim() : String(afterMessageId ?? '').trim();
+  if (!mid || !aid) {
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  const anchorRef = doc(cref, aid);
+  const anchorSnap = await getDoc(anchorRef);
+  if (!anchorSnap.exists()) {
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
+  const q = query(cref, orderBy('createdAt', 'desc'), startAfter(anchorSnap), limit(pageSize));
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
+  const messages = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
+  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
+  return {
+    messages,
+    oldestMessageId,
+    hasMore: snap.size >= pageSize,
+  };
 }
 
 /**

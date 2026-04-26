@@ -89,6 +89,8 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
   };
 }
 
+export const PUBLIC_MEETINGS_PAGE_SIZE = 20;
+
 export async function fetchPublicMeetingsFromSupabaseOnce(): Promise<
   { ok: true; meetings: Meeting[] } | { ok: false; message: string }
 > {
@@ -101,6 +103,56 @@ export async function fetchPublicMeetingsFromSupabaseOnce(): Promise<
   if (error) return { ok: false, message: error.message };
   const meetings = (data ?? []).map((r) => mapSupabaseMeetingRow(r as Record<string, unknown>));
   return { ok: true, meetings };
+}
+
+/** 공개 모임 20건 페이지 — `.range(pageParam * 20, (pageParam + 1) * 20 - 1)` */
+export async function fetchPublicMeetingsPageFromSupabase(
+  pageParam: number,
+): Promise<{ ok: true; meetings: Meeting[]; hasMore: boolean } | { ok: false; message: string }> {
+  const from = pageParam * PUBLIC_MEETINGS_PAGE_SIZE;
+  const to = (pageParam + 1) * PUBLIC_MEETINGS_PAGE_SIZE - 1;
+  const { data, error } = await supabase
+    .from('meetings')
+    .select('*')
+    .eq('is_public', true)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+  if (error) return { ok: false, message: error.message };
+  const rows = data ?? [];
+  const meetings = rows.map((r) => mapSupabaseMeetingRow(r as Record<string, unknown>));
+  const hasMore = rows.length === PUBLIC_MEETINGS_PAGE_SIZE;
+  return { ok: true, meetings, hasMore };
+}
+
+/** `postgres_changes` 페이로드 — 목록 무효화 정책(INSERT/DELETE vs UPDATE) 분기용 */
+export type MeetingsTableRealtimePayload = {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+};
+
+/** Realtime 변경 시 목록 쿼리 무효화용 콜백(이벤트 종류 포함) */
+export function subscribePublicMeetingsListInvalidate(
+  onInvalidate: (payload: MeetingsTableRealtimePayload) => void,
+  onError?: (message: string) => void,
+): Unsubscribe {
+  let cancelled = false;
+  const channel = supabase
+    .channel(`realtime:public-meetings-invalidate:${Date.now()}:${Math.random().toString(36).slice(2)}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings' }, (payload) => {
+      if (cancelled) return;
+      const et = (payload as { eventType?: string }).eventType;
+      if (et === 'INSERT' || et === 'UPDATE' || et === 'DELETE') {
+        onInvalidate({ eventType: et });
+      }
+    })
+    .subscribe((status) => {
+      if (status === 'CHANNEL_ERROR') {
+        onError?.('Supabase Realtime 연결 오류');
+      }
+    });
+  return () => {
+    cancelled = true;
+    void supabase.removeChannel(channel);
+  };
 }
 
 /** Firestore `subscribeMeetings` 와 동일 시그니처 — 공개 행만 Supabase에서 구독 */
