@@ -49,7 +49,7 @@ function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.gly
 export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const router = useRouter();
   const { userId } = useUserSession();
-  const { chatTabUnreadTotal } = useInAppAlarms();
+  const { chatTabUnreadTotal, friendsTabPendingRequestBadge } = useInAppAlarms();
   const insets = useSafeAreaInsets();
   const routes = ORDER.map((name) => state.routes.find((r) => r.name === name)).filter(Boolean) as (typeof state.routes)[number][];
   const fabDocked = useSharedValue(0);
@@ -210,16 +210,27 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                   : String(chatTabUnreadTotal)
                 : null;
 
+            const friendsBadge =
+              route.name === 'friends' && friendsTabPendingRequestBadge > 0
+                ? friendsTabPendingRequestBadge > 99
+                  ? '99+'
+                  : String(friendsTabPendingRequestBadge)
+                : null;
+
+            const tabBadge = chatBadge ?? friendsBadge;
+            const a11yBadgeLabel =
+              chatBadge != null
+                ? `읽지 않은 모임 채팅 ${chatTabUnreadTotal > 99 ? '99개 이상' : `${chatTabUnreadTotal}개`}`
+                : friendsBadge != null
+                  ? `처리할 친구 요청 ${friendsTabPendingRequestBadge > 99 ? '99건 이상' : `${friendsTabPendingRequestBadge}건`}`
+                  : null;
+
             return (
               <Pressable
                 key={route.key}
                 accessibilityRole="button"
                 accessibilityState={focused ? { selected: true } : {}}
-                accessibilityLabel={
-                  chatBadge
-                    ? `${label}, 읽지 않은 모임 채팅 ${chatTabUnreadTotal > 99 ? '99개 이상' : `${chatTabUnreadTotal}개`}`
-                    : label
-                }
+                accessibilityLabel={a11yBadgeLabel ? `${label}, ${a11yBadgeLabel}` : label}
                 onPress={() => onTabPress(route, originalIndex)}
                 style={styles.tab}>
                 <View style={styles.tabIconCluster}>
@@ -228,10 +239,10 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                     size={24}
                     color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
                   />
-                  {chatBadge ? (
+                  {tabBadge ? (
                     <View style={styles.tabUnreadBadge} accessibilityElementsHidden>
                       <Text style={styles.tabUnreadBadgeText} numberOfLines={1}>
-                        {chatBadge}
+                        {tabBadge}
                       </Text>
                     </View>
                   ) : null}
@@ -317,6 +328,8 @@ const styles = StyleSheet.create({
     height: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+    zIndex: 0,
   },
   tabUnreadBadge: {
     position: 'absolute',
@@ -331,6 +344,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#ffffff',
+    zIndex: 2,
+    elevation: 4,
   },
   tabUnreadBadgeText: {
     color: '#ffffff',

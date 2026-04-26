@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -102,6 +103,7 @@ export default function MeetingChatSettingsScreen() {
   const [notifyLoaded, setNotifyLoaded] = useState(false);
   const [imageHighQuality, setImageHighQuality] = useState(false);
   const [imageQualityLoaded, setImageQualityLoaded] = useState(false);
+  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!meetingId) {
@@ -191,6 +193,7 @@ export default function MeetingChatSettingsScreen() {
   const title = meeting?.title?.trim() || '모임';
   const pCount = meeting ? meetingParticipantCount(meeting) : 0;
   const pids = useMemo(() => uniqueParticipantPids(meeting ?? null), [meeting]);
+  const myNorm = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
 
   const onBack = useCallback(() => {
     router.back();
@@ -272,8 +275,17 @@ export default function MeetingChatSettingsScreen() {
             {pids.map((pid) => {
               const p = profileForSender(profiles, pid);
               const nick = isUserProfileWithdrawn(p) ? '회원' : (p?.nickname ?? '회원');
+              const isMe = Boolean(myNorm && pid === myNorm);
+              const isAi = pid === 'ginit_ai';
+              const canOpen = !isMe && !isAi && !isUserProfileWithdrawn(p);
               return (
-                <View key={pid} style={styles.avatarItem}>
+                <Pressable
+                  key={pid}
+                  style={styles.avatarItem}
+                  disabled={!canOpen}
+                  onPress={() => canOpen && setPeerProfileUserId(pid)}
+                  accessibilityRole={canOpen ? 'button' : 'text'}
+                  accessibilityLabel={canOpen ? `${nick} 프로필` : nick}>
                   <View style={styles.avatarRing}>
                     {p?.photoUrl ? (
                       <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
@@ -284,7 +296,7 @@ export default function MeetingChatSettingsScreen() {
                   <Text style={styles.avatarNick} numberOfLines={1}>
                     {nick}
                   </Text>
-                </View>
+                </Pressable>
               );
             })}
           </ScrollView>
@@ -361,6 +373,11 @@ export default function MeetingChatSettingsScreen() {
           />
         </View>
       </ScrollView>
+      <MeetingPeerProfileModal
+        visible={peerProfileUserId != null}
+        peerAppUserId={peerProfileUserId}
+        onClose={() => setPeerProfileUserId(null)}
+      />
     </SafeAreaView>
   );
 }

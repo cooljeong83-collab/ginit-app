@@ -33,6 +33,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
+import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -337,6 +338,7 @@ export default function MeetingChatRoomScreen() {
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [meetingError, setMeetingError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -1160,6 +1162,7 @@ export default function MeetingChatRoomScreen() {
       const withdrawn = isUserProfileWithdrawn(prof);
       const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
       const isHost = Boolean(hostNorm && sid && sid === hostNorm);
+      const canOpenPeerProfile = Boolean(sid && !withdrawn && sid !== 'ginit_ai');
 
       const isImage = item.kind === 'image';
       const caption = item.text?.trim();
@@ -1255,7 +1258,12 @@ export default function MeetingChatRoomScreen() {
 
       const otherBubble = (
         <View style={styles.rowOther}>
-          <View style={styles.avatarCol} pointerEvents={withdrawn ? 'none' : 'auto'}>
+          <Pressable
+            style={styles.avatarCol}
+            disabled={!canOpenPeerProfile}
+            onPress={() => canOpenPeerProfile && setPeerProfileUserId(sid)}
+            accessibilityRole={canOpenPeerProfile ? 'button' : undefined}
+            accessibilityLabel={canOpenPeerProfile ? '프로필 보기' : undefined}>
             {showAvatar ? (
               withdrawn ? (
                 <View style={styles.avatarWithdrawn}>
@@ -1271,15 +1279,20 @@ export default function MeetingChatRoomScreen() {
             ) : (
               <View style={styles.avatarSpacer} />
             )}
-          </View>
+          </Pressable>
           <View style={styles.otherBlock} pointerEvents="box-none">
             {showAvatar ? (
-              <View style={styles.nameRow} pointerEvents={withdrawn ? 'none' : 'auto'}>
+              <Pressable
+                disabled={!canOpenPeerProfile}
+                onPress={() => canOpenPeerProfile && setPeerProfileUserId(sid)}
+                style={({ pressed }) => [styles.nameRow, canOpenPeerProfile && pressed && styles.pressed]}
+                accessibilityRole={canOpenPeerProfile ? 'button' : undefined}
+                accessibilityLabel={canOpenPeerProfile ? '프로필 보기' : undefined}>
                 <Text style={styles.nickname} numberOfLines={1}>
                   {nick}
                 </Text>
                 {isHost ? <Ionicons name="star" size={14} color="#CA8A04" style={styles.crown} /> : null}
-              </View>
+              </Pressable>
             ) : null}
             <View style={styles.bubbleOtherWrap}>
               <View style={[styles.bubbleOtherOuter, isImage && styles.bubbleOtherMedia]}>
@@ -1865,6 +1878,11 @@ export default function MeetingChatRoomScreen() {
         </Modal>
         </View>
       </SafeAreaView>
+      <MeetingPeerProfileModal
+        visible={peerProfileUserId != null}
+        peerAppUserId={peerProfileUserId}
+        onClose={() => setPeerProfileUserId(null)}
+      />
     </GestureHandlerRootView>
   );
 }

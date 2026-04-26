@@ -2,7 +2,7 @@
 
 export const GINIT_IN_APP_ANDROID_CHANNEL = 'ginit_in_app';
 
-export type InAppAlarmPushKind = 'chat' | 'meeting_change';
+export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
 
 export type SendInAppAlarmPushParams = {
   userId: string;

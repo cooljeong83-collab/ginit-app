@@ -20,7 +20,7 @@ Notifications.setNotificationHandler({
       const data = n?.request?.content?.data as Record<string, unknown> | undefined;
       const action = typeof data?.action === 'string' ? String(data.action).trim() : '';
       const meetingId = typeof data?.meetingId === 'string' ? String(data.meetingId).trim() : '';
-      if (action === 'in_app_chat' && meetingId) {
+      if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
         const cur = getCurrentChatRoomId();
         if (cur && cur === meetingId) {
           return {
@@ -61,7 +61,11 @@ function navigateFromPushData(
     navTo('/(tabs)/profile');
     return;
   }
-  if (actionAny === 'friend_request' || actionAny === 'in_app_friend_request') {
+  if (
+    actionAny === 'friend_request' ||
+    actionAny === 'in_app_friend_request' ||
+    actionAny === 'in_app_friend_accepted'
+  ) {
     navTo('/(tabs)/friends');
     return;
   }
@@ -73,6 +77,10 @@ function navigateFromPushData(
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   if (meetingId && action === 'in_app_chat') {
     navTo(`/meeting-chat/${meetingId}`);
+    return;
+  }
+  if (meetingId && action === 'in_app_social_dm') {
+    navTo(`/social-chat/${encodeURIComponent(meetingId)}`);
     return;
   }
   if (meetingId && action === 'in_app_meeting') {
@@ -95,12 +103,17 @@ async function markAlarmReadFromPushData(
   data: Record<string, unknown> | undefined,
   markMeetingAlarmsReadByPushTap: ReturnType<typeof useInAppAlarms>['markMeetingAlarmsReadByPushTap'],
   markFriendRequestAlarmDismissed: ReturnType<typeof useInAppAlarms>['markFriendRequestAlarmDismissed'],
+  markFriendAcceptedAlarmDismissed: ReturnType<typeof useInAppAlarms>['markFriendAcceptedAlarmDismissed'],
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   if (action === 'in_app_friend_request' && meetingId) {
     markFriendRequestAlarmDismissed(meetingId);
+    return;
+  }
+  if (action === 'in_app_friend_accepted' && meetingId) {
+    markFriendAcceptedAlarmDismissed(meetingId);
     return;
   }
   if (!meetingId) return;
@@ -124,7 +137,8 @@ export function PushNotificationBootstrap() {
   const router = useRouter();
   const pathname = usePathname();
   const { userId } = useUserSession();
-  const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed } = useInAppAlarms();
+  const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =
+    useInAppAlarms();
   const bootHandled = useRef(false);
 
   useEffect(() => {
@@ -176,10 +190,21 @@ export function PushNotificationBootstrap() {
       }
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
-      void markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed);
+      void markAlarmReadFromPushData(
+        data,
+        markMeetingAlarmsReadByPushTap,
+        markFriendRequestAlarmDismissed,
+        markFriendAcceptedAlarmDismissed,
+      );
     });
     return () => sub.remove();
-  }, [router, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, pathname]);
+  }, [
+    router,
+    markMeetingAlarmsReadByPushTap,
+    markFriendRequestAlarmDismissed,
+    markFriendAcceptedAlarmDismissed,
+    pathname,
+  ]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;

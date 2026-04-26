@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -42,6 +43,7 @@ export default function MeetingChatMembersScreen() {
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!meetingId) {
@@ -69,6 +71,7 @@ export default function MeetingChatMembersScreen() {
 
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
   const pids = useMemo(() => uniqueParticipantPids(meeting ?? null), [meeting]);
+  const myNorm = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
 
   const rows = useMemo(() => {
     return pids.map((pid) => {
@@ -124,31 +127,48 @@ export default function MeetingChatMembersScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.hint}>gTrust · gDna</Text>
         <View style={styles.card}>
-          {rows.map(({ pid, p, nick, trust, dna, isHost }, i) => (
-            <View key={pid} style={[styles.row, i === rows.length - 1 && styles.rowLast]}>
-              <View style={styles.avatar}>
-                {p?.photoUrl ? (
-                  <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
-                ) : (
-                  <Text style={styles.avatarText}>{nick.slice(0, 1)}</Text>
-                )}
-              </View>
-              <View style={styles.rowBody}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {nick}
-                  </Text>
-                  {isHost ? <Ionicons name="star" size={14} color="#CA8A04" /> : null}
+          {rows.map(({ pid, p, nick, trust, dna, isHost }, i) => {
+            const isMe = Boolean(myNorm && pid === myNorm);
+            const isAi = pid === 'ginit_ai';
+            const withdrawn = isUserProfileWithdrawn(p);
+            const canOpen = !isMe && !isAi && !withdrawn;
+            return (
+              <Pressable
+                key={pid}
+                onPress={() => canOpen && setPeerProfileUserId(pid)}
+                disabled={!canOpen}
+                style={({ pressed }) => [styles.row, i === rows.length - 1 && styles.rowLast, canOpen && pressed && { opacity: 0.88 }]}
+                accessibilityRole={canOpen ? 'button' : undefined}
+                accessibilityLabel={canOpen ? `${nick} 프로필` : undefined}>
+                <View style={styles.avatar}>
+                  {p?.photoUrl ? (
+                    <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
+                  ) : (
+                    <Text style={styles.avatarText}>{nick.slice(0, 1)}</Text>
+                  )}
                 </View>
-                <Text style={styles.meta}>
-                  {trust != null ? `gTrust ${trust}` : 'gTrust -'}
-                  {dna ? ` · ${dna}` : ''}
-                </Text>
-              </View>
-            </View>
-          ))}
+                <View style={styles.rowBody}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {nick}
+                    </Text>
+                    {isHost ? <Ionicons name="star" size={14} color="#CA8A04" /> : null}
+                  </View>
+                  <Text style={styles.meta}>
+                    {trust != null ? `gTrust ${trust}` : 'gTrust -'}
+                    {dna ? ` · ${dna}` : ''}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
       </ScrollView>
+      <MeetingPeerProfileModal
+        visible={peerProfileUserId != null}
+        peerAppUserId={peerProfileUserId}
+        onClose={() => setPeerProfileUserId(null)}
+      />
     </SafeAreaView>
   );
 }

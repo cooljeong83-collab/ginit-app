@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { SocialChat } from '@/components/social/SocialChat';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import {
   ensureSocialChatRoomDoc,
@@ -18,6 +21,7 @@ import {
 export default function SocialChatRoomScreen() {
   const router = useRouter();
   const { userId } = useUserSession();
+  const { markChatReadUpTo } = useInAppAlarms();
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();
   const rawRoom = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const roomId = useMemo(() => decodeURIComponent(String(rawRoom ?? '').trim()), [rawRoom]);
@@ -38,7 +42,9 @@ export default function SocialChatRoomScreen() {
   const [sending, setSending] = useState(false);
   const [ready, setReady] = useState(false);
   const listRef = useRef<FlatList<SocialChatMessage>>(null);
+  const lastMarkedReadMessageIdRef = useRef<string>('');
 
+  const [peerProfileOpen, setPeerProfileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SocialChatMessage[]>([]);
@@ -63,6 +69,25 @@ export default function SocialChatRoomScreen() {
       cancelled = true;
     };
   }, [roomId, userId, peerId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    setCurrentChatRoomId(roomId);
+    return () => setCurrentChatRoomId(null);
+  }, [roomId]);
+
+  useEffect(() => {
+    lastMarkedReadMessageIdRef.current = '';
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    const last = messages[messages.length - 1];
+    const lid = last?.id?.trim() ?? '';
+    if (!lid || lastMarkedReadMessageIdRef.current === lid) return;
+    lastMarkedReadMessageIdRef.current = lid;
+    markChatReadUpTo(roomId, lid);
+  }, [roomId, messages, markChatReadUpTo]);
 
   useEffect(() => {
     if (!ready || !roomId) return () => {};
@@ -183,9 +208,16 @@ export default function SocialChatRoomScreen() {
           <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
             <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
           </Pressable>
-          <Text style={s.topTitle} numberOfLines={1}>
-            {peerName}
-          </Text>
+          <Pressable
+            onPress={() => peerId.trim() && setPeerProfileOpen(true)}
+            disabled={!peerId.trim()}
+            style={({ pressed }) => [s.titlePress, !peerId.trim() && { opacity: 0.6 }, pressed && peerId.trim() && { opacity: 0.85 }]}
+            accessibilityRole="button"
+            accessibilityLabel="상대 프로필">
+            <Text style={s.topTitle} numberOfLines={1}>
+              {peerName}
+            </Text>
+          </Pressable>
           <Pressable
             onPress={openSearch}
             hitSlop={10}
@@ -272,6 +304,11 @@ export default function SocialChatRoomScreen() {
           />
         </SafeAreaView>
       </Modal>
+      <MeetingPeerProfileModal
+        visible={peerProfileOpen && Boolean(peerId.trim())}
+        peerAppUserId={peerId.trim() || null}
+        onClose={() => setPeerProfileOpen(false)}
+      />
     </View>
   );
 }
@@ -288,7 +325,8 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
-  topTitle: { flex: 1, fontSize: 16, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  titlePress: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: 4 },
+  topTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
   searchBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   errBanner: { padding: 10, backgroundColor: 'rgba(220, 38, 38, 0.08)' },
   errText: { color: '#b91c1c', textAlign: 'center', fontWeight: '600' },

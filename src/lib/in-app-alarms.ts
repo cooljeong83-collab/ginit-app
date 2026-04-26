@@ -5,7 +5,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
-export type InAppAlarmKind = 'chat' | 'meeting_change' | 'friend_request';
+export type InAppAlarmKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
 
 export type InAppAlarmRow = {
   /** FlatList 키(누적 알람 지원) */
@@ -19,6 +19,10 @@ export type InAppAlarmRow = {
   latestMessageId?: string;
   /** kind === 'friend_request' — 요청자 앱 사용자 id */
   requesterAppUserId?: string;
+  /** kind === 'friend_accepted' — 상대(수락한 사람) 앱 사용자 id */
+  peerAppUserId?: string;
+  /** kind === 'social_dm' — `chat_rooms` 문서 id */
+  socialRoomId?: string;
 };
 
 export type InAppAlarmReadState = {
@@ -28,10 +32,17 @@ export type InAppAlarmReadState = {
   meetingAckFingerprint: Record<string, string>;
   /** 수락/거절 전에 알람 패널에서 확인한 친구 요청(friendships.id) */
   friendRequestDismissedIds: Record<string, true>;
+  /** 내가 보낸 요청이 상대에 의해 수락된 알람을 새 소식에서 닫은 friendship id */
+  friendAcceptedDismissedIds: Record<string, true>;
 };
 
 export function defaultInAppAlarmReadState(): InAppAlarmReadState {
-  return { chatReadMessageId: {}, meetingAckFingerprint: {}, friendRequestDismissedIds: {} };
+  return {
+    chatReadMessageId: {},
+    meetingAckFingerprint: {},
+    friendRequestDismissedIds: {},
+    friendAcceptedDismissedIds: {},
+  };
 }
 
 export function chatMessageTimeMs(m: MeetingChatMessage | null | undefined): number {

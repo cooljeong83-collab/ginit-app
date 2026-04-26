@@ -35,6 +35,24 @@ export type SocialChatMessage = {
   createdAt: Timestamp | null;
 };
 
+const SOCIAL_LATEST_PREVIEW_LIMIT = 1;
+
+export function socialMessageTimeMs(m: SocialChatMessage | null | undefined): number {
+  const ts = m?.createdAt as Timestamp | null | undefined;
+  if (!ts || typeof ts.toMillis !== 'function') return 0;
+  try {
+    return ts.toMillis();
+  } catch {
+    return 0;
+  }
+}
+
+export function socialDmPreviewLine(m: SocialChatMessage | null | undefined): string {
+  const t = m?.text?.trim();
+  if (t) return t.length > 100 ? `${t.slice(0, 100)}…` : t;
+  return '새 메시지';
+}
+
 function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChatMessage {
   const senderRaw = data.senderId;
   const senderId =
@@ -137,6 +155,35 @@ export async function searchSocialChatMessages(
     return a.id.localeCompare(b.id);
   });
   return matches;
+}
+
+/** 최신 1건 미리보기(모임 채팅 `subscribeMeetingChatLatestMessage`와 동일 패턴). */
+export function subscribeSocialChatLatestMessage(
+  roomId: string,
+  onLatest: (message: SocialChatMessage | null) => void,
+  onError?: (message: string) => void,
+): Unsubscribe {
+  const rid = roomId.trim();
+  if (!rid) {
+    onLatest(null);
+    return () => {};
+  }
+  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_LATEST_PREVIEW_LIMIT));
+  return onSnapshot(
+    q,
+    (snap) => {
+      if (snap.empty) {
+        onLatest(null);
+        return;
+      }
+      const d = snap.docs[0]!;
+      onLatest(mapSocialMessage(d.id, d.data() as Record<string, unknown>));
+    },
+    (err) => {
+      onError?.(err.message ?? '채팅 미리보기를 불러오지 못했어요.');
+    },
+  );
 }
 
 export function subscribeSocialChatMessages(

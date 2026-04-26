@@ -23,7 +23,7 @@ export async function ensureGinitInAppAndroidChannel(): Promise<void> {
   });
 }
 
-export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request';
+export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
 
 async function fetchExpoPushTokenForUser(userId: string): Promise<string | null> {
   const uid = normalizeParticipantId(userId.trim());
@@ -65,6 +65,30 @@ function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
       meetingId: mid,
       action: 'in_app_friend_request',
       url: 'ginitapp://friends',
+    };
+  }
+  if (params.kind === 'friend_accepted') {
+    const name = mt || '친구';
+    const body = (params.preview ?? '').trim() || `${name}님이 친구 요청을 수락했어요.`;
+    return {
+      title: '친구 연결',
+      subtitle: name,
+      body,
+      meetingId: mid,
+      action: 'in_app_friend_accepted',
+      url: 'ginitapp://friends',
+    };
+  }
+  if (params.kind === 'social_dm') {
+    const name = mt || '친구';
+    const preview = (params.preview ?? '').trim().slice(0, 500) || '새 글이 도착했어요.';
+    return {
+      title: name,
+      subtitle: '친구 메시지',
+      body: preview,
+      meetingId: mid,
+      action: 'in_app_social_dm',
+      url: `ginitapp://social-chat/${encodeURIComponent(mid)}`,
     };
   }
   if (params.kind === 'chat') {
@@ -149,7 +173,7 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
       await ensureGinitInAppAndroidChannel();
       if (AppState.currentState === 'active') {
         // 카카오톡처럼: 현재 보고 있는 채팅방이면 포그라운드 헤드업/배너를 띄우지 않습니다.
-        if (params.kind === 'chat') {
+        if (params.kind === 'chat' || params.kind === 'social_dm') {
           const cur = getCurrentChatRoomId();
           if (cur && cur === params.meetingId.trim()) return;
         }

@@ -1,4 +1,10 @@
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { supabase } from '@/src/lib/supabase';
+
+/** Firestore·모임·친구 탭과 동일한 PK(이메일 소문자 등) — RPC `trim(p_me)`만으로는 대소문자 불일치가 남습니다. */
+function canonAppUserId(raw: string): string {
+  return normalizeParticipantId(raw.trim());
+}
 
 export type FriendInboxRow = {
   id: string;
@@ -50,7 +56,7 @@ function parseRelationStatus(data: unknown): FriendRelationStatusRow {
 }
 
 export async function fetchFriendsPendingInbox(meAppUserId: string): Promise<FriendInboxRow[]> {
-  const me = meAppUserId.trim();
+  const me = canonAppUserId(meAppUserId);
   if (!me) return [];
   const { data, error } = await supabase.rpc('friends_pending_inbox', { p_me: me });
   if (error) throw new Error(error.message);
@@ -59,7 +65,7 @@ export async function fetchFriendsPendingInbox(meAppUserId: string): Promise<Fri
 
 /** 내가 요청자인 지닛 내역(pending + 내가 보내 수락된 경우, 상대는 addressee). */
 export async function fetchFriendsPendingOutbox(meAppUserId: string): Promise<FriendInboxRow[]> {
-  const me = meAppUserId.trim();
+  const me = canonAppUserId(meAppUserId);
   if (!me) return [];
   const { data, error } = await supabase.rpc('friends_pending_outbox', { p_me: me });
   if (error) throw new Error(error.message);
@@ -67,7 +73,7 @@ export async function fetchFriendsPendingOutbox(meAppUserId: string): Promise<Fr
 }
 
 export async function fetchFriendsAcceptedList(meAppUserId: string): Promise<FriendAcceptedRow[]> {
-  const me = meAppUserId.trim();
+  const me = canonAppUserId(meAppUserId);
   if (!me) return [];
   const { data, error } = await supabase.rpc('friends_accepted_list', { p_me: me });
   if (error) throw new Error(error.message);
@@ -76,16 +82,16 @@ export async function fetchFriendsAcceptedList(meAppUserId: string): Promise<Fri
 
 export async function sendGinitRequest(requesterAppUserId: string, addresseeAppUserId: string): Promise<string> {
   const { data, error } = await supabase.rpc('friends_send_ginit', {
-    p_requester: requesterAppUserId.trim(),
-    p_addressee: addresseeAppUserId.trim(),
+    p_requester: canonAppUserId(requesterAppUserId),
+    p_addressee: canonAppUserId(addresseeAppUserId),
   });
   if (error) throw new Error(error.message);
   return String(data ?? '');
 }
 
 export async function fetchFriendRelationStatus(meAppUserId: string, peerAppUserId: string): Promise<FriendRelationStatusRow> {
-  const me = meAppUserId.trim();
-  const peer = peerAppUserId.trim();
+  const me = canonAppUserId(meAppUserId);
+  const peer = canonAppUserId(peerAppUserId);
   if (!me || !peer || me === peer) return { status: 'none', friendship_id: null };
   const { data, error } = await supabase.rpc('friends_relation_status', {
     p_me: me,
@@ -97,7 +103,7 @@ export async function fetchFriendRelationStatus(meAppUserId: string, peerAppUser
 
 export async function acceptGinitRequest(meAppUserId: string, friendshipId: string): Promise<void> {
   const { error } = await supabase.rpc('friends_accept', {
-    p_me: meAppUserId.trim(),
+    p_me: canonAppUserId(meAppUserId),
     p_friendship_id: friendshipId.trim(),
   });
   if (error) throw new Error(error.message);
@@ -106,7 +112,7 @@ export async function acceptGinitRequest(meAppUserId: string, friendshipId: stri
 /** 수신자가 대기 중인 지닛 요청을 거절합니다(`friends` 행 삭제). */
 export async function declineGinitRequest(meAppUserId: string, friendshipId: string): Promise<void> {
   const { error } = await supabase.rpc('friends_decline', {
-    p_me: meAppUserId.trim(),
+    p_me: canonAppUserId(meAppUserId),
     p_friendship_id: friendshipId.trim(),
   });
   if (error) throw new Error(error.message);
@@ -115,7 +121,7 @@ export async function declineGinitRequest(meAppUserId: string, friendshipId: str
 /** 요청자가 보낸 대기(pending) 지닛 요청을 취소합니다(`friends` 행 삭제). */
 export async function cancelOutgoingGinitRequest(meAppUserId: string, friendshipId: string): Promise<void> {
   const { error } = await supabase.rpc('friends_cancel_outgoing', {
-    p_me: meAppUserId.trim(),
+    p_me: canonAppUserId(meAppUserId),
     p_friendship_id: friendshipId.trim(),
   });
   if (error) throw new Error(error.message);

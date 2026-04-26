@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { defaultInAppAlarmReadState, type InAppAlarmReadState } from '@/src/lib/in-app-alarms';
 
 const STORAGE_PREFIX = 'ginit:inAppAlarms:v1:';
@@ -12,29 +13,40 @@ type StoredShape = {
   chatReadMessageId?: Record<string, string>;
   meetingAckFingerprint?: Record<string, string>;
   friendRequestDismissedIds?: Record<string, true>;
+  friendAcceptedDismissedIds?: Record<string, true>;
 };
 
 export async function loadInAppAlarmReadState(phoneUserId: string): Promise<InAppAlarmReadState> {
   const uid = phoneUserId?.trim();
   if (!uid) return defaultInAppAlarmReadState();
+  const canon = normalizeParticipantId(uid);
+  /** 예전 키(비정규 이메일 등)에 저장된 읽음 상태 호환 */
+  const keysToTry = canon && canon !== uid ? [canon, uid] : [canon || uid];
   try {
-    const raw = await AsyncStorage.getItem(keyForUser(uid));
-    if (!raw?.trim()) return defaultInAppAlarmReadState();
-    const parsed = JSON.parse(raw) as StoredShape;
-    return {
-      chatReadMessageId:
-        parsed.chatReadMessageId && typeof parsed.chatReadMessageId === 'object'
-          ? parsed.chatReadMessageId
-          : {},
-      meetingAckFingerprint:
-        parsed.meetingAckFingerprint && typeof parsed.meetingAckFingerprint === 'object'
-          ? parsed.meetingAckFingerprint
-          : {},
-      friendRequestDismissedIds:
-        parsed.friendRequestDismissedIds && typeof parsed.friendRequestDismissedIds === 'object'
-          ? parsed.friendRequestDismissedIds
-          : {},
-    };
+    for (const k of keysToTry) {
+      const raw = await AsyncStorage.getItem(keyForUser(k));
+      if (!raw?.trim()) continue;
+      const parsed = JSON.parse(raw) as StoredShape;
+      return {
+        chatReadMessageId:
+          parsed.chatReadMessageId && typeof parsed.chatReadMessageId === 'object'
+            ? parsed.chatReadMessageId
+            : {},
+        meetingAckFingerprint:
+          parsed.meetingAckFingerprint && typeof parsed.meetingAckFingerprint === 'object'
+            ? parsed.meetingAckFingerprint
+            : {},
+        friendRequestDismissedIds:
+          parsed.friendRequestDismissedIds && typeof parsed.friendRequestDismissedIds === 'object'
+            ? parsed.friendRequestDismissedIds
+            : {},
+        friendAcceptedDismissedIds:
+          parsed.friendAcceptedDismissedIds && typeof parsed.friendAcceptedDismissedIds === 'object'
+            ? parsed.friendAcceptedDismissedIds
+            : {},
+      };
+    }
+    return defaultInAppAlarmReadState();
   } catch {
     return defaultInAppAlarmReadState();
   }
@@ -43,8 +55,9 @@ export async function loadInAppAlarmReadState(phoneUserId: string): Promise<InAp
 export async function saveInAppAlarmReadState(phoneUserId: string, state: InAppAlarmReadState): Promise<void> {
   const uid = phoneUserId?.trim();
   if (!uid) return;
+  const canon = normalizeParticipantId(uid) || uid;
   try {
-    await AsyncStorage.setItem(keyForUser(uid), JSON.stringify(state));
+    await AsyncStorage.setItem(keyForUser(canon), JSON.stringify(state));
   } catch {
     /* 저장 실패는 알림 기능만 제한 */
   }

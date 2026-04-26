@@ -12,6 +12,9 @@ export function subscribeFriendsTableChanges(onChange: () => void, onError?: (me
       if (!cancelled) onChange();
     })
     .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        if (!cancelled) onChange();
+      }
       if (status === 'CHANNEL_ERROR') {
         onError?.('Supabase Realtime(friends) 연결 오류');
       }
