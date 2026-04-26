@@ -1,0 +1,479 @@
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { GinitTheme } from '@/constants/ginit-theme';
+import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import { meetingParticipantCount, subscribeMeetingById, type Meeting } from '@/src/lib/meetings';
+import type { UserProfile } from '@/src/lib/user-profile';
+import {
+  getMeetingChatImageUploadQuality,
+  setMeetingChatImageUploadQuality,
+} from '@/src/lib/meeting-chat-image-quality-preference';
+import { meetingChatNotifyStorageKey } from '@/src/lib/meeting-chat-notify-preference';
+import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+
+type IonIconName = ComponentProps<typeof Ionicons>['name'];
+
+function SettingsRowIcon({ name, destructive }: { name: IonIconName; destructive?: boolean }) {
+  return (
+    <View
+      style={[styles.rowIconSlot, destructive && styles.rowIconSlotDanger]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants">
+      <Ionicons name={name} size={22} color={destructive ? '#dc2626' : '#475569'} />
+    </View>
+  );
+}
+
+function profileForSender(map: Map<string, UserProfile>, senderId: string): UserProfile | undefined {
+  const n = normalizeParticipantId(senderId);
+  const hit = map.get(senderId) ?? map.get(n);
+  if (hit) return hit;
+  for (const [k, v] of map) {
+    if (normalizeParticipantId(k) === n) return v;
+  }
+  return undefined;
+}
+
+function uniqueParticipantPids(m: Meeting | null | undefined): string[] {
+  if (!m) return [];
+  const ids = [...(m.participantIds ?? []), ...(m.createdBy?.trim() ? [m.createdBy] : [])];
+  return [...new Set(ids.map((x) => normalizeParticipantId(String(x)) ?? String(x).trim()).filter(Boolean))];
+}
+
+function SettingsRowChevron({
+  icon,
+  label,
+  sub,
+  onPress,
+  destructive,
+}: {
+  icon: IonIconName;
+  label: string;
+  sub?: string;
+  onPress: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]} accessibilityRole="button">
+      <SettingsRowIcon name={icon} destructive={destructive} />
+      <View style={styles.rowTextCol}>
+        <Text style={[styles.rowLabel, destructive && styles.rowLabelDanger]}>{label}</Text>
+        {sub ? (
+          <Text style={[styles.rowSub, destructive && styles.rowSubDanger]} numberOfLines={2}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={destructive ? '#f87171' : '#94a3b8'} />
+    </Pressable>
+  );
+}
+
+export default function MeetingChatSettingsScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ meetingId: string | string[] }>();
+  const meetingId = Array.isArray(params.meetingId)
+    ? (params.meetingId[0] ?? '').trim()
+    : typeof params.meetingId === 'string'
+      ? params.meetingId.trim()
+      : '';
+  const { userId } = useUserSession();
+
+  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
+  const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [notifyOn, setNotifyOn] = useState(true);
+  const [notifyLoaded, setNotifyLoaded] = useState(false);
+  const [imageHighQuality, setImageHighQuality] = useState(false);
+  const [imageQualityLoaded, setImageQualityLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!meetingId) {
+      setMeeting(null);
+      return;
+    }
+    return subscribeMeetingById(
+      meetingId,
+      (m) => setMeeting(m),
+      () => {},
+    );
+  }, [meetingId]);
+
+  const allowed = useMemo(() => {
+    if (meeting === undefined) return null;
+    if (!meeting) return false;
+    return isUserJoinedMeeting(meeting, userId);
+  }, [meeting, userId]);
+
+  useEffect(() => {
+    if (!meeting || allowed !== true) return;
+    const ids = uniqueParticipantPids(meeting);
+    void getUserProfilesForIds(ids).then(setProfiles);
+  }, [meeting, allowed]);
+
+  useEffect(() => {
+    if (!meetingId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const v = await AsyncStorage.getItem(meetingChatNotifyStorageKey(meetingId));
+        if (cancelled) return;
+        if (v === '0') setNotifyOn(false);
+        else setNotifyOn(true);
+      } catch {
+        /* noop */
+      } finally {
+        if (!cancelled) setNotifyLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId]);
+
+  useEffect(() => {
+    if (!meetingId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const q = await getMeetingChatImageUploadQuality(meetingId);
+        if (cancelled) return;
+        setImageHighQuality(q === 'high');
+      } catch {
+        /* noop */
+      } finally {
+        if (!cancelled) setImageQualityLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId]);
+
+  const onToggleNotify = useCallback(
+    async (next: boolean) => {
+      setNotifyOn(next);
+      if (!meetingId) return;
+      try {
+        await AsyncStorage.setItem(meetingChatNotifyStorageKey(meetingId), next ? '1' : '0');
+      } catch {
+        /* noop */
+      }
+    },
+    [meetingId],
+  );
+
+  const onToggleImageQuality = useCallback(
+    async (high: boolean) => {
+      setImageHighQuality(high);
+      if (!meetingId) return;
+      await setMeetingChatImageUploadQuality(meetingId, high ? 'high' : 'low');
+    },
+    [meetingId],
+  );
+
+  const title = meeting?.title?.trim() || '모임';
+  const pCount = meeting ? meetingParticipantCount(meeting) : 0;
+  const pids = useMemo(() => uniqueParticipantPids(meeting ?? null), [meeting]);
+
+  const onBack = useCallback(() => {
+    router.back();
+  }, [router]);
+
+  const openMembers = useCallback(() => {
+    router.push(`/meeting-chat/${meetingId}/members`);
+  }, [router, meetingId]);
+
+  const openChatPhotos = useCallback(() => {
+    router.push(`/meeting-chat/${meetingId}/media`);
+  }, [router, meetingId]);
+
+  const openMeetingDetail = useCallback(() => {
+    router.push(`/meeting/${meetingId}`);
+  }, [router, meetingId]);
+
+  const openLeaveInfo = useCallback(() => {
+    Alert.alert(
+      '모임 나가기',
+      '채팅방을 나가려면 모임 상세 화면에서 나가기를 진행해 주세요. 일정이 확정된 모임은 패널티 안내가 있을 수 있어요.',
+      [
+        { text: '닫기', style: 'cancel' },
+        { text: '모임 상세로', onPress: () => router.push(`/meeting/${meetingId}`) },
+      ],
+    );
+  }, [router, meetingId]);
+
+  if (!meetingId) {
+    return (
+      <SafeAreaView style={styles.center} edges={['top']}>
+        <Text style={styles.muted}>잘못된 주소예요.</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (meeting === undefined) {
+    return (
+      <SafeAreaView style={styles.center} edges={['top']}>
+        <ActivityIndicator color={GinitTheme.colors.primary} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!meeting || allowed !== true) {
+    return (
+      <SafeAreaView style={styles.center} edges={['top']}>
+        <Text style={styles.muted}>참여 중인 모임만 설정할 수 있어요.</Text>
+        <Pressable onPress={onBack} style={styles.textBtn}>
+          <Text style={styles.textBtnLabel}>돌아가기</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <View style={styles.header}>
+        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
+          <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
+        </Pressable>
+        <Text style={styles.headerTitle}>채팅방 설정</Text>
+        <View style={{ width: 28 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={styles.heroCard}>
+          <View style={styles.heroIcon}>
+            <Ionicons name="chatbubbles" size={28} color={GinitTheme.colors.primary} />
+          </View>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {title}
+          </Text>
+          <Text style={styles.heroSub}>참여자 {pCount}명 · 모임 채팅</Text>
+        </View>
+
+        <View style={styles.card}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarStrip}>
+            {pids.map((pid) => {
+              const p = profileForSender(profiles, pid);
+              const nick = isUserProfileWithdrawn(p) ? '회원' : (p?.nickname ?? '회원');
+              return (
+                <View key={pid} style={styles.avatarItem}>
+                  <View style={styles.avatarRing}>
+                    {p?.photoUrl ? (
+                      <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
+                    ) : (
+                      <Text style={styles.avatarLetter}>{nick.slice(0, 1)}</Text>
+                    )}
+                  </View>
+                  <Text style={styles.avatarNick} numberOfLines={1}>
+                    {nick}
+                  </Text>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.cardDivider} />
+          <SettingsRowChevron
+            icon="people-outline"
+            label="전체 멤버 보기"
+            sub="프로필과 gTrust · gDna"
+            onPress={openMembers}
+          />
+          <View style={styles.cardDivider} />
+          <SettingsRowChevron
+            icon="images-outline"
+            label="사진"
+            sub="이 채팅방에서 주고받은 사진을 모아서 볼 수 있어요"
+            onPress={openChatPhotos}
+          />
+          <View style={styles.cardDivider} />
+          <SettingsRowChevron
+            icon="calendar-outline"
+            label="모임 정보"
+            sub="일정·장소·참여자 관리"
+            onPress={openMeetingDetail}
+          />
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <SettingsRowIcon name="notifications-outline" />
+            <View style={styles.rowTextCol}>
+              <Text style={styles.rowLabel}>알림</Text>
+              <Text style={styles.rowSub}>이 모임 채팅 알림(앱 내·푸시 연동은 추후)</Text>
+            </View>
+            {notifyLoaded ? (
+              <Switch
+                value={notifyOn}
+                onValueChange={(v) => void onToggleNotify(v)}
+                trackColor={{ false: '#cbd5e1', true: 'rgba(31, 42, 68, 0.35)' }}
+                thumbColor={notifyOn ? GinitTheme.colors.primary : '#f1f5f9'}
+                accessibilityLabel="채팅 알림"
+              />
+            ) : (
+              <ActivityIndicator size="small" color="#94a3b8" />
+            )}
+          </View>
+          <View style={styles.cardDividerIndented} />
+          <View style={styles.row}>
+            <SettingsRowIcon name="image-outline" />
+            <View style={styles.rowTextCol}>
+              <Text style={styles.rowLabel}>고화질로 사진 보내기</Text>
+              <Text style={styles.rowSub}>기본은 저화질(최대한 압축)이고, 켜면 더 선명하게 보낼 수 있어요.</Text>
+            </View>
+            {imageQualityLoaded ? (
+              <Switch
+                value={imageHighQuality}
+                onValueChange={(v) => void onToggleImageQuality(v)}
+                trackColor={{ false: '#cbd5e1', true: 'rgba(31, 42, 68, 0.35)' }}
+                thumbColor={imageHighQuality ? GinitTheme.colors.primary : '#f1f5f9'}
+                accessibilityLabel="고화질 사진 전송"
+              />
+            ) : (
+              <ActivityIndicator size="small" color="#94a3b8" />
+            )}
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <SettingsRowChevron
+            icon="log-out-outline"
+            label="채팅방 나가기"
+            sub="모임 상세에서 나가기를 진행해 주세요"
+            onPress={openLeaveInfo}
+            destructive
+          />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#f2f4f7' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  muted: { fontSize: 14, color: '#64748b', fontWeight: '600' },
+  textBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
+  textBtnLabel: { fontSize: 15, fontWeight: '800', color: GinitTheme.colors.primary },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#f2f4f7',
+  },
+  headerTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  scroll: { paddingBottom: 32, paddingTop: 4 },
+  heroCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    paddingVertical: 22,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  heroIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: 'rgba(31, 42, 68, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  heroTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0f172a',
+    textAlign: 'center',
+    letterSpacing: -0.4,
+    marginBottom: 6,
+  },
+  heroSub: { fontSize: 13, fontWeight: '600', color: '#64748b' },
+  sectionLabel: {
+    marginLeft: 20,
+    marginBottom: 8,
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#64748b',
+    letterSpacing: -0.1,
+  },
+  card: {
+    marginHorizontal: 16,
+    marginBottom: 18,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  avatarStrip: { paddingVertical: 14, paddingHorizontal: 12, gap: 14, flexDirection: 'row', alignItems: 'flex-start' },
+  avatarItem: { width: 56, alignItems: 'center' },
+  avatarRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0, 82, 204, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarImg: { width: 48, height: 48 },
+  avatarLetter: { fontSize: 18, fontWeight: '900', color: '#0052CC' },
+  avatarNick: { marginTop: 6, fontSize: 11, fontWeight: '700', color: '#475569', maxWidth: 56, textAlign: 'center' },
+  cardDivider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(15, 23, 42, 0.08)', marginLeft: 16 },
+  /** 아이콘(36) + gap(12) + 좌 패딩(16) — 텍스트 시작선에 맞춤 */
+  cardDividerIndented: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    marginLeft: 64,
+  },
+  rowIconSlot: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowIconSlotDanger: {
+    backgroundColor: 'rgba(220, 38, 38, 0.12)',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  rowPressed: { backgroundColor: 'rgba(15, 23, 42, 0.03)' },
+  rowTextCol: { flex: 1, minWidth: 0 },
+  rowLabel: { fontSize: 16, fontWeight: '700', color: '#0f172a', letterSpacing: -0.2 },
+  rowLabelDanger: { color: '#dc2626' },
+  rowSub: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#94a3b8', lineHeight: 16 },
+  rowSubDanger: { color: '#ef4444' },
+});

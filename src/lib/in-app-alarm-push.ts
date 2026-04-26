@@ -6,6 +6,7 @@ import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 /** Android 헤드업 배너용 — `HIGH` 이상이어야 다른 앱 사용 중에도 상단 배너가 뜨는 경우가 많습니다. */
@@ -125,6 +126,14 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
   void (async () => {
     try {
       if (Platform.OS === 'web') return;
+      // 채팅방 설정에서 알림을 꺼둔 경우: 포그라운드 배너/백그라운드 푸시 모두 차단
+      if (params.kind === 'chat') {
+        const mid = params.meetingId.trim();
+        if (mid) {
+          const ok = await isMeetingChatNotifyEnabled(mid);
+          if (!ok) return;
+        }
+      }
       await ensureGinitInAppAndroidChannel();
       if (AppState.currentState === 'active') {
         // 카카오톡처럼: 현재 보고 있는 채팅방이면 포그라운드 헤드업/배너를 띄우지 않습니다.

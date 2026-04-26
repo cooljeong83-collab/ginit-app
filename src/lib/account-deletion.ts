@@ -4,7 +4,7 @@
  * - 게스트로만 참여 중인 모임: `leaveMeeting`으로 나가기
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deleteAsync, cacheDirectory } from 'expo-file-system/legacy';
+import { Directory, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { deleteUser } from 'firebase/auth';
 import { getAuth } from '@react-native-firebase/auth';
@@ -266,10 +266,9 @@ export async function wipeLocalAppData(): Promise<void> {
     /* */
   }
   try {
-    const dir = cacheDirectory;
-    if (dir) {
-      await deleteAsync(dir, { idempotent: true });
-    }
+    const dir = new Directory(Paths.cache);
+    // 캐시 전체 삭제는 기기·OS에 따라 실패할 수 있어 best-effort
+    dir.delete();
   } catch {
     /* 캐시 전체 삭제는 기기·OS에 따라 실패할 수 있음 */
   }

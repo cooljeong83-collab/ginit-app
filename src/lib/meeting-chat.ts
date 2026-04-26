@@ -32,8 +32,9 @@ import {
   startAfter,
   updateDoc,
   doc,
+  where,
   type DocumentSnapshot,
-  type Timestamp,
+  Timestamp,
   type Unsubscribe,
   writeBatch,
 } from 'firebase/firestore';
@@ -148,6 +149,106 @@ export function meetingChatMessageSearchHaystack(m: MeetingChatMessage): string 
   return (m.text ?? '').trim();
 }
 
+const CHAT_IMAGES_PAGE_SIZE = 60;
+const CHAT_IMAGES_SCAN_PAGE = 220;
+
+/**
+ * 채팅방 "사진" 탭용 — `kind === 'image'` 메시지 페이징.
+ * 최신(최근)부터 내려받아 UI에서는 그대로 그리드에 추가합니다.
+ */
+export async function fetchMeetingChatImagesPage(
+  meetingId: string,
+  cursor: DocumentSnapshot | null,
+): Promise<{ images: MeetingChatMessage[]; nextCursor: DocumentSnapshot | null; hasMore: boolean }> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) return { images: [], nextCursor: null, hasMore: false };
+
+  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+  /**
+   * `where(kind == 'image') + orderBy(createdAt)`는 Firestore 복합 인덱스가 없으면 실패합니다.
+   * 채팅 "사진" 메뉴는 인덱스 의존을 피하기 위해 createdAt desc로만 가져오고 클라이언트에서 필터합니다.
+   */
+  const images: MeetingChatMessage[] = [];
+  let nextCursor: DocumentSnapshot | null = cursor;
+  let scannedLastSnap: DocumentSnapshot | null = null;
+
+  while (images.length < CHAT_IMAGES_PAGE_SIZE) {
+    const q = nextCursor
+      ? query(cref, orderBy('createdAt', 'desc'), startAfter(nextCursor), limit(CHAT_IMAGES_SCAN_PAGE))
+      : query(cref, orderBy('createdAt', 'desc'), limit(CHAT_IMAGES_SCAN_PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      scannedLastSnap = null;
+      break;
+    }
+    scannedLastSnap = snap.docs[snap.docs.length - 1]!;
+    nextCursor = scannedLastSnap;
+    for (const d of snap.docs) {
+      const m = mapMessageDoc(d.id, d.data() as Record<string, unknown>);
+      if (m.kind === 'image' && m.imageUrl?.trim()) {
+        images.push(m);
+        if (images.length >= CHAT_IMAGES_PAGE_SIZE) break;
+      }
+    }
+    if (snap.size < CHAT_IMAGES_SCAN_PAGE) break;
+  }
+
+  const hasMore = scannedLastSnap != null;
+  return { images, nextCursor: scannedLastSnap, hasMore };
+}
+
+function supabasePublicObjectPathFromUrl(url: string, bucket: string): string {
+  const u = (url ?? '').trim();
+  const b = bucket.trim();
+  if (!u || !b) return '';
+  try {
+    const parsed = new URL(u);
+    const marker = `/storage/v1/object/public/${encodeURIComponent(b)}/`;
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx < 0) return '';
+    const rest = parsed.pathname.slice(idx + marker.length);
+    return decodeURIComponent(rest).replace(/^\/+/, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 채팅 이미지 1건 삭제(카카오톡처럼 "삭제됨" 이력 남김).
+ * - Firestore 문서는 유지하고, 내용만 자리표시로 치환합니다(소프트 삭제).
+ * - Storage 파일은 best-effort로 제거합니다(실패해도 무시).
+ */
+export async function deleteMeetingChatImageMessageBestEffort(
+  meetingId: string,
+  messageId: string,
+  imageUrl: string,
+): Promise<void> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const msgId = typeof messageId === 'string' ? messageId.trim() : String(messageId ?? '').trim();
+  const url = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+  if (!mid) throw new Error('모임 정보가 없습니다.');
+  if (!msgId) throw new Error('메시지 정보가 없습니다.');
+
+  const db = getFirestoreDb();
+  const msgRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, msgId);
+  await updateDoc(msgRef, {
+    // 사람이 입력한 말풍선이 아니라 "시스템 알림"처럼 보이도록 처리
+    kind: 'system',
+    senderId: null,
+    text: '사진이 삭제되었습니다.',
+    imageUrl: null,
+    deletedAt: serverTimestamp(),
+  } as Record<string, unknown>);
+
+  const objectPath = supabasePublicObjectPathFromUrl(url, SUPABASE_STORAGE_BUCKET_MEETING_CHAT);
+  if (!objectPath) return;
+  try {
+    await supabase.storage.from(SUPABASE_STORAGE_BUCKET_MEETING_CHAT).remove([objectPath]);
+  } catch {
+    /* best-effort */
+  }
+}
+
 const SEARCH_PAGE = 120;
 
 /**
@@ -203,7 +304,9 @@ export async function searchMeetingChatMessages(
 }
 
 /**
- * 최신 쪽부터 `CHAT_PAGE_SIZE`개 구독 후, 시간 오름차순 배열로 돌려줍니다.
+ * 최신 쪽부터 `CHAT_PAGE_SIZE`개 구독 후, **최신순(desc)** 배열로 돌려줍니다.
+ *
+ * 채팅 UI는 `FlatList inverted` + 최신순 배열 조합을 기본으로 사용합니다.
  */
 export function subscribeMeetingChatMessages(
   meetingId: string,
@@ -221,7 +324,6 @@ export function subscribeMeetingChatMessages(
     q,
     (snap) => {
       const rows = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-      rows.reverse();
       onMessages(rows);
     },
     (err) => {
@@ -421,7 +523,12 @@ export async function sendMeetingChatTextMessage(
             }
           : null,
       kind: 'text' as const,
-      createdAt: serverTimestamp(),
+      /**
+       * `serverTimestamp()`는 로컬에서 아직 값이 확정되기 전까지 `orderBy('createdAt')` 쿼리에서
+       * 문서가 제외되는 케이스가 있어(전송해도 리스트에 안 뜨는 현상), 우선 클라이언트 타임으로 저장합니다.
+       * 채팅 UI는 "즉시 보임"이 더 중요하고, 정렬이 필요한 경우에도 큰 문제 없이 동작합니다.
+       */
+      createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
 }
@@ -491,7 +598,7 @@ export async function sendMeetingChatImageMessage(
       text: cap,
       kind: 'image' as const,
       imageUrl,
-      createdAt: serverTimestamp(),
+      createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
 }

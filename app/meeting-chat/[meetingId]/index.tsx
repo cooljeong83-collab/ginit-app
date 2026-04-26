@@ -26,10 +26,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
+import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -41,7 +43,9 @@ import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
+import { getMeetingChatImageUploadQuality } from '@/src/lib/meeting-chat-image-quality-preference';
 import {
+  deleteMeetingChatImageMessageBestEffort,
   meetingChatMessageSearchHaystack,
   searchMeetingChatMessages,
   sendMeetingChatImageMessage,
@@ -325,9 +329,7 @@ export default function MeetingChatRoomScreen() {
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [replyTo, setReplyTo] = useState<MeetingChatMessage['replyTo']>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
-  const drawerAnim = useRef(new Animated.Value(0)).current;
   /** + 퀵 메뉴 행별 진행 0→1 (아래에서 올라오며 페이드), 닫을 때 역재생 */
   const plusRowAnims = useRef([
     new Animated.Value(0),
@@ -340,12 +342,12 @@ export default function MeetingChatRoomScreen() {
   /** 키보드 본체 + IME 상단(이모지/툴바 등)까지 포함해 입력창을 올리기 위한 하단 여백 */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
-  /** Android 삼성 등: IME `defaultInputmode=emoji` — 토글 후 포커스 */
-  const [androidEmojiIme, setAndroidEmojiIme] = useState(false);
   const [imageViewer, setImageViewer] = useState<{
+    messageId: string;
     url: string;
     senderLabel: string;
     sentAtLabel: string;
+    canDelete: boolean;
   } | null>(null);
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   /** 맨 아래에서 조금이라도 위로 올라왔을 때만「최신으로」FAB 표시 */
@@ -363,6 +365,12 @@ export default function MeetingChatRoomScreen() {
   const messagesRef = useRef<MeetingChatMessage[]>([]);
   const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
   const { markChatReadUpTo } = useInAppAlarms();
+  const jumpToLatest = useCallback(() => {
+    setShowJumpToBottomFab(false);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+    });
+  }, []);
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
@@ -409,23 +417,23 @@ export default function MeetingChatRoomScreen() {
       return () => {
         if (!meetingId) return;
         const list = messagesRef.current;
-        const last = list[list.length - 1];
-        if (!last?.id) return;
-        markChatReadUpTo(meetingId, last.id);
+        const latest = list[0];
+        if (!latest?.id) return;
+        markChatReadUpTo(meetingId, latest.id);
       };
     }, [allowed, meetingId, markChatReadUpTo]),
   );
 
   useEffect(() => {
     if (allowed !== true || !meetingId) return;
-    const last = messages[messages.length - 1];
-    if (!last?.id) return;
+    const latest = messages[0];
+    if (!latest?.id) return;
     const prev = lastMarkedReadRef.current;
-    if (prev && prev.meetingId === meetingId && prev.messageId === last.id) return;
-    lastMarkedReadRef.current = { meetingId, messageId: last.id };
-    markChatReadUpTo(meetingId, last.id);
+    if (prev && prev.meetingId === meetingId && prev.messageId === latest.id) return;
+    lastMarkedReadRef.current = { meetingId, messageId: latest.id };
+    markChatReadUpTo(meetingId, latest.id);
     if (myId) {
-      void writeMeetingChatReadReceipt(meetingId, myId, last.id).catch(() => {
+      void writeMeetingChatReadReceipt(meetingId, myId, latest.id).catch(() => {
         /* best-effort */
       });
     }
@@ -451,13 +459,7 @@ export default function MeetingChatRoomScreen() {
     void getUserProfilesForIds(ids).then(setProfiles);
   }, [meeting, allowed]);
 
-  const scrollToBottom = useCallback(() => {
-    if (messages.length === 0) return;
-    setShowJumpToBottomFab(false);
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    });
-  }, [messages.length]);
+  // inverted 리스트: offset=0 이 "최신(하단)" 이므로 별도 scrollToEnd 로직이 필요 없습니다.
 
   const onChatScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
@@ -472,18 +474,16 @@ export default function MeetingChatRoomScreen() {
       setShowJumpToBottomFab(false);
       return;
     }
-    const distanceFromBottom = contentH - (contentOffset.y + viewH);
     const threshold = 56;
-    setShowJumpToBottomFab(distanceFromBottom > threshold);
+    // inverted: 최신 위치(하단)는 offset=0, 위로 갈수록 offset이 증가
+    setShowJumpToBottomFab(contentOffset.y > threshold);
   }, []);
 
   useEffect(() => {
     if (messages.length === 0) {
       setShowJumpToBottomFab(false);
-      return;
     }
-    scrollToBottom();
-  }, [messages.length, scrollToBottom]);
+  }, [messages.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -519,11 +519,9 @@ export default function MeetingChatRoomScreen() {
         pad = fromBottom + Math.min(slack + 4, 12);
       }
       setKeyboardBottomInset(Math.ceil(pad));
-      requestAnimationFrame(scrollToBottom);
     };
     const clear = () => {
       setKeyboardBottomInset(0);
-      requestAnimationFrame(scrollToBottom);
     };
 
     const subs: { remove: () => void }[] = [];
@@ -614,7 +612,7 @@ export default function MeetingChatRoomScreen() {
               animated: true,
             });
           } catch {
-            listRef.current?.scrollToEnd({ animated: true });
+            listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
           }
         } else {
           const d = msg.createdAt && typeof msg.createdAt.toDate === 'function' ? msg.createdAt.toDate() : null;
@@ -641,7 +639,6 @@ export default function MeetingChatRoomScreen() {
 
   const openChatSearch = useCallback(() => {
     Keyboard.dismiss();
-    setDrawerOpen(false);
     setPlusMenuOpen(false);
     setChatSearchOpen(true);
     setChatSearchQuery('');
@@ -691,20 +688,6 @@ export default function MeetingChatRoomScreen() {
     [profiles, chatSearchQuery, jumpToSearchResult],
   );
 
-  const onEmojiToolbarPress = useCallback(() => {
-    if (Platform.OS === 'android') {
-      setAndroidEmojiIme((v) => !v);
-    }
-  }, []);
-
-  useEffect(() => {
-    Animated.timing(drawerAnim, {
-      toValue: drawerOpen ? 1 : 0,
-      duration: drawerOpen ? 220 : 180,
-      useNativeDriver: true,
-    }).start();
-  }, [drawerOpen, drawerAnim]);
-
   const onSend = useCallback(async () => {
     if (!meetingId || !userId?.trim()) {
       Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
@@ -746,9 +729,11 @@ export default function MeetingChatRoomScreen() {
     setUploadingImage(true);
     try {
       const caption = draft.trim();
+      const uploadQuality = await getMeetingChatImageUploadQuality(meetingId);
       await sendMeetingChatImageMessage(meetingId, userId, asset.uri, {
         caption: caption || undefined,
         naturalWidth: typeof asset.width === 'number' && asset.width > 0 ? asset.width : undefined,
+        uploadQuality,
       });
       if (caption) setDraft('');
     } catch (e) {
@@ -928,7 +913,9 @@ export default function MeetingChatRoomScreen() {
         const lastId = lastReadMessageIdForParticipant(readMsgBy, pid);
         if (lastId) {
           const readIdx = messageIndexById.get(lastId);
-          if (readIdx != null && readIdx >= idxMsg) continue;
+          // inverted + 최신순 배열: 인덱스가 작을수록 더 최신.
+          // 참여자의 마지막 읽음이 이 메시지보다 최신(또는 동일)이면 이미 읽음 처리.
+          if (readIdx != null && readIdx <= idxMsg) continue;
         }
         const ms = readAtMsByUser[pid] ?? 0;
         if (!ms || ms < messageMs) unread += 1;
@@ -942,20 +929,23 @@ export default function MeetingChatRoomScreen() {
     const url = item.imageUrl?.trim();
     if (!url || item.kind !== 'image') return;
     const { senderLabel, sentAtLabel } = meetingImageViewerMeta(item, profiles);
-    setImageViewer({ url, senderLabel, sentAtLabel });
-  }, [profiles]);
+    const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
+    const canDelete = Boolean(myId && sid && sid === myId);
+    setImageViewer({ messageId: item.id, url, senderLabel, sentAtLabel, canDelete });
+  }, [profiles, myId]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: MeetingChatMessage; index: number }) => {
-      const prev = index > 0 ? messages[index - 1] : null;
+      const prev = index > 0 ? messages[index - 1] : null; // 배열상 더 최신(시각적으로는 아래)
+      const next = index + 1 < messages.length ? messages[index + 1] : null; // 배열상 더 과거(시각적으로는 위)
       const currDate = item.createdAt?.toDate?.() ?? null;
-      const prevDate = prev?.createdAt?.toDate?.() ?? null;
+      const nextDate = next?.createdAt?.toDate?.() ?? null;
       const dateLabel =
         currDate &&
-        (!prevDate ||
-          currDate.getFullYear() !== prevDate.getFullYear() ||
-          currDate.getMonth() !== prevDate.getMonth() ||
-          currDate.getDate() !== prevDate.getDate())
+        (!nextDate ||
+          currDate.getFullYear() !== nextDate.getFullYear() ||
+          currDate.getMonth() !== nextDate.getMonth() ||
+          currDate.getDate() !== nextDate.getDate())
           ? currDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
           : '';
 
@@ -1205,20 +1195,25 @@ export default function MeetingChatRoomScreen() {
           </View>
           <View style={styles.topBarRight}>
             <Text style={styles.participantCount}>{pCount}</Text>
-            <Pressable
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="대화 검색"
-              onPress={openChatSearch}>
-              <Ionicons name="search-outline" size={22} color="#475569" />
-            </Pressable>
-            <Pressable
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="메뉴"
-              onPress={() => setDrawerOpen(true)}>
-              <Ionicons name="menu-outline" size={24} color="#475569" />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                onPress={openChatSearch}
+                accessibilityRole="button"
+                accessibilityLabel="대화 검색"
+                hitSlop={10}
+                style={styles.searchIconWrap}>
+                <Ionicons name="search-outline" size={24} color="#0f172a" />
+              </Pressable>
+              <InAppAlarmsBellButton />
+              <Pressable
+                onPress={() => router.push(`/meeting-chat/${meetingId}/settings`)}
+                accessibilityRole="button"
+                accessibilityLabel="채팅방 설정"
+                hitSlop={10}
+                style={styles.settingsIconWrap}>
+                <Ionicons name="settings-outline" size={24} color="#0f172a" />
+              </Pressable>
+            </View>
           </View>
         </View>
 
@@ -1245,13 +1240,14 @@ export default function MeetingChatRoomScreen() {
                 <Text style={styles.chatErrorText}>{chatError}</Text>
               </View>
             ) : null}
-            <KeyboardAwareFlatList
+            <View style={{ flex: 1 }}>
+              <KeyboardAwareFlatList
               ref={listRef}
               data={messages}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               contentContainerStyle={styles.listContent}
-              onContentSizeChange={scrollToBottom}
+                inverted
               onScroll={onChatScroll}
               scrollEventThrottle={16}
               keyboardShouldPersistTaps="handled"
@@ -1264,11 +1260,12 @@ export default function MeetingChatRoomScreen() {
               ListEmptyComponent={
                 <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
               }
-            />
+              />
+            </View>
             {showJumpToBottomFab && !plusMenuOpen ? (
               <Pressable
                 style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
-                onPress={scrollToBottom}
+                onPress={jumpToLatest}
                 accessibilityRole="button"
                 accessibilityLabel="최신 메시지로">
                 <Ionicons name="chevron-down" size={22} color="#334155" />
@@ -1400,34 +1397,7 @@ export default function MeetingChatRoomScreen() {
                   multiline
                   maxLength={4000}
                   editable={!sending && !uploadingImage}
-                  {...(Platform.OS === 'android'
-                    ? ({
-                        privateImeOptions: androidEmojiIme ? 'defaultInputmode=emoji' : undefined,
-                      } as Record<string, unknown>)
-                    : {})}
                 />
-                <Pressable
-                  style={styles.emojiBtn}
-                  onPress={onEmojiToolbarPress}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    Platform.OS === 'android' && androidEmojiIme
-                      ? '글자 키보드로 전환'
-                      : '이모지 키보드'
-                  }
-                  accessibilityHint={
-                    Platform.OS === 'android'
-                      ? androidEmojiIme
-                        ? '한글·영문 입력으로 돌아갑니다.'
-                        : '삼성 키보드 이모지 입력으로 전환합니다.'
-                      : undefined
-                  }>
-                  <Ionicons
-                    name={Platform.OS === 'android' && androidEmojiIme ? 'keypad-outline' : 'happy-outline'}
-                    size={22}
-                    color={Platform.OS === 'android' && androidEmojiIme ? GinitTheme.colors.primary : '#64748b'}
-                  />
-                </Pressable>
               </View>
               <Pressable
                 onPress={() => void onSend()}
@@ -1445,73 +1415,6 @@ export default function MeetingChatRoomScreen() {
           </View>
         </View>
         </View>
-
-        {/* 우측 드로어: 멤버 리스트 */}
-        {drawerOpen ? (
-          <Pressable style={styles.overlayDim} onPress={() => setDrawerOpen(false)} accessibilityRole="button">
-            <Animated.View
-              style={[
-                styles.drawer,
-                {
-                  transform: [
-                    {
-                      translateX: drawerAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [320, 0],
-                      }),
-                    },
-                  ],
-                },
-              ]}>
-              <BlurView tint="light" intensity={60} style={styles.drawerInner}>
-                <View style={styles.drawerHeader}>
-                  <Text style={styles.drawerTitle}>참여 멤버</Text>
-                  <Pressable onPress={() => setDrawerOpen(false)} hitSlop={10} accessibilityRole="button">
-                    <Ionicons name="close" size={20} color="#475569" />
-                  </Pressable>
-                </View>
-                <Text style={styles.drawerHint}>gTrust · gDna</Text>
-                <View style={styles.drawerList}>
-                  {[...(meeting?.participantIds ?? []), ...(meeting?.createdBy?.trim() ? [meeting.createdBy] : [])]
-                    .filter((x, i, arr) => {
-                      const n = normalizeParticipantId(String(x)) ?? String(x).trim();
-                      return n && arr.findIndex((y) => (normalizeParticipantId(String(y)) ?? String(y).trim()) === n) === i;
-                    })
-                    .map((pid) => {
-                      const n = normalizeParticipantId(String(pid)) ?? String(pid).trim();
-                      const p = n ? profileForSender(profiles, n) : undefined;
-                      const nick = isUserProfileWithdrawn(p) ? WITHDRAWN_NICKNAME : (p?.nickname ?? '회원');
-                      const trust = typeof p?.gTrust === 'number' ? p.gTrust : null;
-                      const dna = typeof p?.gDna === 'string' ? p.gDna : '';
-                      const isHost = Boolean(hostNorm && n && n === hostNorm);
-                      return (
-                        <View key={String(pid)} style={styles.drawerRow}>
-                          <View style={styles.drawerAvatar}>
-                            {p?.photoUrl ? (
-                              <Image source={{ uri: p.photoUrl }} style={styles.drawerAvatarImg} contentFit="cover" />
-                            ) : (
-                              <Text style={styles.drawerAvatarText}>{nick.slice(0, 1)}</Text>
-                            )}
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <View style={styles.drawerNameRow}>
-                              <Text style={styles.drawerName} numberOfLines={1}>
-                                {nick}
-                              </Text>
-                              {isHost ? <Ionicons name="star" size={14} color="#CA8A04" /> : null}
-                            </View>
-                            <Text style={styles.drawerMeta}>
-                              {trust != null ? `gTrust ${trust}` : 'gTrust -'}{dna ? ` · ${dna}` : ''}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                </View>
-              </BlurView>
-            </Animated.View>
-          </Pressable>
-        ) : null}
 
         {/* 대화 검색 */}
         <Modal
@@ -1573,10 +1476,11 @@ export default function MeetingChatRoomScreen() {
 
         {/* 사진 크게 보기 */}
         <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
-          <View style={styles.viewerRoot}>
+          <GestureHandlerRootView style={styles.viewerRoot}>
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={() => !imageViewerBusy && setImageViewer(null)}
+              pointerEvents="none"
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
@@ -1630,7 +1534,6 @@ export default function MeetingChatRoomScreen() {
                         setImageViewerBusy(true);
                         try {
                           await saveRemoteImageUrlToLibrary(u);
-                          Alert.alert('저장됨', '사진이 저장되었어요.');
                         } catch (e) {
                           Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
                         } finally {
@@ -1644,13 +1547,51 @@ export default function MeetingChatRoomScreen() {
                     accessibilityLabel="저장">
                     <Ionicons name="download-outline" size={24} color="#fff" />
                   </Pressable>
+                  {imageViewer?.canDelete ? (
+                    <Pressable
+                      onPress={() => {
+                        const u = imageViewer?.url.trim() ?? '';
+                        const mid = meetingId.trim();
+                        const msgId = imageViewer?.messageId.trim() ?? '';
+                        if (!u || !mid || !msgId) return;
+                        if (imageViewerBusy) return;
+                        Alert.alert('사진 삭제', '이 사진을 채팅방에서 삭제할까요?', [
+                          { text: '취소', style: 'cancel' },
+                          {
+                            text: '삭제',
+                            style: 'destructive',
+                            onPress: () => {
+                              void (async () => {
+                                setImageViewerBusy(true);
+                                try {
+                                  await deleteMeetingChatImageMessageBestEffort(mid, msgId, u);
+                                  setImageViewer(null);
+                                } catch (e) {
+                                  Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                                } finally {
+                                  setImageViewerBusy(false);
+                                }
+                              })();
+                            },
+                          },
+                        ]);
+                      }}
+                      hitSlop={10}
+                      disabled={imageViewerBusy}
+                      accessibilityRole="button"
+                      accessibilityLabel="삭제">
+                      <Ionicons name="trash-outline" size={24} color="#fff" />
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
               {imageViewer?.url ? (
-                <Image source={{ uri: imageViewer.url }} style={styles.viewerImage} contentFit="contain" />
+                <View style={styles.viewerImageWrap}>
+                  <MeetingChatImageViewerZoomArea uri={imageViewer.url} />
+                </View>
               ) : null}
             </View>
-          </View>
+          </GestureHandlerRootView>
         </Modal>
       </View>
     </SafeAreaView>
@@ -1736,8 +1677,23 @@ const styles = StyleSheet.create({
   topBarRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     flexShrink: 0,
+  },
+  /** 모임 탭(`app/(tabs)/index.tsx`) feedHeader — 검색·벨·설정과 동일 */
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    flexShrink: 0,
+  },
+  searchIconWrap: {
+    position: 'relative',
+    padding: 2,
+  },
+  settingsIconWrap: {
+    position: 'relative',
+    padding: 2,
   },
   participantCount: {
     fontSize: 14,
@@ -2032,14 +1988,6 @@ const styles = StyleSheet.create({
   },
   replyPreviewTitle: { fontSize: 12, fontWeight: '900', color: '#0052CC' },
   replyPreviewBody: { flex: 1, fontSize: 12, fontWeight: '800', color: '#0f172a' },
-  overlayDim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.25)',
-  },
   /** + 퀵 메뉴 + 입력창 묶음 (퀵 메뉴는 배경 없이 아이콘·라벨만) */
   composerCluster: {
     width: '100%',
@@ -2070,55 +2018,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  drawer: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: 300,
-    borderTopLeftRadius: 18,
-    borderBottomLeftRadius: 18,
-    overflow: 'hidden',
-  },
-  drawerInner: {
-    flex: 1,
-    paddingTop: 14,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.62)',
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.22)',
-  },
-  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  drawerTitle: { fontSize: 15, fontWeight: '900', color: '#0f172a' },
-  drawerHint: { fontSize: 12, color: '#64748b', marginBottom: 10, fontWeight: '800' },
-  drawerList: { gap: 10 },
-  drawerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 14,
-    backgroundColor: 'rgba(15, 23, 42, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  drawerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  drawerAvatarImg: { width: 38, height: 38 },
-  drawerAvatarText: { fontSize: 14, fontWeight: '900', color: '#0052CC' },
-  drawerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  drawerName: { fontSize: 13, fontWeight: '900', color: '#0f172a', flexShrink: 1 },
-  drawerMeta: { marginTop: 2, fontSize: 12, color: '#475569', fontWeight: '800' },
   pressed: {
     opacity: 0.85,
   },
@@ -2162,9 +2061,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
-  viewerImage: {
+  viewerImageWrap: {
     flex: 1,
     width: '100%',
+    minHeight: 0,
     backgroundColor: 'transparent',
   },
   chatSearchSafe: {
@@ -2306,8 +2206,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f1f5f9',
     borderRadius: 20,
-    paddingLeft: 14,
-    paddingRight: 6,
+    paddingHorizontal: 14,
     minHeight: 44,
     maxHeight: 120,
     borderWidth: StyleSheet.hairlineWidth,
@@ -2319,9 +2218,6 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     paddingVertical: 10,
     maxHeight: 100,
-  },
-  emojiBtn: {
-    padding: 6,
   },
   sendBtn: {
     width: 44,
