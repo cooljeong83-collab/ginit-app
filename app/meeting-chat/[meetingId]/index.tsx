@@ -13,6 +13,7 @@ import {
   Dimensions,
   Easing,
   FlatList,
+  InteractionManager,
   Keyboard,
   type KeyboardEvent,
   type LayoutChangeEvent,
@@ -374,39 +375,138 @@ export default function MeetingChatRoomScreen() {
   const chatSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatSearchInputRef = useRef<TextInput>(null);
   const listRef = useRef<any>(null);
+  const innerFlatListRef = useRef<any>(null);
+  const setListRef = useCallback((r: any) => {
+    if (r) listRef.current = r;
+  }, []);
+  const setInnerFlatListRef = useCallback((r: any) => {
+    if (r) innerFlatListRef.current = r;
+  }, []);
   const messageInputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MeetingChatMessage[]>([]);
   const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
   const { markChatReadUpTo } = useInAppAlarms();
+  const lastScrollOffsetRef = useRef(0);
+  const smoothScrollAnimRef = useRef(new Animated.Value(0)).current;
+  const smoothScrollListenerIdRef = useRef<string | null>(null);
+  const pendingAutoScrollToLatestRef = useRef(false);
+  const lastAutoScrolledMessageIdRef = useRef<string>('');
+
+  const resolveListScroller = useCallback(() => {
+    // KeyboardAwareFlatList는 outer ref로는 스크롤 메서드가 없는 경우가 있어 inner ref를 최우선합니다.
+    const r = innerFlatListRef.current ?? listRef.current;
+    if (!r) return null;
+    // KeyboardAwareFlatList / FlatList / AnimatedFlatList 등 다양한 래퍼 케이스를 모두 커버
+    const candidates = [
+      r,
+      typeof (r as any).getNode === 'function' ? (r as any).getNode() : null,
+      typeof (r as any).getScrollResponder === 'function' ? (r as any).getScrollResponder() : null,
+      (r as any)._flatListRef ?? null,
+      (r as any)._flatList ?? null,
+    ].filter(Boolean);
+    for (const c of candidates) {
+      if (c && (typeof c.scrollToIndex === 'function' || typeof c.scrollToOffset === 'function')) return c;
+    }
+    return null;
+  }, []);
+
+  const scrollToIndexSafe = useCallback((index: number, viewPosition = 0.35) => {
+    const scroller = resolveListScroller();
+    if (!scroller || typeof scroller.scrollToIndex !== 'function') return false;
+    try {
+      scroller.scrollToIndex({ index, viewPosition, animated: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [resolveListScroller]);
+
+  const scrollToOffsetSafe = useCallback((offset: number, animated = true) => {
+    const scroller = resolveListScroller();
+    if (!scroller || typeof scroller.scrollToOffset !== 'function') return false;
+    try {
+      scroller.scrollToOffset({ offset, animated });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [resolveListScroller]);
+
+  const smoothScrollToOffset = useCallback(
+    (targetOffset: number) => {
+      const scroller = resolveListScroller();
+      if (!scroller || typeof scroller.scrollToOffset !== 'function') return;
+
+      const from = Math.max(0, Math.floor(lastScrollOffsetRef.current || 0));
+      const target = Math.max(0, Math.floor(targetOffset || 0));
+      const dist = Math.abs(target - from);
+      const duration = Math.min(900, Math.max(220, Math.floor(dist * 0.65)));
+
+      smoothScrollAnimRef.stopAnimation();
+      if (smoothScrollListenerIdRef.current) {
+        smoothScrollAnimRef.removeListener(smoothScrollListenerIdRef.current);
+        smoothScrollListenerIdRef.current = null;
+      }
+      smoothScrollAnimRef.setValue(from);
+      smoothScrollListenerIdRef.current = smoothScrollAnimRef.addListener(({ value }) => {
+        try {
+          scroller.scrollToOffset({ offset: value, animated: false });
+        } catch {
+          /* ignore */
+        }
+      });
+
+      Animated.timing(smoothScrollAnimRef, {
+        toValue: target,
+        duration,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start(() => {
+        if (smoothScrollListenerIdRef.current) {
+          smoothScrollAnimRef.removeListener(smoothScrollListenerIdRef.current);
+          smoothScrollListenerIdRef.current = null;
+        }
+        try {
+          scroller.scrollToOffset({ offset: target, animated: false });
+        } catch {
+          /* ignore */
+        }
+      });
+    },
+    [resolveListScroller, smoothScrollAnimRef],
+  );
   const jumpToLatest = useCallback(() => {
     setShowJumpToBottomFab(false);
     requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+      scrollToOffsetSafe(0, true);
     });
-  }, []);
+  }, [scrollToOffsetSafe]);
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
   const scrollToMessageIndexBestEffort = useCallback((idx: number) => {
     const index = Math.max(0, Math.floor(idx));
     // 모달 닫힘/레이아웃 안정화 이후에 시도(특히 Android에서 즉시 호출 시 무시되는 케이스 방지)
-    setTimeout(() => {
-      try {
-        listRef.current?.scrollToIndex?.({ index, viewPosition: 0.35, animated: true });
-      } catch {
-        // inverted 리스트: index가 클수록 더 과거(위쪽) → offset도 증가하는 방향이라 대략치로 먼저 이동
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        // 1) 가능하면 한 번에 "부드럽게" index로 스크롤
+        if (scrollToIndexSafe(index, 0.35)) return;
+
+        /**
+         * 2) 스크롤 메서드가 아직 준비되지 않았거나(index 계산 실패) 등으로 실패하면,
+         * 먼저 대략 위치로 "애니메이션 스크롤"을 보내고(점프 X),
+         * 스크롤이 어느 정도 진행된 뒤 미세 보정만 합니다.
+         */
         const approx = Math.max(0, index * 140);
-        listRef.current?.scrollToOffset?.({ offset: approx, animated: true });
+        smoothScrollToOffset(approx);
+
+        // 보정은 충분히 늦게(스크롤 진행 후) 1회만
         setTimeout(() => {
-          try {
-            listRef.current?.scrollToIndex?.({ index, viewPosition: 0.35, animated: true });
-          } catch {
-            /* best-effort */
-          }
-        }, 80);
-      }
-    }, 60);
-  }, []);
+          scrollToIndexSafe(index, 0.35);
+        }, 420);
+      }, 90);
+    });
+  }, [scrollToIndexSafe, smoothScrollToOffset]);
 
   useFocusEffect(
     useCallback(() => {
@@ -497,6 +597,7 @@ export default function MeetingChatRoomScreen() {
 
   const onChatScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    lastScrollOffsetRef.current = contentOffset.y;
     const viewH = layoutMeasurement.height;
     const contentH = contentSize.height;
     if (viewH <= 0 || contentH <= 0) {
@@ -518,6 +619,22 @@ export default function MeetingChatRoomScreen() {
       setShowJumpToBottomFab(false);
     }
   }, [messages.length]);
+
+  useEffect(() => {
+    const latest = messages[0];
+    if (!latest?.id) return;
+    if (lastAutoScrolledMessageIdRef.current === latest.id) return;
+
+    const shouldAutoScroll = pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
+    if (!shouldAutoScroll) return;
+
+    // 내가 보낸 메시지나, 현재 최신 영역에 머무르고 있는 상태라면 최신을 유지
+    lastAutoScrolledMessageIdRef.current = latest.id;
+    pendingAutoScrollToLatestRef.current = false;
+    requestAnimationFrame(() => {
+      scrollToOffsetSafe(0, true);
+    });
+  }, [messages, showJumpToBottomFab, scrollToOffsetSafe]);
 
   useEffect(() => {
     let cancelled = false;
@@ -720,6 +837,7 @@ export default function MeetingChatRoomScreen() {
     const body = draft.trim();
     if (!body || sending || uploadingImage) return;
     setSending(true);
+    pendingAutoScrollToLatestRef.current = true;
     try {
       await sendMeetingChatTextMessage(meetingId, userId, body, replyTo?.messageId ? replyTo : null);
       setDraft('');
@@ -927,7 +1045,10 @@ export default function MeetingChatRoomScreen() {
       const rid = String(replyMessageId ?? '').trim();
       if (!rid) return;
       const idx = messageIndexById.get(rid);
-      if (idx == null) return;
+      if (idx == null) {
+        Alert.alert('원글 위치', '원글이 현재 화면에 불러온 최근 대화 범위 밖이라 바로 이동할 수 없어요.\n위로 더 스크롤해 불러온 뒤 다시 눌러 보세요.');
+        return;
+      }
       scrollToMessageIndexBestEffort(idx);
     },
     [messageIndexById, scrollToMessageIndexBestEffort],
@@ -1087,6 +1208,7 @@ export default function MeetingChatRoomScreen() {
               </View>
             ) : null}
             <SwipeToReply
+              simultaneousHandlers={listRef}
               onTriggerReply={() =>
                 setReplyTo({
                   messageId: item.id,
@@ -1196,6 +1318,7 @@ export default function MeetingChatRoomScreen() {
             </View>
           ) : null}
           <SwipeToReply
+            simultaneousHandlers={listRef}
             onTriggerReply={() =>
               setReplyTo({
                 messageId: item.id,
@@ -1262,8 +1385,9 @@ export default function MeetingChatRoomScreen() {
   const composerBottomPad = keyboardBottomInset > 0 ? keyboardBottomInset : Math.max(insets.bottom, 8);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.flexColumn}>
+    <GestureHandlerRootView style={styles.ghRoot}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.flexColumn}>
         <View style={styles.topBar}>
           <Pressable
             onPress={() => router.back()}
@@ -1329,7 +1453,10 @@ export default function MeetingChatRoomScreen() {
             ) : null}
             <View style={{ flex: 1 }}>
               <KeyboardAwareFlatList
-              ref={listRef}
+              // KeyboardAwareFlatList는 일반 ref가 실제 FlatList 메서드로 연결되지 않는 케이스가 있어
+              // innerRef로 스크롤 제어(ref.scrollToIndex/Offset)가 확실히 동작하도록 합니다.
+              ref={setListRef}
+              innerRef={setInnerFlatListRef}
               data={messages}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
@@ -1342,7 +1469,10 @@ export default function MeetingChatRoomScreen() {
               extraScrollHeight={12}
               onScrollToIndexFailed={(info) => {
                 const h = Math.max(100, info.averageItemLength || 140);
-                listRef.current?.scrollToOffset({ offset: Math.max(0, h * info.index), animated: true });
+                scrollToOffsetSafe(Math.max(0, h * info.index), true);
+                setTimeout(() => {
+                  scrollToIndexSafe(info.index, 0.35);
+                }, 80);
               }}
               ListEmptyComponent={
                 <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
@@ -1692,17 +1822,20 @@ export default function MeetingChatRoomScreen() {
             </View>
           </GestureHandlerRootView>
         </Modal>
-      </View>
-    </SafeAreaView>
+        </View>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
 function SwipeToReply({
   children,
   onTriggerReply,
+  simultaneousHandlers,
 }: {
   children: ReactNode;
   onTriggerReply: () => void;
+  simultaneousHandlers?: any;
 }) {
   /**
    * 카카오톡처럼: 말풍선을 "왼쪽으로 당기면" 따라오고, 손을 놓으면 항상 원위치로 복귀.
@@ -1769,8 +1902,15 @@ function SwipeToReply({
 
   return (
     <PanGestureHandler
-      activeOffsetX={[-18, 18]}
-      failOffsetY={[-10, 10]}
+      /**
+       * 스크롤과 충돌 방지:
+       * - 왼쪽(음수) 드래그에서만 활성화(오른쪽/미세 흔들림으로 스크롤이 막히지 않게)
+       * - 세로 이동이 조금이라도 있으면 빠르게 실패시켜 FlatList 스크롤을 우선
+       * - FlatList와 simultaneous로 동작하게 연결
+       */
+      activeOffsetX={[-18, 9999]}
+      failOffsetY={[-6, 6]}
+      simultaneousHandlers={simultaneousHandlers}
       onGestureEvent={onGestureEvent}
       onHandlerStateChange={onHandlerStateChange}
     >
@@ -1780,6 +1920,7 @@ function SwipeToReply({
 }
 
 const styles = StyleSheet.create({
+  ghRoot: { flex: 1 },
   safe: { flex: 1, backgroundColor: '#ECEFF1' },
   flexColumn: { flex: 1, flexDirection: 'column' },
   /** 리스트 + 퀵 메뉴(입력창 위) + composerDock — 퀵 메뉴 bottom을 입력 블록 높이에 맞춤 */
@@ -2201,6 +2342,8 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     marginBottom: 2,
+    /** replyPreviewCard의 paddingHorizontal(12)만큼 왼쪽으로 당겨 + 버튼과 X축 정렬 */
+    marginLeft: -12,
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
