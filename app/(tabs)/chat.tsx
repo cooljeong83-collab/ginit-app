@@ -31,7 +31,8 @@ import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { fetchMeetingsOnceHybrid, subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { socialDmRoomId, subscribeMySocialChatRooms, type SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
+import { socialDmRoomId, type SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
+import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -111,9 +112,7 @@ export default function ChatTab() {
     Record<string, MeetingChatMessage | null | undefined>
   >({});
   const [hostProfiles, setHostProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [socialRooms, setSocialRooms] = useState<SocialChatRoomSummary[]>([]);
   const [socialProfiles, setSocialProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [socialRoomsError, setSocialRoomsError] = useState<string | null>(null);
   const [unreadByMeetingId, setUnreadByMeetingId] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -172,6 +171,16 @@ export default function ChatTab() {
 
   const signedIn = Boolean(userId?.trim());
 
+  const {
+    rooms: socialRooms,
+    listError: socialListError,
+    refetch: refetchSocialRooms,
+    fetchNextPage: fetchNextSocialRoomsPage,
+    hasNextPage: hasMoreSocialRooms,
+    isFetchingNextPage: isFetchingMoreSocialRooms,
+    isInitialLoading: socialRoomsInitialLoading,
+  } = useChatRoomsInfiniteQuery(userId, signedIn && chatKind === 'social');
+
   const chatRowMeetingKey = useMemo(() => sortedMeetingChats.map((m) => m.id).join('\u0001'), [sortedMeetingChats]);
 
   const unreadRefreshSig = useMemo(() => {
@@ -187,23 +196,6 @@ export default function ChatTab() {
   }, [sortedMeetingChats, latestByMeetingId, meetingChatReadMessageIdMap, userId]);
 
   const socialRoomKey = useMemo(() => socialRooms.map((r) => r.roomId).join('\u0001'), [socialRooms]);
-
-  useEffect(() => {
-    if (!signedIn || chatKind !== 'social') {
-      return () => {};
-    }
-    const uid = userId?.trim();
-    if (!uid) return () => {};
-    const unsub = subscribeMySocialChatRooms(
-      uid,
-      (rooms) => {
-        setSocialRooms(rooms);
-        setSocialRoomsError(null);
-      },
-      (msg) => setSocialRoomsError(msg),
-    );
-    return unsub;
-  }, [signedIn, chatKind, userId]);
 
   useEffect(() => {
     if (chatKind !== 'social' || socialRooms.length === 0) {
@@ -290,24 +282,38 @@ export default function ChatTab() {
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const result = await fetchMeetingsOnceHybrid();
-      if (result.ok) {
-        setMeetings(result.meetings);
-        setListError(null);
+      if (chatKind === 'social') {
+        await refetchSocialRooms();
       } else {
-        setListError(result.message);
+        const result = await fetchMeetingsOnceHybrid();
+        if (result.ok) {
+          setMeetings(result.meetings);
+          setListError(null);
+        } else {
+          setListError(result.message);
+        }
       }
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [chatKind, refetchSocialRooms]);
+
+  const socialListFooter = useMemo(() => {
+    if (chatKind !== 'social') return null;
+    if (!isFetchingMoreSocialRooms && !(socialRoomsInitialLoading && socialRooms.length === 0)) return null;
+    return (
+      <View style={styles.listFooterSpinner} accessibilityLabel="채팅방 목록 로딩">
+        <ActivityIndicator color={GinitTheme.colors.primary} />
+      </View>
+    );
+  }, [chatKind, isFetchingMoreSocialRooms, socialRoomsInitialLoading, socialRooms.length]);
 
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <FlatList
+        <FlatList<Meeting | SocialChatRoomSummary>
           data={chatKind === 'gather' ? sortedMeetingChats : socialRooms}
-          keyExtractor={(item) => (chatKind === 'gather' ? (item as Meeting).id : (item as SocialChatRoomSummary).roomId)}
+          keyExtractor={(item) => ('peerAppUserId' in item ? item.roomId : item.id)}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.scroll}
@@ -397,10 +403,10 @@ export default function ChatTab() {
                 </View>
               ) : null}
 
-              {chatKind === 'social' && socialRoomsError ? (
+              {chatKind === 'social' && socialListError ? (
                 <View style={styles.errorBox}>
                   <Text style={styles.errorTitle}>Social 목록 오류</Text>
-                  <Text style={styles.errorBody}>{socialRoomsError}</Text>
+                  <Text style={styles.errorBody}>{socialListError}</Text>
                 </View>
               ) : null}
 
@@ -417,6 +423,15 @@ export default function ChatTab() {
               ) : null}
             </View>
           }
+          ListFooterComponent={socialListFooter}
+          onEndReached={
+            chatKind === 'social' && hasMoreSocialRooms
+              ? () => {
+                  void fetchNextSocialRoomsPage();
+                }
+              : undefined
+          }
+          onEndReachedThreshold={0.6}
           renderItem={({ item }) => {
             if (chatKind === 'gather') {
               const m = item as Meeting;
@@ -674,6 +689,11 @@ const styles = StyleSheet.create({
     color: '#64748b',
     lineHeight: 20,
     marginBottom: 12,
+  },
+  listFooterSpinner: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // 정렬 모달/칩 UI 제거됨
 });

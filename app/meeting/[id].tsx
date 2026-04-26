@@ -6,6 +6,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
@@ -29,6 +30,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -67,7 +69,6 @@ import {
   meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
-  subscribeMeetingById,
   unconfirmMeetingSchedule,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
@@ -347,6 +348,7 @@ export default function MeetingDetailScreen() {
   const isFocused = useIsFocused();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
+  const queryClient = useQueryClient();
 
   const safeBack = useCallback(() => {
     try {
@@ -360,9 +362,6 @@ export default function MeetingDetailScreen() {
     }
   }, [router]);
 
-  const [meeting, setMeeting] = useState<Meeting | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   /** 일시 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
   /** 장소 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
@@ -382,6 +381,7 @@ export default function MeetingDetailScreen() {
   const placeVoteFormRef = useRef<VoteCandidatesFormHandle>(null);
 
   const [retryNonce, setRetryNonce] = useState(0);
+  const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, retryNonce);
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
@@ -400,36 +400,6 @@ export default function MeetingDetailScreen() {
   const [followRelationStatus, setFollowRelationStatus] = useState<FollowRelationStatus>('none');
   const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
-
-  useEffect(() => {
-    if (!id.trim()) {
-      setMeeting(null);
-      setLoadError(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setLoadError(null);
-    let alive = true;
-    const unsub = subscribeMeetingById(
-      id,
-      (m) => {
-        if (!alive) return;
-        setMeeting(m);
-        setLoading(false);
-        setLoadError(null);
-      },
-      (msg) => {
-        if (!alive) return;
-        setLoadError(msg);
-        setLoading(false);
-      },
-    );
-    return () => {
-      alive = false;
-      unsub();
-    };
-  }, [id, retryNonce]);
 
   useEffect(() => {
     if (!isFocused || !meeting || !userId?.trim()) return;
@@ -850,13 +820,14 @@ export default function MeetingDetailScreen() {
         refreshed?.dateCandidates != null && refreshed.dateCandidates.length > 0
           ? refreshed.dateCandidates
           : merged;
-      setMeeting((prev) => {
+      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
         if (!prev) return prev;
         if (refreshed) {
           return { ...refreshed, dateCandidates: dates.map((d) => ({ ...d })) };
         }
         return { ...prev, dateCandidates: dates.map((d) => ({ ...d })) };
       });
+      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
       setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
       setProposeOpen(false);
     } catch (e) {
@@ -864,7 +835,7 @@ export default function MeetingDetailScreen() {
     } finally {
       setProposeSaving(false);
     }
-  }, [meeting, userId]);
+  }, [meeting, userId, queryClient]);
 
   const confirmPlaceProposals = useCallback(async () => {
     if (!meeting) return;
@@ -897,13 +868,14 @@ export default function MeetingDetailScreen() {
         refreshed?.placeCandidates != null && refreshed.placeCandidates.length > 0
           ? refreshed.placeCandidates
           : merged;
-      setMeeting((prev) => {
+      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
         if (!prev) return prev;
         if (refreshed) {
           return { ...refreshed, placeCandidates: places.map((p) => ({ ...p })) };
         }
         return { ...prev, placeCandidates: places.map((p) => ({ ...p })) };
       });
+      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
       setSelectedPlaceIds(additions.map((p, j) => placeCandidateChipId(p, existing.length + j)));
       setPlaceProposeOpen(false);
     } catch (e) {
@@ -911,7 +883,7 @@ export default function MeetingDetailScreen() {
     } finally {
       setPlaceProposeSaving(false);
     }
-  }, [meeting]);
+  }, [meeting, queryClient]);
 
   const toggleDateSelection = useCallback((chipId: string) => {
     setSelectedDateIds((prev) =>
@@ -1302,6 +1274,7 @@ export default function MeetingDetailScreen() {
               movieChipIds: effectiveMovieIds,
             };
       await joinMeeting(meeting.id, sessionPk, joinVotes);
+      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
       // 참여 직후에도 이 모임 상세에 머무름(구독 스냅샷으로 참여자 UI로 전환)
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
@@ -1331,6 +1304,7 @@ export default function MeetingDetailScreen() {
     selectedDateIds,
     selectedPlaceIds,
     selectedMovieIds,
+    queryClient,
   ]);
 
   /** 투표 선택을 서버에 반영(호스트/참여자 공통, 자동 저장에서 호출) */
@@ -1388,6 +1362,7 @@ export default function MeetingDetailScreen() {
         movie: effectiveMovieIds,
       });
       setVotePersistNonce((n) => n + 1);
+      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
       // 하단 버튼 영역을 가리지 않도록 오프셋을 둡니다.
       showTransientBottomMessage('투표가 저장됐어요.', 1600, 74);
       return true;
@@ -1420,6 +1395,7 @@ export default function MeetingDetailScreen() {
     selectedPlaceIds,
     selectedMovieIds,
     votesFingerprint,
+    queryClient,
   ]);
 
   useEffect(() => {
@@ -1480,6 +1456,7 @@ export default function MeetingDetailScreen() {
             setParticipantVoteBusy(true);
             try {
               await leaveMeeting(meeting.id, sessionPk);
+              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
               let penaltyLedgerOk = false;
               if (confirmed) {
                 try {
@@ -1521,7 +1498,7 @@ export default function MeetingDetailScreen() {
         },
       },
     ]);
-  }, [meeting, sessionPk, router]);
+  }, [meeting, sessionPk, router, queryClient]);
 
   const recruitmentPhase = useMemo(
     () => (meeting ? getMeetingRecruitmentPhase(meeting) : null),
@@ -1616,6 +1593,7 @@ export default function MeetingDetailScreen() {
               try {
                 markRecentSelfMeetingChange(meeting.id);
                 await unconfirmMeetingSchedule(meeting.id, userId.trim());
+                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
               } catch (e) {
                 Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -1626,7 +1604,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId]);
+  }, [meeting, userId, queryClient]);
 
   const handleConfirmSchedule = useCallback(() => {
     if (!meeting || !userId?.trim()) {
@@ -1655,6 +1633,7 @@ export default function MeetingDetailScreen() {
               try {
                 markRecentSelfMeetingChange(meeting.id);
                 await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
+                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
               } catch (e) {
                 const msg = e instanceof Error ? e.message : '';
                 if (isConfirmedScheduleOverlapErrorMessage(msg)) {
@@ -1670,7 +1649,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, hostTiePicks, scrollToVoteBlock]);
+  }, [meeting, userId, hostTiePicks, scrollToVoteBlock, queryClient]);
 
   const handleDeleteMeeting = useCallback(() => {
     if (!meeting || !userId?.trim()) {
@@ -1692,6 +1671,7 @@ export default function MeetingDetailScreen() {
               try {
                 markRecentSelfMeetingChange(meeting.id);
                 await deleteMeetingByHost(meeting.id, userId.trim());
+                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
                 safeBack();
               } catch (e) {
                 Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
@@ -1703,7 +1683,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, safeBack]);
+  }, [meeting, userId, safeBack, queryClient]);
 
   const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
     if (!meeting || !confirmedPlaceCoords) return;
@@ -1752,7 +1732,13 @@ export default function MeetingDetailScreen() {
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>문제가 생겼어요</Text>
             <Text style={styles.muted}>{loadError}</Text>
-            <Pressable onPress={() => setRetryNonce((n) => n + 1)} style={styles.retryBtn} accessibilityRole="button">
+            <Pressable
+              onPress={() => {
+                setRetryNonce((n) => n + 1);
+                void refetchMeetingDetail();
+              }}
+              style={styles.retryBtn}
+              accessibilityRole="button">
               <LinearGradient
                 colors={GinitTheme.colors.ctaGradient}
                 start={{ x: 0, y: 0 }}
