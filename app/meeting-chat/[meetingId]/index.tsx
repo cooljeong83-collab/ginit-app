@@ -397,8 +397,6 @@ export default function MeetingChatRoomScreen() {
   const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
   const { markChatReadUpTo } = useInAppAlarms();
   const lastScrollOffsetRef = useRef(0);
-  const smoothScrollAnimRef = useRef(new Animated.Value(0)).current;
-  const smoothScrollListenerIdRef = useRef<string | null>(null);
   const pendingAutoScrollToLatestRef = useRef(false);
   const lastAutoScrolledMessageIdRef = useRef<string>('');
 
@@ -420,7 +418,7 @@ export default function MeetingChatRoomScreen() {
     return null;
   }, []);
 
-  const scrollToIndexSafe = useCallback((index: number, viewPosition = 0.35, animated = true) => {
+  const scrollToIndexSafe = useCallback((index: number, viewPosition = 0.35, animated = false) => {
     const scroller = resolveListScroller();
     if (!scroller || typeof scroller.scrollToIndex !== 'function') return false;
     try {
@@ -431,7 +429,7 @@ export default function MeetingChatRoomScreen() {
     }
   }, [resolveListScroller]);
 
-  const scrollToOffsetSafe = useCallback((offset: number, animated = true) => {
+  const scrollToOffsetSafe = useCallback((offset: number, animated = false) => {
     const scroller = resolveListScroller();
     if (!scroller || typeof scroller.scrollToOffset !== 'function') return false;
     try {
@@ -442,77 +440,12 @@ export default function MeetingChatRoomScreen() {
     }
   }, [resolveListScroller]);
 
-  const smoothScrollToOffset = useCallback(
-    (targetOffset: number) => {
-      const scroller = resolveListScroller();
-      if (!scroller || typeof scroller.scrollToOffset !== 'function') return;
-
-      const from = Math.max(0, Math.floor(lastScrollOffsetRef.current || 0));
-      const target = Math.max(0, Math.floor(targetOffset || 0));
-      const dist = Math.abs(target - from);
-      /**
-       * 거리 기반 duration(속도) 조절:
-       * - 짧은 이동은 "너무 빠른 점프"처럼 느껴지지 않게 최소 시간을 보장
-       * - 긴 이동은 무한히 느려지지 않게 상한을 둠
-       * - 체감은 dist의 선형보다 완만한 곡선이 더 부드러움(제곱근/로그 계열)
-       */
-      const base = 180;
-      const curved = 90 * Math.sqrt(Math.max(0, dist)); // dist가 클수록 증가하되 완만
-      const duration = Math.min(1150, Math.max(240, Math.floor(base + curved)));
-
-      smoothScrollAnimRef.stopAnimation();
-      if (smoothScrollListenerIdRef.current) {
-        smoothScrollAnimRef.removeListener(smoothScrollListenerIdRef.current);
-        smoothScrollListenerIdRef.current = null;
-      }
-      smoothScrollAnimRef.setValue(from);
-      // 첫 프레임 전 "시작 위치 고정" (초반 1틱 끊김 완화)
-      try {
-        scroller.scrollToOffset({ offset: from, animated: false });
-      } catch {
-        /* ignore */
-      }
-      smoothScrollListenerIdRef.current = smoothScrollAnimRef.addListener(({ value }) => {
-        try {
-          scroller.scrollToOffset({ offset: value, animated: false });
-        } catch {
-          /* ignore */
-        }
-      });
-
-      Animated.timing(smoothScrollAnimRef, {
-        toValue: target,
-        duration,
-        /**
-         * inOut은 시작/끝이 너무 느려 "멈칫"처럼 느껴질 수 있어
-         * 살짝 힘 있게 출발/감속하는 커브로 교체합니다.
-         */
-        easing: Easing.bezier(0.18, 0.92, 0.2, 1),
-        useNativeDriver: false,
-      }).start(() => {
-        if (smoothScrollListenerIdRef.current) {
-          smoothScrollAnimRef.removeListener(smoothScrollListenerIdRef.current);
-          smoothScrollListenerIdRef.current = null;
-        }
-        // 마지막 프레임에서 미세한 오차가 남을 수 있어 다음 프레임에 한번 더 고정
-        requestAnimationFrame(() => {
-          try {
-            scroller.scrollToOffset({ offset: target, animated: false });
-          } catch {
-            /* ignore */
-          }
-        });
-      });
-    },
-    [resolveListScroller, smoothScrollAnimRef],
-  );
   const jumpToLatest = useCallback(() => {
     setShowJumpToBottomFab(false);
     requestAnimationFrame(() => {
-      // Android에서 멀리 이동 시 native animated가 점프처럼 보이는 케이스가 있어 JS 스무스 스크롤 사용
-      smoothScrollToOffset(0);
+      scrollToOffsetSafe(0, false);
     });
-  }, [smoothScrollToOffset]);
+  }, [scrollToOffsetSafe]);
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
@@ -667,9 +600,9 @@ export default function MeetingChatRoomScreen() {
     lastAutoScrolledMessageIdRef.current = latest.id;
     pendingAutoScrollToLatestRef.current = false;
     requestAnimationFrame(() => {
-      smoothScrollToOffset(0);
+      scrollToOffsetSafe(0, false);
     });
-  }, [messages, showJumpToBottomFab, smoothScrollToOffset]);
+  }, [messages, showJumpToBottomFab, scrollToOffsetSafe]);
 
   useEffect(() => {
     let cancelled = false;
