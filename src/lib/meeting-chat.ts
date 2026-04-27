@@ -448,6 +448,59 @@ export async function fetchMeetingChatOlderPageAfterMessageId(
   };
 }
 
+const PREFETCH_OLDER_DEFAULT_PAGE = 100;
+const PREFETCH_OLDER_MAX_PAGES = 200;
+
+export type MeetingChatOlderPrefetchUntilTargetResult = {
+  /** 기존 infinite 캐시의 마지막 페이지 **이후**(더 과거) 구간만 담은 페이지 배열 */
+  newPages: MeetingChatFetchedMessagesPage[];
+  /** `newPages` 안에 `targetMessageId`가 포함되었는지 */
+  found: boolean;
+};
+
+/**
+ * 검색 등으로 특정 메시지로 점프할 때, 현재 캐시보다 과거에만 있는 경우
+ * `anchorOldestMessageId`(이미 로드된 구간 중 가장 과거 메시지 id) 다음부터
+ * `targetMessageId`가 나올 때까지(또는 더 불러올 문서 없음) 과거 페이지를 이어 받습니다.
+ * `pageSize`를 크게 잡아 왕복 횟수를 줄입니다.
+ */
+export async function fetchOlderMeetingChatPagesUntilTargetMessageId(
+  meetingId: string,
+  anchorOldestMessageId: string,
+  targetMessageId: string,
+  opts?: { pageSize?: number; maxPages?: number },
+): Promise<MeetingChatOlderPrefetchUntilTargetResult> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const anchor = typeof anchorOldestMessageId === 'string' ? anchorOldestMessageId.trim() : '';
+  const tid = typeof targetMessageId === 'string' ? targetMessageId.trim() : '';
+  if (!mid || !anchor || !tid) {
+    return { newPages: [], found: false };
+  }
+  const pageSize = Math.min(
+    Math.max(opts?.pageSize ?? PREFETCH_OLDER_DEFAULT_PAGE, MEETING_CHAT_PAGE_SIZE),
+    200,
+  );
+  const maxPages = Math.min(Math.max(opts?.maxPages ?? PREFETCH_OLDER_MAX_PAGES, 1), 400);
+
+  const newPages: MeetingChatFetchedMessagesPage[] = [];
+  let cursor = anchor;
+  for (let i = 0; i < maxPages; i++) {
+    const page = await fetchMeetingChatOlderPageAfterMessageId(mid, cursor, pageSize);
+    if (!page.messages.length) {
+      return { newPages, found: false };
+    }
+    newPages.push(page);
+    if (page.messages.some((m) => m.id === tid)) {
+      return { newPages, found: true };
+    }
+    if (!page.hasMore || !page.oldestMessageId?.trim()) {
+      return { newPages, found: false };
+    }
+    cursor = page.oldestMessageId.trim();
+  }
+  return { newPages, found: false };
+}
+
 /**
  * `lastVisible` 문서 **이후**(더 과거) `MEETING_CHAT_PAGE_SIZE`개를 한 번에 가져옵니다.
  */

@@ -102,9 +102,9 @@ export function SocialChat({
           }}
           onScrollToIndexFailed={(info) => {
             const h = Math.max(100, info.averageItemLength || 120);
-            listRef.current?.scrollToOffset?.({ offset: Math.max(0, h * info.index), animated: true });
+            listRef.current?.scrollToOffset?.({ offset: Math.max(0, h * info.index), animated: false });
             requestAnimationFrame(() => {
-              listRef.current?.scrollToIndex?.({ index: info.index, viewPosition: 0.35, animated: true });
+              listRef.current?.scrollToIndex?.({ index: info.index, viewPosition: 0.35, animated: false });
             });
           }}
           renderItem={({ item }) => {

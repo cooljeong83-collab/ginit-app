@@ -59,6 +59,44 @@ function countDistinctMessagesInInfiniteData(
   return seen.size;
 }
 
+/** infinite 캐시를 `messages` 배열과 동일 규칙(중복 제거·페이지 순)으로 평탄화 */
+export function flattenMeetingChatInfinitePages(
+  data: InfiniteData<MeetingChatFetchedMessagesPage> | undefined,
+): MeetingChatMessage[] {
+  const pages = data?.pages ?? [];
+  const seen = new Set<string>();
+  const out: MeetingChatMessage[] = [];
+  for (const p of pages) {
+    for (const m of p.messages) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+/**
+ * 검색 점프용으로 가져온 과거 `extra` 페이지들을 `InfiniteData` 끝에 붙입니다.
+ * `pageParams[i]`는 `pages[i]`를 가져올 때 사용한 커서(직전 페이지의 `oldestMessageId`)와 동일해야 합니다.
+ */
+export function mergeMeetingChatInfiniteAppendPages(
+  old: InfiniteData<MeetingChatFetchedMessagesPage> | undefined,
+  extra: MeetingChatFetchedMessagesPage[],
+): InfiniteData<MeetingChatFetchedMessagesPage> | undefined {
+  if (!old?.pages?.length || !extra.length) return old;
+  const pageParams = [...old.pageParams];
+  const pages = [...old.pages];
+  for (const np of extra) {
+    const prev = pages[pages.length - 1];
+    const cursor = prev?.oldestMessageId?.trim();
+    if (!cursor) break;
+    pageParams.push(cursor);
+    pages.push(np);
+  }
+  return { ...old, pageParams, pages };
+}
+
 type UseMeetingChatMessagesInfiniteQueryArgs = {
   meetingId: string;
   enabled: boolean;

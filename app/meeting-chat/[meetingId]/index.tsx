@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import {
   ActivityIndicator,
   Alert,
@@ -44,17 +45,23 @@ import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
+import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { getMeetingChatImageUploadQuality } from '@/src/lib/meeting-chat-image-quality-preference';
 import {
   deleteMeetingChatImageMessageBestEffort,
+  fetchOlderMeetingChatPagesUntilTargetMessageId,
   meetingChatMessageSearchHaystack,
   searchMeetingChatMessages,
   sendMeetingChatImageMessage,
   sendMeetingChatTextMessage,
   writeMeetingChatReadReceipt,
 } from '@/src/lib/meeting-chat';
-import { useMeetingChatMessagesInfiniteQuery } from '@/src/hooks/use-meeting-chat-messages-infinite-query';
+import {
+  flattenMeetingChatInfinitePages,
+  meetingChatMessagesQueryKey,
+  mergeMeetingChatInfiniteAppendPages,
+  useMeetingChatMessagesInfiniteQuery,
+} from '@/src/hooks/use-meeting-chat-messages-infinite-query';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -334,6 +341,7 @@ export default function MeetingChatRoomScreen() {
       ? params.meetingId.trim()
       : '';
   const { userId } = useUserSession();
+  const queryClient = useQueryClient();
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [meetingError, setMeetingError] = useState<string | null>(null);
@@ -370,6 +378,8 @@ export default function MeetingChatRoomScreen() {
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [chatSearchResults, setChatSearchResults] = useState<MeetingChatMessage[]>([]);
   const [chatSearchBusy, setChatSearchBusy] = useState(false);
+  /** 검색 결과 점프 시 과거 메시지를 한꺼번에 불러오는 동안 */
+  const [searchNavigateLoading, setSearchNavigateLoading] = useState(false);
   /** 퀵 메뉴·닫기 레이어를 입력창(composerDock) 바로 위에 붙이기 위한 높이 */
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const chatSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -508,23 +518,17 @@ export default function MeetingChatRoomScreen() {
 
   const scrollToMessageIndexBestEffort = useCallback((idx: number) => {
     const index = Math.max(0, Math.floor(idx));
-    // 모달 닫힘/레이아웃 안정화 이후에 시도(특히 Android에서 즉시 호출 시 무시되는 케이스 방지)
+    // inverted + 가변 높이: index*고정px 오프셋 추정은 클램프 버그가 있어 scrollToIndex만 사용.
+    // 답장/검색 이동은 애니메이션 없이 즉시 점프(animated: false).
     InteractionManager.runAfterInteractions(() => {
       setTimeout(() => {
-        /**
-         * 1) 항상 "스크롤링"으로 이동: index 기반 목표 offset으로 JS 스무스 스크롤.
-         *    (scrollToIndex(animated:true)가 플랫폼에 따라 점프처럼 보이는 문제 대응)
-         */
-        const approx = Math.max(0, index * 140);
-        smoothScrollToOffset(approx);
-
-        // 2) 스크롤이 진행된 뒤 미세 보정(원하는 메시지가 화면에 정확히 오도록)
-        setTimeout(() => {
+        scrollToIndexSafe(index, 0.35, false);
+        requestAnimationFrame(() => {
           scrollToIndexSafe(index, 0.35, false);
-        }, 420);
-      }, 90);
+        });
+      }, 60);
     });
-  }, [scrollToIndexSafe, smoothScrollToOffset]);
+  }, [scrollToIndexSafe]);
 
   useFocusEffect(
     useCallback(() => {
@@ -561,6 +565,7 @@ export default function MeetingChatRoomScreen() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    refetch: refetchChatMessages,
   } = useMeetingChatMessagesInfiniteQuery({
     meetingId,
     enabled: allowed === true,
@@ -780,14 +785,64 @@ export default function MeetingChatRoomScreen() {
   }, [chatSearchOpen]);
 
   const jumpToSearchResult = useCallback(
-    (msg: MeetingChatMessage) => {
+    async (msg: MeetingChatMessage) => {
+      const mid = meetingId.trim();
+      const tid = msg.id.trim();
+      if (!mid || !tid) return;
+
       closeChatSearch();
       Keyboard.dismiss();
-      const idx = messages.findIndex((m) => m.id === msg.id);
+
+      const cacheKey = meetingChatMessagesQueryKey(mid);
+      const indexFromRQ = (): number => {
+        const data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
+        return flattenMeetingChatInfinitePages(data).findIndex((m) => m.id === tid);
+      };
+
+      let idx = messages.findIndex((m) => m.id === tid);
+      if (idx < 0) idx = indexFromRQ();
+
+      if (idx < 0) {
+        setSearchNavigateLoading(true);
+        try {
+          let data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
+          if (!data?.pages?.length) {
+            await refetchChatMessages();
+            data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
+          }
+          const anchor = data?.pages?.[data.pages.length - 1]?.oldestMessageId?.trim() ?? '';
+          if (anchor) {
+            const { newPages, found } = await fetchOlderMeetingChatPagesUntilTargetMessageId(mid, anchor, tid, {
+              pageSize: 100,
+              maxPages: 200,
+            });
+            if (found && newPages.length) {
+              queryClient.setQueryData(
+                cacheKey,
+                (prev: InfiniteData<MeetingChatFetchedMessagesPage> | undefined) =>
+                  mergeMeetingChatInfiniteAppendPages(prev, newPages),
+              );
+            }
+          }
+          idx = indexFromRQ();
+          if (idx < 0) {
+            await refetchChatMessages();
+            idx = indexFromRQ();
+          }
+        } finally {
+          setSearchNavigateLoading(false);
+        }
+      }
+
       if (idx >= 0) {
-        scrollToMessageIndexBestEffort(idx);
+        InteractionManager.runAfterInteractions(() => {
+          requestAnimationFrame(() => {
+            scrollToMessageIndexBestEffort(idx);
+          });
+        });
         return;
       }
+
       const d = msg.createdAt && typeof msg.createdAt.toDate === 'function' ? msg.createdAt.toDate() : null;
       const when = d
         ? d.toLocaleString('ko-KR', {
@@ -801,11 +856,11 @@ export default function MeetingChatRoomScreen() {
       Alert.alert(
         '대화 위치',
         when
-          ? `이 메시지는 ${when}에 보내진 내용이에요.\n현재 화면에 불러온 최근 대화 범위 밖이라 바로 이동할 수 없어요. 위로 더 스크롤한 뒤 다시 검색해 보세요.`
-          : '현재 화면에 불러온 최근 대화 범위 밖이에요. 위로 더 스크롤한 뒤 다시 검색해 보세요.',
+          ? `이 메시지는 ${when}에 보내진 내용이에요.\n불러올 수 있는 범위 안에서 찾지 못했어요.`
+          : '불러올 수 있는 범위 안에서 찾지 못했어요.',
       );
     },
-    [messages, closeChatSearch, scrollToMessageIndexBestEffort],
+    [meetingId, messages, queryClient, closeChatSearch, scrollToMessageIndexBestEffort, refetchChatMessages],
   );
 
   const openChatSearch = useCallback(() => {
@@ -837,7 +892,7 @@ export default function MeetingChatRoomScreen() {
       return (
         <Pressable
           style={({ pressed }) => [styles.chatSearchRow, pressed && styles.chatSearchRowPressed]}
-          onPress={() => jumpToSearchResult(item)}
+          onPress={() => void jumpToSearchResult(item)}
           accessibilityRole="button"
           accessibilityLabel={`${nick}, ${when}`}>
           <View style={styles.chatSearchRowTop}>
@@ -1071,17 +1126,73 @@ export default function MeetingChatRoomScreen() {
   }, [messages]);
 
   const jumpToRepliedMessage = useCallback(
-    (replyMessageId: string) => {
+    async (replyMessageId: string) => {
+      const mid = meetingId.trim();
       const rid = String(replyMessageId ?? '').trim();
-      if (!rid) return;
-      const idx = messageIndexById.get(rid);
-      if (idx == null) {
-        Alert.alert('원글 위치', '원글이 현재 화면에 불러온 최근 대화 범위 밖이라 바로 이동할 수 없어요.\n위로 더 스크롤해 불러온 뒤 다시 눌러 보세요.');
+      if (!mid || !rid) return;
+
+      const cacheKey = meetingChatMessagesQueryKey(mid);
+      const indexFromRQ = (): number => {
+        const data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
+        return flattenMeetingChatInfinitePages(data).findIndex((m) => m.id === rid);
+      };
+
+      let idx = messageIndexById.get(rid) ?? -1;
+      if (idx < 0) idx = indexFromRQ();
+
+      if (idx < 0) {
+        setSearchNavigateLoading(true);
+        try {
+          let data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
+          if (!data?.pages?.length) {
+            await refetchChatMessages();
+            data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
+          }
+          const anchor = data?.pages?.[data.pages.length - 1]?.oldestMessageId?.trim() ?? '';
+          if (anchor) {
+            const { newPages, found } = await fetchOlderMeetingChatPagesUntilTargetMessageId(mid, anchor, rid, {
+              pageSize: 100,
+              maxPages: 200,
+            });
+            if (found && newPages.length) {
+              queryClient.setQueryData(
+                cacheKey,
+                (prev: InfiniteData<MeetingChatFetchedMessagesPage> | undefined) =>
+                  mergeMeetingChatInfiniteAppendPages(prev, newPages),
+              );
+            }
+          }
+          idx = indexFromRQ();
+          if (idx < 0) {
+            await refetchChatMessages();
+            idx = indexFromRQ();
+          }
+        } finally {
+          setSearchNavigateLoading(false);
+        }
+      }
+
+      if (idx >= 0) {
+        InteractionManager.runAfterInteractions(() => {
+          requestAnimationFrame(() => {
+            scrollToMessageIndexBestEffort(idx);
+          });
+        });
         return;
       }
-      scrollToMessageIndexBestEffort(idx);
+
+      Alert.alert('원글 위치', '불러올 수 있는 범위 안에서 원글을 찾지 못했어요.');
     },
-    [messageIndexById, scrollToMessageIndexBestEffort],
+    [
+      meetingId,
+      queryClient,
+      messageIndexById,
+      refetchChatMessages,
+      scrollToMessageIndexBestEffort,
+      fetchOlderMeetingChatPagesUntilTargetMessageId,
+      flattenMeetingChatInfinitePages,
+      mergeMeetingChatInfiniteAppendPages,
+    ],
   );
 
   const unreadCountForMessage = useCallback(
@@ -1184,7 +1295,7 @@ export default function MeetingChatRoomScreen() {
                 {item.replyTo?.messageId ? (
                   <View style={styles.replyQuoteMine}>
                     <Pressable
-                      onPress={() => jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
+                      onPress={() => void jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
                       style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
                       accessibilityRole="button"
                       accessibilityLabel="원글로 이동">
@@ -1300,7 +1411,7 @@ export default function MeetingChatRoomScreen() {
                   {item.replyTo?.messageId ? (
                     <View style={styles.replyQuoteOther}>
                       <Pressable
-                        onPress={() => jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
+                        onPress={() => void jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
                         style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
                         accessibilityRole="button"
                         accessibilityLabel="원글로 이동">
@@ -1492,6 +1603,15 @@ export default function MeetingChatRoomScreen() {
                 <Text style={styles.chatErrorText}>{chatError}</Text>
               </View>
             ) : null}
+            {searchNavigateLoading ? (
+              <View
+                style={styles.searchJumpLoadingOverlay}
+                pointerEvents="auto"
+                accessibilityLabel="이전 대화를 불러오는 중">
+                <ActivityIndicator color={GinitTheme.colors.primary} size="large" />
+                <Text style={styles.searchJumpLoadingText}>이전 대화를 불러오는 중…</Text>
+              </View>
+            ) : null}
             <View style={{ flex: 1 }}>
               <KeyboardAwareFlatList
               // KeyboardAwareFlatList는 일반 ref가 실제 FlatList 메서드로 연결되지 않는 케이스가 있어
@@ -1509,11 +1629,14 @@ export default function MeetingChatRoomScreen() {
               enableOnAndroid
               extraScrollHeight={12}
               onScrollToIndexFailed={(info) => {
-                const h = Math.max(100, info.averageItemLength || 140);
-                scrollToOffsetSafe(Math.max(0, h * info.index), true);
+                const target = info.index;
+                // h*index 오프셋은 inverted·가변 높이에서 과대 추정 시 최상단으로 클램프될 수 있음
                 setTimeout(() => {
-                  scrollToIndexSafe(info.index, 0.35, false);
-                }, 80);
+                  scrollToIndexSafe(target, 0.35, false);
+                }, 100);
+                setTimeout(() => {
+                  scrollToIndexSafe(target, 0.35, false);
+                }, 350);
               }}
               ListEmptyComponent={
                 <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
@@ -2099,6 +2222,19 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#ECEFF1',
   },
+  searchJumpLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    zIndex: 12,
+    gap: 10,
+  },
+  searchJumpLoadingText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GinitTheme.colors.textSub,
+  },
   /** 퀵 메뉴 열릴 때 바깥 탭 — bottom은 입력 블록 높이로 JS에서 지정 */
   plusListDismissLayer: {
     position: 'absolute',
@@ -2205,6 +2341,8 @@ const styles = StyleSheet.create({
   bubbleMineMedia: {
     paddingHorizontal: 6,
     paddingVertical: 6,
+    /** 고정 78%는 220px 이미지+패딩보다 좁아 모서리가 잘리므로, 사진 말풍선만 가로 폭 전부 사용 */
+    maxWidth: '100%',
   },
   bubbleMineText: {
     fontSize: 15,
@@ -2213,9 +2351,11 @@ const styles = StyleSheet.create({
   },
   chatImage: {
     width: 220,
-    height: 220,
+    maxWidth: '100%',
+    aspectRatio: 1,
     borderRadius: 12,
     backgroundColor: '#e2e8f0',
+    alignSelf: 'flex-start',
   },
   imageCaptionMine: {
     marginTop: 6,
@@ -2322,6 +2462,7 @@ const styles = StyleSheet.create({
   bubbleOtherMedia: {
     paddingHorizontal: 6,
     paddingVertical: 6,
+    maxWidth: '100%',
   },
   bubbleOtherText: {
     fontSize: 15,

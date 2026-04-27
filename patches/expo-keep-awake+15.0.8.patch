@@ -1,0 +1,25 @@
+diff --git a/node_modules/expo-keep-awake/src/index.ts b/node_modules/expo-keep-awake/src/index.ts
+index b7a856e..6ece70c 100644
+--- a/node_modules/expo-keep-awake/src/index.ts
++++ b/node_modules/expo-keep-awake/src/index.ts
+@@ -30,11 +30,15 @@ export function useKeepAwake(tag?: string, options?: KeepAwakeOptions): void {
+ 
+   useEffect(() => {
+     let isMounted = true;
+-    activateKeepAwakeAsync(tagOrDefault).then(() => {
+-      if (isMounted && ExpoKeepAwake.addListenerForTag && options?.listener) {
+-        addListener(tagOrDefault, options.listener);
+-      }
+-    });
++    void activateKeepAwakeAsync(tagOrDefault)
++      .then(() => {
++        if (isMounted && ExpoKeepAwake.addListenerForTag && options?.listener) {
++          addListener(tagOrDefault, options.listener);
++        }
++      })
++      .catch(() => {
++        /* Android: activity not ready at first paint → KeepAwakeManager.activate rejects */
++      });
+     return () => {
+       isMounted = false;
+       if (options?.suppressDeactivateWarnings) {

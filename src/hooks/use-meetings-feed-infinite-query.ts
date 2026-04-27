@@ -14,7 +14,10 @@ type Page = { meetings: Meeting[]; hasMore: boolean };
 export type UseMeetingsFeedInfiniteQueryOptions = {
   /** false면 fetch·Realtime 구독 안 함(채팅 탭 친구 전용일 때 등). 기본 true */
   enabled?: boolean;
-  /** 미지정 시 QueryClient 기본값(예: 홈 피드) */
+  /**
+   * 캐시 신선도(ms). 미지정 시 `0` — `PersistQueryClient` 복원 직후에도 전역 staleTime(10분) 때문에
+   * 마운트 시 refetch가 생략되어 빈 목록에 고이는 현상을 막습니다.
+   */
   staleTime?: number;
   refetchOnWindowFocus?: boolean;
 };
@@ -76,13 +79,18 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
     };
   }, [queryClient, enabled]);
 
-  const queryKey = useMemo(() => meetingsFeedInfiniteQueryKey(), []);
+  const feedSource = meetingListSource();
+  const queryKey = useMemo(() => meetingsFeedInfiniteQueryKey(), [feedSource]);
 
   const query = useInfiniteQuery({
     queryKey,
     enabled,
     initialPageParam: 0,
-    ...(staleTimeOpt !== undefined ? { staleTime: staleTimeOpt } : {}),
+    /** 당겨서 새로고침(refetch) 직후 `data`가 잠깐 비는 동안 목록이 통째로 사라지는 것을 막습니다. */
+    placeholderData: (previousData) => previousData,
+    staleTime: staleTimeOpt ?? 0,
+    /** 복원된 캐시가 비어 있어도 `staleTime`만으로는 갱신이 막히지 않게 항상 마운트 시 네트워크 동기화 */
+    refetchOnMount: 'always',
     ...(refetchOnWindowFocusOpt !== undefined ? { refetchOnWindowFocus: refetchOnWindowFocusOpt } : {}),
     queryFn: ({ pageParam }) => fetchMeetingsFeedPage(pageParam as number),
     getNextPageParam: (lastPage, allPages) => (lastPage.hasMore ? allPages.length : undefined),

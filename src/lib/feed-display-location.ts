@@ -14,12 +14,25 @@ export function formatSeoulGuLabel(gu: string): string {
 
 /**
  * 한국 주소 문자열에서 첫 번째 `○○구` 행정구명을 추출합니다.
+ *
+ * ECMAScript에서 `\b`는 한글을 단어 문자로 보지 않아 `…구\b` 패턴이 거의 항상 실패합니다.
+ * `중구`처럼 구명 앞 글자가 한 자인 경우도 포함하려면 `{1,}` 길이가 필요합니다.
  */
 export function extractGuFromKoreanAddressText(text: string): string | null {
   const t = text.trim();
   if (!t) return null;
-  const m = t.match(/([가-힣]{2,14}구)\b/);
+  const m = t.match(/([가-힣]{1,20}구)(?=\s|$|[^가-힣])/);
   return m ? m[1] : null;
+}
+
+/**
+ * 피드·캐시에 저장된 지역 문자열을 탐색 필터용으로 맞춥니다.
+ * (`서울시 강남구` → `강남구`, `경기도 성남시 분당구` → `분당구` 등)
+ */
+export function normalizeFeedRegionLabel(label: string): string {
+  const t = label.trim();
+  if (!t) return '';
+  return extractGuFromKoreanAddressText(t) ?? t;
 }
 
 /**

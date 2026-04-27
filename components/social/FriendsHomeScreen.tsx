@@ -84,42 +84,70 @@ function PendingGinitCard({
   onAccept: (row: FriendInboxRow) => void;
   onDecline: (row: FriendInboxRow) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const nick = profile?.nickname?.trim() || '회원';
   const photo = profile?.photoUrl?.trim();
   const initials = nick.slice(0, 1) || '?';
 
   return (
     <View style={s.pendingCard}>
-      <View style={s.pendingAvatarRing}>
-        {photo ? (
-          <Image source={{ uri: photo }} style={s.pendingAvatarImg} contentFit="cover" />
-        ) : (
-          <View style={s.pendingAvatarFallback}>
-            <Text style={s.pendingAvatarLetter}>{initials}</Text>
+      {menuOpen ? (
+        <Pressable
+          style={s.pendingMenuBackdrop}
+          onPress={() => setMenuOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="메뉴 닫기"
+        />
+      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${nick}, 지닛 요청. 눌러서 수락·거절`}
+        accessibilityState={{ expanded: menuOpen }}
+        onPress={() => setMenuOpen((v) => !v)}
+        style={s.pendingAvatarTap}>
+        <View style={s.pendingAvatarRing}>
+          {photo ? (
+            <Image source={{ uri: photo }} style={s.pendingAvatarImg} contentFit="cover" />
+          ) : (
+            <View style={s.pendingAvatarFallback}>
+              <Text style={s.pendingAvatarLetter}>{initials}</Text>
+            </View>
+          )}
+        </View>
+      </Pressable>
+      {menuOpen ? (
+        <View style={s.pendingMenuSheet} pointerEvents="box-none">
+          <View style={s.pendingMenuRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="지닛 수락"
+              onPress={() => {
+                setMenuOpen(false);
+                onAccept(row);
+              }}
+              style={({ pressed }) => [s.pendingIconBtn, s.pendingAcceptBtn, pressed && { opacity: 0.9 }]}>
+              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="지닛 거절"
+              onPress={() => {
+                setMenuOpen(false);
+                onDecline(row);
+              }}
+              style={({ pressed }) => [s.pendingIconBtn, s.pendingDeclineBtn, pressed && { opacity: 0.88 }]}>
+              <Ionicons name="close" size={20} color="#64748B" />
+            </Pressable>
           </View>
-        )}
-      </View>
-      <Text style={s.pendingNick} numberOfLines={1}>
-        {nick}
-      </Text>
-      <Text style={s.pendingHint} numberOfLines={1}>
-        지닛 요청
-      </Text>
-      <View style={s.pendingActions}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="지닛 수락"
-          onPress={() => onAccept(row)}
-          style={({ pressed }) => [s.pendingIconBtn, s.pendingAcceptBtn, pressed && { opacity: 0.9 }]}>
-          <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="지닛 거절"
-          onPress={() => onDecline(row)}
-          style={({ pressed }) => [s.pendingIconBtn, s.pendingDeclineBtn, pressed && { opacity: 0.88 }]}>
-          <Ionicons name="close" size={20} color="#64748B" />
-        </Pressable>
+        </View>
+      ) : null}
+      <View style={s.pendingTextBlock} pointerEvents={menuOpen ? 'none' : 'auto'}>
+        <Text style={s.pendingNick} numberOfLines={1}>
+          {nick}
+        </Text>
+        <Text style={s.pendingHint} numberOfLines={1}>
+          지닛 요청
+        </Text>
       </View>
     </View>
   );
@@ -136,6 +164,7 @@ function OutgoingGinitCard({
   status: string;
   onCancel: (row: FriendInboxRow) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const nick = profile?.nickname?.trim() || '회원';
   const photo = profile?.photoUrl?.trim();
   const initials = nick.slice(0, 1) || '?';
@@ -144,30 +173,58 @@ function OutgoingGinitCard({
 
   return (
     <View style={s.pendingCard} accessibilityRole="summary" accessibilityLabel={`지닛 요청을 받은 사람, ${nick}, ${hint}`}>
-      <View style={s.pendingAvatarRing}>
-        {photo ? (
-          <Image source={{ uri: photo }} style={s.pendingAvatarImg} contentFit="cover" />
-        ) : (
-          <View style={s.pendingAvatarFallback}>
-            <Text style={s.pendingAvatarLetter}>{initials}</Text>
-          </View>
-        )}
-      </View>
-      <Text style={s.pendingNick} numberOfLines={1}>
-        {nick}
-      </Text>
-      <Text style={s.pendingHint} numberOfLines={1}>
-        {hint}
-      </Text>
-      {canCancel ? (
+      {menuOpen ? (
         <Pressable
+          style={s.pendingMenuBackdrop}
+          onPress={() => setMenuOpen(false)}
           accessibilityRole="button"
-          accessibilityLabel="지닛 요청 취소"
-          onPress={() => onCancel(row)}
-          style={({ pressed }) => [s.outgoingCancelBtn, pressed && { opacity: 0.88 }]}>
-          <Text style={s.outgoingCancelBtnText}>요청 취소</Text>
-        </Pressable>
+          accessibilityLabel="메뉴 닫기"
+        />
       ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${nick}, ${hint}. 눌러서 ${canCancel ? '요청 취소' : '상태 확인'}`}
+        accessibilityState={{ expanded: menuOpen }}
+        onPress={() => setMenuOpen((v) => !v)}
+        style={s.pendingAvatarTap}>
+        <View style={s.pendingAvatarRing}>
+          {photo ? (
+            <Image source={{ uri: photo }} style={s.pendingAvatarImg} contentFit="cover" />
+          ) : (
+            <View style={s.pendingAvatarFallback}>
+              <Text style={s.pendingAvatarLetter}>{initials}</Text>
+            </View>
+          )}
+        </View>
+      </Pressable>
+      {menuOpen ? (
+        <View style={s.pendingMenuSheet} pointerEvents="box-none">
+          {canCancel ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="지닛 요청 취소"
+              onPress={() => {
+                setMenuOpen(false);
+                onCancel(row);
+              }}
+              style={({ pressed }) => [s.outgoingCancelBtnOverlay, pressed && { opacity: 0.88 }]}>
+              <Text style={s.outgoingCancelBtnText}>요청 취소</Text>
+            </Pressable>
+          ) : (
+            <View style={s.outgoingStatusOnly}>
+              <Text style={s.outgoingStatusOnlyText}>{hint}</Text>
+            </View>
+          )}
+        </View>
+      ) : null}
+      <View style={s.pendingTextBlock} pointerEvents={menuOpen ? 'none' : 'auto'}>
+        <Text style={s.pendingNick} numberOfLines={1}>
+          {nick}
+        </Text>
+        <Text style={s.pendingHint} numberOfLines={1}>
+          {hint}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -269,6 +326,7 @@ function FriendConnectionRow({
   item,
   categories,
   onOpenChat,
+  onOpenProfile,
   onLongPress,
   onDirectGather,
   onEvaluateTrust,
@@ -277,6 +335,7 @@ function FriendConnectionRow({
   item: EnrichedFriend;
   categories: Category[];
   onOpenChat: () => void;
+  onOpenProfile: () => void;
   onLongPress: () => void;
   onDirectGather: () => void;
   onEvaluateTrust: () => void;
@@ -348,16 +407,26 @@ function FriendConnectionRow({
         delayLongPress={380}
         style={({ pressed }) => [s.connRow, pressed && { opacity: 0.92 }]}>
         <View style={s.connLeft}>
-          <View style={s.connAvatarWrap}>
-            {uri ? <Image source={{ uri }} style={s.connAvatarImg} contentFit="cover" /> : (
-              <View style={s.connAvatarFallback}>
-                <Text style={s.connAvatarLetter}>{initials}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="친구 프로필"
+            hitSlop={6}
+            onPress={(ev) => {
+              ev.stopPropagation?.();
+              onOpenProfile();
+            }}
+            style={s.connAvatarPress}>
+            <View style={s.connAvatarWrap}>
+              {uri ? <Image source={{ uri }} style={s.connAvatarImg} contentFit="cover" /> : (
+                <View style={s.connAvatarFallback}>
+                  <Text style={s.connAvatarLetter}>{initials}</Text>
+                </View>
+              )}
+              <View style={s.gLevelBadge}>
+                <Text style={s.gLevelBadgeTxt}>{gLv}</Text>
               </View>
-            )}
-            <View style={s.gLevelBadge}>
-              <Text style={s.gLevelBadgeTxt}>{gLv}</Text>
             </View>
-          </View>
+          </Pressable>
         </View>
         <View style={s.connCenter}>
           <View style={s.connLine1}>
@@ -940,6 +1009,7 @@ export function FriendsHomeScreen() {
               item={item}
               categories={categories}
               onOpenChat={() => openDm(item.row.peer_app_user_id, item.profile.nickname)}
+              onOpenProfile={() => setSheetFriend(item)}
               onLongPress={() => setSheetFriend(item)}
               onDirectGather={goCreateGathering}
               onEvaluateTrust={onEvaluateTrust}
@@ -955,6 +1025,31 @@ export function FriendsHomeScreen() {
               <View style={s.sheetGrab} />
               {sheetFriend ? (
                 <>
+                  <View style={s.sheetAvatarBlock}>
+                    {sheetFriend.profile.photoUrl?.trim() ? (
+                      <Image
+                        source={{ uri: sheetFriend.profile.photoUrl.trim() }}
+                        style={s.sheetAvatarImg}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <View style={s.sheetAvatarFallback}>
+                        <Text style={s.sheetAvatarLetter}>
+                          {sheetFriend.profile.nickname?.trim()?.slice(0, 1) || '?'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <GinitButton
+                    title="1:1 채팅"
+                    style={s.sheetDmBtn}
+                    onPress={() => {
+                      const peer = sheetFriend.row.peer_app_user_id;
+                      const nick = sheetFriend.profile.nickname?.trim() || '친구';
+                      setSheetFriend(null);
+                      openDm(peer, nick);
+                    }}
+                  />
                   <Text style={s.sheetTitle}>{sheetFriend.profile.nickname}님</Text>
                   <Text style={s.sheetSub}>gDna</Text>
                   <Text style={s.sheetBody}>{sheetFriend.profile.gDna?.trim() || '등록된 gDna가 없어요.'}</Text>
@@ -1153,27 +1248,68 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
     alignItems: 'center',
     gap: 8,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  pendingMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 16,
+    backgroundColor: 'rgba(248, 250, 252, 0.92)',
+    zIndex: 1,
+  },
+  pendingAvatarTap: {
+    zIndex: 2,
+    alignSelf: 'center',
+  },
+  /** 프로필 아래에 뜨는 액션 오버레이 (닉네임 플로우와 겹칠 수 있어 zIndex로 위에 표시) */
+  pendingMenuSheet: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    top: 62,
+    zIndex: 10,
+    alignItems: 'center',
+  },
+  pendingTextBlock: {
+    width: '100%',
+    alignItems: 'center',
+    zIndex: 0,
+  },
+  pendingMenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
+    ...GinitTheme.shadow.card,
   },
   pendingAvatarRing: {
     width: 48,
     height: 48,
-    borderRadius: 16,
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
     backgroundColor: 'rgba(15, 23, 42, 0.06)',
   },
-  pendingAvatarImg: { width: '100%', height: '100%' },
+  pendingAvatarImg: { width: '100%', height: '100%', borderRadius: 24 },
   pendingAvatarFallback: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0, 82, 204, 0.08)',
+    borderRadius: 24,
   },
   pendingAvatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
   pendingNick: { fontSize: 13, fontWeight: '900', color: '#0f172a', textAlign: 'center', width: '100%' },
   pendingHint: { fontSize: 11, fontWeight: '700', color: '#94a3b8' },
-  pendingActions: { flexDirection: 'row', gap: 10, marginTop: 2 },
   pendingIconBtn: {
     width: 40,
     height: 40,
@@ -1184,18 +1320,26 @@ const s = StyleSheet.create({
   },
   pendingAcceptBtn: { backgroundColor: GinitTheme.colors.primary, borderColor: 'rgba(15, 23, 42, 0.12)' },
   pendingDeclineBtn: { backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: 'rgba(15, 23, 42, 0.12)' },
-  outgoingCancelBtn: {
-    marginTop: 2,
+  outgoingCancelBtnOverlay: {
     alignSelf: 'stretch',
-    paddingVertical: 7,
-    paddingHorizontal: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
     borderWidth: 1,
     borderColor: 'rgba(15, 23, 42, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  outgoingStatusOnly: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
+  },
+  outgoingStatusOnlyText: { fontSize: 12, fontWeight: '800', color: '#64748b', textAlign: 'center' },
   outgoingCancelBtnText: { fontSize: 11, fontWeight: '800', color: '#64748b' },
   swipeContainer: { marginTop: 10 },
   swipeLeftRail: {
@@ -1257,6 +1401,7 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.78)',
   },
   connLeft: { justifyContent: 'center', marginRight: 10 },
+  connAvatarPress: { alignSelf: 'center' },
   connAvatarWrap: { width: 52, height: 52, position: 'relative' },
   connAvatarImg: { width: 52, height: 52, borderRadius: 18, backgroundColor: 'rgba(15,23,42,0.06)' },
   connAvatarFallback: {
@@ -1344,6 +1489,27 @@ const s = StyleSheet.create({
     backgroundColor: '#cbd5e1',
     marginBottom: 12,
   },
+  sheetAvatarBlock: { alignItems: 'center', marginBottom: 12 },
+  sheetAvatarImg: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(15,23,42,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15,23,42,0.1)',
+  },
+  sheetAvatarFallback: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 82, 204, 0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15,23,42,0.1)',
+  },
+  sheetAvatarLetter: { fontSize: 28, fontWeight: '900', color: GinitTheme.colors.primary },
+  sheetDmBtn: { alignSelf: 'stretch', marginBottom: 14 },
   sheetTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
   sheetSub: { fontSize: 12, fontWeight: '800', color: '#64748b', marginBottom: 4 },
   sheetBody: { fontSize: 14, fontWeight: '600', color: '#334155', lineHeight: 21 },

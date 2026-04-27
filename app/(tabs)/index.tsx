@@ -30,6 +30,7 @@ import {
   FEED_LOCATION_FALLBACK_SHORT,
   extractGuFromKoreanAddressText,
   formatSeoulGuLabel,
+  normalizeFeedRegionLabel,
   resolveFeedLocationContext,
 } from '@/src/lib/feed-display-location';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -164,7 +165,7 @@ function parseSeoulGuFromLabel(label: string): SeoulGuLabel | null {
 }
 
 function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean {
-  const sel = regionLabel.trim();
+  const sel = normalizeFeedRegionLabel(regionLabel);
   if (!sel) return true;
   const selGu = extractGuFromKoreanAddressText(sel) ?? sel;
   const hay = [m.address, m.location, m.placeName]
@@ -194,6 +195,9 @@ export default function FeedScreen() {
   const [actualLocationLabel, setActualLocationLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
   const regionLabelRef = useRef(FEED_LOCATION_FALLBACK_SHORT);
   const manualRegionPickRef = useRef(false);
+  const [manualRegionPicked, setManualRegionPicked] = useState(false);
+  /** 첫 GPS·캐시 병합 전에는 지역 문자열 필터를 적용하지 않음(기본 '영등포구'만으로 목록이 비는 것 방지) */
+  const [feedLocationReady, setFeedLocationReady] = useState(false);
   /** 거리·거리순 정렬에 쓰는 기준점: 캐시 좌표 → GPS로 갱신(실패 시 캐시 유지) */
   const userCoordsRef = useRef<LatLng | null>(null);
   const [regionModalOpen, setRegionModalOpen] = useState(false);
@@ -294,30 +298,52 @@ export default function FeedScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const cached = await loadFeedLocationCache();
-      if (cancelled) return;
+    void (async () => {
+      try {
+        const cached = await loadFeedLocationCache();
+        if (cancelled) return;
 
-      let coordsForDistance = null as LatLng | null;
-      if (cached) {
-        setRegionLabel(cached.label);
-        setActualLocationLabel(cached.label);
-        coordsForDistance = cached.coords;
+        let coordsForDistance = null as LatLng | null;
+        if (cached?.coords) {
+          coordsForDistance = cached.coords;
+          setUserCoords(coordsForDistance);
+        }
+
+        const ctx = await resolveFeedLocationContext();
+        if (cancelled) return;
+        setActualLocationLabel(ctx.labelShort);
+        coordsForDistance = ctx.coords ?? coordsForDistance;
         setUserCoords(coordsForDistance);
-      }
 
-      const ctx = await resolveFeedLocationContext();
-      if (cancelled) return;
-      // 실제 위치 라벨은 항상 갱신(인접 구 목록 기준)
-      setActualLocationLabel(ctx.labelShort);
-      if (!manualRegionPickRef.current) {
-        setRegionLabel(ctx.labelShort);
-      }
-      coordsForDistance = ctx.coords ?? coordsForDistance;
-      setUserCoords(coordsForDistance);
+        // 부트 중 사용자가 지역 모달로 고른 경우, 아래 GPS 분기로 덮어쓰지 않음
+        if (manualRegionPickRef.current) {
+          await saveFeedLocationCache(normalizeFeedRegionLabel(regionLabelRef.current), coordsForDistance, {
+            manualRegion: true,
+          });
+          return;
+        }
 
-      const labelToSave = manualRegionPickRef.current ? regionLabelRef.current : ctx.labelShort;
-      await saveFeedLocationCache(labelToSave, coordsForDistance);
+        const actualNorm = normalizeFeedRegionLabel(ctx.labelShort);
+        const persistManual = Boolean(cached?.manualRegionPicked && cached.label.trim());
+
+        if (persistManual) {
+          manualRegionPickRef.current = true;
+          setManualRegionPicked(true);
+          const savedNorm = normalizeFeedRegionLabel(cached.label);
+          regionLabelRef.current = savedNorm;
+          setRegionLabel(savedNorm);
+        } else {
+          manualRegionPickRef.current = false;
+          setManualRegionPicked(false);
+          regionLabelRef.current = actualNorm;
+          setRegionLabel(actualNorm);
+        }
+
+        const labelToSave = persistManual && cached ? normalizeFeedRegionLabel(cached.label) : actualNorm;
+        await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: persistManual });
+      } finally {
+        if (!cancelled) setFeedLocationReady(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -347,10 +373,11 @@ export default function FeedScreen() {
     }
   }, [categories, selectedCategoryId]);
 
-  const meetingsWithinRadius = useMemo(
-    () => meetings.filter((m) => meetingWithinHomeFeedRadius(m, userCoords)),
-    [meetings, userCoords],
-  );
+  const meetingsWithinRadius = useMemo(() => {
+    // 탐색 목록은 좌측 상단 선택 구(문자열)로 거르고, GPS 5km 반경은 쓰지 않습니다.
+    // (로드된 페이지 안에서만 필터 — 서버는 전역 페이지네이션)
+    return meetings.filter((m) => meetingWithinHomeFeedRadius(m, null));
+  }, [meetings]);
 
   const feedChips = useMemo(
     () => buildFeedChips(meetingsWithinRadius, categories),
@@ -359,19 +386,30 @@ export default function FeedScreen() {
 
   const filteredMeetings = useMemo(() => {
     return meetingsWithinRadius.filter((m) => {
-      // 탐색 탭은 "선택된 지역"의 모임만 표시합니다.
-      if (!meetingMatchesSelectedRegion(m, regionLabel)) return false;
+      // 위치·캐시 초기화 전에는 기본 구 라벨로 잘리지 않도록 구 필터를 잠시 생략합니다.
+      if (feedLocationReady && !meetingMatchesSelectedRegion(m, regionLabel)) return false;
       if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
       if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
       if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
       return true;
     });
-  }, [meetingsWithinRadius, regionLabel, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
+  }, [
+    meetingsWithinRadius,
+    regionLabel,
+    feedLocationReady,
+    selectedCategoryId,
+    categories,
+    recruitingOnly,
+    appliedFeedSearch,
+  ]);
 
-  const sortedFilteredMeetings = useMemo(
-    () => sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords),
-    [filteredMeetings, listSortMode, userCoords],
-  );
+  const sortedFilteredMeetings = useMemo(() => {
+    // 선택 지역 모드에서는 "내 기준 거리"가 의미가 없으므로, 거리순을 강제로 등록순으로 폴백합니다.
+    const effectiveMode: MeetingListSortMode =
+      manualRegionPicked && listSortMode === 'distance' ? 'latest' : listSortMode;
+    const coordsForSort = manualRegionPicked ? null : userCoords;
+    return sortMeetingsForFeed(filteredMeetings, effectiveMode, coordsForSort);
+  }, [filteredMeetings, listSortMode, userCoords, manualRegionPicked]);
 
   const exploreFeedMeetings = useMemo(
     () => sortedFilteredMeetings.filter((m) => m.isPublic !== false),
@@ -445,11 +483,13 @@ export default function FeedScreen() {
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
   const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
   const pickRegion = useCallback((shortLabel: string) => {
+    const norm = normalizeFeedRegionLabel(shortLabel);
     manualRegionPickRef.current = true;
-    regionLabelRef.current = shortLabel;
-    setRegionLabel(shortLabel);
+    setManualRegionPicked(true);
+    regionLabelRef.current = norm;
+    setRegionLabel(norm);
     setRegionModalOpen(false);
-    void saveFeedLocationCache(shortLabel, userCoordsRef.current);
+    void saveFeedLocationCache(norm, userCoordsRef.current, { manualRegion: true });
   }, []);
 
   const selectedFilterLabel = useMemo(() => {
@@ -568,10 +608,11 @@ export default function FeedScreen() {
       const isHost = Boolean(ns) && (normalizeParticipantId(item.createdBy?.trim() ?? '') ?? '') === ns;
       const isJoined = isUserJoinedMeeting(item, userId);
       const ownership: 'hosted' | 'joined' | 'none' = isHost ? 'hosted' : isJoined ? 'joined' : 'none';
+      const coordsForItem = manualRegionPicked && homeTab === 'explore' ? null : userCoords;
       return (
         <HomeMeetingListItem
           meeting={item}
-          userCoords={userCoords}
+          userCoords={coordsForItem}
           joined={isJoined}
           ownership={ownership}
           onPress={() => onPressMeetingFromGrid(item)}
@@ -585,6 +626,8 @@ export default function FeedScreen() {
     },
     [
       userCoords,
+      manualRegionPicked,
+      homeTab,
       userId,
       myConfirmedScheduleSlots,
       overlapBufferHours,
@@ -608,8 +651,12 @@ export default function FeedScreen() {
               <Text
                 style={styles.locationText}
                 numberOfLines={1}
-                accessibilityLabel={`현재 표시 지역 ${formatSeoulGuLabel(regionLabel)}`}>
-                {formatSeoulGuLabel(regionLabel)}
+                accessibilityLabel={
+                  feedLocationReady
+                    ? `현재 표시 지역 ${formatSeoulGuLabel(regionLabel)}`
+                    : '현재 표시 지역, 위치 확인 중'
+                }>
+                {feedLocationReady ? formatSeoulGuLabel(regionLabel) : '위치 확인 중…'}
               </Text>
               <Ionicons name="chevron-down" size={20} color={GinitTheme.colors.primary} />
             </View>
@@ -686,10 +733,6 @@ export default function FeedScreen() {
         <Text style={styles.empty}>등록된 모임이 없습니다. + 버튼으로 첫 모임을 만들어 보세요.</Text>
       ) : null}
 
-      {!isInitialListLoading && !listError && meetings.length > 0 && meetingsWithinRadius.length === 0 && userCoords ? (
-        <Text style={styles.empty}>내 위치 기준 반경 5km 안에 등록된 모임이 없어요.</Text>
-      ) : null}
-
       {!isInitialListLoading &&
       !listError &&
       meetingsWithinRadius.length > 0 &&
@@ -706,7 +749,11 @@ export default function FeedScreen() {
         </Text>
       ) : null}
 
-      {!isInitialListLoading && !listError && meetingsWithinRadius.length > 0 && joinedFilteredMeetings.length === 0 && homeTab === 'mine' ? (
+      {!isInitialListLoading &&
+      !listError &&
+      meetings.length > 0 &&
+      ((homeTab === 'guest' && sortedGuestMeetings.length === 0) ||
+        (homeTab === 'host' && sortedHostedMeetings.length === 0)) ? (
         <Text style={styles.empty}>조건에 맞는 내 모임이 없어요. 필터를 바꾸거나 탐색에서 모임에 참여해 보세요.</Text>
       ) : null}
 
@@ -734,6 +781,7 @@ export default function FeedScreen() {
             selectedCategoryId,
             appliedFeedSearch,
             exploreLen: exploreFeedMeetings.length,
+            feedLocationReady,
           }}
           renderItem={renderHomeItem}
           ListHeaderComponent={listHeader}
@@ -743,7 +791,7 @@ export default function FeedScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
-          removeClippedSubviews
+          removeClippedSubviews={false}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
           windowSize={9}

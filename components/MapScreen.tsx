@@ -35,6 +35,7 @@ import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
+  normalizeFeedRegionLabel,
   resolveFeedLocationContext,
 } from '@/src/lib/feed-display-location';
 import {
@@ -229,22 +230,30 @@ export default function MapScreen() {
       if (cancelled) return;
 
       let coordsForDistance = null as LatLng | null;
-      if (cached) {
-        setRegionLabel(cached.label);
+      if (cached?.coords) {
         coordsForDistance = cached.coords;
         setUserCoords(coordsForDistance);
       }
 
       const ctx = await resolveFeedLocationContext();
       if (cancelled) return;
-      if (!manualRegionPickRef.current) {
-        setRegionLabel(ctx.labelShort);
+
+      const actualNorm = normalizeFeedRegionLabel(ctx.labelShort);
+      const persistManual = Boolean(cached?.manualRegionPicked && cached.label.trim());
+
+      if (persistManual) {
+        manualRegionPickRef.current = true;
+        setRegionLabel(normalizeFeedRegionLabel(cached.label));
+      } else {
+        manualRegionPickRef.current = false;
+        setRegionLabel(actualNorm);
       }
+
       coordsForDistance = ctx.coords ?? coordsForDistance;
       setUserCoords(coordsForDistance);
 
-      const labelToSave = manualRegionPickRef.current ? regionLabelRef.current : ctx.labelShort;
-      await saveFeedLocationCache(labelToSave, coordsForDistance);
+      const labelToSave = persistManual && cached ? normalizeFeedRegionLabel(cached.label) : actualNorm;
+      await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: persistManual });
     })();
     return () => {
       cancelled = true;
@@ -317,11 +326,12 @@ export default function MapScreen() {
   const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
   const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
   const pickRegion = useCallback((shortLabel: string) => {
+    const norm = normalizeFeedRegionLabel(shortLabel);
     manualRegionPickRef.current = true;
-    regionLabelRef.current = shortLabel;
-    setRegionLabel(shortLabel);
+    regionLabelRef.current = norm;
+    setRegionLabel(norm);
     setRegionModalOpen(false);
-    void saveFeedLocationCache(shortLabel, userCoordsRef.current);
+    void saveFeedLocationCache(norm, userCoordsRef.current, { manualRegion: true });
   }, []);
 
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);

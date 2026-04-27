@@ -171,10 +171,10 @@ export default function SocialChatRoomScreen() {
       setTimeout(() => {
         if (idx < 0) return;
         try {
-          listRef.current?.scrollToIndex({ index: idx, viewPosition: 0.35, animated: true });
+          listRef.current?.scrollToIndex({ index: idx, viewPosition: 0.35, animated: false });
         } catch {
           requestAnimationFrame(() => {
-            listRef.current?.scrollToIndex?.({ index: idx, viewPosition: 0.35, animated: true });
+            listRef.current?.scrollToIndex?.({ index: idx, viewPosition: 0.35, animated: false });
           });
         }
       }, 60);
