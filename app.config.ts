@@ -2,7 +2,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
-loadEnv({ path: path.resolve(__dirname, 'env/.env') });
+loadEnv({ path: path.resolve(__dirname, 'env/.env'), quiet: true });
 
 function pickExtra(): Record<string, string> {
   const out: Record<string, string> = {};
@@ -145,12 +145,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         : {}),
       barStyle: 'dark-content',
       translucent: true,
-      backgroundColor: '#00000000',
+      backgroundColor: '#FFFFFF',
     },
     plugins: [
       ...plugins,
-      'expo-secure-store',
-      '@react-native-google-signin/google-signin',
+      '@react-native-google-signin/google-signin/app.plugin.js',
       [
         'expo-speech-recognition',
         {
@@ -169,6 +168,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-build-properties',
         {
           ios: {
+            deploymentTarget: '15.0',
             /**
              * FirebaseAuth (Swift) pods fail to integrate as static libraries unless modular headers are enabled.
              * Using dynamic frameworks avoids the modular-headers requirement and makes `pod install` succeed.
