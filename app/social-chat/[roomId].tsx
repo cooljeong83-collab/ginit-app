@@ -1,12 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
 import { ActivityIndicator, Alert, FlatList, Keyboard, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import {
+  SocialDmChatRoomBody,
+  type SocialDmChatRoomBodyHandle,
+  type SocialDmChatRoomBodyProps,
+} from '@/components/chat/SocialDmChatRoomBody';
 import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
-import { SocialChat } from '@/components/social/SocialChat';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -16,9 +20,13 @@ import {
   ensureSocialChatRoomDoc,
   parsePeerFromSocialRoomId,
   searchSocialChatMessages,
-  sendSocialChatTextMessage,
+  subscribeSocialChatRoom,
   subscribeSocialChatMessages,
+  updateSocialChatReadReceipt,
+  type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 export default function SocialChatRoomScreen() {
   const router = useRouter();
@@ -42,19 +50,42 @@ export default function SocialChatRoomScreen() {
 
   const [messages, setMessages] = useState<SocialChatMessage[]>([]);
   const [chatError, setChatError] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [ready, setReady] = useState(false);
-  const listRef = useRef<FlatList<SocialChatMessage>>(null);
+  const [roomDoc, setRoomDoc] = useState<SocialChatRoomDoc | null>(null);
+  const dmBodyRef = useRef<SocialDmChatRoomBodyHandle | null>(null);
   const lastMarkedReadMessageIdRef = useRef<string>('');
 
-  const [peerProfileOpen, setPeerProfileOpen] = useState(false);
+  const [profileModalUserId, setProfileModalUserId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SocialChatMessage[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
+
+  const SocialDmChatRoomBodyTyped = SocialDmChatRoomBody as unknown as ForwardRefExoticComponent<
+    SocialDmChatRoomBodyProps & RefAttributes<SocialDmChatRoomBodyHandle>
+  >;
+
+  const pickPeerReadValue = useCallback(
+    <T,>(map: Record<string, T> | undefined, rawPeerId: string): T | null => {
+      if (!map) return null;
+      const pid = rawPeerId.trim();
+      if (!pid) return null;
+      const direct = (map as Record<string, T | undefined>)[pid];
+      if (direct !== undefined) return direct ?? null;
+      const pidPk = normalizeParticipantId(pid) ?? '';
+      const pidPhone = normalizePhoneUserId(pid) ?? '';
+      for (const [k, v] of Object.entries(map)) {
+        if (!k.trim()) continue;
+        const kPk = normalizeParticipantId(k) ?? '';
+        const kPhone = normalizePhoneUserId(k) ?? '';
+        if ((pidPk && kPk && kPk === pidPk) || (pidPhone && kPhone && kPhone === pidPhone)) return v ?? null;
+      }
+      return null;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!roomId || !userId?.trim() || !peerId) {
@@ -92,7 +123,8 @@ export default function SocialChatRoomScreen() {
     if (!lid || lastMarkedReadMessageIdRef.current === lid) return;
     lastMarkedReadMessageIdRef.current = lid;
     markChatReadUpTo(roomId, lid);
-  }, [roomId, messages, markChatReadUpTo, isFocused]);
+    void updateSocialChatReadReceipt(roomId, userId?.trim() ?? '', lid).catch(() => {});
+  }, [roomId, messages, markChatReadUpTo, isFocused, userId]);
 
   useEffect(() => {
     if (!ready || !roomId) return () => {};
@@ -107,19 +139,15 @@ export default function SocialChatRoomScreen() {
     return unsub;
   }, [ready, roomId]);
 
-  const onSend = useCallback(async () => {
-    const uid = userId?.trim();
-    if (!uid || !roomId || !draft.trim()) return;
-    setSending(true);
-    try {
-      await sendSocialChatTextMessage(roomId, uid, draft);
-      setDraft('');
-    } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSending(false);
-    }
-  }, [userId, roomId, draft]);
+  useEffect(() => {
+    if (!ready || !roomId) return () => {};
+    const unsub = subscribeSocialChatRoom(
+      roomId,
+      (d) => setRoomDoc(d),
+      () => {},
+    );
+    return unsub;
+  }, [ready, roomId]);
 
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
@@ -137,6 +165,10 @@ export default function SocialChatRoomScreen() {
     setSearchQuery('');
     setSearchResults([]);
   }, []);
+
+  const openSettings = useCallback(() => {
+    router.push(`/social-chat/${encodeURIComponent(roomId)}/settings?peerName=${encodeURIComponent(peerName)}`);
+  }, [router, roomId, peerName]);
 
   const runSearch = useCallback(
     async (q: string) => {
@@ -187,20 +219,12 @@ export default function SocialChatRoomScreen() {
   const jumpToResult = useCallback(
     (msg: SocialChatMessage) => {
       closeSearch();
-      const idx = messages.findIndex((m) => m.id === msg.id);
-      // 모달 닫힘/레이아웃 안정화 이후에 점프 (즉시 호출하면 ref/레이아웃 타이밍으로 실패하는 케이스가 있음)
       setTimeout(() => {
-        if (idx < 0) return;
-        try {
-          listRef.current?.scrollToIndex({ index: idx, viewPosition: 0.35, animated: false });
-        } catch {
-          requestAnimationFrame(() => {
-            listRef.current?.scrollToIndex?.({ index: idx, viewPosition: 0.35, animated: false });
-          });
-        }
-      }, 60);
+        const ok = dmBodyRef.current?.scrollToMessageId(msg.id) ?? false;
+        if (!ok) Alert.alert('위치 이동', '해당 메시지를 목록에서 찾지 못했어요.');
+      }, 100);
     },
-    [messages, closeSearch],
+    [closeSearch],
   );
 
   const exitSocialChat = useCallback(() => {
@@ -238,7 +262,11 @@ export default function SocialChatRoomScreen() {
             <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
           </Pressable>
           <Pressable
-            onPress={() => peerId.trim() && setPeerProfileOpen(true)}
+            onPress={() => {
+              const p = peerId.trim();
+              if (!p) return;
+              setProfileModalUserId(p);
+            }}
             disabled={!peerId.trim()}
             style={({ pressed }) => [s.titlePress, !peerId.trim() && { opacity: 0.6 }, pressed && peerId.trim() && { opacity: 0.85 }]}
             accessibilityRole="button"
@@ -256,31 +284,36 @@ export default function SocialChatRoomScreen() {
           >
             <Ionicons name="search-outline" size={22} color="#0f172a" />
           </Pressable>
+          <Pressable
+            onPress={openSettings}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="채팅방 설정"
+            style={s.settingsBtn}
+          >
+            <Ionicons name="settings-outline" size={22} color="#0f172a" />
+          </Pressable>
         </View>
       </SafeAreaView>
-
-      {chatError ? (
-        <View style={s.errBanner}>
-          <Text style={s.errText}>{chatError}</Text>
-        </View>
-      ) : null}
 
       {!ready ? (
         <View style={s.loading}>
           <ActivityIndicator color={GinitTheme.colors.primary} />
         </View>
       ) : (
-        <SocialChat
-          title={peerName}
-          noticeLine="약속·공통 취향은 여기에 고정해 두세요"
-          messages={messages}
+        <SocialDmChatRoomBodyTyped
+          ref={dmBodyRef}
+          roomId={roomId}
+          peerId={peerId}
           myUserId={userId.trim()}
-          draft={draft}
-          onChangeDraft={setDraft}
-          onSend={onSend}
-          sending={sending}
-          onPressNotice={() => Alert.alert('공지', '친구와의 약속이나 공통 태그를 이 영역에 표시할 수 있어요.')}
-          listRef={listRef}
+          messages={messages}
+          chatError={chatError}
+          peerReadMessageId={(() => {
+            const v = pickPeerReadValue<unknown>(roomDoc?.readMessageIdBy as unknown as Record<string, unknown> | undefined, peerId);
+            return typeof v === 'string' && v.trim() ? v.trim() : null;
+          })()}
+          peerReadAt={pickPeerReadValue<unknown>(roomDoc?.readAtBy, peerId)}
+          onPeerProfileOpen={(id) => setProfileModalUserId(id.trim() || null)}
         />
       )}
 
@@ -340,9 +373,9 @@ export default function SocialChatRoomScreen() {
         </SafeAreaView>
       </Modal>
       <MeetingPeerProfileModal
-        visible={peerProfileOpen && Boolean(peerId.trim())}
-        peerAppUserId={peerId.trim() || null}
-        onClose={() => setPeerProfileOpen(false)}
+        visible={Boolean(profileModalUserId?.trim())}
+        peerAppUserId={profileModalUserId?.trim() || null}
+        onClose={() => setProfileModalUserId(null)}
       />
     </View>
   );
@@ -363,8 +396,7 @@ const s = StyleSheet.create({
   titlePress: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: 4 },
   topTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
   searchBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  errBanner: { padding: 10, backgroundColor: 'rgba(220, 38, 38, 0.08)' },
-  errText: { color: '#b91c1c', textAlign: 'center', fontWeight: '600' },
+  settingsBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   loading: { padding: 24, alignItems: 'center' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   muted: { fontSize: 15, color: '#64748b' },

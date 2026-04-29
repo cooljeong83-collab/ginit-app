@@ -683,8 +683,10 @@ function profilePatchToSupabaseJsonb(patch: {
       patch.displayName && String(patch.displayName).trim() ? String(patch.displayName).trim() : null;
   }
   if (patch.fcmToken !== undefined) {
-    const t = patch.fcmToken && String(patch.fcmToken).trim() ? String(patch.fcmToken).trim() : null;
-    fields.fcm_token = t;
+    const t = patch.fcmToken && String(patch.fcmToken).trim() ? String(patch.fcmToken).trim() : '';
+    // 토큰이 없으면(falsy/빈 문자열) payload에 fcm_token 자체를 포함하지 않습니다.
+    // (기존 DB 값이 null로 덮이는 것을 방지)
+    if (t) fields.fcm_token = t;
   }
   if (patch.signupProvider !== undefined) {
     const sp = patch.signupProvider;

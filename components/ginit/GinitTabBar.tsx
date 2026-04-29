@@ -226,7 +226,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             const tabBadge = chatBadge ?? friendsBadge;
             const a11yBadgeLabel =
               chatBadge != null
-                ? `읽지 않은 모임 채팅 ${chatTabUnreadTotal > 99 ? '99개 이상' : `${chatTabUnreadTotal}개`}`
+                ? `읽지 않은 채팅 ${chatTabUnreadTotal > 99 ? '99개 이상' : `${chatTabUnreadTotal}개`}`
                 : friendsBadge != null
                   ? `처리할 친구 요청 ${friendsTabPendingRequestBadge > 99 ? '99건 이상' : `${friendsTabPendingRequestBadge}건`}`
                   : null;

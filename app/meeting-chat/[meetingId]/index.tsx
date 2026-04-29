@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
-import { type ComponentProps, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import {
   ActivityIndicator,
@@ -28,11 +28,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { GestureHandlerRootView, PanGestureHandler, type PanGestureHandlerGestureEvent, State } from 'react-native-gesture-handler';
-import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
+import { MeetingChatMainColumn } from '@/components/chat/MeetingChatMainColumn';
+import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
+import type { MeetingChatQuickActionDef } from '@/components/chat/meeting-chat-quick-action-row';
+import { meetingImageViewerMeta, profileForSender } from '@/components/chat/meeting-chat-ui-helpers';
+import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -46,7 +50,6 @@ import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/lib/meeting-chat';
-import { getMeetingChatImageUploadQuality } from '@/src/lib/meeting-chat-image-quality-preference';
 import {
   deleteMeetingChatImageMessageBestEffort,
   fetchOlderMeetingChatPagesUntilTargetMessageId,
@@ -66,46 +69,6 @@ import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
-
-function profileForSender(map: Map<string, UserProfile>, senderId: string): UserProfile | undefined {
-  const n = normalizeParticipantId(senderId);
-  const hit = map.get(senderId) ?? map.get(n);
-  if (hit) return hit;
-  for (const [k, v] of map) {
-    if (normalizeParticipantId(k) === n) return v;
-  }
-  return undefined;
-}
-
-function formatChatTime(ts: Timestamp | null | undefined): string {
-  if (!ts || typeof ts.toDate !== 'function') return '';
-  try {
-    return ts.toDate().toLocaleString('ko-KR', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  } catch {
-    return '';
-  }
-}
-
-/** 사진 크게 보기 상단 — 보낸 시각(날짜·시간) */
-function formatImageViewerSentAt(ts: Timestamp | null | undefined): string {
-  if (!ts || typeof ts.toDate !== 'function') return '';
-  try {
-    return ts.toDate().toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  } catch {
-    return '';
-  }
-}
 
 /** Firestore Timestamp · `{ seconds }` · Ledger ISO 문자열 → ms */
 function coalesceFirestoreTimeMs(v: unknown): number {
@@ -145,31 +108,6 @@ function lastReadMessageIdForParticipant(readBy: Meeting['chatReadMessageIdBy'],
   return '';
 }
 
-function meetingImageViewerMeta(
-  item: MeetingChatMessage,
-  profiles: Map<string, UserProfile>,
-): { senderLabel: string; sentAtLabel: string } {
-  const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
-  const prof = sid ? profileForSender(profiles, sid) : undefined;
-  const withdrawn = isUserProfileWithdrawn(prof);
-  const senderLabel = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
-  const sentAtLabel = formatImageViewerSentAt(item.createdAt);
-  return { senderLabel, sentAtLabel };
-}
-
-function replyTargetLabel(replyTo: MeetingChatMessage['replyTo'], profiles: Map<string, UserProfile>): string {
-  const sid = replyTo?.senderId?.trim() ? normalizeParticipantId(replyTo.senderId.trim()) : '';
-  const prof = sid ? profileForSender(profiles, sid) : undefined;
-  const withdrawn = isUserProfileWithdrawn(prof);
-  const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
-  return nick;
-}
-
-function replyPreviewText(replyTo: MeetingChatMessage['replyTo']): string {
-  if (!replyTo?.messageId) return '';
-  return replyTo.kind === 'image' || Boolean(replyTo.imageUrl?.trim()) ? '사진' : (replyTo.text || '메시지');
-}
-
 /** 검색 결과 한 줄 미리보기 — 검색어 주변만 잘라 표시 */
 function splitSearchSnippet(full: string, needle: string): { head: string; mid: string; tail: string } {
   const f = full;
@@ -193,142 +131,6 @@ function splitSearchSnippet(full: string, needle: string): { head: string; mid: 
     mid: midRaw,
     tail: tailRaw + (end < f.length ? '…' : ''),
   };
-}
-
-/** 탭바「모임 생성」FAB·마법사 primary CTA와 동일 높이 느낌(bottomPill min 50) */
-const PLUS_QUICK_ROW_H = 50;
-const PLUS_QUICK_ICON = 22;
-/** 펼침 시 좌·우 패딩(마법사 primary 버튼과 유사) */
-const PLUS_QUICK_PAD_X = 14;
-/** 아이콘과 라벨 사이 — `plusFanLabelMorph.marginLeft` 과 맞출 것 */
-const PLUS_QUICK_ICON_LABEL_GAP = 8;
-/** 퀵 버튼 캡슐 라운딩(높이의 절반 — 좌우 완전 둥근 알약 형태) */
-const PLUS_QUICK_BORDER_RADIUS = PLUS_QUICK_ROW_H / 2;
-/** 측정 폭보다 살짝 넓혀 글자가 답답하지 않게 */
-const PLUS_QUICK_PILL_EXTRA_W = 12;
-/** `GinitTheme.colors.primary` (#1F2A44)와 동일 RGB — 캡슐만 반투명 */
-const PLUS_QUICK_PILL_BG = 'rgba(31, 42, 68, 0.8)';
-
-function estimateQuickLabelPx(label: string): number {
-  if (!label) return 24;
-  return [...label].reduce((acc, ch) => acc + ((ch.codePointAt(0) ?? 0) > 0x007f ? 15 : 9), 0);
-}
-
-type MeetingChatQuickActionDef = {
-  key: string;
-  label: string;
-  icon: ComponentProps<typeof Ionicons>['name'];
-  onPress: () => void;
-};
-
-function MeetingChatQuickActionRow({
-  action,
-  progress,
-  pillMaxW,
-}: {
-  action: MeetingChatQuickActionDef;
-  progress: Animated.Value;
-  pillMaxW: number;
-}) {
-  const p = progress;
-  const basePillContentW = (textPx: number) =>
-    PLUS_QUICK_PAD_X + PLUS_QUICK_ICON + PLUS_QUICK_ICON_LABEL_GAP + textPx + PLUS_QUICK_PAD_X + PLUS_QUICK_PILL_EXTRA_W;
-
-  const [pillTargetW, setPillTargetW] = useState(() =>
-    Math.min(pillMaxW, Math.max(PLUS_QUICK_ROW_H, basePillContentW(estimateQuickLabelPx(action.label)))),
-  );
-
-  useEffect(() => {
-    setPillTargetW(
-      Math.min(pillMaxW, Math.max(PLUS_QUICK_ROW_H, basePillContentW(estimateQuickLabelPx(action.label)))),
-    );
-  }, [action.label, pillMaxW]);
-
-  const onMeasureLabelTextLayout = useCallback(
-    (e: { nativeEvent: { lines: { width: number }[] } }) => {
-      const tw = e.nativeEvent.lines[0]?.width;
-      if (tw == null || !Number.isFinite(tw)) return;
-      const total = Math.ceil(basePillContentW(tw));
-      setPillTargetW((prev) => {
-        const next = Math.min(pillMaxW, Math.max(PLUS_QUICK_ROW_H, total));
-        return prev === next ? prev : next;
-      });
-    },
-    [pillMaxW],
-  );
-
-  /** 전체 진행에 맞춰 천천히 떠오르고 페이드 — 애니메이션 이징은 부모 timing에서 처리 */
-  const rowLift = p.interpolate({
-    inputRange: [0, 1],
-    outputRange: [20, 0],
-    extrapolate: 'clamp',
-  });
-  const rowOp = p.interpolate({
-    inputRange: [0, 0.14, 0.62],
-    outputRange: [0, 1, 1],
-    extrapolate: 'clamp',
-  });
-  const rowScale = p.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.93, 1],
-    extrapolate: 'clamp',
-  });
-
-  return (
-    <Animated.View
-      style={{
-        marginBottom: 10,
-        alignSelf: 'flex-start',
-        opacity: rowOp,
-        transform: [{ translateY: rowLift }, { scale: rowScale }],
-      }}>
-      <View
-        style={[styles.plusQuickMeasureHost, { width: pillMaxW }]}
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants">
-        <Text style={styles.plusFanLabelMorph} onTextLayout={onMeasureLabelTextLayout} numberOfLines={1}>
-          {action.label}
-        </Text>
-      </View>
-      <Pressable
-        onPress={action.onPress}
-        accessibilityRole="button"
-        accessibilityLabel={action.label}
-        hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}>
-        <View
-          style={{
-            width: pillTargetW,
-            minWidth: PLUS_QUICK_ROW_H,
-            height: PLUS_QUICK_ROW_H,
-            borderRadius: PLUS_QUICK_BORDER_RADIUS,
-            backgroundColor: 'transparent',
-            ...GinitTheme.shadow.float,
-          }}>
-          <View
-            style={{
-              width: '100%',
-              height: '100%',
-              borderRadius: PLUS_QUICK_BORDER_RADIUS,
-              overflow: 'hidden',
-              borderWidth: 0,
-              backgroundColor: PLUS_QUICK_PILL_BG,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingHorizontal: PLUS_QUICK_PAD_X,
-            }}>
-            <View style={styles.plusQuickIconLabelRow}>
-              <Ionicons name={action.icon} size={PLUS_QUICK_ICON} color="#FFFFFF" />
-              <Text style={styles.plusFanLabelMorph} numberOfLines={1}>
-                {action.label}
-              </Text>
-            </View>
-          </View>
-        </View>
-      </Pressable>
-    </Animated.View>
-  );
 }
 
 export default function MeetingChatRoomScreen() {
@@ -550,7 +352,7 @@ export default function MeetingChatRoomScreen() {
 
   const listFooterLoading = useMemo(
     () => (
-      <View style={styles.chatListFooterSpinner} accessibilityLabel="이전 메시지 로딩">
+      <View style={meetingChatBodyStyles.chatListFooterSpinner} accessibilityLabel="이전 메시지 로딩">
         <ActivityIndicator color={GinitTheme.colors.primary} />
       </View>
     ),
@@ -903,11 +705,9 @@ export default function MeetingChatRoomScreen() {
     setUploadingImage(true);
     try {
       const caption = draft.trim();
-      const uploadQuality = await getMeetingChatImageUploadQuality(meetingId);
       await sendMeetingChatImageMessage(meetingId, userId, asset.uri, {
         caption: caption || undefined,
         naturalWidth: typeof asset.width === 'number' && asset.width > 0 ? asset.width : undefined,
-        uploadQuality,
       });
       if (caption) setDraft('');
     } catch (e) {
@@ -923,7 +723,7 @@ export default function MeetingChatRoomScreen() {
   );
   const chatListContentStyle = useMemo(
     () => [
-      styles.listContent,
+      meetingChatBodyStyles.listContent,
       {
         // inverted 리스트에서 paddingTop이 시각적 하단 여백 역할
         paddingTop: keyboardBottomInset > 0 ? composerInputBarHeight : 4,
@@ -1187,263 +987,18 @@ export default function MeetingChatRoomScreen() {
     setImageViewer({ messageId: item.id, url, senderLabel, sentAtLabel, canDelete });
   }, [profiles, myId]);
 
-  const renderItem = useCallback(
-    ({ item, index }: { item: MeetingChatMessage; index: number }) => {
-      const prev = index > 0 ? messages[index - 1] : null; // 배열상 더 최신(시각적으로는 아래)
-      const next = index + 1 < messages.length ? messages[index + 1] : null; // 배열상 더 과거(시각적으로는 위)
-      const currDate = item.createdAt?.toDate?.() ?? null;
-      const nextDate = next?.createdAt?.toDate?.() ?? null;
-      const dateLabel =
-        currDate &&
-        (!nextDate ||
-          currDate.getFullYear() !== nextDate.getFullYear() ||
-          currDate.getMonth() !== nextDate.getMonth() ||
-          currDate.getDate() !== nextDate.getDate())
-          ? currDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
-          : '';
-
-      if (item.kind === 'system') {
-        return (
-          <View>
-            {dateLabel ? (
-              <View style={styles.dateChipRow}>
-                <View style={styles.dateChip}>
-                  <Text style={styles.dateChipText}>{dateLabel}</Text>
-                </View>
-              </View>
-            ) : null}
-            <View style={styles.systemRow}>
-              <Text style={styles.systemText}>{item.text}</Text>
-            </View>
-          </View>
-        );
-      }
-      const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
-      const isMine = Boolean(myId && sid && sid === myId);
-      const prevSid =
-        prev && prev.kind !== 'system' ? normalizeParticipantId(String(prev.senderId ?? '').trim()) : '';
-      const sameSenderAsPrev = Boolean(sid && prevSid && prevSid === sid);
-      const showAvatar = !isMine && sid && (index === 0 || !prev || prev.kind === 'system' || !sameSenderAsPrev);
-
-      const prof = sid ? profileForSender(profiles, sid) : undefined;
-      const withdrawn = isUserProfileWithdrawn(prof);
-      const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
-      const isHost = Boolean(hostNorm && sid && sid === hostNorm);
-      const canOpenPeerProfile = Boolean(sid && !withdrawn && sid !== 'ginit_ai');
-
-      const isImage = item.kind === 'image';
-      const caption = item.text?.trim();
-
-      if (isMine) {
-        const unread = unreadCountForMessage(item, index);
-        const bubble = (
-          <View style={styles.rowMine}>
-            <View style={styles.timeMineCol}>
-              {unread > 0 ? (
-                <Text style={styles.unreadBubbleCount} accessibilityLabel={`안 읽은 사람 ${unread}명`}>
-                  {unread}
-                </Text>
-              ) : null}
-              <Text style={styles.timeMine}>{formatChatTime(item.createdAt)}</Text>
-            </View>
-            <View style={[styles.bubbleMineWrap, isImage && styles.bubbleMineMedia]}>
-              <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
-                {item.replyTo?.messageId ? (
-                  <View style={styles.replyQuoteMine}>
-                    <Pressable
-                      onPress={() => void jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
-                      style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
-                      accessibilityRole="button"
-                      accessibilityLabel="원글로 이동">
-                      <View style={styles.replyQuoteTopRow}>
-                        <View style={styles.replyQuoteTextCol}>
-                          <Text style={styles.replyQuoteLabelMine}>
-                            {replyTargetLabel(item.replyTo, profiles)}에게 답장
-                          </Text>
-                          <Text style={styles.replyQuoteTextMine} numberOfLines={2}>
-                            {replyPreviewText(item.replyTo)}
-                          </Text>
-                        </View>
-                        {item.replyTo.kind === 'image' && item.replyTo.imageUrl?.trim() ? (
-                          <Image
-                            source={{ uri: item.replyTo.imageUrl.trim() }}
-                            style={styles.replyQuoteThumb}
-                            contentFit="cover"
-                          />
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  </View>
-                ) : null}
-                {item.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                {isImage ? (
-                  item.imageUrl ? (
-                    <Pressable
-                      onPress={() => openMeetingChatImageViewer(item)}
-                      style={({ pressed }) => [pressed && styles.pressed]}
-                      accessibilityRole="button"
-                      accessibilityLabel="사진 크게 보기">
-                      <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
-                    </Pressable>
-                  ) : (
-                    <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
-                  )
-                ) : (
-                  <Text style={styles.bubbleMineText}>{item.text}</Text>
-                )}
-                {isImage && caption ? <Text style={styles.imageCaptionMine}>{caption}</Text> : null}
-              </BlurView>
-            </View>
-          </View>
-        );
-        return (
-          <View>
-            {dateLabel ? (
-              <View style={styles.dateChipRow}>
-                <View style={styles.dateChip}>
-                  <Text style={styles.dateChipText}>{dateLabel}</Text>
-                </View>
-              </View>
-            ) : null}
-            <SwipeToReply
-              simultaneousHandlers={listRef}
-              onTriggerReply={() =>
-                setReplyTo({
-                  messageId: item.id,
-                  senderId: item.senderId ?? null,
-                  kind: item.kind,
-                  imageUrl: item.imageUrl ?? null,
-                  text: item.text,
-                })
-              }
-            >
-              {bubble}
-            </SwipeToReply>
-          </View>
-        );
-      }
-
-      const otherBubble = (
-        <View style={styles.rowOther}>
-          <Pressable
-            style={styles.avatarCol}
-            disabled={!canOpenPeerProfile}
-            onPress={() => canOpenPeerProfile && setPeerProfileUserId(sid)}
-            accessibilityRole={canOpenPeerProfile ? 'button' : undefined}
-            accessibilityLabel={canOpenPeerProfile ? '프로필 보기' : undefined}>
-            {showAvatar ? (
-              withdrawn ? (
-                <View style={styles.avatarWithdrawn}>
-                  <Ionicons name="person" size={18} color="#94a3b8" />
-                </View>
-              ) : prof?.photoUrl ? (
-                <Image source={{ uri: prof.photoUrl }} style={styles.avatar} contentFit="cover" />
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarFallbackText}>{nick.slice(0, 1)}</Text>
-                </View>
-              )
-            ) : (
-              <View style={styles.avatarSpacer} />
-            )}
-          </Pressable>
-          <View style={styles.otherBlock} pointerEvents="box-none">
-            {showAvatar ? (
-              <Pressable
-                disabled={!canOpenPeerProfile}
-                onPress={() => canOpenPeerProfile && setPeerProfileUserId(sid)}
-                style={({ pressed }) => [styles.nameRow, canOpenPeerProfile && pressed && styles.pressed]}
-                accessibilityRole={canOpenPeerProfile ? 'button' : undefined}
-                accessibilityLabel={canOpenPeerProfile ? '프로필 보기' : undefined}>
-                <Text style={styles.nickname} numberOfLines={1}>
-                  {nick}
-                </Text>
-                {isHost ? <Ionicons name="star" size={14} color="#CA8A04" style={styles.crown} /> : null}
-              </Pressable>
-            ) : null}
-            <View style={styles.bubbleOtherWrap}>
-              <View style={[styles.bubbleOtherOuter, isImage && styles.bubbleOtherMedia]}>
-                <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
-                  {item.replyTo?.messageId ? (
-                    <View style={styles.replyQuoteOther}>
-                      <Pressable
-                        onPress={() => void jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
-                        style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
-                        accessibilityRole="button"
-                        accessibilityLabel="원글로 이동">
-                        <View style={styles.replyQuoteTopRow}>
-                          <View style={styles.replyQuoteTextCol}>
-                            <Text style={styles.replyQuoteLabelOther}>
-                              {replyTargetLabel(item.replyTo, profiles)}에게 답장
-                            </Text>
-                            <Text style={styles.replyQuoteTextOther} numberOfLines={2}>
-                              {replyPreviewText(item.replyTo)}
-                            </Text>
-                          </View>
-                          {item.replyTo.kind === 'image' && item.replyTo.imageUrl?.trim() ? (
-                            <Image
-                              source={{ uri: item.replyTo.imageUrl.trim() }}
-                              style={styles.replyQuoteThumb}
-                              contentFit="cover"
-                            />
-                          ) : null}
-                        </View>
-                      </Pressable>
-                    </View>
-                  ) : null}
-                  {item.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                  {isImage ? (
-                    item.imageUrl ? (
-                      <Pressable
-                        onPress={() => openMeetingChatImageViewer(item)}
-                        style={({ pressed }) => [pressed && styles.pressed]}
-                        accessibilityRole="button"
-                        accessibilityLabel="사진 크게 보기">
-                        <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
-                      </Pressable>
-                    ) : (
-                      <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
-                    )
-                  ) : (
-                    <Text style={styles.bubbleOtherText}>{item.text}</Text>
-                  )}
-                  {isImage && caption ? <Text style={styles.imageCaptionOther}>{caption}</Text> : null}
-                </BlurView>
-                {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
-              </View>
-              <Text style={styles.timeOther}>{formatChatTime(item.createdAt)}</Text>
-            </View>
-          </View>
-        </View>
-      );
-      return (
-        <View>
-          {dateLabel ? (
-            <View style={styles.dateChipRow}>
-              <View style={styles.dateChip}>
-                <Text style={styles.dateChipText}>{dateLabel}</Text>
-              </View>
-            </View>
-          ) : null}
-          <SwipeToReply
-            simultaneousHandlers={listRef}
-            onTriggerReply={() =>
-              setReplyTo({
-                messageId: item.id,
-                senderId: item.senderId ?? null,
-                kind: item.kind,
-                imageUrl: item.imageUrl ?? null,
-                text: item.text,
-              })
-            }
-          >
-            {otherBubble}
-          </SwipeToReply>
-        </View>
-      );
-    },
-    [myId, messages, profiles, hostNorm, unreadCountForMessage, openMeetingChatImageViewer],
-  );
+  const renderItem = useMeetingChatRenderItem({
+    messages,
+    myId,
+    hostNorm,
+    profiles,
+    unreadCountForMessage,
+    jumpToRepliedMessage,
+    setReplyTo,
+    setPeerProfileUserId,
+    openMeetingChatImageViewer,
+    listRef,
+  });
 
   if (!meetingId) {
     return (
@@ -1552,236 +1107,51 @@ export default function MeetingChatRoomScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.chatMainColumn}>
-          <View style={styles.listWrap}>
-            {chatError ? (
-              <View style={styles.chatErrorBanner}>
-                <Text style={styles.chatErrorText}>{chatError}</Text>
-              </View>
-            ) : null}
-            {searchNavigateLoading ? (
-              <View
-                style={styles.searchJumpLoadingOverlay}
-                pointerEvents="auto"
-                accessibilityLabel="이전 대화를 불러오는 중">
-                <ActivityIndicator color={GinitTheme.colors.primary} size="large" />
-                <Text style={styles.searchJumpLoadingText}>이전 대화를 불러오는 중…</Text>
-              </View>
-            ) : null}
-            <View style={{ flex: 1 }}>
-              <KeyboardAwareFlatList
-              // KeyboardAwareFlatList는 일반 ref가 실제 FlatList 메서드로 연결되지 않는 케이스가 있어
-              // innerRef로 스크롤 제어(ref.scrollToIndex/Offset)가 확실히 동작하도록 합니다.
-              ref={setListRef}
-              innerRef={setInnerFlatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id}
-              renderItem={renderItem}
-              contentContainerStyle={chatListContentStyle}
-                inverted
-              onScroll={onChatScroll}
-              scrollEventThrottle={16}
-              keyboardShouldPersistTaps="handled"
-              enableOnAndroid
-              extraScrollHeight={12}
-              onScrollToIndexFailed={(info) => {
-                const target = info.index;
-                // h*index 오프셋은 inverted·가변 높이에서 과대 추정 시 최상단으로 클램프될 수 있음
-                setTimeout(() => {
-                  scrollToIndexSafe(target, 0.35, false);
-                }, 100);
-                setTimeout(() => {
-                  scrollToIndexSafe(target, 0.35, false);
-                }, 350);
-              }}
-              ListEmptyComponent={
-                <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>
-              }
-              ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
-              onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
-              onEndReachedThreshold={0.55}
-              initialNumToRender={14}
-              maxToRenderPerBatch={10}
-              windowSize={11}
-              updateCellsBatchingPeriod={50}
-              /**
-               * inverted + 과거 페이지 prepend 시 `maintainVisibleContentPosition`은
-               * Android/iOS에서 네이티브 SIGABRT/강제 종료가 보고되는 경우가 많아 사용하지 않습니다.
-               * 과거 로드 직후 스크롤이 약간 움직일 수 있으나 크래시를 막는 쪽을 택합니다.
-               */
-              removeClippedSubviews={false}
-              />
-            </View>
-            {showJumpToBottomFab && !plusMenuOpen ? (
-              <Pressable
-                style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
-                onPress={jumpToLatest}
-                accessibilityRole="button"
-                accessibilityLabel="최신 메시지로">
-                <Ionicons name="chevron-down" size={22} color="#334155" />
-              </Pressable>
-            ) : null}
-          </View>
-          {plusMenuOpen ? (
-            <Pressable
-              style={[styles.plusListDismissLayer, { bottom: composerDockBlockHeight }]}
-              onPress={() => closePlusMenuThen()}
-              accessibilityRole="button"
-              accessibilityLabel="퀵 메뉴 닫기"
-            />
-          ) : null}
-          {plusMenuOpen ? (
-            <View
-              style={[styles.plusFanFloating, { bottom: composerDockBlockHeight }]}
-              pointerEvents="box-none">
-              <View style={styles.plusFanInner} pointerEvents="box-none">
-                {plusQuickActions.map((action, i) => (
-                  <MeetingChatQuickActionRow
-                    key={action.key}
-                    action={action}
-                    progress={plusRowAnims[i]}
-                    pillMaxW={plusPillMaxWidth}
-                  />
-                ))}
-              </View>
-            </View>
-          ) : null}
-          <View
-            style={[styles.composerDock, { paddingBottom: composerBottomPad }]}
-            onLayout={onComposerDockLayout}>
-          {replyTo?.messageId ? (
-            <View style={styles.replyPreviewRow}>
-              <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
-                <View style={styles.replyPreviewIconWrap} accessibilityElementsHidden pointerEvents="none">
-                  <Ionicons name="return-up-back-outline" size={20} color="#0f172a" />
-                </View>
-                <View style={styles.replyPreviewTextCol} pointerEvents="none">
-                  <Text style={styles.replyPreviewTitle} numberOfLines={1}>
-                    {replyTargetLabel(replyTo, profiles)}에게 답장
-                  </Text>
-                  <Text style={styles.replyPreviewBody} numberOfLines={1}>
-                    {replyPreviewText(replyTo)}
-                  </Text>
-                </View>
-                {replyTo.kind === 'image' && replyTo.imageUrl?.trim() ? (
-                  <View style={styles.replyPreviewThumbOuter} pointerEvents="none" accessibilityElementsHidden>
-                    <Image source={{ uri: replyTo.imageUrl.trim() }} style={styles.replyPreviewThumb} contentFit="cover" />
-                  </View>
-                ) : null}
-                <Pressable
-                  onPress={() => setReplyTo(null)}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="답장 취소">
-                  <Ionicons name="close" size={18} color="#475569" />
-                </Pressable>
-              </BlurView>
-            </View>
-          ) : null}
-          <View
-            style={styles.composerCluster}
-            onLayout={(e) => {
-              const h = e.nativeEvent.layout.height;
-              if (h > 0) setComposerInputBarHeight(h);
-            }}>
-            <View style={styles.composer}>
-              <Pressable
-                style={styles.plusBtn}
-                onPress={openPlusMenu}
-                disabled={uploadingImage}
-                accessibilityRole="button"
-                accessibilityLabel={plusMenuOpen ? '퀵 액션 닫기' : '퀵 액션 열기'}
-                accessibilityState={{ expanded: plusMenuOpen }}>
-                {uploadingImage ? (
-                  <ActivityIndicator size="small" color="#475569" />
-                ) : (
-                  <View style={styles.plusBtnIconSlot} pointerEvents="none">
-                    <Animated.View
-                      style={[
-                        styles.plusBtnIconLayer,
-                        {
-                          opacity: plusIconMorph.interpolate({
-                            inputRange: [0, 0.42],
-                            outputRange: [1, 0],
-                            extrapolate: 'clamp',
-                          }),
-                          transform: [
-                            {
-                              scale: plusIconMorph.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [1, 0.45],
-                              }),
-                            },
-                            {
-                              rotate: plusIconMorph.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: ['0deg', '45deg'],
-                              }),
-                            },
-                          ],
-                        },
-                      ]}>
-                      <Ionicons name="add-sharp" size={26} color="#475569" />
-                    </Animated.View>
-                    <Animated.View
-                      style={[
-                        styles.plusBtnIconLayer,
-                        {
-                          opacity: plusIconMorph.interpolate({
-                            inputRange: [0.38, 1],
-                            outputRange: [0, 1],
-                            extrapolate: 'clamp',
-                          }),
-                          transform: [
-                            {
-                              scale: plusIconMorph.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [0.45, 1],
-                              }),
-                            },
-                            {
-                              rotate: plusIconMorph.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: ['-45deg', '0deg'],
-                              }),
-                            },
-                          ],
-                        },
-                      ]}>
-                      <Ionicons name="close-sharp" size={26} color="#475569" />
-                    </Animated.View>
-                  </View>
-                )}
-              </Pressable>
-              <View style={styles.inputShell}>
-                <TextInput
-                  ref={messageInputRef}
-                  style={styles.input}
-                  placeholder="메시지 보내기"
-                  placeholderTextColor="#94a3b8"
-                  value={draft}
-                  onChangeText={setDraft}
-                  multiline
-                  maxLength={4000}
-                  editable={!uploadingImage}
-                />
-              </View>
-              <Pressable
-                onPress={() => void onSend()}
-                style={[styles.sendBtn, (sending || uploadingImage) && styles.sendBtnDisabled]}
-                disabled={sending || uploadingImage || !draft.trim()}
-                accessibilityRole="button"
-                accessibilityLabel="보내기">
-                {sending || uploadingImage ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Ionicons name="send" size={20} color="#fff" />
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
-        </View>
+        <MeetingChatMainColumn
+          chatError={chatError}
+          searchNavigateLoading={searchNavigateLoading}
+          setListRef={setListRef}
+          setInnerFlatListRef={setInnerFlatListRef}
+          messages={messages}
+          renderItem={renderItem}
+          chatListContentStyle={chatListContentStyle}
+          onScrollToIndexFailed={(info) => {
+            const target = info.index;
+            setTimeout(() => {
+              scrollToIndexSafe(target, 0.35, false);
+            }, 100);
+            setTimeout(() => {
+              scrollToIndexSafe(target, 0.35, false);
+            }, 350);
+          }}
+          onChatScroll={onChatScroll}
+          listFooterLoading={listFooterLoading}
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          onPrefetchOlderMessages={hasNextPage ? onPrefetchOlderMessages : undefined}
+          showJumpToBottomFab={showJumpToBottomFab}
+          plusMenuOpen={plusMenuOpen}
+          composerDockBlockHeight={composerDockBlockHeight}
+          jumpToLatest={jumpToLatest}
+          closePlusMenuThen={closePlusMenuThen}
+          plusQuickActions={plusQuickActions}
+          plusRowAnims={plusRowAnims}
+          plusPillMaxWidth={plusPillMaxWidth}
+          composerBottomPad={composerBottomPad}
+          onComposerDockLayout={onComposerDockLayout}
+          replyTo={replyTo}
+          setReplyTo={setReplyTo}
+          profiles={profiles}
+          setComposerInputBarHeight={setComposerInputBarHeight}
+          messageInputRef={messageInputRef}
+          draft={draft}
+          setDraft={setDraft}
+          uploadingImage={uploadingImage}
+          sending={sending}
+          onSend={onSend}
+          openPlusMenu={openPlusMenu}
+          plusIconMorph={plusIconMorph}
+        />
 
         {/* 대화 검색 */}
         <Modal
@@ -1843,7 +1213,7 @@ export default function MeetingChatRoomScreen() {
 
         {/* 사진 크게 보기 */}
         <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
-          <GestureHandlerRootView style={styles.viewerRoot}>
+          <GestureHandlerRootView style={meetingChatBodyStyles.viewerRoot}>
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={() => !imageViewerBusy && setImageViewer(null)}
@@ -1851,8 +1221,8 @@ export default function MeetingChatRoomScreen() {
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View style={styles.viewerSheet} pointerEvents="box-none">
-              <View style={[styles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
+            <View style={meetingChatBodyStyles.viewerSheet} pointerEvents="box-none">
+              <View style={[meetingChatBodyStyles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
                 <Pressable
                   onPress={() => setImageViewer(null)}
                   hitSlop={10}
@@ -1861,17 +1231,17 @@ export default function MeetingChatRoomScreen() {
                   accessibilityLabel="닫기">
                   <Ionicons name="close" size={26} color="#fff" />
                 </Pressable>
-                <View style={styles.viewerMetaCol} pointerEvents="none">
-                  <Text style={styles.viewerMetaName} numberOfLines={1}>
+                <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
+                  <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
                     {imageViewer?.senderLabel ?? ''}
                   </Text>
                   {imageViewer?.sentAtLabel ? (
-                    <Text style={styles.viewerMetaTime} numberOfLines={1}>
+                    <Text style={meetingChatBodyStyles.viewerMetaTime} numberOfLines={1}>
                       {imageViewer.sentAtLabel}
                     </Text>
                   ) : null}
                 </View>
-                <View style={styles.viewerActions}>
+                <View style={meetingChatBodyStyles.viewerActions}>
                   <Pressable
                     onPress={() => {
                       const u = imageViewer?.url.trim() ?? '';
@@ -1953,7 +1323,7 @@ export default function MeetingChatRoomScreen() {
                 </View>
               </View>
               {imageViewer?.url ? (
-                <View style={styles.viewerImageWrap}>
+                <View style={meetingChatBodyStyles.viewerImageWrap}>
                   <MeetingChatImageViewerZoomArea uri={imageViewer.url} />
                 </View>
               ) : null}
@@ -1971,114 +1341,10 @@ export default function MeetingChatRoomScreen() {
   );
 }
 
-function SwipeToReply({
-  children,
-  onTriggerReply,
-  simultaneousHandlers,
-}: {
-  children: ReactNode;
-  onTriggerReply: () => void;
-  simultaneousHandlers?: any;
-}) {
-  /**
-   * 카카오톡처럼: 말풍선을 "왼쪽으로 당기면" 따라오고, 손을 놓으면 항상 원위치로 복귀.
-   * 임계치만 넘으면 답장 타겟만 설정하고(=quote preview), UI는 즉시 복귀합니다.
-   */
-  const dragX = useRef(new Animated.Value(0)).current;
-  const didTriggerRef = useRef(false);
-  const triggerRef = useRef(onTriggerReply);
-  triggerRef.current = onTriggerReply;
-
-  const onGestureEvent = useMemo(
-    () =>
-      Animated.event<PanGestureHandlerGestureEvent>(
-        [{ nativeEvent: { translationX: dragX } }],
-        {
-          useNativeDriver: true,
-          listener: (e) => {
-            const tx = (e as PanGestureHandlerGestureEvent).nativeEvent.translationX;
-            // 왼쪽(음수)로 당길 때만 reply 트리거. 드래그 중에 실시간으로 체크.
-            if (typeof tx === 'number' && tx < -56 && !didTriggerRef.current) {
-              didTriggerRef.current = true;
-              triggerRef.current();
-            }
-          },
-        },
-      ),
-    [dragX],
-  );
-
-  const reset = useCallback(() => {
-    dragX.stopAnimation();
-    Animated.spring(dragX, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 180,
-      friction: 18,
-    }).start();
-  }, [dragX]);
-
-  const onHandlerStateChange = useCallback(
-    (e: PanGestureHandlerGestureEvent) => {
-      const s = e.nativeEvent.state;
-
-      if (s === State.BEGAN) {
-        didTriggerRef.current = false;
-      }
-
-      if (s === State.END || s === State.CANCELLED || s === State.FAILED) {
-        reset();
-      }
-    },
-    [reset],
-  );
-
-  const translateX = useMemo(
-    () =>
-      dragX.interpolate({
-        inputRange: [-140, 0, 140],
-        outputRange: [-72, 0, 0],
-        extrapolate: 'clamp',
-      }),
-    [dragX],
-  );
-
-  return (
-    <PanGestureHandler
-      /**
-       * 스크롤과 충돌 방지:
-       * - 왼쪽(음수) 드래그에서만 활성화(오른쪽/미세 흔들림으로 스크롤이 막히지 않게)
-       * - 세로 이동이 조금이라도 있으면 빠르게 실패시켜 FlatList 스크롤을 우선
-       * - FlatList와 simultaneous로 동작하게 연결
-       */
-      activeOffsetX={[-18, 9999]}
-      failOffsetY={[-6, 6]}
-      simultaneousHandlers={simultaneousHandlers}
-      onGestureEvent={onGestureEvent}
-      onHandlerStateChange={onHandlerStateChange}
-    >
-      <Animated.View style={{ transform: [{ translateX }] }}>{children}</Animated.View>
-    </PanGestureHandler>
-  );
-}
-
 const styles = StyleSheet.create({
   ghRoot: { flex: 1 },
   safe: { flex: 1, backgroundColor: '#ECEFF1' },
   flexColumn: { flex: 1, flexDirection: 'column' },
-  /** 리스트 + 퀵 메뉴(입력창 위) + composerDock — 퀵 메뉴 bottom을 입력 블록 높이에 맞춤 */
-  chatMainColumn: {
-    flex: 1,
-    minHeight: 0,
-    position: 'relative',
-  },
-  composerDock: {
-    width: '100%',
-    flexShrink: 0,
-    backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(15, 23, 42, 0.08)',
-  },
   centerFill: {
     flex: 1,
     justifyContent: 'center',
@@ -2145,7 +1411,6 @@ const styles = StyleSheet.create({
     gap: 12,
     flexShrink: 0,
   },
-  /** 모임 탭(`app/(tabs)/index.tsx`) feedHeader — 검색·벨·설정과 동일 */
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2166,453 +1431,6 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     minWidth: 22,
     textAlign: 'right',
-  },
-  timeMineCol: {
-    alignItems: 'flex-end',
-    justifyContent: 'flex-end',
-  },
-  unreadBubbleCount: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#000000',
-    marginBottom: 2,
-  },
-  // meetingInfoOuter: 상단 모임 스냅샷(요약 카드) 섹션 제거됨
-  listWrap: {
-    flex: 1,
-    position: 'relative',
-    backgroundColor: '#ECEFF1',
-  },
-  searchJumpLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.55)',
-    zIndex: 12,
-    gap: 10,
-  },
-  searchJumpLoadingText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: GinitTheme.colors.textSub,
-  },
-  /** 퀵 메뉴 열릴 때 바깥 탭 — bottom은 입력 블록 높이로 JS에서 지정 */
-  plusListDismissLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 4,
-    backgroundColor: 'transparent',
-  },
-  /** 입력창 블록 바로 위에 붙는 퀵 메뉴 — bottom은 composerDock 높이로 지정 */
-  plusFanFloating: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 7,
-  },
-  dateChipRow: {
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 2,
-  },
-  dateChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  dateChipText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#475569',
-  },
-  chatErrorBanner: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(220, 38, 38, 0.12)',
-  },
-  chatErrorText: { fontSize: 12, color: '#991b1b' },
-  chatListFooterSpinner: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listContent: {
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    paddingBottom: 16,
-    flexGrow: 1,
-  },
-  emptyChat: {
-    textAlign: 'center',
-    marginTop: 40,
-    fontSize: 14,
-    color: '#94a3b8',
-  },
-  jumpFab: {
-    position: 'absolute',
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 3,
-    zIndex: 8,
-  },
-  systemRow: {
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  systemText: {
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  rowMine: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'flex-end',
-    gap: 6,
-    marginBottom: 10,
-  },
-  bubbleMineWrap: {
-    maxWidth: '78%',
-  },
-  bubbleMine: {
-    backgroundColor: 'rgba(0, 82, 204, 0.22)',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 16,
-    borderTopRightRadius: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0, 82, 204, 0.30)',
-    overflow: 'hidden',
-  },
-  bubbleMineMedia: {
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    /** 고정 78%는 220px 이미지+패딩보다 좁아 모서리가 잘리므로, 사진 말풍선만 가로 폭 전부 사용 */
-    maxWidth: '100%',
-  },
-  bubbleMineText: {
-    fontSize: 15,
-    color: '#0f172a',
-    lineHeight: 20,
-  },
-  chatImage: {
-    width: 220,
-    maxWidth: '100%',
-    aspectRatio: 1,
-    borderRadius: 12,
-    backgroundColor: '#e2e8f0',
-    alignSelf: 'flex-start',
-  },
-  imageCaptionMine: {
-    marginTop: 6,
-    paddingHorizontal: 6,
-    fontSize: 14,
-    color: '#0f172a',
-    lineHeight: 19,
-  },
-  timeMine: {
-    fontSize: 11,
-    color: '#94a3b8',
-    marginBottom: 2,
-  },
-  rowOther: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 10,
-  },
-  avatarCol: {
-    width: 40,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#e2e8f0',
-  },
-  avatarWithdrawn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#e2e8f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarFallback: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0, 82, 204, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarFallbackText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: GinitTheme.colors.primary,
-  },
-  avatarSpacer: {
-    width: 36,
-    height: 36,
-  },
-  otherBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-  },
-  nickname: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0f172a',
-    maxWidth: '85%',
-  },
-  crown: { marginTop: -1 },
-  bubbleOtherWrap: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  bubbleOtherOuter: {
-    maxWidth: '78%',
-    position: 'relative',
-  },
-  bubbleOther: {
-    backgroundColor: 'rgba(255,255,255,0.58)',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 16,
-    borderTopLeftRadius: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    overflow: 'hidden',
-  },
-  aiNeonOutline: {
-    position: 'absolute',
-    top: -1,
-    left: -1,
-    right: -1,
-    bottom: -1,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 138, 0, 0.85)',
-    shadowColor: '#FF8A00',
-    shadowOpacity: 0.55,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  bubbleOtherMedia: {
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    maxWidth: '100%',
-  },
-  bubbleOtherText: {
-    fontSize: 15,
-    color: '#0f172a',
-    lineHeight: 20,
-  },
-  imageCaptionOther: {
-    marginTop: 6,
-    paddingHorizontal: 6,
-    fontSize: 14,
-    color: '#0f172a',
-    lineHeight: 19,
-  },
-  timeOther: {
-    fontSize: 11,
-    color: '#94a3b8',
-    marginBottom: 2,
-  },
-  replyQuoteMine: {
-    marginBottom: 8,
-    paddingLeft: 0,
-    borderLeftWidth: 0,
-    borderLeftColor: 'transparent',
-  },
-  replyQuoteOther: {
-    marginBottom: 8,
-    paddingLeft: 0,
-    borderLeftWidth: 0,
-    borderLeftColor: 'transparent',
-  },
-  replyQuoteLabelMine: { fontSize: 11, fontWeight: '900', color: '#0f172a' },
-  replyQuoteLabelOther: { fontSize: 11, fontWeight: '900', color: '#0f172a' },
-  /** 답장 말풍선 상단 원글(인용) 텍스트 — 카카오톡처럼 검정색 */
-  replyQuoteTextMine: { marginTop: 2, fontSize: 12, color: '#0f172a' },
-  replyQuoteTextOther: { marginTop: 2, fontSize: 12, color: '#0f172a' },
-  replyQuoteTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    /**
-     * 답장 인용 영역이 말풍선 폭을 "최대폭까지" 밀어버리는 케이스 방지:
-     * row가 기본 stretch로 잡히지 않게 하고, 내용 기반으로만 폭이 결정되게 함.
-     */
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
-  },
-  replyQuoteTextCol: { flexShrink: 1, minWidth: 0 },
-  replyQuoteThumb: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: '#e2e8f0',
-  },
-  replyQuotePressable: {
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
-  },
-  /** 답장 인용과 본문을 분리하는 --- 라인 */
-  replyDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(15, 23, 42, 0.16)',
-    marginBottom: 8,
-  },
-  replyPreviewRow: {
-    paddingHorizontal: 10,
-    paddingTop: 10,
-  },
-  replyPreviewCard: {
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    overflow: 'hidden',
-  },
-  replyPreviewIconWrap: {
-    /** composer의 + 버튼(44x44, marginBottom:2)과 동일 라인 정렬 */
-    width: 44,
-    height: 44,
-    marginBottom: 2,
-    /** replyPreviewCard의 paddingHorizontal(12)만큼 왼쪽으로 당겨 + 버튼과 X축 정렬 */
-    marginLeft: -12,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    borderColor: 'transparent',
-  },
-  replyPreviewTextCol: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'column',
-    gap: 2,
-  },
-  replyPreviewTitle: { fontSize: 13, fontWeight: '900', color: '#0f172a' },
-  replyPreviewBody: { fontSize: 12, fontWeight: '600', color: '#0f172a' },
-  replyPreviewThumbOuter: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#e2e8f0',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  replyPreviewThumb: { width: '100%', height: '100%' },
-  /** + 퀵 메뉴 + 입력창 묶음 (퀵 메뉴는 배경 없이 아이콘·라벨만) */
-  composerCluster: {
-    width: '100%',
-  },
-  plusFanInner: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  /** 퀵 라벨 실제 너비 측정(화면 밖, 터치 불가) */
-  plusQuickMeasureHost: {
-    position: 'absolute',
-    left: -8000,
-    top: 0,
-    opacity: 0,
-  },
-  /** 보내기 버튼과 동일 primary 배경 위 흰 라벨 (아이콘 간격은 `plusQuickIconLabelRow` gap) */
-  plusFanLabelMorph: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: -0.2,
-    flexShrink: 1,
-  },
-  /** 버튼 안에서 아이콘·라벨을 한 덩어리로 가운데 정렬 */
-  plusQuickIconLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  pressed: {
-    opacity: 0.85,
-  },
-  viewerRoot: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    justifyContent: 'center',
-    alignItems: 'stretch',
-  },
-  viewerSheet: {
-    flex: 1,
-    paddingBottom: 12,
-  },
-  viewerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-  },
-  viewerMetaCol: {
-    flex: 1,
-    marginLeft: 6,
-    marginRight: 8,
-    justifyContent: 'center',
-    minWidth: 0,
-  },
-  viewerMetaName: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  viewerMetaTime: {
-    marginTop: 2,
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  viewerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  viewerImageWrap: {
-    flex: 1,
-    width: '100%',
-    minHeight: 0,
-    backgroundColor: 'transparent',
   },
   chatSearchSafe: {
     flex: 1,
@@ -2719,63 +1537,5 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#0f172a',
     backgroundColor: 'rgba(255, 235, 59, 0.35)',
-  },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  /** 보내기 버튼과 동일 44 고정 — +/× 전환 시 입력창 폭이 흔들리지 않게 */
-  plusBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  plusBtnIconSlot: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  plusBtnIconLayer: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inputShell: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f1f5f9',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    minHeight: 44,
-    maxHeight: 120,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  input: {
-    flex: 1,
-    fontSize: 15,
-    color: '#0f172a',
-    paddingVertical: 10,
-    maxHeight: 100,
-  },
-  sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: GinitTheme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  sendBtnDisabled: {
-    opacity: 0.5,
   },
 });

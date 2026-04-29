@@ -8,6 +8,7 @@ import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 /** Android 헤드업 배너용 — `HIGH` 이상이어야 다른 앱 사용 중에도 상단 배너가 뜨는 경우가 많습니다. */
@@ -231,6 +232,13 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
         const mid = params.meetingId.trim();
         if (mid) {
           const ok = await isMeetingChatNotifyEnabled(mid);
+          if (!ok) return;
+        }
+      }
+      if (params.kind === 'social_dm') {
+        const rid = params.meetingId.trim();
+        if (rid) {
+          const ok = await isSocialChatNotifyEnabled(rid);
           if (!ok) return;
         }
       }

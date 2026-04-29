@@ -14,27 +14,25 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { GinitTheme } from '@/constants/ginit-theme';
-import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import {
   getHomeCategoryVisual,
   homeCategoryMarkerIconColor,
   homeMeetingStatusBadgeLabel,
 } from '@/src/lib/feed-home-visual';
+import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
+import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import {
+  formatPublicMeetingAgeSummary,
+  MEETING_CAPACITY_UNLIMITED,
   meetingCategoryDisplayLabel,
+  meetingParticipantCount,
+  meetingPrimaryStartMs,
+  parsePublicMeetingDetailsConfig,
   type Meeting,
   type PublicMeetingDetailsConfig,
   type PublicMeetingGenderRatio,
   type PublicMeetingHostGenderSnapshot,
-} from '@/src/lib/meetings';
-import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
-import {
-  formatPublicMeetingAgeSummary,
-  MEETING_CAPACITY_UNLIMITED,
-  meetingParticipantCount,
-  meetingPrimaryStartMs,
-  parsePublicMeetingDetailsConfig,
 } from '@/src/lib/meetings';
 
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -384,6 +382,15 @@ export function HomeMeetingListItem({
 
               {m.isPublic === false ? (
                 <View style={s.privateRow}>
+                  {ownership === 'hosted' ? (
+                    <View style={s.roleChip} accessibilityLabel="역할 Host">
+                      <Text style={s.roleChipText}>Host</Text>
+                    </View>
+                  ) : ownership === 'joined' ? (
+                    <View style={s.roleChip} accessibilityLabel="역할 Guest">
+                      <Text style={s.roleChipText}>Guest</Text>
+                    </View>
+                  ) : null}
                   <View style={s.infoChip}>
                     <Ionicons name="lock-closed-outline" size={13} color={GinitTheme.colors.textSub} />
                     <Text style={s.infoChipText}>비공개</Text>
@@ -392,6 +399,15 @@ export function HomeMeetingListItem({
               ) : cfg ? (
                 <>
                   <View style={s.zoneB}>
+                    {ownership === 'hosted' ? (
+                      <View style={s.roleChip} accessibilityLabel="역할 Host">
+                        <Text style={s.roleChipText}>Host</Text>
+                      </View>
+                    ) : ownership === 'joined' ? (
+                      <View style={s.roleChip} accessibilityLabel="역할 Guest">
+                        <Text style={s.roleChipText}>Guest</Text>
+                      </View>
+                    ) : null}
                     <View style={[s.infoChip, s.settlementChipShrink]}>
                       <Ionicons name="wallet-outline" size={13} color={GinitTheme.colors.primary} />
                       <Text style={[s.infoChipTextStrong, s.chipLabelMax]} numberOfLines={1}>
@@ -446,11 +462,11 @@ const s = StyleSheet.create({
   },
   /** 게스트(참여) 모임 — 호스트 카드와 동일 블루 계열, 살짝 옅게 */
   cardShadowJoined: {
-    backgroundColor: 'rgba(115, 199, 255, 0.07)',
+    backgroundColor: GinitTheme.colors.surface,
   },
   /** 주관(호스트) 모임 — 스카이 블루 글래스 */
   cardShadowHosted: {
-    backgroundColor: 'rgba(115, 199, 255, 0.10)',
+    backgroundColor: GinitTheme.colors.surface,
   },
   cardShell: {
     borderRadius: GinitTheme.radius.card,
@@ -482,12 +498,12 @@ const s = StyleSheet.create({
     borderLeftColor: GinitTheme.colors.border,
   },
   cardInnerJoined: {
-    backgroundColor: 'rgba(115, 199, 255, 0.08)',
-    borderLeftColor: 'rgba(115, 199, 255, 0.16)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
+    borderLeftColor: GinitTheme.colors.border,
   },
   cardInnerHosted: {
-    backgroundColor: 'rgba(115, 199, 255, 0.11)',
-    borderLeftColor: 'rgba(115, 199, 255, 0.20)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
+    borderLeftColor: GinitTheme.colors.border,
   },
   zoneA: {
     flexDirection: 'row',
@@ -731,6 +747,23 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '900',
     color: GinitTheme.colors.primary,
+    letterSpacing: -0.12,
+  },
+  roleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: '100%',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  roleChipText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
     letterSpacing: -0.12,
   },
   settlementChipShrink: {

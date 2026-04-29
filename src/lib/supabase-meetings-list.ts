@@ -105,6 +105,23 @@ export async function fetchPublicMeetingsFromSupabaseOnce(): Promise<
   return { ok: true, meetings };
 }
 
+export async function fetchMyMeetingsForFeedFromSupabase(
+  appUserId: string,
+): Promise<{ ok: true; meetings: Meeting[] } | { ok: false; message: string }> {
+  const uid = appUserId.trim();
+  if (!uid) return { ok: true, meetings: [] };
+  const { data, error } = await supabase.rpc('ledger_list_my_meetings_for_feed', {
+    p_app_user_id: uid,
+  });
+  if (error) return { ok: false, message: error.message };
+  const rows = (data ?? []) as unknown[];
+  const meetings = rows
+    .map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : null))
+    .filter((r): r is Record<string, unknown> => Boolean(r))
+    .map((r) => mapSupabaseMeetingRow(r));
+  return { ok: true, meetings };
+}
+
 /** 공개 모임 20건 페이지 — `.range(pageParam * 20, (pageParam + 1) * 20 - 1)` */
 export async function fetchPublicMeetingsPageFromSupabase(
   pageParam: number,

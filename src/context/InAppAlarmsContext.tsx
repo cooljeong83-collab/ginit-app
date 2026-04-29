@@ -55,6 +55,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
+  fetchSocialChatUnreadCount,
   socialDmPreviewLine,
   socialMessageTimeMs,
   subscribeMySocialChatRooms,
@@ -960,12 +961,28 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           /* 한 방 실패는 건너뜀 */
         }
       }
+      // 친구(1:1) 채팅 unread도 합산
+      for (const sr of socialRooms) {
+        if (cancelled) return;
+        const rid = sr.roomId.trim();
+        if (!rid) continue;
+        const latest = socialLatestByRoomId[rid];
+        const latestId = latest?.id?.trim() ?? '';
+        // 최신이 없으면 unread도 0
+        if (!latestId) continue;
+        const readId = localMap[rid] ?? '';
+        try {
+          sum += await fetchSocialChatUnreadCount(rid, raw, readId || null, null, { maxDocsScanned: 600 });
+        } catch {
+          /* 한 방 실패는 건너뜀 */
+        }
+      }
       if (!cancelled) setChatTabUnreadTotal(sum);
     })();
     return () => {
       cancelled = true;
     };
-  }, [persistReady, userId, meetings, chatTabUnreadRefreshSig]);
+  }, [persistReady, userId, meetings, chatTabUnreadRefreshSig, socialRooms, socialLatestByRoomId]);
 
   const markChatReadUpTo = useCallback((meetingId: string, messageId: string | undefined) => {
     const mid = meetingId.trim();

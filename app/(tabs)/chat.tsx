@@ -46,8 +46,15 @@ import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-ex
 import type { Meeting } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
+  fetchSocialChatUnreadCount,
   searchSocialChatMessages,
   socialDmRoomId,
+  socialDmPreviewLine,
+  socialMessageTimeMs,
+  subscribeSocialChatLatestMessage,
+  subscribeSocialChatRoom,
+  type SocialChatMessage,
+  type SocialChatRoomDoc,
   type SocialChatRoomSummary,
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -84,6 +91,44 @@ function latestMeetingChatMessageMs(msg: MeetingChatMessage | null | undefined):
   return 0;
 }
 
+function latestSocialChatMessageMs(msg: SocialChatMessage | null | undefined): number {
+  return socialMessageTimeMs(msg);
+}
+
+function formatRelativeFromMs(ms: number): string {
+  if (!ms || ms <= 0) return '';
+  const diffMs = Date.now() - ms;
+  if (diffMs < 0) return '';
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return '방금';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}일 전`;
+  const week = Math.floor(day / 7);
+  if (week < 6) return `${week}주 전`;
+  const d = new Date(ms);
+  return d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+}
+
+function formatRightTimeFromMs(ms: number): string {
+  if (!ms || ms <= 0) return '';
+  try {
+    const d = new Date(ms);
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    if (sameDay) {
+      return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit', hour12: true });
+    }
+    return formatRelativeFromMs(ms);
+  } catch {
+    return '';
+  }
+}
+
 function meetingTextSearchHaystack(m: Meeting): string {
   return [m.title, m.description, m.categoryLabel, m.location, m.placeName, m.address ?? '']
     .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
@@ -118,6 +163,9 @@ export default function ChatTab() {
   const [hostProfiles, setHostProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [socialProfiles, setSocialProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [unreadByMeetingId, setUnreadByMeetingId] = useState<Record<string, number>>({});
+  const [latestBySocialRoomId, setLatestBySocialRoomId] = useState<Record<string, SocialChatMessage | null | undefined>>({});
+  const [socialRoomDocById, setSocialRoomDocById] = useState<Record<string, SocialChatRoomDoc | null | undefined>>({});
+  const [unreadBySocialRoomId, setUnreadBySocialRoomId] = useState<Record<string, number>>({});
 
   const signedIn = Boolean(userId?.trim());
 
@@ -284,8 +332,18 @@ export default function ChatTab() {
         return socialMessageMatchRoomIds.has(r.roomId);
       });
     }
-    return rows;
-  }, [socialFriendDmRooms, appliedSocialTextQuery, socialProfiles, socialMessageMatchRoomIds]);
+    const list = [...rows];
+    list.sort((a, b) => {
+      const tb = latestSocialChatMessageMs(latestBySocialRoomId[b.roomId]);
+      const ta = latestSocialChatMessageMs(latestBySocialRoomId[a.roomId]);
+      if (tb !== ta) return tb - ta;
+      const nb = (socialProfiles.get(b.peerAppUserId)?.nickname ?? b.peerAppUserId ?? '').trim();
+      const na = (socialProfiles.get(a.peerAppUserId)?.nickname ?? a.peerAppUserId ?? '').trim();
+      if (nb !== na) return na.localeCompare(nb, 'ko');
+      return a.roomId.localeCompare(b.roomId);
+    });
+    return list;
+  }, [socialFriendDmRooms, appliedSocialTextQuery, socialProfiles, socialMessageMatchRoomIds, latestBySocialRoomId]);
 
   const chatSearchFiltersDot = useMemo(
     () =>
@@ -421,6 +479,95 @@ export default function ChatTab() {
       unsubs.forEach((u) => u());
     };
   }, [joinedMeetingRowKey, signedIn]);
+
+  useEffect(() => {
+    if (!signedIn || socialFriendDmRooms.length === 0) {
+      setLatestBySocialRoomId({});
+      return () => {};
+    }
+    const unsubs = socialFriendDmRooms.map((r) =>
+      subscribeSocialChatLatestMessage(
+        r.roomId,
+        (msg) => setLatestBySocialRoomId((p) => ({ ...p, [r.roomId]: msg })),
+        () => setLatestBySocialRoomId((p) => ({ ...p, [r.roomId]: null })),
+      ),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [signedIn, socialRoomKey]);
+
+  useEffect(() => {
+    if (!signedIn || socialFriendDmRooms.length === 0) {
+      setSocialRoomDocById({});
+      return () => {};
+    }
+    const unsubs = socialFriendDmRooms.map((r) =>
+      subscribeSocialChatRoom(
+        r.roomId,
+        (doc) => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: doc })),
+        () => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: null })),
+      ),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [signedIn, socialRoomKey]);
+
+  const socialUnreadRefreshSig = useMemo(() => {
+    const raw = userId?.trim() ?? '';
+    const mePhone = normalizePhoneUserId(raw) ?? raw;
+    const mePk = raw ? normalizeParticipantId(raw) : '';
+    return socialFriendDmRooms
+      .map((r) => {
+        const lm = latestBySocialRoomId[r.roomId];
+        const doc = socialRoomDocById[r.roomId];
+        const map = doc?.readMessageIdBy ?? {};
+        const read =
+          map[raw] ??
+          map[mePhone] ??
+          (mePk ? map[mePk] : null) ??
+          '';
+        const ms = latestSocialChatMessageMs(lm);
+        return `${r.roomId}:${(lm?.id ?? '').trim()}:${ms}:${String(read ?? '')}`;
+      })
+      .join('|');
+  }, [socialFriendDmRooms, latestBySocialRoomId, socialRoomDocById, userId]);
+
+  useEffect(() => {
+    if (!signedIn || socialFriendDmRooms.length === 0) {
+      setUnreadBySocialRoomId({});
+      return;
+    }
+    const raw = userId?.trim() ?? '';
+    const mePhone = normalizePhoneUserId(raw) ?? raw;
+    const mePk = raw ? normalizeParticipantId(raw) : '';
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, number> = {};
+      for (const r of socialFriendDmRooms) {
+        if (cancelled) return;
+        const doc = socialRoomDocById[r.roomId];
+        const readMap = doc?.readMessageIdBy ?? {};
+        const atMap = doc?.readAtBy ?? {};
+        const readId =
+          readMap[raw] ??
+          readMap[mePhone] ??
+          (mePk ? readMap[mePk] : null) ??
+          null;
+        const readAt =
+          atMap[raw] ??
+          atMap[mePhone] ??
+          (mePk ? atMap[mePk] : null) ??
+          null;
+        try {
+          next[r.roomId] = await fetchSocialChatUnreadCount(r.roomId, raw, readId, readAt, { maxDocsScanned: 600 });
+        } catch {
+          next[r.roomId] = 0;
+        }
+      }
+      if (!cancelled) setUnreadBySocialRoomId(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, socialUnreadRefreshSig]);
 
   useEffect(() => {
     if (!signedIn || joinedMeetings.length === 0) {
@@ -784,6 +931,12 @@ export default function ChatTab() {
                   const uri = prof?.photoUrl?.trim();
                   const nick = prof?.nickname ?? '친구';
                   const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
+                  const latest = latestBySocialRoomId[row.roomId];
+                  const hasMessage = latest != null;
+                  const loadingPreview = latest === undefined;
+                  const preview = hasMessage ? socialDmPreviewLine(latest) : '대화를 시작해 보세요.';
+                  const rightTime = hasMessage ? formatRightTimeFromMs(latestSocialChatMessageMs(latest)) : '';
+                  const unread = unreadBySocialRoomId[row.roomId] ?? 0;
                   return (
                     <ChatListCardShell
                       accentGradient={SOCIAL_CHAT_LIST_ACCENT}
@@ -809,11 +962,34 @@ export default function ChatTab() {
                           </Text>
                         </View>
                         <View style={styles.socialZoneMain}>
-                          <Text style={styles.socialHeroTitle} numberOfLines={1}>
-                            {nick}
-                          </Text>
-                          <Text style={styles.socialMetaMuted} numberOfLines={1}>
-                            친구 채팅
+                          <View style={styles.socialTitleRow}>
+                            <View style={styles.socialTitleBlock}>
+                              <Text style={styles.socialHeroTitle} numberOfLines={1}>
+                                {nick}
+                              </Text>
+                              <Text style={styles.socialMetaMuted} numberOfLines={1}>
+                                친구 채팅
+                              </Text>
+                            </View>
+                            {rightTime || unread > 0 ? (
+                              <View style={styles.socialTimeColumn}>
+                                {rightTime ? (
+                                  <Text style={styles.socialTimeRight} numberOfLines={1}>
+                                    {rightTime}
+                                  </Text>
+                                ) : null}
+                                {unread > 0 ? (
+                                  <View
+                                    style={[styles.socialUnreadBadge, !rightTime && styles.socialUnreadBadgeSolo]}
+                                    accessibilityLabel={`읽지 않은 메시지 ${unread > 99 ? '99개 이상' : `${unread}개`}`}>
+                                    <Text style={styles.socialUnreadBadgeText}>{unread > 99 ? '99+' : String(unread)}</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                            ) : null}
+                          </View>
+                          <Text style={styles.socialPreviewLine} numberOfLines={2}>
+                            {loadingPreview ? '불러오는 중…' : preview}
                           </Text>
                         </View>
                       </View>
@@ -1133,6 +1309,54 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: -0.12,
+  },
+  socialTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  socialTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  socialTimeColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    gap: 6,
+    paddingTop: 1,
+  },
+  socialTimeRight: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.12,
+  },
+  socialUnreadBadge: {
+    marginTop: 2,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-end',
+    backgroundColor: '#EF4444',
+  },
+  socialUnreadBadgeSolo: {
+    marginTop: 1,
+  },
+  socialUnreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+  },
+  socialPreviewLine: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: GinitTheme.colors.textSub,
   },
   centerRow: {
     flexDirection: 'row',
