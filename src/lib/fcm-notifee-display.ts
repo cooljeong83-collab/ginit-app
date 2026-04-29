@@ -55,6 +55,7 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
     android: {
       channelId: GINIT_FCM_NOTIFEE_CHANNEL,
       importance: AndroidImportance.HIGH,
+      smallIcon: 'notification_icon',
       pressAction: { id: 'default' },
     },
   });

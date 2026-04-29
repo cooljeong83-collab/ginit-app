@@ -1,11 +1,12 @@
 import { doc, getDoc } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
 import { sendFcmPushToUsersFireAndForget } from '@/src/lib/fcm-push-api';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
@@ -129,6 +130,23 @@ function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
   };
 }
 
+async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (!(await ensureNotificationsPresentable())) return;
+  await ensureGinitInAppAndroidChannel();
+  const c = buildHeadsUpContent(params);
+  await Notifications.presentNotificationAsync({
+    title: c.title,
+    body: c.body,
+    subtitle: c.subtitle,
+    sound: 'default',
+    data: { meetingId: c.meetingId, action: c.action, url: c.url },
+    interruptionLevel: 'active',
+    priority: 'high',
+    ...(Platform.OS === 'android' ? { channelId: GINIT_IN_APP_ANDROID_CHANNEL } : {}),
+  });
+}
+
 /**
  * 로그인한 사용자 본인의 Expo 푸시 토큰으로 전송(백그라운드·다른 앱 사용 중 헤드업용).
  * @returns 토큰이 있어 전송 시도까지 한 경우 true, 토큰 없음 false
@@ -197,9 +215,7 @@ export function sendInAppAlarmRemotePushToUserFireAndForget(
   })();
 }
 
-/**
- * 로컬 알림을 사용하지 않고 원격 푸시만 전송합니다.
- */
+/** 앱 활성 상태에서는 로컬 헤드업, 그 외에는 원격 푸시를 전송합니다. */
 export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushParams): void {
   void (async () => {
     try {
@@ -212,7 +228,14 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
           if (!ok) return;
         }
       }
-      // 로컬 스케줄 알림은 제거: 원격 푸시 전송만 유지합니다.
+      if (AppState.currentState === 'active') {
+        if (params.kind === 'chat' || params.kind === 'social_dm') {
+          const cur = getCurrentChatRoomId();
+          if (cur && cur === params.meetingId.trim()) return;
+        }
+        await presentLocalHeadsUp(params);
+        return;
+      }
       const { status: notifPerm } = await Notifications.getPermissionsAsync();
       if (notifPerm !== 'granted') return;
       await sendInAppAlarmPush(params);

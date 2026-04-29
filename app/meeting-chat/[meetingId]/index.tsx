@@ -1744,7 +1744,7 @@ export default function MeetingChatRoomScreen() {
                   onChangeText={setDraft}
                   multiline
                   maxLength={4000}
-                  editable={!sending && !uploadingImage}
+                  editable={!uploadingImage}
                 />
               </View>
               <Pressable

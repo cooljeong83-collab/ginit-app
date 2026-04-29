@@ -10,6 +10,7 @@ import { useEffect, useRef } from 'react';
 import { Alert, PermissionsAndroid, Platform } from 'react-native';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { fcmDebugSetError, fcmDebugSetSaveOk, fcmDebugSetToken } from '@/src/lib/fcm-debug-state';
 import { displayFcmRemoteMessageWithNotifeeAndroid } from '@/src/lib/fcm-notifee-display';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
@@ -146,8 +147,12 @@ export function FcmMessagingBootstrap() {
       try {
         unsubOnMessage = onMessage(m, async (rm) => {
           if (Platform.OS === 'android') {
-            // notification payload는 플랫폼 표시 경로와 중복될 수 있어 data-only만 Notifee로 표시합니다.
-            if (rm?.notification) return;
+            const action = String(rm?.data?.action ?? '').trim();
+            const meetingId = String(rm?.data?.meetingId ?? '').trim();
+            if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
+              const cur = getCurrentChatRoomId();
+              if (cur && cur === meetingId) return;
+            }
             await displayFcmRemoteMessageWithNotifeeAndroid(rm);
             return;
           }

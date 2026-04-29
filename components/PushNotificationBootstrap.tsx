@@ -24,7 +24,6 @@ Notifications.setNotificationHandler({
           return {
             shouldShowBanner: false,
             shouldShowList: false,
-            // Android: shouldPlaySound false면 배너 자체가 안 뜨는 동작이 있어, 숨김은 배너 플래그만으로 처리합니다.
             shouldPlaySound: true,
             shouldSetBadge: false,
           };
