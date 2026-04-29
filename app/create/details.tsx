@@ -26,6 +26,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Image,
   InteractionManager,
   Modal,
   Platform,
@@ -34,8 +35,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
   useWindowDimensions,
+  View,
   type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
@@ -79,6 +80,11 @@ import {
   setPendingVoteCandidates,
 } from '@/src/lib/meeting-place-bridge';
 import {
+  assertDateCandidatesNoOverlapWithOtherMeetings,
+  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+} from '@/src/lib/meeting-schedule-overlap';
+import {
   generateAiMeetingDescription,
   generateSuggestedMeetingTitle,
   generateSuggestedMeetingTitles,
@@ -89,14 +95,10 @@ import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import type { PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { addMeeting, normalizeProfileGenderToHostSnapshot } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
+import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
-import {
-  assertDateCandidatesNoOverlapWithOtherMeetings,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
-} from '@/src/lib/meeting-schedule-overlap';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
@@ -109,6 +111,38 @@ import { DateCandidateEditorCard, type DatePickerField } from '../../components/
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
+const PLACE_SEARCH_INITIAL_PAGE_SIZE = 10;
+const PLACE_SEARCH_PAGE_SIZE = 5;
+const DEFAULT_CALENDAR_PICK_TIME = '19:00';
+const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+function clampHm(raw: string): string {
+  const t = raw.trim();
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(t);
+  if (!m) return t;
+  const hh = Math.max(0, Math.min(23, Number(m[1])));
+  const mm = Math.max(0, Math.min(59, Number(m[2])));
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
+
+
+function dateFromYmd(ymd: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const da = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(da)) return null;
+  const d = new Date(y, mo - 1, da);
+  if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return null;
+  return d;
+}
+
+function monthStartYmd(ymd: string): string {
+  const d = dateFromYmd(ymd);
+  if (!d) return fmtDate(new Date());
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
+}
 
 type SpeechRecognitionErrorEvent = {
   error?: string;
@@ -611,6 +645,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [nlpScheduleInput, setNlpScheduleInput] = useState('');
   const [nlpParsed, setNlpParsed] = useState<SmartNlpResult | null>(null);
   const [weekendPreviewSlots, setWeekendPreviewSlots] = useState<{ ymd: string; hm: string }[]>([]);
+  const [calendarMonth, setCalendarMonth] = useState(() => monthStartYmd(fmtDate(new Date())));
+  const [timePick, setTimePick] = useState<{ ymd: string; draft: Date; source?: 'calendar' | 'ai' } | null>(null);
   const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
   const [deadlineTick, setDeadlineTick] = useState(0);
   const dateScrollRef = useRef<ScrollView>(null);
@@ -628,7 +664,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [placeBiasHint, setPlaceBiasHint] = useState<string | null>(null);
   const [placeSearchRows, setPlaceSearchRows] = useState<NaverLocalPlace[]>([]);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
+  const [placeSearchLoadingMore, setPlaceSearchLoadingMore] = useState(false);
   const [placeSearchErr, setPlaceSearchErr] = useState<string | null>(null);
+  const [placeSearchNextStart, setPlaceSearchNextStart] = useState<number | null>(null);
+  const placeSearchQueryKeyRef = useRef<string>('');
+  const [placeThumbById, setPlaceThumbById] = useState<Record<string, string | null>>({});
+  const [placeSelectedById, setPlaceSelectedById] = useState<Record<string, { placeName: string; address: string }>>(
+    {},
+  );
+  const [placeResolvingById, setPlaceResolvingById] = useState<Record<string, boolean>>({});
 
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
@@ -820,8 +864,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     scheduleAiReplacesFirstCandidate,
   ]);
 
-  const appendWeekendPreviewSlot = useCallback(
-    async (slot: { ymd: string; hm: string }) => {
+  const commitPointCandidate = useCallback(
+    async (ymd: string, hm: string) => {
       animate();
       const prev = dateCandidatesRef.current;
 
@@ -830,8 +874,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         if (!first) return;
         const patched = forcePointCandidate({
           ...first,
-          startDate: slot.ymd,
-          startTime: slot.hm,
+          startDate: ymd,
+          startTime: hm,
         } as DateCandidate);
         const key = dateCandidateDupKey(patched);
         if (prev.slice(1).some((d) => dateCandidateDupKey(d) === key)) {
@@ -863,8 +907,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       const candidate = forcePointCandidate({
         id: newId('date'),
         type: 'point',
-        startDate: slot.ymd,
-        startTime: slot.hm,
+        startDate: ymd,
+        startTime: hm,
       } as DateCandidate);
       const key = dateCandidateDupKey(candidate);
       if (prev.some((d) => dateCandidateDupKey(d) === key)) {
@@ -914,6 +958,43 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     },
     [bare, guardDateCandidatesOverlapOrAlert, parentScrollRef, parentScrollYRef, scheduleAiReplacesFirstCandidate],
   );
+
+  const openTimePickerForDate = useCallback(
+    (ymd: string, defaultHm?: string, source?: 'calendar' | 'ai') => {
+      const base = clampHm((defaultHm ?? '').trim() || DEFAULT_CALENDAR_PICK_TIME);
+      const d0 = dateFromYmd(ymd) ?? new Date();
+      const m = /^(\d{2}):(\d{2})$/.exec(base);
+      const hh = m ? Number(m[1]) : 19;
+      const mm = m ? Number(m[2]) : 0;
+      const draft = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), hh, mm, 0, 0);
+      setTimePick({ ymd, draft, source });
+    },
+    [],
+  );
+
+  const confirmTimePick = useCallback(() => {
+    const cur = timePick;
+    if (!cur) return;
+    const hm = fmtTime(cur.draft);
+    setTimePick(null);
+    void commitPointCandidate(cur.ymd, hm);
+  }, [commitPointCandidate, timePick]);
+
+  const appendWeekendPreviewSlot = useCallback(
+    async (slot: { ymd: string; hm: string }) => {
+      void commitPointCandidate(slot.ymd, slot.hm);
+    },
+    [commitPointCandidate],
+  );
+
+  const onPressAiPreviewParsed = useCallback(() => {
+    const c = nlpParsed?.candidate;
+    const sd = String(c?.startDate ?? '').trim();
+    const st = String(c?.startTime ?? '').trim();
+    const ymd = sd || fmtDate(new Date());
+    const hm = st || DEFAULT_CALENDAR_PICK_TIME;
+    void commitPointCandidate(ymd, hm);
+  }, [commitPointCandidate, nlpParsed]);
 
   useImperativeHandle(
     ref,
@@ -1296,6 +1377,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       setPlaceSearchRows([]);
       setPlaceSearchErr(null);
       setPlaceSearchLoading(false);
+      setPlaceSearchLoadingMore(false);
+      setPlaceSearchNextStart(null);
+      placeSearchQueryKeyRef.current = '';
+      setPlaceThumbById({});
       return undefined;
     }
     let alive = true;
@@ -1306,13 +1391,22 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         try {
           const { bias } = await ensureNearbySearchBias();
           if (!alive) return;
-          const list = await searchNaverLocalPlaces(qTrim, { locationBias: bias });
+          const list = await searchNaverLocalPlaces(qTrim, {
+            locationBias: bias,
+            start: 1,
+            display: PLACE_SEARCH_INITIAL_PAGE_SIZE,
+          });
           if (!alive) return;
           setPlaceSearchRows(list);
+          // 첫 페이지가 5개 미만이어도 다음 페이지를 시도할 수 있게 nextStart를 열어둡니다.
+          setPlaceSearchNextStart(list.length > 0 ? 1 + PLACE_SEARCH_INITIAL_PAGE_SIZE : null);
+          placeSearchQueryKeyRef.current = qTrim;
+          setPlaceThumbById({});
         } catch (e) {
           if (!alive) return;
           setPlaceSearchRows([]);
           setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
+          setPlaceSearchNextStart(null);
         } finally {
           if (alive) setPlaceSearchLoading(false);
         }
@@ -1324,20 +1418,95 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     };
   }, [placeQuery, placesListOnly, showPlaces]);
 
+  useEffect(() => {
+    if (!showPlaces || placesListOnly) return undefined;
+    if (placeSearchLoading) return undefined;
+    if (placeSearchErr) return undefined;
+    if (placeSearchRows.length === 0) return undefined;
+
+    const visible = placeSearchRows.slice(0, Math.min(30, placeSearchRows.length));
+    let alive = true;
+    const t = setTimeout(() => {
+      void (async () => {
+        for (const row of visible) {
+          if (!alive) return;
+          if (placeThumbById[row.id] !== undefined) continue;
+          const q = `${row.title} ${(row.roadAddress || row.address || row.category || '').trim()}`.trim();
+          try {
+            const thumb = await searchNaverImageThumbnail(q);
+            if (!alive) return;
+            setPlaceThumbById((prev) => {
+              if (prev[row.id] !== undefined) return prev;
+              return { ...prev, [row.id]: thumb };
+            });
+          } catch {
+            if (!alive) return;
+            setPlaceThumbById((prev) => {
+              if (prev[row.id] !== undefined) return prev;
+              return { ...prev, [row.id]: null };
+            });
+          }
+        }
+      })();
+    }, 220);
+
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // placeThumbById는 inside에서 undefined 체크로 보호합니다(반복 effect 비용 최소화).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeSearchErr, placeSearchLoading, placeSearchRows, placesListOnly, showPlaces]);
+
+  const loadMorePlaceSearchRows = useCallback(() => {
+    if (!showPlaces || placesListOnly) return;
+    if (placeSearchLoading || placeSearchLoadingMore) return;
+    if (placeSearchErr) return;
+    const nextStart = placeSearchNextStart;
+    if (nextStart == null) return;
+    const qTrim = placeQuery.trim();
+    if (!qTrim) return;
+    if (placeSearchQueryKeyRef.current !== qTrim) return;
+
+    setPlaceSearchLoadingMore(true);
+    void (async () => {
+      try {
+        const { bias } = await ensureNearbySearchBias();
+        const list = await searchNaverLocalPlaces(qTrim, {
+          locationBias: bias,
+          start: nextStart,
+          display: PLACE_SEARCH_PAGE_SIZE,
+        });
+        setPlaceSearchRows((prev) => {
+          const seen = new Set(prev.map((r) => r.id));
+          const add = list.filter((r) => !seen.has(r.id));
+          return add.length > 0 ? [...prev, ...add] : prev;
+        });
+        setPlaceSearchNextStart(list.length > 0 ? nextStart + PLACE_SEARCH_PAGE_SIZE : null);
+      } catch (e) {
+        setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
+        setPlaceSearchNextStart(null);
+      } finally {
+        setPlaceSearchLoadingMore(false);
+      }
+    })();
+  }, [
+    placeQuery,
+    placeSearchErr,
+    placeSearchLoading,
+    placeSearchLoadingMore,
+    placeSearchNextStart,
+    placesListOnly,
+    showPlaces,
+  ]);
+
   const scheduleSection = (
     <>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>일시 후보</Text>
-      </View>
-      <Text style={styles.sectionHint}>
-        {scheduleListOnly
-          ? '확정한 일시 후보예요. 필요하면 카드를 펼쳐 내용을 바꿀 수 있어요.'
-          : '날짜·시간 후보를 추가하고 투표에서 고를 수 있어요.'}
-      </Text>
+
 
       {!scheduleListOnly ? (
         <View style={styles.nlpSection}>
-          <Text style={styles.aiQuickInitLabel}>말로 일정 아이디어를 입력해보세요</Text>
+          
           <LinearGradient
             colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
             start={{ x: 0, y: 0 }}
@@ -1383,7 +1552,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           </LinearGradient>
 
           <View style={styles.aiPreviewRow}>
-            <Text style={styles.aiPreviewHint}>AI 미리보기</Text>
+            
             {weekendPreviewSlots.length > 0 ? (
               <ScrollView
                 horizontal
@@ -1408,7 +1577,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               </ScrollView>
             ) : nlpParsed ? (
               <Pressable
-                onPress={applyNlpSuggestion}
+                onPress={onPressAiPreviewParsed}
                 style={({ pressed }) => [
                   styles.aiPreviewScheduleChip,
                   styles.aiPreviewScheduleChipFull,
@@ -1436,7 +1605,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             )}
           </View>
 
-          {!scheduleAiReplacesFirstCandidate ? (
+          {!scheduleAiReplacesFirstCandidate && !(bare && wizardSegment === 'schedule') ? (
             <Pressable
               onPress={addDateRow}
               style={({ pressed }) => [styles.addCandidateBtn, pressed && styles.addCandidateBtnPressed]}
@@ -1450,35 +1619,176 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </View>
       ) : null}
 
-      {dateCandidates.map((d, dateIndex) => (
-        <DateCandidateEditorCard
-          key={d.id}
-          d={d}
-          dateIndex={dateIndex}
-          expanded={!!dateDetailExpanded[d.id]}
-          onToggleExpanded={() => {
-            animate();
-            setDateDetailExpanded((prev) => ({ ...prev, [d.id]: !prev[d.id] }));
-          }}
-          canDelete={!scheduleListOnly && dateCandidates.length > 1}
-          onRemove={() => removeDateRow(d.id)}
+      {(() => {
+        const monthStart = dateFromYmd(calendarMonth) ?? new Date();
+        const year = monthStart.getFullYear();
+        const month = monthStart.getMonth(); // 0-based
+        const firstDow = new Date(year, month, 1).getDay(); // 0 Sun .. 6 Sat
+        // 6주(42칸) 고정: 토요일 포함 요일 누락/비는 현상을 방지합니다.
+        const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
+        const gridStart = new Date(year, month, 1 - firstDow);
+        for (let i = 0; i < 42; i += 1) {
+          const d = new Date(gridStart);
+          d.setDate(gridStart.getDate() + i);
+          cells.push({ ymd: fmtDate(d), day: d.getDate(), inMonth: d.getMonth() === month });
+        }
+
+        const byDay: Record<string, string[]> = {};
+        dateCandidates.forEach((dc) => {
+          const ymd = String(dc.startDate ?? '').trim();
+          const hm = String(dc.startTime ?? '').trim();
+          if (!ymd) return;
+          if (!byDay[ymd]) byDay[ymd] = [];
+          if (hm) byDay[ymd].push(hm);
+        });
+        Object.keys(byDay).forEach((k) => {
+          const uniq = [...new Set(byDay[k])];
+          uniq.sort((a, b) => a.localeCompare(b));
+          byDay[k] = uniq;
+        });
+
+        const monthLabel = `${year}.${pad2(month + 1)}`;
+        const todayYmd = fmtDate(new Date());
+        const compactCalendar = bare && wizardSegment === 'schedule';
+        return (
+          <View style={styles.scheduleCalendarWrap}>
+            <View style={styles.scheduleCalendarHeaderRow}>
+              <Pressable
+                onPress={() => {
+                  const prev = new Date(year, month - 1, 1);
+                  setCalendarMonth(monthStartYmd(fmtDate(prev)));
+                }}
+                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="이전 달">
+                <Ionicons name="chevron-back" size={18} color={GinitTheme.colors.primary} />
+              </Pressable>
+              <Text style={styles.scheduleCalendarTitle}>{monthLabel}</Text>
+              <Pressable
+                onPress={() => {
+                  const next = new Date(year, month + 1, 1);
+                  setCalendarMonth(monthStartYmd(fmtDate(next)));
+                }}
+                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="다음 달">
+                <Ionicons name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
+              </Pressable>
+            </View>
+            <View style={styles.calendarDowRow}>
+              {WEEKDAY_KO.map((w) => (
+                <Text key={w} style={styles.calendarDowText}>
+                  {w}
+                </Text>
+              ))}
+            </View>
+            <View style={styles.calendarGrid}>
+              {Array.from({ length: 6 }).map((_, wi) => {
+                const week = cells.slice(wi * 7, wi * 7 + 7);
+                const weekHasAnyTimes = week.some((c) => (byDay[c.ymd]?.length ?? 0) > 0);
+                return (
+                  <View
+                    key={`week-${wi}`}
+                    style={[
+                      styles.calendarWeekRow,
+                      !weekHasAnyTimes && styles.calendarWeekRowEmpty,
+                      // 마지막 주는 아래 여백 제거
+                      wi === 5 ? { marginBottom: 0 } : null,
+                    ]}>
+                    {week.map((c) => {
+                      const times = byDay[c.ymd] ?? [];
+                      const has = times.length > 0;
+                      const lastTime = times[times.length - 1] ?? '';
+                      const isPast = c.ymd < todayYmd;
+                      return (
+                        <Pressable
+                          key={c.ymd}
+                          disabled={isPast}
+                          onPress={() => {
+                            if (isPast) return;
+                            openTimePickerForDate(c.ymd, has ? lastTime : DEFAULT_CALENDAR_PICK_TIME, 'calendar');
+                          }}
+                          style={({ pressed }) => [
+                            styles.calendarCell,
+                            compactCalendar && styles.calendarCellCompact,
+                            !weekHasAnyTimes && styles.calendarCellRowEmpty,
+                            !c.inMonth && styles.calendarCellOut,
+                            has && styles.calendarCellHas,
+                            isPast && styles.calendarCellDisabled,
+                            pressed && !isPast && styles.calendarCellPressed,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${c.ymd}${has ? ` ${times.length}개` : ''}`}>
+                          <Text
+                            style={[
+                              styles.calendarCellDay,
+                              compactCalendar && styles.calendarCellDayCompact,
+                              !c.inMonth && styles.calendarCellDayOut,
+                            ]}>
+                            {c.day}
+                          </Text>
+                          {has ? (
+                            <View style={styles.calendarTimesWrap} pointerEvents="none">
+                              {times.map((t) => (
+                                <Text
+                                  key={`${c.ymd}-${t}`}
+                                  style={[styles.calendarCellMeta, compactCalendar && styles.calendarCellMetaCompact]}>
+                                  {t}
+                                </Text>
+                              ))}
+                            </View>
+                          ) : (
+                            <Text
+                              style={[
+                                styles.calendarCellMetaEmpty,
+                                compactCalendar && styles.calendarCellMetaEmptyCompact,
+                              ]}
+                              numberOfLines={1}>
+                              {' '}
+                            </Text>
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        );
+      })()}
+
+      {!(bare && wizardSegment === 'schedule') ? (
+        dateCandidates.map((d, dateIndex) => (
+          <DateCandidateEditorCard
+            key={d.id}
+            d={d}
+            dateIndex={dateIndex}
+            expanded={!!dateDetailExpanded[d.id]}
+            onToggleExpanded={() => {
+              animate();
+              setDateDetailExpanded((prev) => ({ ...prev, [d.id]: !prev[d.id] }));
+            }}
+            canDelete={!scheduleListOnly && dateCandidates.length > 1}
+            onRemove={() => removeDateRow(d.id)}
             onPatch={(patch: Partial<DateCandidate>) => updateDateRow(d.id, patch)}
-          reduceHeavyEffects={reduceHeavyEffects}
+            reduceHeavyEffects={reduceHeavyEffects}
             onOpenPicker={(field: DatePickerField) => openPicker(d.id, field)}
-          deadlineTick={deadlineTick}
-          onSubmitLastFieldInCard={
-            scheduleListOnly || Platform.OS !== 'web' ? undefined : () => focusNextDateCandidateAfterWebSubmit(d.id)
-          }
-        />
-      ))}
+            deadlineTick={deadlineTick}
+            onSubmitLastFieldInCard={
+              scheduleListOnly || Platform.OS !== 'web' ? undefined : () => focusNextDateCandidateAfterWebSubmit(d.id)
+            }
+          />
+        ))
+      ) : null}
     </>
   );
 
   const placesInner = (
     <>
-      <View style={[styles.sectionHeader, wizardSegment === 'places' ? undefined : styles.sectionGap]}>
+      {/* <View style={[styles.sectionHeader, wizardSegment === 'places' ? undefined : styles.sectionGap]}>
         <Text style={styles.sectionTitle}>장소 후보</Text>
-      </View>
+      </View> */}
       <Text style={styles.sectionHint}>
         {placesListOnly
           ? '확정한 장소 후보예요. 필요하면 카드를 탭해 장소를 다시 고를 수 있어요.'
@@ -1547,24 +1857,30 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           ) : null}
 
           {(() => {
-            // 1열 리스트 기준: 후보 3개가 한 번에 보이는 높이로 고정
-            const placeResultsViewportH = Math.min(420, Math.max(300, Math.round(windowHeight * 0.32)));
             const listEmpty = !placeSearchLoading && !placeSearchErr && placeSearchRows.length === 0;
             const centerEmpty = listEmpty || placeSearchLoading;
+            const visible = placeSearchRows;
             return (
-              <View style={[styles.placeResultsScrollHost, { height: placeResultsViewportH }]}>
+              <View style={[styles.placeResultsScrollHost, styles.placeResultsCarouselHost]}>
                 <ScrollView
+                  horizontal={!centerEmpty}
                   nestedScrollEnabled
                   keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator
+                  showsHorizontalScrollIndicator={false}
+                  showsVerticalScrollIndicator={false}
+                  scrollEventThrottle={16}
+                  onScroll={(e) => {
+                    if (centerEmpty) return;
+                    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                    if (contentSize.width <= 0) return;
+                    const nearEnd = contentOffset.x + layoutMeasurement.width >= contentSize.width - 120;
+                    if (nearEnd) loadMorePlaceSearchRows();
+                  }}
                   style={styles.placeResultsScrollView}
                   contentContainerStyle={[
                     styles.placeResultsScrollContent,
-                    centerEmpty && {
-                      flexGrow: 1,
-                      minHeight: placeResultsViewportH - 4,
-                      justifyContent: 'center',
-                    },
+                    styles.placeResultsCarouselContent,
+                    centerEmpty && { flexGrow: 1, justifyContent: 'center', paddingVertical: 0 },
                   ]}>
                   {placeSearchLoading ? (
                     <View style={styles.placeResultsStatus}>
@@ -1576,53 +1892,108 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   ) : listEmpty ? (
                     <Text style={styles.placeResultsStatusText}>검색 결과가 없어요.</Text>
                   ) : (
-                    <View style={styles.placeResultsGrid}>
-                      {placeSearchRows.slice(0, 12).map((item) => {
-                        const title = item.title;
-                        const addr = (item.roadAddress || item.address || '').trim() || item.category;
-                        return (
-                          <Pressable
-                            key={item.id}
-                            onPress={() => {
-                              layoutAnimateEaseInEaseOut();
-                              setPlaceSearchLoading(true);
-                              void (async () => {
-                                try {
-                                  const resolved = await resolveNaverPlaceCoordinates(item);
-                                  const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
-                                  if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
-                                  const p: PlaceCandidate = {
-                                    id: newId('place'),
-                                    placeName: resolved.title.trim(),
-                                    address,
-                                    latitude: resolved.latitude,
-                                    longitude: resolved.longitude,
-                                  };
-                                  setPlaceCandidates((prev) => {
-                                    const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
-                                    if (hit) return prev;
-                                    return [...prev, placeRowFromCandidate(p)];
-                                  });
-                                } catch (e) {
-                                  setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
-                                } finally {
-                                  setPlaceSearchLoading(false);
+                    visible.map((item) => {
+                      const title = item.title;
+                      const addr = (item.roadAddress || item.address || '').trim() || item.category;
+                      const selected = Boolean(placeSelectedById[item.id]);
+                      const resolving = Boolean(placeResolvingById[item.id]);
+                      const thumb = placeThumbById[item.id] ?? null;
+                      return (
+                        <Pressable
+                          key={item.id}
+                          onPress={() => {
+                            if (resolving) return;
+                            layoutAnimateEaseInEaseOut();
+
+                            if (selected) {
+                              const picked = placeSelectedById[item.id];
+                              setPlaceSelectedById((prev) => {
+                                const next = { ...prev };
+                                delete next[item.id];
+                                return next;
+                              });
+                              setPlaceCandidates((prev) => {
+                                if (!picked) {
+                                  return prev.filter(
+                                    (r) => !(r.placeName === title.trim() && r.address === addr.trim()),
+                                  );
                                 }
-                              })();
-                            }}
-                            style={({ pressed }) => [styles.placeResultCard, pressed && styles.placeResultCardPressed]}
-                            accessibilityRole="button"
-                            accessibilityLabel={title}>
-                            <Text style={styles.placeResultTitle} numberOfLines={2}>
-                              {title}
-                            </Text>
-                            <Text style={styles.placeResultAddr} numberOfLines={2}>
-                              {addr}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
+                                return prev.filter(
+                                  (r) => !(r.placeName === picked.placeName && r.address === picked.address),
+                                );
+                              });
+                              return;
+                            }
+
+                            setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
+                            void (async () => {
+                              try {
+                                const resolved = await resolveNaverPlaceCoordinates(item);
+                                const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
+                                if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
+                                const placeName = resolved.title.trim() || title.trim();
+                                const p: PlaceCandidate = {
+                                  id: newId('place'),
+                                  placeName,
+                                  address,
+                                  latitude: resolved.latitude,
+                                  longitude: resolved.longitude,
+                                };
+
+                                setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
+                                setPlaceCandidates((prev) => {
+                                  const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
+                                  if (hit) return prev;
+                                  return [...prev, placeRowFromCandidate(p)];
+                                });
+                              } catch (e) {
+                                setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+                              } finally {
+                                setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
+                              }
+                            })();
+                          }}
+                          style={({ pressed }) => [
+                            styles.placeResultCard,
+                            styles.placeResultImageCard,
+                            selected && styles.placeResultImageCardSelected,
+                            pressed && styles.placeResultCardPressed,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={title}>
+                          <View style={styles.placeResultImageWrap}>
+                            {thumb ? (
+                              <Image source={{ uri: thumb }} style={styles.placeResultImage} resizeMode="cover" />
+                            ) : (
+                              <View style={styles.placeResultImageFallback} />
+                            )}
+                            {resolving ? (
+                              <View style={styles.placeResultImageOverlay}>
+                                <ActivityIndicator color={GinitTheme.colors.primary} />
+                              </View>
+                            ) : selected ? (
+                              <View style={styles.placeResultImageOverlay}>
+                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                              </View>
+                            ) : null}
+                          </View>
+                          <Text style={styles.placeResultTitle} numberOfLines={2}>
+                            {title}
+                          </Text>
+                          <Text style={styles.placeResultAddr} numberOfLines={2}>
+                            {addr}
+                          </Text>
+                        </Pressable>
+                      );
+                    }).concat(
+                      placeSearchLoadingMore
+                        ? [
+                            <View key="place-loading-more" style={styles.placeResultsLoadingMore}>
+                              <ActivityIndicator color={GinitTheme.colors.primary} />
+                            </View>,
+                          ]
+                        : [],
+                    )
                   )}
                 </ScrollView>
               </View>
@@ -1631,7 +2002,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </>
       ) : null}
 
-      {placeCandidates.length > 0 ? (
+      {placesListOnly && placeCandidates.length > 0 ? (
         <View style={{ marginTop: 10 }}>
           <Text style={styles.wizardFieldLabel}>선택된 장소 후보</Text>
           {placeCandidates.map((row) => (
@@ -1680,6 +2051,60 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           {formBody}
         </ScrollView>
       )}
+
+      {timePick ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
+          <View style={GinitStyles.modalRoot}>
+            <Pressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
+            <View style={[GinitStyles.modalSheet, { maxHeight: 320 }]}>
+              <View style={GinitStyles.modalHeader}>
+                <Pressable onPress={() => setTimePick(null)} hitSlop={10}>
+                  <Text style={GinitStyles.modalCancel}>취소</Text>
+                </Pressable>
+                <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
+                  <Text style={GinitStyles.modalTitle}>시간 선택</Text>
+                  <Text style={styles.timePickHint} numberOfLines={1}>
+                    {timePick.ymd}
+                  </Text>
+                </View>
+                <Pressable onPress={confirmTimePick} hitSlop={10}>
+                  <Text style={GinitStyles.modalDone}>완료</Text>
+                </Pressable>
+              </View>
+              <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                <DateTimePicker
+                  value={timePick.draft}
+                  mode="time"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(event, d) => {
+                    // Android는 네이티브 다이얼로그 이벤트(type=set/dismissed)가 오므로,
+                    // 선택/취소 시점에 모달을 확실히 닫고 반영합니다.
+                    if (Platform.OS === 'android') {
+                      const t = (event as unknown as { type?: string } | null)?.type ?? '';
+                      if (t === 'dismissed') {
+                        setTimePick(null);
+                        return;
+                      }
+                      if (t === 'set' && d) {
+                        const ymd = timePick.ymd;
+                        setTimePick(null);
+                        void commitPointCandidate(ymd, fmtTime(d));
+                        return;
+                      }
+                      // fallback: 값이 없으면 닫기만
+                      if (!d) setTimePick(null);
+                      return;
+                    }
+
+                    if (!d) return;
+                    setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
+                  }}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
 
       {picker && Platform.OS === 'ios' ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setPicker(null)}>
@@ -2939,11 +3364,11 @@ export default function CreateDetailsScreen() {
                     <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(scheduleStep, e)}>
                       <View style={styles.scheduleStepHeader}>
                         <Text style={styles.wizardStepBadge}>일정 설정</Text>
-                        <Text style={styles.wizardLockedHint}>
+                        {/* <Text style={styles.wizardLockedHint}>
                           {currentStep === scheduleStep
-                            ? '말로 입력하거나 카드에서 일시 후보를 다듬어 주세요.'
+                            ? '하거나 카드에서 일시 후보를 다듬어 주세요.'
                             : '확정한 일시 후보예요. 필요하면 이전 단계로 돌아가 수정할 수 있어요.'}
-                        </Text>
+                        </Text> */}
                       </View>
 
                       {currentStep === scheduleStep ? (
@@ -3572,6 +3997,140 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     maxWidth: 220,
   },
+  scheduleCalendarWrap: {
+    marginTop: 10,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    overflow: 'hidden',
+  },
+  scheduleCalendarHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  scheduleCalendarTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: GinitTheme.colors.text,
+    letterSpacing: -0.2,
+  },
+  calendarNavBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+  },
+  calendarNavBtnPressed: {
+    opacity: 0.9,
+  },
+  calendarDowRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  calendarDowText: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+  },
+  calendarGrid: {
+    paddingHorizontal: 8,
+    paddingBottom: 10,
+  },
+  calendarWeekRow: {
+    flexDirection: 'row',
+    width: '100%',
+    marginBottom: 8,
+  },
+  calendarWeekRowEmpty: {
+    marginBottom: 2,
+  },
+  calendarCell: {
+    flexGrow: 1,
+    flexBasis: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    borderRadius: 12,
+  },
+  calendarCellCompact: {
+    paddingVertical: 3,
+    minHeight: 22,
+  },
+  calendarCellRowEmpty: {
+    paddingVertical: 2,
+    minHeight: 18,
+  },
+  calendarCellOut: {
+    opacity: 0.42,
+  },
+  calendarCellHas: {
+    backgroundColor: 'rgba(0, 82, 204, 0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.18)',
+  },
+  calendarCellPressed: {
+    opacity: 0.9,
+  },
+  calendarCellDisabled: {
+    opacity: 0.35,
+  },
+  calendarCellDay: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: GinitTheme.colors.text,
+    lineHeight: 18,
+  },
+  calendarCellDayCompact: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  calendarCellDayOut: {
+    color: GinitTheme.colors.textMuted,
+  },
+  calendarTimesWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarCellMeta: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '800',
+    color: GinitTheme.colors.primary,
+  },
+  calendarCellMetaCompact: {
+    marginTop: 1,
+    fontSize: 9,
+  },
+  calendarCellMetaEmpty: {
+    marginTop: 2,
+    fontSize: 10,
+    color: 'transparent',
+  },
+  calendarCellMetaEmptyCompact: {
+    marginTop: 1,
+    fontSize: 9,
+  },
+  timePickHint: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+  },
   placeResultsScrollHost: {
     width: '100%',
     marginTop: 4,
@@ -3587,6 +4146,20 @@ const styles = StyleSheet.create({
   placeResultsScrollContent: {
     paddingBottom: 10,
     paddingHorizontal: 4,
+  },
+  placeResultsCarouselHost: {
+    height: 246,
+  },
+  placeResultsCarouselContent: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    gap: 10,
+  },
+  placeResultsLoadingMore: {
+    width: 76,
+    height: 176,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   placeResultsGrid: {
     flexDirection: 'column',
@@ -3613,6 +4186,43 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     paddingVertical: 10,
     paddingHorizontal: 10,
+  },
+  placeResultImageCard: {
+    width: 176,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  placeResultImageCardSelected: {
+    borderColor: 'rgba(134, 211, 183, 0.9)',
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+  },
+  placeResultImageWrap: {
+    width: '100%',
+    height: 112,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  placeResultImage: {
+    width: '100%',
+    height: '100%',
+  },
+  placeResultImageFallback: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  placeResultImageOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderRadius: 999,
+    padding: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
   },
   placeResultCardPressed: {
     opacity: 0.92,

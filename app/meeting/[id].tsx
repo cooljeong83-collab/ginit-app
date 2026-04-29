@@ -3,10 +3,10 @@ import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
@@ -32,18 +32,16 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { getPolicy } from '@/src/lib/app-policies-store';
-import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
+import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import {
   acceptGinitRequest,
   fetchFriendRelationStatus,
   sendGinitRequest,
   type FriendRelationStatusRow,
 } from '@/src/lib/friends';
-import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
@@ -58,6 +56,7 @@ import {
 } from '@/src/lib/meeting-schedule-overlap';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  applyTrustPenaltyLeaveConfirmedMeeting,
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
   deleteMeetingByHost,
@@ -68,7 +67,6 @@ import {
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
-  applyTrustPenaltyLeaveConfirmedMeeting,
   joinMeeting,
   leaveMeeting,
   meetingPrimaryStartMs,
@@ -80,9 +78,13 @@ import {
   updateParticipantVotes,
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
+import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
+import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
+import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -372,6 +374,7 @@ export default function MeetingDetailScreen() {
   const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
   /** 장소 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedPlaceIds, setSelectedPlaceIds] = useState<string[]>([]);
+  const [placeThumbByChipId, setPlaceThumbByChipId] = useState<Record<string, string | null>>({});
   /** 영화 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -816,6 +819,20 @@ export default function MeetingDetailScreen() {
     return { scheduleDate: fmtDateYmd(new Date()), scheduleTime: '15:00' };
   }, [meeting?.scheduleDate, meeting?.scheduleTime]);
 
+  const isHost = useMemo(() => (meeting ? isMeetingHost(userId, meeting.createdBy) : false), [meeting, userId]);
+
+  const orderedParticipantIdsList = useMemo(() => (meeting ? orderedParticipantIds(meeting) : []), [meeting]);
+
+  const sessionPk = useMemo(
+    () => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''),
+    [userId],
+  );
+
+  const alreadyJoinedMeeting = useMemo(() => {
+    if (!sessionPk) return false;
+    return orderedParticipantIdsList.includes(sessionPk);
+  }, [sessionPk, orderedParticipantIdsList]);
+
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
     const dates = [
@@ -841,6 +858,8 @@ export default function MeetingDetailScreen() {
   }, []);
 
   const openPlaceProposeModal = useCallback(() => {
+    // 관심지역(active feed region) 기준으로 최신 바이어스를 쓰도록 캐시를 비웁니다.
+    invalidateNearbySearchBiasCache();
     setPlaceProposeFormKey((k) => k + 1);
     setPlaceProposeOpen(true);
   }, []);
@@ -907,7 +926,7 @@ export default function MeetingDetailScreen() {
     } finally {
       setProposeSaving(false);
     }
-  }, [meeting, userId, queryClient]);
+  }, [meeting, queryClient, userId]);
 
   const confirmPlaceProposals = useCallback(async () => {
     if (!meeting) return;
@@ -975,15 +994,6 @@ export default function MeetingDetailScreen() {
     );
   }, []);
 
-  const isHost = useMemo(() => (meeting ? isMeetingHost(userId, meeting.createdBy) : false), [meeting, userId]);
-
-  const orderedParticipantIdsList = useMemo(() => (meeting ? orderedParticipantIds(meeting) : []), [meeting]);
-
-  const sessionPk = useMemo(
-    () => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''),
-    [userId],
-  );
-
   // 모임 상세 열람 게이트: 모임 이용 인증(약관+전화+성별/생년월일)이 완료되지 않으면 상세를 숨깁니다.
   useEffect(() => {
     let cancelled = false;
@@ -1012,11 +1022,6 @@ export default function MeetingDetailScreen() {
       cancelled = true;
     };
   }, [sessionPk]);
-
-  const alreadyJoinedMeeting = useMemo(() => {
-    if (!sessionPk) return false;
-    return orderedParticipantIdsList.includes(sessionPk);
-  }, [sessionPk, orderedParticipantIdsList]);
 
   useEffect(() => {
     if (!meeting || !sessionPk) {
@@ -1378,6 +1383,40 @@ export default function MeetingDetailScreen() {
     selectedMovieIds,
     queryClient,
   ]);
+
+  useEffect(() => {
+    if (placeChipsShown.length === 0) return;
+    let alive = true;
+    const visible = placeChipsShown.slice(0, 24);
+    const t = setTimeout(() => {
+      void (async () => {
+        for (const chip of visible) {
+          if (!alive) return;
+          if (placeThumbByChipId[chip.id] !== undefined) continue;
+          const q = `${chip.title} ${(chip.sub ?? '').trim()}`.trim();
+          try {
+            const thumb = await searchNaverImageThumbnail(q);
+            if (!alive) return;
+            setPlaceThumbByChipId((prev) => {
+              if (prev[chip.id] !== undefined) return prev;
+              return { ...prev, [chip.id]: thumb };
+            });
+          } catch {
+            if (!alive) return;
+            setPlaceThumbByChipId((prev) => {
+              if (prev[chip.id] !== undefined) return prev;
+              return { ...prev, [chip.id]: null };
+            });
+          }
+        }
+      })();
+    }, 180);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeChipsShown]);
 
   /** 투표 선택을 서버에 반영(호스트/참여자 공통, 자동 저장에서 호출) */
   const flushVoteSelectionsToServer = useCallback(async (): Promise<boolean> => {
@@ -2380,58 +2419,81 @@ export default function MeetingDetailScreen() {
                         height={200}
                         borderRadius={12}
                       />
+                      <Pressable
+                        onPress={() => {
+                          const name = placeChips[0]?.title?.trim();
+                          void openNaverMapAt(singlePlaceCoords.latitude, singlePlaceCoords.longitude, name).then((ok) => {
+                            if (!ok) Alert.alert('안내', '네이버 지도를 열 수 없어요.');
+                          });
+                        }}
+                        style={({ pressed }) => [
+                          styles.confirmedMapTapOverlay,
+                          pressed && styles.confirmedMapTapOverlayPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="네이버 지도에서 이 장소 보기">
+                        <View style={StyleSheet.absoluteFillObject} collapsable={false} />
+                      </Pressable>
+                      <View style={styles.confirmedMapBadge} pointerEvents="none">
+                        <Ionicons name="navigate-outline" size={14} color="#fff" />
+                        <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
+                      </View>
                     </View>
                   </View>
                 ) : null}
               </>
             ) : placeChips.length > 0 ? (
               <>
-                <VoteCandidateListV
-                  items={placeChipsShown}
-                  style={styles.candidateListV}
-                  keyForItem={(chip) => chip.id}
-                  renderItem={(chip) => {
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.placeVoteCarouselContent}>
+                  {placeChipsShown.map((chip) => {
                     const chipSelected = placeHostPickMode
                       ? hostTiePlaceId === chip.id
                       : selectedPlaceIds.includes(chip.id);
                     const tally = meeting.voteTallies?.places?.[chip.id] ?? 0;
+                    const thumb = placeThumbByChipId[chip.id] ?? null;
                     return (
                       <Pressable
+                        key={chip.id}
                         onPress={() => onPlaceChipPress(chip.id)}
                         style={({ pressed }) => [
-                          styles.dateChip,
-                          styles.placeVoteChip,
-                          styles.candidateChipV,
-                          chipSelected ? styles.dateChipSelected : null,
+                          styles.placeVoteCard,
+                          chipSelected ? styles.placeVoteCardSelected : null,
                           pressed ? styles.dateChipPressed : null,
                         ]}
-                        accessibilityRole="radio"
+                        accessibilityRole={placeHostPickMode ? 'radio' : 'checkbox'}
                         accessibilityState={{ checked: chipSelected, selected: chipSelected }}
                         accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
-                        <View style={styles.voteTallyBadge} pointerEvents="none">
-                          <Text style={styles.voteTallyBadgeText}>{tally}</Text>
-                        </View>
-                        {chipSelected ? (
-                          <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
-                            <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
+                        <View style={styles.placeVoteImageWrap}>
+                          {thumb ? (
+                            <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+                          ) : (
+                            <View style={styles.placeVoteImageFallback} />
+                          )}
+                          <View style={styles.placeVoteTallyBadge} pointerEvents="none">
+                            <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                           </View>
-                        ) : null}
-                        <Text
-                          style={[styles.dateChipTitle, styles.dateChipTitleV, chipSelected && styles.dateChipTitleSelected]}
-                          numberOfLines={2}>
+                          {chipSelected ? (
+                            <View style={styles.placeVoteSelectedOverlay} pointerEvents="none">
+                              <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={styles.placeVoteTitle} numberOfLines={2}>
                           {chip.title}
                         </Text>
                         {chip.sub ? (
-                          <Text
-                            style={[styles.dateChipSub, styles.dateChipSubV, chipSelected && styles.dateChipSubSelected]}
-                            numberOfLines={2}>
+                          <Text style={styles.placeVoteSub} numberOfLines={2}>
                             {chip.sub}
                           </Text>
                         ) : null}
                       </Pressable>
                     );
-                  }}
-                />
+                  })}
+                </ScrollView>
                 <Text
                   style={
                     placeHostPickMode
@@ -2454,11 +2516,7 @@ export default function MeetingDetailScreen() {
             ) : (
               <Text style={styles.infoRowMuted}>등록된 장소 후보가 없어요.</Text>
             )}
-            <Text style={styles.placePayNote}>결제: 💵 1/N 정산 (안내)</Text>
-            <Pressable style={styles.pencilPlaceRow} accessibilityRole="button" accessibilityLabel="장소 수정">
-              <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
-              <Text style={styles.pencilPlaceRowText}>장소 편집</Text>
-            </Pressable>
+            
 
             <Pressable
               style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
@@ -2682,31 +2740,45 @@ export default function MeetingDetailScreen() {
               <View style={styles.guestJoinBottomCol}>
                 <View style={styles.bottomBarEqualRow}>
                   <Pressable
-                    onPress={() => void handleJoinMeeting()}
-                    disabled={joinBusy || !guestVotesReady || joinScheduleOverlapBlock}
+                    onPress={() => {
+                      if (joinBusy) {
+                        Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
+                        return;
+                      }
+                      if (joinScheduleOverlapBlock) {
+                        Alert.alert(
+                          '일정 겹침',
+                          `이미 확정된 다른 모임과 시간이 겹칠 수 있어요. (겹침 방지 ${joinOverlapBufferHours}시간)`,
+                        );
+                        return;
+                      }
+                      void handleJoinMeeting();
+                    }}
                     style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillOrange,
+                      styles.joinCtaBtn,
                       styles.bottomPillFlex,
-                      (joinBusy || !guestVotesReady || joinScheduleOverlapBlock) && { opacity: 0.75 },
-                      pressed &&
-                        !joinBusy &&
-                        guestVotesReady &&
-                        !joinScheduleOverlapBlock && { opacity: 0.9 },
+                      joinBusy && { opacity: 0.75 },
+                      pressed && !joinBusy && { opacity: 0.9 },
                     ]}
                     accessibilityRole="button"
                     accessibilityLabel="모임 참여">
-                    {joinBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="hand-right-outline" size={18} color={GinitTheme.colors.text} />
-                    )}
-                    <Text
-                      style={[styles.pillText, styles.pillTextOnOrange, styles.bottomPillLabel, { color: GinitTheme.colors.text }]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      참여
-                    </Text>
+                    <LinearGradient
+                      colors={GinitTheme.colors.ctaGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.joinCtaBg}
+                      pointerEvents="none"
+                    />
+                    <View style={styles.joinCtaInner} pointerEvents="none">
+                      {joinBusy ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                      )}
+                      <Text style={styles.joinCtaLabel} numberOfLines={1} ellipsizeMode="tail">
+                        참여
+                      </Text>
+                    </View>
                   </Pressable>
                 </View>
                 {joinScheduleOverlapBlock ? (
@@ -2739,7 +2811,7 @@ export default function MeetingDetailScreen() {
                 styles.proposeModalSheetDateCompact,
                 {
                   maxHeight: Math.round(
-                    Math.min(windowHeight * 0.62, windowHeight - 56),
+                    Math.min(windowHeight * 0.86, windowHeight - 56),
                   ),
                 },
               ]}>
@@ -2757,7 +2829,7 @@ export default function MeetingDetailScreen() {
                   style={[
                     styles.proposeModalFormScroll,
                     styles.proposeModalFormScrollDate,
-                    { maxHeight: Math.round(windowHeight * 0.36) },
+                    { maxHeight: Math.round(windowHeight * 0.62) },
                   ]}
                   contentContainerStyle={[
                     styles.proposeModalFormScrollContent,
@@ -2778,7 +2850,6 @@ export default function MeetingDetailScreen() {
                     initialPayload={proposeInitialPayload}
                     bare
                     wizardSegment="schedule"
-                    scheduleAiReplacesFirstCandidate
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
@@ -2829,7 +2900,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+            <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.72) }]}>
               <View style={styles.proposeModalHeaderRow}>
                 <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
                   <Ionicons name="location-outline" size={22} color={GinitTheme.colors.primary} />
@@ -2838,9 +2909,7 @@ export default function MeetingDetailScreen() {
                   <Text style={styles.proposeModalTitle}>장소 제안</Text>
                 </View>
               </View>
-              <Text style={styles.proposeModalSub}>
-                기존 장소 목록은 여기서 바꾸지 않아요. 새로 넣을 장소만 추가하면 기존 후보 뒤에 붙습니다.
-              </Text>
+    
               {placeProposeInitialPayload ? (
                 <KeyboardAwareScreenScroll
                   style={styles.proposeModalFormScroll}
@@ -3077,6 +3146,36 @@ const styles = StyleSheet.create({
   retryText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 12 },
+  joinCtaBtn: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: GinitTheme.glass.borderLight,
+    shadowColor: GinitTheme.glass.shadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 1,
+    shadowRadius: 22,
+    elevation: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+  },
+  joinCtaBg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  joinCtaInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  joinCtaLabel: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.35,
+  },
   titleCard: {
     backgroundColor: '#fff',
     borderRadius: 18,
@@ -3376,6 +3475,71 @@ const styles = StyleSheet.create({
   tieHostHintEm: { fontWeight: '800', color: '#b45309' },
   dateChipScroll: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
   placeVoteChip: { minWidth: 148, maxWidth: 220 },
+  placeVoteCarouselContent: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
+  placeVoteCard: {
+    width: 176,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#E4E9EF',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    position: 'relative',
+    overflow: 'visible',
+    shadowColor: 'rgba(15, 23, 42, 0.06)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  placeVoteCardSelected: {
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(0, 82, 204, 0.07)',
+  },
+  placeVoteImageWrap: {
+    width: '100%',
+    height: 112,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  placeVoteImage: { width: '100%', height: '100%' },
+  placeVoteImageFallback: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.06)' },
+  placeVoteSelectedOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderRadius: 999,
+    padding: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  placeVoteTallyBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 6,
+    minWidth: 27,
+    height: 25,
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.97)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.12)',
+    shadowColor: 'rgba(15, 23, 42, 0.12)',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  placeVoteTitle: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
+  placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
   candidateListV: { gap: 10, paddingBottom: 6 },
   candidateChipV: {
     alignSelf: 'stretch',
@@ -3539,9 +3703,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
     gap: 10,
-    marginTop: 14,
+    marginTop: 5,
     paddingTop: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
+//    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: GinitTheme.colors.border,
   },
   proposeModalFooterDateCompact: {

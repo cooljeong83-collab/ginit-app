@@ -123,6 +123,7 @@ const SHEET_SNAP_THRESHOLD = 0.52;
 const SHEET_VELOCITY_OPEN = -520;
 const SHEET_VELOCITY_CLOSE = 520;
 const MARKER_DARK_NAVY = '#0B1220';
+const MY_LOCATION_CENTER_EXTRA_BOTTOM_PX = 84;
 
 function formatSchedulePretty(m: Pick<Meeting, 'scheduleDate' | 'scheduleTime'>): string | null {
   const d = (m.scheduleDate ?? '').trim();
@@ -260,7 +261,9 @@ function centerLatForBetweenTopAndBottom(
   windowH: number,
 ) {
   const bottomFrac = Math.max(0, Math.min(0.9, bottomSheetPx / Math.max(1, windowH)));
-  const topOverlayPx = Math.max(0, topInsetPx) + 8 + 60; // 카테고리 글래스 바 영역(대략)
+  // 상단 카테고리 메뉴(글래스 바)는 기기/폰트에 따라 높이 체감이 커서,
+  // 내 위치 이동 시 마커가 위쪽으로 붙어 보이지 않도록 추정치를 조금 넉넉하게 잡습니다.
+  const topOverlayPx = Math.max(0, topInsetPx) ; // 카테고리 글래스 바 영역(대략)
   const topFrac = Math.max(0, Math.min(0.4, topOverlayPx / Math.max(1, windowH)));
   const desiredY = (topFrac + (1 - bottomFrac)) / 2;
   const yShiftFrac = 0.5 - desiredY;
@@ -339,6 +342,7 @@ export default function MapScreen() {
   const scrollAfterInteractionCancelRef = useRef<(() => void) | null>(null);
   const lastCompleteRegionRef = useRef<Region | null>(null);
   const lastQueriedRegionRef = useRef<Region | null>(null);
+  const suppressRescanUntilMsRef = useRef(0);
 
   const sheetExpandedPx = useMemo(() => Math.min(Math.round(windowHeight * 0.62), 560), [windowHeight]);
   const sheetCollapsedPx = useMemo(() => {
@@ -536,7 +540,7 @@ export default function MapScreen() {
           u.latitude,
           base.latitudeDelta,
           insets.top ?? 0,
-          sheetPeekHeight,
+          sheetPeekHeight + MY_LOCATION_CENTER_EXTRA_BOTTOM_PX,
           windowHeight,
         ),
         longitude: u.longitude,
@@ -545,7 +549,12 @@ export default function MapScreen() {
       setSearchAnchor(u);
       setListingRegion(r);
       setMapGeoQueryRegion(r);
+      setQueriedRegion(r);
+      setPendingRegion(r);
       lastQueriedRegionRef.current = r;
+      // "내 위치로 이동" 직후 카메라 idle/region 콜백이 연속으로 들어오며
+      // `pendingRegion`이 미세하게 달라져 재검색 버튼이 다시 뜨는 현상을 방지합니다.
+      suppressRescanUntilMsRef.current = Date.now() + 1400;
       setDriftTooFar(false);
       setMapMovedSinceSearch(false);
       try {
@@ -648,6 +657,7 @@ export default function MapScreen() {
   }, [mapGeoQueryRegion]);
 
   const hasPendingRescan = useMemo(() => {
+    if (Date.now() < suppressRescanUntilMsRef.current) return false;
     const q = queriedRegion;
     const p = pendingRegion;
     if (!q || !p) return false;
@@ -2205,7 +2215,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(31, 42, 68, 0.8)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,

@@ -129,7 +129,10 @@ function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] 
 /**
  * openapi 지역 검색 — **X-Naver-Client-Id / X-Naver-Client-Secret 만** (Search API 전용 키).
  */
-async function fetchOpenApiLocalSearch(query: string): Promise<NaverOpenApiLocalJson> {
+async function fetchOpenApiLocalSearch(
+  query: string,
+  opts?: { display?: number; start?: number },
+): Promise<NaverOpenApiLocalJson> {
   const id = publicEnv.naverSearchClientId?.trim();
   const secret = publicEnv.naverSearchClientSecret?.trim();
   if (!id || !secret) {
@@ -139,7 +142,9 @@ async function fetchOpenApiLocalSearch(query: string): Promise<NaverOpenApiLocal
   }
 
   const q = query.trim();
-  const baseUrl = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=5&sort=comment`;
+  const display = Math.min(10, Math.max(1, Math.floor(opts?.display ?? 5)));
+  const start = Math.max(1, Math.floor(opts?.start ?? 1));
+  const baseUrl = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=${display}&start=${start}&sort=comment`;
 
   let url = baseUrl;
   if (Platform.OS === 'web') {
@@ -192,6 +197,10 @@ export type SearchNaverLocalPlacesOptions = {
    * (네이버 Local API는 좌표 파라미터가 없어 쿼리 보강으로 처리)
    */
   locationBias?: string | null;
+  /** openapi local search pagination (1-based) */
+  start?: number;
+  /** openapi local search page size (default 5) */
+  display?: number;
 };
 
 function applyLocationBiasToQuery(trimmed: string, bias: string | null | undefined): string {
@@ -220,7 +229,7 @@ export async function searchNaverLocalPlaces(
 
   if (hasSearchKeys) {
     try {
-      const json = await fetchOpenApiLocalSearch(q);
+      const json = await fetchOpenApiLocalSearch(q, { display: options?.display, start: options?.start });
       const list = parseOpenApiLocalItems(json);
       if (list.length > 0) return list;
     } catch (e) {
