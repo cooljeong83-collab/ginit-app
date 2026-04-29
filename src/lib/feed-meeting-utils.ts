@@ -156,6 +156,14 @@ export function buildFeedChips(meetings: Meeting[], categories: Category[]): Fee
   return [{ filterId: null, label: '전체' }, ...sorted.map((c) => ({ filterId: c.id, label: c.label }))];
 }
 
+/** 지도 탭 상단: `meeting_categories` 마스터 기준 칩(주변에 모임이 없어도 식사·운동 등 전부 표시). */
+export function buildMapCategoryChips(categories: Category[]): FeedChip[] {
+  const sorted = [...categories].sort((a, b) =>
+    a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko'),
+  );
+  return [{ filterId: null, label: '전체' }, ...sorted.map((c) => ({ filterId: c.id, label: c.label }))];
+}
+
 export function sortMeetingsForFeed(
   filtered: Meeting[],
   listSortMode: MeetingListSortMode,

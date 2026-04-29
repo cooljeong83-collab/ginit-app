@@ -1,4 +1,8 @@
-/** 장소 검색 화면 → 모임 등록 화면으로 전달하는 인메모리 브리지 (라우터 back 시 사용). */
+/**
+ * 장소 검색 화면 → 모임 등록 화면으로 전달하는 인메모리 브리지 (라우터 back 시 사용).
+ * 지도 탭 FAB는 동일 객체를 **initialLocation**으로 쓰며, `applyNearbySearchBiasFromMapNavigation`과 함께
+ * 모임 등록 단계의 주변 장소 검색 기준 좌표로 소비됩니다.
+ */
 export type MeetingPlaceSelection = {
   placeName: string;
   address: string;

@@ -149,6 +149,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const friendAcceptHeadsUpNotifiedIdsRef = useRef<Set<string>>(new Set());
   const prevOutboxFriendshipIdsRef = useRef<Set<string>>(new Set());
   const friendOutboxBootstrappedRef = useRef(false);
+  /**
+   * 재설치/첫 로그인 직후: readState가 비어 있는 상태에서 최신 스냅샷이 먼저 들어오면
+   * "미확인"으로 오인해 푸시/로컬 헤드업이 한꺼번에 발생하고,
+   * 직후 베이스라인을 잡으면서 새 소식은 비어 보이는 레이스가 생길 수 있습니다.
+   * 베이스라인(ACK/채팅 읽음 포인터)이 준비된 뒤에만 헤드업을 허용합니다.
+   */
+  const headsUpReadyRef = useRef(false);
+  const [headsUpReady, setHeadsUpReady] = useState(false);
+  const meetingsBootstrappedRef = useRef(false);
+  const [meetingsBootstrapped, setMeetingsBootstrapped] = useState(false);
+  const socialRoomsBootstrappedRef = useRef(false);
+  const [socialRoomsBootstrapped, setSocialRoomsBootstrapped] = useState(false);
 
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
@@ -200,6 +212,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       friendAcceptHeadsUpNotifiedIdsRef.current = new Set();
       prevOutboxFriendshipIdsRef.current = new Set();
       friendOutboxBootstrappedRef.current = false;
+      headsUpReadyRef.current = false;
+      setHeadsUpReady(false);
+      meetingsBootstrappedRef.current = false;
+      setMeetingsBootstrapped(false);
+      socialRoomsBootstrappedRef.current = false;
+      setSocialRoomsBootstrapped(false);
       setPanelOpen(false);
       pushDedupeRef.current = new Set();
       prevParticipantSetRef.current = {};
@@ -242,7 +260,13 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!userId?.trim()) return;
     return subscribeMeetingsHybrid(
-      (list) => setMeetings(list),
+      (list) => {
+        if (!meetingsBootstrappedRef.current) {
+          meetingsBootstrappedRef.current = true;
+          setMeetingsBootstrapped(true);
+        }
+        setMeetings(list);
+      },
       () => {
         /* 목록 오류는 각 탭에서 처리 */
       },
@@ -349,9 +373,43 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     };
   }, [friendAcceptQueue]);
 
+  /**
+   * 헤드업 알림은 "초기 베이스라인"이 준비된 뒤부터 허용합니다.
+   * - 모임: meetingAckFingerprint, chatReadMessageId가 모두 세팅됨
+   * - 소셜 DM: chatReadMessageId가 세팅됨
+   */
+  useEffect(() => {
+    if (headsUpReadyRef.current) return;
+    if (!persistReady || !userId?.trim()) return;
+    if (!meetingsBootstrappedRef.current) return;
+    if (!socialRoomsBootstrappedRef.current) return;
+    const joined = filterJoinedMeetings(meetings, userId);
+    const meetingLatestBootstrapped = joined.every((m) => m.id in latestById);
+    const meetingOk = joined.every(
+      (m) => readState.meetingAckFingerprint[m.id] !== undefined && readState.chatReadMessageId[m.id] !== undefined,
+    );
+    const socialLatestBootstrapped = socialRooms.every((r) => r.roomId in socialLatestByRoomId);
+    const socialOk = socialRooms.every((r) => readState.chatReadMessageId[r.roomId] !== undefined);
+    if (meetingLatestBootstrapped && meetingOk && socialLatestBootstrapped && socialOk) {
+      headsUpReadyRef.current = true;
+      setHeadsUpReady(true);
+    }
+  }, [
+    persistReady,
+    userId,
+    meetings,
+    latestById,
+    socialRooms,
+    socialLatestByRoomId,
+    readState.meetingAckFingerprint,
+    readState.chatReadMessageId,
+    meetingsBootstrapped,
+    socialRoomsBootstrapped,
+  ]);
+
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!persistReady || !userId?.trim()) return;
+    if (!persistReady || !userId?.trim() || !headsUpReady) return;
 
     for (const fr of friendInbox) {
       const frid = String(fr.id ?? '').trim();
@@ -376,7 +434,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!persistReady || !userId?.trim()) return;
+    if (!persistReady || !userId?.trim() || !headsUpReady) return;
 
     for (const it of friendAcceptQueue) {
       const fid = it.friendshipId.trim();
@@ -428,7 +486,13 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const uid = userId.trim();
     return subscribeMySocialChatRooms(
       uid,
-      (rooms) => setSocialRooms(rooms),
+      (rooms) => {
+        if (!socialRoomsBootstrappedRef.current) {
+          socialRoomsBootstrappedRef.current = true;
+          setSocialRoomsBootstrapped(true);
+        }
+        setSocialRooms(rooms);
+      },
       () => {
         /* 목록 오류는 친구·채팅 탭에서 처리 */
       },
@@ -603,7 +667,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!persistReady || !userId?.trim()) return;
+    if (!persistReady || !userId?.trim() || !headsUpReady) return;
 
     const myPk = normalizeParticipantId(userId.trim());
     const joined = filterJoinedMeetings(meetings, userId);
@@ -751,7 +815,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!persistReady || !userId?.trim()) return;
+    if (!persistReady || !userId?.trim() || !headsUpReady) return;
     const myPk = normalizeParticipantId(userId.trim());
 
     for (const sr of socialRooms) {

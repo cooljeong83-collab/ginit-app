@@ -84,6 +84,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const naverClientId =
     process.env.NAVER_MAP_CLIENT_ID ?? process.env.EXPO_PUBLIC_NAVER_MAP_CLIENT_ID ?? '';
 
+  const googleMapsAndroidApiKey =
+    process.env.GOOGLE_MAPS_ANDROID_API_KEY ?? process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ?? '';
+
   const plugins = (config.plugins ?? []).filter((entry) => {
     if (entry === 'expo-build-properties') return false;
     if (Array.isArray(entry) && entry[0] === 'expo-build-properties') return false;
@@ -119,6 +122,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           'WAKE_LOCK',
         ]),
       ),
+      config: {
+        ...((config.android as { config?: Record<string, unknown> } | undefined)?.config ?? {}),
+        googleMaps: {
+          ...(((config.android as { config?: any } | undefined)?.config?.googleMaps as Record<string, unknown>) ?? {}),
+          apiKey: googleMapsAndroidApiKey,
+        },
+      },
       /** 키보드가 올라올 때 입력창이 가려지지 않도록(채팅 등) — app.json과 동일 권장값 */
       softwareKeyboardLayoutMode: 'resize',
       /** Adaptive icon 캐시 우회: foreground 이미지를 v2로 고정 */
@@ -182,6 +192,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       './plugins/withAndroidPlayServicesAuth.js',
       /** Android 스플래시 아이콘을 Adaptive 전경(`ic_launcher_foreground`)과 동일하게 */
       './plugins/withAndroidSplashLauncherForeground.js',
+      /** Google Maps SDK API key (`com.google.android.geo.API_KEY`) */
+      './plugins/withAndroidGoogleMapsApiKey.js',
     ],
     extra: {
       ...baseExtra,

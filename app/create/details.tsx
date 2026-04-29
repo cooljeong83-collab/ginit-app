@@ -91,7 +91,7 @@ import { addMeeting, normalizeProfileGenderToHostSnapshot } from '@/src/lib/meet
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
-import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
   DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
@@ -1775,6 +1775,12 @@ export default function CreateDetailsScreen() {
       };
     }, [userId]),
   );
+
+  useEffect(() => {
+    return () => {
+      invalidateNearbySearchBiasCache();
+    };
+  }, []);
 
   // Android에서 BlurView(특히 experimental blur)가 children 업데이트를 늦게 반영하는 케이스가 있어
   // 즉시 피드백이 중요한 "선택 UI"는 정적 View 렌더링을 우선합니다.

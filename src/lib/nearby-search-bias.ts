@@ -3,6 +3,19 @@ import type { LatLng } from '@/src/lib/geo-distance';
 
 let cache: Promise<{ bias: string | null; coords: LatLng | null }> | null = null;
 
+/** `/create/details` 이탈 후 다음 모임 생성에서 GPS 기준 힌트를 다시 쓰도록 비웁니다. */
+export function invalidateNearbySearchBiasCache(): void {
+  cache = null;
+}
+
+/**
+ * 지도 탭에서 모임 만들기로 이동하기 직전 호출 — 이후 `ensureNearbySearchBias()` 첫 호출이 지도 중심 좌표를 사용합니다.
+ */
+export function applyNearbySearchBiasFromMapNavigation(coords: LatLng, biasLabel: string | null): void {
+  const bias = biasLabel?.trim() ? biasLabel.trim() : null;
+  cache = Promise.resolve({ bias, coords });
+}
+
 /**
  * 모임 등록·장소 검색에서 네이버 지역 검색 쿼리에 붙일 **행정구역 힌트**와 좌표.
  * `bias`는 `resolveFeedLocationContext().labelShort`(구 단위, 실패 시 폴백 구)를 쓰며, 좌표가 없어도 동일 라벨을 반환합니다.
