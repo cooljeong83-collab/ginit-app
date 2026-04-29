@@ -14,10 +14,195 @@ export type NaverLocalPlace = {
   address: string;
   roadAddress: string;
   category: string;
+  /** 네이버 지역 검색 API `link` — 플레이스 등 상세 URL (없을 수 있음) */
+  link?: string;
   /** 지역 검색 직후에는 null — 항목 선택 시 NCP Geocoding으로 채움 */
   latitude: number | null;
   longitude: number | null;
 };
+
+/** API `link` 값을 앱 내 WebView 로드용 https URL로 정규화합니다. */
+export function sanitizeNaverLocalPlaceLink(raw: string | null | undefined): string | undefined {
+  const t = raw?.trim();
+  if (!t) return undefined;
+  try {
+    const normalized = t.startsWith('http://') || t.startsWith('https://') ? t : `https://${t}`;
+    const u = new URL(normalized);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined;
+    if (!u.hostname) return undefined;
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/** `map.naver.com` / `m.map.naver.com` 경로에서 플레이스 숫자 ID 추출 */
+function extractPlaceIdFromNaverMapPath(pathname: string): string | undefined {
+  const entry = pathname.match(/\/entry\/place\/(\d{4,})\b/);
+  if (entry?.[1]) return entry[1];
+  // 예: /p/search/.../place/11583151?placePath=… (entry 없이 지도 검색 URL만 오는 경우)
+  const placeTail = pathname.match(/\/place\/(\d{4,})(?:\/|$|\?)/);
+  if (placeTail?.[1]) return placeTail[1];
+  return undefined;
+}
+
+/**
+ * URL 전체에서 네이버 **플레이스 숫자 ID**를 찾습니다(지도·플레이스 경로·쿼리 `pinId` 등).
+ * 통합검색으로 보낼 때 검색어 보강용으로만 씁니다.
+ */
+function extractNaverPlaceNumericIdFromUrl(urlString: string): string | undefined {
+  const raw = urlString?.trim() ?? '';
+  if (!raw) return undefined;
+  try {
+    const normalized = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+    const u = new URL(normalized);
+    const fromPath = extractPlaceIdFromNaverMapPath(u.pathname);
+    if (fromPath) return fromPath;
+    for (const key of ['pinId', 'businessId', 'placeId', 'code']) {
+      const v = u.searchParams.get(key)?.trim() ?? '';
+      if (/^\d{4,}$/.test(v)) return v;
+    }
+  } catch {
+    const m =
+      raw.match(/\/entry\/place\/(\d{4,})\b/) ??
+      raw.match(/\/place\/(\d{4,})(?:\/|[\?#]|$)/);
+    if (m?.[1] && m[1] !== 'list') return m[1];
+  }
+  return undefined;
+}
+
+/**
+ * WebView에 넣기 전 URL 정리: 이미 **모바일 통합검색**이면 그대로 두고,
+ * 네이버 지도·플레이스 링크는 플레이스 페이지 대신 **동일 검색어(숫자 ID)** 로 통합검색으로 보냅니다.
+ */
+export function normalizeNaverPlaceDetailWebUrl(url: string): string {
+  const raw = url?.trim() ?? '';
+  if (!raw) return raw;
+  try {
+    const normalized = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+    const u = new URL(normalized);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return raw;
+
+    const host = u.hostname.toLowerCase();
+    if (host === 'm.search.naver.com' || host === 'search.naver.com') {
+      return u.toString();
+    }
+
+    const isMapHost = host === 'map.naver.com' || host === 'm.map.naver.com';
+    const isPlaceHost =
+      host === 'm.place.naver.com' || host === 'place.naver.com' || host.endsWith('.place.naver.com');
+
+    if (isMapHost || isPlaceHost) {
+      const id = extractNaverPlaceNumericIdFromUrl(u.toString());
+      if (id) {
+        return `https://m.search.naver.com/search.naver?where=m&sm=mtp_hty.top&query=${encodeURIComponent(id)}`;
+      }
+    }
+
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * 주소 한 줄에서 **행정구의 '…구'까지**만 남깁니다(로·길·번지 앞에서 끊음).
+ * 예: `서울특별시 강남구 테헤란로 152` → `서울특별시 강남구` / 구가 없으면 도로명·지번 앞 단계까지만.
+ */
+function truncateAddressForNaverSearchQuery(address: string): string {
+  const normalized = address.trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  const parts = normalized.split(' ');
+  const acc: string[] = [];
+  for (const part of parts) {
+    const p = part.trim();
+    if (!p) continue;
+    const isRoadOrLotToken =
+      /^\d/.test(p) || /(?:로|길)$/u.test(p) || p.includes('번길') || /^[0-9]+-[0-9]+$/.test(p);
+    if (isRoadOrLotToken) break;
+    acc.push(p);
+    if (/[가-힣]+구$/u.test(p) && p.length >= 2) break;
+  }
+  const out = acc.join(' ').trim();
+  return out || normalized;
+}
+
+/** 상호·주소·카테고리로 네이버 **모바일 통합검색**(m.search) 검색어를 만듭니다. `link`는 사용하지 않습니다. */
+function buildNaverMobileSearchUrlFromPlaceFields(input: {
+  title: string;
+  roadAddress?: string | null | undefined;
+  address?: string | null | undefined;
+  category?: string | null | undefined;
+}): string | undefined {
+  const title = typeof input.title === 'string' ? input.title.trim() : '';
+  const road = typeof input.roadAddress === 'string' ? input.roadAddress.trim() : '';
+  const jibun = typeof input.address === 'string' ? input.address.trim() : '';
+  const cat = typeof input.category === 'string' ? input.category.trim() : '';
+  const addrLine = road || jibun;
+  const addrForQuery = addrLine ? truncateAddressForNaverSearchQuery(addrLine) : '';
+  const primary = [title, addrForQuery].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const q =
+    primary.length > 0
+      ? primary
+      : [title, cat].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || cat;
+  const finalQ = (q || title).trim();
+  if (!finalQ) return undefined;
+  return sanitizeNaverLocalPlaceLink(
+    `https://m.search.naver.com/search.naver?where=m&sm=mtp_hty.top&query=${encodeURIComponent(finalQ)}`,
+  );
+}
+
+/**
+ * 상세(WebView) URL: 네이버 플레이스가 아니라 **모바일 네이버 통합검색**(`m.search.naver.com`)으로
+ * 상호명 + 주소(행정 **구** 단위까지 잘린 한 줄, 또는 카테고리) 검색 결과를 띄웁니다. API `link`는 검색어에 쓰지 않습니다.
+ */
+export function resolveNaverPlaceDetailWebUrl(input: {
+  link?: string | null | undefined;
+  title: string;
+  roadAddress?: string | null | undefined;
+  address?: string | null | undefined;
+  category?: string | null | undefined;
+}): string | undefined {
+  return buildNaverMobileSearchUrlFromPlaceFields({
+    title: input.title,
+    roadAddress: input.roadAddress,
+    address: input.address,
+    category: input.category,
+  });
+}
+
+/**
+ * 모임 상세 **장소 투표 칩**(`naverPlaceLink`는 무시·한 줄 `address` + 제목)과 동일한 인자로
+ * 네이버 모바일 **통합검색** URL을 만듭니다.
+ */
+export function resolveNaverPlaceDetailWebUrlLikeVoteChip(input: {
+  naverPlaceLink?: string | null | undefined;
+  title: string;
+  /** 한 줄 주소(모임 `placeCandidates.address` / 칩 `sub`) */
+  addressLine?: string | null | undefined;
+}): string | undefined {
+  const line = typeof input.addressLine === 'string' ? input.addressLine.trim() : '';
+  return resolveNaverPlaceDetailWebUrl({
+    link: input.naverPlaceLink,
+    title: input.title,
+    roadAddress: line || undefined,
+    address: undefined,
+    category: undefined,
+  });
+}
+
+/**
+ * 상호·주소로 네이버 모바일 **통합검색**(WebView)을 엽니다.
+ */
+export function buildNaverPlaceFallbackWebUrl(placeName: string, address?: string | null): string | undefined {
+  return resolveNaverPlaceDetailWebUrl({
+    link: undefined,
+    title: placeName,
+    roadAddress: address ?? undefined,
+    address: undefined,
+    category: undefined,
+  });
+}
 
 function stripHtml(s: string) {
   return s.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
@@ -96,6 +281,7 @@ type NaverOpenApiLocalJson = {
     category?: string;
     mapx?: string;
     mapy?: string;
+    link?: string;
   }[];
 };
 
@@ -113,12 +299,15 @@ function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] 
     const category = typeof it.category === 'string' ? it.category : '';
     const mapx = typeof it.mapx === 'string' ? it.mapx : '';
     const mapy = typeof it.mapy === 'string' ? it.mapy : '';
+    const linkRaw = typeof it.link === 'string' ? it.link : '';
+    const link = sanitizeNaverLocalPlaceLink(linkRaw);
     out.push({
       id: `local-${mapx}-${mapy}-${idx}`,
       title,
       address,
       roadAddress,
       category,
+      ...(link ? { link } : {}),
       latitude: null,
       longitude: null,
     });

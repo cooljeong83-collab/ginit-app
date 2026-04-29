@@ -18,13 +18,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
+import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
-import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
+import {
+  resolveNaverPlaceCoordinates,
+  resolveNaverPlaceDetailWebUrlLikeVoteChip,
+  sanitizeNaverLocalPlaceLink,
+  searchNaverLocalPlaces,
+} from '@/src/lib/naver-local-search';
 
 function animateListLayout() {
   layoutAnimateEaseInEaseOut();
@@ -65,6 +71,7 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
   const [selected, setSelected] = useState<NaverLocalPlace | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
 
   const canConfirm =
     selected != null && selected.latitude != null && selected.longitude != null && !resolving;
@@ -160,11 +167,13 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
       return;
     }
     const addr = selected.roadAddress?.trim() || selected.address?.trim() || '';
+    const linkFromApi = sanitizeNaverLocalPlaceLink(selected.link);
     const payload = {
       placeName: selected.title,
       address: addr,
       latitude: selected.latitude,
       longitude: selected.longitude,
+      ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
     };
     if (voteRowId?.trim()) {
       setPendingVotePlaceRow({ ...payload, rowId: voteRowId.trim() });
@@ -277,6 +286,13 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
                 const showInlineMap =
                   useInlineMapPreview && active && lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
 
+                const addrLine =
+                  (item.roadAddress || item.address || '').trim() || (item.category?.trim() ?? '');
+                const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
+                  naverPlaceLink: item.link,
+                  title: item.title,
+                  addressLine: addrLine || undefined,
+                });
                 return (
                   <View style={GinitStyles.itemWrap}>
                     <View style={GinitStyles.glassListRowWrap}>
@@ -306,6 +322,17 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
                           </View>
                         </View>
                       </Pressable>
+                      {detailUrl ? (
+                        <Pressable
+                          onPress={() =>
+                            setNaverPlaceWebModal({ url: detailUrl, title: item.title.trim() || '상세 정보' })
+                          }
+                          style={({ pressed }) => [styles.placeSearchDetailBtn, pressed && { opacity: 0.88 }]}
+                          accessibilityRole="button"
+                          accessibilityLabel="상세 정보">
+                          <Text style={styles.placeSearchDetailBtnText}>상세 정보</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                     {showInlineMap ? (
                       <View style={GinitStyles.inlineMapSlot}>
@@ -338,6 +365,13 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
             />
             <Text style={GinitStyles.ctaButtonLabel}>확인</Text>
           </Pressable>
+
+          <NaverPlaceWebViewModal
+            visible={naverPlaceWebModal != null}
+            url={naverPlaceWebModal?.url}
+            pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
+            onClose={() => setNaverPlaceWebModal(null)}
+          />
         </SafeAreaView>
     </View>
   );
@@ -348,6 +382,23 @@ export const PlaceSearchScreen = memo(PlaceSearchScreenInner);
 const styles = StyleSheet.create({
   enteringStaticVeil: {
     backgroundColor: '#E8EEF8',
+  },
+  placeSearchDetailBtn: {
+    marginTop: 8,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: GinitTheme.radius.button,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  placeSearchDetailBtnText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
   },
 });
 

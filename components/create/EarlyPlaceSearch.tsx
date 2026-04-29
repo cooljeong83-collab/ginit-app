@@ -1,5 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import {
+  Fragment,
   type RefObject,
   useCallback,
   useEffect,
@@ -24,6 +25,7 @@ import {
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
@@ -31,7 +33,12 @@ import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
-import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
+import {
+  resolveNaverPlaceCoordinates,
+  resolveNaverPlaceDetailWebUrlLikeVoteChip,
+  sanitizeNaverLocalPlaceLink,
+  searchNaverLocalPlaces,
+} from '@/src/lib/naver-local-search';
 
 import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
@@ -172,6 +179,7 @@ export function EarlyPlaceSearch({
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [nearbyHint, setNearbyHint] = useState<string | null>(null);
   const [locationReady, setLocationReady] = useState(false);
+  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const expandedPickerRef = useRef<View>(null);
   const earlyPlaceQueryInputRef = useRef<TextInput>(null);
   const earlyPlaceQueryDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(earlyPlaceQueryInputRef), []);
@@ -364,12 +372,15 @@ export function EarlyPlaceSearch({
         const resolved = await resolveNaverPlaceCoordinates(item);
         const addr = resolved.roadAddress?.trim() || resolved.address?.trim() || '';
         if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
+        const linkFromApi =
+          sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
         onPickCandidate({
           id: resolved.id,
           placeName: resolved.title.trim(),
           address: addr,
           latitude: resolved.latitude,
           longitude: resolved.longitude,
+          ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
         });
       } catch (e) {
         setErr(e instanceof Error ? e.message : '위치를 불러오지 못했습니다.');
@@ -548,7 +559,45 @@ export function EarlyPlaceSearch({
         ) : (
           rows.map((item) => {
             const addr = (item.roadAddress || item.address || '').trim() || item.category;
-            return renderPickRow(item.id, item.title, addr, () => void onPickNaver(item));
+            const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
+              naverPlaceLink: item.link,
+              title: item.title,
+              addressLine: typeof addr === 'string' && addr.trim() ? addr.trim() : undefined,
+            });
+            return (
+              <Animated.View
+                key={item.id}
+                style={Platform.OS === 'web' ? ({ width: '100%' } as const) : { alignSelf: 'stretch' }}
+                entering={FadeInDown.duration(320)}>
+                <View style={[styles.resultCard, Platform.OS === 'web' && { width: '100%' as const }]}>
+                  <Pressable
+                    onPress={() => void onPickNaver(item)}
+                    disabled={disabled || loading}
+                    style={({ pressed }) => [pressed && styles.resultCardPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.title}>
+                    <Text style={styles.resultTitle} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.resultAddr} numberOfLines={3}>
+                      {addr}
+                    </Text>
+                  </Pressable>
+                  {detailUrl ? (
+                    <Pressable
+                      onPress={() =>
+                        setNaverPlaceWebModal({ url: detailUrl, title: item.title.trim() || '상세 정보' })
+                      }
+                      disabled={disabled || loading}
+                      style={({ pressed }) => [styles.naverDetailBtn, pressed && { opacity: 0.88 }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="상세 정보">
+                      <Text style={styles.naverDetailBtnText}>상세 정보</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </Animated.View>
+            );
           })
         )
       ) : showCinemaBlock ? null : (
@@ -591,15 +640,24 @@ export function EarlyPlaceSearch({
 
   if (value.length === 0) {
     return (
-      <View style={styles.pickerRoot}>
-        {searchHeader}
-        {cinemaScrollBlock}
-        {listScrollOrNull}
-      </View>
+      <Fragment>
+        <View style={styles.pickerRoot}>
+          {searchHeader}
+          {cinemaScrollBlock}
+          {listScrollOrNull}
+        </View>
+        <NaverPlaceWebViewModal
+          visible={naverPlaceWebModal != null}
+          url={naverPlaceWebModal?.url}
+          pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
+          onClose={() => setNaverPlaceWebModal(null)}
+        />
+      </Fragment>
     );
   }
 
   return (
+    <Fragment>
     <View style={styles.pickColumnOuter}>
       <Text style={S.fieldLabel}>선택된 장소 후보</Text>
       <Animated.View
@@ -648,6 +706,13 @@ export function EarlyPlaceSearch({
         </View>
       ) : null}
     </View>
+    <NaverPlaceWebViewModal
+      visible={naverPlaceWebModal != null}
+      url={naverPlaceWebModal?.url}
+      pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
+      onClose={() => setNaverPlaceWebModal(null)}
+    />
+    </Fragment>
   );
 }
 
@@ -764,6 +829,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GinitTheme.colors.textMuted,
     lineHeight: 15,
+  },
+  naverDetailBtn: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: GinitTheme.radius.button,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  naverDetailBtnText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
   },
   pickedStack: {
     flexDirection: 'column',

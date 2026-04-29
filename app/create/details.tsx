@@ -49,6 +49,7 @@ import { IntensityPicker } from '@/components/create/IntensityPicker';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
+import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitStyles } from '@/constants/GinitStyles';
@@ -97,7 +98,12 @@ import { addMeeting, normalizeProfileGenderToHostSnapshot } from '@/src/lib/meet
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
-import { resolveNaverPlaceCoordinates, searchNaverLocalPlaces } from '@/src/lib/naver-local-search';
+import {
+  resolveNaverPlaceCoordinates,
+  resolveNaverPlaceDetailWebUrlLikeVoteChip,
+  sanitizeNaverLocalPlaceLink,
+  searchNaverLocalPlaces,
+} from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -444,6 +450,7 @@ type PlaceRowModel = {
   address: string;
   latitude: number | null;
   longitude: number | null;
+  naverPlaceLink?: string;
 };
 
 function emptyPlaceRow(seedQuery = ''): PlaceRowModel {
@@ -462,6 +469,7 @@ function isFilled(p: PlaceRowModel) {
 }
 
 function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
+  const link = (p.naverPlaceLink ?? '').trim();
   return {
     id: p.id,
     query: p.placeName,
@@ -469,6 +477,7 @@ function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
     address: p.address,
     latitude: p.latitude,
     longitude: p.longitude,
+    ...(link ? { naverPlaceLink: link } : {}),
   };
 }
 
@@ -534,6 +543,10 @@ export type VoteCandidatesFormProps = {
   parentScrollYRef?: RefObject<number>;
   /** true면 AI 미리보기/주말 미리보기 탭 시 새 행이 아니라 첫 번째 일정 후보만 덮어씀(날짜 제안 모달 등). `+ 일자 후보 등록` 버튼도 숨김 */
   scheduleAiReplacesFirstCandidate?: boolean;
+  /**
+   * 설정 시 장소「상세 정보」는 내부 WebView 모달 대신 상위에서 연다(모임 상세 장소 제안 등 **Modal 중첩** 방지).
+   */
+  onNaverPlaceWebOpen?: (url: string, title: string) => void;
 };
 
 export type VoteCandidatesBuildResult =
@@ -581,6 +594,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     parentScrollRef,
     parentScrollYRef,
     scheduleAiReplacesFirstCandidate = false,
+    onNaverPlaceWebOpen,
   },
   ref,
 ) {
@@ -673,6 +687,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     {},
   );
   const [placeResolvingById, setPlaceResolvingById] = useState<Record<string, boolean>>({});
+  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
 
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
@@ -1048,6 +1063,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
             }) as PlaceCandidate,
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
@@ -1101,6 +1117,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
             }) as PlaceCandidate,
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
@@ -1120,6 +1137,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
             }) as PlaceCandidate,
         );
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: [] } };
@@ -1150,6 +1168,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   address: sel.address,
                   latitude: sel.latitude,
                   longitude: sel.longitude,
+                  ...(sel.naverPlaceLink?.trim() ? { naverPlaceLink: sel.naverPlaceLink.trim() } : {}),
                 }
               : r,
           );
@@ -1898,92 +1917,125 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
                       const thumb = placeThumbById[item.id] ?? null;
+                      /** 모임 상세 장소투표「가게 정보」와 동일: 한 줄 주소 + 제목으로 통합검색 URL */
+                      const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
+                        naverPlaceLink: item.link,
+                        title: item.title,
+                        addressLine: typeof addr === 'string' && addr.trim() ? addr.trim() : undefined,
+                      });
                       return (
-                        <Pressable
+                        <View
                           key={item.id}
-                          onPress={() => {
-                            if (resolving) return;
-                            layoutAnimateEaseInEaseOut();
-
-                            if (selected) {
-                              const picked = placeSelectedById[item.id];
-                              setPlaceSelectedById((prev) => {
-                                const next = { ...prev };
-                                delete next[item.id];
-                                return next;
-                              });
-                              setPlaceCandidates((prev) => {
-                                if (!picked) {
-                                  return prev.filter(
-                                    (r) => !(r.placeName === title.trim() && r.address === addr.trim()),
-                                  );
-                                }
-                                return prev.filter(
-                                  (r) => !(r.placeName === picked.placeName && r.address === picked.address),
-                                );
-                              });
-                              return;
-                            }
-
-                            setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
-                            void (async () => {
-                              try {
-                                const resolved = await resolveNaverPlaceCoordinates(item);
-                                const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
-                                if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
-                                const placeName = resolved.title.trim() || title.trim();
-                                const p: PlaceCandidate = {
-                                  id: newId('place'),
-                                  placeName,
-                                  address,
-                                  latitude: resolved.latitude,
-                                  longitude: resolved.longitude,
-                                };
-
-                                setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
-                                setPlaceCandidates((prev) => {
-                                  const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
-                                  if (hit) return prev;
-                                  return [...prev, placeRowFromCandidate(p)];
-                                });
-                              } catch (e) {
-                                setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
-                              } finally {
-                                setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
-                              }
-                            })();
-                          }}
-                          style={({ pressed }) => [
+                          style={[
                             styles.placeResultCard,
                             styles.placeResultImageCard,
+                            styles.placeResultProposalCardWrap,
                             selected && styles.placeResultImageCardSelected,
-                            pressed && styles.placeResultCardPressed,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={title}>
-                          <View style={styles.placeResultImageWrap}>
-                            {thumb ? (
-                              <Image source={{ uri: thumb }} style={styles.placeResultImage} resizeMode="cover" />
-                            ) : (
-                              <View style={styles.placeResultImageFallback} />
-                            )}
-                            {resolving ? (
-                              <View style={styles.placeResultImageOverlay}>
-                                <ActivityIndicator color={GinitTheme.colors.primary} />
+                          ]}>
+                          <Pressable
+                            onPress={() => {
+                              if (resolving) return;
+                              layoutAnimateEaseInEaseOut();
+
+                              if (selected) {
+                                const picked = placeSelectedById[item.id];
+                                setPlaceSelectedById((prev) => {
+                                  const next = { ...prev };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                                setPlaceCandidates((prev) => {
+                                  if (!picked) {
+                                    return prev.filter(
+                                      (r) => !(r.placeName === title.trim() && r.address === addr.trim()),
+                                    );
+                                  }
+                                  return prev.filter(
+                                    (r) => !(r.placeName === picked.placeName && r.address === picked.address),
+                                  );
+                                });
+                                return;
+                              }
+
+                              setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
+                              void (async () => {
+                                try {
+                                  const resolved = await resolveNaverPlaceCoordinates(item);
+                                  const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
+                                  if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
+                                  const placeName = resolved.title.trim() || title.trim();
+                                  const linkFromApi =
+                                    sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
+                                  const p: PlaceCandidate = {
+                                    id: newId('place'),
+                                    placeName,
+                                    address,
+                                    latitude: resolved.latitude,
+                                    longitude: resolved.longitude,
+                                    ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
+                                  };
+
+                                  setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
+                                  setPlaceCandidates((prev) => {
+                                    const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
+                                    if (hit) return prev;
+                                    return [...prev, placeRowFromCandidate(p)];
+                                  });
+                                } catch (e) {
+                                  setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+                                } finally {
+                                  setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
+                                }
+                              })();
+                            }}
+                            style={({ pressed }) => [
+                              styles.placeResultProposalPressFill,
+                              pressed && styles.placeResultCardPressed,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={title}>
+                            <View style={styles.placeResultProposalPressInner}>
+                              <View style={styles.placeResultImageWrap}>
+                                {thumb ? (
+                                  <Image source={{ uri: thumb }} style={styles.placeResultImage} resizeMode="cover" />
+                                ) : (
+                                  <View style={styles.placeResultImageFallback} />
+                                )}
+                                {resolving ? (
+                                  <View style={styles.placeResultImageOverlay}>
+                                    <ActivityIndicator color={GinitTheme.colors.primary} />
+                                  </View>
+                                ) : selected ? (
+                                  <View style={styles.placeResultImageOverlay}>
+                                    <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                                  </View>
+                                ) : null}
                               </View>
-                            ) : selected ? (
-                              <View style={styles.placeResultImageOverlay}>
-                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                              </View>
-                            ) : null}
-                          </View>
-                          <Text style={styles.placeResultTitle} numberOfLines={2}>
-                            {title}
-                          </Text>
-                          <Text style={styles.placeResultAddr} numberOfLines={2}>
-                            {addr}
-                          </Text>
-                        </Pressable>
+                              <Text style={styles.placeResultTitle} numberOfLines={2}>
+                                {title}
+                              </Text>
+                              <Text style={styles.placeResultAddr} numberOfLines={2}>
+                                {addr}
+                              </Text>
+                            </View>
+                          </Pressable>
+                          {detailUrl ? (
+                            <Pressable
+                              onPress={() => {
+                                const t = title.trim() || '장소 상세';
+                                if (onNaverPlaceWebOpen) {
+                                  onNaverPlaceWebOpen(detailUrl, t);
+                                } else {
+                                  setNaverPlaceWebModal({ url: detailUrl, title: t });
+                                }
+                              }}
+                              style={({ pressed }) => [styles.placeResultDetailBtn, pressed && { opacity: 0.88 }]}
+                              accessibilityRole="button"
+                              accessibilityLabel="가게 정보">
+                              <Text style={styles.placeResultDetailBtnText}>가게 정보</Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
                       );
                     }).concat(
                       placeSearchLoadingMore
@@ -2177,6 +2229,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           }}
         />
       ) : null}
+
+      {onNaverPlaceWebOpen ? null : (
+        <NaverPlaceWebViewModal
+          visible={naverPlaceWebModal != null}
+          url={naverPlaceWebModal?.url}
+          pageTitle={naverPlaceWebModal?.title ?? '장소 상세'}
+          onClose={() => setNaverPlaceWebModal(null)}
+        />
+      )}
     </>
   );
 });
@@ -4147,8 +4208,9 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     paddingHorizontal: 4,
   },
+  /** 제목·주소 각 2줄 + 상세 정보 버튼까지 포함(이미지 112 + 여백) — `overflow: hidden` 호스트에 맞춤 */
   placeResultsCarouselHost: {
-    height: 246,
+    height: 274,
   },
   placeResultsCarouselContent: {
     paddingVertical: 10,
@@ -4157,7 +4219,7 @@ const styles = StyleSheet.create({
   },
   placeResultsLoadingMore: {
     width: 76,
-    height: 176,
+    height: 274,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -4191,6 +4253,18 @@ const styles = StyleSheet.create({
     width: 176,
     paddingVertical: 10,
     paddingHorizontal: 10,
+  },
+  /** 가로 캐러셀(`placeResultsCarouselHost` 274) − 세로 패딩 20 기준 — 상세 정보 버튼을 카드 하단에 고정 */
+  placeResultProposalCardWrap: {
+    minHeight: 254,
+    flexDirection: 'column',
+  },
+  placeResultProposalPressFill: {
+    flex: 1,
+    minHeight: 0,
+  },
+  placeResultProposalPressInner: {
+    flexGrow: 1,
   },
   placeResultImageCardSelected: {
     borderColor: 'rgba(134, 211, 183, 0.9)',
@@ -4240,6 +4314,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GinitTheme.colors.textMuted,
     lineHeight: 15,
+  },
+  placeResultDetailBtn: {
+    marginTop: 8,
+    flexShrink: 0,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: GinitTheme.radius.button,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  placeResultDetailBtnText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
   },
   placePickedRow: {
     flexDirection: 'row',

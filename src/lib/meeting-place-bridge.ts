@@ -8,6 +8,8 @@ export type MeetingPlaceSelection = {
   address: string;
   latitude: number;
   longitude: number;
+  /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
+  naverPlaceLink?: string | null;
 };
 
 let pending: MeetingPlaceSelection | null = null;
@@ -44,6 +46,8 @@ export type PlaceCandidate = {
   address: string;
   latitude: number;
   longitude: number;
+  /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
+  naverPlaceLink?: string | null;
 };
 
 export type DateCandidateType =

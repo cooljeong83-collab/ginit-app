@@ -129,6 +129,7 @@ export type Meeting = {
     address: string;
     latitude: number;
     longitude: number;
+    naverPlaceLink?: string | null;
   }> | null;
   /** 참여 확정 사용자 전화 PK(정규화). 주선자는 모임 생성 시 포함하는 것을 권장 */
   participantIds?: string[] | null;
@@ -392,7 +393,14 @@ export function getFirestoreDb() {
   return getFirebaseFirestore();
 }
 
-type PlaceCandidateLike = { id: string; placeName: string; address: string; latitude: number; longitude: number };
+type PlaceCandidateLike = {
+  id: string;
+  placeName: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  naverPlaceLink?: string | null;
+};
 
 export type CreateMeetingInput = {
   title: string;
