@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -26,7 +25,10 @@ import {
   getMeetingChatImageUploadQuality,
   setMeetingChatImageUploadQuality,
 } from '@/src/lib/meeting-chat-image-quality-preference';
-import { meetingChatNotifyStorageKey } from '@/src/lib/meeting-chat-notify-preference';
+import {
+  getMeetingChatNotifyEnabledForUser,
+  setMeetingChatNotifyEnabledForUser,
+} from '@/src/lib/meeting-chat-notify-preference';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
 type IonIconName = ComponentProps<typeof Ionicons>['name'];
@@ -130,14 +132,13 @@ export default function MeetingChatSettingsScreen() {
   }, [meeting, allowed]);
 
   useEffect(() => {
-    if (!meetingId) return;
+    if (!meetingId || !userId?.trim()) return;
     let cancelled = false;
     void (async () => {
       try {
-        const v = await AsyncStorage.getItem(meetingChatNotifyStorageKey(meetingId));
+        const v = await getMeetingChatNotifyEnabledForUser(meetingId, userId.trim());
         if (cancelled) return;
-        if (v === '0') setNotifyOn(false);
-        else setNotifyOn(true);
+        setNotifyOn(v);
       } catch {
         /* noop */
       } finally {
@@ -147,7 +148,7 @@ export default function MeetingChatSettingsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [meetingId]);
+  }, [meetingId, userId]);
 
   useEffect(() => {
     if (!meetingId) return;
@@ -171,14 +172,14 @@ export default function MeetingChatSettingsScreen() {
   const onToggleNotify = useCallback(
     async (next: boolean) => {
       setNotifyOn(next);
-      if (!meetingId) return;
+      if (!meetingId || !userId?.trim()) return;
       try {
-        await AsyncStorage.setItem(meetingChatNotifyStorageKey(meetingId), next ? '1' : '0');
+        await setMeetingChatNotifyEnabledForUser(meetingId, userId.trim(), next);
       } catch {
-        /* noop */
+        setNotifyOn((prev) => !prev);
       }
     },
-    [meetingId],
+    [meetingId, userId],
   );
 
   const onToggleImageQuality = useCallback(

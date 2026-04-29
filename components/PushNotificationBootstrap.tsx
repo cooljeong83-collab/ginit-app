@@ -9,6 +9,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
+import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
 import { saveUserExpoPushToken } from '@/src/lib/user-expo-push-token';
 
@@ -18,6 +19,17 @@ Notifications.setNotificationHandler({
       const data = n?.request?.content?.data as Record<string, unknown> | undefined;
       const action = typeof data?.action === 'string' ? String(data.action).trim() : '';
       const meetingId = typeof data?.meetingId === 'string' ? String(data.meetingId).trim() : '';
+      if (action === 'in_app_chat' && meetingId) {
+        const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
+        if (!notifyOn) {
+          return {
+            shouldShowBanner: false,
+            shouldShowList: false,
+            shouldPlaySound: false,
+            shouldSetBadge: false,
+          };
+        }
+      }
       if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
         const cur = getCurrentChatRoomId();
         if (cur && cur === meetingId) {

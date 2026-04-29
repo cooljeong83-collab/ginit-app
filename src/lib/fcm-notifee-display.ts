@@ -1,5 +1,6 @@
 import notifee, { AndroidImportance } from '@notifee/react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 
 /** FCM·포그라운드 표시용 Notifee 채널 (Android) */
 export const GINIT_FCM_NOTIFEE_CHANNEL = 'ginit_fcm';
@@ -47,6 +48,12 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
   if (!content) return;
   const { title, body } = content;
   const data = fcmDataToStringRecord(rm.data);
+  const action = (data.action ?? '').trim();
+  const meetingId = (data.meetingId ?? '').trim();
+  if (action === 'in_app_chat' && meetingId) {
+    const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
+    if (!notifyOn) return;
+  }
   await ensureGinitFcmNotifeeChannel();
   await notifee.displayNotification({
     title,

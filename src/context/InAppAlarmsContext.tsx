@@ -283,6 +283,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     );
   }, [userId]);
 
+
   /**
    * 친구 수신 인박스·발신 대기·수락 목록은 `persistReady`와 무관하게 로드합니다.
    * 발신 대기(outbox) 스냅샷과 비교해 상대 수락 시 알람 큐에 넣습니다.

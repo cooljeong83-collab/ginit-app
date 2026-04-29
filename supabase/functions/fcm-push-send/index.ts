@@ -101,7 +101,7 @@ serve(async (req) => {
       return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400);
     }
 
-    const toUserIds = normalizeIds(payload.toUserIds);
+    let toUserIds = normalizeIds(payload.toUserIds);
     const title = String(payload.title ?? '').trim();
     const body = String(payload.body ?? '').trim();
     if (toUserIds.length === 0) return jsonResponse({ ok: false, error: 'toUserIds is empty' }, 400);
@@ -112,6 +112,31 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceRole, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    const data = dataToStringRecord(payload.data);
+    const action = String(data.action ?? '').trim();
+    const roomId = String(data.meetingId ?? '').trim();
+
+    if ((action === 'in_app_chat' || action === 'in_app_social_dm') && roomId) {
+      const { data: prefRows, error: prefErr } = await supabase
+        .from('chat_room_notify_preferences')
+        .select('app_user_id, notify_enabled')
+        .eq('room_id', roomId)
+        .in('app_user_id', toUserIds);
+      if (prefErr) return jsonResponse({ ok: false, error: prefErr.message }, 500);
+      const muted = new Set(
+        (prefRows ?? [])
+          .filter((r: any) => r?.notify_enabled === false)
+          .map((r: any) => String(r?.app_user_id ?? '').trim())
+          .filter(Boolean),
+      );
+      if (muted.size > 0) {
+        toUserIds = toUserIds.filter((id) => !muted.has(id));
+      }
+      if (toUserIds.length === 0) {
+        return jsonResponse({ ok: true, attempted: 0, sent: 0, reason: 'all_recipients_muted' });
+      }
+    }
 
     const { data: rows, error } = await supabase
       .from('profiles')
@@ -136,7 +161,6 @@ serve(async (req) => {
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
-    const data = dataToStringRecord(payload.data);
     let res;
     try {
       res = await messaging.sendEachForMulticast({

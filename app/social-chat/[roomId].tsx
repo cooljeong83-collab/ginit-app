@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Keyboard, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
@@ -15,6 +15,7 @@ import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import {
   ensureSocialChatRoomDoc,
   parsePeerFromSocialRoomId,
+  searchSocialChatMessages,
   sendSocialChatTextMessage,
   subscribeSocialChatMessages,
 } from '@/src/lib/social-chat-rooms';
@@ -22,6 +23,7 @@ import {
 export default function SocialChatRoomScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const isFocused = useIsFocused();
   const { userId } = useUserSession();
   const { markChatReadUpTo } = useInAppAlarms();
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();
@@ -50,6 +52,7 @@ export default function SocialChatRoomScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SocialChatMessage[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<TextInput>(null);
 
@@ -73,23 +76,23 @@ export default function SocialChatRoomScreen() {
   }, [roomId, userId, peerId]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !isFocused) return;
     setCurrentChatRoomId(roomId);
     return () => setCurrentChatRoomId(null);
-  }, [roomId]);
+  }, [roomId, isFocused]);
 
   useEffect(() => {
     lastMarkedReadMessageIdRef.current = '';
   }, [roomId]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !isFocused) return;
     const last = messages[messages.length - 1];
     const lid = last?.id?.trim() ?? '';
     if (!lid || lastMarkedReadMessageIdRef.current === lid) return;
     lastMarkedReadMessageIdRef.current = lid;
     markChatReadUpTo(roomId, lid);
-  }, [roomId, messages, markChatReadUpTo]);
+  }, [roomId, messages, markChatReadUpTo, isFocused]);
 
   useEffect(() => {
     if (!ready || !roomId) return () => {};
@@ -129,28 +132,44 @@ export default function SocialChatRoomScreen() {
   }, []);
 
   const openSearch = useCallback(() => {
+    Keyboard.dismiss();
     setSearchOpen(true);
     setSearchQuery('');
     setSearchResults([]);
   }, []);
 
   const runSearch = useCallback(
-    (q: string) => {
-      const needle = q.trim().toLowerCase();
-      if (!needle) {
+    async (q: string) => {
+      const needle = q.trim();
+      if (!roomId) {
         setSearchResults([]);
         return;
       }
-      const hits = messages.filter((m) => (m.text ?? '').toLowerCase().includes(needle));
-      setSearchResults(hits);
+      if (!needle) {
+        setSearchResults([]);
+        setSearchBusy(false);
+        return;
+      }
+      setSearchBusy(true);
+      try {
+        const rows = await searchSocialChatMessages(roomId, needle, { maxDocsScanned: 3000 });
+        setSearchResults(rows);
+      } catch {
+        setSearchResults([]);
+        Alert.alert('검색 실패', '네트워크 상태를 확인한 뒤 다시 시도해 주세요.');
+      } finally {
+        setSearchBusy(false);
+      }
     },
-    [messages],
+    [roomId],
   );
 
   useEffect(() => {
     if (!searchOpen) return;
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => runSearch(searchQuery), 220);
+    searchDebounceRef.current = setTimeout(() => {
+      void runSearch(searchQuery);
+    }, 280);
     return () => {
       if (searchDebounceRef.current) {
         clearTimeout(searchDebounceRef.current);
@@ -312,6 +331,12 @@ export default function SocialChatRoomScreen() {
               </Text>
             }
           />
+          {searchBusy ? (
+            <View style={s.searchBusyRow}>
+              <ActivityIndicator color={GinitTheme.colors.primary} />
+              <Text style={s.searchBusyText}>검색 중…</Text>
+            </View>
+          ) : null}
         </SafeAreaView>
       </Modal>
       <MeetingPeerProfileModal
@@ -372,6 +397,21 @@ const s = StyleSheet.create({
   searchFieldIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 16, color: '#0f172a', paddingVertical: 10 },
   searchListContent: { paddingHorizontal: 14, paddingBottom: 24, flexGrow: 1 },
+  searchBusyRow: {
+    position: 'absolute',
+    right: 16,
+    bottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.08)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  searchBusyText: { fontSize: 12, color: '#475569', fontWeight: '700' },
   searchEmpty: {
     marginTop: 48,
     textAlign: 'center',

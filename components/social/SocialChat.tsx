@@ -1,23 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
-import { type RefObject, useMemo, useRef } from 'react';
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassInput } from '@/components/social/GlassInput';
 import { NeonBadge } from '@/components/social/NeonBadge';
 import { GinitTheme } from '@/constants/ginit-theme';
-import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 
 function formatShortTime(ts: Timestamp | null | undefined): string {
   if (!ts || typeof ts.toDate !== 'function') return '';
@@ -40,7 +41,7 @@ export type SocialChatProps = {
   sending?: boolean;
   onPressNotice?: () => void;
   /** 검색 결과 탭 시 특정 메시지로 스크롤하기 위한 외부 ref(선택) */
-  listRef?: RefObject<FlatList<SocialChatMessage>>;
+  listRef?: RefObject<FlatList<SocialChatMessage> | null>;
 };
 
 /**
@@ -58,17 +59,61 @@ export function SocialChat({
   onPressNotice,
   listRef: externalListRef,
 }: SocialChatProps) {
+  const insets = useSafeAreaInsets();
   const innerListRef = useRef<FlatList<SocialChatMessage>>(null);
   const listRef = externalListRef ?? innerListRef;
   const myNorm = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) ?? myUserId.trim() : ''), [myUserId]);
   const didInitialAutoScrollRef = useRef(false);
+  const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
+  const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
+  const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  const composerBottomPad = Math.max(insets.bottom, 8);
+  const listContentStyle = useMemo(
+    () => [
+      styles.listContent,
+      {
+        paddingBottom: keyboardVisible ? composerInputBarHeight : 4,
+      },
+    ],
+    [keyboardVisible, composerInputBarHeight],
+  );
+  const jumpToLatest = useCallback(() => {
+    setShowJumpToBottomFab(false);
+    listRef.current?.scrollToEnd({ animated: false });
+  }, [listRef]);
+
+  const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0) setComposerDockBlockHeight(h);
+  }, []);
+
+  useEffect(() => {
+    const onKeyboardDidShow = () => {
+      setKeyboardVisible(true);
+      requestAnimationFrame(() => {
+        setShowJumpToBottomFab(false);
+        listRef.current?.scrollToEnd({ animated: true });
+      });
+    };
+    const onKeyboardHide = () => {
+      setKeyboardVisible(false);
+    };
+    const subs: { remove: () => void }[] = [];
+    if (Platform.OS === 'ios') {
+      subs.push(Keyboard.addListener('keyboardDidShow', onKeyboardDidShow));
+      subs.push(Keyboard.addListener('keyboardWillHide', onKeyboardHide));
+    } else {
+      subs.push(Keyboard.addListener('keyboardDidShow', onKeyboardDidShow));
+      subs.push(Keyboard.addListener('keyboardDidHide', onKeyboardHide));
+    }
+    return () => subs.forEach((s) => s.remove());
+  }, [listRef]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
+      <View style={styles.flex}>
         {noticeLine.trim() ? (
           <Pressable
             onPress={onPressNotice}
@@ -89,7 +134,13 @@ export function SocialChat({
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={listContentStyle}
+          onScroll={(e) => {
+            const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+            const nearBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 56;
+            setShowJumpToBottomFab(!nearBottom);
+          }}
+          scrollEventThrottle={16}
           /**
            * 기존 구현은 content size가 변할 때마다 무조건 맨 아래로 점프해서,
            * "검색 결과 탭 → 해당 메시지로 스크롤"을 바로 덮어써버리는 버그가 생깁니다.
@@ -142,29 +193,45 @@ export function SocialChat({
           }
           ListEmptyComponent={<Text style={styles.empty}>첫 인사를 남겨 보세요.</Text>}
         />
-
-        <View style={styles.composerMeta} accessibilityElementsHidden>
-          <NeonBadge label="Social · 1:1" pulse={false} />
-        </View>
-        <View style={styles.composer}>
-          <GlassInput
-            value={draft}
-            onChangeText={onChangeDraft}
-            placeholder="메시지 보내기"
-            multiline
-            dense
-            style={styles.composerInput}
-          />
+        {showJumpToBottomFab ? (
           <Pressable
-            onPress={onSend}
-            disabled={sending || !draft.trim()}
-            style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnDisabled]}
+            style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
+            onPress={jumpToLatest}
             accessibilityRole="button"
-            accessibilityLabel="보내기">
-            <Ionicons name="send" size={20} color="#fff" />
+            accessibilityLabel="최신 메시지로">
+            <Ionicons name="chevron-down" size={22} color="#334155" />
           </Pressable>
+        ) : null}
+
+        <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
+          <View style={styles.composerMeta} accessibilityElementsHidden>
+            <NeonBadge label="Social · 1:1" pulse={false} />
+          </View>
+          <View
+            style={styles.composer}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              if (h > 0) setComposerInputBarHeight(h);
+            }}>
+            <GlassInput
+              value={draft}
+              onChangeText={onChangeDraft}
+              placeholder="메시지 보내기"
+              multiline
+              dense
+              style={styles.composerInput}
+            />
+            <Pressable
+              onPress={onSend}
+              disabled={sending || !draft.trim()}
+              style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="보내기">
+              <Ionicons name="send" size={20} color="#fff" />
+            </Pressable>
+          </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -204,8 +271,9 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: 14,
-    paddingBottom: 12,
+    paddingBottom: 4,
     flexGrow: 1,
+    justifyContent: 'flex-end',
   },
   empty: { textAlign: 'center', color: '#94a3b8', marginTop: 24, fontWeight: '600' },
   rowMine: {
@@ -271,6 +339,13 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(15, 23, 42, 0.08)',
   },
+  composerDock: {
+    width: '100%',
+    flexShrink: 0,
+    backgroundColor: '#fff',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(15, 23, 42, 0.08)',
+  },
   composerInput: { minHeight: 40, maxHeight: 120 },
   sendBtn: {
     width: 44,
@@ -281,4 +356,22 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.colors.primary,
   },
   sendBtnDisabled: { opacity: 0.45 },
+  jumpFab: {
+    position: 'absolute',
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 8,
+  },
 });

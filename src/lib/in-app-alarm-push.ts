@@ -165,7 +165,13 @@ export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Prom
       toUserIds: [params.userId],
       title: c.title,
       body: c.body,
-      data: { meetingId: c.meetingId, action: c.action, url: c.url },
+      data: {
+        meetingId: c.meetingId,
+        action: c.action,
+        url: c.url,
+        title: c.title,
+        body: c.body,
+      },
     });
     return true;
   }

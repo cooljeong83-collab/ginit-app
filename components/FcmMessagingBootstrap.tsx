@@ -14,6 +14,7 @@ import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { fcmDebugSetError, fcmDebugSetSaveOk, fcmDebugSetToken } from '@/src/lib/fcm-debug-state';
 import { displayFcmRemoteMessageWithNotifeeAndroid } from '@/src/lib/fcm-notifee-display';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
+import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { ensureUserProfile, getUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -146,9 +147,13 @@ export function FcmMessagingBootstrap() {
 
       try {
         unsubOnMessage = onMessage(m, async (rm) => {
+          const action = String(rm?.data?.action ?? '').trim();
+          const meetingId = String(rm?.data?.meetingId ?? '').trim();
+          if (action === 'in_app_chat' && meetingId) {
+            const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
+            if (!notifyOn) return;
+          }
           if (Platform.OS === 'android') {
-            const action = String(rm?.data?.action ?? '').trim();
-            const meetingId = String(rm?.data?.meetingId ?? '').trim();
             if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
               const cur = getCurrentChatRoomId();
               if (cur && cur === meetingId) return;

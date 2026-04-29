@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -334,6 +334,7 @@ function MeetingChatQuickActionRow({
 export default function MeetingChatRoomScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
@@ -383,6 +384,7 @@ export default function MeetingChatRoomScreen() {
   const [searchNavigateLoading, setSearchNavigateLoading] = useState(false);
   /** 퀵 메뉴·닫기 레이어를 입력창(composerDock) 바로 위에 붙이기 위한 높이 */
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
+  const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const chatSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatSearchInputRef = useRef<TextInput>(null);
   const listRef = useRef<any>(null);
@@ -527,7 +529,7 @@ export default function MeetingChatRoomScreen() {
   );
 
   useEffect(() => {
-    if (allowed !== true || !meetingId) return;
+    if (allowed !== true || !meetingId || !isFocused) return;
     const latest = messages[0];
     if (!latest?.id) return;
     const prev = lastMarkedReadRef.current;
@@ -539,7 +541,7 @@ export default function MeetingChatRoomScreen() {
         /* best-effort */
       });
     }
-  }, [allowed, meetingId, messages, markChatReadUpTo, myId]);
+  }, [allowed, meetingId, messages, markChatReadUpTo, myId, isFocused]);
 
   /** inverted 리스트에서 상단(과거) 근접 시 훅 내부에서 중복 요청 방지 + 미리 불러오기 */
   const onPrefetchOlderMessages = useCallback(() => {
@@ -639,6 +641,9 @@ export default function MeetingChatRoomScreen() {
         pad = fromBottom + Math.min(slack + 4, 12);
       }
       setKeyboardBottomInset(Math.ceil(pad));
+      requestAnimationFrame(() => {
+        scrollToOffsetSafe(Math.max(0, composerInputBarHeight), false);
+      });
     };
     const clear = () => {
       setKeyboardBottomInset(0);
@@ -654,7 +659,7 @@ export default function MeetingChatRoomScreen() {
       subs.push(Keyboard.addListener('keyboardDidHide', clear));
     }
     return () => subs.forEach((s) => s.remove());
-  }, []);
+  }, [scrollToOffsetSafe, composerInputBarHeight]);
 
   const goMeetingDetail = useCallback(() => {
     if (!meetingId) return;
@@ -916,7 +921,16 @@ export default function MeetingChatRoomScreen() {
     () => Math.max(200, Math.floor(Dimensions.get('window').width - 40)),
     [],
   );
-
+  const chatListContentStyle = useMemo(
+    () => [
+      styles.listContent,
+      {
+        // inverted 리스트에서 paddingTop이 시각적 하단 여백 역할
+        paddingTop: keyboardBottomInset > 0 ? composerInputBarHeight : 4,
+      },
+    ],
+    [keyboardBottomInset, composerInputBarHeight],
+  );
   const closePlusMenuThen = useCallback(
     (after?: () => void) => {
       if (!plusMenuOpen) {
@@ -1563,7 +1577,7 @@ export default function MeetingChatRoomScreen() {
               data={messages}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={chatListContentStyle}
                 inverted
               onScroll={onChatScroll}
               scrollEventThrottle={16}
@@ -1664,7 +1678,12 @@ export default function MeetingChatRoomScreen() {
               </BlurView>
             </View>
           ) : null}
-          <View style={styles.composerCluster}>
+          <View
+            style={styles.composerCluster}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              if (h > 0) setComposerInputBarHeight(h);
+            }}>
             <View style={styles.composer}>
               <Pressable
                 style={styles.plusBtn}
@@ -2224,7 +2243,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingTop: 4,
     paddingBottom: 16,
     flexGrow: 1,
   },
