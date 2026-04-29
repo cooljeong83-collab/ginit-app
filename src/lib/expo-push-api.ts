@@ -11,6 +11,8 @@ export type ExpoPushMessage = {
   priority?: 'default' | 'normal' | 'high';
   /** iOS: 제목 아래 보조 한 줄 */
   subtitle?: string;
+  /** iOS: 배너·배달 우선순위(백그라운드·집중 모드 등에서 표시에 영향) */
+  interruptionLevel?: 'active' | 'passive' | 'timeSensitive' | 'critical';
 };
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -42,6 +44,7 @@ function dedupeExpoMessages(messages: ExpoPushMessage[]): ExpoPushMessage[] {
       (m.channelId ?? '').trim(),
       stableJson(m.data ?? null),
       stableJson(m.sound ?? null),
+      String(m.interruptionLevel ?? ''),
     ].join('\u001f');
     if (seen.has(key)) continue;
     seen.add(key);
@@ -71,8 +74,21 @@ export async function sendExpoPushMessages(messages: ExpoPushMessage[]): Promise
     headers,
     body: JSON.stringify(deduped),
   });
+  const text = await res.text().catch(() => '');
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
     throw new Error(`Expo push 실패 (${res.status}): ${text.slice(0, 200)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return;
+  }
+  const data = parsed && typeof parsed === 'object' && 'data' in parsed ? (parsed as { data?: unknown }).data : undefined;
+  if (!Array.isArray(data)) return;
+  const errors = data.filter((row) => row && typeof row === 'object' && (row as { status?: string }).status === 'error');
+  if (errors.length > 0) {
+    const first = errors[0] as { message?: string };
+    throw new Error(`Expo push 티켓 오류: ${String(first?.message ?? '').slice(0, 200)}`);
   }
 }

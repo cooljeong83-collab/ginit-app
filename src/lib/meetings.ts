@@ -31,6 +31,7 @@ import {
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
 import { getFirebaseFirestore } from './firebase';
@@ -760,6 +761,11 @@ export function subscribeMeetingById(
   }
   if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
     let cancelled = false;
+    let channel: RealtimeChannel | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let channelErrorRetries = 0;
+    const maxChannelErrorRetries = 12;
+
     const emit = () => {
       if (cancelled) return;
       void ledgerGetMeetingDocOutcome(id).then((outcome) => {
@@ -769,19 +775,60 @@ export function subscribeMeetingById(
         else onMeeting(mapFirestoreMeetingDoc(id, outcome.doc));
       });
     };
+
+    const dropChannel = () => {
+      if (channel) {
+        void supabase.removeChannel(channel);
+        channel = null;
+      }
+    };
+
+    const connect = () => {
+      if (cancelled) return;
+      dropChannel();
+      const topic = `meetings-ledger:${id}:${Math.random().toString(36).slice(2)}`;
+      channel = supabase
+        .channel(topic)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings', filter: `id=eq.${id}` }, () => {
+          emit();
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            channelErrorRetries = 0;
+            return;
+          }
+          if (status !== 'CHANNEL_ERROR') return;
+          if (__DEV__) {
+            console.warn('[subscribeMeetingById] ledger realtime CHANNEL_ERROR (reconnecting)', id);
+          }
+          emit();
+          dropChannel();
+          if (cancelled) return;
+          channelErrorRetries += 1;
+          if (channelErrorRetries > maxChannelErrorRetries) {
+            if (__DEV__) {
+              console.warn('[subscribeMeetingById] ledger realtime: max reconnect attempts', id);
+            }
+            return;
+          }
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 600);
+        });
+    };
+
     emit();
-    const topic = `meetings-ledger:${id}:${Math.random().toString(36).slice(2)}`;
-    const ch = supabase
-      .channel(topic)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings', filter: `id=eq.${id}` }, () => {
-        emit();
-      })
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') onError?.('Supabase Realtime 연결 오류');
-      });
+    connect();
+
     return () => {
       cancelled = true;
-      void supabase.removeChannel(ch);
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      dropChannel();
     };
   }
   const dRef = doc(getFirestoreDb(), MEETINGS_COLLECTION, id);
@@ -1848,24 +1895,24 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   const cleaned = stripUndefinedDeep(docFields) as Record<string, unknown>;
 
   const hostPk = input.createdBy?.trim();
-  if (hostPk) {
-    const hostProf = await getUserProfile(hostPk);
-    const buf = getScheduleOverlapBufferHours(hostProf);
-    const starts = collectCreateMeetingProposedStartMs(input);
-    if (starts.length > 0) {
-      await assertProposedStartsOverlapHybrid({
-        appUserId: hostPk,
-        startMsList: starts,
-        bufferHours: buf,
-        excludeMeetingId: null,
-      });
-    }
+  if (!hostPk) throw new Error('주최자 정보가 없습니다.');
+  const hostProf = await getUserProfile(hostPk);
+  if (!isUserPhoneVerified(hostProf)) {
+    throw new Error('전화번호 인증을 완료한 사용자만 모임을 만들 수 있어요. 프로필에서 인증을 진행해 주세요.');
+  }
+  const buf = getScheduleOverlapBufferHours(hostProf);
+  const starts = collectCreateMeetingProposedStartMs(input);
+  if (starts.length > 0) {
+    await assertProposedStartsOverlapHybrid({
+      appUserId: hostPk,
+      startMsList: starts,
+      bufferHours: buf,
+      excludeMeetingId: null,
+    });
   }
 
   if (ledgerWritesToSupabase()) {
-    const host = input.createdBy?.trim();
-    if (!host) throw new Error('주최자 정보가 없습니다.');
-    return ledgerMeetingCreate(host, cleaned);
+    return ledgerMeetingCreate(hostPk, cleaned);
   }
 
   console.log('Final Firestore Payload:', toJsonSafeFirestorePreview({ ...cleaned, createdAt: '[serverTimestamp]' }));

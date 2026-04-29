@@ -54,6 +54,7 @@ import {
 } from '@/src/lib/profile-register-info';
 import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
+import { getFirebaseAuth } from '@/src/lib/firebase';
 import {
   ensureUserProfile,
   firestoreTimestampLikeToDate,
@@ -62,6 +63,7 @@ import {
   isMeetingServiceComplianceComplete,
   meetingDemographicsIncomplete,
   isUserPhoneVerified,
+  readGooglePeopleDemographicsLocks,
   updateUserProfile,
   type UserProfile,
 } from '@/src/lib/user-profile';
@@ -109,6 +111,11 @@ export default function ProfileTab() {
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
   const [termsConsentChecked, setTermsConsentChecked] = useState(false);
   const [complianceBusy, setComplianceBusy] = useState(false);
+  const [googleDemoGenderLocked, setGoogleDemoGenderLocked] = useState(false);
+  const [googleDemoBirthLocked, setGoogleDemoBirthLocked] = useState(false);
+  /** profiles에 이미 저장된 경우 인증 시트에서 수정 불가 */
+  const [profileHasStoredGender, setProfileHasStoredGender] = useState(false);
+  const [profileHasStoredBirth, setProfileHasStoredBirth] = useState(false);
 
   /** 인증 모달: 화면 대부분을 쓰되 패딩·타이틀 영역을 빼고 스크롤 영역 높이 확보 */
   const authSheetLayout = useMemo(() => {
@@ -331,8 +338,9 @@ export default function ProfileTab() {
         setTermsConsentChecked(complete ? true : hasTermsAgreementRecorded(p));
 
         // 인증 팝업 진입 시: 이미 저장된 정보를 state에 다시 세팅(로그아웃/재로그인 후에도 잠금 유지)
-        setIsPhoneVerified(isUserPhoneVerified(p));
-        const phone = p.phone?.trim();
+        const authPhone = getFirebaseAuth().currentUser?.phoneNumber?.trim() ?? '';
+        const phone = p.phone?.trim() || authPhone;
+        setIsPhoneVerified(isUserPhoneVerified(p) || !!authPhone);
         const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
         const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
         const phoneDisplay =
@@ -349,17 +357,46 @@ export default function ProfileTab() {
           gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
         setGenderDemo(gNorm);
 
-        const y = typeof p.birthYear === 'number' ? p.birthYear : null;
-        const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
-        const d = typeof p.birthDay === 'number' ? p.birthDay : null;
-        if (y) {
-          // month/day가 비어 있어도 저장된 year는 반드시 표시합니다.
-          setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
+        const locks = readGooglePeopleDemographicsLocks(p);
+        setGoogleDemoGenderLocked(locks.genderLocked);
+        setGoogleDemoBirthLocked(locks.birthLocked);
+
+        setProfileHasStoredGender(Boolean(p.gender?.trim()));
+        const bdDateForLock = firestoreTimestampLikeToDate(p.birthDate);
+        setProfileHasStoredBirth(
+          Boolean(bdDateForLock) ||
+            (typeof p.birthYear === 'number' &&
+              Number.isFinite(p.birthYear) &&
+              typeof p.birthMonth === 'number' &&
+              Number.isFinite(p.birthMonth) &&
+              typeof p.birthDay === 'number' &&
+              Number.isFinite(p.birthDay)),
+        );
+
+        const bdDate = firestoreTimestampLikeToDate(p.birthDate);
+        if (bdDate) {
+          setBirthDemo({
+            year: bdDate.getFullYear(),
+            month: bdDate.getMonth() + 1,
+            day: bdDate.getDate(),
+          });
+        } else {
+          const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+          const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+          const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+          if (y) {
+            // month/day가 비어 있어도 저장된 year는 반드시 표시합니다.
+            setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
+          }
         }
       } catch {
         if (!alive) return;
         setTermsConsentChecked(false);
         setMeetingAuthComplete(false);
+        setGoogleDemoGenderLocked(false);
+        setGoogleDemoBirthLocked(false);
+        setProfileHasStoredGender(false);
+        setProfileHasStoredBirth(false);
       }
     })();
     return () => {
@@ -877,7 +914,8 @@ export default function ProfileTab() {
             if (!complianceBusy) setAuthSheetVisible(false);
           }}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             style={styles.sheetKbWrap}>
             <View style={styles.sheetRoot}>
               <Pressable
@@ -905,6 +943,15 @@ export default function ProfileTab() {
                     ? '이용 인증이 완료된 계정이에요. 아래에서 등록된 정보를 확인할 수 있어요.'
                     : '모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.'}
                 </Text>
+                {(googleDemoGenderLocked ||
+                  googleDemoBirthLocked ||
+                  profileHasStoredGender ||
+                  profileHasStoredBirth) &&
+                !meetingAuthComplete ? (
+                  <Text style={styles.sheetGoogleLockHint}>
+                    Google에서 동의해 받은 정보 또는 이미 프로필에 저장된 성별·생년월일은 수정할 수 없어요.
+                  </Text>
+                ) : null}
 
                 <Pressable
                   onPress={() =>
@@ -944,13 +991,25 @@ export default function ProfileTab() {
                       return (
                         <Pressable
                           key={code}
-                          disabled={profileBusy || complianceBusy || meetingAuthComplete}
+                          disabled={
+                            profileBusy ||
+                            complianceBusy ||
+                            meetingAuthComplete ||
+                            googleDemoGenderLocked ||
+                            profileHasStoredGender
+                          }
                           onPress={() => setGenderDemo(code)}
                           style={({ pressed }) => [
                             authFormStyles.genderBinaryBtn,
                             selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
                             pressed &&
-                              !(profileBusy || complianceBusy || meetingAuthComplete) &&
+                              !(
+                                profileBusy ||
+                                complianceBusy ||
+                                meetingAuthComplete ||
+                                googleDemoGenderLocked ||
+                                profileHasStoredGender
+                              ) &&
                               authFormStyles.pressed,
                           ]}
                           accessibilityRole="radio"
@@ -967,7 +1026,13 @@ export default function ProfileTab() {
                   <BirthdateWheel
                     value={birthDemo}
                     onChange={setBirthDemo}
-                    disabled={profileBusy || complianceBusy || meetingAuthComplete}
+                    disabled={
+                      profileBusy ||
+                      complianceBusy ||
+                      meetingAuthComplete ||
+                      googleDemoBirthLocked ||
+                      profileHasStoredBirth
+                    }
                   />
                 </>
 
@@ -1435,6 +1500,13 @@ const styles = StyleSheet.create({
     color: '#64748b',
     lineHeight: 20,
     marginBottom: 14,
+  },
+  sheetGoogleLockHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+    lineHeight: 19,
+    marginBottom: 12,
   },
   termsRow: {
     flexDirection: 'row',

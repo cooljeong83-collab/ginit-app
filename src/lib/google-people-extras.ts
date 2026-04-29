@@ -40,7 +40,19 @@ export async function fetchGooglePeopleExtras(accessToken: string | null): Promi
     const url =
       'https://people.googleapis.com/v1/people/me?personFields=birthdays,genders';
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (__DEV__) {
+        const body = await res.text().catch(() => '');
+        console.warn(
+          '[GooglePeople]',
+          'people/me failed',
+          res.status,
+          res.statusText,
+          body?.slice(0, 200) ?? '',
+        );
+      }
+      return null;
+    }
     const j = (await res.json()) as PeopleJson;
     const gender = j.genders?.[0]?.value?.trim() || null;
     const date = pickPrimaryBirthday(j.birthdays);

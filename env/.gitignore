@@ -4,5 +4,4 @@ GoogleService-Info.plist
 .env
 .env.*
 !.env.example
-# Firebase Service Account Key
-ginit-1b7b3-firebase-adminsdk-fbsvc-af1c37acd2.json
+ginit-1b7b3-62d58aec969e.json

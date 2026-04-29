@@ -39,6 +39,7 @@ import {
   isMeetingServiceComplianceComplete,
   isUserPhoneVerified,
   meetingDemographicsIncomplete,
+  readGooglePeopleDemographicsLocks,
   updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
@@ -80,6 +81,8 @@ export default function ProfileEditScreen() {
   const [termsConsentChecked, setTermsConsentChecked] = useState(false);
   const [complianceBusy, setComplianceBusy] = useState(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
+  const [googleDemoGenderLocked, setGoogleDemoGenderLocked] = useState(false);
+  const [googleDemoBirthLocked, setGoogleDemoBirthLocked] = useState(false);
 
   const authSheetLayout = useMemo(() => {
     const panelMax = Math.floor(windowHeight * 0.96);
@@ -126,6 +129,9 @@ export default function ProfileEditScreen() {
           const d = typeof p.birthDay === 'number' ? p.birthDay : null;
           if (y && m && d) setBirthDemo({ year: y, month: m, day: d });
         }
+        const locks = readGooglePeopleDemographicsLocks(p);
+        setGoogleDemoGenderLocked(locks.genderLocked);
+        setGoogleDemoBirthLocked(locks.birthLocked);
         setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
       } catch {
         if (!alive) return;
@@ -139,6 +145,8 @@ export default function ProfileEditScreen() {
         setOtpError(null);
         setGenderDemo(null);
         setMeetingAuthComplete(false);
+        setGoogleDemoGenderLocked(false);
+        setGoogleDemoBirthLocked(false);
       }
     })();
     return () => {
@@ -177,17 +185,30 @@ export default function ProfileEditScreen() {
           gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
         setGenderDemo(gNorm);
 
-        const y = typeof p.birthYear === 'number' ? p.birthYear : null;
-        const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
-        const d = typeof p.birthDay === 'number' ? p.birthDay : null;
-        if (y) {
-          // month/day가 비어 있어도 저장된 year는 반드시 표시합니다.
-          setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
+        const bdDateOpen = firestoreTimestampLikeToDate(p.birthDate);
+        if (bdDateOpen) {
+          setBirthDemo({
+            year: bdDateOpen.getFullYear(),
+            month: bdDateOpen.getMonth() + 1,
+            day: bdDateOpen.getDate(),
+          });
+        } else {
+          const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+          const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+          const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+          if (y) {
+            setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
+          }
         }
+        const locksOpen = readGooglePeopleDemographicsLocks(p);
+        setGoogleDemoGenderLocked(locksOpen.genderLocked);
+        setGoogleDemoBirthLocked(locksOpen.birthLocked);
       } catch {
         if (!alive) return;
         setTermsConsentChecked(false);
         setMeetingAuthComplete(false);
+        setGoogleDemoGenderLocked(false);
+        setGoogleDemoBirthLocked(false);
       }
     })();
     return () => {
@@ -250,15 +271,18 @@ export default function ProfileEditScreen() {
         photoUrl: photoUrl.trim() || null,
       };
       /** SNS 가입 보완: 시트에서만 입력한 성별·생일은 별도 ‘인증 저장’ 전에도 닉네임 저장 시 함께 반영해야 뒤로 가도 사라지지 않음 */
-      if (
-        isDemographicsIncomplete(pCur) &&
-        genderDemo &&
-        birthDemo.year > 0 &&
-        birthDemo.month > 0 &&
-        birthDemo.day > 0
-      ) {
-        patch.gender = genderDemo;
-        patch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
+      if (isDemographicsIncomplete(pCur)) {
+        if (!googleDemoGenderLocked && genderDemo) {
+          patch.gender = genderDemo;
+        }
+        if (
+          !googleDemoBirthLocked &&
+          birthDemo.year > 0 &&
+          birthDemo.month > 0 &&
+          birthDemo.day > 0
+        ) {
+          patch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
+        }
       }
       await updateUserProfile(profilePk, patch);
       await ensureUserProfile(profilePk);
@@ -271,7 +295,7 @@ export default function ProfileEditScreen() {
     } finally {
       setProfileBusy(false);
     }
-  }, [profilePk, nickname, photoUrl, router, genderDemo, birthDemo]);
+  }, [profilePk, nickname, photoUrl, router, genderDemo, birthDemo, googleDemoGenderLocked, googleDemoBirthLocked]);
 
   const canSendOtp = useMemo(() => {
     const normalized = normalizePhoneUserId(phoneField);

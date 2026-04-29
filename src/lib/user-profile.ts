@@ -18,6 +18,34 @@ export const USERS_COLLECTION = 'users';
 /** 탈퇴(익명화) 후 UI·Firestore에 고정되는 표시 닉네임 */
 export const WITHDRAWN_NICKNAME = '(탈퇴한 회원)';
 
+/** Google People 동의로 확정된 성별 — 서비스 이용 인증·프로필에서 수정 불가 */
+export const PROFILE_META_GOOGLE_DEMO_GENDER_LOCKED = 'ginit_google_demo_gender_locked' as const;
+/** Google People 동의로 확정된 생년월일 — 동일하게 수정 불가 */
+export const PROFILE_META_GOOGLE_DEMO_BIRTH_LOCKED = 'ginit_google_demo_birth_locked' as const;
+
+export function buildGooglePeopleDemographicsMetadataPatch(opts: {
+  genderFromGoogle?: boolean;
+  birthFromGoogle?: boolean;
+}): Record<string, unknown> {
+  const o: Record<string, unknown> = {};
+  if (opts.genderFromGoogle) o[PROFILE_META_GOOGLE_DEMO_GENDER_LOCKED] = true;
+  if (opts.birthFromGoogle) o[PROFILE_META_GOOGLE_DEMO_BIRTH_LOCKED] = true;
+  return o;
+}
+
+export function readGooglePeopleDemographicsLocks(p: UserProfile | null | undefined): {
+  genderLocked: boolean;
+  birthLocked: boolean;
+} {
+  const m = p?.metadata;
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return { genderLocked: false, birthLocked: false };
+  const rec = m as Record<string, unknown>;
+  return {
+    genderLocked: rec[PROFILE_META_GOOGLE_DEMO_GENDER_LOCKED] === true,
+    birthLocked: rec[PROFILE_META_GOOGLE_DEMO_BIRTH_LOCKED] === true,
+  };
+}
+
 export type UserStatus = 'ACTIVE' | 'BANNED' | 'WITHDRAWN';
 
 export type UserProfile = {
@@ -532,6 +560,12 @@ function supabaseProfileJsonToFirestoreShape(row: Record<string, unknown>): Reco
     isWithdrawn: row.is_withdrawn === true,
     status: row.is_withdrawn === true ? 'WITHDRAWN' : 'ACTIVE',
     signupProvider: sp === 'google_sns' || sp === 'phone_otp' ? sp : null,
+    fcmToken:
+      typeof row.fcm_token === 'string' && row.fcm_token.trim() !== '' ? row.fcm_token.trim() : null,
+    metadata:
+      row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+        ? (row.metadata as Record<string, unknown>)
+        : null,
   };
 }
 
@@ -561,9 +595,13 @@ function profilePatchToSupabaseJsonb(patch: {
   rankingPoints?: number | null;
   email?: string | null;
   displayName?: string | null;
+  /** 디바이스별 최신 FCM 토큰 */
+  fcmToken?: string | null;
   signupProvider?: 'google_sns' | 'phone_otp' | null;
   isWithdrawn?: boolean | null;
   withdrawnAt?: unknown | null;
+  /** `upsert_profile_payload`에 `metadata_patch`로 병합(기존 metadata와 ||) */
+  metadata?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   if (patch.nickname !== undefined) {
@@ -581,23 +619,43 @@ function profilePatchToSupabaseJsonb(patch: {
   if (patch.ageBand !== undefined) {
     fields.age_band = patch.ageBand && String(patch.ageBand).trim() ? String(patch.ageBand).trim() : null;
   }
-  if (patch.birthDate !== undefined) {
-    const d = firestoreTimestampLikeToDate(patch.birthDate);
-    if (d && Number.isFinite(d.getTime())) {
-      fields.birth_year = d.getUTCFullYear();
-      fields.birth_month = d.getUTCMonth() + 1;
-      fields.birth_day = d.getUTCDate();
+  // 생년월일: 분필드가 모두 있으면 우선(구글 가입 등 로컬 달력과 일치). birthDate만 있으면 로컬 달력으로 변환.
+  // 기존 UTC만 쓰면 `Timestamp.fromDate(new Date(y,m-1,d))`와 하루 어긋날 수 있고, birthDate 파싱 실패 시 분필드가 무시되던 문제가 있었음.
+  if (
+    patch.birthDate !== undefined ||
+    patch.birthYear !== undefined ||
+    patch.birthMonth !== undefined ||
+    patch.birthDay !== undefined
+  ) {
+    let y: number | null = null;
+    let mo: number | null = null;
+    let da: number | null = null;
+    const yE = patch.birthYear;
+    const mE = patch.birthMonth;
+    const dE = patch.birthDay;
+    if (
+      yE != null &&
+      Number.isFinite(yE) &&
+      mE != null &&
+      Number.isFinite(mE) &&
+      dE != null &&
+      Number.isFinite(dE)
+    ) {
+      y = Math.trunc(yE);
+      mo = Math.trunc(mE);
+      da = Math.trunc(dE);
+    } else {
+      const d = firestoreTimestampLikeToDate(patch.birthDate);
+      if (d && Number.isFinite(d.getTime())) {
+        y = d.getFullYear();
+        mo = d.getMonth() + 1;
+        da = d.getDate();
+      }
     }
-  }
-  if (patch.birthDate === undefined) {
-    if (patch.birthYear !== undefined && patch.birthYear != null && Number.isFinite(patch.birthYear)) {
-      fields.birth_year = Math.trunc(patch.birthYear);
-    }
-    if (patch.birthMonth !== undefined && patch.birthMonth != null && Number.isFinite(patch.birthMonth)) {
-      fields.birth_month = Math.trunc(patch.birthMonth);
-    }
-    if (patch.birthDay !== undefined && patch.birthDay != null && Number.isFinite(patch.birthDay)) {
-      fields.birth_day = Math.trunc(patch.birthDay);
+    if (y != null && mo != null && da != null) {
+      fields.birth_year = y;
+      fields.birth_month = mo;
+      fields.birth_day = da;
     }
   }
   if (patch.phone !== undefined) {
@@ -624,6 +682,10 @@ function profilePatchToSupabaseJsonb(patch: {
     fields.display_name =
       patch.displayName && String(patch.displayName).trim() ? String(patch.displayName).trim() : null;
   }
+  if (patch.fcmToken !== undefined) {
+    const t = patch.fcmToken && String(patch.fcmToken).trim() ? String(patch.fcmToken).trim() : null;
+    fields.fcm_token = t;
+  }
   if (patch.signupProvider !== undefined) {
     const sp = patch.signupProvider;
     fields.signup_provider =
@@ -636,6 +698,10 @@ function profilePatchToSupabaseJsonb(patch: {
     const iso = tsToIsoOrNull(patch.withdrawnAt);
     if (iso != null) fields.withdrawn_at = iso;
     else if (patch.withdrawnAt === null) fields.withdrawn_at = null;
+  }
+  if (patch.metadata !== undefined && patch.metadata != null) {
+    const keys = Object.keys(patch.metadata);
+    if (keys.length > 0) fields.metadata_patch = patch.metadata;
   }
   return fields;
 }
@@ -834,6 +900,7 @@ export async function applyGoogleSignupProfile(
       birthMonth: patch.birthMonth ?? undefined,
       birthDay: patch.birthDay ?? undefined,
       signupProvider: patch.signupProvider ?? undefined,
+      metadata: patch.metadata ?? undefined,
       // 재가입/복구 케이스: withdrawn이면 재활성화
       isWithdrawn: false,
       withdrawnAt: null,
@@ -926,6 +993,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
     phone_verified_at: null,
     email: null,
     display_name: null,
+    fcm_token: null,
     terms_agreed_at: null,
     gender: null,
     age_band: null,
@@ -935,13 +1003,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
     signup_provider: null,
     // private 계정 플래그는 운영상 의미가 없으므로 기본값으로 되돌립니다.
     is_private: false,
-
-    // 게이미피케이션/신뢰/개인화 데이터도 식별 정보에 준하여 초기화합니다.
-    g_level: 1,
-    g_xp: 0,
-    g_trust: 100,
-    g_dna: 'Explorer',
-    meeting_count: 0,
+    metadata: {},
   });
 }
 

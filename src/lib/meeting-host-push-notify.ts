@@ -1,6 +1,8 @@
 import { doc, getDoc } from 'firebase/firestore';
+import { Platform } from 'react-native';
 
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
+import { sendFcmPushToUsersFireAndForget } from '@/src/lib/fcm-push-api';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import type { Meeting } from '@/src/lib/meetings';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -91,8 +93,6 @@ export async function notifyMeetingParticipantsOfHostAction(
 ): Promise<void> {
   const recipients = participantRecipientIds(meeting, hostPhoneUserId);
   if (recipients.length === 0) return;
-  const tokens = await fetchExpoPushTokensForUsers(recipients);
-  if (tokens.length === 0) return;
 
   const { title, body } = copyForPush(action, meeting.title);
   const data: Record<string, unknown> = {
@@ -101,11 +101,20 @@ export async function notifyMeetingParticipantsOfHostAction(
     url: `ginitapp://meeting/${meeting.id}`,
   };
 
+  // Android(FCM) 서버 경유: 수신자 앱 종료 상태 수신 보강
+  sendFcmPushToUsersFireAndForget({ toUserIds: recipients, title, body, data });
+  // Android는 Expo Push도 FCM을 타므로 중복 방지: FCM만 사용
+  if (Platform.OS === 'android') return;
+
+  const tokens = await fetchExpoPushTokensForUsers(recipients);
+  if (tokens.length === 0) return;
+
   const messages: ExpoPushMessage[] = tokens.map((to) => ({
     to,
     title,
     body,
     sound: 'default',
+    priority: 'high',
     channelId: 'default',
     data,
   }));
@@ -143,8 +152,6 @@ export async function notifyMeetingNewHostAssigned(
 ): Promise<void> {
   const nid = normalizeParticipantId(newHostUserId.trim());
   if (!nid) return;
-  const tokens = await fetchExpoPushTokensForUsers([nid]);
-  if (tokens.length === 0) return;
 
   const { title, body } = copyForNewHostAssigned(meeting.title);
   const data: Record<string, unknown> = {
@@ -152,11 +159,20 @@ export async function notifyMeetingNewHostAssigned(
     action: 'host_transferred',
     url: `ginitapp://meeting/${meeting.id}`,
   };
+
+  // Android(FCM) 서버 경유
+  sendFcmPushToUsersFireAndForget({ toUserIds: [nid], title, body, data });
+  // Android는 Expo Push도 FCM을 타므로 중복 방지: FCM만 사용
+  if (Platform.OS === 'android') return;
+
+  const tokens = await fetchExpoPushTokensForUsers([nid]);
+  if (tokens.length === 0) return;
   const messages: ExpoPushMessage[] = tokens.map((to) => ({
     to,
     title,
     body,
     sound: 'default',
+    priority: 'high',
     channelId: 'default',
     data,
   }));
@@ -186,9 +202,6 @@ export async function notifyMeetingHostParticipantEvent(
   if (!host || !participant) return;
   if (host === participant) return;
 
-  const tokens = await fetchExpoPushTokensForUsers([host]);
-  if (tokens.length === 0) return;
-
   const { title, body } = copyForHostParticipantEvent(event, meeting.title, participantNickname);
   const data: Record<string, unknown> = {
     meetingId: meeting.id,
@@ -196,11 +209,20 @@ export async function notifyMeetingHostParticipantEvent(
     participantId: participant,
     url: `ginitapp://meeting/${meeting.id}`,
   };
+
+  // Android(FCM) 서버 경유
+  sendFcmPushToUsersFireAndForget({ toUserIds: [host], title, body, data });
+  // Android는 Expo Push도 FCM을 타므로 중복 방지: FCM만 사용
+  if (Platform.OS === 'android') return;
+
+  const tokens = await fetchExpoPushTokensForUsers([host]);
+  if (tokens.length === 0) return;
   const messages: ExpoPushMessage[] = tokens.map((to) => ({
     to,
     title,
     body,
     sound: 'default',
+    priority: 'high',
     channelId: 'default',
     data,
   }));

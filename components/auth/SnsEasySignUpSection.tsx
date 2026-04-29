@@ -1,4 +1,4 @@
-import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import {
@@ -93,7 +93,7 @@ export function SnsEasySignUpSection({ onGooglePress, googleDisabled, googleLoad
           disabled={googleDisabled}
           loading={googleLoading}
           accessibilityLabel="Google로 시작하기"
-          icon={<FontAwesome5 name="google" size={ICON_SIZE} color={GOOGLE_BLUE} brand />}
+          icon={<Ionicons name="logo-google" size={ICON_SIZE} color={GOOGLE_BLUE} />}
         />
       </View>
     </View>

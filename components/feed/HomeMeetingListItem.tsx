@@ -204,7 +204,7 @@ type Props = {
   meeting: Meeting;
   userCoords: LatLng | null;
   joined: boolean;
-  /** 홈 피드 목록에서 내 역할에 따른 색상 구분 */
+  /** 홈 피드 목록에서 내 역할 — 호스트/게스트 모두 동일 블루 글래스 톤(농도만 구분) */
   ownership?: 'hosted' | 'joined' | 'none';
   onPress: () => void;
   /** 내 확정 일정과 ±버퍼 이내 겹침(피드 안내) */
@@ -285,7 +285,12 @@ export function HomeMeetingListItem({
             ownership === 'joined' && s.cardShadowJoined,
             ownership === 'hosted' && s.cardShadowHosted,
           ]}>
-          <View style={[s.cardShell, ownership === 'hosted' && s.cardShellHosted]}>
+          <View
+            style={[
+              s.cardShell,
+              ownership === 'hosted' && s.cardShellHosted,
+              ownership === 'joined' && s.cardShellJoined,
+            ]}>
             <LinearGradient
               colors={[...visual.gradient]}
               start={{ x: 0, y: 0 }}
@@ -439,13 +444,12 @@ const s = StyleSheet.create({
     borderRadius: GinitTheme.radius.card,
     backgroundColor: GinitTheme.colors.surface,
   },
-  /** 참여 중인 모임 — 선택된 카드처럼 은은한 하이라이트 */
+  /** 게스트(참여) 모임 — 호스트 카드와 동일 블루 계열, 살짝 옅게 */
   cardShadowJoined: {
-    backgroundColor: GinitTheme.colors.bgAlt,
+    backgroundColor: 'rgba(115, 199, 255, 0.07)',
   },
-  /** 주관(방장) 모임 — 따뜻한 오렌지 톤 */
+  /** 주관(호스트) 모임 — 스카이 블루 글래스 */
   cardShadowHosted: {
-    // 모임 생성 CTA(블루 톤) 쪽을 아주 옅게 반영
     backgroundColor: 'rgba(115, 199, 255, 0.10)',
   },
   cardShell: {
@@ -458,6 +462,9 @@ const s = StyleSheet.create({
   },
   cardShellHosted: {
     borderColor: 'rgba(115, 199, 255, 0.24)',
+  },
+  cardShellJoined: {
+    borderColor: 'rgba(115, 199, 255, 0.18)',
   },
   accentStripe: {
     width: 4,
@@ -475,7 +482,8 @@ const s = StyleSheet.create({
     borderLeftColor: GinitTheme.colors.border,
   },
   cardInnerJoined: {
-    backgroundColor: GinitTheme.colors.primarySoft,
+    backgroundColor: 'rgba(115, 199, 255, 0.08)',
+    borderLeftColor: 'rgba(115, 199, 255, 0.16)',
   },
   cardInnerHosted: {
     backgroundColor: 'rgba(115, 199, 255, 0.11)',

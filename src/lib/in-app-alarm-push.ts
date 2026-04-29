@@ -1,11 +1,11 @@
 import { doc, getDoc } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
-import { AppState, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
+import { sendFcmPushToUsersFireAndForget } from '@/src/lib/fcm-push-api';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
@@ -21,6 +21,22 @@ export async function ensureGinitInAppAndroidChannel(): Promise<void> {
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
   });
+}
+
+/** 로컬·시스템 배너 표시 전에 호출 — 미요청/거절 시 한 번 더 요청합니다. */
+export async function ensureNotificationsPresentable(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  if (existing === 'granted') return true;
+  const { status } = await Notifications.requestPermissionsAsync({
+    ios: {
+      allowAlert: true,
+      allowBadge: true,
+      allowSound: true,
+      allowDisplayInCarPlay: true,
+    },
+  });
+  return status === 'granted';
 }
 
 export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
@@ -113,34 +129,31 @@ function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
   };
 }
 
-async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<void> {
-  if (Platform.OS === 'web') return;
-  await ensureGinitInAppAndroidChannel();
-  const c = buildHeadsUpContent(params);
-  /** Android: `channelId`만 있는 trigger가 즉시 전달 + 고중요도 채널에 연결됩니다. iOS: `null`이 즉시입니다. */
-  const trigger =
-    Platform.OS === 'android' ? { channelId: GINIT_IN_APP_ANDROID_CHANNEL } : null;
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: c.title,
-      body: c.body,
-      subtitle: c.subtitle,
-      sound: 'default',
-      data: { meetingId: c.meetingId, action: c.action, url: c.url },
-      interruptionLevel: 'active',
-      priority: 'high',
-    },
-    trigger,
-  });
-}
-
 /**
  * 로그인한 사용자 본인의 Expo 푸시 토큰으로 전송(백그라운드·다른 앱 사용 중 헤드업용).
+ * @returns 토큰이 있어 전송 시도까지 한 경우 true, 토큰 없음 false
  */
-export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Promise<void> {
-  const token = await fetchExpoPushTokenForUser(params.userId);
-  if (!token) return;
+export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Promise<boolean> {
   const c = buildHeadsUpContent(params);
+  /**
+   * IMPORTANT (중복 푸시 방지):
+   * - Android: Expo Push도 내부적으로 FCM을 타기 때문에, 여기서 FCM + Expo를 같이 보내면 동일 알림이 중복될 수 있습니다.
+   *   따라서 Android는 서버 경유 FCM만 사용합니다.
+   * - iOS: FCM 토큰 저장/발송 경로가 없으므로 Expo Push만 사용합니다.
+   */
+  if (Platform.OS === 'android') {
+    // Android(FCM): 수신자가 앱 종료 상태여도 오도록 서버 경유 발송(토큰이 없으면 서버에서 sent=0으로 종료).
+    sendFcmPushToUsersFireAndForget({
+      toUserIds: [params.userId],
+      title: c.title,
+      body: c.body,
+      data: { meetingId: c.meetingId, action: c.action, url: c.url },
+    });
+    return true;
+  }
+
+  const token = await fetchExpoPushTokenForUser(params.userId);
+  if (!token) return false;
   const msg: ExpoPushMessage = {
     to: token,
     title: c.title,
@@ -148,15 +161,44 @@ export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Prom
     subtitle: c.subtitle,
     sound: 'default',
     priority: 'high',
-    channelId: GINIT_IN_APP_ANDROID_CHANNEL,
+    /**
+     * Android(Expo push): 수신 기기 채널은 `default`로 고정합니다.
+     * 앱이 완전 종료 상태면 커스텀 채널(`ginit_in_app`)이 아직 생성되지 않았을 수 있어 미표시가 날 수 있습니다.
+     * `default`는 `PushNotificationBootstrap`에서 앱 부팅 시 항상 생성합니다.
+     */
+    channelId: 'default',
+    /** iOS 전용 필드 — Expo가 Android(FCM) 경로에서는 무시합니다. 발신 기기가 Android여도 수신 iOS에 반영되게 항상 포함합니다. */
+    interruptionLevel: 'active',
     data: { meetingId: c.meetingId, action: c.action, url: c.url },
   };
   await sendExpoPushMessages([msg]);
+  return true;
 }
 
 /**
- * 앱이 포그라운드면 로컬 즉시 알림(배너), 그 외에는 원격 푸시.
- * 채팅 본문은 `body`에 넣어 배너에서 바로 읽히게 합니다.
+ * 송신 측에서 호출: `userId` 기기로만 Expo 원격 푸시(호출자 AppState·로컬 배너 무관).
+ * 수신자 앱이 백그라운드/화면 꺼짐이어도 토큰이 등록돼 있으면 배너가 갈 수 있습니다.
+ */
+export function sendInAppAlarmRemotePushToUserFireAndForget(
+  userId: string,
+  payload: Omit<SendInAppAlarmPushParams, 'userId'>,
+): void {
+  void (async () => {
+    try {
+      if (Platform.OS === 'web') return;
+      const uid = normalizeParticipantId(userId.trim());
+      if (!uid) return;
+      await sendInAppAlarmPush({ ...payload, userId: uid });
+    } catch (err) {
+      if (__DEV__) {
+        console.warn('[in-app-alarm-push] remote-only', err);
+      }
+    }
+  })();
+}
+
+/**
+ * 로컬 알림을 사용하지 않고 원격 푸시만 전송합니다.
  */
 export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushParams): void {
   void (async () => {
@@ -170,16 +212,9 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
           if (!ok) return;
         }
       }
-      await ensureGinitInAppAndroidChannel();
-      if (AppState.currentState === 'active') {
-        // 카카오톡처럼: 현재 보고 있는 채팅방이면 포그라운드 헤드업/배너를 띄우지 않습니다.
-        if (params.kind === 'chat' || params.kind === 'social_dm') {
-          const cur = getCurrentChatRoomId();
-          if (cur && cur === params.meetingId.trim()) return;
-        }
-        await presentLocalHeadsUp(params);
-        return;
-      }
+      // 로컬 스케줄 알림은 제거: 원격 푸시 전송만 유지합니다.
+      const { status: notifPerm } = await Notifications.getPermissionsAsync();
+      if (notifPerm !== 'granted') return;
       await sendInAppAlarmPush(params);
     } catch (err) {
       if (__DEV__) {

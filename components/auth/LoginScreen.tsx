@@ -51,6 +51,7 @@ import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import {
   applyGoogleSignupProfile,
+  buildGooglePeopleDemographicsMetadataPatch,
   ensureUserProfile,
   generateRandomNickname,
   recordTermsAgreement,
@@ -371,6 +372,11 @@ export default function LoginScreen() {
           ? Timestamp.fromDate(new Date(py, pm - 1, pd))
           : null;
 
+      const googleDemoMeta = buildGooglePeopleDemographicsMetadataPatch({
+        genderFromGoogle: Boolean(genderFs),
+        birthFromGoogle: Boolean(birthDateTs),
+      });
+
       await applyGoogleSignupProfile(emailPk, {
         nickname,
         photoUrl,
@@ -390,8 +396,33 @@ export default function LoginScreen() {
               birthDay: pd,
             }
           : {}),
+        ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
         firebaseUid: user.uid,
       });
+      /** 첫 upsert 직후에도 gender/birth가 비는 환경이 있어, People에서 확보된 값이면 한 번 더 반영합니다. */
+      const pAfterSignup = await ensureUserProfile(emailPk);
+      const repairGender = Boolean(genderFs) && !pAfterSignup.gender?.trim();
+      const repairBirth =
+        py != null &&
+        pm != null &&
+        pd != null &&
+        (pAfterSignup.birthYear == null ||
+          pAfterSignup.birthMonth == null ||
+          pAfterSignup.birthDay == null);
+      if (repairGender || repairBirth) {
+        await updateUserProfile(emailPk, {
+          ...(repairGender ? { gender: genderFs } : {}),
+          ...(repairBirth
+            ? {
+                birthDate: Timestamp.fromDate(new Date(py, pm - 1, pd)),
+                birthYear: py,
+                birthMonth: pm,
+                birthDay: pd,
+              }
+            : {}),
+          ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
+        });
+      }
       await setUserId(emailPk);
       await writeSecureAuthSession({ uid: user.uid, userId: emailPk });
       await registerSignupLocalKeys('', emailPk);

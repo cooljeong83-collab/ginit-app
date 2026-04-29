@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -333,6 +333,7 @@ function MeetingChatQuickActionRow({
 
 export default function MeetingChatRoomScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
@@ -659,6 +660,14 @@ export default function MeetingChatRoomScreen() {
     if (!meetingId) return;
     router.push(`/meeting/${meetingId}`);
   }, [router, meetingId]);
+
+  const exitChatRoom = useCallback(() => {
+    if (navigation.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/chat');
+    }
+  }, [navigation, router]);
 
   const closeChatSearch = useCallback(() => {
     setChatSearchOpen(false);
@@ -1426,7 +1435,7 @@ export default function MeetingChatRoomScreen() {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.muted}>잘못된 주소예요.</Text>
-        <Pressable onPress={() => router.back()} style={styles.backLink}>
+        <Pressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
         </Pressable>
       </SafeAreaView>
@@ -1446,7 +1455,7 @@ export default function MeetingChatRoomScreen() {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.errorText}>{meetingError ?? '모임을 찾을 수 없어요.'}</Text>
-        <Pressable onPress={() => router.back()} style={styles.backLink}>
+        <Pressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
         </Pressable>
       </SafeAreaView>
@@ -1457,7 +1466,7 @@ export default function MeetingChatRoomScreen() {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.errorText}>참여 중인 모임의 채팅방만 들어갈 수 있어요.</Text>
-        <Pressable onPress={() => router.back()} style={styles.backLink}>
+        <Pressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
         </Pressable>
       </SafeAreaView>
@@ -1475,7 +1484,7 @@ export default function MeetingChatRoomScreen() {
         <View style={styles.flexColumn}>
         <View style={styles.topBar}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={exitChatRoom}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로">

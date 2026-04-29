@@ -1,9 +1,14 @@
+import '@/src/lib/ginit-background-fetch';
+import '@/src/lib/fcm-background-handler';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 
+import { BackgroundExecutionBootstrap } from '@/components/BackgroundExecutionBootstrap';
+import { FcmMessagingBootstrap } from '@/components/FcmMessagingBootstrap';
+import { FcmPushRoutingBootstrap } from '@/components/FcmPushRoutingBootstrap';
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
@@ -48,6 +53,9 @@ export default function RootLayout() {
         <QueryClientPersistProvider>
           <UserSessionProvider>
             <InAppAlarmsProvider>
+              <BackgroundExecutionBootstrap />
+              <FcmMessagingBootstrap />
+              <FcmPushRoutingBootstrap />
               <PushNotificationBootstrap />
               <Stack
                 screenOptions={{

@@ -20,10 +20,14 @@ import {
   type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { Platform } from 'react-native';
 
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { getUserProfile } from '@/src/lib/user-profile';
 
 export const CHAT_ROOMS_COLLECTION = 'chat_rooms';
 export const SOCIAL_CHAT_MESSAGES_SUBCOLLECTION = 'messages';
@@ -272,4 +276,33 @@ export async function sendSocialChatTextMessage(
       createdAt: serverTimestamp(),
     }) as Record<string, unknown>,
   );
+
+  if (Platform.OS !== 'web') {
+    void (async () => {
+      try {
+        const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
+        const pdata = roomSnap.data() as Record<string, unknown> | undefined;
+        const rawIds = Array.isArray(pdata?.participantIds)
+          ? (pdata!.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+          : [];
+        const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
+        const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
+        if (!peerRaw?.trim()) return;
+        const peerPk =
+          normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
+        const senderPk = normalizeParticipantId(senderId) || senderId;
+        if (!peerPk || peerPk === senderPk) return;
+        const prof = await getUserProfile(senderPk).catch(() => null);
+        const titleNick = prof?.nickname?.trim() || '친구';
+        sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
+          kind: 'social_dm',
+          meetingId: rid,
+          meetingTitle: titleNick,
+          preview: text.slice(0, 500),
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+  }
 }

@@ -120,6 +120,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         new Set([
           ...(((config.android as { permissions?: string[] } | undefined)?.permissions ?? []) as string[]),
           'WAKE_LOCK',
+          'RECEIVE_BOOT_COMPLETED',
         ]),
       ),
       config: {
@@ -180,14 +181,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           },
         },
       ],
+      /**
+       * Android 상태바·알림: 단색(흰 실루엣) + 투명 배경 PNG → OS가 밝기에 맞춰 틴트(밝은 배경=어두운 아이콘 등).
+       * `color` 미지정 → 고정 브랜드 원 배경 없이 시스템 기본 처리.
+       * 소스: `assets/images/notification_icon_monochrome.png` (재생성 시 android drawable은 `expo prebuild` 또는 scripts 참고)
+       */
       [
         'expo-notifications',
         {
-          icon: './assets/images/icon.png',
-          color: '#0052CC',
+          icon: './assets/images/notification_icon_monochrome.png',
           sounds: [],
+          /** FCM v1: 페이로드에 channelId가 없을 때 기본으로 쓸 채널(앱 종료·콜드 스타트 수신 보강) */
+          defaultChannel: 'default',
         },
       ],
+      'expo-background-fetch',
       /** Android Phone Number Hint API (play-services-auth) */
       './plugins/withAndroidPlayServicesAuth.js',
       /** Android 스플래시 아이콘을 Adaptive 전경(`ic_launcher_foreground`)과 동일하게 */

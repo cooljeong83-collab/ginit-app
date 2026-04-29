@@ -99,7 +99,12 @@ import {
 } from '@/src/lib/meeting-schedule-overlap';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { getUserProfile, meetingDemographicsIncomplete, type UserProfile } from '@/src/lib/user-profile';
+import {
+  getUserProfile,
+  isUserPhoneVerified,
+  meetingDemographicsIncomplete,
+  type UserProfile,
+} from '@/src/lib/user-profile';
 import { DateCandidateEditorCard, type DatePickerField } from '../../components/create/DateCandidateEditorCard';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
@@ -2502,6 +2507,12 @@ export default function CreateDetailsScreen() {
     let hostProfile: UserProfile | null = null;
     try {
       hostProfile = await getUserProfile(userId.trim());
+      if (!isUserPhoneVerified(hostProfile)) {
+        Alert.alert('인증 정보 등록', '모임을 이용하시려면 인증 정보 등록을 완료하셔야 합니다.', [
+          { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
+        ]);
+        return;
+      }
       if (meetingDemographicsIncomplete(hostProfile, userId.trim())) {
         Alert.alert(
           '프로필을 먼저 완성해 주세요',

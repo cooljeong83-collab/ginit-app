@@ -14,9 +14,20 @@ export type SendInAppAlarmPushParams = {
 
 export async function ensureGinitInAppAndroidChannel(): Promise<void> {}
 
-export async function sendInAppAlarmPush(_params: SendInAppAlarmPushParams): Promise<void> {}
+export async function ensureNotificationsPresentable(): Promise<boolean> {
+  return false;
+}
+
+export async function sendInAppAlarmPush(_params: SendInAppAlarmPushParams): Promise<boolean> {
+  return false;
+}
 
 export function notifyInAppAlarmHeadsUpFireAndForget(_params: SendInAppAlarmPushParams): void {}
+
+export function sendInAppAlarmRemotePushToUserFireAndForget(
+  _userId: string,
+  _payload: Omit<SendInAppAlarmPushParams, 'userId'>,
+): void {}
 
 /** @deprecated 내부에서 `notifyInAppAlarmHeadsUpFireAndForget` 사용을 권장합니다. */
 export function sendInAppAlarmPushFireAndForget(params: SendInAppAlarmPushParams): void {

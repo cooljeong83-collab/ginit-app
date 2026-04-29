@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -20,6 +21,7 @@ import {
 
 export default function SocialChatRoomScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { userId } = useUserSession();
   const { markChatReadUpTo } = useInAppAlarms();
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();
@@ -182,6 +184,14 @@ export default function SocialChatRoomScreen() {
     [messages, closeSearch],
   );
 
+  const exitSocialChat = useCallback(() => {
+    if (navigation.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/chat');
+    }
+  }, [navigation, router]);
+
   if (!userId?.trim()) {
     return (
       <SafeAreaView style={s.center} edges={['top']}>
@@ -194,7 +204,7 @@ export default function SocialChatRoomScreen() {
     return (
       <SafeAreaView style={s.center} edges={['top']}>
         <Text style={s.muted}>채팅방 정보가 올바르지 않아요.</Text>
-        <Pressable onPress={() => router.back()} style={s.backLink}>
+        <Pressable onPress={exitSocialChat} style={s.backLink}>
           <Text style={s.backLinkText}>돌아가기</Text>
         </Pressable>
       </SafeAreaView>
@@ -205,7 +215,7 @@ export default function SocialChatRoomScreen() {
     <View style={s.root}>
       <SafeAreaView edges={['top']} style={s.topSafe}>
         <View style={s.topBar}>
-          <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
+          <Pressable onPress={exitSocialChat} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
             <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
           </Pressable>
           <Pressable

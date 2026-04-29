@@ -22,7 +22,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
-import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
+import { getUserProfile, isUserPhoneVerified, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
@@ -88,6 +88,12 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
       if (pk) {
         try {
           const p = await getUserProfile(pk);
+          if (!isUserPhoneVerified(p)) {
+            Alert.alert('인증 정보 등록', '모임을 이용하시려면 인증 정보 등록을 완료하셔야 합니다.', [
+              { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
+            ]);
+            return;
+          }
           if (meetingDemographicsIncomplete(p, pk)) {
             Alert.alert(
               '프로필을 완성해 주세요',

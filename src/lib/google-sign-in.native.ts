@@ -126,6 +126,26 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
   ensureConfigured(GoogleSignin, options);
   logCurrentAuth('signInWithGoogle:after configure');
 
+  // 로그아웃 직후에도 Android는 `getLastSignedInAccount`가 남는 경우가 있어, 계정 선택 UI를 위해 잔여 세션을 끊습니다.
+  try {
+    const hasPrev = GoogleSignin.hasPreviousSignIn?.() === true;
+    const cur = GoogleSignin.getCurrentUser?.();
+    if (hasPrev || cur) {
+      try {
+        await GoogleSignin.revokeAccess();
+      } catch {
+        /* 세션 없음 등 */
+      }
+      try {
+        await GoogleSignin.signOut();
+      } catch {
+        /* noop */
+      }
+    }
+  } catch {
+    /* hasPreviousSignIn 미지원 등 */
+  }
+
   try {
     log('Auth Step 1 → hasPlayServices');
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
@@ -168,6 +188,15 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
     log('Error:no-idToken', { message: err.message });
     throw err;
   }
+  /** People API용 OAuth 액세스 토큰은 Firebase 연동 전에 받는 편이 안정적입니다(연동 후 getTokens가 빈 값이 되는 기기 대응). */
+  let googleAccessToken: string | null = null;
+  try {
+    const tPre = await GoogleSignin.getTokens();
+    googleAccessToken = (tPre.accessToken ?? '').trim() || null;
+  } catch (e) {
+    const { message } = pickErr(e);
+    log('Warn:getTokens before Firebase credential', { message });
+  }
   try {
     log('Auth Step 2 → signInWithCredential (Firebase)', { idTokenLength: idToken.length });
     const credential = GoogleAuthProvider.credential(idToken);
@@ -177,12 +206,14 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
       email: user.email ?? null,
     });
     logCurrentAuth('signInWithGoogle:after credential success');
-    let googleAccessToken: string | null = null;
-    try {
-      const t = await GoogleSignin.getTokens();
-      googleAccessToken = t.accessToken ?? null;
-    } catch {
-      googleAccessToken = null;
+    if (!googleAccessToken) {
+      try {
+        const tPost = await GoogleSignin.getTokens();
+        googleAccessToken = (tPost.accessToken ?? '').trim() || null;
+      } catch (e) {
+        const { message } = pickErr(e);
+        log('Warn:getTokens after Firebase credential', { message });
+      }
     }
     return { user, googleAccessToken };
   } catch (e) {
@@ -208,9 +239,21 @@ export async function signOutGoogle(): Promise<void> {
   }
   try {
     const GoogleSignin = requireGoogleSignin();
-    await GoogleSignin.signOut();
+    // configure 없이 signOut만 호출되면 Android RNGoogleSigninModule의 _apiClient가 null이라
+    // 네이티브 Google 세션이 안 지워지고 다음 로그인에서 마지막 계정으로 바로 이어질 수 있습니다.
+    ensureConfigured(GoogleSignin, { forRegistration: false });
+    try {
+      await GoogleSignin.revokeAccess();
+    } catch {
+      /* 이미 끊김 등 */
+    }
+    try {
+      await GoogleSignin.signOut();
+    } catch {
+      /* noop */
+    }
   } catch {
-    // noop
+    // noop (Expo Go 외에도 모듈/설정 오류 시 Firebase만이라도 아래에서 정리)
   }
   try {
     await signOut(getFirebaseAuth());

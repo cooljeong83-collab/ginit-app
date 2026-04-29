@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,7 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Image } from 'expo-image';
 
@@ -31,7 +32,7 @@ import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infi
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
-import { listSortModeLabel, sortMeetingsForFeed, type MeetingListSortMode } from '@/src/lib/feed-meeting-utils';
+import { meetingCreatedAtMs } from '@/src/lib/feed-meeting-utils';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
@@ -71,6 +72,18 @@ function profileForCreatedBy(
 
 type ChatKind = 'gather' | 'social';
 
+function latestMeetingChatMessageMs(msg: MeetingChatMessage | null | undefined): number {
+  const ts = msg?.createdAt;
+  if (ts && typeof ts.toMillis === 'function') {
+    try {
+      return ts.toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
 function meetingTextSearchHaystack(m: Meeting): string {
   return [m.title, m.description, m.categoryLabel, m.location, m.placeName, m.address ?? '']
     .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
@@ -82,13 +95,22 @@ export default function ChatTab() {
   const router = useRouter();
   const { userId } = useUserSession();
   const { meetingChatReadMessageIdMap } = useInAppAlarms();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const safeInsets = useSafeAreaInsets();
+  /** 모임 피드와 동일: 빈 목록 안내를 리스트 영역 세로 중앙에 배치 */
+  const chatEmptyMinHeight = useMemo(
+    () => Math.max(300, windowHeight - safeInsets.top - safeInsets.bottom - 200),
+    [windowHeight, safeInsets.top, safeInsets.bottom],
+  );
   /** 홈 피드 상단 칩과 동일한 라벨 폭 상한 */
   const tabChipMaxWidth = useMemo(
     () => Math.min(200, Math.max(100, Math.floor(windowWidth * 0.38))),
     [windowWidth],
   );
   const [chatKind, setChatKind] = useState<ChatKind>('gather');
+  const tabPagerRef = useRef<ScrollView | null>(null);
+  const chatKindRef = useRef(chatKind);
+  chatKindRef.current = chatKind;
   const [refreshing, setRefreshing] = useState(false);
   const [latestByMeetingId, setLatestByMeetingId] = useState<
     Record<string, MeetingChatMessage | null | undefined>
@@ -109,7 +131,7 @@ export default function ChatTab() {
     showFooterSpinner: showMeetingsFeedFooterSpinner,
     isInitialListLoading: meetingsFeedInitialLoading,
   } = useMeetingsFeedInfiniteQuery({
-    enabled: signedIn && chatKind === 'gather',
+    enabled: signedIn,
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
@@ -118,6 +140,42 @@ export default function ChatTab() {
     if (!hasMoreMeetingsFeed || isFetchingMoreMeetingsFeed) return;
     await fetchNextMeetingsFeedPage();
   }, [hasMoreMeetingsFeed, isFetchingMoreMeetingsFeed, fetchNextMeetingsFeedPage]);
+
+  const goToChatKind = useCallback(
+    (k: ChatKind) => {
+      setChatKind(k);
+      const idx = k === 'gather' ? 0 : 1;
+      requestAnimationFrame(() => {
+        tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: true });
+      });
+    },
+    [windowWidth],
+  );
+
+  const onTabPagerMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const w = Math.max(1, windowWidth);
+      const idx = Math.round(x / w);
+      setChatKind(idx <= 0 ? 'gather' : 'social');
+    },
+    [windowWidth],
+  );
+
+  const handleEndReachedForKind = useCallback(
+    (kind: ChatKind) => {
+      if (chatKind !== kind) return;
+      if (kind === 'social' && hasMoreSocialRooms) void fetchNextSocialRoomsPage();
+      else if (kind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
+    },
+    [chatKind, hasMoreSocialRooms, hasMoreMeetingsFeed, fetchNextSocialRoomsPage, fetchNextMeetingsFeedPageGuarded],
+  );
+
+  useEffect(() => {
+    const k = chatKindRef.current;
+    const idx = k === 'gather' ? 0 : 1;
+    tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: false });
+  }, [windowWidth]);
 
   useEffect(() => {
     const uid = userId?.trim();
@@ -139,13 +197,8 @@ export default function ChatTab() {
   const [gatherSearchBusy, setGatherSearchBusy] = useState(false);
   const [socialMessageMatchRoomIds, setSocialMessageMatchRoomIds] = useState<Set<string>>(() => new Set());
   const [socialSearchBusy, setSocialSearchBusy] = useState(false);
-  const [chatListSettingsModalOpen, setChatListSettingsModalOpen] = useState(false);
-  const [gatherListSortMode, setGatherListSortMode] = useState<MeetingListSortMode>('latest');
-  const [socialSortByName, setSocialSortByName] = useState(false);
-
   useEffect(() => {
     setChatSearchModalOpen(false);
-    setChatListSettingsModalOpen(false);
   }, [chatKind]);
 
   useEffect(() => {
@@ -173,10 +226,20 @@ export default function ChatTab() {
     });
   }, [joinedMeetings, appliedGatherTextQuery, gatherMessageMatchIds]);
 
-  const displayedGatherMeetings = useMemo(
-    () => sortMeetingsForFeed(gatherMeetingsFiltered, gatherListSortMode, userCoords),
-    [gatherMeetingsFiltered, gatherListSortMode, userCoords],
-  );
+  /** 최근 메시지 시각 기준(없으면 모임 생성일) — 최신 대화가 위로 */
+  const displayedGatherMeetings = useMemo(() => {
+    const list = [...gatherMeetingsFiltered];
+    list.sort((a, b) => {
+      const tb = latestMeetingChatMessageMs(latestByMeetingId[b.id]);
+      const ta = latestMeetingChatMessageMs(latestByMeetingId[a.id]);
+      if (tb !== ta) return tb - ta;
+      const cb = meetingCreatedAtMs(b);
+      const ca = meetingCreatedAtMs(a);
+      if (cb !== ca) return cb - ca;
+      return a.title.localeCompare(b.title, 'ko');
+    });
+    return list;
+  }, [gatherMeetingsFiltered, latestByMeetingId]);
 
   const {
     rooms: socialRooms,
@@ -186,7 +249,7 @@ export default function ChatTab() {
     hasNextPage: hasMoreSocialRooms,
     isFetchingNextPage: isFetchingMoreSocialRooms,
     isInitialLoading: socialRoomsInitialLoading,
-  } = useChatRoomsInfiniteQuery(userId, signedIn && chatKind === 'social');
+  } = useChatRoomsInfiniteQuery(userId, signedIn);
 
   /** 친구 탭: `social_` 1:1 DM만 표시(그룹·기타 룸 제외) */
   const socialFriendDmRooms = useMemo(
@@ -221,15 +284,8 @@ export default function ChatTab() {
         return socialMessageMatchRoomIds.has(r.roomId);
       });
     }
-    if (socialSortByName) {
-      rows = [...rows].sort((a, b) => {
-        const na = socialProfiles.get(a.peerAppUserId)?.nickname ?? a.peerAppUserId;
-        const nb = socialProfiles.get(b.peerAppUserId)?.nickname ?? b.peerAppUserId;
-        return na.localeCompare(nb, 'ko');
-      });
-    }
     return rows;
-  }, [socialFriendDmRooms, appliedSocialTextQuery, socialSortByName, socialProfiles, socialMessageMatchRoomIds]);
+  }, [socialFriendDmRooms, appliedSocialTextQuery, socialProfiles, socialMessageMatchRoomIds]);
 
   const chatSearchFiltersDot = useMemo(
     () =>
@@ -237,16 +293,9 @@ export default function ChatTab() {
     [chatKind, appliedGatherTextQuery, appliedSocialTextQuery],
   );
 
-  const chatListSettingsDotActive = useMemo(() => {
-    if (chatKind === 'gather') return gatherListSortMode !== 'latest';
-    return socialSortByName;
-  }, [chatKind, gatherListSortMode, socialSortByName]);
-
-  const gatherSortComboLabel = useMemo(() => listSortModeLabel(gatherListSortMode), [gatherListSortMode]);
-
   useEffect(() => {
     const q = appliedGatherTextQuery.trim();
-    if (!signedIn || chatKind !== 'gather') {
+    if (!signedIn) {
       setGatherMessageMatchIds(new Set());
       setGatherSearchBusy(false);
       return;
@@ -287,11 +336,11 @@ export default function ChatTab() {
       cancelled = true;
       setGatherSearchBusy(false);
     };
-  }, [appliedGatherTextQuery, joinedMeetingRowKey, signedIn, chatKind, joinedMeetings]);
+  }, [appliedGatherTextQuery, joinedMeetingRowKey, signedIn, joinedMeetings]);
 
   useEffect(() => {
     const q = appliedSocialTextQuery.trim();
-    if (!signedIn || chatKind !== 'social') {
+    if (!signedIn) {
       setSocialMessageMatchRoomIds(new Set());
       setSocialSearchBusy(false);
       return;
@@ -336,10 +385,10 @@ export default function ChatTab() {
       cancelled = true;
       setSocialSearchBusy(false);
     };
-  }, [appliedSocialTextQuery, socialRoomKey, signedIn, chatKind, socialFriendDmRooms, socialProfiles]);
+  }, [appliedSocialTextQuery, socialRoomKey, signedIn, socialFriendDmRooms, socialProfiles]);
 
   useEffect(() => {
-    if (chatKind !== 'social' || socialFriendDmRooms.length === 0) {
+    if (socialFriendDmRooms.length === 0) {
       setSocialProfiles(new Map());
       return;
     }
@@ -351,7 +400,7 @@ export default function ChatTab() {
     return () => {
       cancelled = true;
     };
-  }, [chatKind, socialRoomKey]);
+  }, [socialRoomKey]);
 
   useEffect(() => {
     if (!signedIn || joinedMeetings.length === 0) {
@@ -374,7 +423,7 @@ export default function ChatTab() {
   }, [joinedMeetingRowKey, signedIn]);
 
   useEffect(() => {
-    if (chatKind !== 'gather' || !signedIn || joinedMeetings.length === 0) {
+    if (!signedIn || joinedMeetings.length === 0) {
       setUnreadByMeetingId({});
       return;
     }
@@ -397,7 +446,7 @@ export default function ChatTab() {
     return () => {
       cancelled = true;
     };
-  }, [chatKind, signedIn, unreadRefreshSig]);
+  }, [signedIn, unreadRefreshSig]);
 
   useEffect(() => {
     const hosts = [
@@ -457,257 +506,324 @@ export default function ChatTab() {
     setChatSearchModalOpen(false);
   }, [chatKind]);
 
-  const openChatListSettings = useCallback(() => setChatListSettingsModalOpen(true), []);
-  const closeChatListSettings = useCallback(() => setChatListSettingsModalOpen(false), []);
-
   const gatherListFooter = useMemo(() => {
-    if (chatKind !== 'gather') return null;
     if (!showMeetingsFeedFooterSpinner || refreshing) return null;
     return (
       <View style={styles.listFooterSpinner} accessibilityLabel="모임 목록 로딩">
         <ActivityIndicator color={GinitTheme.colors.primary} />
       </View>
     );
-  }, [chatKind, showMeetingsFeedFooterSpinner, refreshing]);
+  }, [showMeetingsFeedFooterSpinner, refreshing]);
 
   const socialListFooter = useMemo(() => {
-    if (chatKind !== 'social') return null;
     if (!isFetchingMoreSocialRooms && !(socialRoomsInitialLoading && socialRooms.length === 0)) return null;
     return (
       <View style={styles.listFooterSpinner} accessibilityLabel="채팅방 목록 로딩">
         <ActivityIndicator color={GinitTheme.colors.primary} />
       </View>
     );
-  }, [chatKind, isFetchingMoreSocialRooms, socialRoomsInitialLoading, socialRooms.length]);
+  }, [isFetchingMoreSocialRooms, socialRoomsInitialLoading, socialRooms.length]);
+
+  const chatListEmptyCentered = useCallback(
+    (
+      icon: React.ComponentProps<typeof Ionicons>['name'],
+      title: string,
+      body: string,
+    ): ReactElement => (
+      <View style={[styles.chatListEmptyFill, { minHeight: chatEmptyMinHeight }]}>
+        <View style={styles.chatListEmptyInner}>
+          <View style={styles.chatListEmptyIconCircle}>
+            <Ionicons name={icon} size={34} color={GinitTheme.colors.primary} />
+          </View>
+          <Text style={styles.chatListEmptyTitle}>{title}</Text>
+          <Text style={styles.chatListEmptyBody}>{body}</Text>
+        </View>
+      </View>
+    ),
+    [chatEmptyMinHeight],
+  );
+
+  const fixedChatHeader = (
+    <View style={styles.feedHeader}>
+      <View style={styles.feedHeaderTopRow}>
+        <View style={styles.chatTitlePressable} accessibilityRole="header">
+          <View style={styles.chatTitleCluster}>
+            <Text style={styles.chatTitle} numberOfLines={1}>
+              채팅
+            </Text>
+          </View>
+        </View>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={openChatSearch}
+            accessibilityRole="button"
+            accessibilityLabel="채팅 검색"
+            hitSlop={10}
+            style={styles.searchIconWrap}>
+            <Ionicons name="search-outline" size={24} color="#0f172a" />
+            {chatSearchFiltersDot ? <View style={styles.searchFilterDot} /> : null}
+          </Pressable>
+          <InAppAlarmsBellButton />
+        </View>
+      </View>
+
+      <View style={styles.tabCategoryBar} accessibilityRole="tablist">
+        <View style={styles.tabPair}>
+          <GlassCategoryChip
+            label="모임"
+            active={chatKind === 'gather'}
+            onPress={() => goToChatKind('gather')}
+            maxLabelWidth={tabChipMaxWidth}
+            accessibilityLabel="모임"
+          />
+          <GlassCategoryChip
+            label="친구"
+            active={chatKind === 'social'}
+            onPress={() => goToChatKind('social')}
+            maxLabelWidth={tabChipMaxWidth}
+            accessibilityLabel="친구"
+          />
+        </View>
+        <View style={styles.categoryDropdownSpacer} pointerEvents="none" />
+      </View>
+    </View>
+  );
+
+  const chatTabListAlerts = (kind: ChatKind): ReactElement => (
+    <>
+      {kind === 'gather' && meetingsFeedInitialLoading && meetings.length === 0 ? (
+        <View style={styles.centerRow}>
+          <ActivityIndicator color={GinitTheme.colors.primary} />
+          <Text style={styles.muted}>불러오는 중…</Text>
+        </View>
+      ) : null}
+
+      {kind === 'gather' && gatherListError ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
+          <Text style={styles.errorBody}>{gatherListError}</Text>
+        </View>
+      ) : null}
+
+      {kind === 'social' && socialListError ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorTitle}>Social 목록 오류</Text>
+          <Text style={styles.errorBody}>{socialListError}</Text>
+        </View>
+      ) : null}
+
+      {signedIn && kind === 'gather' && appliedGatherTextQuery.trim() !== '' && gatherSearchBusy ? (
+        <View style={styles.centerRow}>
+          <ActivityIndicator color={GinitTheme.colors.primary} />
+          <Text style={styles.muted}>대화에서 검색하는 중…</Text>
+        </View>
+      ) : null}
+
+      {signedIn && kind === 'social' && appliedSocialTextQuery.trim() !== '' && socialSearchBusy ? (
+        <View style={styles.centerRow}>
+          <ActivityIndicator color={GinitTheme.colors.primary} />
+          <Text style={styles.muted}>대화에서 검색하는 중…</Text>
+        </View>
+      ) : null}
+
+      {!signedIn &&
+      (kind === 'gather'
+        ? !(meetingsFeedInitialLoading && meetings.length === 0) && !gatherListError
+        : !(socialRoomsInitialLoading && socialRooms.length === 0) && !socialListError)
+        ? chatListEmptyCentered(
+            'chatbubbles-outline',
+            '채팅 목록',
+            '로그인하면 참여 중인 대화가 여기에 표시돼요.',
+          )
+        : null}
+
+      {kind === 'gather' &&
+      !(meetingsFeedInitialLoading && meetings.length === 0) &&
+      !gatherListError &&
+      signedIn &&
+      joinedMeetings.length === 0
+        ? chatListEmptyCentered(
+            'people-outline',
+            '참여 중인 모임이 없어요',
+            '홈에서 모임에 참여하면 모임 채팅이 여기에 모여요.',
+          )
+        : null}
+
+      {kind === 'social' &&
+      !(socialRoomsInitialLoading && socialRooms.length === 0) &&
+      !socialListError &&
+      signedIn &&
+      socialFriendDmRooms.length === 0
+        ? chatListEmptyCentered(
+            'person-outline',
+            '1:1 친구 채팅이 없어요',
+            '친구를 맺고 나면 대화방이 여기에 표시돼요.',
+          )
+        : null}
+
+      {kind === 'gather' &&
+      !(meetingsFeedInitialLoading && meetings.length === 0) &&
+      !gatherListError &&
+      signedIn &&
+      !gatherSearchBusy &&
+      joinedMeetings.length > 0 &&
+      displayedGatherMeetings.length === 0
+        ? chatListEmptyCentered(
+            'search-outline',
+            '검색 결과가 없어요',
+            '다른 단어로 찾아 보시거나, 상단 검색을 열어 조건을 바꿔 보세요.',
+          )
+        : null}
+
+      {kind === 'social' &&
+      !(socialRoomsInitialLoading && socialRooms.length === 0) &&
+      !socialListError &&
+      signedIn &&
+      !socialSearchBusy &&
+      socialFriendDmRooms.length > 0 &&
+      displayedSocialRooms.length === 0
+        ? chatListEmptyCentered(
+            'search-outline',
+            '검색 결과가 없어요',
+            '다른 단어로 찾아 보시거나, 상단 검색을 열어 조건을 바꿔 보세요.',
+          )
+        : null}
+    </>
+  );
 
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <FlatList<Meeting | SocialChatRoomSummary>
-          data={chatKind === 'gather' ? displayedGatherMeetings : displayedSocialRooms}
-          extraData={{
-            chatKind,
-            gatherListSortMode,
-            appliedGatherTextQuery,
-            appliedSocialTextQuery,
-            socialSortByName,
-            gatherSearchBusy,
-            socialSearchBusy,
-            gatherMsgHits: gatherMessageMatchIds.size,
-            socialMsgHits: socialMessageMatchRoomIds.size,
-          }}
-          keyExtractor={(item) => ('peerAppUserId' in item ? item.roomId : item.id)}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.scroll}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onPullRefresh}
-              tintColor={GinitTheme.colors.primary}
-              colors={[GinitTheme.colors.primary]}
-            />
-          }
-          ListHeaderComponent={
-            <View style={styles.feedHeader}>
-              <View style={styles.feedHeaderTopRow}>
-                <View style={styles.chatTitlePressable} accessibilityRole="header">
-                  <View style={styles.chatTitleCluster}>
-                    <Text style={styles.chatTitle} numberOfLines={1}>
-                      채팅
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.headerActions}>
-                  <Pressable
-                    onPress={openChatSearch}
-                    accessibilityRole="button"
-                    accessibilityLabel="채팅 검색"
-                    hitSlop={10}
-                    style={styles.searchIconWrap}>
-                    <Ionicons name="search-outline" size={24} color="#0f172a" />
-                    {chatSearchFiltersDot ? <View style={styles.searchFilterDot} /> : null}
-                  </Pressable>
-                  <InAppAlarmsBellButton />
-                  <Pressable
-                    onPress={openChatListSettings}
-                    accessibilityRole="button"
-                    hitSlop={10}
-                    accessibilityLabel="목록 정렬"
-                    style={styles.settingsIconWrap}>
-                    <Ionicons name="settings-outline" size={24} color="#0f172a" />
-                    {chatListSettingsDotActive ? <View style={styles.settingsFilterDot} /> : null}
-                  </Pressable>
-                </View>
-              </View>
-
-              <View style={styles.tabCategoryBar} accessibilityRole="tablist">
-                <View style={styles.tabPair}>
-                  <GlassCategoryChip
-                    label="모임"
-                    active={chatKind === 'gather'}
-                    onPress={() => setChatKind('gather')}
-                    maxLabelWidth={tabChipMaxWidth}
-                    accessibilityLabel="모임"
+        <View style={styles.feedColumn}>
+          {fixedChatHeader}
+          <ScrollView
+            ref={tabPagerRef}
+            horizontal
+            pagingEnabled
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={onTabPagerMomentumEnd}
+            style={styles.tabPager}>
+            <View style={[styles.tabPage, { width: windowWidth }]}>
+              <FlatList<Meeting>
+                data={displayedGatherMeetings}
+                extraData={{
+                  chatKind,
+                  appliedGatherTextQuery,
+                  gatherSearchBusy,
+                  gatherMsgHits: gatherMessageMatchIds.size,
+                  latestByMeetingId,
+                  unreadByMeetingId,
+                  hostProfiles,
+                }}
+                keyExtractor={(m) => m.id}
+                style={styles.listFlex}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.scroll}
+                nestedScrollEnabled
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onPullRefresh}
+                    tintColor={GinitTheme.colors.primary}
+                    colors={[GinitTheme.colors.primary]}
                   />
-                  <GlassCategoryChip
-                    label="친구"
-                    active={chatKind === 'social'}
-                    onPress={() => setChatKind('social')}
-                    maxLabelWidth={tabChipMaxWidth}
-                    accessibilityLabel="친구"
-                  />
-                </View>
-                <View style={styles.categoryDropdownSpacer} pointerEvents="none" />
-              </View>
-
-              {chatKind === 'gather' && meetingsFeedInitialLoading && meetings.length === 0 ? (
-                <View style={styles.centerRow}>
-                  <ActivityIndicator color={GinitTheme.colors.primary} />
-                  <Text style={styles.muted}>불러오는 중…</Text>
-                </View>
-              ) : null}
-
-              {chatKind === 'gather' && gatherListError ? (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
-                  <Text style={styles.errorBody}>{gatherListError}</Text>
-                </View>
-              ) : null}
-
-              {chatKind === 'social' && socialListError ? (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorTitle}>Social 목록 오류</Text>
-                  <Text style={styles.errorBody}>{socialListError}</Text>
-                </View>
-              ) : null}
-
-              {signedIn && chatKind === 'gather' && appliedGatherTextQuery.trim() !== '' && gatherSearchBusy ? (
-                <View style={styles.centerRow}>
-                  <ActivityIndicator color={GinitTheme.colors.primary} />
-                  <Text style={styles.muted}>대화에서 검색하는 중…</Text>
-                </View>
-              ) : null}
-
-              {signedIn && chatKind === 'social' && appliedSocialTextQuery.trim() !== '' && socialSearchBusy ? (
-                <View style={styles.centerRow}>
-                  <ActivityIndicator color={GinitTheme.colors.primary} />
-                  <Text style={styles.muted}>대화에서 검색하는 중…</Text>
-                </View>
-              ) : null}
-
-              {!signedIn &&
-              (chatKind === 'gather'
-                ? !(meetingsFeedInitialLoading && meetings.length === 0) && !gatherListError
-                : !(socialRoomsInitialLoading && socialRooms.length === 0) && !socialListError) ? (
-                <Text style={styles.empty}>로그인하면 채팅 목록이 여기에 표시돼요.</Text>
-              ) : null}
-
-              {chatKind === 'gather' &&
-              !(meetingsFeedInitialLoading && meetings.length === 0) &&
-              !gatherListError &&
-              signedIn &&
-              joinedMeetings.length === 0 ? (
-                <Text style={styles.empty}>참여 중인 모임이 없어요. 홈에서 모임에 참여해 보세요.</Text>
-              ) : null}
-
-              {chatKind === 'social' &&
-              !(socialRoomsInitialLoading && socialRooms.length === 0) &&
-              !socialListError &&
-              signedIn &&
-              socialFriendDmRooms.length === 0 ? (
-                <Text style={styles.empty}>1:1 친구 채팅이 없어요.</Text>
-              ) : null}
-
-              {chatKind === 'gather' &&
-              !(meetingsFeedInitialLoading && meetings.length === 0) &&
-              !gatherListError &&
-              signedIn &&
-              !gatherSearchBusy &&
-              joinedMeetings.length > 0 &&
-              displayedGatherMeetings.length === 0 ? (
-                <Text style={styles.empty}>
-                  검색어에 맞는 모임 채팅이 없어요. 검색을 열어 다른 단어로 찾아 보세요.
-                </Text>
-              ) : null}
-
-              {chatKind === 'social' &&
-              !(socialRoomsInitialLoading && socialRooms.length === 0) &&
-              !socialListError &&
-              signedIn &&
-              !socialSearchBusy &&
-              socialFriendDmRooms.length > 0 &&
-              displayedSocialRooms.length === 0 ? (
-                <Text style={styles.empty}>
-                  검색어에 맞는 친구 채팅이 없어요. 검색을 열어 다른 단어로 찾아 보세요.
-                </Text>
-              ) : null}
-            </View>
-          }
-          ListFooterComponent={chatKind === 'social' ? socialListFooter : gatherListFooter}
-          onEndReached={() => {
-            if (chatKind === 'social' && hasMoreSocialRooms) void fetchNextSocialRoomsPage();
-            else if (chatKind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
-          }}
-          onEndReachedThreshold={0.6}
-          renderItem={({ item }) => {
-            if (chatKind === 'gather') {
-              const m = item as Meeting;
-              const host = profileForCreatedBy(hostProfiles, m.createdBy);
-              return (
-                <ChatMeetingListRow
-                  meeting={m}
-                  hostPhotoUrl={host?.photoUrl ?? null}
-                  hostNickname={host?.nickname ?? '주관자'}
-                  hostWithdrawn={isUserProfileWithdrawn(host)}
-                  latestMessage={latestByMeetingId[m.id]}
-                  unreadCount={unreadByMeetingId[m.id] ?? 0}
-                  onPress={() => router.push(`/meeting-chat/${m.id}`)}
-                />
-              );
-            }
-            const row = item as SocialChatRoomSummary;
-            const prof = socialProfiles.get(row.peerAppUserId);
-            const uri = prof?.photoUrl?.trim();
-            const nick = prof?.nickname ?? '친구';
-            const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
-            return (
-              <ChatListCardShell
-                accentGradient={SOCIAL_CHAT_LIST_ACCENT}
-                onPress={() =>
-                  router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`)
                 }
-                accessibilityLabel={`${nick}와 채팅`}>
-                <View style={styles.socialZoneA}>
-                  <View style={styles.socialSymbolCol}>
-                    {uri ? (
-                      <View style={styles.socialAvatarBubble}>
-                        <Image source={{ uri }} style={styles.socialAvatarImg} contentFit="cover" />
-                      </View>
-                    ) : (
-                      <View style={styles.socialAvatarBubble}>
-                        <View style={styles.socialAvatarFallback}>
-                          <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                ListHeaderComponent={chatTabListAlerts('gather')}
+                ListFooterComponent={chatKind === 'gather' ? gatherListFooter : null}
+                onEndReached={() => handleEndReachedForKind('gather')}
+                onEndReachedThreshold={0.6}
+                renderItem={({ item: m }) => {
+                  const host = profileForCreatedBy(hostProfiles, m.createdBy);
+                  return (
+                    <ChatMeetingListRow
+                      meeting={m}
+                      hostPhotoUrl={host?.photoUrl ?? null}
+                      hostNickname={host?.nickname ?? '주관자'}
+                      hostWithdrawn={isUserProfileWithdrawn(host)}
+                      latestMessage={latestByMeetingId[m.id]}
+                      unreadCount={unreadByMeetingId[m.id] ?? 0}
+                      onPress={() => router.push(`/meeting-chat/${m.id}`)}
+                    />
+                  );
+                }}
+              />
+            </View>
+            <View style={[styles.tabPage, { width: windowWidth }]}>
+              <FlatList<SocialChatRoomSummary>
+                data={displayedSocialRooms}
+                extraData={{
+                  chatKind,
+                  appliedSocialTextQuery,
+                  socialSearchBusy,
+                  socialMsgHits: socialMessageMatchRoomIds.size,
+                  socialProfiles,
+                }}
+                keyExtractor={(row) => row.roomId}
+                style={styles.listFlex}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.scroll}
+                nestedScrollEnabled
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onPullRefresh}
+                    tintColor={GinitTheme.colors.primary}
+                    colors={[GinitTheme.colors.primary]}
+                  />
+                }
+                ListHeaderComponent={chatTabListAlerts('social')}
+                ListFooterComponent={chatKind === 'social' ? socialListFooter : null}
+                onEndReached={() => handleEndReachedForKind('social')}
+                onEndReachedThreshold={0.6}
+                renderItem={({ item: row }) => {
+                  const prof = socialProfiles.get(row.peerAppUserId);
+                  const uri = prof?.photoUrl?.trim();
+                  const nick = prof?.nickname ?? '친구';
+                  const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
+                  return (
+                    <ChatListCardShell
+                      accentGradient={SOCIAL_CHAT_LIST_ACCENT}
+                      onPress={() =>
+                        router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`)
+                      }
+                      accessibilityLabel={`${nick}와 채팅`}>
+                      <View style={styles.socialZoneA}>
+                        <View style={styles.socialSymbolCol}>
+                          {uri ? (
+                            <View style={styles.socialAvatarBubble}>
+                              <Image source={{ uri }} style={styles.socialAvatarImg} contentFit="cover" />
+                            </View>
+                          ) : (
+                            <View style={styles.socialAvatarBubble}>
+                              <View style={styles.socialAvatarFallback}>
+                                <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                              </View>
+                            </View>
+                          )}
+                          <Text style={styles.socialKindUnder} numberOfLines={1}>
+                            1:1
+                          </Text>
+                        </View>
+                        <View style={styles.socialZoneMain}>
+                          <Text style={styles.socialHeroTitle} numberOfLines={1}>
+                            {nick}
+                          </Text>
+                          <Text style={styles.socialMetaMuted} numberOfLines={1}>
+                            친구 채팅
+                          </Text>
                         </View>
                       </View>
-                    )}
-                    <Text style={styles.socialKindUnder} numberOfLines={1}>
-                      1:1
-                    </Text>
-                  </View>
-                  <View style={styles.socialZoneMain}>
-                    <Text style={styles.socialHeroTitle} numberOfLines={1}>
-                      {nick}
-                    </Text>
-                    <Text style={styles.socialMetaMuted} numberOfLines={1}>
-                      친구 채팅
-                    </Text>
-                  </View>
-                </View>
-              </ChatListCardShell>
-            );
-          }}
-        />
+                    </ChatListCardShell>
+                  );
+                }}
+              />
+            </View>
+          </ScrollView>
+        </View>
 
         <Modal
           visible={chatSearchModalOpen}
@@ -770,93 +886,6 @@ export default function ChatTab() {
             </View>
           </View>
         </Modal>
-
-        <Modal
-          visible={chatListSettingsModalOpen}
-          animationType="fade"
-          transparent
-          onRequestClose={closeChatListSettings}>
-          <View style={styles.modalRoot}>
-            <Pressable
-              style={StyleSheet.absoluteFillObject}
-              onPress={closeChatListSettings}
-              accessibilityRole="button"
-              accessibilityLabel="목록 정렬 닫기"
-            />
-            <View style={[styles.modalCard, styles.modalCardWide]}>
-              <Text style={styles.modalTitle}>목록 정렬</Text>
-              <Text style={styles.modalHint}>
-                채팅 목록의 순서만 바꿀 수 있어요. 검색어는 상단 검색 아이콘을 눌러 주세요.
-              </Text>
-              {chatKind === 'gather' ? (
-                <>
-                  <Text style={styles.modalCurrentSummary} numberOfLines={2}>
-                    현재: {gatherSortComboLabel}
-                  </Text>
-                  <ScrollView
-                    style={styles.feedSettingsScroll}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}>
-                    <Text style={styles.modalSectionTitle}>정렬</Text>
-                    {(['distance', 'latest', 'soon'] as const).map((mode) => {
-                      const selected = gatherListSortMode === mode;
-                      const label = listSortModeLabel(mode);
-                      return (
-                        <Pressable
-                          key={mode}
-                          onPress={() => setGatherListSortMode(mode)}
-                          style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected }}>
-                          <Text style={styles.modalRowLabel}>{label}</Text>
-                          {selected ? (
-                            <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                          ) : (
-                            <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </>
-              ) : (
-                <ScrollView
-                  style={styles.feedSettingsScroll}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}>
-                  <Text style={styles.modalSectionTitle}>정렬</Text>
-                  <Pressable
-                    onPress={() => setSocialSortByName(false)}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: !socialSortByName }}>
-                    <Text style={styles.modalRowLabel}>기본 순서</Text>
-                    {!socialSortByName ? (
-                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                    ) : (
-                      <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
-                    )}
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setSocialSortByName(true)}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: socialSortByName }}>
-                    <Text style={styles.modalRowLabel}>이름순 (가나다)</Text>
-                    {socialSortByName ? (
-                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                    ) : (
-                      <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
-                    )}
-                  </Pressable>
-                </ScrollView>
-              )}
-              <Pressable onPress={closeChatListSettings} style={styles.modalCloseBtn} accessibilityRole="button">
-                <Text style={styles.modalCloseLabel}>닫기</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
       </SafeAreaView>
     </ScreenShell>
   );
@@ -865,13 +894,19 @@ export default function ChatTab() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
+  feedColumn: { flex: 1 },
+  tabPager: { flex: 1 },
+  tabPage: { flex: 1 },
+  listFlex: { flex: 1 },
   scroll: {
     paddingHorizontal: 20,
     paddingBottom: 28,
+    flexGrow: 1,
   },
   feedHeader: {
     marginBottom: 16,
     paddingTop: 4,
+    paddingHorizontal: 20,
     gap: 12,
   },
   feedHeaderTopRow: {
@@ -910,22 +945,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     padding: 2,
   },
-  settingsIconWrap: {
-    position: 'relative',
-    padding: 2,
-  },
   searchFilterDot: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#EF4444',
-    borderWidth: 1.5,
-    borderColor: '#fff',
-  },
-  settingsFilterDot: {
     position: 'absolute',
     top: 0,
     right: 0,
@@ -954,26 +974,6 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 8,
   },
-  modalCardWide: {
-    maxHeight: '92%',
-  },
-  feedSettingsScroll: {
-    maxHeight: 400,
-  },
-  modalCurrentSummary: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
-    lineHeight: 17,
-    marginBottom: 8,
-  },
-  modalSectionTitle: {
-    marginTop: 4,
-    marginBottom: 2,
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#475569',
-  },
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
@@ -985,23 +985,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: '#64748b',
     marginBottom: 16,
-  },
-  modalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  modalRowPressed: {
-    backgroundColor: 'rgba(0, 82, 204, 0.06)',
-  },
-  modalRowLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0f172a',
   },
   modalCloseBtn: {
     marginTop: 16,
@@ -1180,11 +1163,37 @@ const styles = StyleSheet.create({
     color: '#7F1D1D',
     lineHeight: 20,
   },
-  empty: {
-    fontSize: 14,
-    color: '#64748b',
-    lineHeight: 20,
-    marginBottom: 12,
+  chatListEmptyFill: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: GinitTheme.spacing.xl,
+    paddingVertical: GinitTheme.spacing.lg,
+  },
+  chatListEmptyInner: {
+    alignItems: 'center',
+    maxWidth: 300,
+  },
+  chatListEmptyIconCircle: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: GinitTheme.colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: GinitTheme.spacing.lg,
+  },
+  chatListEmptyTitle: {
+    ...GinitTheme.typography.title,
+    color: GinitTheme.colors.text,
+    textAlign: 'center',
+    marginBottom: GinitTheme.spacing.sm,
+  },
+  chatListEmptyBody: {
+    ...GinitTheme.typography.body,
+    lineHeight: 22,
+    color: GinitTheme.colors.textSub,
+    textAlign: 'center',
   },
   listFooterSpinner: {
     paddingVertical: 16,

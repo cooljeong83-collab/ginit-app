@@ -104,3 +104,28 @@ export function meetingChangeFingerprint(m: Meeting): string {
   ];
   return parts.join('\u001f');
 }
+
+/** `meetingAckFingerprint`에 저장되는 값의 접두사(레거시 전체 지문과 구분·마이그레이션용). */
+export const MEETING_INFO_FP_PREFIX = 'ginit_info:v1:';
+
+/**
+ * 참여자·투표 집계는 제외하고 일정·장소·제목·후보만 반영한 지문.
+ * 인앱/ACK는 이 값으로만 비교해 참여·탈퇴 시 "모임 정보 업데이트" 알람이 겹치지 않게 합니다.
+ */
+export function meetingInfoFingerprint(m: Meeting): string {
+  const parts = [
+    m.title?.trim() ?? '',
+    m.scheduleConfirmed === true ? '1' : '0',
+    m.confirmedDateChipId ?? '',
+    m.confirmedPlaceChipId ?? '',
+    m.confirmedMovieChipId ?? '',
+    m.scheduleDate ?? '',
+    m.scheduleTime ?? '',
+    m.placeName ?? '',
+    m.address ?? '',
+    m.location ?? '',
+    stableJsonForFingerprint(m.dateCandidates ?? null),
+    stableJsonForFingerprint(m.placeCandidates ?? null),
+  ];
+  return `${MEETING_INFO_FP_PREFIX}${parts.join('\u001f')}`;
+}

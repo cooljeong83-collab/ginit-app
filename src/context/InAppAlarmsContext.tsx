@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import {
   createContext,
@@ -31,7 +32,8 @@ import {
   defaultInAppAlarmReadState,
   type InAppAlarmReadState,
   type InAppAlarmRow,
-  meetingChangeFingerprint,
+  MEETING_INFO_FP_PREFIX,
+  meetingInfoFingerprint,
 } from '@/src/lib/in-app-alarms';
 import {
   fetchFriendsAcceptedList,
@@ -40,7 +42,6 @@ import {
   type FriendAcceptedRow,
   type FriendInboxRow,
 } from '@/src/lib/friends';
-import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
@@ -60,6 +61,7 @@ import {
   subscribeSocialChatLatestMessage,
 } from '@/src/lib/social-chat-rooms';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -79,6 +81,14 @@ function formatAlarmTime(sortMs: number): string {
   } catch {
     return '';
   }
+}
+
+/** 재연결 직후 오래된 스냅샷으로 로컬 알림이 몰리지 않게 — 실시간 건은 송신 측 원격 푸시로 이미 전달됐을 수 있음 */
+const HEADS_UP_MAX_EVENT_AGE_MS = 120_000;
+
+function isRecentEnoughForHeadsUp(eventTimeMs: number): boolean {
+  if (!eventTimeMs || !Number.isFinite(eventTimeMs)) return true;
+  return Date.now() - eventTimeMs <= HEADS_UP_MAX_EVENT_AGE_MS;
 }
 
 type InAppAlarmsContextValue = {
@@ -416,6 +426,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       if (!frid) continue;
       if (readState.friendRequestDismissedIds[frid]) continue;
       if (friendHeadsUpNotifiedIdsRef.current.has(frid)) continue;
+      const createdMs = fr.created_at ? Date.parse(fr.created_at) : 0;
+      if (createdMs && !isRecentEnoughForHeadsUp(createdMs)) continue;
       friendHeadsUpNotifiedIdsRef.current.add(frid);
       const title = friendRequesterNickById.get(fr.requester_app_user_id) ?? '친구';
       notifyInAppAlarmHeadsUpFireAndForget({
@@ -441,15 +453,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       if (!fid) continue;
       if (readState.friendAcceptedDismissedIds[fid]) continue;
       if (friendAcceptHeadsUpNotifiedIdsRef.current.has(fid)) continue;
+      if (it.sortMs && !isRecentEnoughForHeadsUp(it.sortMs)) continue;
+      // 중복 방지: 친구 수락은 새소식 목록/뱃지로만 반영하고 추가 푸시는 보내지 않습니다.
       friendAcceptHeadsUpNotifiedIdsRef.current.add(fid);
-      const title = friendAcceptPeerNickById.get(it.peerAppUserId) ?? '친구';
-      notifyInAppAlarmHeadsUpFireAndForget({
-        userId,
-        kind: 'friend_accepted',
-        meetingId: fid,
-        meetingTitle: title,
-        preview: `${title}님이 친구 요청을 수락했어요.`,
-      });
     }
     const cur = new Set(friendAcceptQueue.map((x) => x.friendshipId.trim()).filter(Boolean));
     for (const id of [...friendAcceptHeadsUpNotifiedIdsRef.current]) {
@@ -593,8 +599,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       let changed = false;
 
       for (const m of joined) {
-        if (meetingAckFingerprint[m.id] === undefined) {
-          meetingAckFingerprint[m.id] = meetingChangeFingerprint(m);
+        const fpInfo = meetingInfoFingerprint(m);
+        const curAck = meetingAckFingerprint[m.id];
+        if (curAck === undefined || !curAck.startsWith(MEETING_INFO_FP_PREFIX)) {
+          meetingAckFingerprint[m.id] = fpInfo;
           changed = true;
         }
         if (!(m.id in latestById)) continue;
@@ -617,7 +625,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     setMeetingAlarmSinceMs((prev) => {
       const next = { ...prev };
       for (const m of joined) {
-        const fp = meetingChangeFingerprint(m);
+        const fp = meetingInfoFingerprint(m);
         const ack = readState.meetingAckFingerprint[m.id];
         if (ack === undefined) continue;
         if (fp !== ack) {
@@ -733,13 +741,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                   const next = [{ id: evId, subtitle: msg, sortMs: now }, ...cur].slice(0, 50);
                   return { ...prev, [mid]: next };
                 });
-                notifyInAppAlarmHeadsUpFireAndForget({
-                  userId,
-                  kind: 'meeting_change',
-                  meetingId: mid,
-                  meetingTitle: m.title?.trim() || '모임',
-                  preview: msg,
-                });
               }
             })();
           }
@@ -747,31 +748,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         prevParticipantSetRef.current[mid] = nextLine;
       }
 
-      // 2) 채팅 헤드업
-      if (mid in latestById) {
-        const latest = latestById[mid];
-        const readChatId = readState.chatReadMessageId[mid] ?? '';
-        const latestId = latest?.id ?? '';
-        if (latestId && latestId !== readChatId) {
-          const senderRaw = latest?.senderId?.trim() ?? '';
-          const senderPk = senderRaw ? normalizeParticipantId(senderRaw) : '';
-          if (senderPk && senderPk === myPk) continue;
-
-          const dedupeKey = `c:${mid}:${latestId}`;
-          if (pushDedupeRef.current.has(dedupeKey)) continue;
-          pushDedupeRef.current.add(dedupeKey);
-
-          notifyInAppAlarmHeadsUpFireAndForget({
-            userId,
-            kind: 'chat',
-            meetingId: mid,
-            meetingTitle: m.title?.trim() || '모임',
-            preview: latest ? previewLine(latest) : undefined,
-          });
-        }
-      }
-
-      const fp = meetingChangeFingerprint(m);
+      const fp = meetingInfoFingerprint(m);
       const ack = readState.meetingAckFingerprint[mid];
       if (ack !== undefined && fp !== ack) {
         // 내가 방금(상세 화면에서) 바꾼 모임이면: 알람/푸시는 띄우지 않고 ACK만 갱신합니다.
@@ -792,65 +769,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         const preview = buildMeetingChangePreview(prevSnap, m);
         meetingChangePreviewRef.current[mid] = preview;
 
-        notifyInAppAlarmHeadsUpFireAndForget({
-          userId,
-          kind: 'meeting_change',
-          meetingId: mid,
-          meetingTitle: m.title?.trim() || '모임',
-          preview,
-        });
+        // 중복 방지: 모임 변경은 새소식 패널/배지로만 반영하고 원격 푸시는 보내지 않습니다.
       }
 
       prevMeetingSnapshotRef.current[mid] = m;
     }
-  }, [
-    persistReady,
-    userId,
-    meetings,
-    latestById,
-    readState.chatReadMessageId,
-    readState.meetingAckFingerprint,
-    buildMeetingChangePreview,
-  ]);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    if (!persistReady || !userId?.trim() || !headsUpReady) return;
-    const myPk = normalizeParticipantId(userId.trim());
-
-    for (const sr of socialRooms) {
-      const rid = sr.roomId.trim();
-      if (!rid) continue;
-      const latest = socialLatestByRoomId[rid];
-      const readChatId = readState.chatReadMessageId[rid] ?? '';
-      const latestId = latest?.id ?? '';
-      if (!latestId || latestId === readChatId) continue;
-
-      const senderRaw = latest?.senderId?.trim() ?? '';
-      const senderPk = senderRaw ? normalizeParticipantId(senderRaw) : '';
-      if (senderPk && senderPk === myPk) continue;
-
-      const dedupeKey = `sd:${rid}:${latestId}`;
-      if (pushDedupeRef.current.has(dedupeKey)) continue;
-      pushDedupeRef.current.add(dedupeKey);
-
-      const nick = socialPeerNickByRoomId.get(rid) ?? '친구';
-      notifyInAppAlarmHeadsUpFireAndForget({
-        userId,
-        kind: 'social_dm',
-        meetingId: rid,
-        meetingTitle: nick,
-        preview: socialDmPreviewLine(latest),
-      });
-    }
-  }, [
-    persistReady,
-    userId,
-    socialRooms,
-    socialLatestByRoomId,
-    readState.chatReadMessageId,
-    socialPeerNickByRoomId,
-  ]);
+  }, [persistReady, userId, meetings, readState.meetingAckFingerprint, buildMeetingChangePreview]);
 
   const alarms = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, userId);
@@ -878,7 +802,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           });
         }
       }
-      const fp = meetingChangeFingerprint(m);
+      const fp = meetingInfoFingerprint(m);
       const ack = readState.meetingAckFingerprint[mid];
       const isHost = Boolean(myPk) && normalizeParticipantId(m.createdBy?.trim() ?? '') === myPk;
       if (isHost) {
@@ -976,6 +900,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const hasUnread = alarms.length > 0;
 
+  /** 홈 상단 종 알람 패널과 동일한 건수 — iOS·지원 Android 런처의 앱 아이콘 배지 */
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!userId?.trim()) {
+      void Notifications.setBadgeCountAsync(0).catch(() => {});
+      return;
+    }
+    const n = persistReady ? alarms.length : 0;
+    const badge = n > 0 ? Math.min(n, 999) : 0;
+    void Notifications.setBadgeCountAsync(badge).catch(() => {});
+  }, [persistReady, userId, alarms.length]);
+
   const friendsTabPendingRequestBadge = useMemo(() => {
     if (friendInbox.length === 0) return 0;
     const dismissed = readState.friendRequestDismissedIds;
@@ -1044,7 +980,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const syncMeetingAckFromMeeting = useCallback((meeting: Meeting) => {
     const mid = meeting.id?.trim();
     if (!mid) return;
-    const fp = meetingChangeFingerprint(meeting);
+    const fp = meetingInfoFingerprint(meeting);
     setReadState((p) => ({
       ...p,
       meetingAckFingerprint: { ...p.meetingAckFingerprint, [mid]: fp },
@@ -1054,7 +990,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const markMeetingAlarmsReadByPushTap = useCallback((meeting: Meeting) => {
     const mid = meeting.id?.trim();
     if (!mid) return;
-    const fp = meetingChangeFingerprint(meeting);
+    const fp = meetingInfoFingerprint(meeting);
     setReadState((p) => ({
       ...p,
       meetingAckFingerprint: { ...p.meetingAckFingerprint, [mid]: fp },
@@ -1107,7 +1043,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         const mid = j.id;
         const m = meetingById.get(mid);
         if (!m) continue;
-        meetingAckFingerprint[mid] = meetingChangeFingerprint(m);
+        meetingAckFingerprint[mid] = meetingInfoFingerprint(m);
         if (mid in latestById) {
           const latest = latestById[mid];
           chatReadMessageId[mid] = latest?.id ?? '';
@@ -1177,7 +1113,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       }
       const m = meetings.find((x) => x.id === row.meetingId);
       if (m) {
-        const fp = meetingChangeFingerprint(m);
+        const fp = meetingInfoFingerprint(m);
         setReadState((p) => ({
           ...p,
           meetingAckFingerprint: { ...p.meetingAckFingerprint, [row.meetingId]: fp },

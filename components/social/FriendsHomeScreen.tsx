@@ -53,9 +53,9 @@ import {
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
+import { getUserProfile, getUserProfilesForIds, isUserPhoneVerified } from '@/src/lib/user-profile';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 
 const ACCENT_ORANGE = '#FF8A00';
 const NEON_A = '#22d3ee';
@@ -726,7 +726,25 @@ export function FriendsHomeScreen() {
   const goMap = useCallback(() => router.push('/(tabs)/map'), [router]);
   const goAddFriend = useCallback(() => router.push('/social/discovery'), [router]);
   const goSettings = useCallback(() => router.push('/(tabs)/profile'), [router]);
-  const goCreateGathering = useCallback(() => router.push('/create/details'), [router]);
+  const goCreateGathering = useCallback(() => {
+    void (async () => {
+      const pk = userId?.trim();
+      if (pk) {
+        try {
+          const p = await getUserProfile(pk);
+          if (!isUserPhoneVerified(p)) {
+            Alert.alert('인증 정보 등록', '모임을 이용하시려면 인증 정보 등록을 완료하셔야 합니다.', [
+              { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
+            ]);
+            return;
+          }
+        } catch {
+          /* 등록 시 addMeeting에서 재검증 */
+        }
+      }
+      router.push('/create/details');
+    })();
+  }, [router, userId]);
 
   const hideFriend = useCallback(
     (peerId: string) => {

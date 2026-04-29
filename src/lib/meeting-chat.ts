@@ -18,6 +18,7 @@
  */
 import * as ImageManipulator from 'expo-image-manipulator';
 import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
 import {
   addDoc,
   collection,
@@ -43,9 +44,11 @@ import {
   SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
+import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
-import { getFirestoreDb, MEETINGS_COLLECTION } from '@/src/lib/meetings';
+import { getFirestoreDb, getMeetingById, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
@@ -710,6 +713,41 @@ export async function deleteMeetingChatImagesStorageBestEffort(meetingId: string
   }
 }
 
+/** 모임 채팅 송신 직후 참가자에게 원격 푸시(수신자 앱이 백그라운드여도 동작). */
+function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
+  meetingId: string;
+  senderId: string;
+  preview: string;
+}): void {
+  if (Platform.OS === 'web') return;
+  void (async () => {
+    try {
+      const mid = args.meetingId.trim();
+      if (!mid) return;
+      const m = await getMeetingById(mid);
+      if (!m) return;
+      const title = m.title?.trim() || '모임';
+      const senderPk = normalizeParticipantId(args.senderId.trim()) || args.senderId.trim();
+      const ids = m.participantIds ?? [];
+      const seen = new Set<string>();
+      const pv = args.preview.trim().slice(0, 500);
+      for (const raw of ids) {
+        const pk = normalizeParticipantId(String(raw).trim()) || String(raw).trim();
+        if (!pk || pk === senderPk || seen.has(pk)) continue;
+        seen.add(pk);
+        sendInAppAlarmRemotePushToUserFireAndForget(pk, {
+          kind: 'chat',
+          meetingId: mid,
+          meetingTitle: title,
+          preview: pv,
+        });
+      }
+    } catch {
+      /* 푸시 실패는 전송 성공과 무관 */
+    }
+  })();
+}
+
 export async function sendMeetingChatTextMessage(
   meetingId: string,
   senderPhoneUserId: string,
@@ -749,6 +787,11 @@ export async function sendMeetingChatTextMessage(
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
+  notifyMeetingChatParticipantsRemoteFireAndForget({
+    meetingId: mid,
+    senderId,
+    preview: text,
+  });
 }
 
 const CHAT_IMAGE_MAX_WIDTH = 1280;
@@ -819,4 +862,10 @@ export async function sendMeetingChatImageMessage(
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
+  const imgPreview = cap ? `사진 · ${cap}` : '사진';
+  notifyMeetingChatParticipantsRemoteFireAndForget({
+    meetingId: mid,
+    senderId,
+    preview: imgPreview,
+  });
 }

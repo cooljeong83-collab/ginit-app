@@ -1,6 +1,5 @@
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
-import * as Linking from 'expo-linking';
 import { usePathname, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
@@ -10,8 +9,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
-import { getMeetingById } from '@/src/lib/meetings';
-import { TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION } from '@/src/lib/trust-penalty-notify';
+import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
 import { saveUserExpoPushToken } from '@/src/lib/user-expo-push-token';
 
 Notifications.setNotificationHandler({
@@ -26,7 +24,8 @@ Notifications.setNotificationHandler({
           return {
             shouldShowBanner: false,
             shouldShowList: false,
-            shouldPlaySound: false,
+            // Android: shouldPlaySound false면 배너 자체가 안 뜨는 동작이 있어, 숨김은 배너 플래그만으로 처리합니다.
+            shouldPlaySound: true,
             shouldSetBadge: false,
           };
         }
@@ -42,93 +41,6 @@ Notifications.setNotificationHandler({
     };
   },
 });
-
-function navigateFromPushData(
-  router: ReturnType<typeof useRouter>,
-  data: Record<string, unknown> | undefined,
-  opts?: { replace?: boolean; currentPathname?: string },
-): void {
-  if (!data || typeof data !== 'object') return;
-  const replace = Boolean(opts?.replace);
-  const navTo = (path: string) => {
-    const cur = (opts?.currentPathname ?? '').trim();
-    if (cur && cur === path) return; // 이미 해당 화면이면 스택을 쌓지 않음
-    if (replace) router.replace(path);
-    else router.push(path);
-  };
-  const actionAny = typeof (data as { action?: unknown }).action === 'string' ? String((data as { action: string }).action).trim() : '';
-  if (actionAny === TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION) {
-    navTo('/(tabs)/profile');
-    return;
-  }
-  if (
-    actionAny === 'friend_request' ||
-    actionAny === 'in_app_friend_request' ||
-    actionAny === 'in_app_friend_accepted'
-  ) {
-    navTo('/(tabs)/friends');
-    return;
-  }
-  if (actionAny === 'follow_request') {
-    navTo('/social/connections');
-    return;
-  }
-  const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
-  const action = typeof data.action === 'string' ? data.action.trim() : '';
-  if (meetingId && action === 'in_app_chat') {
-    navTo(`/meeting-chat/${meetingId}`);
-    return;
-  }
-  if (meetingId && action === 'in_app_social_dm') {
-    navTo(`/social-chat/${encodeURIComponent(meetingId)}`);
-    return;
-  }
-  if (meetingId && action === 'in_app_meeting') {
-    navTo(`/meeting/${meetingId}`);
-    return;
-  }
-  if (!meetingId) {
-    const url = typeof data.url === 'string' ? data.url.trim() : '';
-    if (url) void Linking.openURL(url);
-    return;
-  }
-  if (action === 'deleted') {
-    router.replace('/(tabs)');
-    return;
-  }
-  navTo(`/meeting/${meetingId}`);
-}
-
-async function markAlarmReadFromPushData(
-  data: Record<string, unknown> | undefined,
-  markMeetingAlarmsReadByPushTap: ReturnType<typeof useInAppAlarms>['markMeetingAlarmsReadByPushTap'],
-  markFriendRequestAlarmDismissed: ReturnType<typeof useInAppAlarms>['markFriendRequestAlarmDismissed'],
-  markFriendAcceptedAlarmDismissed: ReturnType<typeof useInAppAlarms>['markFriendAcceptedAlarmDismissed'],
-): Promise<void> {
-  if (!data || typeof data !== 'object') return;
-  const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
-  const action = typeof data.action === 'string' ? data.action.trim() : '';
-  if (action === 'in_app_friend_request' && meetingId) {
-    markFriendRequestAlarmDismissed(meetingId);
-    return;
-  }
-  if (action === 'in_app_friend_accepted' && meetingId) {
-    markFriendAcceptedAlarmDismissed(meetingId);
-    return;
-  }
-  if (!meetingId) return;
-  // 채팅은 messageId가 없어서 여기서 정확한 read up to 처리는 어려움.
-  // 모임 변경/상세 알람은 현재 모임 스냅샷으로 ack를 갱신해 읽음 처리합니다.
-  const shouldAckMeeting =
-    action === 'in_app_meeting' ||
-    action === 'participant_joined' ||
-    action === 'participant_left' ||
-    action === 'host_transferred';
-  if (!shouldAckMeeting) return;
-  const m = await getMeetingById(meetingId);
-  if (!m) return;
-  markMeetingAlarmsReadByPushTap(m);
-}
 
 /**
  * 푸시 권한·Expo 토큰 등록, 알림 탭 시 모임 상세(또는 삭제 시 홈)로 이동.
@@ -146,12 +58,17 @@ export function PushNotificationBootstrap() {
     if (!userId?.trim()) return;
 
     (async () => {
-      if (!Device.isDevice) return;
-
       const { status: existing } = await Notifications.getPermissionsAsync();
       let finalStatus = existing;
       if (existing !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
+        const { status } = await Notifications.requestPermissionsAsync({
+          ios: {
+            allowAlert: true,
+            allowBadge: true,
+            allowSound: true,
+            allowDisplayInCarPlay: true,
+          },
+        });
         finalStatus = status;
       }
       if (finalStatus !== 'granted') return;
@@ -159,10 +76,14 @@ export function PushNotificationBootstrap() {
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
           name: 'default',
-          importance: Notifications.AndroidImportance.DEFAULT,
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 220],
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         });
         await ensureGinitInAppAndroidChannel();
       }
+
+      if (!Device.isDevice) return;
 
       const projectId =
         (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ??
@@ -216,9 +137,20 @@ export function PushNotificationBootstrap() {
       if (last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
       const data = last.notification.request.content.data as Record<string, unknown> | undefined;
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
-      await markAlarmReadFromPushData(data, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed);
+      await markAlarmReadFromPushData(
+        data,
+        markMeetingAlarmsReadByPushTap,
+        markFriendRequestAlarmDismissed,
+        markFriendAcceptedAlarmDismissed,
+      );
     })();
-  }, [router, markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, pathname]);
+  }, [
+    router,
+    markMeetingAlarmsReadByPushTap,
+    markFriendRequestAlarmDismissed,
+    markFriendAcceptedAlarmDismissed,
+    pathname,
+  ]);
 
   return null;
 }
