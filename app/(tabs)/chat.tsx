@@ -19,9 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Image } from 'expo-image';
 
-import { ChatListCardShell } from '@/components/chat/ChatListCardShell';
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
-import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -718,20 +716,40 @@ export default function ChatTab() {
 
       <View style={styles.tabCategoryBar} accessibilityRole="tablist">
         <View style={styles.tabPair}>
-          <GlassCategoryChip
-            label="모임"
-            active={chatKind === 'gather'}
+          <Pressable
             onPress={() => goToChatKind('gather')}
-            maxLabelWidth={tabChipMaxWidth}
-            accessibilityLabel="모임"
-          />
-          <GlassCategoryChip
-            label="친구"
-            active={chatKind === 'social'}
+            style={({ pressed }) => [
+              styles.chatTopChip,
+              chatKind === 'gather' && styles.chatTopChipActive,
+              pressed && styles.chatTopChipPressed,
+              { maxWidth: tabChipMaxWidth },
+            ]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: chatKind === 'gather' }}
+            accessibilityLabel="모임">
+            <Text
+              style={[styles.chatTopChipLabel, chatKind === 'gather' && styles.chatTopChipLabelActive]}
+              numberOfLines={1}>
+              모임
+            </Text>
+          </Pressable>
+          <Pressable
             onPress={() => goToChatKind('social')}
-            maxLabelWidth={tabChipMaxWidth}
-            accessibilityLabel="친구"
-          />
+            style={({ pressed }) => [
+              styles.chatTopChip,
+              chatKind === 'social' && styles.chatTopChipActive,
+              pressed && styles.chatTopChipPressed,
+              { maxWidth: tabChipMaxWidth },
+            ]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: chatKind === 'social' }}
+            accessibilityLabel="친구">
+            <Text
+              style={[styles.chatTopChipLabel, chatKind === 'social' && styles.chatTopChipLabelActive]}
+              numberOfLines={1}>
+              친구
+            </Text>
+          </Pressable>
         </View>
         <View style={styles.categoryDropdownSpacer} pointerEvents="none" />
       </View>
@@ -840,6 +858,8 @@ export default function ChatTab() {
     </>
   );
 
+  const renderChatListSeparator = useCallback(() => <View style={styles.chatListSeparator} />, []);
+
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -882,6 +902,7 @@ export default function ChatTab() {
                 }
                 ListHeaderComponent={chatTabListAlerts('gather')}
                 ListFooterComponent={chatKind === 'gather' ? gatherListFooter : null}
+                ItemSeparatorComponent={renderChatListSeparator}
                 onEndReached={() => handleEndReachedForKind('gather')}
                 onEndReachedThreshold={0.6}
                 renderItem={({ item: m }) => {
@@ -926,6 +947,7 @@ export default function ChatTab() {
                 }
                 ListHeaderComponent={chatTabListAlerts('social')}
                 ListFooterComponent={chatKind === 'social' ? socialListFooter : null}
+                ItemSeparatorComponent={renderChatListSeparator}
                 onEndReached={() => handleEndReachedForKind('social')}
                 onEndReachedThreshold={0.6}
                 renderItem={({ item: row }) => {
@@ -940,12 +962,13 @@ export default function ChatTab() {
                   const rightTime = hasMessage ? formatRightTimeFromMs(latestSocialChatMessageMs(latest)) : '';
                   const unread = unreadBySocialRoomId[row.roomId] ?? 0;
                   return (
-                    <ChatListCardShell
-                      accentGradient={SOCIAL_CHAT_LIST_ACCENT}
+                    <Pressable
                       onPress={() =>
                         router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`)
                       }
-                      accessibilityLabel={`${nick}와 채팅`}>
+                      accessibilityRole="button"
+                      accessibilityLabel={`${nick}와 채팅`}
+                      style={({ pressed }) => [styles.chatPressableRow, pressed && styles.chatPressablePressed]}>
                       <View style={styles.socialZoneA}>
                         <View style={styles.socialSymbolCol}>
                           {uri ? (
@@ -995,7 +1018,7 @@ export default function ChatTab() {
                           </Text>
                         </View>
                       </View>
-                    </ChatListCardShell>
+                    </Pressable>
                   );
                 }}
               />
@@ -1080,6 +1103,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 28,
     flexGrow: 1,
+  },
+  chatListSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GinitTheme.colors.border,
+  },
+  chatPressableRow: {
+    paddingVertical: 10,
+  },
+  chatPressablePressed: {
+    opacity: 0.86,
   },
   feedHeader: {
     marginBottom: 16,
@@ -1250,6 +1283,30 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'transparent',
     opacity: 0,
+  },
+  chatTopChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.75)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
+    flexShrink: 1,
+  },
+  chatTopChipActive: {
+    backgroundColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.trustBlue,
+  },
+  chatTopChipPressed: {
+    opacity: 0.88,
+  },
+  chatTopChipLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
+  },
+  chatTopChipLabelActive: {
+    color: '#fff',
   },
   socialZoneA: {
     flexDirection: 'row',

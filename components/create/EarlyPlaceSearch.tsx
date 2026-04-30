@@ -188,6 +188,7 @@ export function EarlyPlaceSearch({
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return undefined;
     if (document.getElementById(WEB_SCROLLBAR_STYLE_ID)) return undefined;
+    const thumb = GinitTheme.colors.ctaGradient[1];
     const el = document.createElement('style');
     el.id = WEB_SCROLLBAR_STYLE_ID;
     el.textContent = `
@@ -197,7 +198,7 @@ export function EarlyPlaceSearch({
         border-radius: 4px;
       }
       .${WEB_SCROLLBAR_CLASS}::-webkit-scrollbar-thumb {
-        background: rgba(0, 82, 204, 0.35);
+        background: ${thumb};
         border-radius: 4px;
       }
     `;
@@ -299,7 +300,7 @@ export function EarlyPlaceSearch({
         overflowY: 'scroll',
         overflowX: 'hidden',
         scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(0, 82, 204, 0.38) rgba(15, 23, 42, 0.12)',
+        scrollbarColor: `${GinitTheme.colors.ctaGradient[1]} rgba(15, 23, 42, 0.12)`,
       } as ViewStyle);
     } else {
       base.push({
@@ -456,7 +457,7 @@ export function EarlyPlaceSearch({
         overflowY: 'scroll',
         overflowX: 'hidden',
         scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(0, 82, 204, 0.38) rgba(15, 23, 42, 0.12)',
+        scrollbarColor: `${GinitTheme.colors.ctaGradient[1]} rgba(15, 23, 42, 0.12)`,
       } as ViewStyle);
     } else {
       base.push({

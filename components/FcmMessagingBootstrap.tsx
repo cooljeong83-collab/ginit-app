@@ -14,6 +14,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { fcmDebugSetError, fcmDebugSetSaveOk, fcmDebugSetToken } from '@/src/lib/fcm-debug-state';
 import { displayFcmRemoteMessageWithNotifeeAndroid, ensureGinitFcmNotifeeChannel } from '@/src/lib/fcm-notifee-display';
+import { extractFirebaseLikeCode, hintForNativeFcmTokenError } from '@/src/lib/firebase-credential-hints';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
@@ -146,7 +147,13 @@ export function FcmMessagingBootstrap() {
       } catch (e) {
         fcmDebugSetSaveOk(false);
         fcmDebugSetError(e);
-        ginitNotifyDbg('FcmMessaging', 'getToken_or_save_failed', { message: e instanceof Error ? e.message : String(e) });
+        const msg = e instanceof Error ? e.message : String(e);
+        const code = extractFirebaseLikeCode(e);
+        ginitNotifyDbg('FcmMessaging', 'getToken_or_save_failed', {
+          message: msg,
+          code: code || undefined,
+          reissueHint: hintForNativeFcmTokenError(msg, code),
+        });
         if (__DEV__) {
           console.warn('[fcm] getToken/save failed:', e);
         }

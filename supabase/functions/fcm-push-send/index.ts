@@ -37,10 +37,40 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function getFirebaseMessaging() {
   const raw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')?.trim();
-  if (!raw) throw new Error('Missing FIREBASE_SERVICE_ACCOUNT_JSON');
-  const cred = JSON.parse(raw) as Record<string, unknown>;
-  if (!getApps().length) {
-    initializeApp({ credential: cert(cred as never) });
+  if (!raw) {
+    console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON missing (set Supabase Edge secret)');
+    throw new Error('Missing FIREBASE_SERVICE_ACCOUNT_JSON');
+  }
+  let cred: Record<string, unknown>;
+  try {
+    cred = JSON.parse(raw) as Record<string, unknown>;
+  } catch (e) {
+    console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON', String(e));
+    throw e;
+  }
+  const projectId = typeof cred.project_id === 'string' ? cred.project_id : '';
+  const clientEmail = typeof cred.client_email === 'string' ? cred.client_email : '';
+  const pk = typeof cred.private_key === 'string' ? cred.private_key : '';
+  const at = clientEmail.indexOf('@');
+  const emailDomain = at > 0 ? clientEmail.slice(at + 1) : '';
+  console.log(
+    '[fcm-push-send] service_account_diag',
+    JSON.stringify({
+      project_id: projectId || '(missing in json)',
+      client_email_domain: emailDomain || '(missing)',
+      private_key_present: pk.length > 0,
+      private_key_starts_with_begin: pk.trimStart().startsWith('-----BEGIN'),
+    }),
+  );
+  try {
+    if (!getApps().length) {
+      initializeApp({ credential: cert(cred as never) });
+    }
+    console.log('[fcm-push-send] firebase_admin_initialize_ok');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[fcm-push-send] firebase_admin_initialize_failed', msg);
+    throw e;
   }
   return getMessaging();
 }
@@ -158,6 +188,7 @@ serve(async (req) => {
       messaging = getFirebaseMessaging();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[fcm-push-send] getFirebaseMessaging_failed', msg);
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
@@ -177,6 +208,7 @@ serve(async (req) => {
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[fcm-push-send] sendEachForMulticast_failed', msg);
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 

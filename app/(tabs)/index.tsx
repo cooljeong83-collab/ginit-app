@@ -21,7 +21,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
-import { GlassCategoryChip } from '@/components/feed/GlassCategoryChip';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
@@ -90,12 +89,8 @@ export default function FeedScreen() {
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
-  /** 탐색·내 모임 칩 — 예전 카테고리 칩과 동일 컴포넌트·유사 maxWidth */
-  /** 탐색·내 모임 칩 라벨 폭 — 카테고리 칩과 동일 상한 규칙 */
-  const tabChipMaxWidth = useMemo(
-    () => Math.min(200, Math.max(100, Math.floor(windowWidth * 0.38))),
-    [windowWidth],
-  );
+  /** 탐색·내 모임 칩 — 우측 카테고리 드롭다운(maxWidth 150)과 폭 기준을 맞춤 */
+  const tabChipMaxWidth = 150;
   /** 전역 모임 없음 안내를 리스트 영역 세로 중앙에 두기 위한 최소 높이 */
   const globalEmptyMinHeight = useMemo(
     () => Math.max(300, windowHeight - safeInsets.top - safeInsets.bottom - 200),
@@ -711,6 +706,11 @@ export default function FeedScreen() {
     [router, userId],
   );
 
+  const renderHomeMeetingListSeparator = useCallback(
+    () => <View style={styles.homeMeetingListSeparator} />,
+    [],
+  );
+
   const renderHomeItemForList = useCallback(
     (item: Meeting, tab: 'explore' | 'my') => {
       const pk = userId?.trim() ?? '';
@@ -875,20 +875,36 @@ export default function FeedScreen() {
       </View>
       <View style={styles.tabCategoryBar}>
         <View style={styles.tabPair}>
-          <GlassCategoryChip
-            label="탐색"
-            active={homeTab === 'explore'}
+          <Pressable
             onPress={() => goToHomeTab('explore')}
-            maxLabelWidth={tabChipMaxWidth}
-            accessibilityLabel="탐색"
-          />
-          <GlassCategoryChip
-            label="내 모임"
-            active={homeTab === 'my'}
+            style={({ pressed }) => [
+              styles.homeTopChip,
+              homeTab === 'explore' && styles.homeTopChipActive,
+              pressed && styles.homeTopChipPressed,
+              { maxWidth: tabChipMaxWidth },
+            ]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: homeTab === 'explore' }}
+            accessibilityLabel="탐색">
+            <Text style={[styles.homeTopChipLabel, homeTab === 'explore' && styles.homeTopChipLabelActive]} numberOfLines={1}>
+              탐색
+            </Text>
+          </Pressable>
+          <Pressable
             onPress={() => goToHomeTab('my')}
-            maxLabelWidth={tabChipMaxWidth}
-            accessibilityLabel="내 모임"
-          />
+            style={({ pressed }) => [
+              styles.homeTopChip,
+              homeTab === 'my' && styles.homeTopChipActive,
+              pressed && styles.homeTopChipPressed,
+              { maxWidth: tabChipMaxWidth },
+            ]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: homeTab === 'my' }}
+            accessibilityLabel="내 모임">
+            <Text style={[styles.homeTopChipLabel, homeTab === 'my' && styles.homeTopChipLabelActive]} numberOfLines={1}>
+              내 모임
+            </Text>
+          </Pressable>
         </View>
         <Pressable
           onPress={openCategoryPicker}
@@ -1011,6 +1027,7 @@ export default function FeedScreen() {
                       exploreActiveRegionNorm,
                     }}
                     renderItem={({ item }) => renderHomeItemForList(item, tab)}
+                    ItemSeparatorComponent={renderHomeMeetingListSeparator}
                     ListHeaderComponent={tabListAlerts(tab)}
                     ListFooterComponent={homeTab === tab ? listFooter : null}
                     contentContainerStyle={styles.scroll}
@@ -1403,6 +1420,10 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     flexGrow: 1,
   },
+  homeMeetingListSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GinitTheme.colors.border,
+  },
   tabCategoryBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1417,6 +1438,32 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
+  homeTopChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.75)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
+    flexShrink: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeTopChipActive: {
+    backgroundColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.trustBlue,
+  },
+  homeTopChipPressed: {
+    opacity: 0.88,
+  },
+  homeTopChipLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
+  },
+  homeTopChipLabelActive: {
+    color: '#fff',
+  },
   categoryDropdown: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1425,22 +1472,22 @@ const styles = StyleSheet.create({
     maxWidth: 150,
     minWidth: 96,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.75)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
+    borderColor: 'rgba(15, 23, 42, 0.1)',
   },
   categoryDropdownPressed: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderColor: 'rgba(0, 82, 204, 0.25)',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderColor: 'rgba(15, 23, 42, 0.14)',
   },
   categoryDropdownText: {
     flex: 1,
     minWidth: 0,
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
   },
   feedHeader: {
     marginBottom: 16,

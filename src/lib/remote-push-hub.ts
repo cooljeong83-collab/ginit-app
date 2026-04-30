@@ -7,6 +7,7 @@
  */
 import { doc, getDoc } from 'firebase/firestore';
 
+import { hintForFcmEdgeInvoke } from '@/src/lib/firebase-credential-hints';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
 import { fcmPushSuccessCount, sendFcmPushToUsersWithResult, type FcmPushInvokeResult } from '@/src/lib/fcm-push-api';
@@ -79,8 +80,15 @@ export async function dispatchRemotePushToRecipients(params: RemotePushHubPayloa
   try {
     fcmRes = await sendFcmPushToUsersWithResult({ toUserIds, title, body, data });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const statusMatch = msg.match(/\(status (\d+)\)/);
+    const status = statusMatch ? Number(statusMatch[1]) : undefined;
+    const colon = msg.indexOf(': ');
+    const bodyLike = colon >= 0 ? msg.slice(colon + 2) : msg;
     ginitNotifyDbg('remote-push-hub', 'fcm_invoke_threw', {
-      message: e instanceof Error ? e.message : String(e),
+      message: msg.slice(0, 400),
+      status: status ?? undefined,
+      reissueHint: hintForFcmEdgeInvoke(status, bodyLike.slice(0, 500)),
     });
     fcmRes = {};
   }

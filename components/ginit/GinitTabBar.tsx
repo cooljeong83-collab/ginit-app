@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -272,13 +271,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             onPress={onFabPress}
             style={StyleSheet.absoluteFillObject}>
             <Animated.View style={[styles.fabInner, fabAnimStyle, fabRadiusStyle]}>
-              <LinearGradient
-                colors={GinitTheme.colors.ctaGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.fabBg}
-                pointerEvents="none"
-              />
+              <View style={styles.fabBg} pointerEvents="none" />
               <Animated.View style={[styles.fabContent, fabContentPadStyle]}>
                 <View style={styles.fabLogo} pointerEvents="none">
                   <Ionicons name="add" size={24} color="#FFFFFF" />
@@ -371,14 +364,15 @@ const styles = StyleSheet.create({
   fabInner: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
-    backgroundColor: 'transparent',
+    backgroundColor: GinitTheme.trustBlue,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.72)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.trustBlue,
   },
   fabBg: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: GinitTheme.trustBlue,
   },
   fabContent: {
     flexDirection: 'row',

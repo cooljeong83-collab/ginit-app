@@ -801,109 +801,117 @@ export default function ProfileTab() {
             </View>
           </GinitCard>
 
-          <Pressable
-            onPress={() => router.push('/profile/meeting-history')}
-            style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="모임 히스토리">
-            <View style={styles.menuLeft}>
-              <View style={styles.menuIconWrap}>
-                <Ionicons name="time-outline" size={18} color="#0f172a" />
-              </View>
-              <View style={styles.menuTextCol}>
-                <Text style={styles.menuTitle}>모임 히스토리</Text>
-              </View>
-            </View>
-            <Text style={styles.menuChevron}>›</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setAuthSheetVisible(true)}
-            disabled={complianceBusy || otpBusy || profileBusy}
-            style={({ pressed }) => [
-              styles.menuRow,
-              (complianceBusy || otpBusy || profileBusy) && styles.menuRowDisabled,
-              pressed && !(complianceBusy || otpBusy || profileBusy) && styles.pressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="인증 정보 등록">
-            <View style={styles.menuLeft}>
-              <View style={styles.menuIconWrap}>
-                <Ionicons name="shield-checkmark-outline" size={18} color="#0f172a" />
-              </View>
-              <View style={styles.menuTextCol}>
-                <Text style={styles.menuTitle}>인증 정보 등록</Text>
-                <Text
-                  style={[styles.menuSub, meetingAuthComplete ? styles.menuSubOk : styles.menuSubWarn]}
-                  numberOfLines={1}>
-                  {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.menuChevron}>›</Text>
-          </Pressable>
-
-          {isSignedIn ? (
-            <>
-              <Pressable
-                onPress={onSignOut}
-                disabled={busy || deleteBusy}
-                style={({ pressed }) => [
-                  styles.menuRow,
-                  (busy || deleteBusy) && styles.menuRowDisabled,
-                  pressed && !(busy || deleteBusy) && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="로그아웃">
-                <View style={styles.menuLeft}>
-                  <View style={styles.menuIconWrap}>
-                    <Ionicons name="log-out-outline" size={18} color="#0f172a" />
-                  </View>
-                  <View style={styles.menuTextCol}>
-                    <Text style={styles.menuTitle}>로그아웃</Text>
-                  </View>
-                </View>
-                <Text style={styles.menuChevron}>›</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={onRequestDeleteAccount}
-                disabled={deleteBusy || profileBusy}
-                style={({ pressed }) => [
-                  styles.menuRow,
-                  (deleteBusy || profileBusy) && styles.menuRowDisabled,
-                  pressed && !(deleteBusy || profileBusy) && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="회원 탈퇴">
-                <View style={styles.menuLeft}>
-                  <View style={[styles.menuIconWrap, styles.menuIconWrapDanger]}>
-                    <Ionicons name="warning-outline" size={18} color="#b91c1c" />
-                  </View>
-                  <View style={styles.menuTextCol}>
-                    <Text style={styles.menuTitleDanger}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
-                  </View>
-                </View>
-                <Text style={styles.menuChevronDanger}>›</Text>
-              </Pressable>
-            </>
-          ) : (
+          <View style={styles.menuListWrap}>
             <Pressable
-              onPress={onGoLogin}
+              onPress={() => router.push('/profile/meeting-history')}
               style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="로그인">
+              accessibilityLabel="모임 히스토리">
               <View style={styles.menuLeft}>
                 <View style={styles.menuIconWrap}>
-                  <Ionicons name="log-in-outline" size={18} color="#0f172a" />
+                  <Ionicons name="time-outline" size={18} color="#0f172a" />
                 </View>
                 <View style={styles.menuTextCol}>
-                  <Text style={styles.menuTitle}>로그인</Text>
+                  <Text style={styles.menuTitle}>모임 히스토리</Text>
                 </View>
               </View>
               <Text style={styles.menuChevron}>›</Text>
             </Pressable>
-          )}
+
+            <View style={styles.menuSeparator} />
+
+            <Pressable
+              onPress={() => setAuthSheetVisible(true)}
+              disabled={complianceBusy || otpBusy || profileBusy}
+              style={({ pressed }) => [
+                styles.menuRow,
+                (complianceBusy || otpBusy || profileBusy) && styles.menuRowDisabled,
+                pressed && !(complianceBusy || otpBusy || profileBusy) && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="인증 정보 등록">
+              <View style={styles.menuLeft}>
+                <View style={styles.menuIconWrap}>
+                  <Ionicons name="shield-checkmark-outline" size={18} color="#0f172a" />
+                </View>
+                <View style={styles.menuTextCol}>
+                  <Text style={styles.menuTitle}>인증 정보 등록</Text>
+                  <Text
+                    style={[styles.menuSub, meetingAuthComplete ? styles.menuSubOk : styles.menuSubWarn]}
+                    numberOfLines={1}>
+                    {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.menuChevron}>›</Text>
+            </Pressable>
+
+            <View style={styles.menuSeparator} />
+
+            {isSignedIn ? (
+              <>
+                <Pressable
+                  onPress={onSignOut}
+                  disabled={busy || deleteBusy}
+                  style={({ pressed }) => [
+                    styles.menuRow,
+                    (busy || deleteBusy) && styles.menuRowDisabled,
+                    pressed && !(busy || deleteBusy) && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="로그아웃">
+                  <View style={styles.menuLeft}>
+                    <View style={styles.menuIconWrap}>
+                      <Ionicons name="log-out-outline" size={18} color="#0f172a" />
+                    </View>
+                    <View style={styles.menuTextCol}>
+                      <Text style={styles.menuTitle}>로그아웃</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.menuChevron}>›</Text>
+                </Pressable>
+
+                <View style={styles.menuSeparator} />
+
+                <Pressable
+                  onPress={onRequestDeleteAccount}
+                  disabled={deleteBusy || profileBusy}
+                  style={({ pressed }) => [
+                    styles.menuRow,
+                    (deleteBusy || profileBusy) && styles.menuRowDisabled,
+                    pressed && !(deleteBusy || profileBusy) && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="회원 탈퇴">
+                  <View style={styles.menuLeft}>
+                    <View style={[styles.menuIconWrap, styles.menuIconWrapDanger]}>
+                      <Ionicons name="warning-outline" size={18} color="#b91c1c" />
+                    </View>
+                    <View style={styles.menuTextCol}>
+                      <Text style={styles.menuTitleDanger}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.menuChevronDanger}>›</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable
+                onPress={onGoLogin}
+                style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="로그인">
+                <View style={styles.menuLeft}>
+                  <View style={styles.menuIconWrap}>
+                    <Ionicons name="log-in-outline" size={18} color="#0f172a" />
+                  </View>
+                  <View style={styles.menuTextCol}>
+                    <Text style={styles.menuTitle}>로그인</Text>
+                  </View>
+                </View>
+                <Text style={styles.menuChevron}>›</Text>
+              </Pressable>
+            )}
+          </View>
         </ScrollView>
 
         <Modal
@@ -1253,11 +1261,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 11,
     paddingHorizontal: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    marginTop: 12,
+    backgroundColor: 'transparent',
   },
   menuRowDisabled: { opacity: 0.55 },
   menuLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
@@ -1308,6 +1312,14 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     color: 'rgba(185, 28, 28, 0.7)',
     marginLeft: 4,
+  },
+  menuListWrap: {
+    marginTop: 12,
+  },
+  menuSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GinitTheme.colors.border,
+    marginLeft: 44,
   },
   trustInlineSection: {
     position: 'relative',

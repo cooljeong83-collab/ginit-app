@@ -16,8 +16,16 @@ export type KobisDailyBoxOfficeRow = {
   movieNm: string;
   openDt: string;
   rank: string;
+  rankInten?: string;
+  rankOldAndNew?: string;
   salesShare: string;
+  salesAmt?: string;
+  salesInten?: string;
+  salesChange?: string;
+  salesAcc?: string;
   audiCnt: string;
+  audiInten?: string;
+  audiChange?: string;
   audiAcc: string;
   scrnCnt?: string;
   showCnt?: string;
@@ -76,6 +84,11 @@ function mapRowToMovie(row: KobisDailyBoxOfficeRow): SelectedMovieExtra {
     posterUrl: undefined,
     kobisRank: rk || undefined,
     info: `일일 관객 ${intString(row.audiCnt)}명 · 누적 ${intString(row.audiAcc)}명 · 스크린 ${intString(row.scrnCnt)}`,
+    apiMeta: Object.fromEntries(
+      Object.entries(row)
+        .map(([k, v]) => [String(k).trim(), String(v ?? '').trim()] as const)
+        .filter(([k, v]) => Boolean(k) && Boolean(v)),
+    ),
   };
 }
 

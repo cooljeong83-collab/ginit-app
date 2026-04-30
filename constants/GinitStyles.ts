@@ -429,14 +429,14 @@ export const GinitStyles = StyleSheet.create({
   },
 
   checkBubbleDone: {
-    borderColor: GinitTheme.pointOrange,
-    backgroundColor: 'rgba(255, 138, 0, 0.2)',
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(31, 42, 68, 0.14)',
   },
 
   checkMark: {
     fontSize: 15,
     fontWeight: '900',
-    color: GinitTheme.pointOrange,
+    color: GinitTheme.colors.primary,
     marginTop: -1,
   },
 
@@ -621,11 +621,11 @@ export const GinitStyles = StyleSheet.create({
   },
 
   segmentSideActivePrivate: {
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
 
   segmentSideActivePublic: {
-    backgroundColor: 'rgba(255, 138, 0, 0.14)',
+    backgroundColor: 'rgba(134, 211, 183, 0.16)',
   },
 
   segmentTitle: {
@@ -806,21 +806,21 @@ export const GinitStyles = StyleSheet.create({
     marginBottom: 12,
     padding: 12,
     borderRadius: 16,
-    backgroundColor: 'rgba(251, 191, 36, 0.2)',
+    backgroundColor: 'rgba(244, 200, 74, 0.18)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(245, 158, 11, 0.45)',
+    borderColor: 'rgba(244, 200, 74, 0.55)',
   },
 
   warnTitle: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#92400e',
+    color: GinitTheme.colors.primary,
     marginBottom: 4,
   },
 
   warnBody: {
     fontSize: 13,
-    color: '#78350f',
+    color: GinitTheme.colors.textSub,
     lineHeight: 18,
   },
 
@@ -833,11 +833,11 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록 - 모달 딤
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(26, 26, 26, 0.28)',
+    backgroundColor: GinitTheme.glass.overlayDark,
   },
 
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: GinitTheme.colors.surfaceStrong,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     paddingBottom: 24,
@@ -857,19 +857,19 @@ export const GinitStyles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     fontWeight: '900',
-    color: '#1A1A1A',
+    color: GinitTheme.colors.text,
   },
 
   modalCancel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#64748b',
+    color: GinitTheme.colors.textMuted,
   },
 
   modalDone: {
     fontSize: 16,
     fontWeight: '800',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.primary,
   },
 
   spinner: {

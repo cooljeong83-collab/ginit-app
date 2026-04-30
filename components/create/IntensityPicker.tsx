@@ -2,6 +2,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import type { SportIntensityLevel } from '@/src/lib/meeting-extra-data';
 
+import { GinitTheme } from '@/constants/ginit-theme';
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
 const LEVELS: { key: SportIntensityLevel; title: string; sub: string }[] = [
@@ -32,7 +33,7 @@ export function IntensityPicker({ value, onChange, disabled }: IntensityPickerPr
               style={[
                 S.segmentThird,
                 on && S.segmentThirdOn,
-                i > 0 && { borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.08)' },
+                i > 0 && { borderLeftWidth: 1, borderLeftColor: GinitTheme.colors.border },
               ]}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}>

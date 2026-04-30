@@ -79,73 +79,18 @@
 - 모든 정책 변경 및 추가는 마이그레이션 파일(`00XX_...sql`) 작성을 선행한다.
 - 정책의 의미와 단위(예: hours, points)를 `description` 컬럼에 상세히 기록한다.
 
----
+### 6. Design 
+- 모든 디자인은 세미 플랫 디자인으로 해서 질리지 않게 한다.
 
-# Ginit UI Design Standards: Warm-Light Glassmorphism
+### 7. List UI Pattern (강제: 디바이더 기반 목록)
+- 앞으로 **목록형 UI(Feed/Chat/검색 결과 등)** 는 카드(그림자·라운드 박스)로 “덩어리”를 만들지 않고,
+  **연한 디바이더(보더 헤어라인)로만 항목을 구분**하는 연속 리스트 패턴을 기본으로 한다.
+- 구현 기준:
+  - `FlatList`는 `ItemSeparatorComponent`로 구분선을 제공한다. (`height: StyleSheet.hairlineWidth`, `backgroundColor: GinitTheme.colors.border`)
+  - row는 `Pressable` 단위로 구성하고, 눌림 피드백은 **opacity(0.7~0.88 범위)** 만 사용한다. (과도한 스케일/글로우 금지)
+  - row 내부 정보는 **모듈화된 텍스트 블록**(예: 제목/상태, 일정, 위치·메타, 조건/프리뷰)으로 세로 스택해 가독성을 확보한다.
+  - 배경/보더/색상은 `GinitTheme` 토큰만 사용한다. (임의 hex, 네온 글로우/강한 섀도 금지)
 
-모든 UI 작업 시 "Warm & Human Gathering" 시안 톤과 아래의 디자인 규약을 엄격히 준수한다.
-
-## 1. Core Principles
-- **Style Name**: 온기 있는 라이트 글래스 (Warm-Light Glassmorphism)
-- **Concept**: 차가운 미래형 글래스가 아닌, 햇살이 비치는 깨끗한 유리창 같은 따뜻함과 부드러운 연결성 강조.
-- **Rule**: 하드코딩 금지. 모든 수치와 색상은 지정된 토큰 소스에서 가져온다.
-
-## 2. Token & Resource Reference
-- **Theme Source**: `constants/ginit-theme.ts`의 `GinitTheme`
-  - `colors`, `typography`, `spacing`, `radius`, `shadow`, `blur`, `glass`, `glassModal`, `fixedGlassCard` 사용.
-- **Global Styles**: `constants/GinitStyles.ts`의 `GinitStyles`
-  - 스크린 루트, 글래스 카드, 상단 바, `primaryButton` 패턴 사용.
-- **Root Background**: `GinitTheme.colors.bg` (`#F6FAFF`)를 기본으로 하며, 앱 셸(`app/_layout.tsx`)과 정합성을 유지한다.
-
-## 3. Color & Brand Identity
-- **Text**: 
-  - 본문: `colors.text` (`#0F172A`)
-  - 보조: `textSub`, `textMuted` (Slate 계열)
-  - 레거시 헥스 코드(`#1A1A1A`) 발견 시 `GinitTheme.colors.text`로 치환.
-- **Action/Highlight**:
-  - Primary: `#1F2A44` (네이비 계열)
-  - Accent Mint: `#86D3B7` (민트)
-  - Point Yellow: `#F4C84A` (옐로)
-- **Gradients**:
-  - 주요 CTA: `LinearGradient` 래퍼에 `GinitTheme.colors.ctaGradient` (`#86D3B7` → `#73C7FF`) 적용.
-
-## 4. Typography & Layout
-- **Headings**: `fontWeight: "800"`~`"900"`, `letterSpacing: -0.2`~`-0.35` (밀도감 강조).
-- **Body**: 15–17pt, `fontWeight: "600"`~`"700"` 중심.
-- **Spacing**: 8pt 그리드 기반 `GinitTheme.spacing` (xs, sm, md, lg, xl) 사용.
-- **Radius**:
-  - 카드/패널: `GinitTheme.radius.card` (22)
-  - 버튼: `radius.button` (16)
-  - 칩/뱃지: `pill` (완전 곡면)
-
-## 5. Surface & Glass Effects
-- **Standard Card**: 흰색/반투명 서피스 + `colors.border` 헤어라인 + `GinitTheme.shadow.card` (부유감).
-- **Modal/Search**: `GinitTheme.glassModal` 토큰과 `expo-blur` (`intensity={glassModal.blurIntensity}`) 사용.
-- **Fixed Glass**: 다크모드와 무관하게 밝게 유지되는 섹션은 `GinitStyles.fixedGlassCard` 사용.
-
-## 6. Specific Screen Patterns
-- **Meeting Detail (`app/meeting/[id].tsx`)**:
-  - 중앙 정렬 헤더 (17pt/700), 아웃라인 아이콘 + `colors.primary` 틴트 조합.
-  - 상태 뱃지: 고정 헥스(`진행:#FACC15`, `확정:#16A34A`, `종료:#171717`) 사용.
-- **Creation Wizard (`app/create/details.tsx`)**:
-  - `sectionTitle` + `sectionHint`(muted) 한 줄 설명 패턴 유지.
-  - AI 보더: `aiQuickInitBorder` (2px 그라데이션) → 내부 `surface` 중첩 라운드 구조.
-
-## 7. Interaction & Accessibility
-- **Feedback**: 눌림 효과는 `opacity: 0.7`~`0.88` 범위 내에서 구현 (과도한 스케일 변형 지양).
-- **Accessibility**: 주요 버튼에 `accessibilityRole="button"` 및 명확한 `accessibilityLabel` 부여.
-
-## 8. Development Constraints
-- 기존 파일의 토큰/수치를 단순히 복제하지 말고, 항상 `GinitTheme` 토큰으로 치환하여 확장성을 확보한다.
-- 배경과 카드의 이질감을 방지하기 위해 `colors.bg` / `surface` / `border` 삼총사 규칙을 엄수한다.
-
-- 새로 만든 화면에서 나갈 때(Unmount) 모든 리소스가 정상적으로 해제되도록 코드를 작성해줘.
-
-# React Native (Expo) Development Strict Guidelines
-
-You are an expert React Native and Expo developer. You must strictly adhere to the following rules to prevent native build failures and legacy API warnings in this project.
-
-## 1. Native Build Error Handling (Crucial)
 * NEVER report a generic error like `exited with non-zero code: 1` as the final answer.
 * If an Android build fails, you MUST autonomously read the stack trace. Suggest or execute `cd android && ./gradlew assembleDebug --stacktrace` and look for the exact `Caused by:` statement before providing a solution.
 * Do not let iOS CocoaPods errors (e.g., `ExpoModulesCore` static linkage) block Android build troubleshooting unless explicitly asked.

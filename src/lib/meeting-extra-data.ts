@@ -7,6 +7,11 @@ export type SelectedMovieExtra = {
   title: string;
   year?: string;
   info?: string;
+  /**
+   * 영화 API(KOBIS/TMDB 등)에서 확보한 원본 메타.
+   * - Firestore에 그대로 저장되어, 모임 상세에서 "가진 정보 전부"를 펼쳐 보여줄 때 사용합니다.
+   */
+  apiMeta?: Record<string, string>;
   /** 포스터(표시용, TMDB 등 HTTPS URL) */
   posterUrl?: string;
   /** 평점·관객수 등 짧은 뱃지 텍스트 */
@@ -35,6 +40,12 @@ function sanitizeMovieForFirestore(m: SelectedMovieExtra): SelectedMovieExtra {
   const out: SelectedMovieExtra = { id, title };
   if (m.year != null && String(m.year).trim() !== '') out.year = String(m.year).trim();
   if (m.info != null && String(m.info).trim() !== '') out.info = String(m.info).trim();
+  if (m.apiMeta && typeof m.apiMeta === 'object' && !Array.isArray(m.apiMeta)) {
+    const entries = Object.entries(m.apiMeta)
+      .map(([k, v]) => [String(k).trim(), String(v ?? '').trim()] as const)
+      .filter(([k, v]) => Boolean(k) && Boolean(v));
+    if (entries.length > 0) out.apiMeta = Object.fromEntries(entries);
+  }
   if (m.posterUrl != null && String(m.posterUrl).trim() !== '') out.posterUrl = String(m.posterUrl).trim();
   if (m.rating != null && String(m.rating).trim() !== '') out.rating = String(m.rating).trim();
   if (m.kobisRank != null && String(m.kobisRank).trim() !== '') out.kobisRank = String(m.kobisRank).trim();

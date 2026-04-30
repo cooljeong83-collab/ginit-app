@@ -297,6 +297,14 @@ export function MeetingChatMainColumn({
                 value={draft}
                 onChangeText={setDraft}
                 multiline
+                submitBehavior="submit"
+                blurOnSubmit={false}
+                returnKeyType="send"
+                onSubmitEditing={() => {
+                  if (sending || uploadingImage) return;
+                  if (!draft.trim()) return;
+                  void onSend();
+                }}
                 maxLength={4000}
                 editable={!uploadingImage}
               />

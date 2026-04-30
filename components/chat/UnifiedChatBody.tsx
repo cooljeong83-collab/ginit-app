@@ -214,6 +214,13 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
               onChangeText={onChangeDraft}
               placeholder="메시지 보내기"
               multiline
+              submitBehavior="submit"
+              blurOnSubmit={false}
+              returnKeyType="send"
+              onSubmitEditing={() => {
+                if (sending || !draft.trim()) return;
+                onSend();
+              }}
               dense
               style={styles.composerInput}
             />

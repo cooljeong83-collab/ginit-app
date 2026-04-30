@@ -1,17 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
+import { useMemo } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import {
@@ -35,7 +25,8 @@ import {
   type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
 
-const AnimatedView = Animated.createAnimatedComponent(View);
+const THUMB_SIZE = 70;
+const THUMB_RADIUS = 10;
 
 function settlementCornerLabel(cfg: PublicMeetingDetailsConfig): string {
   switch (cfg.settlement) {
@@ -91,7 +82,7 @@ function approvalChipParts(a: PublicMeetingDetailsConfig['approvalType']): {
     : { icon: 'flash-outline', label: '즉시' };
 }
 
-/** 대상 성별 — 남·녀 심볼만 (`compact`: 메타 줄 우측 캡슐용 작은 크기). 동성만은 `hostGenderSnapshot`으로 주최자 성별 표시 */
+/** 대상 성별 — 남·녀 심볼만 (`compact`: 메타 줄 우측). 동성만은 `hostGenderSnapshot`으로 주최자 성별 표시 */
 function GenderSymbolVisual({
   ratio,
   compact,
@@ -101,7 +92,6 @@ function GenderSymbolVisual({
   compact?: boolean;
   hostGenderSnapshot?: PublicMeetingHostGenderSnapshot | null;
 }) {
-  /** `PublicMeetingDetailsCard` 칩·세그먼트와 동일 톤: primary / textSub / muted */
   const male = GinitTheme.colors.primary;
   const female = GinitTheme.colors.textSub;
   const muted = GinitTheme.colors.textMuted;
@@ -149,73 +139,20 @@ function GenderSymbolVisual({
   );
 }
 
-function NeonHeadBadge({ statusLine, pulse }: { statusLine: string; pulse: boolean }) {
-  const scale = useSharedValue(1);
-  const confirmed = statusLine === '일정 확정';
-
-  useEffect(() => {
-    if (pulse) {
-      scale.value = withRepeat(
-        withSequence(
-          withTiming(1.03, { duration: 820, easing: Easing.inOut(Easing.sin) }),
-          withTiming(1, { duration: 820, easing: Easing.inOut(Easing.sin) }),
-        ),
-        -1,
-        false,
-      );
-    } else {
-      cancelAnimation(scale);
-      scale.value = withTiming(1, { duration: 160 });
-    }
-  }, [pulse, scale]);
-
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <AnimatedView style={[s.neonBadgeOuter, pulse && s.neonBadgePulseWrap, pulseStyle]}>
-      <View style={[s.neonBadgeInner, confirmed && s.neonBadgeInnerConfirmed]}>
-        <Text style={[s.neonBadgeStatus, confirmed && s.neonBadgeStatusConfirmed]} numberOfLines={2}>
-          {statusLine}
-        </Text>
-      </View>
-    </AnimatedView>
-  );
-}
-
-const OVERLAP_NEON = '#FF8A00';
-
-function OverlapScheduleNeonBadge() {
-  return (
-    <View style={s.overlapNeonOuter}>
-      <View style={s.overlapNeonInner}>
-        <Text style={s.overlapNeonText} numberOfLines={1}>
-          시간 중복 주의
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 type Props = {
   meeting: Meeting;
   userCoords: LatLng | null;
   joined: boolean;
-  /** 홈 피드 목록에서 내 역할 — 호스트/게스트 모두 동일 블루 글래스 톤(농도만 구분) */
   ownership?: 'hosted' | 'joined' | 'none';
   onPress: () => void;
-  /** 내 확정 일정과 ±버퍼 이내 겹침(피드 안내) */
   scheduleOverlapWarning?: boolean;
-  /** 영화 포스터 또는 주관자 프로필 — 없으면 카테고리 아이콘 */
   symbolBox?: FeedMeetingSymbolBox | null;
-  /** `categoryLabel` 없을 때 `categoryId`로 표시명 보강(피드 상단 카테고리 목록) */
   categories?: readonly { id: string; label: string }[] | null;
 };
 
 /**
- * 홈 모임 리스트 카드 — 모임 생성(`VoteCandidateCard`/wizard)과 동일한 밝은 글래스·보더 패턴,
- * 정산 칩을 자격 칩열 최앞, 성별은 거리·연령 메타 줄 우측 캡슐(심볼만).
+ * 홈(모임 탭) 모임 리스트 행 — 카드 없이 연속 리스트 + 상위 FlatList 디바이더로 구분.
+ * 제목 / 일정 / 위치·조건 / 모집 조건 을 모듈 단위로 쌓아 가독성을 맞춤.
  */
 export function HomeMeetingListItem({
   meeting: m,
@@ -253,9 +190,7 @@ export function HomeMeetingListItem({
     return isHighTrustPublicMeeting(cfg) ? Math.max(GINIT_HIGH_TRUST_HOST_MIN, hostMin) : hostMin;
   }, [cfg]);
 
-  /** 일정·장소 조율 단계(모집 중)일 때만 미세 펄스 */
-  const pulseCoordinating = statusCorner === '모집 중';
-  const approvalParts = cfg ? approvalChipParts(cfg.approvalType) : null;
+  const approvalParts = useMemo(() => (cfg ? approvalChipParts(cfg.approvalType) : null), [cfg]);
 
   const symbolAccessibilityLabel =
     symbolBox?.source === 'movie_poster'
@@ -269,439 +204,294 @@ export function HomeMeetingListItem({
     [m, categories],
   );
 
-  return (
-    <View style={s.meetRowWrap}>
-      <Pressable
-        onPress={onPress}
-        accessibilityRole="button"
-        accessibilityHint="모임 상세로 이동"
-        accessibilityState={{ selected: joined }}
-        style={s.pressable}>
-        <View
-          style={[
-            s.cardShadow,
-            ownership === 'joined' && s.cardShadowJoined,
-            ownership === 'hosted' && s.cardShadowHosted,
-          ]}>
-          <View
-            style={[
-              s.cardShell,
-              ownership === 'hosted' && s.cardShellHosted,
-              ownership === 'joined' && s.cardShellJoined,
-            ]}>
-            <LinearGradient
-              colors={[...visual.gradient]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={s.accentStripe}
-            />
-            <View
-              style={[
-                s.cardInner,
-                ownership === 'joined' && s.cardInnerJoined,
-                ownership === 'hosted' && s.cardInnerHosted,
-              ]}>
-              <View style={s.zoneA}>
-                <View style={s.symbolCol}>
-                  <View style={s.categoryIconBubble} accessibilityLabel={symbolAccessibilityLabel}>
-                    <LinearGradient
-                      colors={[...visual.gradient]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 0, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    {symbolBox ? (
-                      <Image
-                        source={{ uri: symbolBox.url }}
-                        style={s.categoryIconPhoto}
-                        contentFit="cover"
-                        transition={140}
-                        cachePolicy="disk"
-                        recyclingKey={symbolBox.url}
-                        accessibilityIgnoresInvertColors
-                      />
-                    ) : (
-                      <Ionicons name={visual.icon} size={15} color={iconColor} style={s.categoryIconFg} />
-                    )}
-                  </View>
-                  {showCapacityBar ? (
-                    <>
-                      <View
-                        style={s.capacitySymbolTrack}
-                        accessibilityLabel={`참여 인원 ${meetingParticipantCount(m)}명, 최대 ${m.capacity}명`}>
-                        <View style={[s.capacityFill, { width: `${Math.round(capFill * 100)}%` }]} />
-                      </View>
-                      <Text style={s.capacityCountLabel} numberOfLines={1}>
-                        {`${meetingParticipantCount(m)}/${m.capacity}`}
-                      </Text>
-                    </>
-                  ) : null}
-                </View>
-                <View style={s.zoneAMain}>
-                  <View style={s.titleScheduleStack}>
-                    <View style={s.titleRow}>
-                      <Text style={s.heroTitle} numberOfLines={1} ellipsizeMode="tail">
-                        {categoryTitlePrefix ? (
-                          <Text style={s.heroCategoryBracket}>[{categoryTitlePrefix}] </Text>
-                        ) : null}
-                        {m.title}
-                      </Text>
-                      <View style={s.zoneARightCol}>
-                        <NeonHeadBadge statusLine={statusCorner} pulse={pulseCoordinating} />
-                        {scheduleOverlapWarning ? <OverlapScheduleNeonBadge /> : null}
-                      </View>
-                    </View>
-                    {scheduleLine ? (
-                      <Text style={s.scheduleLine} numberOfLines={1} ellipsizeMode="tail">
-                        {scheduleLine}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {m.isPublic === true && cfg ? (
-                    <>
-                      <View style={s.metaRow}>
-                        <Text style={[s.metaMuted, s.metaTextFlex]} numberOfLines={1} ellipsizeMode="tail">
-                          {[distanceLine, ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
-                        </Text>
-                        <View style={s.genderDock}>
-                          <GenderSymbolVisual
-                            ratio={cfg.genderRatio}
-                            hostGenderSnapshot={cfg.hostGenderSnapshot}
-                            compact
-                          />
-                        </View>
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={s.metaMuted} numberOfLines={1}>
-                      {[distanceLine, m.isPublic === true && ageMeta ? ageMeta : null].filter(Boolean).join(' · ')}
-                    </Text>
-                  )}
-                </View>
-              </View>
+  const whereText = useMemo(() => [distanceLine, ageMeta || null].filter(Boolean).join(' · '), [distanceLine, ageMeta]);
 
-              {m.isPublic === false ? (
-                <View style={s.privateRow}>
-                  {ownership === 'hosted' ? (
-                    <View style={s.roleChip} accessibilityLabel="역할 Host">
-                      <Text style={s.roleChipText}>Host</Text>
-                    </View>
-                  ) : ownership === 'joined' ? (
-                    <View style={s.roleChip} accessibilityLabel="역할 Guest">
-                      <Text style={s.roleChipText}>Guest</Text>
-                    </View>
-                  ) : null}
-                  <View style={s.infoChip}>
-                    <Ionicons name="lock-closed-outline" size={13} color={GinitTheme.colors.textSub} />
-                    <Text style={s.infoChipText}>비공개</Text>
-                  </View>
-                </View>
-              ) : cfg ? (
-                <>
-                  <View style={s.zoneB}>
-                    {ownership === 'hosted' ? (
-                      <View style={s.roleChip} accessibilityLabel="역할 Host">
-                        <Text style={s.roleChipText}>Host</Text>
-                      </View>
-                    ) : ownership === 'joined' ? (
-                      <View style={s.roleChip} accessibilityLabel="역할 Guest">
-                        <Text style={s.roleChipText}>Guest</Text>
-                      </View>
-                    ) : null}
-                    <View style={[s.infoChip, s.settlementChipShrink]}>
-                      <Ionicons name="wallet-outline" size={13} color={GinitTheme.colors.primary} />
-                      <Text style={[s.infoChipTextStrong, s.chipLabelMax]} numberOfLines={1}>
-                        {settlementCornerLabel(cfg)}
-                      </Text>
-                    </View>
-                    <View style={s.infoChip}>
-                      <Ionicons name="trending-up-outline" size={13} color={GinitTheme.colors.primary} />
-                      <Text style={s.infoChipTextStrong}>Lv.{cfg.minGLevel}+</Text>
-                    </View>
-                    {trustMin != null ? (
-                      <View style={s.infoChip}>
-                        <Ionicons name="ribbon-outline" size={13} color={GinitTheme.colors.primary} />
-                        <Text style={s.infoChipTextStrong}>신뢰≥{trustMin}</Text>
-                      </View>
-                    ) : null}
-                    {approvalParts ? (
-                      <View style={s.infoChip}>
-                        <Ionicons name={approvalParts.icon} size={13} color={GinitTheme.colors.primary} />
-                        <Text style={s.infoChipTextStrong}>{approvalParts.label}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </>
-              ) : (
-                <Text style={s.fallbackMeta} numberOfLines={1}>
-                  공개 조건을 불러올 수 없어요
-                </Text>
-              )}
-            </View>
+  const rulesLinePublic = useMemo(() => {
+    if (!cfg || m.isPublic !== true) return '';
+    const bits: string[] = [];
+    if (ownership === 'hosted') bits.push('Host');
+    else if (ownership === 'joined') bits.push('Guest');
+    bits.push(settlementCornerLabel(cfg));
+    bits.push(`Lv.${cfg.minGLevel}+`);
+    if (trustMin != null) bits.push(`신뢰≥${trustMin}`);
+    if (approvalParts) bits.push(approvalParts.label);
+    return bits.join(' · ');
+  }, [cfg, m.isPublic, ownership, trustMin, approvalParts]);
+
+  const rulesLinePrivate = useMemo(() => {
+    const bits: string[] = [];
+    if (ownership === 'hosted') bits.push('Host');
+    else if (ownership === 'joined') bits.push('Guest');
+    bits.push('비공개');
+    return bits.join(' · ');
+  }, [ownership]);
+
+  const statusStyle = useMemo(() => {
+    if (statusCorner === '일정 확정') return s.statusConfirmed;
+    if (statusCorner === '모집 중') return s.statusOpen;
+    return s.statusDefault;
+  }, [statusCorner]);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="모임 상세로 이동"
+      accessibilityState={{ selected: joined }}
+      style={({ pressed }) => [s.pressableRow, pressed && s.pressablePressed]}>
+      <View style={s.row}>
+        <View style={s.lead}>
+          <View style={s.symbolRing} accessibilityLabel={symbolAccessibilityLabel}>
+            {!symbolBox ? <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} /> : null}
+            {symbolBox ? (
+              <Image
+                source={{ uri: symbolBox.url }}
+                style={s.symbolPhoto}
+                contentFit="cover"
+                transition={140}
+                cachePolicy="disk"
+                recyclingKey={symbolBox.url}
+                accessibilityIgnoresInvertColors
+              />
+            ) : (
+              <Ionicons name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
+            )}
           </View>
+          {showCapacityBar ? (
+            <>
+              <View style={s.capRow}>
+                <View
+                  style={s.capTrack}
+                  accessibilityLabel={`참여 인원 ${meetingParticipantCount(m)}명, 최대 ${m.capacity}명`}>
+                  <View style={[s.capFill, { width: `${Math.round(capFill * 100)}%` }]} />
+                </View>
+                <Text style={s.capLabel} numberOfLines={1}>
+                  {`${meetingParticipantCount(m)}/${m.capacity}`}
+                </Text>
+              </View>
+            </>
+          ) : null}
         </View>
-      </Pressable>
-    </View>
+
+        <View style={s.main}>
+          {scheduleOverlapWarning ? (
+            <Text style={s.overlapHint} numberOfLines={1}>
+              시간 중복 주의
+            </Text>
+          ) : null}
+
+          <View style={s.headRow}>
+            <View style={s.titleCol}>
+              <Text style={s.title} numberOfLines={2}>
+                {categoryTitlePrefix ? <Text style={s.titleCat}>[{categoryTitlePrefix}] </Text> : null}
+                {m.title}
+              </Text>
+            </View>
+            <Text style={[s.status, statusStyle]} numberOfLines={2}>
+              {statusCorner}
+            </Text>
+          </View>
+
+          {scheduleLine ? (
+            <Text style={s.moduleWhen} numberOfLines={1}>
+              {scheduleLine}
+            </Text>
+          ) : null}
+
+          {whereText.length > 0 || (m.isPublic === true && cfg) ? (
+            <View
+              style={[s.moduleWhereRow, whereText.length === 0 && m.isPublic === true && cfg && s.moduleWhereRowEnd]}>
+              {whereText.length > 0 ? (
+                <Text style={s.moduleWhereText} numberOfLines={1}>
+                  {whereText}
+                </Text>
+              ) : null}
+              {m.isPublic === true && cfg ? (
+                <View style={s.genderInline}>
+                  <GenderSymbolVisual ratio={cfg.genderRatio} hostGenderSnapshot={cfg.hostGenderSnapshot} compact />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {m.isPublic === true && cfg ? (
+            <Text style={s.moduleRules} numberOfLines={2}>
+              {rulesLinePublic}
+            </Text>
+          ) : m.isPublic === false ? (
+            <Text style={s.moduleRules} numberOfLines={2}>
+              {rulesLinePrivate}
+            </Text>
+          ) : m.isPublic === true && !cfg ? (
+            <Text style={s.moduleRulesMuted} numberOfLines={1}>
+              공개 조건을 불러올 수 없어요
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
 const s = StyleSheet.create({
-  meetRowWrap: {
-    marginBottom: 10,
-    borderRadius: GinitTheme.radius.card,
-    backgroundColor: Platform.OS === 'android' ? GinitTheme.colors.surfaceStrong : 'transparent',
-    ...GinitTheme.shadow.card,
-  },
-  pressable: {
-    borderRadius: GinitTheme.radius.card,
-    overflow: 'hidden',
-  },
-  cardShadow: {
-    borderRadius: GinitTheme.radius.card,
-    backgroundColor: GinitTheme.colors.surface,
-  },
-  /** 게스트(참여) 모임 — 호스트 카드와 동일 블루 계열, 살짝 옅게 */
-  cardShadowJoined: {
-    backgroundColor: GinitTheme.colors.surface,
-  },
-  /** 주관(호스트) 모임 — 스카이 블루 글래스 */
-  cardShadowHosted: {
-    backgroundColor: GinitTheme.colors.surface,
-  },
-  cardShell: {
-    borderRadius: GinitTheme.radius.card,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    alignSelf: 'stretch',
-  },
-  cardShellHosted: {
-    borderColor: 'rgba(115, 199, 255, 0.24)',
-  },
-  cardShellJoined: {
-    borderColor: 'rgba(115, 199, 255, 0.18)',
-  },
-  accentStripe: {
-    width: 4,
-    alignSelf: 'stretch',
-  },
-  cardInner: {
-    flex: 1,
-    minWidth: 0,
+  pressableRow: {
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    paddingLeft: 10,
-    gap: 6,
-    backgroundColor: GinitTheme.glassModal.inputFill,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: GinitTheme.colors.border,
   },
-  cardInnerJoined: {
-    backgroundColor: GinitTheme.glassModal.inputFill,
-    borderLeftColor: GinitTheme.colors.border,
+  pressablePressed: {
+    opacity: 0.86,
   },
-  cardInnerHosted: {
-    backgroundColor: GinitTheme.glassModal.inputFill,
-    borderLeftColor: GinitTheme.colors.border,
-  },
-  zoneA: {
+  row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
   },
-  /** 카테고리 심볼 + 참여중 — 세로 스택(열 너비는 아이콘·pill 중 넓은 쪽), 아이콘은 가로 가운데 */
-  symbolCol: {
+  lead: {
+    width: THUMB_SIZE,
     flexShrink: 0,
     alignItems: 'center',
-    gap: 6,
+    gap: 3,
     paddingTop: 1,
   },
-  zoneAMain: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  /** 타이틀 ↔ 일시만 촘촘히; 아래 메타와는 zoneAMain gap 유지 */
-  titleScheduleStack: {
-    minWidth: 0,
-    gap: 1,
-  },
-  zoneARightCol: {
-    flexShrink: 0,
-    maxWidth: '44%',
-    alignItems: 'flex-end',
-    paddingTop: 1,
-    gap: 6,
-  },
-  overlapNeonOuter: {
-    alignSelf: 'flex-end',
-    shadowColor: 'rgba(255, 138, 0, 0.55)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  overlapNeonInner: {
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 138, 0, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 138, 0, 0.55)',
-    alignItems: 'flex-end',
-  },
-  overlapNeonText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: OVERLAP_NEON,
-    letterSpacing: -0.2,
-    textAlign: 'right',
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    minWidth: 0,
-  },
-  categoryIconBubble: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+  symbolRing: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: THUMB_RADIUS,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 1,
-    backgroundColor: GinitTheme.colors.surfaceStrong,
+    backgroundColor: GinitTheme.colors.bgAlt,
   },
-  categoryIconFg: {
+  symbolTint: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  symbolIcon: {
     zIndex: 1,
   },
-  categoryIconPhoto: {
+  symbolPhoto: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 9,
+    borderRadius: THUMB_RADIUS - 1,
     zIndex: 2,
   },
-  heroTitle: {
+  capRow: {
+    width: THUMB_SIZE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: -1,
+  },
+  capTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: GinitTheme.colors.border,
+    alignSelf: 'center',
+  },
+  capFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: GinitTheme.colors.primary,
+  },
+  capLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.35,
+    maxWidth: 40,
+    textAlign: 'center',
+  },
+  main: {
     flex: 1,
     minWidth: 0,
+    gap: 4,
+  },
+  overlapHint: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: GinitTheme.colors.warning,
+    letterSpacing: -0.15,
+  },
+  headRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  titleCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  title: {
     fontSize: 15,
     fontWeight: '900',
     letterSpacing: -0.2,
     lineHeight: 18,
     color: GinitTheme.colors.text,
   },
-  heroCategoryBracket: {
+  titleCat: {
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: -0.15,
     color: GinitTheme.colors.textSub,
   },
-  scheduleLine: {
+  status: {
+    flexShrink: 0,
+    maxWidth: '34%',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: -0.12,
+    textAlign: 'right',
+    lineHeight: 14,
+  },
+  statusDefault: {
+    color: GinitTheme.colors.textMuted,
+  },
+  statusOpen: {
+    color: GinitTheme.colors.textSub,
+  },
+  statusConfirmed: {
+    color: GinitTheme.colors.primary,
+  },
+  moduleWhen: {
     fontSize: 12,
     fontWeight: '800',
-    color: '#1e293b',
+    color: GinitTheme.colors.textSub,
     letterSpacing: -0.2,
     lineHeight: 15,
   },
-  /** 좌측 심볼(32) 아래 — 참여 인원 미니 막대 */
-  capacitySymbolTrack: {
-    width: 32,
-    height: 3,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(15, 23, 42, 0.10)',
-    alignSelf: 'center',
-  },
-  capacityFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: GinitTheme.colors.primary,
-  },
-  /** 막대 아래: 참여 인원 / 최대 인원 */
-  capacityCountLabel: {
-    marginTop: 3,
-    fontSize: 9,
-    fontWeight: '800',
-    color: GinitTheme.colors.textMuted,
-    letterSpacing: -0.35,
-    alignSelf: 'center',
-    maxWidth: 40,
-    textAlign: 'center',
-  },
-  metaRow: {
+  moduleWhereRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 1,
-  },
-  metaTextFlex: {
-    flex: 1,
     minWidth: 0,
   },
-  metaMuted: {
+  moduleWhereRowEnd: {
+    justifyContent: 'flex-end',
+  },
+  moduleWhereText: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 11,
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: -0.12,
   },
-  genderDock: {
+  genderInline: {
     flexShrink: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 2,
-    paddingHorizontal: 5,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
   },
-  neonBadgeOuter: {
-    alignSelf: 'flex-end',
-  },
-  neonBadgePulseWrap: {
-    shadowColor: 'rgba(134, 211, 183, 0.45)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  neonBadgeInner: {
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(134, 211, 183, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(134, 211, 183, 0.45)',
-    alignItems: 'flex-end',
-  },
-  neonBadgeInnerConfirmed: {
-    backgroundColor: 'rgba(0, 82, 204, 0.14)',
-    borderColor: 'rgba(0, 82, 204, 0.46)',
-  },
-  neonBadgeStatus: {
-    fontSize: 10,
-    fontWeight: '900',
+  moduleRules: {
+    fontSize: 11,
+    fontWeight: '700',
     color: GinitTheme.colors.textSub,
-    letterSpacing: -0.2,
-    textAlign: 'right',
+    letterSpacing: -0.1,
+    lineHeight: 15,
   },
-  neonBadgeStatusConfirmed: {
-    color: GinitTheme.colors.primary,
-  },
-  privateRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  zoneB: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    alignItems: 'center',
+  moduleRulesMuted: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.textMuted,
+    letterSpacing: -0.1,
   },
   genderRow: {
     flexDirection: 'row',
@@ -724,59 +514,5 @@ const s = StyleSheet.create({
     borderRadius: 1,
     marginHorizontal: 1,
     backgroundColor: GinitTheme.colors.borderStrong,
-  },
-  infoChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    maxWidth: '100%',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-  },
-  infoChipText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: GinitTheme.colors.textSub,
-    letterSpacing: -0.12,
-  },
-  infoChipTextStrong: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: GinitTheme.colors.primary,
-    letterSpacing: -0.12,
-  },
-  roleChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    maxWidth: '100%',
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15, 23, 42, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  roleChipText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: GinitTheme.colors.textMuted,
-    letterSpacing: -0.12,
-  },
-  settlementChipShrink: {
-    flexShrink: 0,
-    maxWidth: '100%',
-  },
-  chipLabelMax: {
-    flexShrink: 1,
-    maxWidth: 120,
-  },
-  fallbackMeta: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: GinitTheme.colors.textMuted,
   },
 });

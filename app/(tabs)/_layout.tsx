@@ -70,7 +70,7 @@ export default function TabsLayout() {
         headerShown: false,
       }}>
       <Tabs.Screen name="index" options={{ title: '모임' }} />
-      <Tabs.Screen name="map" options={{ title: '지도' }} />
+      <Tabs.Screen name="map" options={{ title: '탐색' }} />
       <Tabs.Screen name="friends" options={{ title: '친구' }} />
       <Tabs.Screen name="chat" options={{ title: '채팅' }} />
       <Tabs.Screen name="profile" options={{ title: '프로필' }} />

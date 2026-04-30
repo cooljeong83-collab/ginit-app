@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +17,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { RectButton, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
@@ -29,15 +27,12 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import {
-  categoryEmojiForMeeting,
   compareFriendsByPresenceDistanceTrust,
   computeFriendSortSignals,
   formatDistanceCompact,
-  meetingPhaseForFriend,
   mutualJoinedMeetingsCount,
   pickPrimaryMeetingForPeer,
   resolveFriendActivity,
-  splitGDnaChips,
 } from '@/src/lib/friend-presence-activity';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -51,17 +46,13 @@ import {
   fetchFriendsPendingOutbox,
   removeAcceptedFriend,
 } from '@/src/lib/friends';
-import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
-import { getUserProfile, getUserProfilesForIds, isUserPhoneVerified } from '@/src/lib/user-profile';
+import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 
-const ACCENT_ORANGE = '#FF8A00';
-const NEON_A = '#22d3ee';
-const NEON_B = '#a855f7';
 const HIDDEN_KEY = (me: string) => `ginit.friends.hidden.v1:${me}`;
 
 function friendAppUserKey(raw: string | null | undefined): string {
@@ -75,7 +66,7 @@ function profileFromMap(map: Map<string, UserProfile>, rawId: string | null | un
   return map.get(k) ?? map.get(rawId?.trim() ?? '');
 }
 
-function PendingGinitCard({
+function PendingGinitRow({
   row,
   profile,
   onAccept,
@@ -86,76 +77,50 @@ function PendingGinitCard({
   onAccept: (row: FriendInboxRow) => void;
   onDecline: (row: FriendInboxRow) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const nick = profile?.nickname?.trim() || '회원';
   const photo = profile?.photoUrl?.trim();
   const initials = nick.slice(0, 1) || '?';
 
   return (
-    <View style={s.pendingCard}>
-      {menuOpen ? (
-        <Pressable
-          style={s.pendingMenuBackdrop}
-          onPress={() => setMenuOpen(false)}
-          accessibilityRole="button"
-          accessibilityLabel="메뉴 닫기"
-        />
-      ) : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${nick}, 지닛 요청. 눌러서 수락·거절`}
-        accessibilityState={{ expanded: menuOpen }}
-        onPress={() => setMenuOpen((v) => !v)}
-        style={s.pendingAvatarTap}>
-        <View style={s.pendingAvatarRing}>
-          {photo ? (
-            <Image source={{ uri: photo }} style={s.pendingAvatarImg} contentFit="cover" />
-          ) : (
-            <View style={s.pendingAvatarFallback}>
-              <Text style={s.pendingAvatarLetter}>{initials}</Text>
-            </View>
-          )}
-        </View>
-      </Pressable>
-      {menuOpen ? (
-        <View style={s.pendingMenuSheet} pointerEvents="box-none">
-          <View style={s.pendingMenuRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="지닛 수락"
-              onPress={() => {
-                setMenuOpen(false);
-                onAccept(row);
-              }}
-              style={({ pressed }) => [s.pendingIconBtn, s.pendingAcceptBtn, pressed && { opacity: 0.9 }]}>
-              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="지닛 거절"
-              onPress={() => {
-                setMenuOpen(false);
-                onDecline(row);
-              }}
-              style={({ pressed }) => [s.pendingIconBtn, s.pendingDeclineBtn, pressed && { opacity: 0.88 }]}>
-              <Ionicons name="close" size={20} color="#64748B" />
-            </Pressable>
+    <View style={s.requestRow}>
+      <View style={s.rowAvatarWrap}>
+        {photo ? (
+          <Image source={{ uri: photo }} style={s.rowAvatarImg} contentFit="cover" />
+        ) : (
+          <View style={s.rowAvatarFallback}>
+            <Text style={s.rowAvatarLetter}>{initials}</Text>
           </View>
-        </View>
-      ) : null}
-      <View style={s.pendingTextBlock} pointerEvents={menuOpen ? 'none' : 'auto'}>
-        <Text style={s.pendingNick} numberOfLines={1}>
+        )}
+      </View>
+      <View style={s.rowCenter}>
+        <Text style={s.rowTitle} numberOfLines={1}>
           {nick}
         </Text>
-        <Text style={s.pendingHint} numberOfLines={1}>
-          지닛 요청
+        <Text style={s.rowSubtle} numberOfLines={1}>
+          나에게 온 지닛
         </Text>
+      </View>
+      <View style={s.rowActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="수락"
+          onPress={() => onAccept(row)}
+          style={({ pressed }) => [s.rowActionBtnPrimary, pressed && { opacity: 0.88 }]}>
+          <Text style={s.rowActionBtnPrimaryText}>수락</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="거절"
+          onPress={() => onDecline(row)}
+          style={({ pressed }) => [s.rowActionBtnGhost, pressed && { opacity: 0.88 }]}>
+          <Text style={s.rowActionBtnGhostText}>거절</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-function OutgoingGinitCard({
+function OutgoingGinitRow({
   row,
   profile,
   status,
@@ -166,7 +131,6 @@ function OutgoingGinitCard({
   status: string;
   onCancel: (row: FriendInboxRow) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const nick = profile?.nickname?.trim() || '회원';
   const photo = profile?.photoUrl?.trim();
   const initials = nick.slice(0, 1) || '?';
@@ -174,58 +138,38 @@ function OutgoingGinitCard({
   const canCancel = status === 'pending';
 
   return (
-    <View style={s.pendingCard} accessibilityRole="summary" accessibilityLabel={`지닛 요청을 받은 사람, ${nick}, ${hint}`}>
-      {menuOpen ? (
-        <Pressable
-          style={s.pendingMenuBackdrop}
-          onPress={() => setMenuOpen(false)}
-          accessibilityRole="button"
-          accessibilityLabel="메뉴 닫기"
-        />
-      ) : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${nick}, ${hint}. 눌러서 ${canCancel ? '요청 취소' : '상태 확인'}`}
-        accessibilityState={{ expanded: menuOpen }}
-        onPress={() => setMenuOpen((v) => !v)}
-        style={s.pendingAvatarTap}>
-        <View style={s.pendingAvatarRing}>
-          {photo ? (
-            <Image source={{ uri: photo }} style={s.pendingAvatarImg} contentFit="cover" />
-          ) : (
-            <View style={s.pendingAvatarFallback}>
-              <Text style={s.pendingAvatarLetter}>{initials}</Text>
-            </View>
-          )}
-        </View>
-      </Pressable>
-      {menuOpen ? (
-        <View style={s.pendingMenuSheet} pointerEvents="box-none">
-          {canCancel ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="지닛 요청 취소"
-              onPress={() => {
-                setMenuOpen(false);
-                onCancel(row);
-              }}
-              style={({ pressed }) => [s.outgoingCancelBtnOverlay, pressed && { opacity: 0.88 }]}>
-              <Text style={s.outgoingCancelBtnText}>요청 취소</Text>
-            </Pressable>
-          ) : (
-            <View style={s.outgoingStatusOnly}>
-              <Text style={s.outgoingStatusOnlyText}>{hint}</Text>
-            </View>
-          )}
-        </View>
-      ) : null}
-      <View style={s.pendingTextBlock} pointerEvents={menuOpen ? 'none' : 'auto'}>
-        <Text style={s.pendingNick} numberOfLines={1}>
+    <View style={s.requestRow} accessibilityRole="summary" accessibilityLabel={`내가 보낸 지닛, ${nick}, ${hint}`}>
+      <View style={s.rowAvatarWrap}>
+        {photo ? (
+          <Image source={{ uri: photo }} style={s.rowAvatarImg} contentFit="cover" />
+        ) : (
+          <View style={s.rowAvatarFallback}>
+            <Text style={s.rowAvatarLetter}>{initials}</Text>
+          </View>
+        )}
+      </View>
+      <View style={s.rowCenter}>
+        <Text style={s.rowTitle} numberOfLines={1}>
           {nick}
         </Text>
-        <Text style={s.pendingHint} numberOfLines={1}>
+        <Text style={s.rowSubtle} numberOfLines={1}>
           {hint}
         </Text>
+      </View>
+      <View style={s.rowActions}>
+        {canCancel ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="요청 취소"
+            onPress={() => onCancel(row)}
+            style={({ pressed }) => [s.rowActionBtnGhost, pressed && { opacity: 0.88 }]}>
+            <Text style={s.rowActionBtnGhostText}>취소</Text>
+          </Pressable>
+        ) : (
+          <View style={s.rowStatusPill} accessibilityElementsHidden>
+            <Text style={s.rowStatusPillText}>연결됨</Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -238,238 +182,46 @@ type EnrichedFriend = {
   sort: ReturnType<typeof computeFriendSortSignals>;
 };
 
-function PresenceAvatar({
-  profile,
-  meeting,
-  categories,
-  onPress,
-}: {
-  profile: UserProfile;
-  meeting: Meeting | null;
-  categories: Category[];
-  onPress: () => void;
-}) {
-  const uri = profile.photoUrl?.trim();
-  const initials = profile.nickname?.trim()?.slice(0, 1) || '?';
-  const phase = meetingPhaseForFriend(meeting);
-  const emoji = meeting ? categoryEmojiForMeeting(meeting, categories) : '·';
-  const subtitle = meeting ? resolveFriendActivity(meeting, profile, categories).presenceSubtitle : '대기 중';
-
-  const inner = (
-    <View style={s.presenceAvatarInner}>
-      {uri ? <Image source={{ uri }} style={s.presenceAvatarImg} contentFit="cover" /> : (
-        <View style={s.presenceAvatarFallback}>
-          <Text style={s.presenceAvatarLetter}>{initials}</Text>
-        </View>
-      )}
-    </View>
-  );
-
-  return (
-    <Pressable style={s.presenceItem} onPress={onPress} accessibilityRole="button">
-      <View style={s.presenceRingWrap}>
-        {phase !== 'idle' ? (
-          <LinearGradient colors={[NEON_A, NEON_B]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.presenceNeonRing}>
-            {inner}
-          </LinearGradient>
-        ) : (
-          <View style={s.presenceIdleRing}>{inner}</View>
-        )}
-        <View style={s.presenceCatBadge}>
-          <Text style={s.presenceCatBadgeTxt}>{emoji}</Text>
-        </View>
-      </View>
-      <Text style={s.presenceNick} numberOfLines={1}>
-        {profile.nickname}
-      </Text>
-      <Text style={s.presenceSub} numberOfLines={1}>
-        {subtitle}
-      </Text>
-    </Pressable>
-  );
-}
-
-function AiAffinityCard({
-  profile,
-  commonLine,
-  onGather,
-}: {
-  profile: UserProfile;
-  commonLine: string;
-  onGather: () => void;
-}) {
-  const uri = profile.photoUrl?.trim();
-  const initials = profile.nickname?.trim()?.slice(0, 1) || '?';
-  return (
-    <View style={s.aiCard}>
-      <View style={s.aiCardLeft}>
-        {uri ? <Image source={{ uri }} style={s.aiCardPhoto} contentFit="cover" /> : (
-          <View style={s.aiCardPhotoFallback}>
-            <Text style={s.aiCardPhotoLetter}>{initials}</Text>
-          </View>
-        )}
-      </View>
-      <View style={s.aiCardMid}>
-        <Text style={s.aiCardNick} numberOfLines={1}>
-          {profile.nickname}
-        </Text>
-        <Text style={s.aiCardCommon} numberOfLines={2}>
-          {commonLine}
-        </Text>
-      </View>
-      <Pressable onPress={onGather} style={({ pressed }) => [s.aiCardCta, pressed && { opacity: 0.9 }]}>
-        <Text style={s.aiCardCtaText}>모임 만들기</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function FriendConnectionRow({
+function FriendListRow({
   item,
   categories,
-  onOpenChat,
   onOpenProfile,
-  onLongPress,
-  onDirectGather,
-  onEvaluateTrust,
-  onHide,
 }: {
   item: EnrichedFriend;
   categories: Category[];
-  onOpenChat: () => void;
   onOpenProfile: () => void;
-  onLongPress: () => void;
-  onDirectGather: () => void;
-  onEvaluateTrust: () => void;
-  onHide: () => void;
 }) {
   const { profile, meeting } = item;
   const uri = profile.photoUrl?.trim();
   const initials = profile.nickname?.trim()?.slice(0, 1) || '?';
-  const gLv = typeof profile.gLevel === 'number' && Number.isFinite(profile.gLevel) ? Math.max(1, Math.trunc(profile.gLevel)) : 1;
-  const trust = typeof profile.gTrust === 'number' ? profile.gTrust : null;
   const activity = resolveFriendActivity(meeting, profile, categories);
-  const chips = splitGDnaChips(profile.gDna, 4);
   const distLabel = formatDistanceCompact(item.sort.distanceM);
-
-  const renderLeftActions = useCallback(
-    (_p: unknown, _d: unknown, swipeable: { close: () => void }) => (
-      <View style={s.swipeLeftRail}>
-        <RectButton
-          style={s.swipeGatherBtn}
-          onPress={() => {
-            swipeable.close();
-            onDirectGather();
-          }}>
-          <Ionicons name="people" size={22} color="#fff" />
-          <Text style={s.swipeGatherTxt}>모임{'\n'}만들기</Text>
-        </RectButton>
-      </View>
-    ),
-    [onDirectGather],
-  );
-
-  const renderRightActions = useCallback(
-    (_p: unknown, _d: unknown, swipeable: { close: () => void }) => (
-      <View style={s.swipeRightRail}>
-        <RectButton
-          style={s.swipeTrustBtn}
-          onPress={() => {
-            swipeable.close();
-            onEvaluateTrust();
-          }}>
-          <Ionicons name="shield-checkmark-outline" size={20} color="#0f172a" />
-          <Text style={s.swipeTrustTxt}>gTrust</Text>
-        </RectButton>
-        <RectButton
-          style={s.swipeHideBtn}
-          onPress={() => {
-            swipeable.close();
-            onHide();
-          }}>
-          <Ionicons name="eye-off-outline" size={20} color="#fff" />
-          <Text style={s.swipeHideTxt}>숨기기</Text>
-        </RectButton>
-      </View>
-    ),
-    [onEvaluateTrust, onHide],
-  );
+  const subtitle = useMemo(() => {
+    const base = activity.secondaryLine?.trim() ?? '';
+    const parts = [base || null, distLabel ? `거리 ${distLabel}` : null].filter(Boolean);
+    return parts.join(' · ');
+  }, [activity.secondaryLine, distLabel]);
 
   return (
-    <Swipeable
-      renderLeftActions={renderLeftActions}
-      renderRightActions={renderRightActions}
-      overshootLeft={false}
-      overshootRight={false}
-      friction={2}
-      containerStyle={s.swipeContainer}
-      childrenContainerStyle={{ flex: 1 }}>
-      <Pressable
-        onLongPress={onLongPress}
-        delayLongPress={380}
-        style={({ pressed }) => [s.connRow, pressed && { opacity: 0.92 }]}>
-        <View style={s.connLeft}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="친구 프로필"
-            hitSlop={6}
-            onPress={(ev) => {
-              ev.stopPropagation?.();
-              onOpenProfile();
-            }}
-            style={s.connAvatarPress}>
-            <View style={s.connAvatarWrap}>
-              {uri ? <Image source={{ uri }} style={s.connAvatarImg} contentFit="cover" /> : (
-                <View style={s.connAvatarFallback}>
-                  <Text style={s.connAvatarLetter}>{initials}</Text>
-                </View>
-              )}
-              <View style={s.gLevelBadge}>
-                <Text style={s.gLevelBadgeTxt}>{gLv}</Text>
-              </View>
-            </View>
-          </Pressable>
-        </View>
-        <View style={s.connCenter}>
-          <View style={s.connLine1}>
-            <Text style={s.connNick} numberOfLines={1}>
-              {profile.nickname}
-            </Text>
-            {distLabel ? (
-              <Text style={s.connDist} numberOfLines={1}>
-                · {distLabel}
-              </Text>
-            ) : null}
+    <Pressable onPress={onOpenProfile} style={({ pressed }) => [s.friendRow, pressed && { opacity: 0.88 }]}>
+      <View style={s.rowAvatarWrap}>
+        {uri ? (
+          <Image source={{ uri }} style={s.rowAvatarImg} contentFit="cover" />
+        ) : (
+          <View style={s.rowAvatarFallback}>
+            <Text style={s.rowAvatarLetter}>{initials}</Text>
           </View>
-          <Text style={[s.connActivity, activity.kind === 'idle' && s.connActivityMuted]} numberOfLines={2}>
-            {activity.secondaryLine}
-          </Text>
-          {chips.length ? (
-            <View style={s.connChips}>
-              {chips.map((c) => (
-                <Text key={c} style={s.connChip} numberOfLines={1}>
-                  {c}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-        </View>
-        <View style={s.connRight}>
-          {trust != null ? <Text style={s.connTrust}>gTrust {trust}</Text> : <Text style={s.connTrustMuted}>—</Text>}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="1대1 채팅"
-            hitSlop={10}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onOpenChat();
-            }}
-            style={({ pressed }) => [s.connMsgBtn, pressed && { opacity: 0.85 }]}>
-            <Ionicons name="chatbubble-ellipses-outline" size={22} color={GinitTheme.colors.primary} />
-          </Pressable>
-        </View>
-      </Pressable>
-    </Swipeable>
+        )}
+      </View>
+      <View style={s.rowCenter}>
+        <Text style={s.rowTitle} numberOfLines={1}>
+          {profile.nickname}
+        </Text>
+        <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
+          {subtitle || ' '}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -480,6 +232,7 @@ export function FriendsHomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
+  const searchInputRef = useRef<TextInput>(null);
   const me = useMemo(() => {
     const raw = userId?.trim() ?? '';
     return raw ? normalizeParticipantId(raw) : '';
@@ -496,6 +249,7 @@ export function FriendsHomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [hiddenPeerIds, setHiddenPeerIds] = useState<Set<string>>(new Set());
   const [sheetFriend, setSheetFriend] = useState<EnrichedFriend | null>(null);
 
@@ -641,29 +395,6 @@ export function FriendsHomeScreen() {
     });
   }, [enrichedFriends, hiddenPeerIds, search]);
 
-  const presenceStripFriends = useMemo(() => {
-    const active = enrichedFriends.filter((e) => e.meeting != null).slice(0, 24);
-    if (active.length) return active;
-    return enrichedFriends.slice(0, 12);
-  }, [enrichedFriends]);
-
-  const aiRecommendations = useMemo(() => {
-    const myDna = (meProfile?.gDna ?? '').trim().toLowerCase();
-    const myInterests = new Set((meProfile?.interests ?? []).map((x) => String(x).toLowerCase()));
-    const scored = enrichedFriends.map((e) => {
-      const peerDna = (e.profile.gDna ?? '').trim().toLowerCase();
-      const mutual = mutualJoinedMeetingsCount(me, e.row.peer_app_user_id, meetings);
-      let bonus = mutual * 6;
-      if (myDna && peerDna && (myDna === peerDna || myDna.includes(peerDna) || peerDna.includes(myDna))) bonus += 10;
-      for (const it of e.profile.interests ?? []) {
-        if (myInterests.has(String(it).toLowerCase())) bonus += 2;
-      }
-      return { e, mutual, bonus };
-    });
-    scored.sort((a, b) => b.bonus - a.bonus);
-    return scored.filter((x) => x.bonus > 0).slice(0, 2).map((x) => x.e);
-  }, [enrichedFriends, me, meetings, meProfile]);
-
   const openDm = useCallback(
     (peerAppUserId: string, peerDisplayName?: string) => {
       const uid = me;
@@ -725,28 +456,8 @@ export function FriendsHomeScreen() {
     [me, profiles, reload],
   );
 
-  const goMap = useCallback(() => router.push('/(tabs)/map'), [router]);
   const goAddFriend = useCallback(() => router.push('/social/discovery'), [router]);
   const goSettings = useCallback(() => router.push('/(tabs)/profile'), [router]);
-  const goCreateGathering = useCallback(() => {
-    void (async () => {
-      const pk = userId?.trim();
-      if (pk) {
-        try {
-          const p = await getUserProfile(pk);
-          if (!isUserPhoneVerified(p)) {
-            Alert.alert('인증 정보 등록', '모임을 이용하시려면 인증 정보 등록을 완료하셔야 합니다.', [
-              { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
-            ]);
-            return;
-          }
-        } catch {
-          /* 등록 시 addMeeting에서 재검증 */
-        }
-      }
-      router.push('/create/details');
-    })();
-  }, [router, userId]);
 
   const onRemoveAcceptedFriend = useCallback(() => {
     if (!sheetFriend || !me) return;
@@ -785,30 +496,16 @@ export function FriendsHomeScreen() {
     );
   }, [me, sheetFriend, reload, persistHidden]);
 
-  const hideFriend = useCallback(
-    (peerId: string) => {
-      const pk = friendAppUserKey(peerId);
-      Alert.alert('친구 숨기기', '목록에서 숨길까요? (설정에서 다시 표시 기능은 준비 중이에요)', [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '숨기기',
-          style: 'destructive',
-          onPress: () => {
-            setHiddenPeerIds((prev) => {
-              const next = new Set(prev);
-              next.add(pk);
-              void persistHidden(next);
-              return next;
-            });
-          },
-        },
-      ]);
-    },
-    [persistHidden],
-  );
-
-  const onEvaluateTrust = useCallback(() => {
-    Alert.alert('gTrust 평가', '모임이 끝난 뒤 상대의 신뢰 점수를 반영할 수 있어요. (평가 UI는 곧 연결됩니다)');
+  const onToggleSearch = useCallback(() => {
+    setSearchOpen((v) => {
+      const next = !v;
+      if (next) {
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+      } else {
+        setSearch('');
+      }
+      return next;
+    });
   }, []);
 
   const sheetMutualMeetings = useMemo(() => {
@@ -817,113 +514,87 @@ export function FriendsHomeScreen() {
     return meetings.filter((m) => isUserJoinedMeeting(m, me) && isUserJoinedMeeting(m, peer));
   }, [sheetFriend, meetings, me]);
 
-  const listHeader = useMemo(
-    () => (
+  const myNick = (meProfile?.nickname ?? '').trim() || '나';
+  const myPhoto = meProfile?.photoUrl?.trim() ?? '';
+  const myInitial = myNick.slice(0, 1) || '나';
+
+  const listHeader = useMemo(() => {
+    const showRequests = pending.length > 0 || pendingOut.length > 0;
+    return (
       <View>
-        {(pending.length > 0 || pendingOut.length > 0) && (
-          <GinitCard appearance="light" style={s.sectionCard}>
-            {pending.length > 0 ? (
-              <>
-                <Text style={s.sectionTitle}>나에게 온 지닛</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pendingStrip}>
-                  {pending.map((row) => (
-                    <PendingGinitCard
-                      key={row.id}
-                      row={row}
-                      profile={profileFromMap(profiles, row.requester_app_user_id)}
-                      onAccept={onAcceptPending}
-                      onDecline={onDeclinePending}
-                    />
-                  ))}
-                </ScrollView>
-              </>
-            ) : null}
-            {pendingOut.length > 0 ? (
-              <>
-                <Text style={[s.sectionTitle, { marginTop: pending.length ? 14 : 0 }]}>내가 보낸 지닛</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.pendingStrip}>
-                  {pendingOut.map((row) => (
-                    <OutgoingGinitCard
-                      key={row.id}
-                      row={row}
-                      profile={profileFromMap(profiles, row.addressee_app_user_id)}
-                      status={row.status}
-                      onCancel={onCancelOutgoing}
-                    />
-                  ))}
-                </ScrollView>
-              </>
-            ) : null}
-          </GinitCard>
-        )}
-
-        <View style={s.presenceSection}>
-          <Text style={s.sectionTitle}>활성 지닛</Text>
-          <Text style={s.sectionHint}>지금 모임에 참여 중인 친구가 네온 링으로 강조돼요.</Text>
-          {presenceStripFriends.length === 0 ? (
-            <View style={s.inlineHintBox}>
-              <Ionicons name="planet-outline" size={20} color="#94a3b8" />
-              <Text style={s.inlineHintText}>친구를 맺으면 활동 스트립이 채워져요.</Text>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.presenceStrip}>
-              {presenceStripFriends.map((e) => (
-                <PresenceAvatar
-                  key={e.row.id}
-                  profile={e.profile}
-                  meeting={e.meeting}
-                  categories={categories}
-                  onPress={() => openDm(e.row.peer_app_user_id, e.profile.nickname)}
-                />
-              ))}
-            </ScrollView>
-          )}
-        </View>
-
-        {aiRecommendations.length > 0 ? (
-          <View style={s.aiBlock}>
-            <Text style={s.sectionTitle}>맞춤 추천</Text>
-            <Text style={s.sectionHint}>함께한 모임·gDna·관심사를 기준으로 골랐어요.</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.aiStrip}>
-              {aiRecommendations.map((e) => {
-                const mutual = mutualJoinedMeetingsCount(me, e.row.peer_app_user_id, meetings);
-                const commonLine =
-                  mutual > 0
-                    ? `함께한 지닛 ${mutual}개 · ${(e.profile.gDna ?? 'gDna').trim().slice(0, 42)}`
-                    : `비슷한 성향 · ${(e.profile.gDna ?? 'gDna').trim().slice(0, 48)}`;
-                return (
-                  <AiAffinityCard
-                    key={`ai-${e.row.id}`}
-                    profile={e.profile}
-                    commonLine={commonLine}
-                    onGather={() => goCreateGathering()}
-                  />
-                );
-              })}
-            </ScrollView>
+        <Pressable
+          onPress={goSettings}
+          style={({ pressed }) => [s.myRow, pressed && { opacity: 0.88 }]}
+          accessibilityRole="button"
+          accessibilityLabel="내 프로필">
+          <View style={s.rowAvatarWrap}>
+            {myPhoto ? (
+              <Image source={{ uri: myPhoto }} style={s.rowAvatarImg} contentFit="cover" />
+            ) : (
+              <View style={s.rowAvatarFallback}>
+                <Text style={s.rowAvatarLetter}>{myInitial}</Text>
+              </View>
+            )}
           </View>
+          <View style={s.rowCenter}>
+            <Text style={s.rowTitle} numberOfLines={1}>
+              {myNick}
+            </Text>
+            <Text style={s.rowSub} numberOfLines={1}>
+              내 프로필
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="rgba(100, 116, 139, 0.9)" />
+        </Pressable>
+
+        {showRequests ? (
+          <>
+            <View style={s.sectionSpacer} />
+            <Text style={s.sectionHeader}>친구 요청</Text>
+            <View style={s.sectionBody}>
+              {pending.map((row) => (
+                <View key={row.id}>
+                  <PendingGinitRow
+                    row={row}
+                    profile={profileFromMap(profiles, row.requester_app_user_id)}
+                    onAccept={onAcceptPending}
+                    onDecline={onDeclinePending}
+                  />
+                  <View style={s.fullSeparator} />
+                </View>
+              ))}
+              {pendingOut.map((row) => (
+                <View key={row.id}>
+                  <OutgoingGinitRow
+                    row={row}
+                    profile={profileFromMap(profiles, row.addressee_app_user_id)}
+                    status={row.status}
+                    onCancel={onCancelOutgoing}
+                  />
+                  <View style={s.fullSeparator} />
+                </View>
+              ))}
+            </View>
+          </>
         ) : null}
 
-        <Text style={[s.sectionTitle, s.sectionTitleLoose]}>내 지닛</Text>
-        <Text style={s.sectionHint}>참여 중 · 거리 · gTrust 순으로 정렬돼요.</Text>
+        <View style={s.sectionSpacer} />
+        <Text style={s.sectionHeader}>친구 {visibleFriends.length}</Text>
       </View>
-    ),
-    [
-      aiRecommendations,
-      categories,
-      goCreateGathering,
-      meetings,
-      me,
-      onAcceptPending,
-      onCancelOutgoing,
-      onDeclinePending,
-      openDm,
-      pending,
-      pendingOut,
-      presenceStripFriends,
-      profiles,
-    ],
-  );
+    );
+  }, [
+    goSettings,
+    myInitial,
+    myNick,
+    myPhoto,
+    onAcceptPending,
+    onCancelOutgoing,
+    onDeclinePending,
+    pending,
+    pendingOut,
+    profiles,
+    visibleFriends.length,
+  ]);
 
   const emptyAll = useMemo(
     () => (
@@ -985,7 +656,7 @@ export function FriendsHomeScreen() {
     emptyHiddenAll,
   ]);
 
-  const showListHeader = pending.length > 0 || pendingOut.length > 0 || accepted.length > 0 || search.trim().length > 0;
+  const showListHeader = true;
 
   if (!me) {
     return (
@@ -1017,11 +688,11 @@ export function FriendsHomeScreen() {
         <View style={[s.fixedHeader, { paddingHorizontal: 20 }]}>
           <View style={s.headerTop}>
             <Text style={s.headerTitle} accessibilityRole="header">
-              지닛 친구
+              친구
             </Text>
             <View style={s.headerIcons}>
-              <Pressable accessibilityLabel="지도 보기" hitSlop={8} onPress={goMap} style={s.iconBtn}>
-                <Ionicons name="map-outline" size={22} color="#0f172a" />
+              <Pressable accessibilityLabel="검색" hitSlop={8} onPress={onToggleSearch} style={s.iconBtn}>
+                <Ionicons name="search-outline" size={22} color="#0f172a" />
               </Pressable>
               <Pressable accessibilityLabel="친구 추가" hitSlop={8} onPress={goAddFriend} style={s.iconBtn}>
                 <Ionicons name="person-add-outline" size={22} color="#0f172a" />
@@ -1032,23 +703,30 @@ export function FriendsHomeScreen() {
               </Pressable>
             </View>
           </View>
-          <View style={s.searchWrap}>
-            <Ionicons name="search-outline" size={18} color="#64748b" style={s.searchIcon} />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="친구 이름이나 gDna 검색"
-              placeholderTextColor="#94a3b8"
-              style={s.searchInput}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
-            {search.length > 0 ? (
-              <Pressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel="검색 지우기">
-                <Ionicons name="close-circle" size={20} color="#94a3b8" />
-              </Pressable>
-            ) : null}
-          </View>
+          {searchOpen ? (
+            <View style={s.searchWrap}>
+              <Ionicons name="search-outline" size={18} color="#64748b" style={s.searchIcon} />
+              <TextInput
+                ref={searchInputRef}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="검색"
+                placeholderTextColor="#94a3b8"
+                style={s.searchInput}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {search.length > 0 ? (
+                <Pressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel="검색 지우기">
+                  <Ionicons name="close-circle" size={20} color="#94a3b8" />
+                </Pressable>
+              ) : (
+                <Pressable onPress={onToggleSearch} hitSlop={8} accessibilityLabel="검색 닫기">
+                  <Ionicons name="close" size={20} color="#94a3b8" />
+                </Pressable>
+              )}
+            </View>
+          ) : null}
         </View>
 
         <FlatList
@@ -1061,16 +739,12 @@ export function FriendsHomeScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={GinitTheme.colors.primary} />
           }
+          ItemSeparatorComponent={() => <View style={s.friendSeparator} />}
           renderItem={({ item }) => (
-            <FriendConnectionRow
+            <FriendListRow
               item={item}
               categories={categories}
-              onOpenChat={() => openDm(item.row.peer_app_user_id, item.profile.nickname)}
               onOpenProfile={() => setSheetFriend(item)}
-              onLongPress={() => setSheetFriend(item)}
-              onDirectGather={goCreateGathering}
-              onEvaluateTrust={onEvaluateTrust}
-              onHide={() => hideFriend(item.row.peer_app_user_id)}
             />
           )}
         />
@@ -1199,325 +873,83 @@ const s = StyleSheet.create({
   errText: { color: '#b91c1c', fontWeight: '700', fontSize: 13 },
   loginBlock: { paddingHorizontal: 20, paddingTop: 24 },
   loginHint: { fontSize: 15, fontWeight: '800', color: '#0f172a', lineHeight: 22 },
-  sectionCard: { marginBottom: 10, borderColor: 'rgba(255, 255, 255, 0.55)' },
-  sectionTitle: { fontSize: 16, fontWeight: '900', color: '#0f172a', marginBottom: 6 },
-  sectionTitleLoose: { marginTop: 6 },
-  sectionHint: { fontSize: 12, fontWeight: '700', color: '#64748b', marginBottom: 10, lineHeight: 17 },
-  presenceSection: { marginBottom: 14 },
-  presenceStrip: { flexDirection: 'row', gap: 14, paddingBottom: 4, paddingRight: 6 },
-  presenceItem: { width: 76, alignItems: 'center' },
-  presenceRingWrap: { width: 68, height: 68, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  presenceNeonRing: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    padding: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
+  sectionSpacer: { height: 14 },
+  sectionHeader: { fontSize: 12, fontWeight: '800', color: 'rgba(100, 116, 139, 0.95)', marginBottom: 6 },
+  sectionBody: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
   },
-  presenceIdleRing: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    padding: 2,
-    borderWidth: 2,
-    borderColor: 'rgba(148, 163, 184, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  presenceAvatarInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(15,23,42,0.06)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15,23,42,0.08)',
-  },
-  presenceAvatarImg: { width: '100%', height: '100%' },
-  presenceAvatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,82,204,0.08)' },
-  presenceAvatarLetter: { fontSize: 20, fontWeight: '900', color: GinitTheme.colors.primary },
-  presenceCatBadge: {
-    position: 'absolute',
-    bottom: 2,
-    right: 4,
-    minWidth: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  presenceCatBadgeTxt: { fontSize: 13 },
-  presenceNick: { fontSize: 12, fontWeight: '900', color: '#0f172a', textAlign: 'center', width: '100%' },
-  presenceSub: { fontSize: 10, fontWeight: '700', color: '#64748b', textAlign: 'center', width: '100%' },
-  aiBlock: { marginBottom: 8 },
-  aiStrip: { flexDirection: 'row', gap: 10, paddingBottom: 4 },
-  aiCard: {
-    width: 300,
+  fullSeparator: { height: StyleSheet.hairlineWidth, backgroundColor: GinitTheme.colors.border, marginLeft: 0 },
+  myRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.55)',
-    backgroundColor: 'rgba(255,255,255,0.78)',
+    paddingVertical: 10,
     gap: 10,
   },
-  aiCardLeft: {},
-  aiCardPhoto: { width: 48, height: 48, borderRadius: 14, backgroundColor: '#e2e8f0' },
-  aiCardPhotoFallback: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,82,204,0.1)',
+  friendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 10,
+  },
+  requestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 10,
+  },
+  rowAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  aiCardPhotoLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
-  aiCardMid: { flex: 1, minWidth: 0 },
-  aiCardNick: { fontSize: 14, fontWeight: '900', color: '#0f172a', marginBottom: 4 },
-  aiCardCommon: { fontSize: 12, fontWeight: '600', color: '#475569', lineHeight: 17 },
-  aiCardCta: {
-    paddingVertical: 10,
+  rowAvatarImg: { width: '100%', height: '100%' },
+  rowAvatarFallback: { flex: 1, width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  rowAvatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
+  rowCenter: { flex: 1, minWidth: 0, justifyContent: 'center', gap: 2 },
+  rowTitle: { fontSize: 15, fontWeight: '900', color: '#0f172a' },
+  rowSub: { fontSize: 12, fontWeight: '700', color: '#64748b' },
+  rowSubMuted: { color: '#94a3b8', fontWeight: '700' },
+  rowSubtle: { fontSize: 12, fontWeight: '700', color: '#94a3b8' },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowActionBtnPrimary: {
     paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
     backgroundColor: GinitTheme.colors.primary,
   },
-  aiCardCtaText: { fontSize: 12, fontWeight: '900', color: '#fff' },
-  inlineHintBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
+  rowActionBtnPrimaryText: { fontSize: 12, fontWeight: '900', color: '#fff' },
+  rowActionBtnGhost: {
     paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(15, 23, 42, 0.04)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
   },
-  inlineHintText: { flex: 1, fontSize: 14, fontWeight: '700', color: '#64748b' },
-  pendingStrip: { flexDirection: 'row', gap: 10, paddingBottom: 2, paddingRight: 2 },
-  pendingCard: {
-    width: 136,
-    paddingVertical: 12,
+  rowActionBtnGhostText: { fontSize: 12, fontWeight: '900', color: '#0f172a' },
+  rowStatusPill: {
     paddingHorizontal: 10,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    alignItems: 'center',
-    gap: 8,
-    position: 'relative',
-    overflow: 'visible',
-  },
-  pendingMenuBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 16,
-    backgroundColor: 'rgba(248, 250, 252, 0.92)',
-    zIndex: 1,
-  },
-  pendingAvatarTap: {
-    zIndex: 2,
-    alignSelf: 'center',
-  },
-  /** 프로필 아래에 뜨는 액션 오버레이 (닉네임 플로우와 겹칠 수 있어 zIndex로 위에 표시) */
-  pendingMenuSheet: {
-    position: 'absolute',
-    left: 6,
-    right: 6,
-    top: 62,
-    zIndex: 10,
-    alignItems: 'center',
-  },
-  pendingTextBlock: {
-    width: '100%',
-    alignItems: 'center',
-    zIndex: 0,
-  },
-  pendingMenuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
-    ...GinitTheme.shadow.card,
-  },
-  pendingAvatarRing: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
+    paddingVertical: 6,
+    borderRadius: 999,
     backgroundColor: 'rgba(15, 23, 42, 0.06)',
-  },
-  pendingAvatarImg: { width: '100%', height: '100%', borderRadius: 24 },
-  pendingAvatarFallback: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 82, 204, 0.08)',
-    borderRadius: 24,
-  },
-  pendingAvatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
-  pendingNick: { fontSize: 13, fontWeight: '900', color: '#0f172a', textAlign: 'center', width: '100%' },
-  pendingHint: { fontSize: 11, fontWeight: '700', color: '#94a3b8' },
-  pendingIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  pendingAcceptBtn: { backgroundColor: GinitTheme.colors.primary, borderColor: 'rgba(15, 23, 42, 0.12)' },
-  pendingDeclineBtn: { backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: 'rgba(15, 23, 42, 0.12)' },
-  outgoingCancelBtnOverlay: {
-    alignSelf: 'stretch',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.98)',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  outgoingStatusOnly: {
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.10)',
   },
-  outgoingStatusOnlyText: { fontSize: 12, fontWeight: '800', color: '#64748b', textAlign: 'center' },
-  outgoingCancelBtnText: { fontSize: 11, fontWeight: '800', color: '#64748b' },
-  swipeContainer: { marginTop: 10 },
-  swipeLeftRail: {
-    width: 100,
-    height: '100%',
-    justifyContent: 'center',
-    paddingRight: 8,
+  rowStatusPillText: { fontSize: 12, fontWeight: '900', color: '#334155' },
+  friendSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GinitTheme.colors.border,
+    marginLeft: 54,
   },
-  swipeGatherBtn: {
-    flex: 1,
-    backgroundColor: '#059669',
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    maxHeight: 96,
-    paddingHorizontal: 6,
-    gap: 4,
-  },
-  swipeGatherTxt: { color: '#fff', fontSize: 12, fontWeight: '900', textAlign: 'center' },
-  swipeRightRail: {
-    width: 112,
-    height: '100%',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'stretch',
-    paddingLeft: 8,
-    gap: 6,
-  },
-  swipeTrustBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    maxHeight: 96,
-    gap: 2,
-  },
-  swipeTrustTxt: { fontSize: 10, fontWeight: '900', color: '#0f172a' },
-  swipeHideBtn: {
-    flex: 1,
-    backgroundColor: '#64748b',
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    maxHeight: 96,
-    gap: 2,
-  },
-  swipeHideTxt: { fontSize: 10, fontWeight: '900', color: '#fff' },
-  connRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    backgroundColor: 'rgba(255, 255, 255, 0.78)',
-  },
-  connLeft: { justifyContent: 'center', marginRight: 10 },
-  connAvatarPress: { alignSelf: 'center' },
-  connAvatarWrap: { width: 52, height: 52, position: 'relative' },
-  connAvatarImg: { width: 52, height: 52, borderRadius: 18, backgroundColor: 'rgba(15,23,42,0.06)' },
-  connAvatarFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,82,204,0.08)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15,23,42,0.1)',
-  },
-  connAvatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
-  gLevelBadge: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
-    minWidth: 22,
-    height: 22,
-    borderRadius: 8,
-    paddingHorizontal: 5,
-    backgroundColor: '#0f172a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.95)',
-  },
-  gLevelBadgeTxt: { fontSize: 10, fontWeight: '900', color: '#fff' },
-  connCenter: { flex: 1, minWidth: 0, justifyContent: 'center', gap: 4 },
-  connLine1: { flexDirection: 'row', alignItems: 'center', flexWrap: 'nowrap' },
-  connNick: { fontSize: 15, fontWeight: '900', color: '#0f172a', flexShrink: 1 },
-  connDist: { fontSize: 12, fontWeight: '700', color: '#64748b', flexShrink: 0 },
-  connActivity: { fontSize: 13, fontWeight: '700', color: '#334155', lineHeight: 18 },
-  connActivityMuted: { color: '#94a3b8', fontWeight: '600' },
-  connChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  connChip: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: ACCENT_ORANGE,
-    backgroundColor: 'rgba(255,138,0,0.12)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  connRight: { alignItems: 'flex-end', justifyContent: 'space-between', paddingLeft: 6, minWidth: 72 },
-  connTrust: { fontSize: 11, fontWeight: '800', color: '#64748b' },
-  connTrustMuted: { fontSize: 11, fontWeight: '700', color: '#cbd5e1' },
-  connMsgBtn: { padding: 6, borderRadius: 12, backgroundColor: 'rgba(0,82,204,0.08)' },
   emptyCard: {
     marginTop: 8,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
     alignItems: 'center',
     paddingVertical: 22,
     paddingHorizontal: 16,

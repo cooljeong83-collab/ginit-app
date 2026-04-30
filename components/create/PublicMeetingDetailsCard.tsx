@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -13,9 +12,8 @@ import type {
 } from '@/src/lib/meetings';
 
 const RADIUS = 12;
-const FIELD_FILL = 'rgba(255, 255, 255, 0.72)';
-const FOCUS_RING = 'rgba(134, 211, 183, 0.75)';
-const FOCUS_SHADOW = 'rgba(134, 211, 183, 0.55)';
+const FIELD_FILL = 'rgba(31, 42, 68, 0.04)';
+const FOCUS_RING = 'rgba(31, 42, 68, 0.45)';
 
 const AGE_OPTIONS: { code: PublicMeetingAgeLimit; label: string }[] = [
   { code: 'TWENTIES', label: '20대' },
@@ -37,19 +35,10 @@ function clampInt(n: number, min: number, max: number): number {
  */
 function blockFocusStyle(active: boolean, reduceHeavyEffects: boolean) {
   if (!active) return null;
-  if (reduceHeavyEffects || Platform.OS === 'android') {
-    return {
-      borderColor: FOCUS_RING,
-      ...(Platform.OS === 'android' ? { backgroundColor: '#FFFFFF' } : {}),
-    };
-  }
-  return {
-    borderColor: FOCUS_RING,
-    shadowColor: FOCUS_SHADOW,
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
-  };
+  // 플랫 스타일: 포커스 시에도 그림자/elevation 없이 보더만 바꿉니다.
+  // (reduceHeavyEffects 여부와 무관하게 동일 동작)
+  void reduceHeavyEffects;
+  return { borderColor: FOCUS_RING };
 }
 
 function Segmented({
@@ -71,14 +60,6 @@ function Segmented({
             onPress={() => onChange(o.id)}
             style={({ pressed }) => [styles.segmentBtn, on && styles.segmentBtnOn, pressed && styles.pressed]}
             accessibilityRole="button">
-            {on ? (
-              <LinearGradient
-                colors={['rgba(134, 211, 183, 0.42)', 'rgba(134, 211, 183, 0.12)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
-              />
-            ) : null}
             <Text style={[styles.segmentLabel, on && styles.segmentLabelOn]}>{o.label}</Text>
           </Pressable>
         );
@@ -167,7 +148,8 @@ export function PublicMeetingDetailsCard({
 
   return (
     <View style={styles.stack}>
-        <View style={[styles.block, blockFocusStyle(focused === 'age', reduceHeavyEffects)]}>
+      <View style={styles.card}>
+        <View style={[styles.section, blockFocusStyle(focused === 'age', reduceHeavyEffects)]}>
           <Text style={styles.label}>모집 연령대</Text>
           <View style={styles.chipRow}>
             {AGE_OPTIONS.map((o) => {
@@ -181,14 +163,6 @@ export function PublicMeetingDetailsCard({
                   }}
                   style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.pressed]}
                   accessibilityRole="button">
-                  {on ? (
-                    <LinearGradient
-                      colors={['rgba(134, 211, 183, 0.45)', 'rgba(134, 211, 183, 0.12)']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                  ) : null}
                   <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{o.label}</Text>
                 </Pressable>
               );
@@ -196,7 +170,8 @@ export function PublicMeetingDetailsCard({
           </View>
         </View>
 
-        <View style={[styles.block, blockFocusStyle(focused === 'gender', reduceHeavyEffects)]}>
+        <View style={styles.sectionSeparator} />
+        <View style={[styles.section, blockFocusStyle(focused === 'gender', reduceHeavyEffects)]}>
           <Text style={styles.label}>성별 비율</Text>
           <Segmented
             value={value.genderRatio}
@@ -212,7 +187,8 @@ export function PublicMeetingDetailsCard({
           />
         </View>
 
-        <View style={[styles.block, blockFocusStyle(focused === 'settlement', reduceHeavyEffects)]}>
+        <View style={styles.sectionSeparator} />
+        <View style={[styles.section, blockFocusStyle(focused === 'settlement', reduceHeavyEffects)]}>
           <Text style={styles.label}>정산 방법</Text>
           <Segmented
             value={value.settlement}
@@ -254,7 +230,8 @@ export function PublicMeetingDetailsCard({
           ) : null}
         </View>
 
-        <View style={[styles.block, blockFocusStyle(focused === 'level', reduceHeavyEffects)]}>
+        <View style={styles.sectionSeparator} />
+        <View style={[styles.section, blockFocusStyle(focused === 'level', reduceHeavyEffects)]}>
           <Text style={styles.label}>참가 자격 (최소 gLevel)</Text>
           <View style={styles.stepperRow}>
             <Pressable
@@ -282,7 +259,8 @@ export function PublicMeetingDetailsCard({
           </View>
         </View>
 
-        <View style={[styles.block, blockFocusStyle(focused === 'trust', reduceHeavyEffects)]}>
+        <View style={styles.sectionSeparator} />
+        <View style={[styles.section, blockFocusStyle(focused === 'trust', reduceHeavyEffects)]}>
           <View style={styles.approvalRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>신뢰도 높은 모임</Text>
@@ -319,12 +297,13 @@ export function PublicMeetingDetailsCard({
           </View>
         </View>
 
-        <View style={[styles.block, blockFocusStyle(focused === 'approval', reduceHeavyEffects)]}>
+        <View style={styles.sectionSeparator} />
+        <View style={[styles.section, blockFocusStyle(focused === 'approval', reduceHeavyEffects)]}>
           <View style={styles.approvalRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>승인 방식</Text>
               <Text style={styles.smallHint}>
-                <Text style={{ color: GinitTheme.colors.warning, fontWeight: '900' }}>호스트 승인</Text>을 켜면 신청을 받고
+                <Text style={{ color: GinitTheme.colors.accent2, fontWeight: '900' }}>호스트 승인</Text>을 켜면 신청을 받고
                 확정해요.
               </Text>
             </View>
@@ -360,6 +339,7 @@ export function PublicMeetingDetailsCard({
             </Pressable>
           ) : null}
         </View>
+      </View>
     </View>
   );
 }
@@ -368,14 +348,22 @@ const styles = StyleSheet.create({
   stack: {
     marginTop: 0,
   },
-  block: {
-    marginTop: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+  card: {
     borderRadius: RADIUS,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : FIELD_FILL,
+    borderColor: 'rgba(31, 42, 68, 0.18)',
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  section: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  sectionSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   label: {
     fontSize: 13,
@@ -398,14 +386,14 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: FIELD_FILL,
     paddingVertical: 9,
     paddingHorizontal: 12,
     overflow: 'hidden',
   },
   chipOn: {
-    borderColor: 'rgba(134, 211, 183, 0.55)',
-    backgroundColor: 'transparent',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
+    backgroundColor: 'rgba(31, 42, 68, 0.06)',
   },
   chipLabel: {
     fontSize: 13,
@@ -421,7 +409,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: FIELD_FILL,
   },
   segmentBtn: {
     flex: 1,
@@ -432,7 +420,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   segmentBtnOn: {
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(31, 42, 68, 0.06)',
   },
   segmentLabel: {
     fontSize: 13,
@@ -459,7 +447,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   feeInput: {
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : FIELD_FILL,
+    backgroundColor: FIELD_FILL,
     borderRadius: RADIUS,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
@@ -480,7 +468,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: FIELD_FILL,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -496,7 +484,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : FIELD_FILL,
+    backgroundColor: FIELD_FILL,
   },
   stepValue: {
     fontSize: 14,
@@ -520,19 +508,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: FIELD_FILL,
     padding: 3,
     justifyContent: 'center',
   },
   toggleWrapOn: {
-    borderColor: 'rgba(134, 211, 183, 0.55)',
-    backgroundColor: GinitTheme.colors.primarySoft,
+    borderColor: 'rgba(31, 42, 68, 0.45)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   toggleKnob: {
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     alignSelf: 'flex-start',
   },
   toggleKnobOn: {
@@ -548,7 +536,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(134, 211, 183, 0.10)',
+    backgroundColor: 'rgba(31, 42, 68, 0.06)',
   },
   checkboxBox: {
     width: 22,
@@ -556,13 +544,13 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: FIELD_FILL,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkboxBoxOn: {
-    borderColor: 'rgba(134, 211, 183, 0.55)',
-    backgroundColor: 'rgba(134, 211, 183, 0.22)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   checkboxTick: {
     fontSize: 14,

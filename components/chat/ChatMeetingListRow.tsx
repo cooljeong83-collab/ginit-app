@@ -2,11 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import type { Timestamp } from 'firebase/firestore';
 import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ChatListCardShell } from '@/components/chat/ChatListCardShell';
 import { GinitTheme } from '@/constants/ginit-theme';
-import { getHomeCategoryVisual } from '@/src/lib/feed-home-visual';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
@@ -89,7 +87,6 @@ export function ChatMeetingListRow({
   unreadCount = 0,
   onPress,
 }: Props) {
-  const visual = useMemo(() => getHomeCategoryVisual(meeting), [meeting]);
   const title = meeting.title?.trim() || '모임';
   const place = placeLine(meeting);
   const pCount = meetingParticipantCount(meeting);
@@ -111,7 +108,11 @@ export function ChatMeetingListRow({
   const initial = (hostNickname?.trim() || '모').slice(0, 1);
 
   return (
-    <ChatListCardShell accentGradient={visual.gradient} onPress={onPress} accessibilityLabel={`${title} 채팅`}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title} 채팅`}
+      style={({ pressed }) => [styles.pressableRow, pressed && styles.pressablePressed]}>
       <View style={styles.zoneA}>
         <View style={styles.symbolCol}>
           {hostWithdrawn ? (
@@ -175,11 +176,17 @@ export function ChatMeetingListRow({
           </Text>
         </View>
       </View>
-    </ChatListCardShell>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  pressableRow: {
+    paddingVertical: 10,
+  },
+  pressablePressed: {
+    opacity: 0.86,
+  },
   zoneA: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -196,9 +203,9 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 10,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: GinitTheme.colors.surfaceStrong,
+    backgroundColor: GinitTheme.colors.bgAlt,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -216,7 +223,6 @@ const styles = StyleSheet.create({
   hostFallback: {
     width: '100%',
     height: '100%',
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },

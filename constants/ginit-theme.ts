@@ -29,7 +29,7 @@ export const GinitTheme = {
 
     // brand / actions
     primary: '#1F2A44',
-    primarySoft: 'rgba(31, 68, 50, 0.1)',
+    primarySoft: 'rgba(31, 42, 68, 0.10)',
     accent: '#86D3B7',
     accent2: '#F4C84A',
     warning: '#F59E0B',
@@ -37,8 +37,9 @@ export const GinitTheme = {
     success: '#22C55E',
 
     // gradients
-    brandGradient: ['#86D3B7', '#F4C84A'] as const,
-    ctaGradient: ['#86D3B7', '#73C7FF'] as const,
+    // 모임 생성 CTA(네이비 톤) — 선택/완료 포인트와 동일 계열로 맞춤
+    brandGradient: ['#1F2A44', '#2B3A62'] as const,
+    ctaGradient: ['#1F2A44', '#2B3A62'] as const,
   },
 
   /** New: 타이포 스케일(플랫폼 기본 폰트 기반) */

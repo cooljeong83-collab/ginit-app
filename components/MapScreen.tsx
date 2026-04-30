@@ -1699,7 +1699,7 @@ export default function MapScreen() {
   const carouselWidth = useMemo(() => Dimensions.get('window').width - 32, []);
 
   const rescanTop = useMemo(
-    () => Math.max(insets.top + 56, Math.round(WINDOW_H * 0.12)),
+    () => Math.max(insets.top + 66, Math.round(WINDOW_H * 0.12) + 10),
     [insets.top],
   );
 
@@ -1916,7 +1916,7 @@ export default function MapScreen() {
 
         {/* Layer 1 — 상단: 지역명 · 카테고리 칩 · 검색 */}
         <View style={[styles.layerTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
-          <BlurView intensity={42} tint="light" style={styles.topGlass}>
+          <BlurView intensity={0} tint="light" style={styles.topGlass}>
             <View style={styles.topGlassInner}>
               {/* 지역 표시기(상단 pill) 숨김 */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow} style={styles.chipScroll}>
@@ -2146,7 +2146,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
+    borderColor: 'transparent',
   },
   topGlassInner: {
     flexDirection: 'row',

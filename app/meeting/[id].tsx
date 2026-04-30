@@ -687,6 +687,20 @@ export default function MeetingDetailScreen() {
     return buildDateChipsFromCandidates(list);
   }, [meeting]);
 
+  // 후보가 1개일 때도 달력 UI가 바로 보이도록, 해당 후보의 월로 자동 정렬합니다(초기 1회).
+  const dateVoteMonthAutofitKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (!meeting) return;
+    if (meeting.scheduleConfirmed === true) return;
+    if (storedDateCandidates.length !== 1) return;
+    const ymd = String(storedDateCandidates[0]?.startDate ?? '').trim();
+    if (!ymd) return;
+    const key = `${meeting.id}\u0001${ymd}`;
+    if (dateVoteMonthAutofitKeyRef.current === key) return;
+    dateVoteMonthAutofitKeyRef.current = key;
+    setDateVoteCalendarMonth(monthStartYmd(ymd));
+  }, [meeting, meeting?.id, meeting?.scheduleConfirmed, storedDateCandidates]);
+
   const placeChips = useMemo(() => (meeting ? buildPlaceChipsFromMeeting(meeting) : []), [meeting]);
 
   const sortedDateChips = useMemo(() => {
@@ -809,6 +823,137 @@ export default function MeetingDetailScreen() {
     }
     return null;
   }, [isScheduleConfirmed, meeting?.confirmedMovieChipId, extraMovies]);
+
+  const movieMetaRows = useCallback((mv: SelectedMovieExtra): Array<{ key: string; value: string; sortKey: string }> => {
+    // KOBIS 원본 키 + 표시 라벨
+    const label: Record<string, string> = {
+      openDt: '개봉일',
+      rank: '순위',
+      rankInten: '순위변동',
+      rankOldAndNew: '신규진입',
+      salesShare: '매출 점유율',
+      salesAmt: '당일 매출',
+      salesInten: '매출 증감액',
+      salesChange: '매출 증감률',
+      salesAcc: '누적 매출',
+      audiCnt: '일일관객',
+      audiInten: '관객 증감',
+      audiChange: '관객 증감률',
+      audiAcc: '누적 관',
+      scrnCnt: '스크린수',
+      showCnt: '상영횟수',
+      // fallback(기존 저장분)
+      rating: '예매율',
+      kobisRank: 'KOBIS 순위',
+    };
+
+    const order = [
+      'openDt',
+      'rank',
+      'kobisRank',
+      'rankInten',
+      'rankOldAndNew',
+      'salesShare',
+      'salesAmt',
+      'salesAcc',
+      'salesInten',
+      'salesChange',
+      'audiCnt',
+      'audiAcc',
+      'audiInten',
+      'audiChange',
+      'scrnCnt',
+      'showCnt',
+      'rating',
+    ];
+
+    const parseNum = (s: string) => {
+      const n = Number.parseFloat(String(s).replace(/,/g, '').replace('%', '').trim());
+      return Number.isFinite(n) ? n : null;
+    };
+    const fmtInt = (s: string) => {
+      const n = Number.parseInt(String(s).replace(/,/g, '').trim(), 10);
+      if (!Number.isFinite(n)) return s.trim();
+      return n.toLocaleString('ko-KR');
+    };
+    const fmtSigned = (s: string) => {
+      const n = parseNum(s);
+      if (n == null) return s.trim();
+      if (n === 0) return '0';
+      return n > 0 ? `+${n}` : `${n}`;
+    };
+    const fmt = (k: string, raw: string) => {
+      const v = String(raw ?? '').trim();
+      if (!v) return '';
+      if (k === 'openDt' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+      if (k === 'rank') return `${fmtInt(v)}위`;
+      if (k === 'kobisRank') return `${fmtInt(v)}위`;
+      if (k === 'rankInten') return fmtSigned(v);
+      if (k === 'rankOldAndNew') return v.toUpperCase() === 'NEW' ? 'NEW' : v;
+      if (k === 'salesShare') return v.endsWith('%') ? v : `${v}%`;
+      if (k === 'salesAmt' || k === 'salesAcc' || k === 'salesInten') return `${fmtInt(v)}원`;
+      if (k === 'salesChange') return v.endsWith('%') ? v : `${v}%`;
+      if (k === 'audiCnt' || k === 'audiAcc' || k === 'audiInten') return `${fmtInt(v)}명`;
+      if (k === 'audiChange') return v.endsWith('%') ? v : `${v}%`;
+      if (k === 'scrnCnt' || k === 'showCnt') return `${fmtInt(v)}`;
+      if (k === 'rating') return v.endsWith('%') ? v : `${v}%`;
+      return v;
+    };
+
+    // 1) 원본 메타(있으면) + 2) 기존 저장분 fallback
+    const meta = new Map<string, string>();
+    if (mv.apiMeta && typeof mv.apiMeta === 'object' && !Array.isArray(mv.apiMeta)) {
+      Object.entries(mv.apiMeta).forEach(([k, v]) => {
+        const key = String(k).trim();
+        const val = String(v ?? '').trim();
+        if (!key || !val) return;
+        meta.set(key, val);
+      });
+    }
+    if (mv.rating?.trim()) meta.set('rating', mv.rating.trim());
+    if (mv.kobisRank?.trim()) meta.set('kobisRank', mv.kobisRank.trim());
+
+    // 제목/본문에서 이미 보여주는 값은 중복으로 또 보여주지 않음
+    meta.delete('movieNm');
+    meta.delete('year');
+    meta.delete('info');
+    meta.delete('movieCd');
+    meta.delete('id');
+
+    const rows = [...meta.entries()]
+      .map(([k, v]) => ({
+        sortKey: k,
+        key: label[k] ?? k,
+        value: fmt(k, v),
+      }))
+      .filter((r) => r.key && r.value)
+      .sort((a, b) => {
+        const ia = order.indexOf(a.sortKey);
+        const ib = order.indexOf(b.sortKey);
+        if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        return a.sortKey.localeCompare(b.sortKey);
+      });
+
+    return rows;
+  }, []);
+
+  const movieSynopsisText = useCallback((mv: SelectedMovieExtra): string => {
+    const meta = mv.apiMeta;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return '';
+    const keys = ['overview', 'synopsis', 'plot', 'story', 'description', 'summary', 'tagline'];
+    for (const k of keys) {
+      const v = String(meta[k] ?? '').trim();
+      if (v) return v;
+    }
+    return '';
+  }, []);
+
+  const movieInfoMultiline = useCallback((info: string | null | undefined): string => {
+    const s = String(info ?? '').trim();
+    if (!s) return '';
+    // KOBIS 등에서 " · "로 이어붙인 요약을 줄바꿈으로 분리
+    return s.replace(/\s*·\s*/g, '\n');
+  }, []);
 
   const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
   const extraSport = useMemo(() => (meeting ? extractSportIntensity(meeting.extraData) : null), [meeting?.extraData]);
@@ -1561,6 +1706,38 @@ export default function MeetingDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placeChipsShown]);
 
+  useEffect(() => {
+    const chip =
+      confirmedPlaceChipResolved ??
+      (placeChips.length === 1 ? placeChips[0] : null);
+    if (!chip) return;
+    if (placeThumbByChipId[chip.id] !== undefined) return;
+    let alive = true;
+    const t = setTimeout(() => {
+      void (async () => {
+        const q = `${chip.title} ${(chip.sub ?? '').trim()}`.trim();
+        try {
+          const thumb = await searchNaverImageThumbnail(q);
+          if (!alive) return;
+          setPlaceThumbByChipId((prev) => {
+            if (prev[chip.id] !== undefined) return prev;
+            return { ...prev, [chip.id]: thumb };
+          });
+        } catch {
+          if (!alive) return;
+          setPlaceThumbByChipId((prev) => {
+            if (prev[chip.id] !== undefined) return prev;
+            return { ...prev, [chip.id]: null };
+          });
+        }
+      })();
+    }, 180);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [confirmedPlaceChipResolved, placeChips, placeThumbByChipId]);
+
   /** 투표 선택을 서버에 반영(호스트/참여자 공통, 자동 저장에서 호출) */
   const flushVoteSelectionsToServer = useCallback(async (): Promise<boolean> => {
     if (!meeting) return false;
@@ -2155,7 +2332,7 @@ export default function MeetingDetailScreen() {
             <View style={styles.infoCard}>
               <View style={styles.infoCardHead}>
                 <LinearGradient
-                  colors={['#86D3B7', '#73C7FF']}
+                  colors={['#0F172A', '#1E3A8A']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.infoCardHeadAccent}
@@ -2274,30 +2451,54 @@ export default function MeetingDetailScreen() {
                 <Text style={styles.infoSectionLabel}>장소</Text>
                 {confirmedPlaceChipResolved ? (
                   <>
-                    <Text style={styles.infoRow}>{confirmedPlaceChipResolved.title}</Text>
-                    {confirmedPlaceChipResolved.sub ? (
-                      <Text style={styles.infoRowMuted}>{confirmedPlaceChipResolved.sub}</Text>
-                    ) : null}
                     {(() => {
+                      const thumb = placeThumbByChipId[confirmedPlaceChipResolved.id] ?? null;
                       const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
                         naverPlaceLink: confirmedPlaceChipResolved.naverPlaceLink,
                         title: confirmedPlaceChipResolved.title,
                         addressLine: confirmedPlaceChipResolved.sub,
                       });
-                      return detailUrl ? (
-                        <Pressable
-                          onPress={() =>
-                            setNaverPlaceWebModal({
-                              url: detailUrl,
-                              title: confirmedPlaceChipResolved.title.trim() || '상세 정보',
-                            })
-                          }
-                          style={({ pressed }) => [styles.placeNaverDetailBtn, pressed && { opacity: 0.88 }]}
-                          accessibilityRole="button"
-                          accessibilityLabel="상세 정보">
-                          <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
-                        </Pressable>
-                      ) : null;
+                      return (
+                        <View style={styles.placeDetailBlock}>
+                          <View style={styles.placeDetailImageWrap}>
+                            {thumb ? (
+                              <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+                            ) : (
+                              <View style={styles.placeVoteImageFallback} />
+                            )}
+                          </View>
+                          <View style={styles.placeDetailHeaderRow}>
+                            <View style={styles.placeDetailHeaderTextCol}>
+                              <Text style={styles.placeVoteTitle} numberOfLines={3}>
+                                {confirmedPlaceChipResolved.title}
+                              </Text>
+                              {confirmedPlaceChipResolved.sub ? (
+                                <Text style={styles.placeVoteSub} numberOfLines={4}>
+                                  {confirmedPlaceChipResolved.sub}
+                                </Text>
+                              ) : null}
+                            </View>
+                            {detailUrl ? (
+                              <Pressable
+                                onPress={() =>
+                                  setNaverPlaceWebModal({
+                                    url: detailUrl,
+                                    title: confirmedPlaceChipResolved.title.trim() || '상세 정보',
+                                  })
+                                }
+                                style={({ pressed }) => [
+                                  styles.placeNaverDetailBtn,
+                                  styles.placeNaverDetailBtnInline,
+                                  pressed && { opacity: 0.88 },
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel="상세 정보">
+                                <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
                     })()}
                   </>
                 ) : placeChips.length === 0 ? (
@@ -2339,26 +2540,80 @@ export default function MeetingDetailScreen() {
                   <>
                     <Text style={styles.infoSectionLabel}>영화</Text>
                     {confirmedMovieResolved ? (
-                      <View style={styles.confirmedMovieRow}>
-                        {confirmedMovieResolved.posterUrl?.trim() ? (
-                          <Image
-                            source={{ uri: confirmedMovieResolved.posterUrl.trim() }}
-                            style={styles.confirmedMoviePoster}
-                            contentFit="cover"
-                            transition={120}
-                          />
-                        ) : (
-                          <View style={[styles.confirmedMoviePoster, styles.moviePosterPlaceholder]}>
-                            <Ionicons name="film-outline" size={28} color="#94A3B8" />
+                      <>
+                        <View style={styles.movieDetailRow}>
+                          <View style={styles.movieDetailPosterLeftWrap}>
+                            {confirmedMovieResolved.posterUrl?.trim() ? (
+                              <Image
+                                source={{ uri: confirmedMovieResolved.posterUrl.trim() }}
+                                style={styles.movieDetailPosterLeft}
+                                contentFit="cover"
+                                transition={120}
+                              />
+                            ) : (
+                              <View style={[styles.movieDetailPosterLeft, styles.moviePosterPlaceholder]}>
+                                <Ionicons name="film-outline" size={26} color="#94A3B8" />
+                              </View>
+                            )}
                           </View>
-                        )}
-                        <View style={styles.confirmedMovieTextCol}>
-                          <Text style={styles.infoRow} numberOfLines={3}>
-                            {confirmedMovieResolved.title}
-                            {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
-                          </Text>
+                          <View style={styles.movieDetailInfoCol}>
+                            <Text style={styles.movieDetailTitle} numberOfLines={3}>
+                              {confirmedMovieResolved.title}
+                              {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
+                            </Text>
+                            {confirmedMovieResolved.info?.trim() ? (
+                              <Text style={styles.movieDetailBody} numberOfLines={5}>
+                                {movieInfoMultiline(confirmedMovieResolved.info)}
+                              </Text>
+                            ) : null}
+                            {(() => {
+                              const s = movieSynopsisText(confirmedMovieResolved);
+                              if (!s) return null;
+                              if (confirmedMovieResolved.info?.trim() && s === confirmedMovieResolved.info.trim()) return null;
+                              return (
+                                <Text style={styles.movieDetailBody} numberOfLines={8}>
+                                  {s}
+                                </Text>
+                              );
+                            })()}
+                            {(() => {
+                              const rows = movieMetaRows(confirmedMovieResolved);
+                              if (rows.length === 0) return null;
+                              return (
+                                <View style={styles.movieMetaList}>
+                                  {rows.map((r) => (
+                                    <Text key={r.sortKey} style={styles.movieMetaLine}>
+                                      <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
+                                      <Text style={styles.movieMetaSep}> : </Text>
+                                      <Text style={styles.movieMetaValInline}>{r.value}</Text>
+                                    </Text>
+                                  ))}
+                                </View>
+                              );
+                            })()}
+                            {resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title) ? (
+                              <Pressable
+                                onPress={() => {
+                                  const u = resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title);
+                                  if (!u) return;
+                                  setNaverPlaceWebModal({
+                                    url: u,
+                                    title: confirmedMovieResolved.title.trim() || '영화',
+                                  });
+                                }}
+                                style={({ pressed }) => [
+                                  styles.moviePosterInfoBtn,
+                                  styles.moviePosterInfoBtnInDetailCol,
+                                  pressed && { opacity: 0.88 },
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel="영화 정보 보기">
+                                <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
                         </View>
-                      </View>
+                      </>
                     ) : extraMovies.length > 0 ? (
                       <Text style={styles.infoRowMuted}>저장된 확정 영화가 없어요.</Text>
                     ) : (
@@ -2392,15 +2647,8 @@ export default function MeetingDetailScreen() {
               ) : null}
             </View>
 
-            {dateChips.length === 1 ? (
-              <>
-                <Text style={styles.infoRow}>{dateChips[0].title}</Text>
-                {dateChips[0].sub ? <Text style={styles.infoRowMuted}>{dateChips[0].sub}</Text> : null}
-                <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
-              </>
-            ) : (
-              <>
-                {(() => {
+            <>
+              {(() => {
                   const p = parseYmd(dateVoteCalendarMonth);
                   const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
                   const year = base.getFullYear();
@@ -2510,8 +2758,10 @@ export default function MeetingDetailScreen() {
                       ? `${selectedDateIds.length}개 선택됨`
                       : '아직 선택한 일정이 없어요'}
                 </Text>
-              </>
-            )}
+              {dateChips.length === 1 ? (
+                <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 선택돼요.</Text>
+              ) : null}
+            </>
 
             <Pressable
               style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
@@ -2548,43 +2798,75 @@ export default function MeetingDetailScreen() {
                 </View>
                 {extraMovies.length === 1 ? (
                   <>
-                    <View style={styles.confirmedMovieRow}>
-                      {extraMovies[0].posterUrl?.trim() ? (
-                        <Image
-                          source={{ uri: extraMovies[0].posterUrl.trim() }}
-                          style={styles.confirmedMoviePoster}
-                          contentFit="cover"
-                          transition={120}
-                        />
-                      ) : (
-                        <View style={[styles.confirmedMoviePoster, styles.moviePosterPlaceholder]}>
-                          <Ionicons name="film-outline" size={28} color="#94A3B8" />
-                        </View>
-                      )}
-                      <View style={styles.confirmedMovieTextCol}>
-                        <Text style={styles.infoRow} numberOfLines={3}>
+                    <View style={styles.movieDetailRow}>
+                      <View style={styles.movieDetailPosterLeftWrap}>
+                        {extraMovies[0].posterUrl?.trim() ? (
+                          <Image
+                            source={{ uri: extraMovies[0].posterUrl.trim() }}
+                            style={styles.movieDetailPosterLeft}
+                            contentFit="cover"
+                            transition={120}
+                          />
+                        ) : (
+                          <View style={[styles.movieDetailPosterLeft, styles.moviePosterPlaceholder]}>
+                            <Ionicons name="film-outline" size={26} color="#94A3B8" />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.movieDetailInfoCol}>
+                        <Text style={styles.movieDetailTitle} numberOfLines={3}>
                           {extraMovies[0].title}
                           {extraMovies[0].year ? ` (${extraMovies[0].year})` : ''}
                         </Text>
+                        {extraMovies[0].info?.trim() ? (
+                          <Text style={styles.movieDetailBody} numberOfLines={5}>
+                            {movieInfoMultiline(extraMovies[0].info)}
+                          </Text>
+                        ) : null}
+                        {(() => {
+                          const s = movieSynopsisText(extraMovies[0]);
+                          if (!s) return null;
+                          if (extraMovies[0].info?.trim() && s === extraMovies[0].info.trim()) return null;
+                          return (
+                            <Text style={styles.movieDetailBody} numberOfLines={8}>
+                              {s}
+                            </Text>
+                          );
+                        })()}
+                        {(() => {
+                          const rows = movieMetaRows(extraMovies[0]);
+                          if (rows.length === 0) return null;
+                          return (
+                            <View style={styles.movieMetaList}>
+                              {rows.map((r) => (
+                                <Text key={r.sortKey} style={styles.movieMetaLine}>
+                                  <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
+                                  <Text style={styles.movieMetaSep}> : </Text>
+                                  <Text style={styles.movieMetaValInline}>{r.value}</Text>
+                                </Text>
+                              ))}
+                            </View>
+                          );
+                        })()}
+                        {resolveNaverMovieSearchWebUrl(extraMovies[0].title) ? (
+                          <Pressable
+                            onPress={() => {
+                              const u = resolveNaverMovieSearchWebUrl(extraMovies[0].title);
+                              if (!u) return;
+                              setNaverPlaceWebModal({ url: u, title: extraMovies[0].title.trim() || '영화' });
+                            }}
+                            style={({ pressed }) => [
+                              styles.moviePosterInfoBtn,
+                              styles.moviePosterInfoBtnInDetailCol,
+                              pressed && { opacity: 0.88 },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="영화 정보 보기">
+                            <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
+                          </Pressable>
+                        ) : null}
                       </View>
                     </View>
-                    {resolveNaverMovieSearchWebUrl(extraMovies[0].title) ? (
-                      <Pressable
-                        onPress={() => {
-                          const u = resolveNaverMovieSearchWebUrl(extraMovies[0].title);
-                          if (!u) return;
-                          setNaverPlaceWebModal({ url: u, title: extraMovies[0].title.trim() || '영화' });
-                        }}
-                        style={({ pressed }) => [
-                          styles.moviePosterInfoBtn,
-                          styles.moviePosterInfoBtnBelowPoster,
-                          pressed && { opacity: 0.88 },
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="영화 정보">
-                        <Text style={styles.moviePosterInfoBtnText}>영화 정보</Text>
-                      </Pressable>
-                    ) : null}
                     <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
                   </>
                 ) : extraMovies.length > 0 ? (
@@ -2694,15 +2976,44 @@ export default function MeetingDetailScreen() {
             </View>
             {placeChips.length === 1 ? (
               <>
-                <Text style={styles.infoRow}>{placeChips[0].title}</Text>
-                {placeChips[0].sub ? <Text style={styles.infoRowMuted}>{placeChips[0].sub}</Text> : null}
-                <Pressable
-                  onPress={() => openPlaceVoteDetailWeb(placeChips[0])}
-                  style={({ pressed }) => [styles.placeNaverDetailBtn, pressed && { opacity: 0.88 }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="상세 정보">
-                  <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
-                </Pressable>
+                {(() => {
+                  const chip = placeChips[0];
+                  const thumb = placeThumbByChipId[chip.id] ?? null;
+                  return (
+                    <View style={styles.placeDetailBlock}>
+                      <View style={styles.placeDetailImageWrap}>
+                        {thumb ? (
+                          <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+                        ) : (
+                          <View style={styles.placeVoteImageFallback} />
+                        )}
+                      </View>
+                      <View style={styles.placeDetailHeaderRow}>
+                        <View style={styles.placeDetailHeaderTextCol}>
+                          <Text style={styles.placeVoteTitle} numberOfLines={3}>
+                            {chip.title}
+                          </Text>
+                          {chip.sub ? (
+                            <Text style={styles.placeVoteSub} numberOfLines={4}>
+                              {chip.sub}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Pressable
+                          onPress={() => openPlaceVoteDetailWeb(placeChips[0])}
+                          style={({ pressed }) => [
+                            styles.placeNaverDetailBtn,
+                            styles.placeNaverDetailBtnInline,
+                            pressed && { opacity: 0.88 },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="상세 정보">
+                          <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })()}
                 <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
                 {singlePlaceCoords ? (
                   <View style={styles.confirmedMapPress}>
@@ -3774,7 +4085,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderWidth: 1,
-    borderColor: 'rgba(134, 211, 183, 0.45)',
+    borderColor: 'rgba(31, 42, 68, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3869,8 +4180,8 @@ const styles = StyleSheet.create({
   miniBadgeMuted: { backgroundColor: '#F1F5F9' },
   miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.primary },
   miniBadgeTextMuted: { color: '#64748B' },
-  miniBadgeMale: { backgroundColor: 'rgba(115, 199, 255, 0.18)' },
-  miniBadgeMaleText: { fontSize: 12, fontWeight: '800', color: '#0369A1' },
+  miniBadgeMale: { backgroundColor: 'rgba(31, 42, 68, 0.10)' },
+  miniBadgeMaleText: { fontSize: 12, fontWeight: '800', color: GinitTheme.colors.primary },
   miniBadgeFemale: { backgroundColor: 'rgba(255, 140, 198, 0.16)' },
   miniBadgeFemaleText: { fontSize: 12, fontWeight: '800', color: '#BE185D' },
   miniBadgeUnknown: { backgroundColor: 'rgba(100, 116, 139, 0.14)' },
@@ -3909,7 +4220,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   moviePosterThumbWrapSelected: {
-    borderColor: 'rgba(134, 211, 183, 0.9)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   moviePosterThumbWrapPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
@@ -3996,6 +4307,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2E8F0',
   },
   confirmedMovieTextCol: { flex: 1, minWidth: 0 },
+  movieDetailRow: { marginTop: 2, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  movieDetailPosterLeftWrap: {
+    width: 140,
+    height: 208,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  movieDetailPosterLeft: { width: '100%', height: '100%' },
+  movieDetailInfoCol: { flex: 1, minWidth: 0, paddingTop: 2 },
+  movieDetailTitle: { fontSize: 14, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 20 },
+  movieDetailBody: { marginTop: 6, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 17 },
+  moviePosterInfoBtnInDetailCol: { marginTop: 10 },
+  movieMetaList: { marginTop: 8, gap: 6 },
+  movieMetaRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  movieMetaKey: { width: 86, fontSize: 11, fontWeight: '800', color: GinitTheme.colors.textMuted },
+  movieMetaVal: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 11, fontWeight: '800', color: GinitTheme.colors.text },
+  movieMetaLine: { textAlign: 'left', fontSize: 11, fontWeight: '800', color: GinitTheme.colors.text },
+  movieMetaKeyInline: { fontSize: 11, fontWeight: '800', color: GinitTheme.colors.textMuted },
+  movieMetaValInline: { fontSize: 11, fontWeight: '800', color: GinitTheme.colors.text },
+  movieMetaSep: { fontSize: 11, fontWeight: '800', color: GinitTheme.colors.textMuted },
   confirmedPayNoteSpacer: { marginTop: 12 },
   confirmedMapPress: {
     marginTop: 10,
@@ -4055,7 +4389,7 @@ const styles = StyleSheet.create({
   placeVoteChip: { minWidth: 148, maxWidth: 220 },
   voteCalendarWrap: {
     width: '100%',
-    marginTop: 6,
+    marginTop: 10,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
@@ -4093,8 +4427,8 @@ const styles = StyleSheet.create({
   },
   voteCalendarPagerContent: {
     paddingVertical: 10,
-    paddingHorizontal: 10,
-    gap: 10,
+    paddingHorizontal: 0,
+    gap: 0,
   },
   calendarNavBtn: {
     width: 34,
@@ -4102,7 +4436,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
@@ -4131,15 +4465,14 @@ const styles = StyleSheet.create({
   calendarCellRowEmpty: { paddingVertical: 2, minHeight: 18 },
   calendarCellOut: { opacity: 0.42 },
   calendarCellHas: {
-    backgroundColor: 'rgba(0, 82, 204, 0.07)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.18)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
   },
-  /** 날짜 제안(`VoteCandidatesForm`) 달력 `calendarCellHas` 톤 + 장소 후보 선택과 동일한 민트 강조 */
   calendarCellSelected: {
     borderWidth: 1,
-    borderColor: 'rgba(134, 211, 183, 0.9)',
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   calendarCellPressed: { opacity: 0.9 },
   calendarCellDay: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 18 },
@@ -4166,7 +4499,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   placeVoteCardSelected: {
-    borderColor: 'rgba(134, 211, 183, 0.9)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   placeVoteImageWrap: {
@@ -4213,6 +4546,19 @@ const styles = StyleSheet.create({
   },
   placeVoteTitle: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
   placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
+  placeDetailBlock: { marginTop: 2 },
+  placeDetailHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  placeDetailHeaderTextCol: { flex: 1, minWidth: 0 },
+  placeDetailImageWrap: {
+    width: '100%',
+    height: 160,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
   placeVoteDetailLink: {
     marginTop: 8,
     alignSelf: 'stretch',
@@ -4239,6 +4585,7 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
   },
+  placeNaverDetailBtnInline: { marginTop: 0 },
   placeNaverDetailBtnText: {
     fontSize: 12,
     fontWeight: '900',
@@ -4273,7 +4620,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   dateChipSelected: {
-    borderColor: 'rgba(134, 211, 183, 0.9)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   dateChipPressed: { opacity: 0.9 },
@@ -4470,7 +4817,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   avatarCircleMale: {
-    borderColor: 'rgba(115, 199, 255, 0.95)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
   },
   avatarCircleFemale: {
     borderColor: 'rgba(255, 140, 198, 0.95)',

@@ -5,6 +5,7 @@ import { getFirestore, initializeFirestore, type Firestore } from 'firebase/fire
 import { Platform } from 'react-native';
 
 import { publicEnv } from '@/src/config/public-env';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 
 const firebaseConfig = {
   apiKey: publicEnv.firebaseApiKey,
@@ -18,6 +19,7 @@ const firebaseConfig = {
 let app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 let firestore: Firestore | undefined;
+let didLogFirebaseClientSummary = false;
 
 /**
  * Firebase JS SDK 초기화 (Expo 권장 경로).
@@ -32,9 +34,27 @@ export function getFirebaseApp(): FirebaseApp {
   }
   if (!getApps().length) {
     app = initializeApp(firebaseConfig);
+    if (!didLogFirebaseClientSummary) {
+      didLogFirebaseClientSummary = true;
+      ginitNotifyDbg('FirebaseClient', 'js_sdk_config_summary', {
+        projectId: firebaseConfig.projectId || '(empty)',
+        authDomain: firebaseConfig.authDomain ? 'set' : 'empty',
+        hasApiKey: Boolean(firebaseConfig.apiKey?.trim()),
+        apiKeyCharLen: firebaseConfig.apiKey?.length ?? 0,
+        hasAppId: Boolean(firebaseConfig.appId?.trim()),
+        messagingSenderId: firebaseConfig.messagingSenderId ? 'set' : 'empty',
+        note: '클라이언트용 공개 설정입니다. 서버 시크릿(FIREBASE_SERVICE_ACCOUNT_JSON)과 별개입니다.',
+      });
+    }
     return app;
   }
   app = getApps()[0]!;
+  if (!didLogFirebaseClientSummary) {
+    didLogFirebaseClientSummary = true;
+    ginitNotifyDbg('FirebaseClient', 'js_sdk_reused_existing_app', {
+      projectId: firebaseConfig.projectId || '(empty)',
+    });
+  }
   return app;
 }
 

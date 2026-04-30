@@ -243,10 +243,12 @@ function VoteCandidateCard({
   reduceHeavyEffects,
   children,
   outerStyle,
+  wrapStyleOverride,
 }: {
   reduceHeavyEffects: boolean;
   children: ReactNode;
   outerStyle?: StyleProp<ViewStyle>;
+  wrapStyleOverride?: StyleProp<ViewStyle>;
 }) {
   const flat = StyleSheet.flatten(outerStyle) as ViewStyle | undefined;
   const {
@@ -264,6 +266,7 @@ function VoteCandidateCard({
 
   const wrapStyle: StyleProp<ViewStyle> = [
     styles.glassCardWrap,
+    wrapStyleOverride,
     (margin != null ||
       marginTop != null ||
       marginBottom != null ||
@@ -602,12 +605,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [voiceTarget, setVoiceTarget] = useState<'scheduleIdea' | 'placeQuery' | null>(null);
   const [voiceRecognizing, setVoiceRecognizing] = useState(false);
 
-  useSpeechRecognitionEvent('start', () => setVoiceRecognizing(true));
+  useSpeechRecognitionEvent('start', () => {
+    if (!voiceTarget) return;
+    setVoiceRecognizing(true);
+  });
   useSpeechRecognitionEvent('end', () => {
+    if (!voiceTarget) return;
     setVoiceRecognizing(false);
     setVoiceTarget(null);
   });
   useSpeechRecognitionEvent('error', (event) => {
+    if (!voiceTarget) return;
     setVoiceRecognizing(false);
     setVoiceTarget(null);
     Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
@@ -615,6 +623,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   useSpeechRecognitionEvent('result', (event) => {
     const t = String(event?.results?.[0]?.transcript ?? '').trim();
     if (!t) return;
+    if (!voiceTarget) return;
     if (voiceTarget === 'scheduleIdea') setNlpScheduleInput(t);
     if (voiceTarget === 'placeQuery') setPlaceQuery(t);
     if (event?.isFinal) {
@@ -2623,11 +2632,15 @@ export default function CreateDetailsScreen() {
     if (k === 'description') setVoiceDescriptionRecognizing(true);
   });
   useSpeechRecognitionEvent('end', () => {
+    const k = voiceCreateTargetRef.current;
+    if (!k) return;
     setVoiceTitleRecognizing(false);
     setVoiceDescriptionRecognizing(false);
     voiceCreateTargetRef.current = null;
   });
   useSpeechRecognitionEvent('error', (event) => {
+    const k = voiceCreateTargetRef.current;
+    if (!k) return;
     setVoiceTitleRecognizing(false);
     setVoiceDescriptionRecognizing(false);
     voiceCreateTargetRef.current = null;
@@ -2637,6 +2650,7 @@ export default function CreateDetailsScreen() {
     const t = String(event?.results?.[0]?.transcript ?? '').trim();
     if (!t) return;
     const k = voiceCreateTargetRef.current;
+    if (!k) return;
     if (k === 'title') setTitle(t);
     if (k === 'description') setDescription(t);
     if (event?.isFinal) {
@@ -3785,7 +3799,8 @@ export default function CreateDetailsScreen() {
                           styles.wizardGlassCard,
                           styles.finalRegistrationGlass,
                           styles.detailStepDescriptionCardOuter,
-                        ]}>
+                        ]}
+                        wrapStyleOverride={styles.flatWrapNoShadow}>
                         <View style={styles.detailDescriptionInputShell}>
                           <TextInput
                             ref={detailDescriptionInputRef}
@@ -3897,20 +3912,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(251, 191, 36, 0.22)',
+    backgroundColor: 'rgba(244, 200, 74, 0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.45)',
+    borderColor: 'rgba(244, 200, 74, 0.55)',
     gap: 8,
   },
   snsGateTitle: {
     fontSize: 14,
     fontWeight: '900',
-    color: '#92400e',
+    color: GinitTheme.colors.primary,
   },
   snsGateBody: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#78350f',
+    color: GinitTheme.colors.textSub,
     lineHeight: 19,
   },
   snsGateBtn: {
@@ -3924,7 +3939,7 @@ const styles = StyleSheet.create({
   snsGateBtnLabel: {
     fontSize: 13,
     fontWeight: '900',
-    color: '#fff',
+    color: GinitTheme.colors.textOnDark,
   },
   backLink: {
     fontSize: 16,
@@ -4008,9 +4023,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0, 82, 204, 0.08)',
+    backgroundColor: 'rgba(31, 42, 68, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.16)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
   },
   voiceBtnPressed: {
     opacity: 0.85,
@@ -4118,7 +4133,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: GinitTheme.colors.primarySoft,
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.18)',
+    borderColor: GinitTheme.colors.border,
   },
   aiPreviewPlusText: {
     fontSize: 12,
@@ -4133,7 +4148,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.72)',
+    borderColor: GinitTheme.fixedGlassCard.border,
     ...GinitTheme.shadow.card,
   },
   aiQuickInitCtaBg: {
@@ -4142,7 +4157,7 @@ const styles = StyleSheet.create({
   aiQuickInitCtaLabel: {
     fontSize: 16,
     fontWeight: '900',
-    color: '#0F172A',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
   aiQuickInitCtaPressed: {
@@ -4156,9 +4171,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 999,
-    backgroundColor: 'rgba(0, 82, 204, 0.38)',
+    backgroundColor: 'rgba(31, 42, 68, 0.22)',
     borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.55)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
   },
   nlpChipPressed: {
     opacity: 0.88,
@@ -4167,7 +4182,7 @@ const styles = StyleSheet.create({
   nlpChipText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#F8FAFC',
+    color: GinitTheme.colors.textOnDark,
     letterSpacing: -0.2,
   },
   sectionGap: {
@@ -4177,19 +4192,26 @@ const styles = StyleSheet.create({
   glassCardWrap: {
     marginBottom: 12,
     borderRadius: 24,
-    backgroundColor: GinitTheme.colors.surface,
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     shadowColor: GinitTheme.shadow.card.shadowColor,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 1,
     shadowRadius: 24,
     elevation: 14,
   },
+  flatWrapNoShadow: {
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
   glassCardInner: {
     borderRadius: 24,
     padding: 14,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     borderWidth: 1.5,
-    borderColor: GinitTheme.colors.border,
+    borderColor: 'rgba(31, 42, 68, 0.18)',
     overflow: 'hidden',
     position: 'relative',
   },
@@ -4204,7 +4226,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(15, 23, 42, 0.67)',
+    backgroundColor: GinitTheme.glass.overlayDark,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
@@ -4213,7 +4235,7 @@ const styles = StyleSheet.create({
     paddingRight: 0,
   },
   deleteIconText: {
-    color: '#FFFFFF',
+    color: GinitTheme.colors.textOnDark,
     fontSize: 14,
     fontWeight: '700',
     lineHeight: 16,
@@ -4232,14 +4254,14 @@ const styles = StyleSheet.create({
   },
   /** 음각 필드 래퍼 */
   fieldRecess: {
-    backgroundColor: 'rgba(255, 255, 255, 0.72)', // 흰색 반투명 (Line 229)
-    borderColor: 'rgba(0, 0, 0, 0.93)', // 아주 연한 테두리 추가
+    backgroundColor: 'rgba(31, 42, 68, 0.04)', // 네이비 틴트
+    borderColor: GinitTheme.colors.borderStrong,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
   placeFieldRecess: {
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     borderColor: GinitTheme.colors.border,
     borderWidth: 1,
     borderRadius: 12,
@@ -4258,14 +4280,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
   placeSuggestChipPressed: {
     opacity: 0.9,
-    backgroundColor: GinitTheme.colors.primarySoft,
-    borderColor: 'rgba(134, 211, 183, 0.75)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
   },
   placeSuggestChipText: {
     fontSize: 12,
@@ -4308,7 +4330,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
@@ -4362,9 +4384,9 @@ const styles = StyleSheet.create({
     opacity: 0.42,
   },
   calendarCellHas: {
-    backgroundColor: 'rgba(0, 82, 204, 0.07)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.18)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
   },
   calendarCellPressed: {
     opacity: 0.9,
@@ -4464,7 +4486,7 @@ const styles = StyleSheet.create({
   placeResultCard: {
     width: '100%',
     borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: GinitTheme.fixedGlassCard.fill,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
     paddingVertical: 10,
@@ -4488,7 +4510,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   placeResultImageCardSelected: {
-    borderColor: 'rgba(134, 211, 183, 0.9)',
+    borderColor: 'rgba(31, 42, 68, 0.70)',
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   placeResultImageWrap: {
@@ -4633,7 +4655,7 @@ const styles = StyleSheet.create({
   addCandidateBtn: {
     alignSelf: 'stretch',
     marginBottom: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
     borderRadius: 16,
@@ -4652,8 +4674,8 @@ const styles = StyleSheet.create({
   },
   addCandidateBtnPressed: {
     opacity: 0.95,
-    backgroundColor: GinitTheme.colors.primarySoft,
-    borderColor: 'rgba(134, 211, 183, 0.75)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
   },
   wizardScrollPad: {
     paddingBottom: 120,
@@ -4702,9 +4724,9 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
   },
   catTileActive: {
-    borderColor: 'rgba(134, 211, 183, 0.8)',
-    backgroundColor: 'rgba(134, 211, 183, 0.16)',
-    shadowColor: 'rgba(134, 211, 183, 0.55)',
+    borderColor: 'rgba(31, 42, 68, 0.55)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    shadowColor: 'rgba(31, 42, 68, 0.28)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.28,
     shadowRadius: 10,
@@ -4739,13 +4761,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
   },
   segmentHalfOnPrivate: {
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    backgroundColor: GinitTheme.colors.primarySoft,
   },
   segmentHalfOnPublic: {
-    backgroundColor: 'rgba(134, 211, 183, 0.14)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   segmentTitle: {
     fontSize: 13,
@@ -4776,20 +4798,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: 'rgba(251, 191, 36, 0.12)',
+    backgroundColor: 'rgba(244, 200, 74, 0.18)',
     borderWidth: 1,
-    borderColor: 'rgba(251, 191, 36, 0.35)',
+    borderColor: 'rgba(244, 200, 74, 0.55)',
   },
   warnTitle: {
     fontSize: 14,
     fontWeight: '900',
-    color: 'rgba(254, 243, 199, 0.98)',
+    color: GinitTheme.colors.primary,
   },
   warnBody: {
     marginTop: 4,
     fontSize: 12,
     fontWeight: '600',
-    color: 'rgba(253, 230, 138, 0.85)',
+    color: GinitTheme.colors.textSub,
     lineHeight: 18,
   },
   scheduleStepHeader: {
@@ -4855,7 +4877,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.72)',
+    borderColor: 'rgba(31, 42, 68, 0.22)',
     shadowColor: GinitTheme.glass.shadow,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,
@@ -4880,7 +4902,7 @@ const styles = StyleSheet.create({
   wizardDoneHint: {
     fontSize: 13,
     fontWeight: '700',
-    color: 'rgba(147, 197, 253, 0.95)',
+    color: 'rgba(31, 42, 68, 0.85)',
     marginTop: 10,
     marginBottom: 4,
   },
@@ -4908,10 +4930,10 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 12,
     borderRadius: 999,
-    backgroundColor: 'rgba(134, 211, 183, 0.18)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(134, 211, 183, 0.55)',
-    shadowColor: 'rgba(134, 211, 183, 0.40)',
+    borderColor: 'rgba(31, 42, 68, 0.45)',
+    shadowColor: 'rgba(31, 42, 68, 0.22)',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 10,
@@ -4930,7 +4952,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
+    borderColor: 'rgba(31, 42, 68, 0.18)',
   },
   /** 상세 소개 입력과 하단 등록 CTA 사이 여백 */
   detailStepDescriptionCardOuter: {
@@ -4951,12 +4973,12 @@ const styles = StyleSheet.create({
   },
   finalDescriptionInput: {
     marginTop: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    borderRadius: 0,
-    borderWidth: 0,
+    backgroundColor: GinitTheme.glassModal.inputFill,
+    borderRadius: 14,
+    borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    paddingHorizontal: 7,
-    paddingVertical: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 16,
     fontWeight: '600',
     color: GinitTheme.colors.text,
@@ -4964,12 +4986,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   finalDescriptionInputFocused: {
-    borderColor: 'rgba(134, 211, 183, 0.75)',
-    shadowColor: 'rgba(134, 211, 183, 0.55)',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    elevation: 6,
+    borderColor: GinitTheme.colors.primary,
   },
   detailFinalFloatingBtn: {
     position: 'absolute',

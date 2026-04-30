@@ -5,7 +5,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 const TRUST_BLUE = GinitTheme.colors.primary;
 /** 영화 리스트 포스터 고정 너비 (80~100px 명세 중간값) */
 export const MOVIE_LIST_POSTER_WIDTH = 92;
-const ENERGETIC_ORANGE = GinitTheme.colors.warning;
+const ENERGETIC_ORANGE = GinitTheme.colors.accent2;
 const INPUT_PLACEHOLDER = GinitTheme.glassModal.placeholder;
 
 export const wizardSpecialtyStyles = StyleSheet.create({
@@ -37,7 +37,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: GinitTheme.fixedGlassCard.fill,
     overflow: 'hidden',
   },
   resultRow: {
@@ -96,7 +96,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: GinitTheme.fixedGlassCard.fill,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
@@ -130,10 +130,10 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 6,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
   },
   segmentThirdOn: {
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    backgroundColor: GinitTheme.colors.primarySoft,
   },
   segmentTitle: {
     fontSize: 13,
@@ -157,7 +157,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: GinitTheme.fixedGlassCard.fill,
     overflow: 'hidden',
     paddingHorizontal: 12,
     paddingTop: 8,
@@ -182,12 +182,12 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(255, 255, 255, 0.86)',
+    backgroundColor: GinitTheme.colors.surfaceStrong,
     overflow: 'hidden',
   },
   movieListRowWrap: {
     borderRadius: 16,
-    backgroundColor: Platform.OS === 'android' ? '#FFFFFF' : 'transparent',
+    backgroundColor: Platform.OS === 'android' ? GinitTheme.colors.surfaceStrong : 'transparent',
     shadowColor: 'rgba(15, 23, 42, 0.14)',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 1,
@@ -218,7 +218,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: GinitTheme.fixedGlassCard.fill,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
@@ -242,8 +242,8 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     zIndex: 1,
   },
   movieListRowPressedOrange: {
-    borderColor: 'rgba(255, 138, 0, 0.75)',
-    backgroundColor: 'rgba(255, 138, 0, 0.1)',
+    borderColor: 'rgba(134, 211, 183, 0.75)',
+    backgroundColor: 'rgba(134, 211, 183, 0.12)',
   },
   movieRankBadge: {
     position: 'absolute',
@@ -263,7 +263,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieRankBadgeText: {
     fontSize: 13,
     fontWeight: '900',
-    color: '#FFFFFF',
+    color: GinitTheme.colors.textOnDark,
   },
   movieRightCol: {
     flex: 1,
@@ -323,9 +323,9 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: 'rgba(0, 82, 204, 0.28)',
+    backgroundColor: 'rgba(134, 211, 183, 0.22)',
     borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.55)',
+    borderColor: 'rgba(134, 211, 183, 0.55)',
   },
   movieRatingBadgeText: {
     fontSize: 11,
@@ -345,15 +345,15 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.45)',
-    backgroundColor: 'rgba(0, 82, 204, 0.18)',
+    borderColor: 'rgba(134, 211, 183, 0.55)',
+    backgroundColor: 'rgba(134, 211, 183, 0.18)',
   },
   movieCompactPoster: {
     width: 44,
     height: 66,
     borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'rgba(15, 23, 42, 0.20)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
   },
@@ -376,9 +376,9 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(0, 82, 204, 0.35)',
+    backgroundColor: 'rgba(134, 211, 183, 0.22)',
     borderWidth: 1,
-    borderColor: 'rgba(147, 197, 253, 0.5)',
+    borderColor: 'rgba(134, 211, 183, 0.55)',
   },
   movieCompactBadgeText: {
     fontSize: 11,
@@ -402,8 +402,8 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingRight: 40,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.55)',
-    backgroundColor: 'rgba(0, 82, 204, 0.16)',
+    borderColor: 'rgba(134, 211, 183, 0.55)',
+    backgroundColor: 'rgba(134, 211, 183, 0.16)',
     overflow: 'hidden',
   },
   movieConfirmedRemoveHit: {
@@ -416,7 +416,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    backgroundColor: 'rgba(255, 255, 255, 0.90)',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
@@ -433,7 +433,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieAddOutlineBtnPressed: {
     opacity: 0.88,
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
+    backgroundColor: 'rgba(134, 211, 183, 0.14)',
   },
   movieAddOutlineBtnLabel: {
     fontSize: 15,
@@ -500,7 +500,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backgroundColor: GinitTheme.fixedGlassCard.fill,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
   },
@@ -525,7 +525,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    backgroundColor: GinitTheme.glassModal.inputFill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
   },

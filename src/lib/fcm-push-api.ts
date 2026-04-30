@@ -1,3 +1,4 @@
+import { hintForFcmEdgeInvoke } from '@/src/lib/firebase-credential-hints';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { supabase } from '@/src/lib/supabase';
 
@@ -62,6 +63,14 @@ export async function sendFcmPushToUsersWithResult(params: FcmPushSendParams): P
         : anyErr?.context?.body != null
           ? JSON.stringify(anyErr.context.body)
           : '';
+    const snippet = bodyText.slice(0, 400);
+    const reissueHint = hintForFcmEdgeInvoke(status, snippet);
+    ginitNotifyDbg('fcm-push-api', 'invoke_http_error', {
+      status,
+      reissueHint,
+      message: error.message,
+      bodySnippet: snippet,
+    });
     const suffix = status ? ` (status ${status})` : '';
     throw new Error(`${error.message}${suffix}${bodyText ? `: ${bodyText.slice(0, 500)}` : ''}`);
   }
