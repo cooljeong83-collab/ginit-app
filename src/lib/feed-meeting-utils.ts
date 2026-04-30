@@ -121,7 +121,7 @@ export function meetingMatchesCategoryFilter(
 export function listSortModeLabel(mode: MeetingListSortMode): string {
   switch (mode) {
     case 'distance':
-      return '거리순';
+      return '가까운 순';
     case 'soon':
       return '임박순';
     default:

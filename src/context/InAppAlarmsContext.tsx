@@ -455,6 +455,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       const frid = String(fr.id ?? '').trim();
       if (!frid) continue;
       if (readState.friendRequestDismissedIds[frid]) continue;
+      if (readState.friendRequestHeadsUpSentIds?.[frid]) continue;
       if (friendHeadsUpNotifiedIdsRef.current.has(frid)) continue;
       const createdMs = fr.created_at ? Date.parse(fr.created_at) : 0;
       if (createdMs && !isRecentEnoughForHeadsUp(createdMs)) continue;
@@ -468,12 +469,24 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         meetingTitle: title,
         preview: '친구 요청이 왔어요. 눌러서 확인해 보세요.',
       });
+      setReadState((p) => ({
+        ...p,
+        friendRequestHeadsUpSentIds: { ...(p.friendRequestHeadsUpSentIds ?? {}), [frid]: true },
+      }));
     }
     const cur = new Set(friendInbox.map((r) => String(r.id ?? '').trim()).filter(Boolean));
     for (const id of [...friendHeadsUpNotifiedIdsRef.current]) {
       if (!cur.has(id)) friendHeadsUpNotifiedIdsRef.current.delete(id);
     }
-  }, [persistReady, userId, headsUpReady, friendInbox, readState.friendRequestDismissedIds, friendRequesterNickById]);
+  }, [
+    persistReady,
+    userId,
+    headsUpReady,
+    friendInbox,
+    readState.friendRequestDismissedIds,
+    readState.friendRequestHeadsUpSentIds,
+    friendRequesterNickById,
+  ]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;

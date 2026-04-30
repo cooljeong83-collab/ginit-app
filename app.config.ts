@@ -187,9 +187,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           },
           android: {
             extraMavenRepos: ['https://repository.map.naver.com/archive/maven'],
+            /**
+             * Android 16KB page size 호환:
+             * - NDK r28+ : 16KB ELF alignment 기본
+             * - AGP 8.5.1+ : 16KB zip alignment 처리
+             */
+            ndkVersion: '28.0.12433566',
+            androidGradlePluginVersion: '8.6.0',
           },
         },
       ],
+      ['./plugins/withAndroidNdkVersionExt.js', { ndkVersion: '28.0.12433566' }],
       /**
        * Android 상태바·알림: 단색(흰 실루엣) + 투명 배경 PNG → OS가 밝기에 맞춰 틴트(밝은 배경=어두운 아이콘 등).
        * `color` 미지정 → 고정 브랜드 원 배경 없이 시스템 기본 처리.

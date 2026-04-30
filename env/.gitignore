@@ -4,4 +4,3 @@ GoogleService-Info.plist
 .env
 .env.*
 !.env.example
-ginit-1b7b3-62d58aec969e.json

@@ -76,9 +76,11 @@
             ]
           },
           "android": {
+            "androidGradlePluginVersion": "8.6.0",
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
+            "ndkVersion": "28.0.12433566",
             "packagingOptions": {
               "pickFirst": ["**/libc++_shared.so"]
             }

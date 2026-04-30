@@ -32,6 +32,8 @@ export type InAppAlarmReadState = {
   meetingAckFingerprint: Record<string, string>;
   /** 수락/거절 전에 알람 패널에서 확인한 친구 요청(friendships.id) */
   friendRequestDismissedIds: Record<string, true>;
+  /** 친구 요청 heads-up(로컬/원격)을 이미 보낸 friendship id — 앱 재시작 중복 방지 */
+  friendRequestHeadsUpSentIds: Record<string, true>;
   /** 내가 보낸 요청이 상대에 의해 수락된 알람을 새 소식에서 닫은 friendship id */
   friendAcceptedDismissedIds: Record<string, true>;
 };
@@ -41,6 +43,7 @@ export function defaultInAppAlarmReadState(): InAppAlarmReadState {
     chatReadMessageId: {},
     meetingAckFingerprint: {},
     friendRequestDismissedIds: {},
+    friendRequestHeadsUpSentIds: {},
     friendAcceptedDismissedIds: {},
   };
 }

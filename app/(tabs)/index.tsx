@@ -355,8 +355,8 @@ export default function FeedScreen() {
   ]);
 
   const sortedFilteredMeetings = useMemo(() => {
-    return sortMeetingsForFeed(filteredMeetings, listSortMode, null);
-  }, [filteredMeetings, listSortMode]);
+    return sortMeetingsForFeed(filteredMeetings, listSortMode, feedCoords);
+  }, [filteredMeetings, listSortMode, feedCoords]);
 
   const exploreFeedMeetings = useMemo(
     () => sortedFilteredMeetings.filter((m) => m.isPublic !== false),
@@ -395,8 +395,8 @@ export default function FeedScreen() {
   }, [myTabsMeetings, userId, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
 
   const sortedJoinedMeetings = useMemo(
-    () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, null),
-    [joinedFilteredMeetings, listSortMode],
+    () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, feedCoords),
+    [joinedFilteredMeetings, listSortMode, feedCoords],
   );
 
   const hostedFilteredMeetings = useMemo(() => {
@@ -1089,7 +1089,7 @@ export default function FeedScreen() {
 
               <ScrollView style={styles.feedSettingsScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 <Text style={styles.modalSectionTitle}>정렬</Text>
-                {(['latest', 'soon'] as const).map((mode) => {
+                {(['distance', 'latest', 'soon'] as const).map((mode) => {
                   const selected = listSortMode === mode;
                   const label = listSortModeLabel(mode);
                   return (

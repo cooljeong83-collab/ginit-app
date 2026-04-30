@@ -1,5 +1,4 @@
 import * as Device from 'expo-device';
-import Constants from 'expo-constants';
 import { usePathname, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
@@ -7,12 +6,10 @@ import * as Notifications from 'expo-notifications';
 
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
-import { saveUserExpoPushToken } from '@/src/lib/user-expo-push-token';
 
 Notifications.setNotificationHandler({
   handleNotification: async (n) => {
@@ -96,26 +93,6 @@ export function PushNotificationBootstrap() {
       }
 
       if (!Device.isDevice) return;
-
-      const projectId =
-        (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ??
-        (Constants.easConfig as { projectId?: string } | undefined)?.projectId;
-
-      try {
-        const tokenRes = projectId
-          ? await Notifications.getExpoPushTokenAsync({ projectId })
-          : await Notifications.getExpoPushTokenAsync();
-        const token = tokenRes.data?.trim();
-        if (token) await saveUserExpoPushToken(userId, token);
-      } catch (e) {
-        ginitNotifyDbg('PushBootstrap', 'expo_push_token_failed', {
-          message: e instanceof Error ? e.message : String(e),
-          hasProjectId: Boolean(projectId),
-        });
-        if (__DEV__) {
-          console.warn('[PushBootstrap] Expo Push 토큰 실패 — env에 EAS_PROJECT_ID(또는 EXPO_PUBLIC_EAS_PROJECT_ID) 확인', e);
-        }
-      }
     })();
   }, [userId]);
 

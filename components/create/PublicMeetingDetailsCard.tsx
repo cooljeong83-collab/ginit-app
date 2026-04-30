@@ -34,11 +34,10 @@ function clampInt(n: number, min: number, max: number): number {
  * `reduceHeavyEffects`(스택 전환 등)일 때는 iOS에서도 shadow 생략.
  */
 function blockFocusStyle(active: boolean, reduceHeavyEffects: boolean) {
-  if (!active) return null;
-  // 플랫 스타일: 포커스 시에도 그림자/elevation 없이 보더만 바꿉니다.
-  // (reduceHeavyEffects 여부와 무관하게 동일 동작)
+  // 상세 설정(선택): 각 섹션이 “박스”처럼 보이지 않도록 포커스 링을 사용하지 않습니다.
+  void active;
   void reduceHeavyEffects;
-  return { borderColor: FOCUS_RING };
+  return null;
 }
 
 function Segmented({
@@ -171,7 +170,7 @@ export function PublicMeetingDetailsCard({
         </View>
 
         <View style={styles.sectionSeparator} />
-        <View style={[styles.section, blockFocusStyle(focused === 'gender', reduceHeavyEffects)]}>
+        <View style={styles.section}>
           <Text style={styles.label}>성별 비율</Text>
           <Segmented
             value={value.genderRatio}
@@ -358,12 +357,11 @@ const styles = StyleSheet.create({
   section: {
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    borderWidth: 0,
   },
   sectionSeparator: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    backgroundColor: '#FFFFFF',
   },
   label: {
     fontSize: 13,
@@ -386,7 +384,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: FIELD_FILL,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 9,
     paddingHorizontal: 12,
     overflow: 'hidden',
@@ -409,7 +407,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
     overflow: 'hidden',
-    backgroundColor: FIELD_FILL,
+    backgroundColor: '#FFFFFF',
   },
   segmentBtn: {
     flex: 1,

@@ -505,7 +505,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
   },
   movieResultImageCardSelected: {
-    borderColor: 'rgba(134, 211, 183, 0.9)',
+    borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   movieResultProposalCardWrap: {

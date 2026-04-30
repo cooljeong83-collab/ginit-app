@@ -5,7 +5,7 @@
  * 단계 번호: 4(일정)→5(장소)→6(상세). 영화도 동일(선행 장소 단계 없음 — 장소는 `placesStep` 한 번만).
  */
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,6 +19,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -43,6 +44,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
+
 import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { IntensityPicker } from '@/components/create/IntensityPicker';
@@ -52,8 +55,8 @@ import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetai
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
-import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { GinitStyles } from '@/constants/GinitStyles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
@@ -76,9 +79,7 @@ import {
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   consumePendingMeetingPlace,
-  consumePendingVoteCandidates,
   consumePendingVotePlaceRow,
-  setPendingVoteCandidates,
 } from '@/src/lib/meeting-place-bridge';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
@@ -2206,7 +2207,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <DateTimePicker
           value={timePick.draft}
           mode="time"
-          display="clock"
+          display="spinner"
+          {...({ accentColor: GinitTheme.colors.primary } as any)}
           onChange={(event, d) => {
             const t = (event as unknown as { type?: string } | null)?.type ?? '';
             if (t === 'dismissed') {
@@ -2423,6 +2425,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           mode={picker.field === 'startDate' ? 'date' : 'time'}
           display="spinner"
           minimumDate={iosPickerMinimumDate}
+          {...({ accentColor: GinitTheme.colors.primary } as any)}
           onChange={(event: DateTimePickerEvent, date) => {
             const { rowId, field } = picker;
             setPicker(null);
@@ -2822,11 +2825,6 @@ export default function CreateDetailsScreen() {
       if (mp?.placeName?.trim()) {
         setPlaceSearchSeed(mp.placeName.trim());
       }
-      const v = consumePendingVoteCandidates();
-      if (v) {
-        setVotePayload(v);
-        setVoteHydrateKey((k) => k + 1);
-      }
     }, []),
   );
 
@@ -3136,10 +3134,6 @@ export default function CreateDetailsScreen() {
   }, [detailStep]);
 
   const handleBack = useCallback(() => {
-    const r = (placesFormRef.current ?? scheduleFormRef.current)?.buildPayload();
-    if (r?.ok) {
-      setPendingVoteCandidates(r.payload);
-    }
     router.back();
   }, [router]);
 
@@ -3387,6 +3381,7 @@ export default function CreateDetailsScreen() {
               contentContainerStyle={[
                 styles.scrollContent,
                 styles.wizardScrollPad,
+                // 상세 단계: 하단 floating CTA가 마지막 카드를 가리지 않도록 추가 여백 확보
                 currentStep === detailStep && { paddingBottom: 132 + insets.bottom },
               ]}>
               <View collapsable={false}>
@@ -3434,18 +3429,27 @@ export default function CreateDetailsScreen() {
                 </View>
 
                 <Text style={[styles.wizardFieldLabel, { marginTop: 18 }]}>공개 / 비공개</Text>
-                <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
+                <VoteCandidateCard
+                  reduceHeavyEffects={reduceHeavyEffectsUI}
+                  outerStyle={styles.wizardGlassCard}
+                  wrapStyleOverride={styles.flatWrapNoShadow}>
                   <View style={styles.segmentRow}>
                     <Pressable
                       onPress={() => setIsPublicMeeting(false)}
-                      style={[styles.segmentHalf, !isPublicMeeting && styles.segmentHalfOnPrivate]}
+                      style={[
+                        styles.segmentHalf,
+                        !isPublicMeeting && styles.segmentHalfOn,
+                      ]}
                       accessibilityRole="button">
                       <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
                       <Text style={styles.segmentSub}>(초대만)</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => setIsPublicMeeting(true)}
-                      style={[styles.segmentHalf, isPublicMeeting && styles.segmentHalfOnPublic]}
+                      style={[
+                        styles.segmentHalf,
+                        isPublicMeeting && styles.segmentHalfOn,
+                      ]}
                       accessibilityRole="button">
                       <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
                       <Text style={styles.segmentSub}>(지역 검색)</Text>
@@ -3745,7 +3749,7 @@ export default function CreateDetailsScreen() {
                           bare
                           wizardSegment="places"
                           scheduleListOnly={true}
-                          placesListOnly={currentStep >= detailStep}
+                          placesListOnly={false}
                           onPlacesBlockLayout={onPlacesBlockLayout}
                         />
                       </View>
@@ -4581,6 +4585,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
     marginTop: 8,
+    alignSelf: 'stretch',
   },
   placePickedName: {
     flex: 1,
@@ -4722,15 +4727,15 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.colors.surfaceStrong,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
+    // 모임 성격 타일: 플랫폼 공통으로 평면(무그림자) 유지
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   catTileActive: {
     borderColor: 'rgba(31, 42, 68, 0.55)',
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    shadowColor: 'rgba(31, 42, 68, 0.28)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    elevation: 6,
   },
   catTilePressed: {
     opacity: 0.9,
@@ -4751,23 +4756,21 @@ const styles = StyleSheet.create({
   },
   segmentRow: {
     flexDirection: 'row',
-    borderRadius: 14,
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
+    backgroundColor: '#FFFFFF',
   },
   segmentHalf: {
     flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
-    backgroundColor: GinitTheme.glassModal.inputFill,
+    backgroundColor: '#FFFFFF',
   },
-  segmentHalfOnPrivate: {
-    backgroundColor: GinitTheme.colors.primarySoft,
-  },
-  segmentHalfOnPublic: {
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+  segmentHalfOn: {
+    backgroundColor: 'rgba(31, 42, 68, 0.06)',
   },
   segmentTitle: {
     fontSize: 13,

@@ -14,6 +14,7 @@ type StoredShape = {
   chatReadMessageId?: Record<string, string>;
   meetingAckFingerprint?: Record<string, string>;
   friendRequestDismissedIds?: Record<string, true>;
+  friendRequestHeadsUpSentIds?: Record<string, true>;
   friendAcceptedDismissedIds?: Record<string, true>;
 };
 
@@ -45,6 +46,10 @@ export async function loadInAppAlarmReadState(phoneUserId: string): Promise<InAp
         friendRequestDismissedIds:
           parsed.friendRequestDismissedIds && typeof parsed.friendRequestDismissedIds === 'object'
             ? parsed.friendRequestDismissedIds
+            : {},
+        friendRequestHeadsUpSentIds:
+          parsed.friendRequestHeadsUpSentIds && typeof parsed.friendRequestHeadsUpSentIds === 'object'
+            ? parsed.friendRequestHeadsUpSentIds
             : {},
         friendAcceptedDismissedIds:
           parsed.friendAcceptedDismissedIds && typeof parsed.friendAcceptedDismissedIds === 'object'

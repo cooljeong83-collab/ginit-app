@@ -1,6 +1,6 @@
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
-import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
+import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps 
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -25,7 +26,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
-import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitStyles } from '@/constants/GinitStyles';
@@ -81,18 +81,18 @@ import {
   updateParticipantVotes,
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
-import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
+import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
 import {
   resolveNaverMovieSearchWebUrl,
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
   sanitizeNaverLocalPlaceLink,
 } from '@/src/lib/naver-local-search';
+import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
-import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -836,16 +836,18 @@ export default function MeetingDetailScreen() {
       salesInten: '매출 증감액',
       salesChange: '매출 증감률',
       salesAcc: '누적 매출',
-      audiCnt: '일일관객',
+      audiCnt: '일일 관객',
       audiInten: '관객 증감',
       audiChange: '관객 증감률',
-      audiAcc: '누적 관',
+      audiAcc: '누적 관객',
       scrnCnt: '스크린수',
       showCnt: '상영횟수',
       // fallback(기존 저장분)
       rating: '예매율',
       kobisRank: 'KOBIS 순위',
     };
+
+    const allow = new Set(['openDt', 'rank', 'audiCnt', 'audiAcc', 'rating']);
 
     const order = [
       'openDt',
@@ -926,7 +928,7 @@ export default function MeetingDetailScreen() {
         key: label[k] ?? k,
         value: fmt(k, v),
       }))
-      .filter((r) => r.key && r.value)
+      .filter((r) => r.key && r.value && allow.has(r.sortKey))
       .sort((a, b) => {
         const ia = order.indexOf(a.sortKey);
         const ib = order.indexOf(b.sortKey);
@@ -952,7 +954,16 @@ export default function MeetingDetailScreen() {
     const s = String(info ?? '').trim();
     if (!s) return '';
     // KOBIS 등에서 " · "로 이어붙인 요약을 줄바꿈으로 분리
-    return s.replace(/\s*·\s*/g, '\n');
+    // 단, 메타(관객/스크린/개봉일/순위/예매율 등)는 별도 영역에서만 보여주므로 여기서는 숨깁니다.
+    const lines = s
+      .split(/\s*·\s*/g)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((line) => {
+        // 예: "일일 관객 123,456명", "누적 관객 1,234,567명", "스크린 123개", "개봉일 2026-01-01", "순위 3위", "예매율 12.3%"
+        return !/(일일\s*관객|일일 관객|누적\s*관객|누적관객|누적|스크린\s*수|스크린수|스크린|개봉일|순위|예매율)/.test(line);
+      });
+    return lines.join('\n');
   }, []);
 
   const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
@@ -2557,40 +2568,46 @@ export default function MeetingDetailScreen() {
                             )}
                           </View>
                           <View style={styles.movieDetailInfoCol}>
-                            <Text style={styles.movieDetailTitle} numberOfLines={3}>
-                              {confirmedMovieResolved.title}
-                              {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
-                            </Text>
-                            {confirmedMovieResolved.info?.trim() ? (
-                              <Text style={styles.movieDetailBody} numberOfLines={5}>
-                                {movieInfoMultiline(confirmedMovieResolved.info)}
+                            <View style={styles.movieDetailInfoTop}>
+                              <Text style={styles.movieDetailTitle} numberOfLines={3}>
+                                {confirmedMovieResolved.title}
+                                {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
                               </Text>
-                            ) : null}
-                            {(() => {
-                              const s = movieSynopsisText(confirmedMovieResolved);
-                              if (!s) return null;
-                              if (confirmedMovieResolved.info?.trim() && s === confirmedMovieResolved.info.trim()) return null;
-                              return (
-                                <Text style={styles.movieDetailBody} numberOfLines={8}>
-                                  {s}
-                                </Text>
-                              );
-                            })()}
-                            {(() => {
-                              const rows = movieMetaRows(confirmedMovieResolved);
-                              if (rows.length === 0) return null;
-                              return (
-                                <View style={styles.movieMetaList}>
-                                  {rows.map((r) => (
-                                    <Text key={r.sortKey} style={styles.movieMetaLine}>
-                                      <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
-                                      <Text style={styles.movieMetaSep}> : </Text>
-                                      <Text style={styles.movieMetaValInline}>{r.value}</Text>
-                                    </Text>
-                                  ))}
-                                </View>
-                              );
-                            })()}
+                              {(() => {
+                                const rows = movieMetaRows(confirmedMovieResolved);
+                                if (rows.length === 0) return null;
+                                return (
+                                  <View style={styles.movieMetaList}>
+                                    {rows.map((r) => (
+                                      <Text key={r.sortKey} style={styles.movieMetaLine}>
+                                        <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
+                                        <Text style={styles.movieMetaSep}> : </Text>
+                                        <Text style={styles.movieMetaValInline}>{r.value}</Text>
+                                      </Text>
+                                    ))}
+                                  </View>
+                                );
+                              })()}
+                              {(() => {
+                                const infoText = movieInfoMultiline(confirmedMovieResolved.info);
+                                if (!infoText) return null;
+                                return (
+                                  <Text style={styles.movieDetailBody} numberOfLines={5}>
+                                    {infoText}
+                                  </Text>
+                                );
+                              })()}
+                              {(() => {
+                                const s = movieSynopsisText(confirmedMovieResolved);
+                                if (!s) return null;
+                                if (confirmedMovieResolved.info?.trim() && s === confirmedMovieResolved.info.trim()) return null;
+                                return (
+                                  <Text style={styles.movieDetailBody} numberOfLines={8}>
+                                    {s}
+                                  </Text>
+                                );
+                              })()}
+                            </View>
                             {resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title) ? (
                               <Pressable
                                 onPress={() => {
@@ -2814,40 +2831,46 @@ export default function MeetingDetailScreen() {
                         )}
                       </View>
                       <View style={styles.movieDetailInfoCol}>
-                        <Text style={styles.movieDetailTitle} numberOfLines={3}>
-                          {extraMovies[0].title}
-                          {extraMovies[0].year ? ` (${extraMovies[0].year})` : ''}
-                        </Text>
-                        {extraMovies[0].info?.trim() ? (
-                          <Text style={styles.movieDetailBody} numberOfLines={5}>
-                            {movieInfoMultiline(extraMovies[0].info)}
+                        <View style={styles.movieDetailInfoTop}>
+                          <Text style={styles.movieDetailTitle} numberOfLines={3}>
+                            {extraMovies[0].title}
+                            {extraMovies[0].year ? ` (${extraMovies[0].year})` : ''}
                           </Text>
-                        ) : null}
-                        {(() => {
-                          const s = movieSynopsisText(extraMovies[0]);
-                          if (!s) return null;
-                          if (extraMovies[0].info?.trim() && s === extraMovies[0].info.trim()) return null;
-                          return (
-                            <Text style={styles.movieDetailBody} numberOfLines={8}>
-                              {s}
-                            </Text>
-                          );
-                        })()}
-                        {(() => {
-                          const rows = movieMetaRows(extraMovies[0]);
-                          if (rows.length === 0) return null;
-                          return (
-                            <View style={styles.movieMetaList}>
-                              {rows.map((r) => (
-                                <Text key={r.sortKey} style={styles.movieMetaLine}>
-                                  <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
-                                  <Text style={styles.movieMetaSep}> : </Text>
-                                  <Text style={styles.movieMetaValInline}>{r.value}</Text>
-                                </Text>
-                              ))}
-                            </View>
-                          );
-                        })()}
+                          {(() => {
+                            const rows = movieMetaRows(extraMovies[0]);
+                            if (rows.length === 0) return null;
+                            return (
+                              <View style={styles.movieMetaList}>
+                                {rows.map((r) => (
+                                  <Text key={r.sortKey} style={styles.movieMetaLine}>
+                                    <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
+                                    <Text style={styles.movieMetaSep}> : </Text>
+                                    <Text style={styles.movieMetaValInline}>{r.value}</Text>
+                                  </Text>
+                                ))}
+                              </View>
+                            );
+                          })()}
+                          {(() => {
+                            const infoText = movieInfoMultiline(extraMovies[0].info);
+                            if (!infoText) return null;
+                            return (
+                              <Text style={styles.movieDetailBody} numberOfLines={5}>
+                                {infoText}
+                              </Text>
+                            );
+                          })()}
+                          {(() => {
+                            const s = movieSynopsisText(extraMovies[0]);
+                            if (!s) return null;
+                            if (extraMovies[0].info?.trim() && s === extraMovies[0].info.trim()) return null;
+                            return (
+                              <Text style={styles.movieDetailBody} numberOfLines={8}>
+                                {s}
+                              </Text>
+                            );
+                          })()}
+                        </View>
                         {resolveNaverMovieSearchWebUrl(extraMovies[0].title) ? (
                           <Pressable
                             onPress={() => {
@@ -2862,6 +2885,7 @@ export default function MeetingDetailScreen() {
                             ]}
                             accessibilityRole="button"
                             accessibilityLabel="영화 정보 보기">
+                              
                             <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
                           </Pressable>
                         ) : null}
@@ -3685,39 +3709,45 @@ export default function MeetingDetailScreen() {
                     <Text style={styles.proposeModalSubDateCompact}>{dateVoteTimePick.ymd}</Text>
                   </View>
                 </View>
-                <ScrollView
+                <FlatList
+                  data={dateVoteByYmd[dateVoteTimePick.ymd] ?? []}
+                  keyExtractor={(o) => o.chipId}
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingBottom: 12 }}>
-                  {(dateVoteByYmd[dateVoteTimePick.ymd] ?? []).map((o) => {
+                  contentContainerStyle={styles.timeVoteListContent}
+                  ItemSeparatorComponent={() => <View style={styles.timeVoteSeparator} />}
+                  renderItem={({ item: o }) => {
                     const selected = dateHostPickMode ? hostTieDateId === o.chipId : selectedDateIds.includes(o.chipId);
                     return (
                       <Pressable
-                        key={o.chipId}
                         onPress={() => onDateChipPress(o.chipId)}
                         style={({ pressed }) => [
-                          styles.dateChip,
-                          styles.candidateChipV,
-                          selected ? styles.dateChipSelected : null,
-                          pressed ? styles.dateChipPressed : null,
+                          styles.timeVoteRow,
+                          selected ? styles.timeVoteRowSelected : null,
+                          pressed ? styles.timeVoteRowPressed : null,
                         ]}
                         accessibilityRole={dateHostPickMode ? 'radio' : 'checkbox'}
                         accessibilityState={{ checked: selected, selected }}
                         accessibilityLabel={`${o.hm}${selected ? ', 선택됨' : ''}`}>
-                        <View style={styles.voteTallyBadge} pointerEvents="none">
-                          <Text style={styles.voteTallyBadgeText}>{o.tally}</Text>
-                        </View>
-                        {selected ? (
-                          <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
-                            <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
-                          </View>
-                        ) : null}
-                        <Text style={[styles.dateChipTitle, styles.dateChipTitleV]} numberOfLines={1}>
+                        <Text style={styles.timeVoteHm} numberOfLines={1}>
                           {o.hm}
                         </Text>
+                        <View style={styles.timeVoteRightMeta} pointerEvents="none">
+                          <View style={[styles.timeVoteTallyPill, selected ? styles.timeVoteTallyPillSelected : null]}>
+                            <Text
+                              style={[styles.timeVoteTallyText, selected ? styles.timeVoteTallyTextSelected : null]}>
+                              {o.tally}
+                            </Text>
+                          </View>
+                          {selected ? (
+                            <Ionicons name="checkmark-circle" size={18} color={GinitTheme.colors.primary} />
+                          ) : (
+                            <View style={styles.timeVoteCheckPlaceholder} />
+                          )}
+                        </View>
                       </Pressable>
                     );
-                  })}
-                </ScrollView>
+                  }}
+                />
                 <View style={styles.proposeModalFooterDateCompact}>
                   <Pressable
                     onPress={() => setDateVoteTimePick(null)}
@@ -4307,7 +4337,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2E8F0',
   },
   confirmedMovieTextCol: { flex: 1, minWidth: 0 },
-  movieDetailRow: { marginTop: 2, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  movieDetailRow: { marginTop: 2, flexDirection: 'row', alignItems: 'stretch', gap: 12 },
   movieDetailPosterLeftWrap: {
     width: 140,
     height: 208,
@@ -4318,7 +4348,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.12)',
   },
   movieDetailPosterLeft: { width: '100%', height: '100%' },
-  movieDetailInfoCol: { flex: 1, minWidth: 0, paddingTop: 2 },
+  movieDetailInfoCol: { flex: 1, minWidth: 0, paddingTop: 2, justifyContent: 'space-between' },
+  movieDetailInfoTop: { flexShrink: 1, minHeight: 0 },
   movieDetailTitle: { fontSize: 14, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 20 },
   movieDetailBody: { marginTop: 6, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 17 },
   moviePosterInfoBtnInDetailCol: { marginTop: 10 },
@@ -4738,6 +4769,69 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontSize: 12,
     lineHeight: 17,
+  },
+  /** 시간 선택(투표) — 디바이더 기반 리스트(촌스러운 칩 제거) */
+  timeVoteListContent: {
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  timeVoteSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GinitTheme.colors.border,
+  },
+  timeVoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  timeVoteRowSelected: {
+    backgroundColor: 'rgba(31, 42, 68, 0.06)',
+  },
+  timeVoteRowPressed: {
+    opacity: 0.88,
+  },
+  timeVoteHm: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 16,
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+    letterSpacing: -0.2,
+  },
+  timeVoteRightMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginLeft: 12,
+  },
+  timeVoteTallyPill: {
+    minWidth: 28,
+    height: 24,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(31, 42, 68, 0.16)',
+  },
+  timeVoteTallyPillSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderColor: 'rgba(31, 42, 68, 0.28)',
+  },
+  timeVoteTallyText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.textSub,
+  },
+  timeVoteTallyTextSelected: {
+    color: GinitTheme.colors.primary,
+  },
+  timeVoteCheckPlaceholder: {
+    width: 18,
+    height: 18,
   },
   proposeModalFormScroll: { flexGrow: 0 },
   /** 날짜 제안: flex는 인라인 maxHeight(화면 비율)로 스크롤 영역 상한만 둠 */
