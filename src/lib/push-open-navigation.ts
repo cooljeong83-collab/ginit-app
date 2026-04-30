@@ -1,6 +1,7 @@
 import * as Linking from 'expo-linking';
 import type { Router } from 'expo-router';
 
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { getMeetingById, type Meeting } from '@/src/lib/meetings';
 import { TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION } from '@/src/lib/trust-penalty-notify';
 
@@ -12,7 +13,11 @@ export function navigateToChatRoomWithChatTabUnderneath(
 ): void {
   const replace = Boolean(opts?.replace);
   const cur = (opts?.currentPathname ?? '').trim();
-  if (cur && cur === roomHref) return;
+  if (cur && cur === roomHref) {
+    ginitNotifyDbg('push-open-nav', 'skip_nav_same_path', { roomHref });
+    return;
+  }
+  ginitNotifyDbg('push-open-nav', 'navigate_chat_stack', { roomHref, replace });
   const openRoom = () => {
     router.push(roomHref as never);
   };
@@ -30,11 +35,18 @@ export function navigateFromPushData(
   data: Record<string, unknown> | undefined,
   opts?: { replace?: boolean; currentPathname?: string },
 ): void {
-  if (!data || typeof data !== 'object') return;
+  if (!data || typeof data !== 'object') {
+    ginitNotifyDbg('push-open-nav', 'navigate_skip_no_data', {});
+    return;
+  }
   const replace = Boolean(opts?.replace);
   const navTo = (path: string) => {
     const cur = (opts?.currentPathname ?? '').trim();
-    if (cur && cur === path) return;
+    if (cur && cur === path) {
+      ginitNotifyDbg('push-open-nav', 'skip_nav_same_path', { path });
+      return;
+    }
+    ginitNotifyDbg('push-open-nav', 'navigate', { path, replace });
     if (replace) router.replace(path as never);
     else router.push(path as never);
   };
@@ -92,10 +104,12 @@ export async function markAlarmReadFromPushData(
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   if (action === 'in_app_friend_request' && meetingId) {
+    ginitNotifyDbg('push-open-nav', 'mark_read_friend_request', { meetingId });
     markFriendRequestAlarmDismissed(meetingId);
     return;
   }
   if (action === 'in_app_friend_accepted' && meetingId) {
+    ginitNotifyDbg('push-open-nav', 'mark_read_friend_accepted', { meetingId });
     markFriendAcceptedAlarmDismissed(meetingId);
     return;
   }
@@ -107,6 +121,10 @@ export async function markAlarmReadFromPushData(
     action === 'host_transferred';
   if (!shouldAckMeeting) return;
   const m = await getMeetingById(meetingId);
-  if (!m) return;
+  if (!m) {
+    ginitNotifyDbg('push-open-nav', 'mark_meeting_ack_skip_no_meeting', { meetingId, action });
+    return;
+  }
+  ginitNotifyDbg('push-open-nav', 'mark_meeting_ack', { meetingId, action });
   markMeetingAlarmsReadByPushTap(m);
 }

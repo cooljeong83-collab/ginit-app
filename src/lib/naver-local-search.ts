@@ -192,6 +192,19 @@ export function resolveNaverPlaceDetailWebUrlLikeVoteChip(input: {
 }
 
 /**
+ * 영화 제목으로 네이버 모바일 **통합검색** URL을 만듭니다.
+ * 검색어 형식: `영화 {제목}` (예: `영화 슈퍼 마리오 갤럭시`)
+ */
+export function resolveNaverMovieSearchWebUrl(movieTitle: string): string | undefined {
+  const title = typeof movieTitle === 'string' ? movieTitle.trim() : '';
+  if (!title) return undefined;
+  const q = `영화 ${title}`.replace(/\s+/g, ' ').trim();
+  return sanitizeNaverLocalPlaceLink(
+    `https://m.search.naver.com/search.naver?where=m&sm=mtp_hty.top&query=${encodeURIComponent(q)}`,
+  );
+}
+
+/**
  * 상호·주소로 네이버 모바일 **통합검색**(WebView)을 엽니다.
  */
 export function buildNaverPlaceFallbackWebUrl(placeName: string, address?: string | null): string | undefined {

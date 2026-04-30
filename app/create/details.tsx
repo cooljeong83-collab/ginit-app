@@ -598,6 +598,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   },
   ref,
 ) {
+  const insets = useSafeAreaInsets();
   const [voiceTarget, setVoiceTarget] = useState<'scheduleIdea' | 'placeQuery' | null>(null);
   const [voiceRecognizing, setVoiceRecognizing] = useState(false);
 
@@ -645,7 +646,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     [voiceRecognizing, voiceTarget],
   );
   const router = useRouter();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const seedQ = seedPlaceQuery.trim();
   const seedDate = seedScheduleDate.trim() || fmtDate(new Date());
   const seedTime = seedScheduleTime.trim() || '15:00';
@@ -660,6 +661,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [nlpParsed, setNlpParsed] = useState<SmartNlpResult | null>(null);
   const [weekendPreviewSlots, setWeekendPreviewSlots] = useState<{ ymd: string; hm: string }[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => monthStartYmd(fmtDate(new Date())));
+  /** 일정 달력 가로 페이지(이전·현재·다음 달) — `onLayout`으로 정확한 너비 갱신 */
+  const [scheduleCalendarPagerW, setScheduleCalendarPagerW] = useState(() => Math.max(280, Math.floor(windowWidth)));
+  const scheduleCalendarPagerRef = useRef<ScrollView>(null);
+  /** 일정 달력 헤더 년·월 탭 → 네이티브 날짜 피커(년·월 반영 후 해당 월 1일로 정규화) */
+  const [scheduleCalendarYmPick, setScheduleCalendarYmPick] = useState<{ draft: Date } | null>(null);
   const [timePick, setTimePick] = useState<{ ymd: string; draft: Date; source?: 'calendar' | 'ai' } | null>(null);
   const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
   const [deadlineTick, setDeadlineTick] = useState(0);
@@ -741,6 +747,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const i = setInterval(() => setDeadlineTick((x) => x + 1), 1000);
     return () => clearInterval(i);
   }, [hasDeadlineRow]);
+
+  /** 가로 페이징 달력: 항상 가운데(현재 달) 페이지로 스크롤 위치 동기화 */
+  useEffect(() => {
+    if (scheduleCalendarPagerW <= 0) return undefined;
+    const id = requestAnimationFrame(() => {
+      scheduleCalendarPagerRef.current?.scrollTo({
+        x: scheduleCalendarPagerW,
+        animated: false,
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [calendarMonth, scheduleCalendarPagerW]);
 
   useEffect(() => {
     const trimmed = nlpScheduleInput.trim();
@@ -994,6 +1012,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     setTimePick(null);
     void commitPointCandidate(cur.ymd, hm);
   }, [commitPointCandidate, timePick]);
+
+  const confirmScheduleCalendarYmPick = useCallback(() => {
+    const cur = scheduleCalendarYmPick;
+    if (!cur) return;
+    setCalendarMonth(monthStartYmd(fmtDate(cur.draft)));
+    setScheduleCalendarYmPick(null);
+  }, [scheduleCalendarYmPick]);
 
   const appendWeekendPreviewSlot = useCallback(
     async (slot: { ymd: string; hm: string }) => {
@@ -1346,6 +1371,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const placeThemeSeed = useMemo(() => {
     const label = (placeThemeLabel || '').trim();
     if (!label) return '맛집';
+    const sk = resolveSpecialtyKind(label);
+    if (sk === 'movie') return '영화관';
+    if (sk === 'sports') return '운동';
+    if (sk === 'food') return '맛집';
     if (label.includes('영화')) return '영화관';
     if (label.includes('카페')) return '카페';
     if (label.includes('술') || label.includes('맥주') || label.includes('바')) return '술집';
@@ -1519,6 +1548,118 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     showPlaces,
   ]);
 
+  const renderScheduleCalendarMonthGrid = useCallback(
+    (monthAnchorYmd: string, pagerPageW: number) => {
+      const monthStart = dateFromYmd(monthAnchorYmd) ?? new Date();
+      const year = monthStart.getFullYear();
+      const month = monthStart.getMonth();
+      const firstDow = new Date(year, month, 1).getDay();
+      const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
+      const gridStart = new Date(year, month, 1 - firstDow);
+      for (let i = 0; i < 42; i += 1) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + i);
+        cells.push({ ymd: fmtDate(d), day: d.getDate(), inMonth: d.getMonth() === month });
+      }
+
+      const byDay: Record<string, string[]> = {};
+      dateCandidates.forEach((dc) => {
+        const ymd = String(dc.startDate ?? '').trim();
+        const hm = String(dc.startTime ?? '').trim();
+        if (!ymd) return;
+        if (!byDay[ymd]) byDay[ymd] = [];
+        if (hm) byDay[ymd].push(hm);
+      });
+      Object.keys(byDay).forEach((k) => {
+        const uniq = [...new Set(byDay[k])];
+        uniq.sort((a, b) => a.localeCompare(b));
+        byDay[k] = uniq;
+      });
+
+      const todayYmd = fmtDate(new Date());
+      const compactCalendar = bare && wizardSegment === 'schedule';
+
+      return (
+        <View
+          key={`cal-page-${monthAnchorYmd}`}
+          style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}>
+          <View style={styles.calendarGrid}>
+            {Array.from({ length: 6 }).map((_, wi) => {
+              const week = cells.slice(wi * 7, wi * 7 + 7);
+              const weekHasAnyTimes = week.some((c) => (byDay[c.ymd]?.length ?? 0) > 0);
+              return (
+                <View
+                  key={`week-${monthAnchorYmd}-${wi}`}
+                  style={[
+                    styles.calendarWeekRow,
+                    !weekHasAnyTimes && styles.calendarWeekRowEmpty,
+                    wi === 5 ? { marginBottom: 0 } : null,
+                  ]}>
+                  {week.map((c) => {
+                    const times = byDay[c.ymd] ?? [];
+                    const has = times.length > 0;
+                    const lastTime = times[times.length - 1] ?? '';
+                    const isPast = c.ymd < todayYmd;
+                    return (
+                      <Pressable
+                        key={c.ymd}
+                        disabled={isPast}
+                        onPress={() => {
+                          if (isPast) return;
+                          openTimePickerForDate(c.ymd, has ? lastTime : DEFAULT_CALENDAR_PICK_TIME, 'calendar');
+                        }}
+                        style={({ pressed }) => [
+                          styles.calendarCell,
+                          compactCalendar && styles.calendarCellCompact,
+                          !weekHasAnyTimes && styles.calendarCellRowEmpty,
+                          !c.inMonth && styles.calendarCellOut,
+                          has && styles.calendarCellHas,
+                          isPast && styles.calendarCellDisabled,
+                          pressed && !isPast && styles.calendarCellPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${c.ymd}${has ? ` ${times.length}개` : ''}`}>
+                        <Text
+                          style={[
+                            styles.calendarCellDay,
+                            compactCalendar && styles.calendarCellDayCompact,
+                            !c.inMonth && styles.calendarCellDayOut,
+                          ]}>
+                          {c.day}
+                        </Text>
+                        {has ? (
+                          <View style={styles.calendarTimesWrap} pointerEvents="none">
+                            {times.map((t) => (
+                              <Text
+                                key={`${c.ymd}-${t}`}
+                                style={[styles.calendarCellMeta, compactCalendar && styles.calendarCellMetaCompact]}>
+                                {t}
+                              </Text>
+                            ))}
+                          </View>
+                        ) : (
+                          <Text
+                            style={[
+                              styles.calendarCellMetaEmpty,
+                              compactCalendar && styles.calendarCellMetaEmptyCompact,
+                            ]}
+                            numberOfLines={1}>
+                            {' '}
+                          </Text>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      );
+    },
+    [bare, dateCandidates, openTimePickerForDate, wizardSegment],
+  );
+
   const scheduleSection = (
     <>
 
@@ -1641,36 +1782,24 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {(() => {
         const monthStart = dateFromYmd(calendarMonth) ?? new Date();
         const year = monthStart.getFullYear();
-        const month = monthStart.getMonth(); // 0-based
-        const firstDow = new Date(year, month, 1).getDay(); // 0 Sun .. 6 Sat
-        // 6주(42칸) 고정: 토요일 포함 요일 누락/비는 현상을 방지합니다.
-        const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
-        const gridStart = new Date(year, month, 1 - firstDow);
-        for (let i = 0; i < 42; i += 1) {
-          const d = new Date(gridStart);
-          d.setDate(gridStart.getDate() + i);
-          cells.push({ ymd: fmtDate(d), day: d.getDate(), inMonth: d.getMonth() === month });
-        }
-
-        const byDay: Record<string, string[]> = {};
-        dateCandidates.forEach((dc) => {
-          const ymd = String(dc.startDate ?? '').trim();
-          const hm = String(dc.startTime ?? '').trim();
-          if (!ymd) return;
-          if (!byDay[ymd]) byDay[ymd] = [];
-          if (hm) byDay[ymd].push(hm);
-        });
-        Object.keys(byDay).forEach((k) => {
-          const uniq = [...new Set(byDay[k])];
-          uniq.sort((a, b) => a.localeCompare(b));
-          byDay[k] = uniq;
-        });
-
+        const month = monthStart.getMonth();
         const monthLabel = `${year}.${pad2(month + 1)}`;
-        const todayYmd = fmtDate(new Date());
-        const compactCalendar = bare && wizardSegment === 'schedule';
+        const prevAnchor = monthStartYmd(
+          fmtDate(new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1)),
+        );
+        const nextAnchor = monthStartYmd(
+          fmtDate(new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1)),
+        );
+        const pagerW = scheduleCalendarPagerW;
+
         return (
-          <View style={styles.scheduleCalendarWrap}>
+          <View
+            style={styles.scheduleCalendarWrap}
+            onLayout={(e) => {
+              const w = Math.floor(e.nativeEvent.layout.width);
+              if (w <= 0) return;
+              setScheduleCalendarPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
+            }}>
             <View style={styles.scheduleCalendarHeaderRow}>
               <Pressable
                 onPress={() => {
@@ -1682,7 +1811,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 accessibilityLabel="이전 달">
                 <Ionicons name="chevron-back" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
-              <Text style={styles.scheduleCalendarTitle}>{monthLabel}</Text>
+              <Pressable
+                onPress={() => {
+                  setScheduleCalendarYmPick({ draft: new Date(year, month, 1) });
+                }}
+                style={({ pressed }) => [styles.scheduleCalendarTitlePress, pressed && { opacity: 0.88 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`년·월 선택 ${monthLabel}`}>
+                <Text style={styles.scheduleCalendarTitle}>{monthLabel}</Text>
+              </Pressable>
               <Pressable
                 onPress={() => {
                   const next = new Date(year, month + 1, 1);
@@ -1701,78 +1838,30 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 </Text>
               ))}
             </View>
-            <View style={styles.calendarGrid}>
-              {Array.from({ length: 6 }).map((_, wi) => {
-                const week = cells.slice(wi * 7, wi * 7 + 7);
-                const weekHasAnyTimes = week.some((c) => (byDay[c.ymd]?.length ?? 0) > 0);
-                return (
-                  <View
-                    key={`week-${wi}`}
-                    style={[
-                      styles.calendarWeekRow,
-                      !weekHasAnyTimes && styles.calendarWeekRowEmpty,
-                      // 마지막 주는 아래 여백 제거
-                      wi === 5 ? { marginBottom: 0 } : null,
-                    ]}>
-                    {week.map((c) => {
-                      const times = byDay[c.ymd] ?? [];
-                      const has = times.length > 0;
-                      const lastTime = times[times.length - 1] ?? '';
-                      const isPast = c.ymd < todayYmd;
-                      return (
-                        <Pressable
-                          key={c.ymd}
-                          disabled={isPast}
-                          onPress={() => {
-                            if (isPast) return;
-                            openTimePickerForDate(c.ymd, has ? lastTime : DEFAULT_CALENDAR_PICK_TIME, 'calendar');
-                          }}
-                          style={({ pressed }) => [
-                            styles.calendarCell,
-                            compactCalendar && styles.calendarCellCompact,
-                            !weekHasAnyTimes && styles.calendarCellRowEmpty,
-                            !c.inMonth && styles.calendarCellOut,
-                            has && styles.calendarCellHas,
-                            isPast && styles.calendarCellDisabled,
-                            pressed && !isPast && styles.calendarCellPressed,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`${c.ymd}${has ? ` ${times.length}개` : ''}`}>
-                          <Text
-                            style={[
-                              styles.calendarCellDay,
-                              compactCalendar && styles.calendarCellDayCompact,
-                              !c.inMonth && styles.calendarCellDayOut,
-                            ]}>
-                            {c.day}
-                          </Text>
-                          {has ? (
-                            <View style={styles.calendarTimesWrap} pointerEvents="none">
-                              {times.map((t) => (
-                                <Text
-                                  key={`${c.ymd}-${t}`}
-                                  style={[styles.calendarCellMeta, compactCalendar && styles.calendarCellMetaCompact]}>
-                                  {t}
-                                </Text>
-                              ))}
-                            </View>
-                          ) : (
-                            <Text
-                              style={[
-                                styles.calendarCellMetaEmpty,
-                                compactCalendar && styles.calendarCellMetaEmptyCompact,
-                              ]}
-                              numberOfLines={1}>
-                              {' '}
-                            </Text>
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                );
-              })}
-            </View>
+            <ScrollView
+              ref={scheduleCalendarPagerRef}
+              horizontal
+              pagingEnabled
+              bounces={false}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              onMomentumScrollEnd={(e) => {
+                if (pagerW <= 0) return;
+                const ix = Math.round(e.nativeEvent.contentOffset.x / pagerW);
+                if (ix === 1) return;
+                const cur = dateFromYmd(calendarMonth) ?? new Date();
+                if (ix === 0) {
+                  setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))));
+                } else if (ix === 2) {
+                  setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() + 1, 1))));
+                }
+              }}>
+              {renderScheduleCalendarMonthGrid(prevAnchor, pagerW)}
+              {renderScheduleCalendarMonthGrid(calendarMonth, pagerW)}
+              {renderScheduleCalendarMonthGrid(nextAnchor, pagerW)}
+            </ScrollView>
           </View>
         );
       })()}
@@ -1917,7 +2006,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
                       const thumb = placeThumbById[item.id] ?? null;
-                      /** 모임 상세 장소투표「가게 정보」와 동일: 한 줄 주소 + 제목으로 통합검색 URL */
+                      /** 모임 상세 장소투표「상세 정보」와 동일: 한 줄 주소 + 제목으로 통합검색 URL */
                       const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
                         naverPlaceLink: item.link,
                         title: item.title,
@@ -2031,8 +2120,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                               }}
                               style={({ pressed }) => [styles.placeResultDetailBtn, pressed && { opacity: 0.88 }]}
                               accessibilityRole="button"
-                              accessibilityLabel="가게 정보">
-                              <Text style={styles.placeResultDetailBtnText}>가게 정보</Text>
+                              accessibilityLabel="상세 정보">
+                              <Text style={styles.placeResultDetailBtnText}>상세 정보</Text>
                             </Pressable>
                           ) : null}
                         </View>
@@ -2104,7 +2193,78 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </ScrollView>
       )}
 
-      {timePick ? (
+      {timePick && Platform.OS === 'android' ? (
+        <DateTimePicker
+          value={timePick.draft}
+          mode="time"
+          display="clock"
+          onChange={(event, d) => {
+            const t = (event as unknown as { type?: string } | null)?.type ?? '';
+            if (t === 'dismissed') {
+              setTimePick(null);
+              return;
+            }
+            if (t === 'set' && d) {
+              const ymd = timePick.ymd;
+              setTimePick(null);
+              void commitPointCandidate(ymd, fmtTime(d));
+              return;
+            }
+            if (!d) setTimePick(null);
+          }}
+        />
+      ) : null}
+
+      {timePick && Platform.OS === 'ios' ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
+          <View style={GinitStyles.modalRoot}>
+            <Pressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: 'absolute',
+                top: Math.max(insets.top, 8),
+                left: 0,
+                right: 0,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                paddingHorizontal: 16,
+              }}>
+              <Pressable onPress={() => setTimePick(null)} hitSlop={10} accessibilityRole="button">
+                <Text style={GinitStyles.modalCancel}>취소</Text>
+              </Pressable>
+              <Pressable onPress={confirmTimePick} hitSlop={10} accessibilityRole="button">
+                <Text style={GinitStyles.modalDone}>완료</Text>
+              </Pressable>
+            </View>
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                paddingBottom: Math.max(insets.bottom, 12),
+                alignItems: 'center',
+                backgroundColor: 'transparent',
+              }}>
+              <DateTimePicker
+                value={timePick.draft}
+                mode="time"
+                display="spinner"
+                themeVariant="light"
+                locale="ko-KR"
+                onChange={(_event, d) => {
+                  if (!d) return;
+                  setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
+                }}
+              />
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
+      {timePick && Platform.OS !== 'android' && Platform.OS !== 'ios' ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
           <View style={GinitStyles.modalRoot}>
             <Pressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
@@ -2127,32 +2287,87 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 <DateTimePicker
                   value={timePick.draft}
                   mode="time"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(event, d) => {
-                    // Android는 네이티브 다이얼로그 이벤트(type=set/dismissed)가 오므로,
-                    // 선택/취소 시점에 모달을 확실히 닫고 반영합니다.
-                    if (Platform.OS === 'android') {
-                      const t = (event as unknown as { type?: string } | null)?.type ?? '';
-                      if (t === 'dismissed') {
-                        setTimePick(null);
-                        return;
-                      }
-                      if (t === 'set' && d) {
-                        const ymd = timePick.ymd;
-                        setTimePick(null);
-                        void commitPointCandidate(ymd, fmtTime(d));
-                        return;
-                      }
-                      // fallback: 값이 없으면 닫기만
-                      if (!d) setTimePick(null);
-                      return;
-                    }
-
+                  display="spinner"
+                  onChange={(_event, d) => {
                     if (!d) return;
                     setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
                   }}
                 />
               </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
+      {scheduleCalendarYmPick && Platform.OS === 'android' ? (
+        <DateTimePicker
+          value={scheduleCalendarYmPick.draft}
+          mode="date"
+          display="spinner"
+          onChange={(event, date) => {
+            const t = (event as unknown as { type?: string } | null)?.type ?? '';
+            if (t === 'dismissed') {
+              setScheduleCalendarYmPick(null);
+              return;
+            }
+            if (t === 'set' && date) {
+              setCalendarMonth(monthStartYmd(fmtDate(date)));
+              setScheduleCalendarYmPick(null);
+              return;
+            }
+            if (!date) setScheduleCalendarYmPick(null);
+          }}
+        />
+      ) : null}
+
+      {scheduleCalendarYmPick && Platform.OS !== 'android' ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setScheduleCalendarYmPick(null)}>
+          <View style={GinitStyles.modalRoot}>
+            <Pressable
+              style={GinitStyles.modalBackdrop}
+              onPress={() => setScheduleCalendarYmPick(null)}
+              accessibilityRole="button"
+            />
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: 'absolute',
+                top: Math.max(insets.top, 8),
+                left: 0,
+                right: 0,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                paddingHorizontal: 16,
+              }}>
+              <Pressable onPress={() => setScheduleCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
+                <Text style={GinitStyles.modalCancel}>취소</Text>
+              </Pressable>
+              <Pressable onPress={confirmScheduleCalendarYmPick} hitSlop={10} accessibilityRole="button">
+                <Text style={GinitStyles.modalDone}>완료</Text>
+              </Pressable>
+            </View>
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                paddingBottom: Math.max(insets.bottom, 12),
+                alignItems: 'center',
+                backgroundColor: 'transparent',
+              }}>
+              <DateTimePicker
+                value={scheduleCalendarYmPick.draft}
+                mode="date"
+                display="spinner"
+                locale="ko-KR"
+                themeVariant="light"
+                onChange={(_event: DateTimePickerEvent, date) => {
+                  if (!date) return;
+                  setScheduleCalendarYmPick((prev) => (prev ? { draft: date } : prev));
+                }}
+              />
             </View>
           </View>
         </Modal>
@@ -2180,7 +2395,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               <DateTimePicker
                 value={iosDraft}
                 mode={picker.field === 'startDate' ? 'date' : 'time'}
-                display={picker.field === 'startDate' ? 'inline' : 'spinner'}
+                display="spinner"
                 onChange={(_, date) => {
                   if (date) setIosDraft(date);
                 }}
@@ -2197,7 +2412,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <DateTimePicker
           value={iosDraft}
           mode={picker.field === 'startDate' ? 'date' : 'time'}
-          display={picker.field === 'startTime' ? 'spinner' : 'default'}
+          display="spinner"
           minimumDate={iosPickerMinimumDate}
           onChange={(event: DateTimePickerEvent, date) => {
             const { rowId, field } = picker;
@@ -4080,6 +4295,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
+  },
+  scheduleCalendarTitlePress: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 34,
   },
   calendarNavBtn: {
     width: 34,

@@ -1,3 +1,4 @@
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { supabase } from '@/src/lib/supabase';
 
 export type FcmPushSendParams = {
@@ -7,19 +8,44 @@ export type FcmPushSendParams = {
   data?: Record<string, unknown>;
 };
 
+/** Edge `fcm-push-send` 응답(일부 필드는 버전에 따라 생략될 수 있음). */
+export type FcmPushInvokeResult = {
+  ok?: boolean;
+  successCount?: number;
+  sent?: number;
+  attempted?: number;
+  failureCount?: number;
+  reason?: string;
+};
+
+function parseFcmInvokeData(data: unknown): FcmPushInvokeResult {
+  if (!data || typeof data !== 'object') return {};
+  return data as FcmPushInvokeResult;
+}
+
 /**
- * Android(FCM) 원격 푸시 전송(Edge Function).
- * - 수신자 앱이 완전 종료 상태여도 OS 트레이로 표시되도록 `notification` payload로 발송합니다(서버에서 처리).
- * - 현재 프로젝트는 Supabase Auth 세션이 없어도 호출하도록 구성될 수 있습니다(테스트 목적).
+ * Android(FCM) 원격 푸시 전송(Edge Function) + 응답 파싱.
+ * Expo 폴백 여부 판단은 `remote-push-hub`에서 사용합니다.
  */
-export async function sendFcmPushToUsers(params: FcmPushSendParams): Promise<void> {
+export async function sendFcmPushToUsersWithResult(params: FcmPushSendParams): Promise<FcmPushInvokeResult> {
   const toUserIds = Array.isArray(params.toUserIds) ? params.toUserIds.map((x) => String(x ?? '').trim()).filter(Boolean) : [];
-  if (toUserIds.length === 0) return;
+  if (toUserIds.length === 0) {
+    ginitNotifyDbg('fcm-push-api', 'invoke_skip_no_recipients', {});
+    return {};
+  }
   const title = String(params.title ?? '').trim();
   const body = String(params.body ?? '').trim();
-  if (!title || !body) return;
+  if (!title || !body) {
+    ginitNotifyDbg('fcm-push-api', 'invoke_skip_title_body', { recipientCount: toUserIds.length });
+    return {};
+  }
 
-  const { error } = await supabase.functions.invoke('fcm-push-send', {
+  ginitNotifyDbg('fcm-push-api', 'invoke_start', {
+    recipientCount: toUserIds.length,
+    dataAction: typeof params.data?.action === 'string' ? params.data.action : undefined,
+  });
+
+  const { data, error } = await supabase.functions.invoke('fcm-push-send', {
     body: {
       toUserIds,
       title,
@@ -39,6 +65,23 @@ export async function sendFcmPushToUsers(params: FcmPushSendParams): Promise<voi
     const suffix = status ? ` (status ${status})` : '';
     throw new Error(`${error.message}${suffix}${bodyText ? `: ${bodyText.slice(0, 500)}` : ''}`);
   }
+  const parsed = parseFcmInvokeData(data);
+  ginitNotifyDbg('fcm-push-api', 'invoke_ok', {
+    ok: parsed.ok,
+    successCount: parsed.successCount,
+    sent: parsed.sent,
+    reason: parsed.reason,
+  });
+  return parsed;
+}
+
+/**
+ * Android(FCM) 원격 푸시 전송(Edge Function).
+ * - 수신자 앱이 완전 종료 상태여도 OS 트레이로 표시되도록 `notification` payload로 발송합니다(서버에서 처리).
+ * - 현재 프로젝트는 Supabase Auth 세션이 없어도 호출하도록 구성될 수 있습니다(테스트 목적).
+ */
+export async function sendFcmPushToUsers(params: FcmPushSendParams): Promise<void> {
+  await sendFcmPushToUsersWithResult(params);
 }
 
 export function sendFcmPushToUsersFireAndForget(params: FcmPushSendParams): void {
@@ -49,3 +92,9 @@ export function sendFcmPushToUsersFireAndForget(params: FcmPushSendParams): void
   });
 }
 
+/** `successCount` / `sent` 중 하나를 반환합니다. */
+export function fcmPushSuccessCount(res: FcmPushInvokeResult): number {
+  if (typeof res.successCount === 'number' && Number.isFinite(res.successCount)) return Math.max(0, res.successCount);
+  if (typeof res.sent === 'number' && Number.isFinite(res.sent)) return Math.max(0, res.sent);
+  return 0;
+}

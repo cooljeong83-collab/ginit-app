@@ -1,8 +1,15 @@
+import fs from 'node:fs';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 loadEnv({ path: path.resolve(__dirname, 'env/.env'), quiet: true });
+
+/** iOS `@react-native-firebase/*` — plist가 있을 때만 네이티브에 연결합니다. */
+function resolveIosGoogleServicesFile(): string | undefined {
+  const abs = path.resolve(__dirname, 'env/GoogleService-Info.plist');
+  return fs.existsSync(abs) ? './env/GoogleService-Info.plist' : undefined;
+}
 
 function pickExtra(): Record<string, string> {
   const out: Record<string, string> = {};
@@ -81,6 +88,7 @@ function pickExtra(): Record<string, string> {
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
+  const iosGoogleServicesFile = resolveIosGoogleServicesFile();
   const naverClientId =
     process.env.NAVER_MAP_CLIENT_ID ?? process.env.EXPO_PUBLIC_NAVER_MAP_CLIENT_ID ?? '';
 
@@ -113,6 +121,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       ...config.ios,
       bundleIdentifier: 'com.ginit.app',
+      ...(iosGoogleServicesFile ? { googleServicesFile: iosGoogleServicesFile } : {}),
     },
     android: {
       ...config.android,

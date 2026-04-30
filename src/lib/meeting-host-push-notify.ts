@@ -1,12 +1,7 @@
-import { doc, getDoc } from 'firebase/firestore';
-import { Platform } from 'react-native';
-
-import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
-import { sendFcmPushToUsersFireAndForget } from '@/src/lib/fcm-push-api';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
 import type { Meeting } from '@/src/lib/meetings';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { dispatchRemotePushToRecipients } from '@/src/lib/remote-push-hub';
 
 export type MeetingHostPushAction =
   | 'confirmed'
@@ -31,22 +26,6 @@ function participantRecipientIds(m: Meeting, hostId: string): string[] {
     out.add(id);
   }
   return [...out];
-}
-
-async function fetchExpoPushTokensForUsers(userIds: string[]): Promise<string[]> {
-  if (userIds.length === 0) return [];
-  const db = getFirebaseFirestore();
-  const tokens: string[] = [];
-  await Promise.all(
-    userIds.map(async (pid) => {
-      const snap = await getDoc(doc(db, USER_EXPO_PUSH_TOKENS_COLLECTION, pid));
-      const t = snap.data()?.token;
-      if (typeof t === 'string' && (t.startsWith('ExponentPushToken') || t.startsWith('ExpoPushToken'))) {
-        tokens.push(t);
-      }
-    }),
-  );
-  return tokens;
 }
 
 function copyForPush(action: MeetingHostPushAction, meetingTitle: string): { title: string; body: string } {
@@ -92,8 +71,16 @@ export async function notifyMeetingParticipantsOfHostAction(
   hostPhoneUserId: string,
 ): Promise<void> {
   const recipients = participantRecipientIds(meeting, hostPhoneUserId);
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) {
+    ginitNotifyDbg('meeting-host-push', 'host_action_skip_no_recipients', { meetingId: meeting.id, action });
+    return;
+  }
 
+  ginitNotifyDbg('meeting-host-push', 'host_action_dispatch', {
+    meetingId: meeting.id,
+    action,
+    recipientCount: recipients.length,
+  });
   const { title, body } = copyForPush(action, meeting.title);
   const data: Record<string, unknown> = {
     meetingId: meeting.id,
@@ -101,25 +88,7 @@ export async function notifyMeetingParticipantsOfHostAction(
     url: `ginitapp://meeting/${meeting.id}`,
   };
 
-  // Android(FCM) 서버 경유: 수신자 앱 종료 상태 수신 보강
-  sendFcmPushToUsersFireAndForget({ toUserIds: recipients, title, body, data });
-  // Android는 Expo Push도 FCM을 타므로 중복 방지: FCM만 사용
-  if (Platform.OS === 'android') return;
-
-  const tokens = await fetchExpoPushTokensForUsers(recipients);
-  if (tokens.length === 0) return;
-
-  const messages: ExpoPushMessage[] = tokens.map((to) => ({
-    to,
-    title,
-    body,
-    sound: 'default',
-    priority: 'high',
-    channelId: 'default',
-    data,
-  }));
-
-  await sendExpoPushMessages(messages);
+  await dispatchRemotePushToRecipients({ toUserIds: recipients, title, body, data });
 }
 
 export function notifyMeetingParticipantsOfHostActionFireAndForget(
@@ -128,6 +97,7 @@ export function notifyMeetingParticipantsOfHostActionFireAndForget(
   hostPhoneUserId: string,
 ): void {
   void notifyMeetingParticipantsOfHostAction(meeting, action, hostPhoneUserId).catch((err) => {
+    ginitNotifyDbg('meeting-host-push', 'host_action_error', { message: err instanceof Error ? err.message : String(err) });
     if (__DEV__) {
       console.warn('[meeting-push]', err);
     }
@@ -151,8 +121,12 @@ export async function notifyMeetingNewHostAssigned(
   newHostUserId: string,
 ): Promise<void> {
   const nid = normalizeParticipantId(newHostUserId.trim());
-  if (!nid) return;
+  if (!nid) {
+    ginitNotifyDbg('meeting-host-push', 'new_host_skip_bad_id', { meetingId: meeting.id });
+    return;
+  }
 
+  ginitNotifyDbg('meeting-host-push', 'new_host_dispatch', { meetingId: meeting.id });
   const { title, body } = copyForNewHostAssigned(meeting.title);
   const data: Record<string, unknown> = {
     meetingId: meeting.id,
@@ -160,27 +134,12 @@ export async function notifyMeetingNewHostAssigned(
     url: `ginitapp://meeting/${meeting.id}`,
   };
 
-  // Android(FCM) 서버 경유
-  sendFcmPushToUsersFireAndForget({ toUserIds: [nid], title, body, data });
-  // Android는 Expo Push도 FCM을 타므로 중복 방지: FCM만 사용
-  if (Platform.OS === 'android') return;
-
-  const tokens = await fetchExpoPushTokensForUsers([nid]);
-  if (tokens.length === 0) return;
-  const messages: ExpoPushMessage[] = tokens.map((to) => ({
-    to,
-    title,
-    body,
-    sound: 'default',
-    priority: 'high',
-    channelId: 'default',
-    data,
-  }));
-  await sendExpoPushMessages(messages);
+  await dispatchRemotePushToRecipients({ toUserIds: [nid], title, body, data });
 }
 
 export function notifyMeetingNewHostAssignedFireAndForget(meeting: Meeting, newHostUserId: string): void {
   void notifyMeetingNewHostAssigned(meeting, newHostUserId).catch((err) => {
+    ginitNotifyDbg('meeting-host-push', 'new_host_error', { message: err instanceof Error ? err.message : String(err) });
     if (__DEV__) {
       console.warn('[meeting-push]', err);
     }
@@ -199,9 +158,13 @@ export async function notifyMeetingHostParticipantEvent(
 ): Promise<void> {
   const host = normalizeParticipantId(hostUserId.trim());
   const participant = normalizeParticipantId(participantUserId.trim());
-  if (!host || !participant) return;
+  if (!host || !participant) {
+    ginitNotifyDbg('meeting-host-push', 'participant_event_skip_bad_ids', { meetingId: meeting.id, event });
+    return;
+  }
   if (host === participant) return;
 
+  ginitNotifyDbg('meeting-host-push', 'participant_event_dispatch', { meetingId: meeting.id, event });
   const { title, body } = copyForHostParticipantEvent(event, meeting.title, participantNickname);
   const data: Record<string, unknown> = {
     meetingId: meeting.id,
@@ -210,23 +173,7 @@ export async function notifyMeetingHostParticipantEvent(
     url: `ginitapp://meeting/${meeting.id}`,
   };
 
-  // Android(FCM) 서버 경유
-  sendFcmPushToUsersFireAndForget({ toUserIds: [host], title, body, data });
-  // Android는 Expo Push도 FCM을 타므로 중복 방지: FCM만 사용
-  if (Platform.OS === 'android') return;
-
-  const tokens = await fetchExpoPushTokensForUsers([host]);
-  if (tokens.length === 0) return;
-  const messages: ExpoPushMessage[] = tokens.map((to) => ({
-    to,
-    title,
-    body,
-    sound: 'default',
-    priority: 'high',
-    channelId: 'default',
-    data,
-  }));
-  await sendExpoPushMessages(messages);
+  await dispatchRemotePushToRecipients({ toUserIds: [host], title, body, data });
 }
 
 export function notifyMeetingHostParticipantEventFireAndForget(
@@ -237,6 +184,7 @@ export function notifyMeetingHostParticipantEventFireAndForget(
   participantNickname: string,
 ): void {
   void notifyMeetingHostParticipantEvent(meeting, hostUserId, participantUserId, event, participantNickname).catch((err) => {
+    ginitNotifyDbg('meeting-host-push', 'participant_event_error', { message: err instanceof Error ? err.message : String(err) });
     if (__DEV__) {
       console.warn('[meeting-push]', err);
     }

@@ -7,6 +7,7 @@ import * as Notifications from 'expo-notifications';
 
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
@@ -106,8 +107,14 @@ export function PushNotificationBootstrap() {
           : await Notifications.getExpoPushTokenAsync();
         const token = tokenRes.data?.trim();
         if (token) await saveUserExpoPushToken(userId, token);
-      } catch {
-        /* 시뮬레이터·EAS projectId 미설정 등 */
+      } catch (e) {
+        ginitNotifyDbg('PushBootstrap', 'expo_push_token_failed', {
+          message: e instanceof Error ? e.message : String(e),
+          hasProjectId: Boolean(projectId),
+        });
+        if (__DEV__) {
+          console.warn('[PushBootstrap] Expo Push 토큰 실패 — env에 EAS_PROJECT_ID(또는 EXPO_PUBLIC_EAS_PROJECT_ID) 확인', e);
+        }
       }
     })();
   }, [userId]);

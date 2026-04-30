@@ -49,7 +49,9 @@ import {
   fetchFriendsAcceptedList,
   fetchFriendsPendingInbox,
   fetchFriendsPendingOutbox,
+  removeAcceptedFriend,
 } from '@/src/lib/friends';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
@@ -746,6 +748,43 @@ export function FriendsHomeScreen() {
     })();
   }, [router, userId]);
 
+  const onRemoveAcceptedFriend = useCallback(() => {
+    if (!sheetFriend || !me) return;
+    const row = sheetFriend;
+    const nick = row.profile.nickname?.trim() || '친구';
+    const fid = row.row.id;
+    const peerPk = friendAppUserKey(row.row.peer_app_user_id);
+    Alert.alert(
+      '친구 삭제',
+      `${nick}님과의 지닛 친구 관계를 삭제할까요?\n채팅 기록은 그대로이며, 이후 다시 지닛을 보낼 수 있어요.`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                await removeAcceptedFriend(me, fid);
+                setHiddenPeerIds((prev) => {
+                  if (!prev.has(peerPk)) return prev;
+                  const next = new Set(prev);
+                  next.delete(peerPk);
+                  void persistHidden(next);
+                  return next;
+                });
+                setSheetFriend(null);
+                await reload();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [me, sheetFriend, reload, persistHidden]);
+
   const hideFriend = useCallback(
     (peerId: string) => {
       const pk = friendAppUserKey(peerId);
@@ -1068,6 +1107,13 @@ export function FriendsHomeScreen() {
                       openDm(peer, nick);
                     }}
                   />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="친구 삭제"
+                    onPress={onRemoveAcceptedFriend}
+                    style={({ pressed }) => [s.sheetDeleteBtn, pressed && { opacity: 0.88 }]}>
+                    <Text style={s.sheetDeleteTxt}>친구 삭제</Text>
+                  </Pressable>
                   <Text style={s.sheetTitle}>{sheetFriend.profile.nickname}님</Text>
                   <Text style={s.sheetSub}>gDna</Text>
                   <Text style={s.sheetBody}>{sheetFriend.profile.gDna?.trim() || '등록된 gDna가 없어요.'}</Text>
@@ -1527,7 +1573,9 @@ const s = StyleSheet.create({
     borderColor: 'rgba(15,23,42,0.1)',
   },
   sheetAvatarLetter: { fontSize: 28, fontWeight: '900', color: GinitTheme.colors.primary },
-  sheetDmBtn: { alignSelf: 'stretch', marginBottom: 14 },
+  sheetDmBtn: { alignSelf: 'stretch', marginBottom: 10 },
+  sheetDeleteBtn: { alignSelf: 'stretch', paddingVertical: 12, marginBottom: 14 },
+  sheetDeleteTxt: { fontSize: 15, fontWeight: '800', color: '#b91c1c', textAlign: 'center' },
   sheetTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
   sheetSub: { fontSize: 12, fontWeight: '800', color: '#64748b', marginBottom: 4 },
   sheetBody: { fontSize: 14, fontWeight: '600', color: '#334155', lineHeight: 21 },

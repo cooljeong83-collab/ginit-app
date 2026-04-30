@@ -582,8 +582,10 @@ export default function ChatTab() {
       for (const m of joinedMeetings) {
         if (cancelled) return;
         const readId = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap, latestByMeetingId[m.id]?.id);
+        const readForCount =
+          (readId || '').trim() || (latestByMeetingId[m.id]?.id ?? '').trim() || null;
         try {
-          next[m.id] = await fetchMeetingChatUnreadCount(m.id, readId || null);
+          next[m.id] = await fetchMeetingChatUnreadCount(m.id, readForCount);
         } catch {
           next[m.id] = 0;
         }

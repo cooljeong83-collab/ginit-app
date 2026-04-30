@@ -47,6 +47,7 @@ import {
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { getFirestoreDb, getMeetingById, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
@@ -570,10 +571,13 @@ export async function fetchMeetingChatUnreadCount(meetingId: string, readMessage
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) return 0;
   const rid = typeof readMessageId === 'string' ? readMessageId.trim() : '';
-  if (!rid) return 0;
 
   const db = getFirestoreDb();
   const cref = collection(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
+
+  /** 커서 없음: 호출부에서 `latestMessageId` 등으로 보강해야 함. 여기서 전체를 세면 탈퇴/재가입·로컬 `''` 고착 시 배지가 과대해집니다. */
+  if (!rid) return 0;
+
   const readRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, rid);
   const readSnap = await getDoc(readRef);
   if (!readSnap.exists()) {
@@ -725,16 +729,21 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
       const mid = args.meetingId.trim();
       if (!mid) return;
       const m = await getMeetingById(mid);
-      if (!m) return;
+      if (!m) {
+        ginitNotifyDbg('meeting-chat', 'notify_skip_no_meeting', { meetingId: mid });
+        return;
+      }
       const title = m.title?.trim() || '모임';
       const senderPk = normalizeParticipantId(args.senderId.trim()) || args.senderId.trim();
       const ids = m.participantIds ?? [];
       const seen = new Set<string>();
       const pv = args.preview.trim().slice(0, 500);
+      let pushCount = 0;
       for (const raw of ids) {
         const pk = normalizeParticipantId(String(raw).trim()) || String(raw).trim();
         if (!pk || pk === senderPk || seen.has(pk)) continue;
         seen.add(pk);
+        pushCount += 1;
         sendInAppAlarmRemotePushToUserFireAndForget(pk, {
           kind: 'chat',
           meetingId: mid,
@@ -742,7 +751,13 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
           preview: pv,
         });
       }
-    } catch {
+      ginitNotifyDbg('meeting-chat', 'notify_participants', {
+        meetingId: mid,
+        recipientPushCount: pushCount,
+        participantIdsLen: ids.length,
+      });
+    } catch (e) {
+      ginitNotifyDbg('meeting-chat', 'notify_error', { message: e instanceof Error ? e.message : String(e) });
       /* 푸시 실패는 전송 성공과 무관 */
     }
   })();

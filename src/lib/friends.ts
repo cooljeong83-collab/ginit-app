@@ -126,3 +126,12 @@ export async function cancelOutgoingGinitRequest(meAppUserId: string, friendship
   });
   if (error) throw new Error(error.message);
 }
+
+/** 수락된 친구 관계를 삭제합니다. 요청자·수신자 어느 쪽이든 호출 가능(`friends` 행 삭제). */
+export async function removeAcceptedFriend(meAppUserId: string, friendshipId: string): Promise<void> {
+  const { error } = await supabase.rpc('friends_remove_accepted', {
+    p_me: canonAppUserId(meAppUserId),
+    p_friendship_id: friendshipId.trim(),
+  });
+  if (error) throw new Error(error.message);
+}

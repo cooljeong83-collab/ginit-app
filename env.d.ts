@@ -2,6 +2,12 @@ declare namespace NodeJS {
   interface ProcessEnv {
     EXPO_PUBLIC_SUPABASE_URL?: string;
     EXPO_PUBLIC_SUPABASE_ANON_KEY?: string;
+    /** Expo Push / EAS — `getExpoPushTokenAsync({ projectId })` 용 (expo.dev Project ID) */
+    EAS_PROJECT_ID?: string;
+    EXPO_PUBLIC_EAS_PROJECT_ID?: string;
+    /** Expo Push API (선택, remote-push-hub 의 Expo 폴백 전송 시 Authorization) */
+    EXPO_ACCESS_TOKEN?: string;
+    EXPO_PUBLIC_EXPO_ACCESS_TOKEN?: string;
     EXPO_PUBLIC_NAVER_MAP_CLIENT_ID?: string;
     EXPO_PUBLIC_NAVER_MAPS_API_ORIGIN?: string;
     EXPO_PUBLIC_NAVER_MAPS_GEOCODE_PATH?: string;

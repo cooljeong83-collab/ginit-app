@@ -1,15 +1,12 @@
-import { doc, getDoc } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
 
-import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
-import { sendFcmPushToUsersFireAndForget } from '@/src/lib/fcm-push-api';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { dispatchRemotePushToRecipients } from '@/src/lib/remote-push-hub';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
-import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 /** Android 헤드업 배너용 — `HIGH` 이상이어야 다른 앱 사용 중에도 상단 배너가 뜨는 경우가 많습니다. */
 export const GINIT_IN_APP_ANDROID_CHANNEL = 'ginit_in_app';
@@ -42,17 +39,6 @@ export async function ensureNotificationsPresentable(): Promise<boolean> {
 }
 
 export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
-
-async function fetchExpoPushTokenForUser(userId: string): Promise<string | null> {
-  const uid = normalizeParticipantId(userId.trim());
-  if (!uid) return null;
-  const snap = await getDoc(doc(getFirebaseFirestore(), USER_EXPO_PUSH_TOKENS_COLLECTION, uid));
-  const t = snap.data()?.token;
-  if (typeof t === 'string' && (t.startsWith('ExponentPushToken') || t.startsWith('ExpoPushToken'))) {
-    return t;
-  }
-  return null;
-}
 
 export type SendInAppAlarmPushParams = {
   userId: string;
@@ -133,76 +119,72 @@ function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
 
 async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<void> {
   if (Platform.OS === 'web') return;
-  if (!(await ensureNotificationsPresentable())) return;
+  const permOk = await ensureNotificationsPresentable();
+  if (!permOk) {
+    ginitNotifyDbg('in-app-alarm-push', 'local_heads_up_skip_perm', { kind: params.kind, meetingId: params.meetingId });
+    return;
+  }
   await ensureGinitInAppAndroidChannel();
   const c = buildHeadsUpContent(params);
-  await Notifications.presentNotificationAsync({
-    title: c.title,
-    body: c.body,
-    subtitle: c.subtitle,
-    sound: 'default',
-    data: { meetingId: c.meetingId, action: c.action, url: c.url },
-    interruptionLevel: 'active',
-    priority: 'high',
-    ...(Platform.OS === 'android' ? { channelId: GINIT_IN_APP_ANDROID_CHANNEL } : {}),
+  ginitNotifyDbg('in-app-alarm-push', 'local_heads_up_present', {
+    kind: params.kind,
+    meetingId: c.meetingId,
+    action: c.action,
+  });
+  /**
+   * SDK 54 `expo-notifications`는 `presentNotificationAsync`를 더 이상 export하지 않습니다.
+   * 즉시 표시는 `scheduleNotificationAsync` + `trigger: null`(iOS) / `{ channelId }`(Android 즉시·채널)로 처리합니다.
+   */
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: c.title,
+      body: c.body,
+      subtitle: c.subtitle,
+      sound: 'default',
+      data: { meetingId: c.meetingId, action: c.action, url: c.url },
+      interruptionLevel: 'active',
+      ...(Platform.OS === 'android'
+        ? { priority: Notifications.AndroidNotificationPriority.HIGH }
+        : {}),
+    },
+    trigger:
+      Platform.OS === 'android'
+        ? { channelId: GINIT_IN_APP_ANDROID_CHANNEL }
+        : null,
   });
 }
 
 /**
- * 로그인한 사용자 본인의 Expo 푸시 토큰으로 전송(백그라운드·다른 앱 사용 중 헤드업용).
- * @returns 토큰이 있어 전송 시도까지 한 경우 true, 토큰 없음 false
+ * 수신자에게 원격 시스템 알림(FCM 우선 → 미전달 시 Expo). 로직은 `remote-push-hub` 단일 경로.
+ * @returns FCM 또는 Expo 중 하나라도 시도되면 true(허브 내부에서 전부 스킵이면 false에 가깝게 처리하기 어려워 true 고정)
  */
 export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Promise<boolean> {
   const c = buildHeadsUpContent(params);
-  /**
-   * IMPORTANT (중복 푸시 방지):
-   * - Android: Expo Push도 내부적으로 FCM을 타기 때문에, 여기서 FCM + Expo를 같이 보내면 동일 알림이 중복될 수 있습니다.
-   *   따라서 Android는 서버 경유 FCM만 사용합니다.
-   * - iOS: FCM 토큰 저장/발송 경로가 없으므로 Expo Push만 사용합니다.
-   */
-  if (Platform.OS === 'android') {
-    // Android(FCM): 수신자가 앱 종료 상태여도 오도록 서버 경유 발송(토큰이 없으면 서버에서 sent=0으로 종료).
-    sendFcmPushToUsersFireAndForget({
-      toUserIds: [params.userId],
-      title: c.title,
-      body: c.body,
-      data: {
-        meetingId: c.meetingId,
-        action: c.action,
-        url: c.url,
-        title: c.title,
-        body: c.body,
-      },
-    });
-    return true;
-  }
-
-  const token = await fetchExpoPushTokenForUser(params.userId);
-  if (!token) return false;
-  const msg: ExpoPushMessage = {
-    to: token,
+  ginitNotifyDbg('in-app-alarm-push', 'remote_push_dispatch', {
+    kind: params.kind,
+    meetingId: c.meetingId,
+    action: c.action,
+    recipientUserIdSuffix: String(params.userId).slice(-6),
+  });
+  await dispatchRemotePushToRecipients({
+    toUserIds: [params.userId],
     title: c.title,
     body: c.body,
-    subtitle: c.subtitle,
-    sound: 'default',
-    priority: 'high',
-    /**
-     * Android(Expo push): 수신 기기 채널은 `default`로 고정합니다.
-     * 앱이 완전 종료 상태면 커스텀 채널(`ginit_in_app`)이 아직 생성되지 않았을 수 있어 미표시가 날 수 있습니다.
-     * `default`는 `PushNotificationBootstrap`에서 앱 부팅 시 항상 생성합니다.
-     */
-    channelId: 'default',
-    /** iOS 전용 필드 — Expo가 Android(FCM) 경로에서는 무시합니다. 발신 기기가 Android여도 수신 iOS에 반영되게 항상 포함합니다. */
-    interruptionLevel: 'active',
-    data: { meetingId: c.meetingId, action: c.action, url: c.url },
-  };
-  await sendExpoPushMessages([msg]);
+    expoSubtitle: c.subtitle,
+    expoInterruptionLevel: 'active',
+    data: {
+      meetingId: c.meetingId,
+      action: c.action,
+      url: c.url,
+      title: c.title,
+      body: c.body,
+    },
+  });
   return true;
 }
 
 /**
- * 송신 측에서 호출: `userId` 기기로만 Expo 원격 푸시(호출자 AppState·로컬 배너 무관).
- * 수신자 앱이 백그라운드/화면 꺼짐이어도 토큰이 등록돼 있으면 배너가 갈 수 있습니다.
+ * 송신 측에서 호출: 수신 `userId`로 원격 알림(`remote-push-hub`: FCM → 필요 시 Expo).
  */
 export function sendInAppAlarmRemotePushToUserFireAndForget(
   userId: string,
@@ -212,9 +194,16 @@ export function sendInAppAlarmRemotePushToUserFireAndForget(
     try {
       if (Platform.OS === 'web') return;
       const uid = normalizeParticipantId(userId.trim());
-      if (!uid) return;
+      if (!uid) {
+        ginitNotifyDbg('in-app-alarm-push', 'remote_fire_forget_skip_uid', { kind: payload.kind });
+        return;
+      }
       await sendInAppAlarmPush({ ...payload, userId: uid });
     } catch (err) {
+      ginitNotifyDbg('in-app-alarm-push', 'remote_fire_forget_error', {
+        kind: payload.kind,
+        message: err instanceof Error ? err.message : String(err),
+      });
       if (__DEV__) {
         console.warn('[in-app-alarm-push] remote-only', err);
       }
@@ -232,28 +221,57 @@ export function notifyInAppAlarmHeadsUpFireAndForget(params: SendInAppAlarmPushP
         const mid = params.meetingId.trim();
         if (mid) {
           const ok = await isMeetingChatNotifyEnabled(mid);
-          if (!ok) return;
+          if (!ok) {
+            ginitNotifyDbg('in-app-alarm-push', 'heads_up_skip_meeting_notify_off', { meetingId: mid });
+            return;
+          }
         }
       }
       if (params.kind === 'social_dm') {
         const rid = params.meetingId.trim();
         if (rid) {
           const ok = await isSocialChatNotifyEnabled(rid);
-          if (!ok) return;
+          if (!ok) {
+            ginitNotifyDbg('in-app-alarm-push', 'heads_up_skip_social_notify_off', { roomId: rid });
+            return;
+          }
         }
       }
       if (AppState.currentState === 'active') {
         if (params.kind === 'chat' || params.kind === 'social_dm') {
           const cur = getCurrentChatRoomId();
-          if (cur && cur === params.meetingId.trim()) return;
+          if (cur && cur === params.meetingId.trim()) {
+            ginitNotifyDbg('in-app-alarm-push', 'heads_up_skip_same_open_room', {
+              kind: params.kind,
+              roomId: cur,
+            });
+            return;
+          }
         }
         await presentLocalHeadsUp(params);
         return;
       }
       const { status: notifPerm } = await Notifications.getPermissionsAsync();
-      if (notifPerm !== 'granted') return;
+      if (notifPerm !== 'granted') {
+        ginitNotifyDbg('in-app-alarm-push', 'heads_up_remote_skip_perm_bg', {
+          kind: params.kind,
+          meetingId: params.meetingId.trim(),
+          expoNotifPerm: notifPerm,
+        });
+        return;
+      }
+      ginitNotifyDbg('in-app-alarm-push', 'heads_up_remote_from_bg', {
+        kind: params.kind,
+        meetingId: params.meetingId.trim(),
+        appState: AppState.currentState,
+        expoNotifPerm: notifPerm,
+      });
       await sendInAppAlarmPush(params);
     } catch (err) {
+      ginitNotifyDbg('in-app-alarm-push', 'heads_up_error', {
+        kind: params.kind,
+        message: err instanceof Error ? err.message : String(err),
+      });
       if (__DEV__) {
         console.warn('[in-app-alarm-push]', err);
       }

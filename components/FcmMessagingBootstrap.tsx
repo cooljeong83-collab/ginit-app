@@ -7,14 +7,17 @@ import {
   type FirebaseMessagingTypes,
 } from '@react-native-firebase/messaging';
 import { useEffect, useRef } from 'react';
+import * as Notifications from 'expo-notifications';
 import { Alert, PermissionsAndroid, Platform } from 'react-native';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { fcmDebugSetError, fcmDebugSetSaveOk, fcmDebugSetToken } from '@/src/lib/fcm-debug-state';
-import { displayFcmRemoteMessageWithNotifeeAndroid } from '@/src/lib/fcm-notifee-display';
+import { displayFcmRemoteMessageWithNotifeeAndroid, ensureGinitFcmNotifeeChannel } from '@/src/lib/fcm-notifee-display';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
 import { ensureUserProfile, getUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -51,6 +54,7 @@ function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): {
 }
 
 async function persistFcmTokenAndVerify(uid: string, token: string): Promise<void> {
+  ginitNotifyDbg('FcmMessaging', 'persist_start', { uidSuffix: uid.slice(-6), tokenLen: token.length });
   if (__DEV__) {
     console.log('[fcm] persist start', { uid, tokenLen: token.length });
   }
@@ -61,6 +65,7 @@ async function persistFcmTokenAndVerify(uid: string, token: string): Promise<voi
   if (saved !== token) {
     throw new Error('[fcm] token persisted check failed: profiles.fcm_token is empty or mismatched');
   }
+  ginitNotifyDbg('FcmMessaging', 'persist_ok', { uidSuffix: uid.slice(-6), savedLen: saved.length });
   if (__DEV__) {
     console.log('[fcm] persist ok', { uid, savedLen: saved.length });
   }
@@ -88,11 +93,31 @@ export function FcmMessagingBootstrap() {
       // 권한은 "토큰 발급/표시" 안정성에 영향 (Android 13+)
       await ensureAndroidPostNotificationsPermission();
 
+      if (Platform.OS === 'android') {
+        try {
+          /**
+           * 서버 FCM(`fcm-push-send`)이 사용하는 채널과 동일하게 맞춥니다.
+           * `PushNotificationBootstrap`은 알림 권한 granted 이후에만 `default` 채널을 만들어,
+           * 권한 지연·거절 직후에는 OS 트레이 알림이 빠질 수 있어 여기서 선(先) 생성합니다.
+           */
+          await ensureGinitFcmNotifeeChannel();
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'default',
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 220],
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          });
+        } catch {
+          /* 채널 생성 실패는 이후 표시 경로에서 재시도 */
+        }
+      }
+
       // fcm_token 저장은 Supabase가 준비되어 있어야 합니다(미설정 시 조용히 실패하지 않도록 개발 로그).
       try {
         assertSupabasePublicReady();
       } catch (e) {
         fcmDebugSetError(e);
+        ginitNotifyDbg('FcmMessaging', 'supabase_not_ready', { message: e instanceof Error ? e.message : String(e) });
         if (__DEV__) {
           console.warn('[fcm] supabase not ready:', e);
         }
@@ -107,6 +132,7 @@ export function FcmMessagingBootstrap() {
         const token = await getToken(m);
         if (!alive) return;
         const t = token?.trim() ?? '';
+        ginitNotifyDbg('FcmMessaging', 'getToken', { uidSuffix: uid.slice(-6), tokenLen: t.length, willPersist: Boolean(t && t !== lastSavedTokenRef.current) });
         if (__DEV__) {
           console.log('[fcm] getToken result', { uid, tokenLen: t.length });
         }
@@ -120,6 +146,7 @@ export function FcmMessagingBootstrap() {
       } catch (e) {
         fcmDebugSetSaveOk(false);
         fcmDebugSetError(e);
+        ginitNotifyDbg('FcmMessaging', 'getToken_or_save_failed', { message: e instanceof Error ? e.message : String(e) });
         if (__DEV__) {
           console.warn('[fcm] getToken/save failed:', e);
         }
@@ -138,6 +165,7 @@ export function FcmMessagingBootstrap() {
             .catch((e) => {
               fcmDebugSetSaveOk(false);
               fcmDebugSetError(e);
+              ginitNotifyDbg('FcmMessaging', 'token_refresh_save_failed', { message: e instanceof Error ? e.message : String(e) });
               if (__DEV__) console.warn('[fcm] tokenRefresh save failed:', e);
             });
         });
@@ -149,16 +177,37 @@ export function FcmMessagingBootstrap() {
         unsubOnMessage = onMessage(m, async (rm) => {
           const action = String(rm?.data?.action ?? '').trim();
           const meetingId = String(rm?.data?.meetingId ?? '').trim();
+          ginitNotifyDbg('FcmMessaging', 'on_message', {
+            messageId: rm.messageId,
+            action: action || undefined,
+            meetingId: meetingId || undefined,
+            hasNotification: Boolean(rm.notification),
+            platform: Platform.OS,
+          });
           if (action === 'in_app_chat' && meetingId) {
             const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
-            if (!notifyOn) return;
+            if (!notifyOn) {
+              ginitNotifyDbg('FcmMessaging', 'foreground_skip_meeting_notify_off', { meetingId });
+              return;
+            }
+          }
+          if (action === 'in_app_social_dm' && meetingId) {
+            const notifyOn = await isSocialChatNotifyEnabled(meetingId);
+            if (!notifyOn) {
+              ginitNotifyDbg('FcmMessaging', 'foreground_skip_social_notify_off', { meetingId });
+              return;
+            }
           }
           if (Platform.OS === 'android') {
             if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
               const cur = getCurrentChatRoomId();
-              if (cur && cur === meetingId) return;
+              if (cur && cur === meetingId) {
+                ginitNotifyDbg('FcmMessaging', 'foreground_skip_same_room', { meetingId });
+                return;
+              }
             }
             await displayFcmRemoteMessageWithNotifeeAndroid(rm);
+            ginitNotifyDbg('FcmMessaging', 'foreground_notifee_displayed', { messageId: rm.messageId });
             return;
           }
           const { title, body } = formatForegroundAlert(rm);

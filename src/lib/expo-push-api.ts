@@ -1,4 +1,5 @@
 import { publicEnv } from '@/src/config/public-env';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 
 export type ExpoPushMessage = {
   to: string;
@@ -59,7 +60,11 @@ function dedupeExpoMessages(messages: ExpoPushMessage[]): ExpoPushMessage[] {
  */
 export async function sendExpoPushMessages(messages: ExpoPushMessage[]): Promise<void> {
   const deduped = dedupeExpoMessages(messages);
-  if (deduped.length === 0) return;
+  if (deduped.length === 0) {
+    ginitNotifyDbg('expo-push-api', 'send_skip_empty', { incoming: messages.length });
+    return;
+  }
+  ginitNotifyDbg('expo-push-api', 'send_start', { count: deduped.length, hasAuth: Boolean(publicEnv.expoAccessToken?.trim()) });
   const accessToken = publicEnv.expoAccessToken?.trim();
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -76,6 +81,7 @@ export async function sendExpoPushMessages(messages: ExpoPushMessage[]): Promise
   });
   const text = await res.text().catch(() => '');
   if (!res.ok) {
+    ginitNotifyDbg('expo-push-api', 'send_http_error', { status: res.status, snippet: text.slice(0, 120) });
     throw new Error(`Expo push 실패 (${res.status}): ${text.slice(0, 200)}`);
   }
   let parsed: unknown;
@@ -89,6 +95,8 @@ export async function sendExpoPushMessages(messages: ExpoPushMessage[]): Promise
   const errors = data.filter((row) => row && typeof row === 'object' && (row as { status?: string }).status === 'error');
   if (errors.length > 0) {
     const first = errors[0] as { message?: string };
+    ginitNotifyDbg('expo-push-api', 'send_ticket_errors', { errorCount: errors.length, first: String(first?.message ?? '').slice(0, 120) });
     throw new Error(`Expo push 티켓 오류: ${String(first?.message ?? '').slice(0, 200)}`);
   }
+  ginitNotifyDbg('expo-push-api', 'send_ok', { count: deduped.length });
 }

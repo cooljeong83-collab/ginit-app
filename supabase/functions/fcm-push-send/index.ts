@@ -170,7 +170,8 @@ serve(async (req) => {
         android: {
           priority: 'high',
           notification: {
-            channelId: 'default',
+            /** 앱 `ensureGinitFcmNotifeeChannel` / `FcmMessagingBootstrap` 과 동일 ID (HIGH) */
+            channelId: 'ginit_fcm',
           },
         },
       });

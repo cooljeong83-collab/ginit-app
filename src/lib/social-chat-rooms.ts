@@ -29,6 +29,7 @@ import { Platform } from 'react-native';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
 import type { MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -394,6 +395,30 @@ function coalesceFirestoreTimeMs(v: unknown): number {
   return 0;
 }
 
+/**
+ * `chat_rooms/{roomId}` 문서의 읽음 포인터 — `app/(tabs)/chat.tsx` 미읽음 집계와 동일한 키( raw / 전화정규화 / PK ) 규칙.
+ * 탭 배지(`InAppAlarmsContext`)는 AsyncStorage만 보면 서버 읽음과 어긋날 수 있어, 합산 시 이 값을 우선합니다.
+ */
+export async function fetchSocialChatReadPointersForUser(
+  roomId: string,
+  myAppUserId: string,
+): Promise<{ readId: string | null; readAt: unknown | null }> {
+  const rid = roomId.trim();
+  const raw = String(myAppUserId ?? '').trim();
+  if (!rid || !raw) return { readId: null, readAt: null };
+  const mePhone = normalizePhoneUserId(raw) ?? raw;
+  const mePk = normalizeParticipantId(raw) ?? raw;
+  const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
+  if (!roomSnap.exists()) return { readId: null, readAt: null };
+  const data = roomSnap.data() as Record<string, unknown>;
+  const readMap = (data.readMessageIdBy ?? {}) as Record<string, string | null | undefined>;
+  const atMap = (data.readAtBy ?? {}) as Record<string, unknown>;
+  const ridFromMap = readMap[raw] ?? readMap[mePhone] ?? (mePk ? readMap[mePk] : undefined);
+  const readId = typeof ridFromMap === 'string' && ridFromMap.trim() ? ridFromMap.trim() : null;
+  const readAt = (atMap[raw] ?? atMap[mePhone] ?? (mePk ? atMap[mePk] : null)) ?? null;
+  return { readId, readAt };
+}
+
 export async function fetchSocialChatUnreadCount(
   roomId: string,
   myAppUserId: string,
@@ -518,22 +543,33 @@ export async function sendSocialChatTextMessage(
           : [];
         const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
         const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
-        if (!peerRaw?.trim()) return;
+        if (!peerRaw?.trim()) {
+          ginitNotifyDbg('social-chat', 'dm_push_skip_no_peer', { rid, rawIdsLen: rawIds.length });
+          return;
+        }
         const peerPk =
           normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
         const senderPk = normalizeParticipantId(senderId) || senderId;
-        if (!peerPk || peerPk === senderPk) return;
+        if (!peerPk || peerPk === senderPk) {
+          ginitNotifyDbg('social-chat', 'dm_push_skip_peer_same_or_empty', { rid, hasPeerPk: Boolean(peerPk) });
+          return;
+        }
         const prof = await getUserProfile(senderPk).catch(() => null);
         const titleNick = prof?.nickname?.trim() || '친구';
         const peerNotify = await getSocialChatNotifyEnabledForUser(rid, peerPk).catch(() => true);
-        if (!peerNotify) return;
+        if (!peerNotify) {
+          ginitNotifyDbg('social-chat', 'dm_push_skip_peer_notify_off', { rid });
+          return;
+        }
+        ginitNotifyDbg('social-chat', 'dm_push_fire', { rid, kind: 'text' });
         sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
           kind: 'social_dm',
           meetingId: rid,
           meetingTitle: titleNick,
           preview: text.slice(0, 500),
         });
-      } catch {
+      } catch (e) {
+        ginitNotifyDbg('social-chat', 'dm_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
         /* ignore */
       }
     })();
@@ -632,23 +668,34 @@ export async function sendSocialChatImageMessage(
           : [];
         const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
         const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
-        if (!peerRaw?.trim()) return;
+        if (!peerRaw?.trim()) {
+          ginitNotifyDbg('social-chat', 'dm_image_push_skip_no_peer', { rid, rawIdsLen: rawIds.length });
+          return;
+        }
         const peerPk =
           normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
         const senderPk = normalizeParticipantId(senderId) || senderId;
-        if (!peerPk || peerPk === senderPk) return;
+        if (!peerPk || peerPk === senderPk) {
+          ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_same_or_empty', { rid });
+          return;
+        }
         const prof = await getUserProfile(senderPk).catch(() => null);
         const titleNick = prof?.nickname?.trim() || '친구';
         const imgPreview = cap ? `사진 · ${cap}` : '사진';
         const peerNotify = await getSocialChatNotifyEnabledForUser(rid, peerPk).catch(() => true);
-        if (!peerNotify) return;
+        if (!peerNotify) {
+          ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_notify_off', { rid });
+          return;
+        }
+        ginitNotifyDbg('social-chat', 'dm_push_fire', { rid, kind: 'image' });
         sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
           kind: 'social_dm',
           meetingId: rid,
           meetingTitle: titleNick,
           preview: imgPreview,
         });
-      } catch {
+      } catch (e) {
+        ginitNotifyDbg('social-chat', 'dm_image_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
         /* ignore */
       }
     })();

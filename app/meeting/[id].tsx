@@ -2,6 +2,7 @@ import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
@@ -27,6 +28,7 @@ import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { VoteCandidateListV } from '@/components/meeting/VoteCandidateListV';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
+import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
@@ -81,6 +83,7 @@ import {
 } from '@/src/lib/meetings';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import {
+  resolveNaverMovieSearchWebUrl,
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
   sanitizeNaverLocalPlaceLink,
 } from '@/src/lib/naver-local-search';
@@ -378,7 +381,7 @@ function isMeetingHost(sessionUserId: string | null, createdBy: string | null | 
 
 export default function MeetingDetailScreen() {
   const router = useRouter();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
@@ -395,6 +398,9 @@ export default function MeetingDetailScreen() {
   const [selectedPlaceIds, setSelectedPlaceIds] = useState<string[]>([]);
   const [placeThumbByChipId, setPlaceThumbByChipId] = useState<Record<string, string | null>>({});
   const [dateVoteCalendarMonth, setDateVoteCalendarMonth] = useState(() => monthStartYmd(fmtDateYmd(new Date())));
+  const [dateVoteCalendarPagerW, setDateVoteCalendarPagerW] = useState(() => Math.max(280, Math.floor(windowWidth)));
+  const dateVoteCalendarPagerRef = useRef<ScrollView>(null);
+  const [dateVoteCalendarYmPick, setDateVoteCalendarYmPick] = useState<{ draft: Date } | null>(null);
   const [dateVoteTimePick, setDateVoteTimePick] = useState<{ ymd: string } | null>(null);
   /** 영화 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
@@ -666,6 +672,14 @@ export default function MeetingDetailScreen() {
     setHostTieMovieId(null);
   }, [meeting?.id]);
 
+  /** 확정용 동점 선택 id는 실제 투표 선택에 포함된 칩만 유지(다건 투표와 동기화) */
+  useEffect(() => {
+    const id = hostTieMovieId?.trim();
+    if (!id) return;
+    if (selectedMovieIds.includes(id)) return;
+    setHostTieMovieId(null);
+  }, [selectedMovieIds, hostTieMovieId]);
+
   const storedDateCandidates = meeting?.dateCandidates ?? [];
   const dateChips = useMemo(() => {
     if (!meeting) return [];
@@ -702,6 +716,18 @@ export default function MeetingDetailScreen() {
   }, [meeting?.voteTallies?.places, placeChips]);
 
   const specialtyKind = useMemo(() => (meeting ? getExtraDataSpecialtyKind(meeting) : null), [meeting]);
+  /** 장소 제안 모달 — `VoteCandidatesForm.placeThemeLabel`로 주변 검색 기본어(영화=영화관 등) 시드 */
+  const placeProposePlaceThemeLabel = useMemo(() => {
+    if (!meeting) return '';
+    const direct = meeting.categoryLabel?.trim();
+    if (direct) return direct;
+    const sk = getExtraDataSpecialtyKind(meeting);
+    if (sk === 'movie') return '영화';
+    if (sk === 'food') return '맛집';
+    if (sk === 'sports') return '운동';
+    if (extractMoviesFromExtra(meeting.extraData).length > 0) return '영화';
+    return '';
+  }, [meeting]);
   const extraMovies = useMemo(() => (meeting ? extractMoviesFromExtra(meeting.extraData) : []), [meeting?.extraData]);
 
   const sortedMovieVoteRows = useMemo(() => {
@@ -1763,6 +1789,107 @@ export default function MeetingDetailScreen() {
     [meeting, isHost, sortedDateChips, toggleDateSelection],
   );
 
+  const confirmDateVoteCalendarYmPick = useCallback(() => {
+    const cur = dateVoteCalendarYmPick;
+    if (!cur) return;
+    setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(cur.draft)));
+    setDateVoteCalendarYmPick(null);
+  }, [dateVoteCalendarYmPick]);
+
+  const renderDateVoteCalendarMonthGrid = useCallback(
+    (monthAnchorYmd: string, pagerPageW: number) => {
+      const p = parseYmd(monthAnchorYmd);
+      const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
+      const year = base.getFullYear();
+      const month = base.getMonth();
+      const firstDow = new Date(year, month, 1).getDay();
+      const gridStart = new Date(year, month, 1 - firstDow);
+      const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
+      for (let i = 0; i < 42; i += 1) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + i);
+        cells.push({
+          ymd: fmtDateYmd(d),
+          day: d.getDate(),
+          inMonth: d.getMonth() === month,
+        });
+      }
+
+      return (
+        <View
+          key={`dv-cal-${monthAnchorYmd}`}
+          style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}>
+          <View style={styles.calendarGrid}>
+            {Array.from({ length: 6 }).map((_, wi) => {
+              const week = cells.slice(wi * 7, wi * 7 + 7);
+              const weekHasAny = week.some((c) => (dateVoteByYmd[c.ymd]?.length ?? 0) > 0);
+              return (
+                <View
+                  key={`week-${monthAnchorYmd}-${wi}`}
+                  style={[styles.calendarWeekRow, !weekHasAny && styles.calendarWeekRowEmpty, wi === 5 ? { marginBottom: 0 } : null]}>
+                  {week.map((c) => {
+                    const opts = dateVoteByYmd[c.ymd] ?? [];
+                    const has = opts.length > 0;
+                    const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
+                    const isSelected = dateHostPickMode ? isHostSelected : opts.some((o) => selectedDateIds.includes(o.chipId));
+                    const times = opts.map((o) => o.hm);
+                    return (
+                      <Pressable
+                        key={c.ymd}
+                        onPress={() => {
+                          if (!has) return;
+                          if (opts.length === 1) {
+                            onDateChipPress(opts[0].chipId);
+                            return;
+                          }
+                          setDateVoteTimePick({ ymd: c.ymd });
+                        }}
+                        style={({ pressed }) => [
+                          styles.calendarCell,
+                          !weekHasAny && styles.calendarCellRowEmpty,
+                          !c.inMonth && styles.calendarCellOut,
+                          has && styles.calendarCellHas,
+                          isSelected && styles.calendarCellSelected,
+                          pressed && styles.calendarCellPressed,
+                        ]}
+                        accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
+                        accessibilityLabel={`${c.ymd}${has ? ` ${opts.length}개` : ''}`}>
+                        <Text style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}>{c.day}</Text>
+                        {has ? (
+                          <View style={styles.calendarTimesWrap} pointerEvents="none">
+                            {times.map((t) => (
+                              <Text key={`${c.ymd}-${t}`} style={styles.calendarCellMeta}>
+                                {t}
+                              </Text>
+                            ))}
+                          </View>
+                        ) : (
+                          <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      );
+    },
+    [dateVoteByYmd, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
+  );
+
+  useEffect(() => {
+    if (dateVoteCalendarPagerW <= 0) return undefined;
+    const id = requestAnimationFrame(() => {
+      dateVoteCalendarPagerRef.current?.scrollTo({
+        x: dateVoteCalendarPagerW,
+        animated: false,
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [dateVoteCalendarMonth, dateVoteCalendarPagerW]);
+
   const onPlaceChipPress = useCallback(
     (chipId: string) => {
       if (!meeting) {
@@ -1781,21 +1908,17 @@ export default function MeetingDetailScreen() {
 
   const onMovieChipPress = useCallback(
     (chipId: string) => {
-      if (!meeting) {
-        toggleMovieSelection(chipId);
-        return;
-      }
+      toggleMovieSelection(chipId);
+      if (!meeting || !isHost) return;
       const tops = resolveVoteTopTies(
         sortedMovieVoteRows.map((r) => r.chipId),
         meeting.voteTallies?.movies,
       ).topIds;
-      if (isHost && tops.length > 1 && tops.includes(chipId)) {
+      if (tops.length > 1 && tops.includes(chipId)) {
         setHostTieMovieId(chipId);
-        return;
       }
-      toggleMovieSelection(chipId);
     },
-    [meeting, isHost, sortedMovieVoteRows, toggleMovieSelection],
+    [meeting, isHost, sortedMovieVoteRows, meeting?.voteTallies?.movies, toggleMovieSelection],
   );
 
   const handleUnconfirmMeetingSchedule = useCallback(() => {
@@ -2282,21 +2405,19 @@ export default function MeetingDetailScreen() {
                   const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
                   const year = base.getFullYear();
                   const month = base.getMonth();
-                  const firstDow = new Date(year, month, 1).getDay();
-                  const gridStart = new Date(year, month, 1 - firstDow);
-                  const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
-                  for (let i = 0; i < 42; i += 1) {
-                    const d = new Date(gridStart);
-                    d.setDate(gridStart.getDate() + i);
-                    cells.push({
-                      ymd: fmtDateYmd(d),
-                      day: d.getDate(),
-                      inMonth: d.getMonth() === month,
-                    });
-                  }
                   const monthLabel = `${year}.${pad2(month + 1)}`;
+                  const prevAnchor = monthStartYmd(fmtDateYmd(new Date(year, month - 1, 1)));
+                  const nextAnchor = monthStartYmd(fmtDateYmd(new Date(year, month + 1, 1)));
+                  const pagerW = dateVoteCalendarPagerW;
+
                   return (
-                    <View style={styles.voteCalendarWrap}>
+                    <View
+                      style={styles.voteCalendarWrap}
+                      onLayout={(e) => {
+                        const w = Math.floor(e.nativeEvent.layout.width);
+                        if (w <= 0) return;
+                        setDateVoteCalendarPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
+                      }}>
                       <View style={styles.voteCalendarHeaderRow}>
                         <Pressable
                           onPress={() => {
@@ -2308,7 +2429,15 @@ export default function MeetingDetailScreen() {
                           accessibilityLabel="이전 달">
                           <Ionicons name="chevron-back" size={18} color={GinitTheme.colors.primary} />
                         </Pressable>
-                        <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
+                        <Pressable
+                          onPress={() => {
+                            setDateVoteCalendarYmPick({ draft: new Date(year, month, 1) });
+                          }}
+                          style={({ pressed }) => [styles.voteCalendarTitlePress, pressed && { opacity: 0.88 }]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`년·월 선택 ${monthLabel}`}>
+                          <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
+                        </Pressable>
                         <Pressable
                           onPress={() => {
                             const next = new Date(year, month + 1, 1);
@@ -2327,59 +2456,38 @@ export default function MeetingDetailScreen() {
                           </Text>
                         ))}
                       </View>
-                      <View style={styles.calendarGrid}>
-                        {Array.from({ length: 6 }).map((_, wi) => {
-                          const week = cells.slice(wi * 7, wi * 7 + 7);
-                          const weekHasAny = week.some((c) => (dateVoteByYmd[c.ymd]?.length ?? 0) > 0);
-                          return (
-                            <View
-                              key={`week-${wi}`}
-                              style={[styles.calendarWeekRow, !weekHasAny && styles.calendarWeekRowEmpty, wi === 5 ? { marginBottom: 0 } : null]}>
-                              {week.map((c) => {
-                                const opts = dateVoteByYmd[c.ymd] ?? [];
-                                const has = opts.length > 0;
-                                const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
-                                const isSelected = dateHostPickMode ? isHostSelected : opts.some((o) => selectedDateIds.includes(o.chipId));
-                                const times = opts.map((o) => o.hm);
-                                return (
-                                  <Pressable
-                                    key={c.ymd}
-                                    onPress={() => {
-                                      if (!has) return;
-                                      if (opts.length === 1) {
-                                        onDateChipPress(opts[0].chipId);
-                                        return;
-                                      }
-                                      setDateVoteTimePick({ ymd: c.ymd });
-                                    }}
-                                    style={({ pressed }) => [
-                                      styles.calendarCell,
-                                      !weekHasAny && styles.calendarCellRowEmpty,
-                                      !c.inMonth && styles.calendarCellOut,
-                                      has && styles.calendarCellHas,
-                                      isSelected && styles.calendarCellSelected,
-                                      pressed && styles.calendarCellPressed,
-                                    ]}
-                                    accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
-                                    accessibilityLabel={`${c.ymd}${has ? ` ${opts.length}개` : ''}`}>
-                                    <Text style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}>{c.day}</Text>
-                                    {has ? (
-                                      <View style={styles.calendarTimesWrap} pointerEvents="none">
-                                        {times.map((t) => (
-                                          <Text key={`${c.ymd}-${t}`} style={styles.calendarCellMeta}>
-                                            {t}
-                                          </Text>
-                                        ))}
-                                      </View>
-                                    ) : (
-                                      <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
-                                    )}
-                                  </Pressable>
-                                );
-                              })}
-                            </View>
-                          );
-                        })}
+                      <View style={styles.voteCalendarCarouselHost}>
+                        <ScrollView
+                          ref={dateVoteCalendarPagerRef}
+                          horizontal
+                          pagingEnabled
+                          bounces={false}
+                          nestedScrollEnabled
+                          keyboardShouldPersistTaps="handled"
+                          showsHorizontalScrollIndicator={false}
+                          decelerationRate="fast"
+                          style={styles.voteCalendarPagerScroll}
+                          contentContainerStyle={styles.voteCalendarPagerContent}
+                          onMomentumScrollEnd={(e) => {
+                            if (pagerW <= 0) return;
+                            const ix = Math.round(e.nativeEvent.contentOffset.x / pagerW);
+                            if (ix === 1) return;
+                            const curP = parseYmd(dateVoteCalendarMonth);
+                            const cur = curP ? new Date(curP.y, curP.m - 1, 1) : new Date();
+                            if (ix === 0) {
+                              setDateVoteCalendarMonth(
+                                monthStartYmd(fmtDateYmd(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))),
+                              );
+                            } else if (ix === 2) {
+                              setDateVoteCalendarMonth(
+                                monthStartYmd(fmtDateYmd(new Date(cur.getFullYear(), cur.getMonth() + 1, 1))),
+                              );
+                            }
+                          }}>
+                          {renderDateVoteCalendarMonthGrid(prevAnchor, pagerW)}
+                          {renderDateVoteCalendarMonthGrid(dateVoteCalendarMonth, pagerW)}
+                          {renderDateVoteCalendarMonthGrid(nextAnchor, pagerW)}
+                        </ScrollView>
                       </View>
                     </View>
                   );
@@ -2429,7 +2537,7 @@ export default function MeetingDetailScreen() {
                   </Text>
                   <Text style={styles.dateVoteSub}>
                     {movieHostPickMode
-                      ? '동점 작품만 표시됩니다. 한 곳만 탭하세요. (집계 표 숫자에는 반영되지 않아요.)'
+                      ? '동점 작품만 표시됩니다. 여러 편 투표한 뒤, 동점 후보를 탭하면 확정용 선택이 갱신돼요. (집계 표 숫자에는 반영되지 않아요.)'
                       : '포스터를 눌러 보고 싶은 작품을 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
                   </Text>
                   {movieHostPickMode ? (
@@ -2460,6 +2568,23 @@ export default function MeetingDetailScreen() {
                         </Text>
                       </View>
                     </View>
+                    {resolveNaverMovieSearchWebUrl(extraMovies[0].title) ? (
+                      <Pressable
+                        onPress={() => {
+                          const u = resolveNaverMovieSearchWebUrl(extraMovies[0].title);
+                          if (!u) return;
+                          setNaverPlaceWebModal({ url: u, title: extraMovies[0].title.trim() || '영화' });
+                        }}
+                        style={({ pressed }) => [
+                          styles.moviePosterInfoBtn,
+                          styles.moviePosterInfoBtnBelowPoster,
+                          pressed && { opacity: 0.88 },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="영화 정보">
+                        <Text style={styles.moviePosterInfoBtnText}>영화 정보</Text>
+                      </Pressable>
+                    ) : null}
                     <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
                   </>
                 ) : extraMovies.length > 0 ? (
@@ -2469,43 +2594,54 @@ export default function MeetingDetailScreen() {
                       showsHorizontalScrollIndicator={false}
                       contentContainerStyle={styles.movieScrollContent}>
                       {movieRowsShown.map(({ mv, chipId }) => {
-                        const chipSelected = movieHostPickMode
-                          ? hostTieMovieId === chipId
-                          : selectedMovieIds.includes(chipId);
+                        const chipSelected = selectedMovieIds.includes(chipId);
                         const tally = meeting.voteTallies?.movies?.[chipId] ?? 0;
+                        const movieInfoUrl = resolveNaverMovieSearchWebUrl(mv.title);
                         return (
-                          <Pressable
-                            key={chipId}
-                            onPress={() => onMovieChipPress(chipId)}
-                            style={({ pressed }) => [
-                              styles.moviePosterThumbWrap,
-                              chipSelected && styles.moviePosterThumbWrapSelected,
-                              pressed && styles.moviePosterThumbWrapPressed,
-                            ]}
-                            accessibilityRole={movieHostPickMode ? 'radio' : 'checkbox'}
-                            accessibilityState={{ checked: chipSelected, selected: chipSelected }}
-                            accessibilityLabel={`${mv.title}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
-                            {mv.posterUrl?.trim() ? (
-                              <Image
-                                source={{ uri: mv.posterUrl.trim() }}
-                                style={styles.moviePosterThumb}
-                                contentFit="cover"
-                                transition={120}
-                              />
-                            ) : (
-                              <View style={[styles.moviePosterThumb, styles.moviePosterPlaceholder]}>
-                                <Ionicons name="film-outline" size={22} color="#94A3B8" />
+                          <View key={chipId} style={styles.movieVotePosterColumn}>
+                            <Pressable
+                              onPress={() => onMovieChipPress(chipId)}
+                              style={({ pressed }) => [
+                                styles.moviePosterThumbWrap,
+                                chipSelected && styles.moviePosterThumbWrapSelected,
+                                pressed && styles.moviePosterThumbWrapPressed,
+                              ]}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                              accessibilityLabel={`${mv.title}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                              {mv.posterUrl?.trim() ? (
+                                <Image
+                                  source={{ uri: mv.posterUrl.trim() }}
+                                  style={styles.moviePosterThumb}
+                                  contentFit="cover"
+                                  transition={120}
+                                />
+                              ) : (
+                                <View style={[styles.moviePosterThumb, styles.moviePosterPlaceholder]}>
+                                  <Ionicons name="film-outline" size={22} color="#94A3B8" />
+                                </View>
+                              )}
+                              <View style={styles.voteTallyBadgeMoviePoster} pointerEvents="none">
+                                <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                               </View>
-                            )}
-                            <View style={[styles.voteTallyBadge, styles.voteTallyBadgeMoviePoster]} pointerEvents="none">
-                              <Text style={styles.voteTallyBadgeText}>{tally}</Text>
-                            </View>
-                            {chipSelected ? (
-                              <View style={styles.moviePosterThumbCheck} pointerEvents="none">
-                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                              </View>
+                              {chipSelected ? (
+                                <View style={styles.moviePosterThumbCheckOverlay} pointerEvents="none">
+                                  <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                                </View>
+                              ) : null}
+                            </Pressable>
+                            {movieInfoUrl ? (
+                              <Pressable
+                                onPress={() =>
+                                  setNaverPlaceWebModal({ url: movieInfoUrl, title: mv.title.trim() || '영화' })
+                                }
+                                style={({ pressed }) => [styles.moviePosterInfoBtn, pressed && { opacity: 0.88 }]}
+                                accessibilityRole="button"
+                                accessibilityLabel="영화 정보">
+                                <Text style={styles.moviePosterInfoBtnText}>영화 정보</Text>
+                              </Pressable>
                             ) : null}
-                          </Pressable>
+                          </View>
                         );
                       })}
                     </ScrollView>
@@ -2521,8 +2657,8 @@ export default function MeetingDetailScreen() {
                       }>
                       {movieHostPickMode
                         ? hostTieMovieId
-                          ? '확정용 1편 선택됨 · 집계 표에는 반영되지 않아요'
-                          : '확정할 작품을 한 곳만 탭해 주세요'
+                          ? '확정용 선택이 반영됐어요 · 집계 표에는 반영되지 않아요'
+                          : '동점 후보 포스터를 탭하면 확정용으로 지정돼요(투표는 여러 편 가능)'
                         : selectedMovieIds.length > 0
                           ? `${selectedMovieIds.length}편 선택됨`
                           : '아직 선택한 영화가 없어요'}
@@ -2564,8 +2700,8 @@ export default function MeetingDetailScreen() {
                   onPress={() => openPlaceVoteDetailWeb(placeChips[0])}
                   style={({ pressed }) => [styles.placeNaverDetailBtn, pressed && { opacity: 0.88 }]}
                   accessibilityRole="button"
-                  accessibilityLabel="가게 정보">
-                  <Text style={styles.placeNaverDetailBtnText}>가게 정보</Text>
+                  accessibilityLabel="상세 정보">
+                  <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
                 </Pressable>
                 <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
                 {singlePlaceCoords ? (
@@ -2651,8 +2787,8 @@ export default function MeetingDetailScreen() {
                           onPress={() => openPlaceVoteDetailWeb(chip)}
                           style={({ pressed }) => [styles.placeVoteDetailLink, pressed && { opacity: 0.88 }]}
                           accessibilityRole="button"
-                          accessibilityLabel="가게 정보">
-                          <Text style={styles.placeVoteDetailLinkText}>가게 정보</Text>
+                          accessibilityLabel="상세 정보">
+                          <Text style={styles.placeVoteDetailLinkText}>상세 정보</Text>
                         </Pressable>
                       </View>
                     );
@@ -2825,6 +2961,26 @@ export default function MeetingDetailScreen() {
                       </Pressable>
                     </>
                   ) : null}
+                  <Pressable
+                    onPress={onPressSaveVotes}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillBlue,
+                      styles.bottomPillFlex,
+                      participantVoteBusy && { opacity: 0.75 },
+                      pressed && !participantVoteBusy && { opacity: 0.9 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="저장">
+                    {participantVoteBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="save-outline" size={18} color="#fff" />
+                    )}
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      저장
+                    </Text>
+                  </Pressable>
                   {meeting.scheduleConfirmed !== true ? (
                     <Pressable
                       onPress={handleDeleteMeeting}
@@ -2885,26 +3041,6 @@ export default function MeetingDetailScreen() {
                       </Text>
                     </Pressable>
                   ) : null}
-                  <Pressable
-                    onPress={onPressSaveVotes}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      styles.bottomPillFlex,
-                      participantVoteBusy && { opacity: 0.75 },
-                      pressed && !participantVoteBusy && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="저장">
-                    {participantVoteBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Ionicons name="save-outline" size={18} color="#fff" />
-                    )}
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      저장
-                    </Text>
-                  </Pressable>
                 </View>
               </View>
             ) : alreadyJoinedMeeting ? (
@@ -3174,6 +3310,7 @@ export default function MeetingDetailScreen() {
                     seedPlaceQuery=""
                     seedScheduleDate={insertModalSchedule.scheduleDate}
                     seedScheduleTime={insertModalSchedule.scheduleTime}
+                    placeThemeLabel={placeProposePlaceThemeLabel}
                     initialPayload={placeProposeInitialPayload}
                     bare
                     wizardSegment="places"
@@ -3278,6 +3415,80 @@ export default function MeetingDetailScreen() {
                     <Text style={styles.proposeModalGhostBtnText}>닫기</Text>
                   </Pressable>
                 </View>
+              </View>
+            </View>
+          </Modal>
+        ) : null}
+
+        {dateVoteCalendarYmPick && Platform.OS === 'android' ? (
+          <DateTimePicker
+            value={dateVoteCalendarYmPick.draft}
+            mode="date"
+            display="spinner"
+            onChange={(event, date) => {
+              const t = (event as unknown as { type?: string } | null)?.type ?? '';
+              if (t === 'dismissed') {
+                setDateVoteCalendarYmPick(null);
+                return;
+              }
+              if (t === 'set' && date) {
+                setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(date)));
+                setDateVoteCalendarYmPick(null);
+                return;
+              }
+              if (!date) setDateVoteCalendarYmPick(null);
+            }}
+          />
+        ) : null}
+
+        {dateVoteCalendarYmPick && Platform.OS !== 'android' ? (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setDateVoteCalendarYmPick(null)}>
+            <View style={GinitStyles.modalRoot}>
+              <Pressable
+                style={GinitStyles.modalBackdrop}
+                onPress={() => setDateVoteCalendarYmPick(null)}
+                accessibilityRole="button"
+              />
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  top: Math.max(insets.top, 8),
+                  left: 0,
+                  right: 0,
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  paddingHorizontal: 16,
+                }}>
+                <Pressable onPress={() => setDateVoteCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
+                  <Text style={GinitStyles.modalCancel}>취소</Text>
+                </Pressable>
+                <Pressable onPress={confirmDateVoteCalendarYmPick} hitSlop={10} accessibilityRole="button">
+                  <Text style={GinitStyles.modalDone}>완료</Text>
+                </Pressable>
+              </View>
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  paddingBottom: Math.max(insets.bottom, 12),
+                  alignItems: 'center',
+                  backgroundColor: 'transparent',
+                }}>
+                <DateTimePicker
+                  value={dateVoteCalendarYmPick.draft}
+                  mode="date"
+                  display="spinner"
+                  locale="ko-KR"
+                  themeVariant="light"
+                  onChange={(_event: DateTimePickerEvent, date) => {
+                    if (!date) return;
+                    setDateVoteCalendarYmPick((prev) => (prev ? { draft: date } : prev));
+                  }}
+                />
               </View>
             </View>
           </Modal>
@@ -3665,22 +3876,77 @@ const styles = StyleSheet.create({
   miniBadgeUnknown: { backgroundColor: 'rgba(100, 116, 139, 0.14)' },
   miniBadgeUnknownText: { fontSize: 12, fontWeight: '800', color: '#475569' },
   movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
+  movieVotePosterColumn: { width: 108 },
+  /** 영화 후보 등록 카드 `movieResultDetailBtn`과 동일 스펙 */
+  moviePosterInfoBtn: {
+    marginTop: 8,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: GinitTheme.radius.button,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  moviePosterInfoBtnText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GinitTheme.colors.primary,
+  },
+  moviePosterInfoBtnBelowPoster: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+  },
+  /** 영화 후보 등록 `wizard-specialty`의 `movieResultImageCard`와 동일 톤 */
   moviePosterThumbWrap: {
     width: 108,
     borderRadius: 14,
-    borderWidth: 2,
-    borderColor: '#E4E9EF',
-    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
     overflow: 'hidden',
     position: 'relative',
   },
   moviePosterThumbWrapSelected: {
-    borderColor: GinitTheme.colors.primary,
+    borderColor: 'rgba(134, 211, 183, 0.9)',
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
-  moviePosterThumbWrapPressed: { opacity: 0.9 },
+  moviePosterThumbWrapPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
   moviePosterThumb: { width: '100%', height: 148, backgroundColor: '#E2E8F0' },
-  moviePosterThumbCheck: { position: 'absolute', top: 6, left: 6, zIndex: 4 },
-  voteTallyBadgeMoviePoster: { top: 6, right: 6 },
+  /** `movieResultImageOverlay` — 체크는 우상단, 집계 뱃지는 좌상단 */
+  moviePosterThumbCheckOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderRadius: 999,
+    padding: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  voteTallyBadgeMoviePoster: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 5,
+    minWidth: 27,
+    height: 25,
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopLeftRadius: 12,
+    borderBottomRightRadius: 11,
+    backgroundColor: 'rgba(255, 255, 255, 0.97)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 82, 204, 0.12)',
+    shadowColor: 'rgba(15, 23, 42, 0.12)',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
   movieVoteCard: {
     width: 108,
     padding: 4,
@@ -3810,6 +4076,25 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
+  },
+  voteCalendarTitlePress: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 34,
+  },
+  voteCalendarCarouselHost: {
+    width: '100%',
+    height: 274,
+  },
+  voteCalendarPagerScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  voteCalendarPagerContent: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    gap: 10,
   },
   calendarNavBtn: {
     width: 34,

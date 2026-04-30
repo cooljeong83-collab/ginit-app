@@ -55,6 +55,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
+  fetchSocialChatReadPointersForUser,
   fetchSocialChatUnreadCount,
   socialDmPreviewLine,
   socialMessageTimeMs,
@@ -63,6 +64,7 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
 import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -204,8 +206,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return '모임 정보가 변경되었습니다.';
   }, []);
 
+  const prevHeadsUpReadyRef = useRef<boolean | null>(null);
+
   useEffect(() => {
     if (!userId?.trim()) {
+      ginitNotifyDbg('InAppAlarms', 'session_reset', {});
       setPersistReady(false);
       setMeetings([]);
       setLatestById({});
@@ -237,6 +242,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void loadInAppAlarmReadState(userId).then((s) => {
       if (cancelled) return;
+      ginitNotifyDbg('InAppAlarms', 'persist_loaded', {
+        chatReadKeys: Object.keys(s.chatReadMessageId ?? {}).length,
+        meetingAckKeys: Object.keys(s.meetingAckFingerprint ?? {}).length,
+      });
       setReadState(s);
       setPersistReady(true);
     });
@@ -275,10 +284,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (!meetingsBootstrappedRef.current) {
           meetingsBootstrappedRef.current = true;
           setMeetingsBootstrapped(true);
+          ginitNotifyDbg('InAppAlarms', 'meetings_hybrid_bootstrapped', { count: list.length });
         }
         setMeetings(list);
       },
       () => {
+        ginitNotifyDbg('InAppAlarms', 'meetings_hybrid_error', {});
         /* 목록 오류는 각 탭에서 처리 */
       },
     );
@@ -298,14 +309,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const load = () => {
       void Promise.all([
         fetchFriendsPendingInbox(uid).catch((e) => {
+          ginitNotifyDbg('InAppAlarms', 'friends_pending_inbox_failed', { message: String(e) });
           if (__DEV__) console.warn('[InAppAlarms] friends_pending_inbox failed', e);
           return [] as FriendInboxRow[];
         }),
         fetchFriendsPendingOutbox(uid).catch((e) => {
+          ginitNotifyDbg('InAppAlarms', 'friends_pending_outbox_failed', { message: String(e) });
           if (__DEV__) console.warn('[InAppAlarms] friends_pending_outbox failed', e);
           return [] as FriendInboxRow[];
         }),
         fetchFriendsAcceptedList(uid).catch((e) => {
+          ginitNotifyDbg('InAppAlarms', 'friends_accepted_list_failed', { message: String(e) });
           if (__DEV__) console.warn('[InAppAlarms] friends_accepted_list failed', e);
           return [] as FriendAcceptedRow[];
         }),
@@ -405,6 +419,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     if (meetingLatestBootstrapped && meetingOk && socialLatestBootstrapped && socialOk) {
       headsUpReadyRef.current = true;
       setHeadsUpReady(true);
+      ginitNotifyDbg('InAppAlarms', 'heads_up_gate_passed', {
+        joinedCount: joined.length,
+        socialRoomsCount: socialRooms.length,
+      });
     }
   }, [
     persistReady,
@@ -420,6 +438,16 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
+    if (prevHeadsUpReadyRef.current === headsUpReady) return;
+    prevHeadsUpReadyRef.current = headsUpReady;
+    ginitNotifyDbg('InAppAlarms', headsUpReady ? 'headsUpReady_on' : 'headsUpReady_off', {
+      persistReady,
+      meetingsBootstrapped,
+      socialRoomsBootstrapped,
+    });
+  }, [headsUpReady, persistReady, meetingsBootstrapped, socialRoomsBootstrapped]);
+
+  useEffect(() => {
     if (Platform.OS === 'web') return;
     if (!persistReady || !userId?.trim() || !headsUpReady) return;
 
@@ -432,6 +460,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       if (createdMs && !isRecentEnoughForHeadsUp(createdMs)) continue;
       friendHeadsUpNotifiedIdsRef.current.add(frid);
       const title = friendRequesterNickById.get(fr.requester_app_user_id) ?? '친구';
+      ginitNotifyDbg('InAppAlarms', 'friend_request_heads_up', { friendshipId: frid });
       notifyInAppAlarmHeadsUpFireAndForget({
         userId,
         kind: 'friend_request',
@@ -444,7 +473,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     for (const id of [...friendHeadsUpNotifiedIdsRef.current]) {
       if (!cur.has(id)) friendHeadsUpNotifiedIdsRef.current.delete(id);
     }
-  }, [persistReady, userId, friendInbox, readState.friendRequestDismissedIds, friendRequesterNickById]);
+  }, [persistReady, userId, headsUpReady, friendInbox, readState.friendRequestDismissedIds, friendRequesterNickById]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -465,7 +494,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         friendAcceptHeadsUpNotifiedIdsRef.current.delete(id);
       }
     }
-  }, [persistReady, userId, friendAcceptQueue, readState.friendAcceptedDismissedIds, friendAcceptPeerNickById]);
+  }, [persistReady, userId, headsUpReady, friendAcceptQueue, readState.friendAcceptedDismissedIds, friendAcceptPeerNickById]);
 
   const joinedKey = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, userId);
@@ -498,10 +527,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (!socialRoomsBootstrappedRef.current) {
           socialRoomsBootstrappedRef.current = true;
           setSocialRoomsBootstrapped(true);
+          ginitNotifyDbg('InAppAlarms', 'social_rooms_bootstrapped', { count: rooms.length });
         }
         setSocialRooms(rooms);
       },
       () => {
+        ginitNotifyDbg('InAppAlarms', 'social_rooms_subscribe_error', {});
         /* 목록 오류는 친구·채팅 탭에서 처리 */
       },
     );
@@ -560,9 +591,14 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       for (const r of socialRooms) {
         if (!(r.roomId in socialLatestByRoomId)) continue;
         const latest = socialLatestByRoomId[r.roomId];
-        if (chatReadMessageId[r.roomId] === undefined) {
-          chatReadMessageId[r.roomId] = latest?.id ?? '';
-          changed = true;
+        const latestId = (latest?.id ?? '').trim();
+        const cur = chatReadMessageId[r.roomId];
+        /** `''`만 남은 채로는 `undefined`와 달리 이후 스냅샷이 와도 갱신되지 않아 탭 배지가 전체 메시지 수로 고정되는 경우가 있습니다(탈퇴/재가입·최초 null 스냅샷 등). */
+        if (cur === undefined || cur === '') {
+          if (chatReadMessageId[r.roomId] !== latestId) {
+            chatReadMessageId[r.roomId] = latestId;
+            changed = true;
+          }
         }
       }
       if (!changed) return prev;
@@ -609,9 +645,14 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         }
         if (!(m.id in latestById)) continue;
         const latest = latestById[m.id];
-        if (chatReadMessageId[m.id] === undefined) {
-          chatReadMessageId[m.id] = latest?.id ?? '';
-          changed = true;
+        const latestId = (latest?.id ?? '').trim();
+        const cur = chatReadMessageId[m.id];
+        /** 소셜과 동일: `''` 고착 시 `fetchMeetingChatUnreadCount`가 방 전체를 미읽음으로 집계할 수 있습니다. */
+        if (cur === undefined || cur === '') {
+          if (chatReadMessageId[m.id] !== latestId) {
+            chatReadMessageId[m.id] = latestId;
+            changed = true;
+          }
         }
       }
 
@@ -679,7 +720,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     if (Platform.OS === 'web') return;
     if (!persistReady || !userId?.trim() || !headsUpReady) return;
 
-    const myPk = normalizeParticipantId(userId.trim());
+    const uid = userId.trim();
+    const myPk = normalizeParticipantId(uid);
     const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
 
@@ -776,7 +818,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
       prevMeetingSnapshotRef.current[mid] = m;
     }
-  }, [persistReady, userId, meetings, readState.meetingAckFingerprint, buildMeetingChangePreview]);
+  }, [persistReady, userId, headsUpReady, meetings, readState.meetingAckFingerprint, buildMeetingChangePreview]);
 
   const alarms = useMemo(() => {
     const joined = filterJoinedMeetings(meetings, userId);
@@ -930,14 +972,26 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const pk = normalizeParticipantId(uid);
     const raw = uid;
     const localMap = readState.chatReadMessageId;
-    return joined
+    const meetingSig = joined
       .map((m) => {
         const lm = latestById[m.id];
         const read = effectiveMeetingChatReadId(m, pk, raw, localMap, lm?.id);
         return `${m.id}:${lm?.id ?? ''}:${read}`;
       })
       .join('|');
-  }, [meetings, userId, latestById, readState.chatReadMessageId]);
+    /** 모임만 있을 때와 달리, 친구 DM 읽음/최신만 바뀌어도 배지 집계 effect가 돌아가야 함 */
+    const socialSig = socialRooms
+      .map((sr) => {
+        const rid = sr.roomId.trim();
+        if (!rid) return '';
+        const lm = socialLatestByRoomId[rid];
+        const read = localMap[rid] ?? '';
+        return `${rid}:${lm?.id?.trim() ?? ''}:${read}`;
+      })
+      .filter(Boolean)
+      .join('|');
+    return `${meetingSig}\u0003${socialSig}`;
+  }, [meetings, userId, latestById, readState.chatReadMessageId, socialRooms, socialLatestByRoomId]);
 
   useEffect(() => {
     if (!persistReady || !userId?.trim()) {
@@ -955,8 +1009,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         const lm = latestById[m.id];
         const readId = effectiveMeetingChatReadId(m, pk, raw, localMap, lm?.id);
+        const readForCount = (readId || '').trim() || (lm?.id ?? '').trim() || null;
         try {
-          sum += await fetchMeetingChatUnreadCount(m.id, readId || null);
+          sum += await fetchMeetingChatUnreadCount(m.id, readForCount);
         } catch {
           /* 한 방 실패는 건너뜀 */
         }
@@ -970,14 +1025,23 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         const latestId = latest?.id?.trim() ?? '';
         // 최신이 없으면 unread도 0
         if (!latestId) continue;
-        const readId = localMap[rid] ?? '';
+        const localRead = (localMap[rid] ?? '').trim();
+        const { readId: serverReadId, readAt } = await fetchSocialChatReadPointersForUser(rid, raw);
+        const readForCount = (serverReadId && serverReadId.trim()) || localRead || null;
         try {
-          sum += await fetchSocialChatUnreadCount(rid, raw, readId || null, null, { maxDocsScanned: 600 });
+          sum += await fetchSocialChatUnreadCount(rid, raw, readForCount, readAt, { maxDocsScanned: 600 });
         } catch {
           /* 한 방 실패는 건너뜀 */
         }
       }
-      if (!cancelled) setChatTabUnreadTotal(sum);
+      if (!cancelled) {
+        ginitNotifyDbg('InAppAlarms', 'chat_tab_unread_computed', {
+          sum,
+          meetingRooms: joined.length,
+          socialRooms: socialRooms.length,
+        });
+        setChatTabUnreadTotal(sum);
+      }
     })();
     return () => {
       cancelled = true;
@@ -989,6 +1053,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     if (!mid) return;
     const id = messageId?.trim();
     if (!id) return;
+    ginitNotifyDbg('InAppAlarms', 'mark_chat_read_up_to', { meetingId: mid, messageIdSuffix: id.slice(-8) });
     setReadState((p) => ({
       ...p,
       chatReadMessageId: { ...p.chatReadMessageId, [mid]: id },

@@ -2,108 +2,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as Font from 'expo-font';
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-  type ReactNode,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import {
-  ActivityIndicator,
-  Dimensions,
-  findNodeHandle,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  UIManager,
-  View,
-} from 'react-native';
-import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
+import { resolveNaverMovieSearchWebUrl } from '@/src/lib/naver-local-search';
 import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/tmdb-movie-poster';
 
 import {
   INPUT_PLACEHOLDER,
-  movieAddOutlineBtnWebStyle,
-  movieListRowWebGlassStyle,
   wizardSpecialtyStyles as S,
 } from './wizard-specialty-styles';
 
 const TRUST_BLUE = GinitTheme.colors.primary;
-
-/**
- * ScrollView / KeyboardAwareScrollView 등 ref에 measureInWindow 가 없을 때 findNodeHandle 폴백.
- * 폴백 시 anchorWindowY·pad 로 sy 를 맞춰 nextY = scrollY 가 되게 해 잘못된 대량 스크롤을 막음.
- */
-function measureHostInWindow(
-  scrollHost: unknown,
-  anchorWindowY: number,
-  pad: number,
-  callback: (x: number, y: number, w: number, h: number) => void,
-): void {
-  if (scrollHost == null) return;
-  const host = scrollHost as {
-    measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
-  };
-  if (typeof host.measureInWindow === 'function') {
-    host.measureInWindow(callback);
-    return;
-  }
-  const tag = findNodeHandle(scrollHost as never);
-  if (tag != null && typeof UIManager.measureInWindow === 'function') {
-    UIManager.measureInWindow(tag, callback);
-    return;
-  }
-  callback(0, anchorWindowY - pad, Dimensions.get('window').width, Dimensions.get('window').height);
-}
-
-type ScrollHost = {
-  scrollToPosition?: (x: number, y: number, animated?: boolean) => void;
-  scrollTo?: (opts: { x?: number; y?: number; animated?: boolean }) => void;
-  getScrollResponder?: () =>
-    | {
-        scrollTo?: (opts: { x?: number; y?: number; animated?: boolean }) => void;
-        scrollResponderScrollTo?: (opts: { x: number; y: number; animated: boolean }) => void;
-      }
-    | null
-    | undefined;
-};
-
-/** `ScrollView` 직접 ref 또는 `KeyboardAwareScrollView`(scrollToPosition) 등 */
-function scrollParentToY(scrollHost: unknown, y: number, animated: boolean): void {
-  if (scrollHost == null) return;
-  const clamped = Math.max(0, y);
-  const h = scrollHost as ScrollHost;
-  if (typeof h.scrollToPosition === 'function') {
-    h.scrollToPosition(0, clamped, animated);
-    return;
-  }
-  if (typeof h.scrollTo === 'function') {
-    h.scrollTo({ x: 0, y: clamped, animated });
-    return;
-  }
-  if (typeof h.getScrollResponder === 'function') {
-    const r = h.getScrollResponder();
-    if (r && typeof r.scrollResponderScrollTo === 'function') {
-      r.scrollResponderScrollTo({ x: 0, y: clamped, animated });
-      return;
-    }
-    if (r && typeof r.scrollTo === 'function') {
-      r.scrollTo({ x: 0, y: clamped, animated });
-    }
-  }
-}
 
 const PRETENDARD_BOLD_URI =
   'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf';
@@ -218,30 +134,6 @@ const SEARCH_EXTRA: SelectedMovieExtra[] = [
 
 const SEARCH_LIMIT = 24;
 
-function MovieGlassListRow({ children, pressed }: { children: ReactNode; pressed: boolean }) {
-  if (Platform.OS === 'web') {
-    return (
-      <View style={S.movieListRowWrap}>
-        <View
-          style={[
-            S.movieListRowCardFallback,
-            movieListRowWebGlassStyle,
-            pressed && S.movieListRowPressedOrange,
-          ]}>
-          <View style={S.movieListRowInner}>{children}</View>
-        </View>
-      </View>
-    );
-  }
-  return (
-    <View style={S.movieListRowWrap}>
-      <View style={[S.movieListRowOuter, pressed && S.movieListRowPressedOrange]}>
-        <View style={S.movieListRowInner}>{children}</View>
-      </View>
-    </View>
-  );
-}
-
 /** TMDB `w500` 절대 URL 우선, 그 외 HTTPS는 그대로, 없으면 폴백 단계에서 그라데이션 */
 function resolveDisplayPosterUrl(m: SelectedMovieExtra): string | undefined {
   const n = normalizeTmdbPosterUrl(m.posterUrl);
@@ -266,7 +158,15 @@ function PosterTrustBlueFallback({ iconSize = 28 }: { iconSize?: number }) {
 }
 
 /** 원격 포스터 로딩·실패 시 Trust Blue 그라데이션 + 아이콘 */
-function MoviePosterFill({ item, recyclingKey, iconSize }: { item: SelectedMovieExtra; recyclingKey: string; iconSize?: number }) {
+function MoviePosterFill({
+  item,
+  recyclingKey,
+  iconSize,
+}: {
+  item: SelectedMovieExtra;
+  recyclingKey: string;
+  iconSize?: number;
+}) {
   const uri = useMemo(() => resolveDisplayPosterUrl(item), [item.id, item.posterUrl]);
   const [fatal, setFatal] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -318,18 +218,17 @@ export function MovieSearch({
   onChange,
   onSelect,
   disabled,
-  parentScrollRef,
-  parentScrollYRef,
+  parentScrollRef: _parentScrollRef,
+  parentScrollYRef: _parentScrollYRef,
 }: MovieSearchProps) {
   const [query, setQuery] = useState('');
-  const [addingMore, setAddingMore] = useState(false);
-  const expandedPickerRef = useRef<View>(null);
   const searchInputRef = useRef<TextInput>(null);
   const searchInputDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(searchInputRef), []);
   const [pretendardFamily, setPretendardFamily] = useState<string | undefined>(undefined);
   const [rankRows, setRankRows] = useState<SelectedMovieExtra[]>([]);
   const [rankReady, setRankReady] = useState(false);
   const [rankErr, setRankErr] = useState<string | null>(null);
+  const [movieNaverWeb, setMovieNaverWeb] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,58 +245,7 @@ export function MovieSearch({
     };
   }, []);
 
-  const pickerOpen = value.length === 0 || addingMore;
-
   useEffect(() => {
-    if (value.length === 0) {
-      setAddingMore(false);
-    }
-  }, [value.length]);
-
-  /** 후보가 있을 때만: 검색 패널을 펼치면 스크롤을 올려 검색이 화면 상단에 오도록 */
-  useEffect(() => {
-    if (!addingMore || value.length === 0) return;
-    if (!parentScrollRef?.current || !parentScrollYRef) return;
-
-    let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let timeoutId2: ReturnType<typeof setTimeout> | null = null;
-
-    const alignPickerToTop = () => {
-      if (cancelled) return;
-      const scrollView = parentScrollRef.current;
-      const anchor = expandedPickerRef.current;
-      if (!scrollView || !anchor) return;
-      anchor.measureInWindow((hx: number, hy: number, _hw: number, _hh: number) => {
-        if (cancelled) return;
-        measureHostInWindow(scrollView, hy, 12, (sx: number, sy: number, _sw: number, _sh: number) => {
-          if (cancelled) return;
-          const scrollY = parentScrollYRef.current;
-          const pad = 12;
-          const nextY = scrollY + (hy - sy) - pad;
-          scrollParentToY(scrollView, nextY, true);
-        });
-      });
-    };
-
-    const raf = requestAnimationFrame(() => {
-      if (cancelled) return;
-      const delay1 = Platform.OS === 'android' ? 120 : 72;
-      const delay2 = Platform.OS === 'android' ? 280 : 220;
-      timeoutId = setTimeout(alignPickerToTop, delay1);
-      timeoutId2 = setTimeout(alignPickerToTop, delay2);
-    });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      if (timeoutId) clearTimeout(timeoutId);
-      if (timeoutId2) clearTimeout(timeoutId2);
-    };
-  }, [addingMore, parentScrollRef, parentScrollYRef, value.length]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
     let alive = true;
     setRankReady(false);
     setRankErr(null);
@@ -418,19 +266,13 @@ export function MovieSearch({
     return () => {
       alive = false;
     };
-  }, [pickerOpen]);
+  }, []);
 
   const searchCatalog = useMemo(() => {
     const map = new Map<string, SelectedMovieExtra>();
     [...SEARCH_EXTRA, ...rankRows].forEach((m) => map.set(m.id, m));
     return [...map.values()];
   }, [rankRows]);
-
-  const windowH = Dimensions.get('window').height;
-  const heroMinH = useMemo(() => {
-    const ratio = value.length > 0 && addingMore ? 0.44 : 0.7;
-    return Math.round(windowH * ratio);
-  }, [addingMore, value.length, windowH]);
 
   const isRankingView = query.trim().length === 0;
 
@@ -440,12 +282,14 @@ export function MovieSearch({
       if (!rankReady) return [];
       return rankRows;
     }
-    return searchCatalog.filter(
-      (m) =>
-        m.title.toLowerCase().includes(q) ||
-        (m.info && m.info.toLowerCase().includes(q)) ||
-        (m.year && m.year.includes(q)),
-    ).slice(0, SEARCH_LIMIT);
+    return searchCatalog
+      .filter(
+        (m) =>
+          m.title.toLowerCase().includes(q) ||
+          (m.info && m.info.toLowerCase().includes(q)) ||
+          (m.year && m.year.includes(q)),
+      )
+      .slice(0, SEARCH_LIMIT);
   }, [query, rankReady, rankRows, searchCatalog]);
 
   const titleFontStyle = useMemo(
@@ -453,231 +297,158 @@ export function MovieSearch({
     [pretendardFamily],
   );
 
-  const onPick = useCallback(
+  const isPicked = useCallback((id: string) => value.some((x) => x.id === id), [value]);
+
+  const onTogglePick = useCallback(
     (m: SelectedMovieExtra) => {
+      if (disabled) return;
+      layoutAnimateEaseInEaseOut();
       if (value.some((x) => x.id === m.id)) {
-        layoutAnimateEaseInEaseOut();
+        onChange(value.filter((x) => x.id !== m.id));
         setQuery('');
-        setAddingMore(false);
         return;
       }
-      layoutAnimateEaseInEaseOut();
       onChange([...value, m]);
       setQuery('');
-      setAddingMore(false);
       onSelect?.(m);
     },
-    [onChange, onSelect, value],
+    [disabled, onChange, onSelect, value],
   );
 
-  const removeCandidate = useCallback(
-    (id: string) => {
-      layoutAnimateEaseInEaseOut();
-      onChange(value.filter((x) => x.id !== id));
-    },
-    [onChange, value],
-  );
+  const centerEmpty = (!rankReady && isRankingView) || rows.length === 0;
+  const showLoadingBlock = isRankingView && !rankReady;
 
-  const onToggleAddMore = useCallback(() => {
-    layoutAnimateEaseInEaseOut();
-    setAddingMore((prev) => !prev);
-    setQuery('');
-  }, []);
-
-  const listScroll = (
-    <ScrollView
-      style={S.movieListScroll}
-      contentContainerStyle={[
-        S.movieListStack,
-        Platform.OS === 'web' && ({ width: '100%', maxWidth: '100%', flexDirection: 'column' } as const),
-      ]}
-      nestedScrollEnabled
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      showsVerticalScrollIndicator={false}>
-      {isRankingView && !rankReady ? (
-        <View style={{ paddingVertical: 28, alignItems: 'center', gap: 12 }}>
-          <ActivityIndicator size="large" color="#0052CC" />
-          <Text style={S.resultMeta}>목록을 불러오는 중이에요…</Text>
-        </View>
-      ) : rows.length === 0 ? (
-        <View style={{ paddingVertical: 16 }}>
-          <Text style={S.resultMeta}>
-            {isRankingView
-              ? rankErr || '목록이 비어 있어요.'
-              : '검색 결과가 없어요. 다른 키워드를 써 보세요.'}
-          </Text>
-        </View>
-      ) : (
-        rows.map((item, index) => (
-          <Animated.View
-            key={`${query}-${item.id}`}
-            style={S.movieListItemOuter}
-            entering={FadeInDown.duration(360).delay(Math.min(index * 52, 480))}>
-            <Pressable
-              onPress={() => onPick(item)}
-              disabled={disabled}
-              style={Platform.OS === 'web' ? ({ width: '100%' } as const) : undefined}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isRankingView ? `${item.kobisRank ?? index + 1}위 ${item.title}` : item.title
-              }>
-              {({ pressed }) => (
-                <MovieGlassListRow pressed={pressed}>
-                  <View style={S.movieListPosterWrap}>
-                    {isRankingView ? (
-                      <View style={S.movieRankBadge} pointerEvents="none">
-                        <Text style={S.movieRankBadgeText}>{item.kobisRank ?? index + 1}</Text>
-                      </View>
-                    ) : null}
-                    <View style={S.movieListPosterImg}>
+  const carousel = (
+    <View style={[S.movieResultsScrollHost, S.movieResultsCarouselHost]}>
+      <ScrollView
+        horizontal={!centerEmpty}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+        style={S.movieListScroll}
+        contentContainerStyle={[
+          S.movieResultsScrollContent,
+          centerEmpty && { flexGrow: 1, justifyContent: 'center', paddingVertical: 0 },
+        ]}>
+        {showLoadingBlock ? (
+          <View style={S.movieResultsStatus}>
+            <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
+            <Text style={S.movieResultsStatusText}>목록을 불러오는 중이에요…</Text>
+          </View>
+        ) : rows.length === 0 ? (
+          <View style={{ paddingVertical: 16, width: '100%' }}>
+            <Text style={S.movieResultsStatusText}>
+              {isRankingView
+                ? rankErr || '목록이 비어 있어요.'
+                : '검색 결과가 없어요. 다른 키워드를 써 보세요.'}
+            </Text>
+          </View>
+        ) : (
+          rows.map((item, index) => {
+            const selected = isPicked(item.id);
+            const metaLine =
+              item.year && item.rating
+                ? `${item.year} · ${item.rating.includes('%') ? `매출 ${item.rating}` : `★ ${item.rating}`}`
+                : item.year || (item.rating ? (item.rating.includes('%') ? `매출 ${item.rating}` : `★ ${item.rating}`) : '');
+            const movieDetailUrl = resolveNaverMovieSearchWebUrl(item.title);
+            return (
+              <View
+                key={`${query}-${item.id}`}
+                style={[
+                  S.movieResultImageCard,
+                  S.movieResultProposalCardWrap,
+                  selected && S.movieResultImageCardSelected,
+                ]}>
+                <Pressable
+                  onPress={() => onTogglePick(item)}
+                  disabled={disabled}
+                  style={({ pressed }) => [S.movieResultProposalPressFill, pressed && S.movieResultCardPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isRankingView ? `${item.kobisRank ?? index + 1}위 ${item.title}` : item.title
+                  }>
+                  <View style={S.movieResultProposalPressInner}>
+                    <View style={S.movieResultImageWrap}>
+                      {isRankingView ? (
+                        <View style={S.movieRankBadge} pointerEvents="none">
+                          <Text style={S.movieRankBadgeText}>{item.kobisRank ?? index + 1}</Text>
+                        </View>
+                      ) : null}
                       <MoviePosterFill item={item} recyclingKey={item.id} />
+                      {selected ? (
+                        <View style={S.movieResultImageOverlay} pointerEvents="none">
+                          <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                        </View>
+                      ) : null}
                     </View>
-                  </View>
-                  <View style={S.movieRightCol}>
-                    <View style={S.movieTitleGlass}>
-                      <Text style={[S.movieListTitle, titleFontStyle]} numberOfLines={2}>
-                        {item.title}
-                      </Text>
-                      {item.year ? <Text style={S.movieYearUnderTitle}>{item.year}</Text> : null}
-                    </View>
-                    {item.rating ? (
-                      <View style={S.movieRatingRow}>
-                        {item.rating.includes('%') ? (
-                          <Text style={S.movieRatingNumber}>매출 {item.rating}</Text>
-                        ) : (
-                          <>
-                            <Text style={S.movieStarIcon}>★</Text>
-                            <Text style={S.movieRatingNumber}>{item.rating}</Text>
-                          </>
-                        )}
-                      </View>
-                    ) : null}
-                    {item.info ? (
-                      <Text style={S.movieSynopsis} numberOfLines={3} ellipsizeMode="tail">
-                        {item.info}
+                    <Text style={[S.movieResultTitle, titleFontStyle]} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                    {metaLine ? (
+                      <Text style={S.movieResultMeta} numberOfLines={2}>
+                        {metaLine}
                       </Text>
                     ) : null}
                   </View>
-                </MovieGlassListRow>
-              )}
-            </Pressable>
-          </Animated.View>
-        ))
-      )}
-    </ScrollView>
-  );
-
-  const searchHeader = (
-    <View>
-      <Text style={S.fieldLabel}>영화 검색</Text>
-      <TextInput
-        ref={searchInputRef}
-        {...searchInputDeferKb}
-        value={query}
-        onChangeText={setQuery}
-        placeholder="제목 검색…"
-        placeholderTextColor={INPUT_PLACEHOLDER}
-        style={[S.textInput, { marginTop: 4 }]}
-        editable={!disabled}
-        returnKeyType="search"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="default"
-        inputMode="text"
-        {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
-      />
+                </Pressable>
+                {movieDetailUrl ? (
+                  <Pressable
+                    onPress={() => {
+                      const t = item.title.trim() || '영화';
+                      setMovieNaverWeb({ url: movieDetailUrl, title: t });
+                    }}
+                    disabled={disabled}
+                    style={({ pressed }) => [S.movieResultDetailBtn, pressed && { opacity: 0.88 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="상세 정보">
+                    <Text style={S.movieResultDetailBtnText}>상세 정보</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
     </View>
   );
 
-  if (value.length === 0) {
-    return (
-      <View style={[S.movieHeroShell, { height: heroMinH }]}>
-        {searchHeader}
-        {listScroll}
-      </View>
-    );
-  }
-
   return (
     <View style={Platform.OS === 'web' ? ({ width: '100%', flexDirection: 'column' } as const) : undefined}>
-      <Text style={S.fieldLabel}>확정된 영화 후보</Text>
-      <Animated.View
-        layout={LinearTransition.springify().damping(18).stiffness(220)}
-        style={S.movieCandidatesColumn}>
-        {value.map((item, index) => (
-          <Animated.View
-            key={item.id}
-            layout={LinearTransition.springify().damping(18).stiffness(220)}
-            entering={FadeInDown.duration(420).delay(Math.min(index * 72, 280))}>
-            <View style={S.movieConfirmedCard}>
-              <Pressable
-                onPress={() => removeCandidate(item.id)}
-                disabled={disabled}
-                style={({ pressed }) => [S.movieConfirmedRemoveHit, pressed && { opacity: 0.85 }]}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.title} 후보에서 제거`}>
-                <Ionicons name="close" size={18} color={GinitTheme.colors.text} />
-              </Pressable>
-              <View style={S.movieListPosterWrap}>
-                <View style={S.movieListPosterImg}>
-                  <MoviePosterFill item={item} recyclingKey={`pick-${item.id}`} />
-                </View>
-              </View>
-              <View style={S.movieRightCol}>
-                <View style={S.movieTitleGlass}>
-                  <Text style={[S.movieListTitle, titleFontStyle]} numberOfLines={2}>
-                    {item.title}
-                  </Text>
-                  {item.year ? <Text style={S.movieYearUnderTitle}>{item.year}</Text> : null}
-                </View>
-                {item.rating ? (
-                  <View style={S.movieRatingRow}>
-                    {item.rating.includes('%') ? (
-                      <Text style={S.movieRatingNumber}>매출 {item.rating}</Text>
-                    ) : (
-                      <>
-                        <Text style={S.movieStarIcon}>★</Text>
-                        <Text style={S.movieRatingNumber}>{item.rating}</Text>
-                      </>
-                    )}
-                  </View>
-                ) : null}
-                {item.info ? (
-                  <Text style={S.movieSynopsis} numberOfLines={3} ellipsizeMode="tail">
-                    {item.info}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          </Animated.View>
-        ))}
-      </Animated.View>
-
-      <Pressable
-        onPress={onToggleAddMore}
-        disabled={disabled}
-        style={({ pressed }) => [
-          S.movieAddOutlineBtn,
-          Platform.OS === 'web' && movieAddOutlineBtnWebStyle,
-          pressed && S.movieAddOutlineBtnPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={addingMore ? '영화 검색 접기' : '다른 영화 후보 추가'}>
-        <Text style={S.movieAddOutlineBtnLabel}>
-          {addingMore ? '검색 닫기' : '+ 다른 후보 추가하기'}
-        </Text>
-      </Pressable>
-
-      {addingMore ? (
-        <View
-          ref={expandedPickerRef}
-          collapsable={false}
-          style={[S.movieHeroShell, { marginTop: 12, height: heroMinH }]}>
-          {searchHeader}
-          {listScroll}
+      <LinearGradient
+        colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={S.movieWizardAiBorder}>
+        <View style={S.movieWizardAiInner}>
+          <TextInput
+            ref={searchInputRef}
+            {...searchInputDeferKb}
+            value={query}
+            onChangeText={setQuery}
+            placeholder='예: "듄", "기생충"'
+            placeholderTextColor={INPUT_PLACEHOLDER}
+            style={S.movieWizardAiInput}
+            editable={!disabled}
+            returnKeyType="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="default"
+            inputMode="text"
+            underlineColorAndroid="transparent"
+            {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
+          />
         </View>
-      ) : null}
+      </LinearGradient>
+
+      {carousel}
+
+      <NaverPlaceWebViewModal
+        visible={movieNaverWeb != null}
+        url={movieNaverWeb?.url}
+        pageTitle={movieNaverWeb?.title ?? '상세 정보'}
+        onClose={() => setMovieNaverWeb(null)}
+      />
     </View>
   );
 }
