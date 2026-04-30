@@ -169,7 +169,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-build-properties',
         {
           ios: {
-            deploymentTarget: '15.0',
+            deploymentTarget: '15.1',
             /**
              * FirebaseAuth (Swift) pods fail to integrate as static libraries unless modular headers are enabled.
              * Using dynamic frameworks avoids the modular-headers requirement and makes `pod install` succeed.
@@ -195,9 +195,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           defaultChannel: 'default',
         },
       ],
+      './plugins/withAndroidFcmDefaultChannelManifest.js',
       'expo-background-fetch',
       /** Android Phone Number Hint API (play-services-auth) */
       './plugins/withAndroidPlayServicesAuth.js',
+      './plugins/withAndroidNotifeeMaven.js',
       /** Android 스플래시 아이콘을 Adaptive 전경(`ic_launcher_foreground`)과 동일하게 */
       './plugins/withAndroidSplashLauncherForeground.js',
       /** Google Maps SDK API key (`com.google.android.geo.API_KEY`) */

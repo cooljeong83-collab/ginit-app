@@ -1,0 +1,89 @@
+diff --git a/node_modules/@react-native-firebase/app/dist/module/internal/web/memidb/lib/FakeEvent.js b/node_modules/@react-native-firebase/app/dist/module/internal/web/memidb/lib/FakeEvent.js
+index c5dbccf..dd9b55c 100644
+--- a/node_modules/@react-native-firebase/app/dist/module/internal/web/memidb/lib/FakeEvent.js
++++ b/node_modules/@react-native-firebase/app/dist/module/internal/web/memidb/lib/FakeEvent.js
+@@ -1,12 +1,29 @@
+ "use strict";
+ 
+-class Event {
+-  eventPath = [];
+-  NONE = 0;
+-  CAPTURING_PHASE = 1;
+-  AT_TARGET = 2;
+-  BUBBLING_PHASE = 3;
++/**
++ * RN 0.81+ 전역 DOM `Event`와 이름·프로퍼티가 겹치면 `NONE` 등이 읽기 전용으로 잡혀
++ * 인스턴스 필드 초기화 시 TypeError가 날 수 있어, 이름 분리 + 위상은 static/getter로만 노출합니다.
++ */
++export default class MemIDBFakeEvent {
++  static NONE = 0;
++  static CAPTURING_PHASE = 1;
++  static AT_TARGET = 2;
++  static BUBBLING_PHASE = 3;
+ 
++  get NONE() {
++    return MemIDBFakeEvent.NONE;
++  }
++  get CAPTURING_PHASE() {
++    return MemIDBFakeEvent.CAPTURING_PHASE;
++  }
++  get AT_TARGET() {
++    return MemIDBFakeEvent.AT_TARGET;
++  }
++  get BUBBLING_PHASE() {
++    return MemIDBFakeEvent.BUBBLING_PHASE;
++  }
++
++  eventPath = [];
+   // Flags
+   propagationStopped = false;
+   immediatePropagationStopped = false;
+@@ -37,5 +54,4 @@ class Event {
+     this.immediatePropagationStopped = true;
+   }
+ }
+-export default Event;
+ //# sourceMappingURL=FakeEvent.js.map
+diff --git a/node_modules/@react-native-firebase/app/lib/internal/web/memidb/lib/FakeEvent.js b/node_modules/@react-native-firebase/app/lib/internal/web/memidb/lib/FakeEvent.js
+index b7ba5af..e70c4d7 100644
+--- a/node_modules/@react-native-firebase/app/lib/internal/web/memidb/lib/FakeEvent.js
++++ b/node_modules/@react-native-firebase/app/lib/internal/web/memidb/lib/FakeEvent.js
+@@ -1,10 +1,27 @@
+-class Event {
+-  eventPath = [];
+-  NONE = 0;
+-  CAPTURING_PHASE = 1;
+-  AT_TARGET = 2;
+-  BUBBLING_PHASE = 3;
++/**
++ * RN 0.81+ 전역 DOM `Event`와 이름·프로퍼티가 겹치면 `NONE` 등이 읽기 전용으로 잡혀
++ * 인스턴스 필드 초기화 시 TypeError가 날 수 있어, 이름 분리 + 위상은 static/getter로만 노출합니다.
++ */
++export default class MemIDBFakeEvent {
++  static NONE = 0;
++  static CAPTURING_PHASE = 1;
++  static AT_TARGET = 2;
++  static BUBBLING_PHASE = 3;
+ 
++  get NONE() {
++    return MemIDBFakeEvent.NONE;
++  }
++  get CAPTURING_PHASE() {
++    return MemIDBFakeEvent.CAPTURING_PHASE;
++  }
++  get AT_TARGET() {
++    return MemIDBFakeEvent.AT_TARGET;
++  }
++  get BUBBLING_PHASE() {
++    return MemIDBFakeEvent.BUBBLING_PHASE;
++  }
++
++  eventPath = [];
+   // Flags
+   propagationStopped = false;
+   immediatePropagationStopped = false;
+@@ -35,4 +52,3 @@ class Event {
+     this.immediatePropagationStopped = true;
+   }
+ }
+-export default Event;

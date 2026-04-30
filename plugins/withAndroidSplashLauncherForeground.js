@@ -6,7 +6,7 @@ const { AndroidConfig, withAndroidStyles } = require('@expo/config-plugins');
 
 const SPLASH_THEME = {
   name: 'Theme.App.SplashScreen',
-  parent: 'Theme.SplashScreen',
+  parent: 'AppTheme',
 };
 
 /** @type {import('@expo/config-plugins').ConfigPlugin} */
