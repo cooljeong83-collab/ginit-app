@@ -1,7 +1,7 @@
+import notifee from '@notifee/react-native';
+import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import * as Notifications from 'expo-notifications';
-import notifee from '@notifee/react-native';
 
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
   edgeTitle: {
     color: GinitTheme.colors.textMuted,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   edgeText: {
     color: GinitTheme.colors.text,

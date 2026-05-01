@@ -6,27 +6,27 @@ import { ActivityIndicator, Alert, FlatList, Keyboard, Modal, Pressable, StyleSh
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  SocialDmChatRoomBody,
-  type SocialDmChatRoomBodyHandle,
-  type SocialDmChatRoomBodyProps,
+    SocialDmChatRoomBody,
+    type SocialDmChatRoomBodyHandle,
+    type SocialDmChatRoomBodyProps,
 } from '@/components/chat/SocialDmChatRoomBody';
 import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import {
-  ensureSocialChatRoomDoc,
-  parsePeerFromSocialRoomId,
-  searchSocialChatMessages,
-  subscribeSocialChatRoom,
-  subscribeSocialChatMessages,
-  updateSocialChatReadReceipt,
-  type SocialChatRoomDoc,
+    ensureSocialChatRoomDoc,
+    parsePeerFromSocialRoomId,
+    searchSocialChatMessages,
+    subscribeSocialChatMessages,
+    subscribeSocialChatRoom,
+    updateSocialChatReadReceipt,
+    type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 export default function SocialChatRoomScreen() {
   const router = useRouter();
@@ -394,7 +394,7 @@ const s = StyleSheet.create({
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
   titlePress: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: 4 },
-  topTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  topTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a', textAlign: 'center' },
   searchBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   settingsBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   loading: { padding: 24, alignItems: 'center' },
@@ -411,7 +411,7 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
-  searchTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  searchTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600', color: '#0f172a' },
   searchHeaderSpacer: { width: 34 },
   searchFieldWrap: {
     flexDirection: 'row',

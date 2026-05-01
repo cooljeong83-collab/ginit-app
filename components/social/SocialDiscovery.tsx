@@ -1,19 +1,19 @@
-import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
+import { Image } from 'expo-image';
 import { useCallback, useMemo, useState } from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
 } from 'react-native-reanimated';
 
 import { NeonBadge } from '@/components/social/NeonBadge';
 import { NeonConfirmButton } from '@/components/social/NeonConfirmButton';
-import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 
 const { width: W } = Dimensions.get('window');
 const SWIPE_OFF = W * 0.35;
@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
   },
   ageG: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   hint: {
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   emptySub: {

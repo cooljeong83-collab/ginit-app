@@ -288,7 +288,7 @@ def build_design_blocks() -> list[dict[str, Any]]:
         table_block(
             ["토큰", "HEX / 값"],
             [
-                ["bg", "#F6FAFF"],
+                ["bg", "#FFFFFF"],
                 ["primary (브랜드 딥)", "#1F2A44"],
                 ["accent (민트)", "#86D3B7"],
                 ["accent2 (옐로)", "#F4C84A"],

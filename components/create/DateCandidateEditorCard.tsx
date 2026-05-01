@@ -3,18 +3,18 @@
  */
 import { useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type StyleProp,
-  type ViewStyle,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+    type StyleProp,
+    type ViewStyle,
 } from 'react-native';
 
-import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
+import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   },
   chipLabel: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     textAlign: 'center',
     lineHeight: 18,

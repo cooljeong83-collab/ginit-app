@@ -3968,7 +3968,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.35,
   },
@@ -3985,7 +3985,7 @@ const styles = StyleSheet.create({
   },
   aiQuickInitLabel: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     marginBottom: 8,
     letterSpacing: 0.2,
@@ -4055,7 +4055,7 @@ const styles = StyleSheet.create({
   },
   aiPreviewHint: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
   },
   aiPreviewScroll: {
@@ -4084,12 +4084,12 @@ const styles = StyleSheet.create({
   },
   aiPreviewScheduleChipLabel: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   aiPreviewScheduleChipHint: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
   },
   aiPreviewScheduleChipPlaceholder: {
@@ -4185,7 +4185,7 @@ const styles = StyleSheet.create({
   },
   nlpChipText: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textOnDark,
     letterSpacing: -0.2,
   },
@@ -4295,7 +4295,7 @@ const styles = StyleSheet.create({
   },
   placeSuggestChipText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     maxWidth: 220,
   },
@@ -4351,7 +4351,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
   },
   calendarGrid: {
@@ -4418,7 +4418,7 @@ const styles = StyleSheet.create({
   calendarCellMeta: {
     marginTop: 2,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   calendarCellMetaCompact: {
@@ -4436,7 +4436,7 @@ const styles = StyleSheet.create({
   },
   timePickHint: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
   },
   placeResultsScrollHost: {
@@ -4591,7 +4591,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   placePickedRemove: {
@@ -4630,7 +4630,7 @@ const styles = StyleSheet.create({
   },
   placeNameText: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     marginBottom: 4,
     paddingRight: 36,
@@ -4671,7 +4671,7 @@ const styles = StyleSheet.create({
   addCandidateBtnLabel: {
     color: GinitTheme.colors.primary,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     textAlign: 'center',
   },
   addCandidateBtnDisabled: {
@@ -4774,7 +4774,7 @@ const styles = StyleSheet.create({
   },
   segmentTitle: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
   },
   segmentTitleOn: {
@@ -4893,7 +4893,7 @@ const styles = StyleSheet.create({
   wizardPrimaryBtnLabel: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   wizardLockedHint: {
     fontSize: 13,
@@ -4947,7 +4947,7 @@ const styles = StyleSheet.create({
   },
   aiTitleChipText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     maxWidth: '100%',
   },

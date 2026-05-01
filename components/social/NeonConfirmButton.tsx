@@ -62,6 +62,6 @@ const styles = StyleSheet.create({
   btnLabel: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

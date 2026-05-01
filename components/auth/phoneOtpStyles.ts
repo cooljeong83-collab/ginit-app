@@ -34,7 +34,7 @@ export const phoneOtpInlineStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.65)',
     paddingHorizontal: 12,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   confirmBtn: {

@@ -2168,7 +2168,7 @@ const styles = StyleSheet.create({
   regionPillText: {
     flex: 1,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   chipScroll: {
@@ -2181,20 +2181,20 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   topChip: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.75)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   topChipActive: {
     backgroundColor: GinitTheme.trustBlue,
     borderColor: GinitTheme.trustBlue,
   },
   topChipLabel: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#475569',
   },
   topChipLabelActive: {
@@ -2224,7 +2224,7 @@ const styles = StyleSheet.create({
   },
   rescanBtnText: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#fff',
   },
   mapControlsRight: {
@@ -2345,7 +2345,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   recruitTogglePillOn: {
     backgroundColor: '#16A34A',
@@ -2471,7 +2471,7 @@ const styles = StyleSheet.create({
   },
   listTitleCategory: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: -0.15,
     color: '#64748b',
   },
@@ -2488,7 +2488,7 @@ const styles = StyleSheet.create({
   },
   listDist: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.trustBlue,
   },
   joinBtn: {
@@ -2499,7 +2499,7 @@ const styles = StyleSheet.create({
   },
   joinBtnText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#fff',
   },
   progressBadge: {
@@ -2513,7 +2513,7 @@ const styles = StyleSheet.create({
   progressBadgeBlack: { backgroundColor: '#171717' },
   progressBadgeText: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     textAlign: 'center',
   },
   progressBadgeTextLight: { color: '#fff' },
@@ -2538,7 +2538,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 6,
   },
@@ -2693,7 +2693,7 @@ const styles = StyleSheet.create({
   },
   detailChipText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   sheetMiniBadge: {
@@ -2709,7 +2709,7 @@ const styles = StyleSheet.create({
   sheetMiniBadgeIcon: { marginRight: 6 },
   sheetMiniBadgeText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   sheetFacts: {
@@ -2745,7 +2745,7 @@ const styles = StyleSheet.create({
   },
   sheetMovePinInlineText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     letterSpacing: -0.1,
   },
@@ -2758,7 +2758,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     letterSpacing: -0.1,
   },
@@ -2806,7 +2806,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#334155',
   },
   sheetInfoDesc: {

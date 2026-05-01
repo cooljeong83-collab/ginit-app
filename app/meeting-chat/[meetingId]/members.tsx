@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   muted: { fontSize: 14, color: '#64748b', fontWeight: '600' },
   backBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
-  backBtnText: { fontSize: 15, fontWeight: '800', color: GinitTheme.colors.primary },
+  backBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
   scroll: { paddingBottom: 24, paddingHorizontal: 16 },
-  hint: { fontSize: 12, color: '#64748b', fontWeight: '800', marginBottom: 10, marginTop: 4 },
+  hint: { fontSize: 12, color: '#64748b', fontWeight: '600', marginBottom: 10, marginTop: 4 },
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,

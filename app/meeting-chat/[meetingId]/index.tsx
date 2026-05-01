@@ -1,32 +1,31 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Easing,
-  FlatList,
-  InteractionManager,
-  Keyboard,
-  type KeyboardEvent,
-  type LayoutChangeEvent,
-  Modal,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    FlatList,
+    InteractionManager,
+    Keyboard,
+    type KeyboardEvent,
+    type LayoutChangeEvent,
+    Modal,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,6 +41,12 @@ import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfile
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import {
+    flattenMeetingChatInfinitePages,
+    meetingChatMessagesQueryKey,
+    mergeMeetingChatInfiniteAppendPages,
+    useMeetingChatMessagesInfiniteQuery,
+} from '@/src/hooks/use-meeting-chat-messages-infinite-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
@@ -51,20 +56,14 @@ import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
-  deleteMeetingChatImageMessageBestEffort,
-  fetchOlderMeetingChatPagesUntilTargetMessageId,
-  meetingChatMessageSearchHaystack,
-  searchMeetingChatMessages,
-  sendMeetingChatImageMessage,
-  sendMeetingChatTextMessage,
-  writeMeetingChatReadReceipt,
+    deleteMeetingChatImageMessageBestEffort,
+    fetchOlderMeetingChatPagesUntilTargetMessageId,
+    meetingChatMessageSearchHaystack,
+    searchMeetingChatMessages,
+    sendMeetingChatImageMessage,
+    sendMeetingChatTextMessage,
+    writeMeetingChatReadReceipt,
 } from '@/src/lib/meeting-chat';
-import {
-  flattenMeetingChatInfinitePages,
-  meetingChatMessagesQueryKey,
-  mergeMeetingChatInfiniteAppendPages,
-  useMeetingChatMessagesInfiniteQuery,
-} from '@/src/hooks/use-meeting-chat-messages-infinite-query';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -1397,7 +1396,7 @@ const styles = StyleSheet.create({
   },
   titleMain: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   titleLink: {
@@ -1448,7 +1447,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   chatSearchHeaderSpacer: {

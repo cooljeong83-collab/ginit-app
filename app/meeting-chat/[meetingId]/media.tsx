@@ -4,20 +4,20 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    Platform,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -26,14 +26,14 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import {
-  deleteMeetingChatImageMessageBestEffort,
-  fetchMeetingChatImagesPage,
-  type MeetingChatMessage,
+    deleteMeetingChatImageMessageBestEffort,
+    fetchMeetingChatImagesPage,
+    type MeetingChatMessage,
 } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { getUserProfilesForIds, isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
 
 function profileForSender(map: Map<string, UserProfile>, senderId: string | null): UserProfile | undefined {
   if (!senderId?.trim()) return undefined;
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
   centerFill: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
   muted: { fontSize: 14, color: '#64748b', fontWeight: '600' },
   backBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
-  backBtnText: { fontSize: 15, fontWeight: '800', color: GinitTheme.colors.primary },
+  backBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 14, fontWeight: '600', color: '#b91c1c' },
   retryBtn: { marginTop: 8, alignSelf: 'flex-start' },
-  retryBtnText: { fontSize: 14, fontWeight: '800', color: GinitTheme.colors.primary },
+  retryBtnText: { fontSize: 14, fontWeight: '600', color: GinitTheme.colors.primary },
   gridContent: {
     paddingHorizontal: H_PAD,
     paddingTop: 8,

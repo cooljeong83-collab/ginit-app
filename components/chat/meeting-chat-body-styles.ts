@@ -102,7 +102,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
@@ -211,7 +211,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
   },
   avatarFallbackText: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   avatarSpacer: {
@@ -230,7 +230,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
   },
   nickname: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     maxWidth: '85%',
   },
@@ -391,7 +391,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
   },
   plusFanLabelMorph: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#FFFFFF',
     letterSpacing: -0.2,
     flexShrink: 1,

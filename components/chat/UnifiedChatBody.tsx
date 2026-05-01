@@ -3,14 +3,14 @@ import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FlatList,
-  Keyboard,
-  type LayoutChangeEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
+    FlatList,
+    Keyboard,
+    type LayoutChangeEvent,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   threadTitle: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#64748b',
     marginBottom: 10,
     textAlign: 'center',
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,

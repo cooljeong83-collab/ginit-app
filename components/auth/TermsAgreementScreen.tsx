@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
   },
   termRowLast: { borderBottomWidth: 0 },
   termLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
-  termTitle: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+  termTitle: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
   viewBtn: { paddingHorizontal: 8, paddingVertical: 6 },
   viewBtnText: { fontSize: 16, fontWeight: '900', color: GinitTheme.colors.primary },
   bottom: {

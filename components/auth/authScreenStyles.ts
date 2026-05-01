@@ -104,7 +104,7 @@ export const authScreenStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(15, 23, 42, 0.10)',
   },
-  countryCodeText: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
+  countryCodeText: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
   countryCodeArrow: { fontSize: 14, fontWeight: '900', color: '#334155', marginTop: -2 },
   phoneInputNew: {
     flex: 1,
@@ -129,7 +129,7 @@ export const authScreenStyles = StyleSheet.create({
   },
 
   fieldBlock: { marginTop: 12, gap: 6 },
-  fieldLabel: { fontSize: 12, fontWeight: '800', color: '#475569' },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: '#475569' },
   fullWidthInput: {
     alignSelf: 'stretch',
     height: 48,
@@ -178,7 +178,7 @@ export const authScreenStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(15, 23, 42, 0.06)',
   },
-  genderBinaryLabel: { fontSize: 15, fontWeight: '800', color: '#64748b' },
+  genderBinaryLabel: { fontSize: 15, fontWeight: '600', color: '#64748b' },
   genderBinaryLabelSelected: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.primary },
 
   registerLinkRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' },
@@ -227,7 +227,7 @@ export const authScreenStyles = StyleSheet.create({
     marginTop: 20,
     textAlign: 'center',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#64748b',
     letterSpacing: 0.6,
     textTransform: 'uppercase',

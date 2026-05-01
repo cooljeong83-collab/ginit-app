@@ -6,8 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { JoinedMeetingDashboardCard } from '@/components/joined-meetings/JoinedMeetingDashboardCard';
 import { ScreenShell } from '@/components/ui';
-import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
   topTitle: {
     flex: 1,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     textAlign: 'center',
   },

@@ -1,14 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GINIT_HIGH_TRUST_HOST_MIN } from '@/src/lib/ginit-trust';
 import type {
-  PublicMeetingAgeLimit,
-  PublicMeetingApprovalType,
-  PublicMeetingDetailsConfig,
-  PublicMeetingGenderRatio,
-  PublicMeetingSettlement,
+    PublicMeetingAgeLimit,
+    PublicMeetingApprovalType,
+    PublicMeetingDetailsConfig,
+    PublicMeetingGenderRatio,
+    PublicMeetingSettlement,
 } from '@/src/lib/meetings';
 
 const RADIUS = 12;
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
   },
   chipLabel: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   chipLabelOn: {
@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   },
   segmentLabel: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
   },
   segmentLabelOn: {
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
   },
   feeLabel: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
     marginBottom: 6,
   },
@@ -486,7 +486,7 @@ const styles = StyleSheet.create({
   },
   stepValue: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   stepHint: {
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
   },
   checkboxLabel: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   checkboxHint: {

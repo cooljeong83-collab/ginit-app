@@ -1,26 +1,26 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  Fragment,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    Fragment,
+    type RefObject,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from 'react';
 import {
-  ActivityIndicator,
-  Dimensions,
-  findNodeHandle,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  UIManager,
-  View,
-  type ViewStyle,
+    ActivityIndicator,
+    Dimensions,
+    findNodeHandle,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    UIManager,
+    View,
+    type ViewStyle,
 } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,17 +28,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
-import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
-import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import {
-  resolveNaverPlaceCoordinates,
-  resolveNaverPlaceDetailWebUrlLikeVoteChip,
-  sanitizeNaverLocalPlaceLink,
-  searchNaverLocalPlaces,
+    resolveNaverPlaceCoordinates,
+    resolveNaverPlaceDetailWebUrlLikeVoteChip,
+    sanitizeNaverLocalPlaceLink,
+    searchNaverLocalPlaces,
 } from '@/src/lib/naver-local-search';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
 import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
@@ -897,7 +897,7 @@ const styles = StyleSheet.create({
   addMoreBtnLabel: {
     color: GinitTheme.colors.primary,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     textAlign: 'center',
   },
 });

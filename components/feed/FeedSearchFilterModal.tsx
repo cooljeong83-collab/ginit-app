@@ -2,13 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
-import type {
-  PublicMeetingAgeLimit,
-  PublicMeetingApprovalType,
-  PublicMeetingGenderRatio,
-  PublicMeetingSettlement,
-} from '@/src/lib/meetings';
 import { defaultFeedSearchFilters, type FeedSearchFilters } from '@/src/lib/feed-meeting-utils';
+import type {
+    PublicMeetingAgeLimit,
+    PublicMeetingApprovalType,
+    PublicMeetingGenderRatio,
+    PublicMeetingSettlement,
+} from '@/src/lib/meetings';
 
 const AGE_CHIPS: { code: PublicMeetingAgeLimit; label: string }[] = [
   { code: 'TWENTIES', label: '20대' },
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 4,
   },
@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   },
   blockLabel: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#64748b',
     marginBottom: 8,
   },
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   segBtnOn: {
     backgroundColor: 'rgba(0, 82, 204, 0.1)',
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
   },
   primaryBtnLabel: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#fff',
   },
   closeLink: {

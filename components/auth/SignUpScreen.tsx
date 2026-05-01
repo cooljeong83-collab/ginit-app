@@ -4,32 +4,32 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
-  ActivityIndicator,
-  Alert,
-  Animated,
-  findNodeHandle,
-  InteractionManager,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  type TextInput as TextInputRefType,
-  View,
+    AccessibilityInfo,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    findNodeHandle,
+    InteractionManager,
+    Keyboard,
+    Modal,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    type TextInput as TextInputRefType,
+    View,
 } from 'react-native';
 import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
+import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
 import { phoneOtpInlineStyles as otpStyles } from '@/components/auth/phoneOtpStyles';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
-import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
 import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
@@ -788,7 +788,7 @@ const emailCombo = StyleSheet.create({
   },
   domainText: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   domainArrow: {
@@ -830,7 +830,7 @@ const emailCombo = StyleSheet.create({
   },
   domainRowText: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   domainRowTextSelected: {

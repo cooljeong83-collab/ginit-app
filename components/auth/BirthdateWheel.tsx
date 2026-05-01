@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
   colInline: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 0 },
   sideLabel: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     width: 16,
     textAlign: 'right',

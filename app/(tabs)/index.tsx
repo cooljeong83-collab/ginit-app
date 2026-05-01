@@ -33,14 +33,13 @@ import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import { haystackMatchesFeedRegion, normalizeFeedRegionLabel, resolveFeedLocationContext } from '@/src/lib/feed-display-location';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import {
   buildFeedChips,
   defaultFeedSearchFilters,
   feedMeetingSymbolBox,
-  meetingCreatedAtMs,
   feedSearchFiltersActive,
   listSortModeLabel,
+  meetingCreatedAtMs,
   meetingMatchesCategoryFilter,
   meetingMatchesFeedSearch,
   meetingWithinHomeFeedRadius,
@@ -55,6 +54,7 @@ import {
   saveActiveFeedRegion,
   saveRegisteredFeedRegions,
 } from '@/src/lib/feed-registered-regions';
+import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
@@ -1444,7 +1444,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.75)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
     flexShrink: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1457,8 +1457,8 @@ const styles = StyleSheet.create({
     opacity: 0.88,
   },
   homeTopChipLabel: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#475569',
   },
   homeTopChipLabelActive: {
@@ -1471,12 +1471,12 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     maxWidth: 150,
     minWidth: 96,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.75)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   categoryDropdownPressed: {
     backgroundColor: 'rgba(255,255,255,0.9)',
@@ -1486,7 +1486,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#475569',
   },
   feedHeader: {
@@ -1581,7 +1581,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.55)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   recruitTogglePillOn: {
     backgroundColor: '#16A34A',
@@ -1614,7 +1614,7 @@ const styles = StyleSheet.create({
   },
   errorTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#B91C1C',
     marginBottom: 6,
   },
@@ -1690,7 +1690,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 2,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#475569',
   },
   modalRowLabelBlock: {
@@ -1706,7 +1706,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 6,
   },

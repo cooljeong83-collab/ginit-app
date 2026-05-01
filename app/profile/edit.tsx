@@ -5,17 +5,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    ToastAndroid,
+    useWindowDimensions,
+    View
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,21 +26,21 @@ import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { safeRouterBack } from '@/src/lib/router-safe';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
+import { safeRouterBack } from '@/src/lib/router-safe';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
-  ensureUserProfile,
-  firestoreTimestampLikeToDate,
-  hasTermsAgreementRecorded,
-  isDemographicsIncomplete,
-  isMeetingServiceComplianceComplete,
-  isUserPhoneVerified,
-  meetingDemographicsIncomplete,
-  readGooglePeopleDemographicsLocks,
-  updateUserProfile,
+    ensureUserProfile,
+    firestoreTimestampLikeToDate,
+    hasTermsAgreementRecorded,
+    isDemographicsIncomplete,
+    isMeetingServiceComplianceComplete,
+    isUserPhoneVerified,
+    meetingDemographicsIncomplete,
+    readGooglePeopleDemographicsLocks,
+    updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
   },
   sectionEyebrow: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: 0.8,
     marginBottom: 8,
@@ -799,7 +799,7 @@ const styles = StyleSheet.create({
   },
   labelInline: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
   },
   charCount: {
@@ -829,7 +829,7 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     color: GinitTheme.colors.text,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   saveBlock: {
     marginTop: GinitTheme.spacing.lg,
@@ -926,12 +926,12 @@ const styles = StyleSheet.create({
   termsBoxUnchecked: { borderColor: '#FF8A00', backgroundColor: 'rgba(255, 138, 0, 0.08)' },
   termsBoxChecked: { borderColor: '#0052CC', backgroundColor: 'rgba(0, 82, 204, 0.12)' },
   termsCheckMark: { fontSize: 16, fontWeight: '900', color: '#0052CC' },
-  termsLabel: { flex: 1, fontSize: 14, fontWeight: '800', color: '#0f172a', lineHeight: 20 },
+  termsLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: '#0f172a', lineHeight: 20 },
   termsLabelLocked: { color: '#64748b' },
   phoneVerifiedDone: {
     marginTop: 6,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f766e',
     lineHeight: 22,
   },
@@ -962,7 +962,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#0f172a',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     lineHeight: 20,
   },
   otpBlock: {
@@ -984,7 +984,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
     color: '#0f172a',
-    fontWeight: '800',
+    fontWeight: '600',
   },
   otpCodeInput: {
     flex: 1,

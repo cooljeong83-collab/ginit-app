@@ -2,69 +2,69 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
+    createContext,
+    type ReactNode,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from 'react';
 import {
-  AppState,
-  type AppStateStatus,
-  FlatList,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
+    AppState,
+    type AppStateStatus,
+    FlatList,
+    Modal,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
-  chatMessageTimeMs,
-  defaultInAppAlarmReadState,
-  type InAppAlarmReadState,
-  type InAppAlarmRow,
-  MEETING_INFO_FP_PREFIX,
-  meetingInfoFingerprint,
-} from '@/src/lib/in-app-alarms';
-import {
-  fetchFriendsAcceptedList,
-  fetchFriendsPendingInbox,
-  fetchFriendsPendingOutbox,
-  type FriendAcceptedRow,
-  type FriendInboxRow,
+    fetchFriendsAcceptedList,
+    fetchFriendsPendingInbox,
+    fetchFriendsPendingOutbox,
+    type FriendAcceptedRow,
+    type FriendInboxRow,
 } from '@/src/lib/friends';
-import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
+import {
+    chatMessageTimeMs,
+    defaultInAppAlarmReadState,
+    type InAppAlarmReadState,
+    type InAppAlarmRow,
+    MEETING_INFO_FP_PREFIX,
+    meetingInfoFingerprint,
+} from '@/src/lib/in-app-alarms';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
-import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { fetchMeetingChatUnreadCount, subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
+import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
-  fetchSocialChatReadPointersForUser,
-  fetchSocialChatUnreadCount,
-  socialDmPreviewLine,
-  socialMessageTimeMs,
-  subscribeMySocialChatRooms,
-  subscribeSocialChatLatestMessage,
+    fetchSocialChatReadPointersForUser,
+    fetchSocialChatUnreadCount,
+    socialDmPreviewLine,
+    socialMessageTimeMs,
+    subscribeMySocialChatRooms,
+    subscribeSocialChatLatestMessage,
 } from '@/src/lib/social-chat-rooms';
+import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
-import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
-import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -1367,7 +1367,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   markAllRow: {

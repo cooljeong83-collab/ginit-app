@@ -2,16 +2,16 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type PressableProps,
-  type PressableStateCallbackType,
-  type StyleProp,
-  type TextStyle,
-  type ViewStyle,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
+    type PressableProps,
+    type PressableStateCallbackType,
+    type StyleProp,
+    type TextStyle,
+    type ViewStyle,
 } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: -0.1,
   },
   pressed: {

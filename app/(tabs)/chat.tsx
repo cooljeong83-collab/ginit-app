@@ -46,8 +46,8 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
   fetchSocialChatUnreadCount,
   searchSocialChatMessages,
-  socialDmRoomId,
   socialDmPreviewLine,
+  socialDmRoomId,
   socialMessageTimeMs,
   subscribeSocialChatLatestMessage,
   subscribeSocialChatRoom,
@@ -1187,7 +1187,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 6,
   },
@@ -1228,7 +1228,7 @@ const styles = StyleSheet.create({
   },
   socialSearchApplyLabel: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#fff',
   },
   chatSearchClearBtn: {
@@ -1250,7 +1250,7 @@ const styles = StyleSheet.create({
   },
   chatSearchClearLabel: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   chatSearchClearLabelDisabled: {
@@ -1277,9 +1277,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     maxWidth: 150,
     minWidth: 96,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'transparent',
     opacity: 0,
@@ -1290,7 +1290,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.75)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
     flexShrink: 1,
   },
   chatTopChipActive: {
@@ -1301,8 +1301,8 @@ const styles = StyleSheet.create({
     opacity: 0.88,
   },
   chatTopChipLabel: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#475569',
   },
   chatTopChipLabelActive: {
@@ -1344,7 +1344,7 @@ const styles = StyleSheet.create({
   socialAvatarLetter: { fontSize: 13, fontWeight: '900', color: GinitTheme.trustBlue },
   socialKindUnder: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: -0.35,
     textAlign: 'center',
@@ -1437,7 +1437,7 @@ const styles = StyleSheet.create({
   },
   errorTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#B91C1C',
     marginBottom: 6,
   },

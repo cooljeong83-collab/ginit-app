@@ -3,10 +3,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GinitTheme } from '@/constants/ginit-theme';
 import { ScreenShell } from '@/components/ui';
-import { AuthService } from '@/src/services/AuthService';
+import { GinitTheme } from '@/constants/ginit-theme';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { AuthService } from '@/src/services/AuthService';
 
 type Country = { label: string; dial: string };
 const COUNTRIES: Country[] = [
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 12,
   },
-  countryLabel: { fontSize: 14, fontWeight: '800', color: '#0f172a' },
+  countryLabel: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
   countryDial: { fontSize: 14, fontWeight: '900', color: '#64748b' },
 });
 

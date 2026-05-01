@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -20,22 +19,19 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
-import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import {
   compareFriendsByPresenceDistanceTrust,
   computeFriendSortSignals,
   formatDistanceCompact,
-  mutualJoinedMeetingsCount,
   pickPrimaryMeetingForPeer,
-  resolveFriendActivity,
+  resolveFriendActivity
 } from '@/src/lib/friend-presence-activity';
-import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { FriendAcceptedRow, FriendInboxRow } from '@/src/lib/friends';
 import {
   acceptGinitRequest,
@@ -46,14 +42,19 @@ import {
   fetchFriendsPendingOutbox,
   removeAcceptedFriend,
 } from '@/src/lib/friends';
+import {
+  loadBlockedPeerIds,
+  loadHiddenPeerIds,
+  saveBlockedPeerIds,
+  saveHiddenPeerIds,
+} from '@/src/lib/friends-privacy-local';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
-import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
-import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
+import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import type { UserProfile } from '@/src/lib/user-profile';
-
-const HIDDEN_KEY = (me: string) => `ginit.friends.hidden.v1:${me}`;
+import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 
 function friendAppUserKey(raw: string | null | undefined): string {
   const t = raw?.trim() ?? '';
@@ -251,6 +252,7 @@ export function FriendsHomeScreen() {
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [hiddenPeerIds, setHiddenPeerIds] = useState<Set<string>>(new Set());
+  const [blockedPeerIds, setBlockedPeerIds] = useState<Set<string>>(new Set());
   const [sheetFriend, setSheetFriend] = useState<EnrichedFriend | null>(null);
 
   const reload = useCallback(async () => {
@@ -294,9 +296,20 @@ export function FriendsHomeScreen() {
     useCallback(() => {
       if (!me) {
         setLoading(false);
+        setHiddenPeerIds(new Set());
+        setBlockedPeerIds(new Set());
         return;
       }
       void reload();
+      void (async () => {
+        try {
+          const [h, b] = await Promise.all([loadHiddenPeerIds(me), loadBlockedPeerIds(me)]);
+          setHiddenPeerIds(h);
+          setBlockedPeerIds(b);
+        } catch {
+          /* ignore */
+        }
+      })();
     }, [me, reload]),
   );
 
@@ -333,30 +346,11 @@ export function FriendsHomeScreen() {
     };
   }, [me]);
 
-  useEffect(() => {
-    if (!me) return;
-    let alive = true;
-    void (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(HIDDEN_KEY(me));
-        if (!alive || !raw) return;
-        const arr = JSON.parse(raw) as unknown;
-        if (!Array.isArray(arr)) return;
-        setHiddenPeerIds(new Set(arr.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => friendAppUserKey(x))));
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [me]);
-
   const persistHidden = useCallback(
     async (next: Set<string>) => {
       if (!me) return;
       try {
-        await AsyncStorage.setItem(HIDDEN_KEY(me), JSON.stringify([...next]));
+        await saveHiddenPeerIds(me, next);
       } catch {
         /* ignore */
       }
@@ -388,12 +382,13 @@ export function FriendsHomeScreen() {
     return enrichedFriends.filter((e) => {
       const pk = friendAppUserKey(e.row.peer_app_user_id);
       if (hiddenPeerIds.has(pk)) return false;
+      if (blockedPeerIds.has(pk)) return false;
       if (!q) return true;
       const nick = e.profile.nickname?.toLowerCase() ?? '';
       const dna = (e.profile.gDna ?? '').toLowerCase();
       return nick.includes(q) || dna.includes(q) || pk.toLowerCase().includes(q);
     });
-  }, [enrichedFriends, hiddenPeerIds, search]);
+  }, [enrichedFriends, hiddenPeerIds, blockedPeerIds, search]);
 
   const openDm = useCallback(
     (peerAppUserId: string, peerDisplayName?: string) => {
@@ -457,7 +452,8 @@ export function FriendsHomeScreen() {
   );
 
   const goAddFriend = useCallback(() => router.push('/social/discovery'), [router]);
-  const goSettings = useCallback(() => router.push('/(tabs)/profile'), [router]);
+  const goMyProfile = useCallback(() => router.push('/(tabs)/profile'), [router]);
+  const goFriendManage = useCallback(() => router.push('/social/friends-settings'), [router]);
 
   const onRemoveAcceptedFriend = useCallback(() => {
     if (!sheetFriend || !me) return;
@@ -484,6 +480,13 @@ export function FriendsHomeScreen() {
                   void persistHidden(next);
                   return next;
                 });
+                setBlockedPeerIds((prev) => {
+                  if (!prev.has(peerPk)) return prev;
+                  const next = new Set(prev);
+                  next.delete(peerPk);
+                  void saveBlockedPeerIds(me, next);
+                  return next;
+                });
                 setSheetFriend(null);
                 await reload();
               } catch (e) {
@@ -495,6 +498,45 @@ export function FriendsHomeScreen() {
       ],
     );
   }, [me, sheetFriend, reload, persistHidden]);
+
+  const onHideFriendFromSheet = useCallback(() => {
+    if (!sheetFriend || !me) return;
+    const pk = friendAppUserKey(sheetFriend.row.peer_app_user_id);
+    setHiddenPeerIds((prev) => {
+      const next = new Set(prev);
+      next.add(pk);
+      void persistHidden(next);
+      return next;
+    });
+    setSheetFriend(null);
+  }, [sheetFriend, me, persistHidden]);
+
+  const onBlockFriendFromSheet = useCallback(() => {
+    if (!sheetFriend || !me) return;
+    const row = sheetFriend;
+    const nick = row.profile.nickname?.trim() || '상대';
+    Alert.alert('차단', `${nick}님을 차단할까요?\n친구 목록에서 보이지 않으며, 이후 상호작용이 제한될 수 있어요.`, [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '차단',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            const pk = friendAppUserKey(row.row.peer_app_user_id);
+            const blocked = await loadBlockedPeerIds(me);
+            blocked.add(pk);
+            await saveBlockedPeerIds(me, blocked);
+            setBlockedPeerIds(blocked);
+            const hidden = await loadHiddenPeerIds(me);
+            hidden.delete(pk);
+            await saveHiddenPeerIds(me, hidden);
+            setHiddenPeerIds(hidden);
+            setSheetFriend(null);
+          })();
+        },
+      },
+    ]);
+  }, [sheetFriend, me]);
 
   const onToggleSearch = useCallback(() => {
     setSearchOpen((v) => {
@@ -523,7 +565,7 @@ export function FriendsHomeScreen() {
     return (
       <View>
         <Pressable
-          onPress={goSettings}
+          onPress={goMyProfile}
           style={({ pressed }) => [s.myRow, pressed && { opacity: 0.88 }]}
           accessibilityRole="button"
           accessibilityLabel="내 프로필">
@@ -583,7 +625,7 @@ export function FriendsHomeScreen() {
       </View>
     );
   }, [
-    goSettings,
+    goMyProfile,
     myInitial,
     myNick,
     myPhoto,
@@ -612,20 +654,20 @@ export function FriendsHomeScreen() {
 
   const emptySearch = useMemo(
     () => (
-      <GinitCard appearance="light" style={s.emptyCard}>
+      <View style={s.emptySearchPlain} accessibilityRole="text">
         <Text style={s.emptyTitle}>검색 결과가 없어요</Text>
         <Text style={s.emptyBody}>이름·gDna·아이디 일부로 다시 검색해 보세요.</Text>
-      </GinitCard>
+      </View>
     ),
     [],
   );
 
   const emptyHiddenAll = useMemo(
     () => (
-      <GinitCard appearance="light" style={s.emptyCard}>
+      <View style={s.emptySearchPlain} accessibilityRole="text">
         <Text style={s.emptyTitle}>표시할 친구가 없어요</Text>
         <Text style={s.emptyBody}>숨긴 친구만 있을 때 목록이 비어 보일 수 있어요.</Text>
-      </GinitCard>
+      </View>
     ),
     [],
   );
@@ -697,8 +739,7 @@ export function FriendsHomeScreen() {
               <Pressable accessibilityLabel="친구 추가" hitSlop={8} onPress={goAddFriend} style={s.iconBtn}>
                 <Ionicons name="person-add-outline" size={22} color="#0f172a" />
               </Pressable>
-              <InAppAlarmsBellButton />
-              <Pressable accessibilityLabel="설정" hitSlop={8} onPress={goSettings} style={s.iconBtn}>
+              <Pressable accessibilityLabel="친구 관리" hitSlop={8} onPress={goFriendManage} style={s.iconBtn}>
                 <Ionicons name="settings-outline" size={22} color="#0f172a" />
               </Pressable>
             </View>
@@ -783,6 +824,20 @@ export function FriendsHomeScreen() {
                   />
                   <Pressable
                     accessibilityRole="button"
+                    accessibilityLabel="목록에서 숨기기"
+                    onPress={onHideFriendFromSheet}
+                    style={({ pressed }) => [s.sheetSecondaryBtn, pressed && { opacity: 0.88 }]}>
+                    <Text style={s.sheetSecondaryTxt}>목록에서 숨기기</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="차단"
+                    onPress={onBlockFriendFromSheet}
+                    style={({ pressed }) => [s.sheetBlockBtn, pressed && { opacity: 0.88 }]}>
+                    <Text style={s.sheetBlockTxt}>차단</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
                     accessibilityLabel="친구 삭제"
                     onPress={onRemoveAcceptedFriend}
                     style={({ pressed }) => [s.sheetDeleteBtn, pressed && { opacity: 0.88 }]}>
@@ -833,8 +888,6 @@ const s = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 10,
     backgroundColor: GinitTheme.colors.bg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
     zIndex: 3,
   },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
@@ -846,7 +899,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
     backgroundColor: 'rgba(255,255,255,0.85)',
     paddingHorizontal: 12,
     minHeight: 44,
@@ -859,7 +912,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 4,
-    backgroundColor: 'rgba(246, 250, 255, 0.65)',
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
   },
   errBanner: {
     marginHorizontal: 20,
@@ -872,9 +925,9 @@ const s = StyleSheet.create({
   },
   errText: { color: '#b91c1c', fontWeight: '700', fontSize: 13 },
   loginBlock: { paddingHorizontal: 20, paddingTop: 24 },
-  loginHint: { fontSize: 15, fontWeight: '800', color: '#0f172a', lineHeight: 22 },
+  loginHint: { fontSize: 15, fontWeight: '600', color: '#0f172a', lineHeight: 22 },
   sectionSpacer: { height: 14 },
-  sectionHeader: { fontSize: 12, fontWeight: '800', color: 'rgba(100, 116, 139, 0.95)', marginBottom: 6 },
+  sectionHeader: { fontSize: 12, fontWeight: '600', color: 'rgba(100, 116, 139, 0.95)', marginBottom: 6 },
   sectionBody: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: GinitTheme.colors.border,
@@ -954,6 +1007,12 @@ const s = StyleSheet.create({
     paddingVertical: 22,
     paddingHorizontal: 16,
   },
+  emptySearchPlain: {
+    marginTop: 8,
+    alignItems: 'center',
+    paddingVertical: 22,
+    paddingHorizontal: 16,
+  },
   emptyIconWrap: {
     width: 52,
     height: 52,
@@ -962,7 +1021,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(15, 23, 42, 0.06)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
     marginBottom: 12,
   },
   emptyTitle: { fontSize: 16, fontWeight: '900', color: '#0f172a', textAlign: 'center', marginBottom: 6 },
@@ -1006,10 +1065,14 @@ const s = StyleSheet.create({
   },
   sheetAvatarLetter: { fontSize: 28, fontWeight: '900', color: GinitTheme.colors.primary },
   sheetDmBtn: { alignSelf: 'stretch', marginBottom: 10 },
+  sheetSecondaryBtn: { alignSelf: 'stretch', paddingVertical: 12, marginBottom: 6 },
+  sheetSecondaryTxt: { fontSize: 15, fontWeight: '600', color: '#0f172a', textAlign: 'center' },
+  sheetBlockBtn: { alignSelf: 'stretch', paddingVertical: 12, marginBottom: 10 },
+  sheetBlockTxt: { fontSize: 15, fontWeight: '600', color: '#b91c1c', textAlign: 'center' },
   sheetDeleteBtn: { alignSelf: 'stretch', paddingVertical: 12, marginBottom: 14 },
-  sheetDeleteTxt: { fontSize: 15, fontWeight: '800', color: '#b91c1c', textAlign: 'center' },
+  sheetDeleteTxt: { fontSize: 15, fontWeight: '600', color: '#b91c1c', textAlign: 'center' },
   sheetTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
-  sheetSub: { fontSize: 12, fontWeight: '800', color: '#64748b', marginBottom: 4 },
+  sheetSub: { fontSize: 12, fontWeight: '600', color: '#64748b', marginBottom: 4 },
   sheetBody: { fontSize: 14, fontWeight: '600', color: '#334155', lineHeight: 21 },
   sheetMeta: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 8 },
   sheetScroll: { maxHeight: 160, marginBottom: 12 },

@@ -14,8 +14,8 @@ export const GinitTheme = {
   /** New: 시안 톤 컬러 토큰 */
   colors: {
     // surfaces
-    bg: '#F6FAFF',
-    bgAlt: '#EEF5FF',
+    bg: '#FFFFFF',
+    bgAlt: '#FFFFFF',
     surface: 'rgba(255, 255, 255)',
     surfaceStrong: '#FFFFFF',
     border: 'rgba(15, 23, 42, 0.10)',

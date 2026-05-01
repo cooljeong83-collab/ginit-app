@@ -190,7 +190,7 @@ export const GinitStyles = StyleSheet.create({
   // 장소검색/모임등록 - 주요 버튼 라벨(흰색)
   primaryButtonLabel: {
     color: '#fff',
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 15,
   },
 
@@ -268,7 +268,7 @@ export const GinitStyles = StyleSheet.create({
   // 장소검색/모임등록 - CTA 라벨
   ctaButtonLabel: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#FFFFFF',
   },
 
@@ -443,7 +443,7 @@ export const GinitStyles = StyleSheet.create({
   // 장소검색 - 장소명
   listItemTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 4,
   },
@@ -473,7 +473,7 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록 - 히어로 제목
   heroTitle: {
     fontSize: 26,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.trustBlue,
     marginBottom: 16,
     letterSpacing: -0.5,
@@ -514,7 +514,7 @@ export const GinitStyles = StyleSheet.create({
 
   glassChipText: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#333333',
   },
 
@@ -562,7 +562,7 @@ export const GinitStyles = StyleSheet.create({
 
   gridLabel: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
 
@@ -630,7 +630,7 @@ export const GinitStyles = StyleSheet.create({
 
   segmentTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#333333',
   },
 
@@ -724,7 +724,7 @@ export const GinitStyles = StyleSheet.create({
 
   summaryLine: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#1A1A1A',
   },
 
@@ -734,14 +734,14 @@ export const GinitStyles = StyleSheet.create({
 
   inputPressableLabel: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 4,
   },
 
   inputPressableValue: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#1A1A1A',
   },
 
@@ -762,7 +762,7 @@ export const GinitStyles = StyleSheet.create({
 
   placeTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#1A1A1A',
   },
 
@@ -813,7 +813,7 @@ export const GinitStyles = StyleSheet.create({
 
   warnTitle: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     marginBottom: 4,
   },
@@ -868,7 +868,7 @@ export const GinitStyles = StyleSheet.create({
 
   modalDone: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
 

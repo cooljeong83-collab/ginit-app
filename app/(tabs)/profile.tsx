@@ -1,27 +1,27 @@
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  KeyboardAvoidingView,
-  LayoutChangeEvent,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    KeyboardAvoidingView,
+    LayoutChangeEvent,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    ToastAndroid,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,42 +32,42 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import {
-  type SignUpGenderCode,
+    type SignUpGenderCode,
 } from '@/src/hooks/useSignUpFlow';
 import {
-  deleteFirebaseAuthUserStrict,
-  purgeUserAccountRemote,
-  purgeUserAccountRemoteByFirebaseUid,
-  wipeLocalAppData,
+    deleteFirebaseAuthUserStrict,
+    purgeUserAccountRemote,
+    purgeUserAccountRemoteByFirebaseUid,
+    wipeLocalAppData,
 } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import {
-  effectiveGTrust,
-  levelBarFillColorForTrust,
-  trustTierForUser,
-  xpProgressWithinLevel,
-} from '@/src/lib/ginit-trust';
-import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import {
-  isProfileRegisterInfoParamOn,
-  PROFILE_REGISTER_INFO_QUERY,
-} from '@/src/lib/profile-register-info';
-import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
-import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import {
-  ensureUserProfile,
-  firestoreTimestampLikeToDate,
-  hasTermsAgreementRecorded,
-  isDemographicsIncomplete,
-  isMeetingServiceComplianceComplete,
-  meetingDemographicsIncomplete,
-  isUserPhoneVerified,
-  readGooglePeopleDemographicsLocks,
-  updateUserProfile,
-  type UserProfile,
-} from '@/src/lib/user-profile';
+    effectiveGTrust,
+    levelBarFillColorForTrust,
+    trustTierForUser,
+    xpProgressWithinLevel,
+} from '@/src/lib/ginit-trust';
+import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
+import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
+import {
+    isProfileRegisterInfoParamOn,
+    PROFILE_REGISTER_INFO_QUERY,
+} from '@/src/lib/profile-register-info';
+import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
+import {
+    ensureUserProfile,
+    firestoreTimestampLikeToDate,
+    hasTermsAgreementRecorded,
+    isDemographicsIncomplete,
+    isMeetingServiceComplianceComplete,
+    isUserPhoneVerified,
+    meetingDemographicsIncomplete,
+    readGooglePeopleDemographicsLocks,
+    updateUserProfile,
+    type UserProfile,
+} from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
@@ -1246,7 +1246,7 @@ const styles = StyleSheet.create({
   },
   quickLabel: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   sectionTitle: {
@@ -1292,7 +1292,7 @@ const styles = StyleSheet.create({
   },
   menuSub: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#64748b',
   },
   menuSubOk: {
@@ -1328,7 +1328,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: 'rgba(15, 23, 42, 0.04)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   trustCardTop: {
     flexDirection: 'row',
@@ -1376,13 +1376,13 @@ const styles = StyleSheet.create({
   trustRestricted: {
     marginTop: 8,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#b91c1c',
   },
   levelLine: {
     marginTop: 4,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#334155',
   },
   levelTrack: {
@@ -1554,7 +1554,7 @@ const styles = StyleSheet.create({
   termsLabel: {
     flex: 1,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     lineHeight: 20,
   },
@@ -1564,7 +1564,7 @@ const styles = StyleSheet.create({
   phoneVerifiedDone: {
     marginTop: 6,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f766e',
     lineHeight: 22,
   },
@@ -1598,7 +1598,7 @@ const styles = StyleSheet.create({
   },
   phone: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 4,
   },
@@ -1630,7 +1630,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
     color: '#0f172a',
-    fontWeight: '800',
+    fontWeight: '600',
   },
   otpCodeInput: {
     flex: 1,
@@ -1677,7 +1677,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: '#b91c1c',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   pressed: {
     opacity: 0.85,
@@ -1726,7 +1726,7 @@ const styles = StyleSheet.create({
   },
   deleteAccountLabel: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#b91c1c',
     textDecorationLine: 'underline',
   },

@@ -1,16 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,16 +19,16 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import { meetingParticipantCount, subscribeMeetingById, type Meeting } from '@/src/lib/meetings';
-import type { UserProfile } from '@/src/lib/user-profile';
 import {
-  getMeetingChatImageUploadQuality,
-  setMeetingChatImageUploadQuality,
+    getMeetingChatImageUploadQuality,
+    setMeetingChatImageUploadQuality,
 } from '@/src/lib/meeting-chat-image-quality-preference';
 import {
-  getMeetingChatNotifyEnabledForUser,
-  setMeetingChatNotifyEnabledForUser,
+    getMeetingChatNotifyEnabledForUser,
+    setMeetingChatNotifyEnabledForUser,
 } from '@/src/lib/meeting-chat-notify-preference';
+import { meetingParticipantCount, subscribeMeetingById, type Meeting } from '@/src/lib/meetings';
+import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
 type IonIconName = ComponentProps<typeof Ionicons>['name'];
@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   muted: { fontSize: 14, color: '#64748b', fontWeight: '600' },
   textBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
-  textBtnLabel: { fontSize: 15, fontWeight: '800', color: GinitTheme.colors.primary },
+  textBtnLabel: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -433,7 +433,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 4,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#64748b',
     letterSpacing: -0.1,
   },

@@ -2,13 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
-  type LayoutChangeEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
+    ActivityIndicator,
+    type LayoutChangeEvent,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -122,7 +122,7 @@ const secStyles = StyleSheet.create({
   },
   dividerTitle: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#94a3b8',
     letterSpacing: 0.4,
   },

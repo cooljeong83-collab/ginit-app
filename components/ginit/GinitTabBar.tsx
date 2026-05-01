@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
   tabUnreadBadgeText: {
     color: '#ffffff',
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: -0.35,
     lineHeight: 12,
   },
@@ -389,8 +389,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fabLabelText: {
-    fontSize: 13,
-    fontWeight: '900',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#FFFFFF',
     letterSpacing: -0.2,
   },

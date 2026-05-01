@@ -62,7 +62,7 @@ export const HomeGlassStyles = StyleSheet.create({
   },
   miniTitle: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0b1220',
     lineHeight: 17,
     textShadowColor: 'rgba(255, 255, 255, 0.9)',
@@ -150,7 +150,7 @@ export const HomeGlassStyles = StyleSheet.create({
   },
   dashboardTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0b1220',
     letterSpacing: -0.3,
     textShadowColor: 'rgba(255, 255, 255, 0.95)',
@@ -176,7 +176,7 @@ export const HomeGlassStyles = StyleSheet.create({
   },
   phasePillText: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.trustBlue,
   },
   phasePillOrange: {

@@ -3,14 +3,14 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   },
   rowPressed: { backgroundColor: 'rgba(15, 23, 42, 0.03)' },
   rowTextCol: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: 15, fontWeight: '800', color: '#0f172a', letterSpacing: -0.15 },
+  rowLabel: { fontSize: 15, fontWeight: '600', color: '#0f172a', letterSpacing: -0.15 },
   rowSub: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#64748b', lineHeight: 16 },
   rowLabelDanger: { color: '#dc2626' },
   rowSubDanger: { color: '#f87171' },

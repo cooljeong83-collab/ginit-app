@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import type { Timestamp } from 'firebase/firestore';
-import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -234,7 +233,7 @@ const styles = StyleSheet.create({
   capacityCountLabel: {
     marginTop: 0,
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: -0.35,
     textAlign: 'center',

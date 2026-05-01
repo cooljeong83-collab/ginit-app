@@ -1,16 +1,16 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { serverTimestamp } from 'firebase/firestore';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { serverTimestamp } from 'firebase/firestore';
 
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { AuthService } from '@/src/services/AuthService';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
+import { AuthService } from '@/src/services/AuthService';
 
 function paramToString(v: string | string[] | undefined): string {
   if (v == null) return '';
@@ -156,6 +156,6 @@ const styles = StyleSheet.create({
   verifyBtnDisabled: { opacity: 0.35 },
   verifyText: { fontSize: 16, fontWeight: '900', color: '#fff' },
   cancelBtn: { height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  cancelText: { fontSize: 14, fontWeight: '800', color: '#475569' },
+  cancelText: { fontSize: 14, fontWeight: '600', color: '#475569' },
 });
 

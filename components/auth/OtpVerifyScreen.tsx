@@ -7,16 +7,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { AuthService } from '@/src/services/AuthService';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
-  ensureUserProfile,
-  findUserRowByPhoneE164,
-  isUserProfileWithdrawn,
-  reactivateWithdrawnUserForOtpSignup,
-  recordTermsAgreement,
+    ensureUserProfile,
+    findUserRowByPhoneE164,
+    isUserProfileWithdrawn,
+    reactivateWithdrawnUserForOtpSignup,
+    recordTermsAgreement,
 } from '@/src/lib/user-profile';
+import { AuthService } from '@/src/services/AuthService';
 import { getAuth } from '@react-native-firebase/auth';
 
 type TermKey = 'tos' | 'privacy' | 'safety';
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
   allRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   allText: { fontSize: 14, fontWeight: '900', color: '#0f172a' },
   termRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  termText: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+  termText: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
   termBlock: { gap: 6 },
   safetyBody: {
     paddingLeft: 30,

@@ -7,9 +7,9 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { AuthService } from '@/src/services/AuthService';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { getUserProfile, isUserPhoneVerified, type UserProfile } from '@/src/lib/user-profile';
+import { AuthService } from '@/src/services/AuthService';
 
 function digitsOnly(s: string): string {
   return s.replace(/\D/g, '');
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
   sub: { fontSize: 13, fontWeight: '600', color: '#64748b', lineHeight: 19 },
   form: { paddingHorizontal: 20, paddingTop: 14, gap: 12 },
-  label: { fontSize: 12, fontWeight: '800', color: '#0f172a' },
+  label: { fontSize: 12, fontWeight: '600', color: '#0f172a' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   prefixBox: {
     height: 48,
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 14,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#0f172a',
   },
   nextBtn: {
@@ -174,8 +174,8 @@ const styles = StyleSheet.create({
   },
   nextBtnDisabled: { opacity: 0.35 },
   nextText: { fontSize: 16, fontWeight: '900', color: '#fff' },
-  verifiedText: { fontSize: 13, fontWeight: '800', color: GinitTheme.colors.primary, marginTop: -2 },
+  verifiedText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.primary, marginTop: -2 },
   cancelBtn: { height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  cancelText: { fontSize: 14, fontWeight: '800', color: '#475569' },
+  cancelText: { fontSize: 14, fontWeight: '600', color: '#475569' },
 });
 

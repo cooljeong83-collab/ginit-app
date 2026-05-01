@@ -48,7 +48,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   resultTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   resultMeta: {
@@ -83,7 +83,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   clearLinkText: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   chipWrap: {
@@ -114,7 +114,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   glassChipText: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   segmentRow: {
@@ -137,7 +137,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   segmentTitle: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
     textAlign: 'center',
   },
@@ -437,7 +437,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieAddOutlineBtnLabel: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   /** MovieSearch — 장소 후보(`VoteCandidatesForm` placesInner)와 동일 레이아웃 톤 */

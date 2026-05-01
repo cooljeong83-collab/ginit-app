@@ -5,24 +5,24 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import {
-  getHomeCategoryVisual,
-  homeCategoryMarkerIconColor,
-  homeMeetingStatusBadgeLabel,
+    getHomeCategoryVisual,
+    homeCategoryMarkerIconColor,
+    homeMeetingStatusBadgeLabel,
 } from '@/src/lib/feed-home-visual';
 import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import {
-  formatPublicMeetingAgeSummary,
-  MEETING_CAPACITY_UNLIMITED,
-  meetingCategoryDisplayLabel,
-  meetingParticipantCount,
-  meetingPrimaryStartMs,
-  parsePublicMeetingDetailsConfig,
-  type Meeting,
-  type PublicMeetingDetailsConfig,
-  type PublicMeetingGenderRatio,
-  type PublicMeetingHostGenderSnapshot,
+    formatPublicMeetingAgeSummary,
+    MEETING_CAPACITY_UNLIMITED,
+    meetingCategoryDisplayLabel,
+    meetingParticipantCount,
+    meetingPrimaryStartMs,
+    parsePublicMeetingDetailsConfig,
+    type Meeting,
+    type PublicMeetingDetailsConfig,
+    type PublicMeetingGenderRatio,
+    type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
 
 const THUMB_SIZE = 70;
@@ -396,7 +396,7 @@ const s = StyleSheet.create({
   },
   capLabel: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: -0.35,
     maxWidth: 40,
@@ -409,7 +409,7 @@ const s = StyleSheet.create({
   },
   overlapHint: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.warning,
     letterSpacing: -0.15,
   },
@@ -431,7 +431,7 @@ const s = StyleSheet.create({
   },
   titleCat: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: -0.15,
     color: GinitTheme.colors.textSub,
   },
@@ -439,7 +439,7 @@ const s = StyleSheet.create({
     flexShrink: 0,
     maxWidth: '34%',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: -0.12,
     textAlign: 'right',
     lineHeight: 14,
@@ -455,7 +455,7 @@ const s = StyleSheet.create({
   },
   moduleWhen: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
     letterSpacing: -0.2,
     lineHeight: 15,

@@ -60,7 +60,7 @@ export default function RootLayout() {
               <Stack
                 screenOptions={{
                   headerShown: false,
-                  contentStyle: { backgroundColor: '#F6FAFF' },
+                  contentStyle: { backgroundColor: '#FFFFFF' },
                   freezeOnBlur: true,
                   animation: 'slide_from_right',
                   gestureEnabled: true,
