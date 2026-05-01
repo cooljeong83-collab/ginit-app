@@ -27,8 +27,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
@@ -1052,6 +1052,10 @@ export default function MeetingDetailScreen() {
   }, [meeting?.scheduleDate, meeting?.scheduleTime]);
 
   const isHost = useMemo(() => (meeting ? isMeetingHost(userId, meeting.createdBy) : false), [meeting, userId]);
+
+  useEffect(() => {
+    if (isScheduleConfirmed) setBasicInfoEditOpen(false);
+  }, [isScheduleConfirmed]);
 
   const orderedParticipantIdsList = useMemo(() => (meeting ? orderedParticipantIds(meeting) : []), [meeting]);
 
@@ -2394,7 +2398,7 @@ export default function MeetingDetailScreen() {
                 <Text style={styles.titleCardText} numberOfLines={6}>
                   {meeting.title || '제목 없음'}
                 </Text>
-                {isHost ? (
+                {isHost && !isScheduleConfirmed ? (
                   <Pressable
                     onPress={() => setBasicInfoEditOpen(true)}
                     style={({ pressed }) => [styles.titleEditCircleBtn, pressed && { opacity: 0.82 }]}
@@ -4047,7 +4051,7 @@ export default function MeetingDetailScreen() {
         </Modal>
 
         <MeetingBasicInfoEditModal
-          visible={basicInfoEditOpen && meeting != null}
+          visible={basicInfoEditOpen && meeting != null && !isScheduleConfirmed}
           meeting={meeting}
           hostUserId={userId}
           onClose={() => setBasicInfoEditOpen(false)}
@@ -4148,7 +4152,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 18,
     padding: 18,
-    marginBottom: 20,
+    marginBottom: 0,
     shadowColor: 'rgba(15, 23, 42, 0.12)',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,

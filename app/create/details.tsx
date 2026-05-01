@@ -48,7 +48,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
-import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
+import {
+  CAPACITY_UNLIMITED,
+  GlassDualCapacityWheel,
+  PARTICIPANT_COUNT_MIN,
+} from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { IntensityPicker } from '@/components/create/IntensityPicker';
 import { MenuPreference } from '@/components/create/MenuPreference';
@@ -2629,7 +2633,7 @@ export default function CreateDetailsScreen() {
   });
 
   const [title, setTitle] = useState('');
-  const [minParticipants, setMinParticipants] = useState(1);
+  const [minParticipants, setMinParticipants] = useState(PARTICIPANT_COUNT_MIN);
   const [maxParticipants, setMaxParticipants] = useState(4);
 
   const minParticipantsRef = useRef(minParticipants);
@@ -2648,8 +2652,8 @@ export default function CreateDetailsScreen() {
       const max = maxParticipantsRef.current;
       const n =
         max === CAPACITY_UNLIMITED || max > 100
-          ? Math.min(100, Math.max(1, min))
-          : Math.min(100, Math.max(1, max));
+          ? Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, min))
+          : Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, max));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
@@ -2661,8 +2665,8 @@ export default function CreateDetailsScreen() {
       const max = maxParticipants;
       const n =
         max === CAPACITY_UNLIMITED || max > 100
-          ? Math.min(100, Math.max(1, min))
-          : Math.min(100, Math.max(1, max));
+          ? Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, min))
+          : Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, max));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
@@ -3129,13 +3133,13 @@ export default function CreateDetailsScreen() {
       setTitle(effectiveMeetingTitle);
     }
     if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < 1 || minParticipants > 100) {
+      if (!Number.isFinite(minParticipants) || minParticipants < PARTICIPANT_COUNT_MIN || minParticipants > 100) {
         setWizardError('최소 인원을 선택해 주세요.');
         return;
       }
       if (
         !Number.isFinite(maxParticipants) ||
-        maxParticipants < 1 ||
+        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < PARTICIPANT_COUNT_MIN) ||
         maxParticipants < minParticipants ||
         (maxParticipants > 100 && maxParticipants !== CAPACITY_UNLIMITED)
       ) {
@@ -3145,7 +3149,7 @@ export default function CreateDetailsScreen() {
     } else {
       if (
         !Number.isFinite(minParticipants) ||
-        minParticipants < 1 ||
+        minParticipants < PARTICIPANT_COUNT_MIN ||
         minParticipants > 100 ||
         minParticipants !== maxParticipants ||
         maxParticipants === CAPACITY_UNLIMITED
@@ -3201,14 +3205,14 @@ export default function CreateDetailsScreen() {
       return;
     }
     if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < 1 || minParticipants > 100) {
+      if (!Number.isFinite(minParticipants) || minParticipants < PARTICIPANT_COUNT_MIN || minParticipants > 100) {
         setWizardError('최소 인원을 선택해 주세요.');
         Alert.alert('입력 확인', '최소 인원을 선택해 주세요.');
         return;
       }
       if (
         !Number.isFinite(maxParticipants) ||
-        maxParticipants < 1 ||
+        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < PARTICIPANT_COUNT_MIN) ||
         maxParticipants < minParticipants ||
         (maxParticipants > 100 && maxParticipants !== CAPACITY_UNLIMITED)
       ) {
@@ -3236,7 +3240,7 @@ export default function CreateDetailsScreen() {
     } else {
       if (
         !Number.isFinite(minParticipants) ||
-        minParticipants < 1 ||
+        minParticipants < PARTICIPANT_COUNT_MIN ||
         minParticipants > 100 ||
         minParticipants !== maxParticipants ||
         maxParticipants === CAPACITY_UNLIMITED
@@ -3332,8 +3336,8 @@ export default function CreateDetailsScreen() {
 
     const lat = Number(p0.latitude);
     const lng = Number(p0.longitude);
-    const cap = toFiniteInt(maxParticipants, 1);
-    const minP = toFiniteInt(minParticipants, 1);
+    const cap = toFiniteInt(maxParticipants, 4);
+    const minP = toFiniteInt(minParticipants, PARTICIPANT_COUNT_MIN);
 
     setBusy(true);
     try {

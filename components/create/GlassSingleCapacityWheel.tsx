@@ -11,16 +11,21 @@ import {
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
+import { PARTICIPANT_COUNT_MIN } from './GlassDualCapacityWheel';
+
 const TRUST_BLUE = GinitTheme.colors.primary;
 
 const ITEM_HEIGHT = 28;
 const WHEEL_HEIGHT = 84;
 const PAD = (WHEEL_HEIGHT - ITEM_HEIGHT) / 2;
 
-const COUNT_OPTIONS: { value: number; label: string }[] = Array.from({ length: 100 }, (_, i) => ({
-  value: i + 1,
-  label: String(i + 1),
-}));
+const COUNT_OPTIONS: { value: number; label: string }[] = Array.from(
+  { length: 100 - PARTICIPANT_COUNT_MIN + 1 },
+  (_, i) => ({
+    value: i + PARTICIPANT_COUNT_MIN,
+    label: String(i + PARTICIPANT_COUNT_MIN),
+  }),
+);
 
 type WheelColumnProps = {
   options: { value: number; label: string }[];

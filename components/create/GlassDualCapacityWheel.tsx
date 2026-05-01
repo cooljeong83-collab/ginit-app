@@ -10,22 +10,29 @@ import {
 } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { MEETING_PARTICIPANT_MIN } from '@/src/lib/meetings';
 
 const TRUST_BLUE = GinitTheme.colors.primary;
 export const CAPACITY_UNLIMITED = 999;
+/** 공개·비공개 모임 최소/최대 인원 피커 하한(명) — `MEETING_PARTICIPANT_MIN` 과 동일 */
+export const PARTICIPANT_COUNT_MIN = MEETING_PARTICIPANT_MIN;
 
 const ITEM_HEIGHT = 28;
 const WHEEL_HEIGHT = 84;
 const PAD = (WHEEL_HEIGHT - ITEM_HEIGHT) / 2;
 
-const MIN_OPTIONS: { value: number; label: string }[] = Array.from({ length: 100 }, (_, i) => ({
-  value: i + 1,
-  label: String(i + 1),
-}));
+const MIN_OPTIONS: { value: number; label: string }[] = Array.from(
+  { length: 100 - PARTICIPANT_COUNT_MIN + 1 },
+  (_, i) => ({
+    value: i + PARTICIPANT_COUNT_MIN,
+    label: String(i + PARTICIPANT_COUNT_MIN),
+  }),
+);
 
 function buildMaxOptions(min: number): { value: number; label: string }[] {
   const list: { value: number; label: string }[] = [];
-  for (let v = min; v <= 100; v += 1) {
+  const floor = Math.max(PARTICIPANT_COUNT_MIN, Math.min(100, Math.floor(min)));
+  for (let v = floor; v <= 100; v += 1) {
     list.push({ value: v, label: String(v) });
   }
   list.push({ value: CAPACITY_UNLIMITED, label: '무제한' });

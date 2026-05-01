@@ -80,6 +80,8 @@ export const MEETINGS_COLLECTION = 'meetings';
 
 /** `GlassDualCapacityWheel` 의 무제한 정원 값(999)과 동일해야 합니다. */
 export const MEETING_CAPACITY_UNLIMITED = 999;
+/** 최소·최대(참가) 인원 피커 하한(명). UI `PARTICIPANT_COUNT_MIN` 과 동일해야 합니다. */
+export const MEETING_PARTICIPANT_MIN = 2;
 
 /** 후보별 누적 투표 수(칩 id 키). 참여 시 선택한 항목마다 +1 */
 export type MeetingVoteTallies = {
@@ -942,18 +944,27 @@ export async function updateMeetingBasicFieldsByHost(
   const title = patch.title.trim();
   if (!title) throw new Error('모임 이름을 입력해 주세요.');
 
-  const capacity = toFiniteInt(patch.capacity, 1);
-  const minParticipants = toFiniteInt(patch.minParticipants, 1);
+  const capacity = toFiniteInt(patch.capacity, MEETING_PARTICIPANT_MIN);
+  const minParticipants = toFiniteInt(patch.minParticipants, MEETING_PARTICIPANT_MIN);
   const isPublic = Boolean(patch.isPublic);
 
   if (isPublic) {
-    if (minParticipants < 1 || minParticipants > 100) throw new Error('최소 인원을 확인해 주세요.');
+    if (minParticipants < MEETING_PARTICIPANT_MIN || minParticipants > 100) {
+      throw new Error('최소 인원을 확인해 주세요.');
+    }
     const maxUnlimited = capacity === MEETING_CAPACITY_UNLIMITED;
-    if (!maxUnlimited && (capacity < 1 || capacity > 100 || capacity < minParticipants)) {
+    if (
+      !maxUnlimited &&
+      (capacity < MEETING_PARTICIPANT_MIN || capacity > 100 || capacity < minParticipants)
+    ) {
       throw new Error('최대 인원을 확인해 주세요.');
     }
   } else {
-    if (minParticipants < 1 || minParticipants > 100 || minParticipants !== capacity) {
+    if (
+      minParticipants < MEETING_PARTICIPANT_MIN ||
+      minParticipants > 100 ||
+      minParticipants !== capacity
+    ) {
       throw new Error('참석 인원을 확인해 주세요.');
     }
   }
@@ -1961,11 +1972,11 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
   }
   const scheduledAt = parseScheduleToTimestamp(input.scheduleDate, input.scheduleTime);
 
-  const capacity = toFiniteInt(input.capacity, 1);
+  const capacity = toFiniteInt(input.capacity, MEETING_PARTICIPANT_MIN);
   const minParticipants =
     input.minParticipants === undefined || input.minParticipants === null
       ? null
-      : toFiniteInt(input.minParticipants, 1);
+      : toFiniteInt(input.minParticipants, MEETING_PARTICIPANT_MIN);
 
   const lat = Number(input.latitude);
   const lng = Number(input.longitude);

@@ -1,4 +1,8 @@
-import { CAPACITY_UNLIMITED, GlassDualCapacityWheel } from '@/components/create/GlassDualCapacityWheel';
+import {
+  CAPACITY_UNLIMITED,
+  GlassDualCapacityWheel,
+  PARTICIPANT_COUNT_MIN,
+} from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -15,7 +19,6 @@ import {
   Animated,
   findNodeHandle,
   Keyboard,
-  type KeyboardEvent,
   Modal,
   Platform,
   Pressable,
@@ -24,6 +27,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type KeyboardEvent,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -139,10 +143,34 @@ export function MeetingBasicInfoEditModal({
   const insets = useSafeAreaInsets();
   /** 시트 상·하에 남길 최소 여백(px) — 노치·홈 인디케이터 제외 후 최대 높이 */
   const sheetEdgeMargin = 8;
-  const sheetMaxHeight = Math.round(
+  const sheetWindowMaxHeight = Math.round(
     Math.max(220, windowHeight - insets.top - insets.bottom - sheetEdgeMargin * 2),
   );
   const sheetMaxWidth = Math.min(440, Math.max(280, windowWidth - 32));
+  /** wizardStepShell 실측 높이 — 소개 입력까지 포함 */
+  const [wizardShellLayoutHeight, setWizardShellLayoutHeight] = useState(0);
+  /** 시트 paddingTop + 헤더(한 줄 + marginBottom) */
+  const sheetChromeAboveFormPx = 16 + 20;
+  /** 푸터 행 + 시트 paddingBottom */
+  const sheetChromeBelowFormPx = 60 + 12;
+  const scrollContentBottomSlackPx = 28;
+  const sheetHeightFromContent = useMemo(() => {
+    if (wizardShellLayoutHeight <= 0) {
+      return Math.min(sheetWindowMaxHeight, 560);
+    }
+    const body =
+      wizardShellLayoutHeight +
+      scrollContentBottomSlackPx +
+      sheetChromeAboveFormPx +
+      sheetChromeBelowFormPx;
+    return Math.min(sheetWindowMaxHeight, Math.max(240, Math.round(body)));
+  }, [
+    wizardShellLayoutHeight,
+    sheetWindowMaxHeight,
+    scrollContentBottomSlackPx,
+    sheetChromeAboveFormPx,
+    sheetChromeBelowFormPx,
+  ]);
   const titleInputRef = useRef<TextInput>(null);
   const descInputRef = useRef<TextInput>(null);
   const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
@@ -202,7 +230,7 @@ export function MeetingBasicInfoEditModal({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isPublicMeeting, setIsPublicMeeting] = useState(true);
-  const [minParticipants, setMinParticipants] = useState(1);
+  const [minParticipants, setMinParticipants] = useState(PARTICIPANT_COUNT_MIN);
   const [maxParticipants, setMaxParticipants] = useState(4);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -299,6 +327,7 @@ export function MeetingBasicInfoEditModal({
       void ExpoSpeechRecognitionModule.stop();
       descFieldFocusedRef.current = false;
       setSheetKeyboardLiftPx(0);
+      setWizardShellLayoutHeight(0);
     }
   }, [visible]);
 
@@ -347,7 +376,7 @@ export function MeetingBasicInfoEditModal({
     const pub = meeting.isPublic !== false;
     setIsPublicMeeting(pub);
     if (pub) {
-      const min = Math.max(1, Math.min(100, meeting.minParticipants ?? 1));
+      const min = Math.max(PARTICIPANT_COUNT_MIN, Math.min(100, meeting.minParticipants ?? PARTICIPANT_COUNT_MIN));
       const cap = meeting.capacity;
       const max =
         cap === CAPACITY_UNLIMITED
@@ -357,7 +386,7 @@ export function MeetingBasicInfoEditModal({
       setMaxParticipants(max);
     } else {
       const cap = meeting.capacity;
-      const n = Math.max(1, Math.min(100, Number.isFinite(cap) && cap > 0 ? cap : 4));
+      const n = Math.max(PARTICIPANT_COUNT_MIN, Math.min(100, Number.isFinite(cap) && cap > 0 ? cap : 4));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
@@ -381,8 +410,8 @@ export function MeetingBasicInfoEditModal({
       const max = maxParticipantsRef.current;
       const n =
         max === CAPACITY_UNLIMITED || max > 100
-          ? Math.min(100, Math.max(1, min))
-          : Math.min(100, Math.max(1, max));
+          ? Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, min))
+          : Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, max));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
@@ -394,8 +423,8 @@ export function MeetingBasicInfoEditModal({
       const max = maxParticipants;
       const n =
         max === CAPACITY_UNLIMITED || max > 100
-          ? Math.min(100, Math.max(1, min))
-          : Math.min(100, Math.max(1, max));
+          ? Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, min))
+          : Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, max));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
@@ -425,13 +454,13 @@ export function MeetingBasicInfoEditModal({
       return;
     }
     if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < 1 || minParticipants > 100) {
+      if (!Number.isFinite(minParticipants) || minParticipants < PARTICIPANT_COUNT_MIN || minParticipants > 100) {
         setFormError('최소 인원을 선택해 주세요.');
         return;
       }
       if (
         !Number.isFinite(maxParticipants) ||
-        maxParticipants < 1 ||
+        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < PARTICIPANT_COUNT_MIN) ||
         maxParticipants < minParticipants ||
         (maxParticipants > 100 && maxParticipants !== CAPACITY_UNLIMITED)
       ) {
@@ -441,7 +470,7 @@ export function MeetingBasicInfoEditModal({
     } else {
       if (
         !Number.isFinite(minParticipants) ||
-        minParticipants < 1 ||
+        minParticipants < PARTICIPANT_COUNT_MIN ||
         minParticipants > 100 ||
         minParticipants !== maxParticipants ||
         maxParticipants === CAPACITY_UNLIMITED
@@ -496,8 +525,8 @@ export function MeetingBasicInfoEditModal({
             style={[
               styles.sheet,
               {
-                height: sheetMaxHeight,
-                maxHeight: sheetMaxHeight,
+                height: sheetHeightFromContent,
+                maxHeight: sheetWindowMaxHeight,
                 maxWidth: sheetMaxWidth,
               },
               sheetKeyboardLiftPx > 0 ? { transform: [{ translateY: -sheetKeyboardLiftPx }] } : null,
@@ -506,7 +535,7 @@ export function MeetingBasicInfoEditModal({
           <KeyboardAwareScreenScroll
             ref={scrollRef}
             style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollContentBottomSlackPx }]}
             contentContainerFlexGrow={false}
             viewIsInsideTabBar={false}
             extraScrollHeight={40}
@@ -519,7 +548,10 @@ export function MeetingBasicInfoEditModal({
               enableAutomaticScroll: false,
             }}
           >
-            <View style={styles.wizardStepShell}>
+            <View
+              style={styles.wizardStepShell}
+              onLayout={(e) => setWizardShellLayoutHeight(e.nativeEvent.layout.height)}
+              collapsable={false}>
               <Text style={styles.wizardFieldLabel}>모임 이름</Text>
               <LinearGradient
                 colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
@@ -717,7 +749,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
-  scrollContent: { paddingBottom: 220 },
+  /** paddingBottom은 contentContainerStyle 인라인에서 소량만 사용 */
+  scrollContent: {},
   wizardStepShell: {
     marginBottom: 4,
     borderRadius: GinitTheme.radius.card,
@@ -871,7 +904,8 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
   },
   wizardTextInputMultiline: {
-    minHeight: 120,
+    height: 120,
+    maxHeight: 120,
     textAlignVertical: 'top',
   },
   /** 소개: 세로 상단·가로 왼쪽 (Android 폰트 패딩 제거로 첫 줄이 박스 상단에 붙음) */
