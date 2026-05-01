@@ -1,7 +1,7 @@
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -57,6 +57,11 @@ export default function OtpVerifyScreen() {
   const proceedToHome = useCallback(
     async (resolvedUserId: string) => {
       await setUserId(resolvedUserId);
+      if (Platform.OS !== 'web') {
+        void import('@/src/lib/fcm-token-supabase-sync').then(({ syncFcmTokenFromDeviceToProfile }) => {
+          void syncFcmTokenFromDeviceToProfile(resolvedUserId);
+        });
+      }
       await ensureUserProfile(resolvedUserId);
       const introSeen = await readAppIntroComplete();
       if (introSeen) {

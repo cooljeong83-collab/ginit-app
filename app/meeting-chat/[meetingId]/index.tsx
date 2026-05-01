@@ -49,8 +49,7 @@ import {
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
-import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
-import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
+import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/lib/meeting-chat';
@@ -411,17 +410,9 @@ export default function MeetingChatRoomScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const cached = await loadFeedLocationCache();
+      const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
       if (cancelled) return;
-      let coordsForDistance = null as LatLng | null;
-      if (cached?.coords) {
-        coordsForDistance = cached.coords;
-        setUserCoords(coordsForDistance);
-      }
-      const ctx = await resolveFeedLocationContext();
-      if (cancelled) return;
-      coordsForDistance = ctx.coords ?? coordsForDistance;
-      setUserCoords(coordsForDistance);
+      setUserCoords(ctx.coords);
     })();
     return () => {
       cancelled = true;
@@ -1413,7 +1404,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 6,
     flexShrink: 0,
   },
   searchIconWrap: {

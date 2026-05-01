@@ -195,6 +195,11 @@ export function useSignUpFlow(initialPhone: string) {
         await registerSignupLocalKeys(n, emailPk);
         await setUserId(emailPk);
         await writeSecureAuthSession({ uid, userId: emailPk });
+        if (Platform.OS !== 'web') {
+          void import('@/src/lib/fcm-token-supabase-sync').then(({ syncFcmTokenFromDeviceToProfile }) => {
+            void syncFcmTokenFromDeviceToProfile(emailPk);
+          });
+        }
         await ensureUserProfile(emailPk);
         await recordTermsAgreement(emailPk);
         onComplete();

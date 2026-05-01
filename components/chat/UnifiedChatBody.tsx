@@ -3,22 +3,22 @@ import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    FlatList,
-    Keyboard,
-    type LayoutChangeEvent,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  FlatList,
+  Keyboard,
+  type LayoutChangeEvent,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassInput } from '@/components/social/GlassInput';
 import { NeonBadge } from '@/components/social/NeonBadge';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type UnifiedChatMessage = {
   id: string;
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.34)',
+    borderColor: 'rgba(103, 58, 183, 0.34)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,

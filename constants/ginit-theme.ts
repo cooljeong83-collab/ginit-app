@@ -37,6 +37,9 @@ export const GinitTheme = {
     warning: '#F59E0B',
     danger: '#DC2626',
     success: '#22C55E',
+    /** 모임 목록 등 성별 심볼 — 동성 모집(남만/여만) 단독 아이콘 색 (남녀 반반 쌍은 primary·textSub 유지) */
+    genderSymbolMale: '#2563EB',
+    genderSymbolFemale: '#DB2777',
 
     // gradients
     // 모임 생성 CTA(네이비 톤) — 선택/완료 포인트와 동일 계열로 맞춤

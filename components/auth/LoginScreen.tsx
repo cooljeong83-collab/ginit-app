@@ -1,24 +1,23 @@
-import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-    AccessibilityInfo,
-    ActivityIndicator,
-    Alert,
-    Animated,
-    BackHandler,
-    Easing,
-    InteractionManager,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    ToastAndroid,
-    useWindowDimensions,
-    View
+  AccessibilityInfo,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  BackHandler,
+  Easing,
+  InteractionManager,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  useWindowDimensions,
+  View
 } from 'react-native';
 import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,14 +31,14 @@ import { useUserSession, type AuthProfileSnapshot } from '@/src/context/UserSess
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import {
-    fetchGooglePeopleExtras,
-    mapGooglePeopleGenderToProfileGender,
-    type GooglePeopleExtras,
+  fetchGooglePeopleExtras,
+  mapGooglePeopleGenderToProfileGender,
+  type GooglePeopleExtras,
 } from '@/src/lib/google-people-extras';
 import {
-    consumeGoogleRedirectResultWithMeta,
-    REDIRECT_STARTED,
-    signInWithGoogle,
+  consumeGoogleRedirectResultWithMeta,
+  REDIRECT_STARTED,
+  signInWithGoogle,
 } from '@/src/lib/google-sign-in';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/phone-registry';
@@ -47,13 +46,13 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import {
-    applyGoogleSignupProfile,
-    buildGooglePeopleDemographicsMetadataPatch,
-    ensureUserProfile,
-    generateRandomNickname,
-    recordTermsAgreement,
-    resolveSessionUserIdFromVerifiedPhone,
-    updateUserProfile,
+  applyGoogleSignupProfile,
+  buildGooglePeopleDemographicsMetadataPatch,
+  ensureUserProfile,
+  generateRandomNickname,
+  recordTermsAgreement,
+  resolveSessionUserIdFromVerifiedPhone,
+  updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
@@ -251,6 +250,11 @@ export default function LoginScreen() {
       await setUserId(docId);
       await registerSignupLocalKeys(n, docId);
       await writeSecureAuthSession({ uid, userId: docId });
+      if (Platform.OS !== 'web') {
+        void import('@/src/lib/fcm-token-supabase-sync').then(({ syncFcmTokenFromDeviceToProfile }) => {
+          void syncFcmTokenFromDeviceToProfile(docId);
+        });
+      }
       await ensureUserProfile(docId);
       // 전화 OTP로 로그인한 경우에도 인증 상태를 사용자 문서에 기록합니다.
       await updateUserProfile(docId, {
@@ -423,6 +427,11 @@ export default function LoginScreen() {
       await setUserId(emailPk);
       await writeSecureAuthSession({ uid: user.uid, userId: emailPk });
       await registerSignupLocalKeys('', emailPk);
+      if (Platform.OS !== 'web') {
+        void import('@/src/lib/fcm-token-supabase-sync').then(({ syncFcmTokenFromDeviceToProfile }) => {
+          void syncFcmTokenFromDeviceToProfile(emailPk);
+        });
+      }
       await recordTermsAgreement(emailPk);
       await ensureUserProfile(emailPk);
 
@@ -587,53 +596,52 @@ export default function LoginScreen() {
           <KeyboardAwareScreenScroll
             ref={loginScrollRef}
             contentContainerStyle={[styles.scroll, loginScreenStyles.scrollTweak]}
+            viewIsInsideTabBar={false}
             extraScrollHeight={12}
             extraHeight={22}>
-            <View style={loginScreenStyles.heroWrap}>
+            <View style={loginScreenStyles.pageLayout}>
+              <View style={loginScreenStyles.heroStage}>
+                <View style={loginScreenStyles.heroWrap}>
+                  <Animated.View
+                    ref={logoWrapRef}
+                    nativeID="logo_shared"
+                    testID="logo_shared"
+                    onLayout={onIntroLogoLayout}
+                    collapsable={false}
+                    style={[
+                      loginScreenStyles.logoFrame,
+                      logoDest && introMotion
+                        ? {
+                            opacity: 1,
+                            transform: [
+                              { translateX: introMotion.tx },
+                              { translateY: introMotion.ty },
+                              { scale: introMotion.scale },
+                            ],
+                          }
+                        : { opacity: 0 },
+                    ]}>
+                    <Animated.View style={{ transform: [{ rotate: logoTiltRotate }] }}>
+                      <Image source={require('@/assets/images/logo_symbol.png')} style={loginScreenStyles.logoImage} contentFit="contain" />
+                    </Animated.View>
+                  </Animated.View>
+
+                  <Animated.View
+                    style={[loginScreenStyles.heroTextCol, logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }]}>
+                    <Text style={loginScreenStyles.brandKr}>지닛</Text>
+                    <Text style={loginScreenStyles.heroTitle}>우리만의 모임을{'\n'}가볍게 시작해요</Text>
+                    
+                  </Animated.View>
+                </View>
+              </View>
+
               <Animated.View
-                ref={logoWrapRef}
-                nativeID="logo_shared"
-                testID="logo_shared"
-                onLayout={onIntroLogoLayout}
-                collapsable={false}
                 style={[
-                  loginScreenStyles.logoFrame,
-                  logoDest && introMotion
-                    ? {
-                        opacity: 1,
-                        transform: [
-                          { translateX: introMotion.tx },
-                          { translateY: introMotion.ty },
-                          { scale: introMotion.scale },
-                        ],
-                      }
-                    : { opacity: 0 },
+                  loginScreenStyles.bottomStage,
+                  logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 },
                 ]}>
-                <Animated.View style={{ transform: [{ rotate: logoTiltRotate }] }}>
-                  <Image source={require('@/assets/images/logo_symbol.png')} style={loginScreenStyles.logoImage} contentFit="contain" />
-                </Animated.View>
-              </Animated.View>
-
-              <Animated.View style={[loginScreenStyles.heroTextCol, logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }]}>
-                <Text style={loginScreenStyles.brandKr}>지닛</Text>
-                <Text style={loginScreenStyles.heroTitle}>우리만의 모임을{'\n'}가볍게 시작해요</Text>
-                <Text style={loginScreenStyles.heroSub}>Google로 한 번에 시작하고, 필요한 정보는 나중에 채울 수 있어요.</Text>
-              </Animated.View>
-            </View>
-
-            <Animated.View style={logoDest && introMotion ? { opacity: introMotion.contentOpacity } : { opacity: 0 }}>
-              <View style={[styles.authCard, loginScreenStyles.authCardTight, loginScreenStyles.ctaCard]}>
-                <BlurView
-                  pointerEvents="none"
-                  intensity={36}
-                  tint="light"
-                  style={StyleSheet.absoluteFill}
-                  experimentalBlurMethod={Platform.OS === 'ios' ? 'dimezisBlurView' : undefined}
-                />
-                <View pointerEvents="none" style={styles.cardGlow} />
-                <View pointerEvents="none" style={styles.cardBorder} />
-
-                <View style={styles.authCardContent}>
+                <View style={[loginScreenStyles.ctaPanel, loginScreenStyles.ctaPanelPad]}>
+                  <View style={styles.authCardContent}>
                   {isExpoGo && Platform.OS !== 'web' ? (
                     <View style={[styles.expoGoBannerCompact, loginScreenStyles.expoGoBannerTight]}>
                       <Text style={styles.expoGoTitle}>개발 빌드가 필요해요</Text>
@@ -665,11 +673,12 @@ export default function LoginScreen() {
                   <Text style={loginScreenStyles.legalLine}>
                     계속하면 서비스 이용약관 및 개인정보 처리방침에 동의한 것으로 간주됩니다.
                   </Text>
+                  </View>
                 </View>
-              </View>
 
-              <Text style={[styles.footerCredit, loginScreenStyles.footerCreditTight]}>UI/UX Vision by Ginit Human-Connection Team.</Text>
-            </Animated.View>
+                <Text style={[styles.footerCredit, loginScreenStyles.footerCreditTight]}>UI/UX Vision by Ginit Human-Connection Team.</Text>
+              </Animated.View>
+            </View>
           </KeyboardAwareScreenScroll>
         </SafeAreaView>
       </ScreenShell>
@@ -679,13 +688,47 @@ export default function LoginScreen() {
 
 const loginScreenStyles = StyleSheet.create({
   scrollTweak: {
-    paddingTop: 14,
+    paddingTop: 8,
     paddingBottom: 22,
     gap: 14,
   },
+  /** 스크롤 콘텐츠가 뷰포트를 채울 때 히어로는 가운데, CTA는 하단에 고정 */
+  pageLayout: {
+    flexGrow: 1,
+    width: '100%',
+  },
+  heroStage: {
+    flex: 1,
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    minHeight: 120,
+    paddingVertical: 12,
+  },
+  bottomStage: {
+    alignSelf: 'stretch',
+    flexShrink: 0,
+    gap: 0,
+  },
+  /** 로그인 전용: 글래스 대신 세미플랫 패널 */
+  ctaPanel: {
+    alignSelf: 'stretch',
+    borderRadius: GinitTheme.radius.card,
+    backgroundColor: GinitTheme.colors.bg,
+    overflow: 'hidden',
+    shadowColor: 'rgba(15, 23, 42, 0.10)',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 1,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  ctaPanelPad: {
+    paddingTop: 16,
+    paddingBottom: 14,
+    paddingHorizontal: 14,
+  },
   heroWrap: {
-    paddingTop: 10,
-    paddingBottom: 6,
+    paddingTop: 0,
+    paddingBottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
@@ -720,7 +763,7 @@ const loginScreenStyles = StyleSheet.create({
     marginTop: 10,
     fontSize: 22,
     fontWeight: '600',
-    color: '#0f172a',
+    color: GinitTheme.colors.text,
     letterSpacing: -0.6,
     textAlign: 'center',
     lineHeight: 28,
@@ -729,17 +772,10 @@ const loginScreenStyles = StyleSheet.create({
     marginTop: 8,
     fontSize: 13,
     fontWeight: '700',
-    color: '#64748b',
+    color: GinitTheme.colors.textMuted,
     lineHeight: 18,
     textAlign: 'center',
     paddingHorizontal: 18,
-  },
-  authCardTight: {
-    padding: 14,
-  },
-  ctaCard: {
-    paddingTop: 16,
-    paddingBottom: 14,
   },
   expoGoBannerTight: {
     marginBottom: 8,
@@ -812,7 +848,8 @@ const loginScreenStyles = StyleSheet.create({
     marginTop: 10,
     fontSize: 11,
     fontWeight: '600',
-    color: '#94a3b8',
+    color: GinitTheme.colors.textMuted,
+    opacity: 0.85,
     lineHeight: 16,
     textAlign: 'center',
   },

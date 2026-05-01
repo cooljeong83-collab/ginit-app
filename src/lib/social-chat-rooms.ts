@@ -448,9 +448,11 @@ export async function fetchSocialChatUnreadCount(
     const sidPhone = sidRaw ? (normalizePhoneUserId(sidRaw) ?? sidRaw) : '';
     const sidPk = sidRaw ? (normalizeParticipantId(sidRaw) ?? sidRaw) : '';
     const isMine = Boolean(sidRaw && ((sidPhone && sidPhone === mePhone) || (sidPk && sidPk === mePk)));
+    // 읽음 포인터가 내가 보낸 최신 메시지일 때: 내 메시지를 먼저 continue 하면 readId에 도달하지 못해
+    // 과거 상대 메시지를 전부 미읽음으로 세는 버그가 납니다. 커서 id 일치는 발신자와 무관하게 먼저 처리합니다.
+    if (readId && m.id === readId) break;
     if (isMine) continue;
 
-    if (readId && m.id === readId) break;
     const ms = socialMessageTimeMs(m);
     if (readAtMs > 0 && ms > 0 && ms <= readAtMs) break;
     // 읽음 포인터가 없다면(0) 전체를 새 메시지로 본다.

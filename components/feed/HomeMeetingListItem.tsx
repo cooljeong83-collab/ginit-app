@@ -3,11 +3,12 @@ import { Image } from 'expo-image';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import {
-    getHomeCategoryVisual,
-    homeCategoryMarkerIconColor,
-    homeMeetingStatusBadgeLabel,
+  getHomeCategoryVisual,
+  homeCategoryMarkerIconColor,
+  homeMeetingStatusBadgeLabel,
 } from '@/src/lib/feed-home-visual';
 import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
@@ -24,7 +25,6 @@ import {
   type PublicMeetingGenderRatio,
   type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
-import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const THUMB_SIZE = 70;
 const THUMB_RADIUS = 10;
@@ -93,8 +93,10 @@ function GenderSymbolVisual({
   compact?: boolean;
   hostGenderSnapshot?: PublicMeetingHostGenderSnapshot | null;
 }) {
-  const male = GinitTheme.colors.primary;
-  const female = GinitTheme.colors.textSub;
+  const maleHalfHalf = GinitTheme.colors.genderSymbolMale;
+  const femaleHalfHalf = GinitTheme.colors.genderSymbolFemale;
+  const maleSolo = GinitTheme.colors.genderSymbolMale;
+  const femaleSolo = GinitTheme.colors.genderSymbolFemale;
   const muted = GinitTheme.colors.textMuted;
   const sm = compact ? 13 : 16;
   const md = compact ? 14 : 18;
@@ -104,9 +106,9 @@ function GenderSymbolVisual({
     return (
       <View style={s.genderRow} accessibilityLabel="남녀 반반">
         <View style={[s.genderIconPair, { gap: pairGap }]}>
-          <GinitSymbolicIcon name="male" size={sm} color={male} />
+          <GinitSymbolicIcon name="male" size={sm} color={maleHalfHalf} />
           {!compact ? <View style={s.genderDot} /> : <View style={s.genderDotCompact} />}
-          <GinitSymbolicIcon name="female" size={sm} color={female} />
+          <GinitSymbolicIcon name="female" size={sm} color={femaleHalfHalf} />
         </View>
       </View>
     );
@@ -116,14 +118,14 @@ function GenderSymbolVisual({
     if (host === 'male') {
       return (
         <View style={s.genderRow} accessibilityLabel="남성 동성 모집">
-          <GinitSymbolicIcon name="male" size={compact ? 14 : 17} color={male} />
+          <GinitSymbolicIcon name="male" size={compact ? 14 : 17} color={maleSolo} />
         </View>
       );
     }
     if (host === 'female') {
       return (
         <View style={s.genderRow} accessibilityLabel="여성 동성 모집">
-          <GinitSymbolicIcon name="female" size={compact ? 14 : 17} color={female} />
+          <GinitSymbolicIcon name="female" size={compact ? 14 : 17} color={femaleSolo} />
         </View>
       );
     }

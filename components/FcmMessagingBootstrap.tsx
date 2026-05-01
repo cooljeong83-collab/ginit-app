@@ -1,14 +1,7 @@
-import {
-  getMessaging,
-  registerDeviceForRemoteMessages,
-  getToken,
-  onMessage,
-  onTokenRefresh,
-  type FirebaseMessagingTypes,
-} from '@react-native-firebase/messaging';
+import { getMessaging, onMessage, onTokenRefresh, type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
-import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import { Alert, AppState, type AppStateStatus, Platform } from 'react-native';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
@@ -17,35 +10,13 @@ import { displayFcmRemoteMessageWithNotifeeAndroid, ensureGinitFcmNotifeeChannel
 import { extractFirebaseLikeCode, hintForNativeFcmTokenError } from '@/src/lib/firebase-credential-hints';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
+import {
+  ensureAndroidPostNotificationsForFcm,
+  persistFcmTokenAndVerify,
+  registerFcmDeviceAndGetToken,
+} from '@/src/lib/fcm-token-supabase-sync';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
-import { ensureUserProfile, getUserProfile, updateUserProfile } from '@/src/lib/user-profile';
-
-async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  let t: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      p,
-      new Promise<T>((_, reject) => {
-        t = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
-      }),
-    ]);
-  } finally {
-    if (t) clearTimeout(t);
-  }
-}
-
-async function ensureAndroidPostNotificationsPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
-  // Android 13(API 33)+: 런타임 알림 권한 필요
-  if (typeof Platform.Version === 'number' && Platform.Version < 33) return true;
-  try {
-    const res = await PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS');
-    return res === PermissionsAndroid.RESULTS.GRANTED;
-  } catch {
-    return false;
-  }
-}
 
 function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } {
   const n = message.notification;
@@ -54,23 +25,10 @@ function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): {
   return { title, body };
 }
 
-async function persistFcmTokenAndVerify(uid: string, token: string): Promise<void> {
-  ginitNotifyDbg('FcmMessaging', 'persist_start', { uidSuffix: uid.slice(-6), tokenLen: token.length });
-  if (__DEV__) {
-    console.log('[fcm] persist start', { uid, tokenLen: token.length });
-  }
-  await withTimeout(ensureUserProfile(uid), 12_000, '[fcm] ensureUserProfile');
-  await withTimeout(updateUserProfile(uid, { fcmToken: token }), 12_000, '[fcm] updateUserProfile');
-  const profile = await withTimeout(getUserProfile(uid), 8_000, '[fcm] getUserProfile');
-  const saved = profile?.fcmToken?.trim() ?? '';
-  if (saved !== token) {
-    throw new Error('[fcm] token persisted check failed: profiles.fcm_token is empty or mismatched');
-  }
-  ginitNotifyDbg('FcmMessaging', 'persist_ok', { uidSuffix: uid.slice(-6), savedLen: saved.length });
-  if (__DEV__) {
-    console.log('[fcm] persist ok', { uid, savedLen: saved.length });
-  }
-}
+/** 로그인 직후 등: 짧은 간격으로 최대 5회 getToken→저장 재시도 */
+const FCM_REGISTER_RETRY_DELAYS_MS = [0, 1800, 3200, 6000, 10_000] as const;
+/** 포그라운드 복귀 시 DB와 불일치 복구(너무 잦은 RPC 방지) */
+const FCM_FOREGROUND_SYNC_MIN_INTERVAL_MS = 22_000;
 
 /**
  * FCM 토큰 등록 + Foreground 메시지 핸들링.
@@ -79,6 +37,12 @@ async function persistFcmTokenAndVerify(uid: string, token: string): Promise<voi
 export function FcmMessagingBootstrap() {
   const { userId } = useUserSession();
   const lastSavedTokenRef = useRef<string>('');
+  const userIdRef = useRef<string | null>(null);
+  const lastForegroundSyncAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    userIdRef.current = userId?.trim() ? userId.trim() : null;
+  }, [userId]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -87,12 +51,62 @@ export function FcmMessagingBootstrap() {
     const uid = userId.trim();
     let unsubToken: null | (() => void) = null;
     let unsubOnMessage: null | (() => void) = null;
+    let unsubAppState: null | (() => void) = null;
     let alive = true;
     const m = getMessaging();
 
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    /**
+     * @param dedupeMemory — false면 메모리상 동일 토큰이어도 DB에 다시 반영(서버에서 비운 뒤 복구 등)
+     */
+    const tryGetTokenAndPersist = async (dedupeMemory: boolean): Promise<'saved' | 'noop' | 'no_token' | 'error'> => {
+      try {
+        assertSupabasePublicReady();
+      } catch (e) {
+        fcmDebugSetError(e);
+        ginitNotifyDbg('FcmMessaging', 'supabase_not_ready', { message: e instanceof Error ? e.message : String(e) });
+        if (__DEV__) console.warn('[fcm] supabase not ready:', e);
+        return 'error';
+      }
+      try {
+        const t = await registerFcmDeviceAndGetToken(m);
+        if (!alive) return 'noop';
+        ginitNotifyDbg('FcmMessaging', 'getToken', {
+          uidSuffix: uid.slice(-6),
+          tokenLen: t.length,
+          willPersist: Boolean(t && (!dedupeMemory || t !== lastSavedTokenRef.current)),
+        });
+        if (__DEV__) {
+          console.log('[fcm] getToken result', { uid, tokenLen: t.length, dedupeMemory });
+        }
+        fcmDebugSetToken(t || null);
+        if (!t) return 'no_token';
+        if (dedupeMemory && t === lastSavedTokenRef.current) return 'noop';
+        await persistFcmTokenAndVerify(uid, t);
+        lastSavedTokenRef.current = t;
+        fcmDebugSetSaveOk(true);
+        return 'saved';
+      } catch (e) {
+        fcmDebugSetSaveOk(false);
+        fcmDebugSetError(e);
+        const msg = e instanceof Error ? e.message : String(e);
+        const code = extractFirebaseLikeCode(e);
+        ginitNotifyDbg('FcmMessaging', 'getToken_or_save_failed', {
+          message: msg,
+          code: code || undefined,
+          reissueHint: hintForNativeFcmTokenError(msg, code),
+        });
+        if (__DEV__) {
+          console.warn('[fcm] getToken/save failed:', e);
+        }
+        return 'error';
+      }
+    };
+
     void (async () => {
       // 권한은 "토큰 발급/표시" 안정성에 영향 (Android 13+)
-      await ensureAndroidPostNotificationsPermission();
+      await ensureAndroidPostNotificationsForFcm();
 
       if (Platform.OS === 'android') {
         try {
@@ -113,50 +127,21 @@ export function FcmMessagingBootstrap() {
         }
       }
 
-      // fcm_token 저장은 Supabase가 준비되어 있어야 합니다(미설정 시 조용히 실패하지 않도록 개발 로그).
-      try {
-        assertSupabasePublicReady();
-      } catch (e) {
-        fcmDebugSetError(e);
-        ginitNotifyDbg('FcmMessaging', 'supabase_not_ready', { message: e instanceof Error ? e.message : String(e) });
-        if (__DEV__) {
-          console.warn('[fcm] supabase not ready:', e);
-        }
-        // Supabase가 준비되지 않으면 fcm_token 저장이 불가능하므로 이후 단계도 의미가 없습니다.
-        return;
-      }
-
-      try {
-        // 일부 환경(iOS/특정 Android)에서 토큰 발급 전에 등록이 필요합니다.
-        await registerDeviceForRemoteMessages(m);
-        // Android 13에서 일부 환경은 채널/권한 전에 토큰이 늦게 생길 수 있어, 실패는 무시하고 다음 사이클에서 재시도합니다.
-        const token = await getToken(m);
+      let tokenPersistOk = false;
+      for (let attempt = 0; attempt < FCM_REGISTER_RETRY_DELAYS_MS.length; attempt += 1) {
         if (!alive) return;
-        const t = token?.trim() ?? '';
-        ginitNotifyDbg('FcmMessaging', 'getToken', { uidSuffix: uid.slice(-6), tokenLen: t.length, willPersist: Boolean(t && t !== lastSavedTokenRef.current) });
-        if (__DEV__) {
-          console.log('[fcm] getToken result', { uid, tokenLen: t.length });
+        const delay = FCM_REGISTER_RETRY_DELAYS_MS[attempt]!;
+        if (delay > 0) await sleep(delay);
+        if (!alive) return;
+        const dedupe = attempt === 0;
+        const outcome = await tryGetTokenAndPersist(dedupe);
+        if (outcome === 'saved') {
+          tokenPersistOk = true;
+          break;
         }
-        fcmDebugSetToken(t || null);
-        if (t && t !== lastSavedTokenRef.current) {
-          // profiles 행이 없으면 update가 실패할 수 있어 먼저 보강하고, 저장 후 재조회로 검증합니다.
-          await persistFcmTokenAndVerify(uid, t);
-          lastSavedTokenRef.current = t;
-          fcmDebugSetSaveOk(true);
-        }
-      } catch (e) {
-        fcmDebugSetSaveOk(false);
-        fcmDebugSetError(e);
-        const msg = e instanceof Error ? e.message : String(e);
-        const code = extractFirebaseLikeCode(e);
-        ginitNotifyDbg('FcmMessaging', 'getToken_or_save_failed', {
-          message: msg,
-          code: code || undefined,
-          reissueHint: hintForNativeFcmTokenError(msg, code),
-        });
-        if (__DEV__) {
-          console.warn('[fcm] getToken/save failed:', e);
-        }
+      }
+      if (!tokenPersistOk) {
+        ginitNotifyDbg('FcmMessaging', 'register_retries_exhausted', { uidSuffix: uid.slice(-6) });
       }
 
       try {
@@ -223,10 +208,39 @@ export function FcmMessagingBootstrap() {
       } catch {
         /* ignore */
       }
+
+      const onAppStateChange = (next: AppStateStatus) => {
+        if (next !== 'active' || !alive) return;
+        const id = userIdRef.current;
+        if (!id || id !== uid) return;
+        const now = Date.now();
+        if (now - lastForegroundSyncAtRef.current < FCM_FOREGROUND_SYNC_MIN_INTERVAL_MS) return;
+        lastForegroundSyncAtRef.current = now;
+        void (async () => {
+          const outcome = await tryGetTokenAndPersist(false);
+          if (outcome === 'saved' && __DEV__) {
+            console.log('[fcm] foreground sync persisted', { uid: id });
+          }
+        })();
+      };
+      const appStateSub = AppState.addEventListener('change', onAppStateChange);
+      unsubAppState = () => {
+        try {
+          appStateSub.remove();
+        } catch {
+          /* ignore */
+        }
+      };
     })();
 
     return () => {
       alive = false;
+      lastSavedTokenRef.current = '';
+      try {
+        unsubAppState?.();
+      } catch {
+        /* ignore */
+      }
       try {
         unsubToken?.();
       } catch {

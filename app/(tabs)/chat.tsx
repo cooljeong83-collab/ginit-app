@@ -28,8 +28,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { resolveFeedLocationContext } from '@/src/lib/feed-display-location';
-import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
+import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import { meetingCreatedAtMs } from '@/src/lib/feed-meeting-utils';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
@@ -241,13 +240,9 @@ export default function ChatTab() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const cached = await loadFeedLocationCache();
+      const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
       if (cancelled) return;
-      let coords: LatLng | null = cached?.coords ?? null;
-      const ctx = await resolveFeedLocationContext();
-      if (cancelled) return;
-      coords = ctx.coords ?? coords;
-      setUserCoords(coords);
+      setUserCoords(ctx.coords);
     })();
     return () => {
       cancelled = true;

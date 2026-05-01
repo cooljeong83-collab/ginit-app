@@ -786,15 +786,30 @@ async function rpcEnsureProfileMinimalWithRetry(id: string): Promise<void> {
   }
 }
 
+/**
+ * RPC `p_fields`에 빈 `fcm_token` 문자열이 들어가면(직렬화 버그 등) DB에서 기존 토큰이 NULL로 덮일 수 있어 제거합니다.
+ * `fcm_token: null`(JSON null)만 탈퇴 등 **명시적 비우기**로 유지합니다.
+ */
+function sanitizeFcmTokenFieldForRpc(fields: Record<string, unknown>): void {
+  if (!Object.prototype.hasOwnProperty.call(fields, 'fcm_token')) return;
+  const v = fields.fcm_token;
+  if (v === null) return;
+  if (v === undefined || v === '' || (typeof v === 'string' && v.trim() === '')) {
+    delete fields.fcm_token;
+  }
+}
+
 /** `upsert_profile_payload` — 탈퇴·프로필 수정, 스키마 캐시 지연 시 재시도 */
 async function rpcUpsertProfilePayloadWithRetry(id: string, fields: Record<string, unknown>): Promise<void> {
   let lastMessage = '';
   for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
     const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const payload = { ...fields };
+    sanitizeFcmTokenFieldForRpc(payload);
     const { error } = await supabase.rpc('upsert_profile_payload', {
       p_app_user_id: id,
-      p_fields: fields,
+      p_fields: payload,
     });
     if (!error) return;
     lastMessage = error.message?.trim() || 'upsert_profile_payload failed';

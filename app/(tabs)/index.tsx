@@ -32,8 +32,11 @@ import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infi
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
-import { haystackMatchesFeedRegion, normalizeFeedRegionLabel, resolveFeedLocationContext } from '@/src/lib/feed-display-location';
-import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
+import {
+  haystackMatchesFeedRegion,
+  normalizeFeedRegionLabel,
+  resolveFeedLocationContextWithoutPermissionPrompt,
+} from '@/src/lib/feed-display-location';
 import {
   buildFeedChips,
   defaultFeedSearchFilters,
@@ -277,13 +280,10 @@ export default function FeedScreen() {
     if (!feedLocationReady) return;
     let alive = true;
     void (async () => {
-      // 1) 캐시에 남아있는 마지막 좌표로 즉시 거리 표시(권한 팝업 없이)
-      const cached = await loadFeedLocationCache();
-      if (alive) setFeedCoords(cached?.coords ?? null);
-      // 2) 가능하면 현재 좌표로 갱신(권한 거부면 coords=null)
-      const ctx = await resolveFeedLocationContext();
+      // 위치 권한이 이미 허용된 경우에만 GPS 좌표를 읽습니다(미동의 시 요청·검색 없음).
+      const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
       if (!alive) return;
-      setFeedCoords(ctx.coords ?? cached?.coords ?? null);
+      setFeedCoords(ctx.coords);
     })();
     return () => {
       alive = false;
@@ -359,8 +359,9 @@ export default function FeedScreen() {
     return sortMeetingsForFeed(filteredMeetings, listSortMode, feedCoords);
   }, [filteredMeetings, listSortMode, feedCoords]);
 
+  /** 탐색 탭: 비공개(`false`)뿐 아니라 플래그 미설정(`null`/`undefined`)도 목록에서 제외 */
   const exploreFeedMeetings = useMemo(
-    () => sortedFilteredMeetings.filter((m) => m.isPublic !== false),
+    () => sortedFilteredMeetings.filter((m) => m.isPublic === true),
     [sortedFilteredMeetings],
   );
 
@@ -848,7 +849,7 @@ export default function FeedScreen() {
             style={({ pressed }) => [styles.locationChevronPressable, pressed && styles.locationClusterPressed]}
             accessibilityRole="button"
             accessibilityLabel="등록된 관심 지역 중 표시 지역 선택"
-            hitSlop={{ top: 10, bottom: 10, left: 4, right: 10 }}>
+            hitSlop={{ top: 20, bottom: 20, left: 16, right: 20 }}>
             <GinitSymbolicIcon name="chevron-down" size={20} color={GinitTheme.colors.primary} />
           </Pressable>
         </View>

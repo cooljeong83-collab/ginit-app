@@ -6,15 +6,19 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
-import { subscribeMeetingById } from '@/src/lib/meetings';
+import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+
+function RowSep() {
+  return <View style={styles.sep} />;
+}
 
 function profileForSender(map: Map<string, UserProfile>, senderId: string): UserProfile | undefined {
   const n = normalizeParticipantId(senderId);
@@ -73,11 +77,12 @@ export default function MeetingChatMembersScreen() {
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
   const pids = useMemo(() => uniqueParticipantPids(meeting ?? null), [meeting]);
   const myNorm = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
+  const pCount = meeting ? meetingParticipantCount(meeting) : 0;
 
   const rows = useMemo(() => {
     return pids.map((pid) => {
       const p = profileForSender(profiles, pid);
-      const nick = isUserProfileWithdrawn(p) ? WITHDRAWN_NICKNAME : (p?.nickname ?? '회원');
+      const nick = isUserProfileWithdrawn(p) ? '회원' : (p?.nickname ?? '회원');
       const trust = typeof p?.gTrust === 'number' ? p.gTrust : null;
       const dna = typeof p?.gDna === 'string' ? p.gDna : '';
       const isHost = Boolean(hostNorm && pid === hostNorm);
@@ -91,76 +96,88 @@ export default function MeetingChatMembersScreen() {
 
   if (!meetingId) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <Text style={styles.muted}>잘못된 주소예요.</Text>
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyText}>잘못된 주소예요.</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   if (meeting === undefined) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <ActivityIndicator color={GinitTheme.colors.primary} />
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator color={GinitTheme.colors.primary} />
+        </View>
       </SafeAreaView>
     );
   }
 
   if (!meeting || allowed !== true) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
-        <Text style={styles.muted}>참여 중인 모임만 볼 수 있어요.</Text>
-        <Pressable onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>돌아가기</Text>
-        </Pressable>
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyText}>참여 중인 모임만 볼 수 있어요.</Text>
+          <Pressable onPress={onBack} style={styles.textBtn}>
+            <Text style={styles.textBtnLabel}>돌아가기</Text>
+          </Pressable>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
-          <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-        </Pressable>
-        <Text style={styles.headerTitle}>참여자</Text>
-        <View style={{ width: 28 }} />
-      </View>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.hint}>gTrust · gDna</Text>
-        <View style={styles.card}>
+    <SafeAreaView style={styles.safe} edges={['bottom']} accessibilityLabel="참여자">
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={styles.block}>
+          <View style={styles.rowStatic}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>참여자 {pCount}명</Text>
+              <Text style={styles.rowSub}>프로필과 gTrust · gDna</Text>
+            </View>
+          </View>
+          <RowSep />
           {rows.map(({ pid, p, nick, trust, dna, isHost }, i) => {
             const isMe = Boolean(myNorm && pid === myNorm);
             const isAi = pid === 'ginit_ai';
             const withdrawn = isUserProfileWithdrawn(p);
             const canOpen = !isMe && !isAi && !withdrawn;
             return (
-              <Pressable
-                key={pid}
-                onPress={() => canOpen && setPeerProfileUserId(pid)}
-                disabled={!canOpen}
-                style={({ pressed }) => [styles.row, i === rows.length - 1 && styles.rowLast, canOpen && pressed && { opacity: 0.88 }]}
-                accessibilityRole={canOpen ? 'button' : undefined}
-                accessibilityLabel={canOpen ? `${nick} 프로필` : undefined}>
-                <View style={styles.avatar}>
-                  {p?.photoUrl ? (
-                    <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
-                  ) : (
-                    <Text style={styles.avatarText}>{nick.slice(0, 1)}</Text>
-                  )}
-                </View>
-                <View style={styles.rowBody}>
-                  <View style={styles.nameRow}>
-                    <Text style={styles.name} numberOfLines={1}>
-                      {nick}
-                    </Text>
-                    {isHost ? <GinitSymbolicIcon name="star" size={14} color="#CA8A04" /> : null}
+              <View key={pid}>
+                {i > 0 ? <RowSep /> : null}
+                <Pressable
+                  onPress={() => canOpen && setPeerProfileUserId(pid)}
+                  disabled={!canOpen}
+                  style={({ pressed }) => [styles.row, canOpen && pressed && styles.rowPressed]}
+                  accessibilityRole={canOpen ? 'button' : 'text'}
+                  accessibilityLabel={canOpen ? `${nick} 프로필` : nick}>
+                  <View style={styles.avatarRing}>
+                    {p?.photoUrl ? (
+                      <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
+                    ) : (
+                      <Text style={styles.avatarLetter}>{nick.slice(0, 1)}</Text>
+                    )}
                   </View>
-                  <Text style={styles.meta}>
-                    {trust != null ? `gTrust ${trust}` : 'gTrust -'}
-                    {dna ? ` · ${dna}` : ''}
-                  </Text>
-                </View>
-              </Pressable>
+                  <View style={styles.rowText}>
+                    <View style={styles.nameRow}>
+                      <Text style={[styles.rowLabel, styles.nameShrink]} numberOfLines={1}>
+                        {nick}
+                      </Text>
+                      {isHost ? <GinitSymbolicIcon name="star" size={14} color={GinitTheme.colors.warning} /> : null}
+                    </View>
+                    <Text style={styles.rowSub} numberOfLines={2}>
+                      {trust != null ? `gTrust ${trust}` : 'gTrust -'}
+                      {dna ? ` · ${dna}` : ''}
+                    </Text>
+                  </View>
+                  {canOpen ? (
+                    <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+                  ) : (
+                    <View style={styles.chevronSpacer} />
+                  )}
+                </Pressable>
+              </View>
             );
           })}
         </View>
@@ -175,55 +192,51 @@ export default function MeetingChatMembersScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f4f7' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  muted: { fontSize: 14, color: '#64748b', fontWeight: '600' },
-  backBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
-  backBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingTop: 12,
-    paddingBottom: 8,
-    backgroundColor: '#f2f4f7',
-  },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
-  scroll: { paddingBottom: 24, paddingHorizontal: 16 },
-  hint: { fontSize: 12, color: '#64748b', fontWeight: '600', marginBottom: 10, marginTop: 4 },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
+  safe: { flex: 1, backgroundColor: GinitTheme.colors.bg },
+  scroll: { paddingTop: 8, paddingBottom: 32 },
+  block: {
+    backgroundColor: 'transparent',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 12,
   },
-  rowLast: { borderBottomWidth: 0 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+  rowStatic: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  rowPressed: { opacity: 0.82 },
+  rowText: { flex: 1, minWidth: 0 },
+  rowLabel: { fontSize: 16, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.2 },
+  rowSub: { marginTop: 4, fontSize: 12, fontWeight: '600', color: GinitTheme.colors.textMuted, lineHeight: 16 },
+  sep: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 20,
+    backgroundColor: GinitTheme.colors.border,
+  },
+  avatarRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     overflow: 'hidden',
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarImg: { width: 40, height: 40 },
-  avatarText: { fontSize: 15, fontWeight: '600', color: '#0052CC' },
-  rowBody: { flex: 1, minWidth: 0 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name: { fontSize: 15, fontWeight: '600', color: '#0f172a', flexShrink: 1 },
-  meta: { marginTop: 2, fontSize: 12, color: '#475569', fontWeight: '700' },
+  avatarImg: { width: 48, height: 48 },
+  avatarLetter: { fontSize: 18, fontWeight: '600', color: GinitTheme.colors.primary },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minWidth: 0 },
+  nameShrink: { flexShrink: 1 },
+  chevronSpacer: { width: 18, height: 18 },
+  emptyWrap: { flex: 1, padding: 24, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.textMuted, textAlign: 'center' },
+  textBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
+  textBtnLabel: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
 });

@@ -2507,7 +2507,7 @@ export default function MeetingDetailScreen() {
                     </View>
                   ) : (
                     <View style={[styles.miniBadge, styles.miniBadgeUnknown]}>
-                      <Text style={styles.miniBadgeUnknownText}>미상 {participantGenderCounts.unknown}명</Text>
+                      <Text style={styles.miniBadgeUnknownText}>게스트 {participantGenderCounts.unknown}명</Text>
                     </View>
                   )}
                 </View>
@@ -4326,7 +4326,7 @@ const styles = StyleSheet.create({
   miniBadgeMuted: { backgroundColor: '#F1F5F9' },
   miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.primary },
   miniBadgeTextMuted: { color: '#64748B' },
-  miniBadgeMale: { backgroundColor: 'rgba(31, 42, 68, 0.10)' },
+  miniBadgeMale: { backgroundColor: 'rgba(0, 76, 255, 0.1)' },
   miniBadgeMaleText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.primary },
   miniBadgeFemale: { backgroundColor: 'rgba(255, 140, 198, 0.16)' },
   miniBadgeFemaleText: { fontSize: 12, fontWeight: '600', color: '#BE185D' },

@@ -2,17 +2,17 @@
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    type LayoutChangeEvent,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  type LayoutChangeEvent,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
-import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { GinitTheme } from '@/constants/ginit-theme';
 
 const RIPPLE = 'rgba(15, 23, 42, 0.08)';
 const LABEL = '#000000';

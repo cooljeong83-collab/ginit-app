@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
 import type { LocationGeocodedAddress } from 'expo-location';
+import { Platform } from 'react-native';
 
 import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
 import { SEOUL_GU_SET } from '@/src/lib/seoul-gu-constants';
@@ -294,7 +295,26 @@ export async function resolveFeedLocationContext(): Promise<FeedLocationContext>
   }
 }
 
+/**
+ * **권한 요청 UI 없이** 현재 권한 상태만 확인합니다.
+ * 이미 허용된 경우에만 GPS·역지오를 수행하고, 미허용·웹이면 좌표는 항상 null입니다.
+ */
+export async function resolveFeedLocationContextWithoutPermissionPrompt(): Promise<FeedLocationContext> {
+  if (Platform.OS === 'web') {
+    return { labelShort: FEED_LOCATION_FALLBACK_SHORT, coords: null };
+  }
+  try {
+    const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+    if (perm?.status !== 'granted') {
+      return { labelShort: FEED_LOCATION_FALLBACK_SHORT, coords: null };
+    }
+    return await resolveFeedLocationWithGrantedPermission();
+  } catch {
+    return { labelShort: FEED_LOCATION_FALLBACK_SHORT, coords: null };
+  }
+}
+
 export async function resolveFeedHeaderLocationLabel(): Promise<string> {
-  const { labelShort } = await resolveFeedLocationContext();
+  const { labelShort } = await resolveFeedLocationContextWithoutPermissionPrompt();
   return labelShort;
 }

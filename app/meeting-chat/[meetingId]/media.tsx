@@ -215,7 +215,7 @@ export default function MeetingChatMediaScreen() {
 
   if (!meetingId) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
+      <SafeAreaView style={styles.center} edges={['top', 'bottom']}>
         <Text style={styles.muted}>잘못된 주소예요.</Text>
       </SafeAreaView>
     );
@@ -223,7 +223,7 @@ export default function MeetingChatMediaScreen() {
 
   if (meeting === undefined) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
+      <SafeAreaView style={styles.center} edges={['top', 'bottom']}>
         <ActivityIndicator color={GinitTheme.colors.primary} />
       </SafeAreaView>
     );
@@ -231,7 +231,7 @@ export default function MeetingChatMediaScreen() {
 
   if (!meeting || allowed !== true) {
     return (
-      <SafeAreaView style={styles.center} edges={['top']}>
+      <SafeAreaView style={styles.center} edges={['top', 'bottom']}>
         <Text style={styles.muted}>참여 중인 모임만 볼 수 있어요.</Text>
         <Pressable onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backBtnText}>돌아가기</Text>
@@ -271,6 +271,7 @@ export default function MeetingChatMediaScreen() {
           data={rows}
           keyExtractor={(item) => item.id}
           numColumns={3}
+          style={styles.listBg}
           columnWrapperStyle={styles.gridRow}
           contentContainerStyle={[styles.gridContent, rows.length === 0 && styles.gridContentEmpty]}
           refreshControl={
@@ -436,10 +437,22 @@ export default function MeetingChatMediaScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f4f7' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  centerFill: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
-  muted: { fontSize: 14, color: '#64748b', fontWeight: '600' },
+  safe: { flex: 1, backgroundColor: GinitTheme.colors.bg },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    backgroundColor: GinitTheme.colors.bg,
+  },
+  centerFill: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: GinitTheme.colors.bg,
+  },
+  muted: { fontSize: 14, color: GinitTheme.colors.textMuted, fontWeight: '600' },
   backBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
   backBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
   header: {
@@ -449,9 +462,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingTop: 12,
     paddingBottom: 8,
-    backgroundColor: '#f2f4f7',
+    backgroundColor: GinitTheme.colors.bg,
   },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.3 },
+  listBg: { backgroundColor: GinitTheme.colors.bg },
   errorBanner: {
     marginHorizontal: 16,
     marginBottom: 8,
@@ -485,7 +499,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 15,
     fontWeight: '600',
-    color: '#64748b',
+    color: GinitTheme.colors.textMuted,
     paddingHorizontal: 24,
   },
   footerBusy: { paddingVertical: 20, alignItems: 'center' },

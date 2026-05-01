@@ -8,6 +8,7 @@ import {
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
+import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -56,9 +57,10 @@ import { subscribeCategories } from '@/src/lib/categories';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
   normalizeFeedRegionLabel,
-  resolveFeedLocationContext,
+  resolveFeedLocationContextWithoutPermissionPrompt,
+  resolveFeedLocationWithGrantedPermission,
 } from '@/src/lib/feed-display-location';
-import { loadFeedLocationCache, saveFeedLocationCache } from '@/src/lib/feed-location-cache';
+import { saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import {
   buildMapCategoryChips,
   defaultFeedSearchFilters,
@@ -72,7 +74,8 @@ import {
 } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
-import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
+import { approximateCenterLatLngForFeedRegion } from '@/src/lib/feed-region-map-center';
+import { loadActiveFeedRegion, loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
 import {
   MAP_AVATAR_CLUSTERING_MAX_DELTA,
   groupMeetingsByCoordinateOverlap,
@@ -178,14 +181,7 @@ const INITIAL_VIEW_NS_SPAN_METERS = 2000;
 // Android(NaverMap): 이 줌 레벨보다 낮으면 “숫자 클러스터”, 높으면 “아바타 마커” 표시
 const NAVER_CLUSTER_MAX_ZOOM = 15;
 
-const MOCK_REGION_ROWS = [
-  { id: 'gangnam', label: '강남구' },
-  { id: 'mapo', label: '마포구' },
-  { id: 'songpa', label: '송파구' },
-  { id: 'ydp', label: '영등포구' },
-] as const;
-
-// 위치 권한 미허용/좌표 미확정 시 기본 진입 중심(영등포구)
+// 위치 권한 미허용·관심 지역 미설정 시 기본 진입 중심(영등포구)
 const DEFAULT_NO_LOCATION_CENTER: LatLng = { latitude: 37.5263, longitude: 126.8962 };
 
 function easeOutCubic(t: number): number {
@@ -491,9 +487,7 @@ export default function MapScreen() {
 
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
   const regionLabelRef = useRef(FEED_LOCATION_FALLBACK_SHORT);
-  const manualRegionPickRef = useRef(false);
   const userCoordsRef = useRef<LatLng | null>(null);
-  const [regionModalOpen, setRegionModalOpen] = useState(false);
   const [sortFilterModalOpen, setSortFilterModalOpen] = useState(false);
   const [mapSearchOpen, setMapSearchOpen] = useState(false);
   const [mapSearchFilters, setMapSearchFilters] = useState<FeedSearchFilters>(defaultFeedSearchFilters());
@@ -510,8 +504,6 @@ export default function MapScreen() {
   const [rpcMeetings, setRpcMeetings] = useState<Meeting[]>([]);
   const [meetingsBooted, setMeetingsBooted] = useState(false);
   const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(null);
-  const [geoLoading, setGeoLoading] = useState(false);
-  const [geoError, setGeoError] = useState<string | null>(null);
   const [driftTooFar, setDriftTooFar] = useState(false);
   const [listingRegion, setListingRegion] = useState<Region | null>(null);
   /** 마지막으로 조회한 지도 가시 영역(이 지역 재검색·초기 로드·내 위치) — RPC·목록·마커 기준 */
@@ -523,7 +515,8 @@ export default function MapScreen() {
   const [naverZoom, setNaverZoom] = useState<number>(16);
   const isMapScreenFocused = useIsFocused();
 
-  const showSheetSplash = !meetingsBooted || geoLoading;
+  /** 하이브리드(공개 목록) 최초 부트 전에만 시트 스플래시 — 지역 RPC 재조회와 분리해 깜빡임 방지 */
+  const showSheetSplash = !meetingsBooted;
 
   const { version: appPoliciesVersion } = useAppPolicies();
   const mapRadiusKm = useMemo(() => {
@@ -587,7 +580,7 @@ export default function MapScreen() {
     ],
   );
 
-  /** 지도 탭 진입·재진입: 시트 펼침 + 내 위치로 카메라·조회 기준 동기화 */
+  /** 지도 탭 진입·재진입: 시트 펼침 + (GPS 허용 시) 내 위치 / (미허용 시) 모임 탭 관심 지역 중심으로 카메라·조회 기준 동기화 */
   useFocusEffect(
     useCallback(() => {
       // 탐색 탭에 들어온 직후에는 지도/시트 초기 레이아웃만으로 "이 지역 재검색"이 뜨지 않게 합니다.
@@ -596,11 +589,23 @@ export default function MapScreen() {
       sheetHeight.value = withSpring(sheetCollapsedPx, SPRING);
       setIsSheetExpanded(false);
       const t = setTimeout(() => {
-        const u = userCoordsRef.current;
-        // 지도 탭 재진입 시에는 기존 조회 기준(사용자가 옮긴 지도 영역)을 유지하고,
-        // 최초 진입(아직 조회 기준이 없는 경우)에만 내 위치로 초기 정렬합니다.
-        const hasExistingQueryContext = Boolean(lastCompleteRegionRef.current || searchAnchor);
-        if (u && !hasExistingQueryContext) snapMapToUserCoords(u);
+        void (async () => {
+          const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+          if (perm?.status === 'granted') {
+            const u = userCoordsRef.current;
+            const hasExistingQueryContext = Boolean(lastCompleteRegionRef.current || searchAnchor);
+            if (u && !hasExistingQueryContext) snapMapToUserCoords(u);
+            return;
+          }
+          const regions = await loadRegisteredFeedRegions();
+          const activeRaw = await loadActiveFeedRegion();
+          if (regions.length === 0) return;
+          const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
+          const exploreActiveNorm =
+            activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
+          const center = await approximateCenterLatLngForFeedRegion(exploreActiveNorm);
+          snapMapToUserCoords(center);
+        })();
       }, 100);
       return () => {
         clearTimeout(t);
@@ -699,41 +704,53 @@ export default function MapScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const cached = await loadFeedLocationCache();
-      if (cancelled) return;
-
-      let coordsForDistance = null as LatLng | null;
-      if (cached?.coords) {
-        coordsForDistance = cached.coords;
-        setUserCoords(coordsForDistance);
+      const regions = await loadRegisteredFeedRegions();
+      const activeRaw = await loadActiveFeedRegion();
+      let exploreActiveNorm = '';
+      if (regions.length > 0) {
+        const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
+        exploreActiveNorm =
+          activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
       }
 
-      const ctx = await resolveFeedLocationContext();
+      const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
       if (cancelled) return;
 
-      const actualNorm = normalizeFeedRegionLabel(ctx.labelShort);
-      const cachedLabel = cached?.label ?? '';
-      const persistManual = Boolean(cached?.manualRegionPicked && cachedLabel.trim());
+      const coordsForDistance = ctx.coords;
 
-      if (persistManual) {
-        manualRegionPickRef.current = true;
-        setRegionLabel(normalizeFeedRegionLabel(cachedLabel));
-      } else {
-        manualRegionPickRef.current = false;
-        setRegionLabel(actualNorm);
-      }
+      setRegionLabel(
+        exploreActiveNorm
+          ? normalizeFeedRegionLabel(exploreActiveNorm)
+          : normalizeFeedRegionLabel(ctx.labelShort),
+      );
 
-      coordsForDistance = ctx.coords ?? coordsForDistance;
       setUserCoords(coordsForDistance);
 
-      const labelToSave = persistManual ? normalizeFeedRegionLabel(cachedLabel) : actualNorm;
-      await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: persistManual });
+      const labelToSave = exploreActiveNorm
+        ? normalizeFeedRegionLabel(exploreActiveNorm)
+        : normalizeFeedRegionLabel(ctx.labelShort);
+      await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: false });
 
       if (coordsForDistance && !searchAnchor) {
         const r0 = regionCenteredOnUserRadius(coordsForDistance.latitude, coordsForDistance.longitude, mapRadiusKm);
+        lastCompleteRegionRef.current = r0;
         setSearchAnchor(coordsForDistance);
         setListingRegion(r0);
         setMapGeoQueryRegion(r0);
+        setPendingRegion(r0);
+        lastQueriedRegionRef.current = r0;
+        setMapMovedSinceSearch(false);
+      } else if (!searchAnchor) {
+        const interestCenter = exploreActiveNorm
+          ? await approximateCenterLatLngForFeedRegion(exploreActiveNorm)
+          : DEFAULT_NO_LOCATION_CENTER;
+        if (cancelled) return;
+        const r0 = regionCenteredOnUserRadius(interestCenter.latitude, interestCenter.longitude, mapRadiusKm);
+        lastCompleteRegionRef.current = r0;
+        setSearchAnchor(interestCenter);
+        setListingRegion(r0);
+        setMapGeoQueryRegion(r0);
+        setPendingRegion(r0);
         lastQueriedRegionRef.current = r0;
         setMapMovedSinceSearch(false);
       }
@@ -750,11 +767,8 @@ export default function MapScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const perm = await ensureForegroundLocationPermissionWithSettingsFallback({
-          title: '위치 권한이 필요해요',
-          message: '지도에서 내 주변 모임과 내 위치를 표시하려면 위치 권한을 허용해 주세요.',
-        });
-        if (cancelled || !perm.granted) return;
+        const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
+        if (cancelled || perm?.status !== 'granted') return;
         posSub = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Balanced,
@@ -817,8 +831,6 @@ export default function MapScreen() {
   useEffect(() => {
     if (!searchAnchor && !mapGeoQueryRegion) return;
     let alive = true;
-    setGeoLoading(true);
-    setGeoError(null);
     void (async () => {
       const anchor =
         mapGeoQueryRegion != null
@@ -832,12 +844,10 @@ export default function MapScreen() {
         selectedCategoryId,
       );
       if (!alive) return;
-      setGeoLoading(false);
       if (res.ok) {
         setRpcMeetings(res.meetings);
         setDriftTooFar(false);
       } else {
-        setGeoError(res.message);
         setRpcMeetings([]);
       }
     })();
@@ -908,6 +918,7 @@ export default function MapScreen() {
 
   const filteredMeetings = useMemo(() => {
     return textFilteredMeetings.filter((m) => {
+      if (m.isPublic === false) return false;
       if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
       if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
       return true;
@@ -917,10 +928,6 @@ export default function MapScreen() {
   const sortedFilteredMeetings = useMemo(
     () => sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords ?? searchAnchor),
     [filteredMeetings, listSortMode, searchAnchor, userCoords],
-  );
-
-  const hadMeetingsOutsideRadius = Boolean(
-    searchAnchor && filteredMeetings.length === 0 && hybridMeetings.length > 0 && rpcMeetings.length === 0 && !geoLoading,
   );
 
   const meetingsOnMap = useMemo(() => {
@@ -1095,20 +1102,9 @@ export default function MapScreen() {
     [initialMapRegion, insets.top, mapGeoQueryRegion, sheetPeekHeight, windowHeight],
   );
 
-  const initialRegionReady = Boolean(searchAnchor ?? userCoords);
+  const initialRegionReady = Boolean(searchAnchor ?? userCoords ?? mapGeoQueryRegion);
 
   const mapCategoryChips = useMemo(() => buildMapCategoryChips(categories), [categories]);
-
-  const openRegionModal = useCallback(() => setRegionModalOpen(true), []);
-  const closeRegionModal = useCallback(() => setRegionModalOpen(false), []);
-  const pickRegion = useCallback((shortLabel: string) => {
-    const norm = normalizeFeedRegionLabel(shortLabel);
-    manualRegionPickRef.current = true;
-    regionLabelRef.current = norm;
-    setRegionLabel(norm);
-    setRegionModalOpen(false);
-    void saveFeedLocationCache(norm, userCoordsRef.current, { manualRegion: true });
-  }, []);
 
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
@@ -1135,9 +1131,52 @@ export default function MapScreen() {
   }, [pendingRegion]);
 
   const onPressMyLocation = useCallback(() => {
-    const u = userCoordsRef.current;
-    if (!u) return;
-    snapMapToUserCoords(u);
+    void (async () => {
+      if (Platform.OS === 'web') {
+        Alert.alert('위치 권한', '웹에서는 내 위치 이동을 지원하지 않습니다.');
+        return;
+      }
+      const existing = userCoordsRef.current;
+      if (existing) {
+        snapMapToUserCoords(existing);
+        return;
+      }
+
+      let granted = (await Location.getForegroundPermissionsAsync().catch(() => null))?.status === 'granted';
+      if (!granted) {
+        const req = await Location.requestForegroundPermissionsAsync().catch(() => null);
+        granted = req?.status === 'granted';
+      }
+      if (granted) {
+        const ctx = await resolveFeedLocationWithGrantedPermission();
+        const c = ctx.coords;
+        if (!c) {
+          Alert.alert(
+            '위치를 가져올 수 없어요',
+            '권한은 허용되었지만 현재 위치 좌표를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.',
+          );
+          return;
+        }
+        userCoordsRef.current = c;
+        setUserCoords(c);
+        snapMapToUserCoords(c);
+        return;
+      }
+
+      const settingsHint =
+        Platform.OS === 'ios'
+          ? '설정 앱 → 개인정보 보호 및 보안 → 위치 서비스 → 지닛 에서 «위치»를 «앱을 사용하는 동안» 또는 «항상»으로 바꿔 주세요.'
+          : '설정 → 앱 → 지닛 → 권한 → 위치 에서 «앱 사용 중에만 허용» 또는 «항상 허용»으로 바꿔 주세요.';
+
+      Alert.alert(
+        '위치 권한이 필요해요',
+        `내 위치로 이동하려면 GPS(위치) 사용을 허용해야 합니다.\n\n${settingsHint}\n\n한 번 거절하셨다면 위 경로에서 다시 켤 수 있고, 아래 «설정 열기»로 바로 이동할 수도 있어요.`,
+        [
+          { text: '닫기', style: 'cancel' },
+          { text: '설정 열기', onPress: () => void Linking.openSettings() },
+        ],
+      );
+    })();
   }, [snapMapToUserCoords]);
 
   const onPressCreateFab = useCallback(() => {
@@ -1927,7 +1966,6 @@ export default function MapScreen() {
         <View style={[styles.layerTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
           <BlurView intensity={0} tint="light" style={styles.topGlass}>
             <View style={styles.topGlassInner}>
-              {/* 지역 표시기(상단 pill) 숨김 */}
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -1963,21 +2001,21 @@ export default function MapScreen() {
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="약속 잡기">
-            <GinitSymbolicIcon name="add" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="add" size={22} color={GinitTheme.colors.deepPurple} />
           </Pressable>
           <Pressable
             onPress={() => setMapSearchOpen(true)}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="검색">
-            <GinitSymbolicIcon name="search" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="search" size={22} color={GinitTheme.colors.deepPurple} />
           </Pressable>
           <Pressable
             onPress={onPressMyLocation}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="내 위치로 이동">
-            <GinitSymbolicIcon name="locate" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="locate" size={22} color={GinitTheme.colors.deepPurple} />
           </Pressable>
         </Animated.View>
       </View>
@@ -2103,29 +2141,6 @@ export default function MapScreen() {
         </View>
       </Modal>
 
-      <Modal visible={regionModalOpen} animationType="fade" transparent onRequestClose={closeRegionModal}>
-        <View style={styles.modalRoot}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={closeRegionModal} accessibilityRole="button" accessibilityLabel="지역 설정 닫기" />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>지역 설정</Text>
-            <Text style={styles.modalHint}>동네를 선택하면 검색·지도 기준이 바뀌어요.</Text>
-            {MOCK_REGION_ROWS.map((row) => (
-              <Pressable
-                key={row.id}
-                onPress={() => pickRegion(row.label)}
-                style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                accessibilityRole="button">
-                <Text style={styles.modalRowLabel}>{row.label}</Text>
-                {regionLabel === row.label ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} /> : <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />}
-              </Pressable>
-            ))}
-            <Pressable onPress={closeRegionModal} style={styles.modalCloseBtn} accessibilityRole="button">
-              <Text style={styles.modalCloseLabel}>닫기</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
       <FeedSearchFilterModal
         visible={mapSearchOpen}
         filters={mapSearchFilters}
@@ -2168,22 +2183,6 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 10,
-  },
-  regionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    maxWidth: 120,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.55)',
-  },
-  regionPillText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: GinitTheme.colors.text,
   },
   chipScroll: {
     flex: 1,
