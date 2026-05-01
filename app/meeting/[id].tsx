@@ -8,10 +8,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -106,6 +108,8 @@ import {
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 const WEEKDAY_KO = WEEK_KO;
+/** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
+const CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY = 0.76;
 
 function pad2(n: number) {
   return String(n).padStart(2, '0');
@@ -400,6 +404,11 @@ export default function MeetingDetailScreen() {
   const [dateVoteCalendarMonth, setDateVoteCalendarMonth] = useState(() => monthStartYmd(fmtDateYmd(new Date())));
   const [dateVoteCalendarPagerW, setDateVoteCalendarPagerW] = useState(() => Math.max(280, Math.floor(windowWidth)));
   const dateVoteCalendarPagerRef = useRef<ScrollView>(null);
+  /** `scrollTo` 가운데 정렬 직후 네이티브가 보내는 가짜 `onMomentumScrollEnd`로 월이 두 칸 넘어가지 않게 함 */
+  const dateVoteCalendarPagerIgnoreMomentumEndRef = useRef(false);
+  const dateVoteCalendarCenterOpacity = useRef(new Animated.Value(1)).current;
+  const dateVoteCalendarSwipeFadeAfterRecenterRef = useRef(false);
+  const dateVoteCalendarFadeAnimRef = useRef<Animated.CompositeAnimation | null>(null);
   const [dateVoteCalendarYmPick, setDateVoteCalendarYmPick] = useState<{ draft: Date } | null>(null);
   const [dateVoteTimePick, setDateVoteTimePick] = useState<{ ymd: string } | null>(null);
   /** 영화 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
@@ -2067,15 +2076,44 @@ export default function MeetingDetailScreen() {
     [dateVoteByYmd, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (dateVoteCalendarPagerW <= 0) return undefined;
-    const id = requestAnimationFrame(() => {
-      dateVoteCalendarPagerRef.current?.scrollTo({
-        x: dateVoteCalendarPagerW,
-        animated: false,
+    dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
+    dateVoteCalendarPagerRef.current?.scrollTo({
+      x: dateVoteCalendarPagerW,
+      animated: false,
+    });
+    if (dateVoteCalendarSwipeFadeAfterRecenterRef.current) {
+      dateVoteCalendarSwipeFadeAfterRecenterRef.current = false;
+      dateVoteCalendarFadeAnimRef.current?.stop?.();
+      const anim = Animated.timing(dateVoteCalendarCenterOpacity, {
+        toValue: 1,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      });
+      dateVoteCalendarFadeAnimRef.current = anim;
+      anim.start(({ finished }) => {
+        if (finished) dateVoteCalendarFadeAnimRef.current = null;
+      });
+    }
+    let clearRaf1: number | null = null;
+    let clearRaf2: number | null = null;
+    let clearRaf3: number | null = null;
+    clearRaf1 = requestAnimationFrame(() => {
+      clearRaf2 = requestAnimationFrame(() => {
+        clearRaf3 = requestAnimationFrame(() => {
+          dateVoteCalendarPagerIgnoreMomentumEndRef.current = false;
+        });
       });
     });
-    return () => cancelAnimationFrame(id);
+    return () => {
+      if (clearRaf1 != null) cancelAnimationFrame(clearRaf1);
+      if (clearRaf2 != null) cancelAnimationFrame(clearRaf2);
+      if (clearRaf3 != null) cancelAnimationFrame(clearRaf3);
+      dateVoteCalendarPagerIgnoreMomentumEndRef.current = false;
+      dateVoteCalendarFadeAnimRef.current?.stop?.();
+    };
   }, [dateVoteCalendarMonth, dateVoteCalendarPagerW]);
 
   const onPlaceChipPress = useCallback(
@@ -2730,27 +2768,38 @@ export default function MeetingDetailScreen() {
                           nestedScrollEnabled
                           keyboardShouldPersistTaps="handled"
                           showsHorizontalScrollIndicator={false}
-                          decelerationRate="fast"
+                          decelerationRate="normal"
                           style={styles.voteCalendarPagerScroll}
                           contentContainerStyle={styles.voteCalendarPagerContent}
                           onMomentumScrollEnd={(e) => {
                             if (pagerW <= 0) return;
+                            if (dateVoteCalendarPagerIgnoreMomentumEndRef.current) return;
                             const ix = Math.round(e.nativeEvent.contentOffset.x / pagerW);
                             if (ix === 1) return;
                             const curP = parseYmd(dateVoteCalendarMonth);
                             const cur = curP ? new Date(curP.y, curP.m - 1, 1) : new Date();
                             if (ix === 0) {
+                              dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
+                              dateVoteCalendarFadeAnimRef.current?.stop?.();
+                              dateVoteCalendarSwipeFadeAfterRecenterRef.current = true;
+                              dateVoteCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
                               setDateVoteCalendarMonth(
                                 monthStartYmd(fmtDateYmd(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))),
                               );
                             } else if (ix === 2) {
+                              dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
+                              dateVoteCalendarFadeAnimRef.current?.stop?.();
+                              dateVoteCalendarSwipeFadeAfterRecenterRef.current = true;
+                              dateVoteCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
                               setDateVoteCalendarMonth(
                                 monthStartYmd(fmtDateYmd(new Date(cur.getFullYear(), cur.getMonth() + 1, 1))),
                               );
                             }
                           }}>
                           {renderDateVoteCalendarMonthGrid(prevAnchor, pagerW)}
-                          {renderDateVoteCalendarMonthGrid(dateVoteCalendarMonth, pagerW)}
+                          <Animated.View style={{ opacity: dateVoteCalendarCenterOpacity }} pointerEvents="box-none">
+                            {renderDateVoteCalendarMonthGrid(dateVoteCalendarMonth, pagerW)}
+                          </Animated.View>
                           {renderDateVoteCalendarMonthGrid(nextAnchor, pagerW)}
                         </ScrollView>
                       </View>

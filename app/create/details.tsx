@@ -15,6 +15,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -27,6 +28,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Easing,
   Image,
   InteractionManager,
   Modal,
@@ -122,6 +124,8 @@ const PLACE_SEARCH_INITIAL_PAGE_SIZE = 10;
 const PLACE_SEARCH_PAGE_SIZE = 5;
 const DEFAULT_CALENDAR_PICK_TIME = '19:00';
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
+/** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
+const CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY = 0.76;
 
 function clampHm(raw: string): string {
   const t = raw.trim();
@@ -674,6 +678,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   /** 일정 달력 가로 페이지(이전·현재·다음 달) — `onLayout`으로 정확한 너비 갱신 */
   const [scheduleCalendarPagerW, setScheduleCalendarPagerW] = useState(() => Math.max(280, Math.floor(windowWidth)));
   const scheduleCalendarPagerRef = useRef<ScrollView>(null);
+  /** `scrollTo` 가운데 정렬 직후 가짜 `onMomentumScrollEnd`로 월이 두 칸 넘어가지 않게 함 */
+  const scheduleCalendarPagerIgnoreMomentumEndRef = useRef(false);
+  const scheduleCalendarCenterOpacity = useRef(new Animated.Value(1)).current;
+  const scheduleCalendarSwipeFadeAfterRecenterRef = useRef(false);
+  const scheduleCalendarFadeAnimRef = useRef<Animated.CompositeAnimation | null>(null);
   /** 일정 달력 헤더 년·월 탭 → 네이티브 날짜 피커(년·월 반영 후 해당 월 1일로 정규화) */
   const [scheduleCalendarYmPick, setScheduleCalendarYmPick] = useState<{ draft: Date } | null>(null);
   const [timePick, setTimePick] = useState<{ ymd: string; draft: Date; source?: 'calendar' | 'ai' } | null>(null);
@@ -759,15 +768,45 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   }, [hasDeadlineRow]);
 
   /** 가로 페이징 달력: 항상 가운데(현재 달) 페이지로 스크롤 위치 동기화 */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (scheduleCalendarPagerW <= 0) return undefined;
-    const id = requestAnimationFrame(() => {
-      scheduleCalendarPagerRef.current?.scrollTo({
-        x: scheduleCalendarPagerW,
-        animated: false,
+    // rAF 안에서만 켜면 scrollTo 직전에 가짜 onMomentumScrollEnd가 들어와 월이 두 칸 움직일 수 있음 → 동기 처리
+    scheduleCalendarPagerIgnoreMomentumEndRef.current = true;
+    scheduleCalendarPagerRef.current?.scrollTo({
+      x: scheduleCalendarPagerW,
+      animated: false,
+    });
+    if (scheduleCalendarSwipeFadeAfterRecenterRef.current) {
+      scheduleCalendarSwipeFadeAfterRecenterRef.current = false;
+      scheduleCalendarFadeAnimRef.current?.stop?.();
+      const anim = Animated.timing(scheduleCalendarCenterOpacity, {
+        toValue: 1,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      });
+      scheduleCalendarFadeAnimRef.current = anim;
+      anim.start(({ finished }) => {
+        if (finished) scheduleCalendarFadeAnimRef.current = null;
+      });
+    }
+    let clearRaf1: number | null = null;
+    let clearRaf2: number | null = null;
+    let clearRaf3: number | null = null;
+    clearRaf1 = requestAnimationFrame(() => {
+      clearRaf2 = requestAnimationFrame(() => {
+        clearRaf3 = requestAnimationFrame(() => {
+          scheduleCalendarPagerIgnoreMomentumEndRef.current = false;
+        });
       });
     });
-    return () => cancelAnimationFrame(id);
+    return () => {
+      if (clearRaf1 != null) cancelAnimationFrame(clearRaf1);
+      if (clearRaf2 != null) cancelAnimationFrame(clearRaf2);
+      if (clearRaf3 != null) cancelAnimationFrame(clearRaf3);
+      scheduleCalendarPagerIgnoreMomentumEndRef.current = false;
+      scheduleCalendarFadeAnimRef.current?.stop?.();
+    };
   }, [calendarMonth, scheduleCalendarPagerW]);
 
   useEffect(() => {
@@ -1848,30 +1887,45 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 </Text>
               ))}
             </View>
-            <ScrollView
-              ref={scheduleCalendarPagerRef}
-              horizontal
-              pagingEnabled
-              bounces={false}
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
-              showsHorizontalScrollIndicator={false}
-              decelerationRate="fast"
-              onMomentumScrollEnd={(e) => {
-                if (pagerW <= 0) return;
-                const ix = Math.round(e.nativeEvent.contentOffset.x / pagerW);
-                if (ix === 1) return;
-                const cur = dateFromYmd(calendarMonth) ?? new Date();
-                if (ix === 0) {
-                  setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))));
-                } else if (ix === 2) {
-                  setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() + 1, 1))));
-                }
-              }}>
-              {renderScheduleCalendarMonthGrid(prevAnchor, pagerW)}
-              {renderScheduleCalendarMonthGrid(calendarMonth, pagerW)}
-              {renderScheduleCalendarMonthGrid(nextAnchor, pagerW)}
-            </ScrollView>
+            <View style={styles.scheduleCalendarCarouselHost}>
+              <ScrollView
+                ref={scheduleCalendarPagerRef}
+                horizontal
+                pagingEnabled
+                bounces={false}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsHorizontalScrollIndicator={false}
+                decelerationRate="normal"
+                style={styles.scheduleCalendarPagerScroll}
+                contentContainerStyle={styles.scheduleCalendarPagerContent}
+                onMomentumScrollEnd={(e) => {
+                  if (pagerW <= 0) return;
+                  if (scheduleCalendarPagerIgnoreMomentumEndRef.current) return;
+                  const ix = Math.round(e.nativeEvent.contentOffset.x / pagerW);
+                  if (ix === 1) return;
+                  const cur = dateFromYmd(calendarMonth) ?? new Date();
+                  if (ix === 0) {
+                    scheduleCalendarPagerIgnoreMomentumEndRef.current = true;
+                    scheduleCalendarFadeAnimRef.current?.stop?.();
+                    scheduleCalendarSwipeFadeAfterRecenterRef.current = true;
+                    scheduleCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
+                    setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))));
+                  } else if (ix === 2) {
+                    scheduleCalendarPagerIgnoreMomentumEndRef.current = true;
+                    scheduleCalendarFadeAnimRef.current?.stop?.();
+                    scheduleCalendarSwipeFadeAfterRecenterRef.current = true;
+                    scheduleCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
+                    setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() + 1, 1))));
+                  }
+                }}>
+                {renderScheduleCalendarMonthGrid(prevAnchor, pagerW)}
+                <Animated.View style={{ opacity: scheduleCalendarCenterOpacity }} pointerEvents="box-none">
+                  {renderScheduleCalendarMonthGrid(calendarMonth, pagerW)}
+                </Animated.View>
+                {renderScheduleCalendarMonthGrid(nextAnchor, pagerW)}
+              </ScrollView>
+            </View>
           </View>
         );
       })()}
@@ -4327,6 +4381,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 34,
+  },
+  scheduleCalendarCarouselHost: {
+    width: '100%',
+    height: 274,
+  },
+  scheduleCalendarPagerScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  scheduleCalendarPagerContent: {
+    paddingVertical: 10,
+    paddingHorizontal: 0,
   },
   calendarNavBtn: {
     width: 34,
