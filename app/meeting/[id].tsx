@@ -422,6 +422,10 @@ export default function MeetingDetailScreen() {
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
   const voteSectionScrollYs = useRef({ date: 0, movie: 0, place: 0 });
+  const scrollToVoteBlock = useCallback((section: 'date' | 'movie' | 'place') => {
+    const y = voteSectionScrollYs.current[section];
+    mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  }, []);
 
   const [placeProposeOpen, setPlaceProposeOpen] = useState(false);
   const [placeProposeFormKey, setPlaceProposeFormKey] = useState(0);
@@ -1635,11 +1639,22 @@ export default function MeetingDetailScreen() {
       if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
       if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
       if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
+      const firstScrollSection: 'date' | 'movie' | 'place' | null =
+        needsDatePick && !autoDatePick && effectiveDateIds.length === 0
+          ? 'date'
+          : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
+            ? 'movie'
+            : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
+              ? 'place'
+              : null;
       Alert.alert(
         '투표를 완료해 주세요',
         parts.length > 0
           ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.`
           : '각 투표에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.',
+        firstScrollSection != null
+          ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
+          : [{ text: '확인' }],
       );
       return;
     }
@@ -1698,6 +1713,7 @@ export default function MeetingDetailScreen() {
     selectedPlaceIds,
     selectedMovieIds,
     queryClient,
+    scrollToVoteBlock,
   ]);
 
   useEffect(() => {
@@ -1782,11 +1798,22 @@ export default function MeetingDetailScreen() {
       if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
       if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
       if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
+      const firstScrollSection: 'date' | 'movie' | 'place' | null =
+        needsDatePick && !autoDatePick && effectiveDateIds.length === 0
+          ? 'date'
+          : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
+            ? 'movie'
+            : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
+              ? 'place'
+              : null;
       Alert.alert(
         '투표를 완료해 주세요',
         parts.length > 0
           ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.`
           : '각 투표에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.',
+        firstScrollSection != null
+          ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
+          : [{ text: '확인' }],
       );
       return false;
     }
@@ -1855,6 +1882,7 @@ export default function MeetingDetailScreen() {
     selectedMovieIds,
     votesFingerprint,
     queryClient,
+    scrollToVoteBlock,
   ]);
 
   // 투표는 하단 「저장」 버튼에서만 반영합니다(자동 저장 제거).
@@ -1972,11 +2000,6 @@ export default function MeetingDetailScreen() {
         return { label: '모집중', wrap: styles.statusBadgeGreen, text: styles.statusBadgeTextLight };
     }
   }, [recruitmentPhase]);
-
-  const scrollToVoteBlock = useCallback((section: 'date' | 'movie' | 'place') => {
-    const y = voteSectionScrollYs.current[section];
-    mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
-  }, []);
 
   const onDateChipPress = useCallback(
     (chipId: string) => {

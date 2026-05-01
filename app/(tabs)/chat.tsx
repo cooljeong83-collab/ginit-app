@@ -314,6 +314,16 @@ export default function ChatTab() {
 
   const socialRoomKey = useMemo(() => socialFriendDmRooms.map((r) => r.roomId).join('\u0001'), [socialFriendDmRooms]);
 
+  const gatherTabUnreadTotal = useMemo(
+    () => joinedMeetings.reduce((sum, m) => sum + (unreadByMeetingId[m.id] ?? 0), 0),
+    [joinedMeetings, unreadByMeetingId],
+  );
+
+  const socialTabUnreadTotal = useMemo(
+    () => socialFriendDmRooms.reduce((sum, r) => sum + (unreadBySocialRoomId[r.roomId] ?? 0), 0),
+    [socialFriendDmRooms, unreadBySocialRoomId],
+  );
+
   const displayedSocialRooms = useMemo(() => {
     let rows = socialFriendDmRooms;
     const q = appliedSocialTextQuery.trim().toLowerCase();
@@ -720,12 +730,25 @@ export default function ChatTab() {
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: chatKind === 'gather' }}
-            accessibilityLabel="모임">
-            <Text
-              style={[styles.chatTopChipLabel, chatKind === 'gather' && styles.chatTopChipLabelActive]}
-              numberOfLines={1}>
-              모임
-            </Text>
+            accessibilityLabel={
+              gatherTabUnreadTotal > 0
+                ? `모임, 읽지 않은 메시지 ${gatherTabUnreadTotal > 99 ? '99개 이상' : `${gatherTabUnreadTotal}개`}`
+                : '모임'
+            }>
+            <View style={styles.chatTopChipInner} accessible={false}>
+              <Text
+                style={[styles.chatTopChipLabel, chatKind === 'gather' && styles.chatTopChipLabelActive]}
+                numberOfLines={1}>
+                모임
+              </Text>
+              {gatherTabUnreadTotal > 0 ? (
+                <View style={styles.chatTopChipUnreadBadge}>
+                  <Text style={styles.chatTopChipUnreadBadgeText}>
+                    {gatherTabUnreadTotal > 99 ? '99+' : String(gatherTabUnreadTotal)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </Pressable>
           <Pressable
             onPress={() => goToChatKind('social')}
@@ -737,12 +760,25 @@ export default function ChatTab() {
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: chatKind === 'social' }}
-            accessibilityLabel="친구">
-            <Text
-              style={[styles.chatTopChipLabel, chatKind === 'social' && styles.chatTopChipLabelActive]}
-              numberOfLines={1}>
-              친구
-            </Text>
+            accessibilityLabel={
+              socialTabUnreadTotal > 0
+                ? `친구, 읽지 않은 메시지 ${socialTabUnreadTotal > 99 ? '99개 이상' : `${socialTabUnreadTotal}개`}`
+                : '친구'
+            }>
+            <View style={styles.chatTopChipInner} accessible={false}>
+              <Text
+                style={[styles.chatTopChipLabel, chatKind === 'social' && styles.chatTopChipLabelActive]}
+                numberOfLines={1}>
+                친구
+              </Text>
+              {socialTabUnreadTotal > 0 ? (
+                <View style={styles.chatTopChipUnreadBadge}>
+                  <Text style={styles.chatTopChipUnreadBadgeText}>
+                    {socialTabUnreadTotal > 99 ? '99+' : String(socialTabUnreadTotal)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </Pressable>
         </View>
         <View style={styles.categoryDropdownSpacer} pointerEvents="none" />
@@ -1290,6 +1326,26 @@ const styles = StyleSheet.create({
   },
   chatTopChipLabelActive: {
     color: '#fff',
+  },
+  chatTopChipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chatTopChipUnreadBadge: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EF4444',
+  },
+  chatTopChipUnreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: -0.2,
   },
   socialZoneA: {
     flexDirection: 'row',
