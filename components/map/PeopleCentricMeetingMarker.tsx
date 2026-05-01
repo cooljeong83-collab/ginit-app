@@ -1,14 +1,14 @@
 
-import { memo, useEffect, useMemo, useRef } from 'react';
-import { Animated, Image as RNImage, Platform, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { memo, useEffect, useMemo, useRef } from 'react';
+import { Animated, Platform, Image as RNImage, StyleSheet, View } from 'react-native';
 
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { getHomeCategoryVisual } from '@/src/lib/feed-home-visual';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 const AVATAR = 44;
 const BORDER = 2.5;
@@ -18,8 +18,8 @@ const ANDROID_CANVAS = AVATAR + ANDROID_PAD * 2;
 
 function phaseBorderColor(phase: ReturnType<typeof getMeetingRecruitmentPhase>): string {
   // 요구사항: 조율 중=Energetic Orange, 확정=Trust Blue
-  // 토큰 매핑: Energetic Orange → warning, Trust Blue → trustBlue(legacy) / primary
-  return phase === 'confirmed' ? GinitTheme.trustBlue : GinitTheme.colors.warning;
+  // 토큰 매핑: Energetic Orange → warning, Trust Blue → themeMainColor(legacy) / primary
+  return phase === 'confirmed' ? GinitTheme.themeMainColor : GinitTheme.colors.warning;
 }
 
 type Props = {
@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   ringSelected: {
-    shadowColor: GinitTheme.trustBlue,
+    shadowColor: GinitTheme.themeMainColor,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.45,
     shadowRadius: 8,

@@ -24,6 +24,7 @@ import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -75,7 +76,6 @@ import {
   isMeetingServiceComplianceComplete,
   type UserProfile,
 } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean {
   const hay = [m.address, m.location, m.placeName]
@@ -1451,8 +1451,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   homeTopChipActive: {
-    backgroundColor: GinitTheme.trustBlue,
-    borderColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
+    borderColor: GinitTheme.themeMainColor,
   },
   homeTopChipPressed: {
     opacity: 0.88,
@@ -1535,7 +1535,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 20,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.text,
     minWidth: 0,
   },
   headerActions: {
@@ -1796,6 +1796,6 @@ const styles = StyleSheet.create({
   modalCloseLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
 });

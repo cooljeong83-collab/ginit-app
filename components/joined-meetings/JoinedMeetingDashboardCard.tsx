@@ -3,11 +3,11 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
+import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 
 type Props = {
   meeting: Meeting;
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   scheduleLine: {
     fontSize: 12,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
     textShadowColor: 'rgba(255, 255, 255, 0.9)',
     textShadowOffset: { width: 0, height: 0.5 },
     textShadowRadius: 2,

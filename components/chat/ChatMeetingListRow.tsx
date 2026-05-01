@@ -3,11 +3,11 @@ import { Image } from 'expo-image';
 import type { Timestamp } from 'firebase/firestore';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function formatRelativeFrom(ts: Timestamp | null | undefined): string {
   if (!ts || typeof ts.toDate !== 'function') return '';
@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   hostFallbackText: {
     fontSize: 21,
     fontWeight: '600',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   hostAvatarFooterBand: {
     position: 'absolute',

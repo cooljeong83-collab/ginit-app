@@ -1,19 +1,19 @@
 
-import { Image } from 'expo-image';
 import * as Font from 'expo-font';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
@@ -21,16 +21,16 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
-import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { resolveNaverMovieSearchWebUrl } from '@/src/lib/naver-local-search';
 import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/tmdb-movie-poster';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import {
-  INPUT_PLACEHOLDER,
-  wizardSpecialtyStyles as S,
+    INPUT_PLACEHOLDER,
+    wizardSpecialtyStyles as S,
 } from './wizard-specialty-styles';
 
 const TRUST_BLUE = GinitTheme.colors.primary;
@@ -237,7 +237,7 @@ function resolveDisplayPosterUrl(m: SelectedMovieExtra): string | undefined {
   return undefined;
 }
 
-function PosterTrustBlueFallback({ iconSize = 28 }: { iconSize?: number }) {
+function PosterthemeMainColorFallback({ iconSize = 28 }: { iconSize?: number }) {
   return (
     <LinearGradient
       colors={[GinitTheme.colors.surfaceStrong, 'rgba(220, 238, 255, 0.9)', 'rgba(239, 255, 250, 0.9)']}
@@ -271,7 +271,7 @@ function MoviePosterFill({
   }, [uri, item.id]);
 
   if (!uri || fatal) {
-    return <PosterTrustBlueFallback iconSize={iconSize ?? 28} />;
+    return <PosterthemeMainColorFallback iconSize={iconSize ?? 28} />;
   }
 
   return (

@@ -1182,7 +1182,7 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  screenHeaderTitle: { fontSize: 20, fontWeight: '700', color: GinitTheme.trustBlue, flex: 1 },
+  screenHeaderTitle: { fontSize: 20, fontWeight: '700', color: GinitTheme.colors.text, flex: 1 },
   headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   iconBtn: { padding: 6, borderRadius: 10 },
   scrollBottom: {

@@ -5,25 +5,25 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
-  friendsAllowRecommendationsStorageKey,
-  friendsAutoAddContactsStorageKey,
-  loadBlockedPeerIds,
-  loadFriendBoolPref,
-  loadHiddenPeerIds,
-  saveFriendBoolPref,
+    friendsAllowRecommendationsStorageKey,
+    friendsAutoAddContactsStorageKey,
+    loadBlockedPeerIds,
+    loadFriendBoolPref,
+    loadHiddenPeerIds,
+    saveFriendBoolPref,
 } from '@/src/lib/friends-privacy-local';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function RowSep() {
   return <View style={styles.sep} />;
 }
 
-/** 하단 탭「모임 생성」FAB과 동일 톤 (`GinitTabBar` fabInner / trustBlue) */
-const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.trustBlue } as const;
+/** 하단 탭「모임 생성」FAB과 동일 톤 (`GinitTabBar` fabInner / themeMainColor) */
+const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 
 export default function FriendsSettingsScreen() {
   const router = useRouter();

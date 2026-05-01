@@ -21,6 +21,7 @@ import { Image } from 'expo-image';
 
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
 import { ScreenShell } from '@/components/ui';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -56,7 +57,6 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 /** 친구 채팅 행 좌측 액센트 — 홈 카드 톤과 어울리는 블루·민트 그라데이션 */
 const SOCIAL_CHAT_LIST_ACCENT = ['rgba(0, 82, 204, 0.28)', 'rgba(134, 211, 183, 0.18)'] as const;
@@ -1118,7 +1118,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 20,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.colors.text,
     minWidth: 0,
   },
   chatTitleCluster: {
@@ -1194,7 +1194,7 @@ const styles = StyleSheet.create({
   modalCloseLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   socialSearchInput: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -1282,8 +1282,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   chatTopChipActive: {
-    backgroundColor: GinitTheme.trustBlue,
-    borderColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
+    borderColor: GinitTheme.themeMainColor,
   },
   chatTopChipPressed: {
     opacity: 0.88,
@@ -1328,7 +1328,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  socialAvatarLetter: { fontSize: 21, fontWeight: '600', color: GinitTheme.trustBlue },
+  socialAvatarLetter: { fontSize: 21, fontWeight: '600', color: GinitTheme.themeMainColor },
   socialZoneMain: {
     flex: 1,
     minWidth: 0,

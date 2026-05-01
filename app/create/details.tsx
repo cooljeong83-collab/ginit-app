@@ -15,8 +15,8 @@ import {
   forwardRef,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -56,6 +56,7 @@ import { MovieSearch } from '@/components/create/MovieSearch';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
@@ -117,7 +118,6 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 import { DateCandidateEditorCard, type DatePickerField } from '../../components/create/DateCandidateEditorCard';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
@@ -1965,7 +1965,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <Text style={styles.sectionHint}>
         {placesListOnly
           ? '확정한 장소 후보예요. 필요하면 카드를 탭해 장소를 다시 고를 수 있어요.'
-          : '검색어를 입력하면 AI가 추천하는 장소 후보를 아래에서 바로 고를 수 있어요.'}
+          : '검색어를 입력하면 AI가 추천하는 장소 후보를 추천해 드려요.'}
       </Text>
 
       {!placesListOnly ? (
@@ -3475,7 +3475,7 @@ export default function CreateDetailsScreen() {
                         accessibilityRole="button"
                         accessibilityState={{ selected: active }}>
                         <Text style={styles.catEmoji}>{c.emoji}</Text>
-                        <Text style={styles.catLabel} numberOfLines={2}>
+                        <Text style={[styles.catLabel, active && styles.catLabelActive]} numberOfLines={2}>
                           {c.label}
                         </Text>
                       </Pressable>
@@ -3596,8 +3596,7 @@ export default function CreateDetailsScreen() {
               {currentStep >= 3 ? (
                 <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(3, e)}>
                   <Text style={styles.wizardStepBadge}>기본 정보</Text>
-                  <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
-                    <Text style={styles.wizardFieldLabel}>모임 이름</Text>
+                  <Text style={styles.wizardFieldLabel}>모임 이름</Text>  
                     <LinearGradient
                       colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
                       start={{ x: 0, y: 0 }}
@@ -3638,11 +3637,10 @@ export default function CreateDetailsScreen() {
                       </View>
                     </LinearGradient>
                     <Text style={[styles.wizardFieldHint, { marginTop: 6 }]}>
-                      비워 두면 AI 추천(또는 자동 생성) 제목이 등록됩니다.
+                    ✨ 입력하지 않으셔도 AI 추천(또는 자동 생성) 제목이 등록됩니다.
                     </Text>
                     {aiTitleSuggestions.length > 0 ? (
                       <View style={styles.aiTitlePickBlock}>
-                        <Text style={styles.wizardFieldHint}>✨ AI 추천 — 탭하면 이름에 넣어요</Text>
                         <ScrollView
                           horizontal
                           nestedScrollEnabled
@@ -3688,7 +3686,7 @@ export default function CreateDetailsScreen() {
                         />
                       </>
                     )}
-                  </VoteCandidateCard>
+                  
                   {currentStep === 3 ? (
                     <Pressable
                       onPress={onStep3BasicNext}
@@ -3785,11 +3783,6 @@ export default function CreateDetailsScreen() {
                         collapsable={false}
                         style={styles.placesStepHeader}>
                         <Text style={styles.wizardStepBadge}>장소 후보</Text>
-                        <Text style={styles.wizardLockedHint}>
-                          {currentStep >= detailStep
-                            ? '확정한 장소 후보예요. 필요하면 카드를 탭해 바꿀 수 있어요.'
-                            : '장소 행을 눌러 검색·선택하거나 후보를 추가하세요.'}
-                        </Text>
                       </View>
 
                       <View style={styles.wizardFormMount}>
@@ -4003,7 +3996,7 @@ const styles = StyleSheet.create({
   backLink: {
     fontSize: 16,
     fontWeight: '700',
-    color: GinitTheme.colors.primary,
+    color: GinitTheme.colors.text,
     minWidth: 56,
   },
   screenTitle: {
@@ -4581,7 +4574,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   placeResultImageCardSelected: {
-    borderColor: 'rgba(31, 42, 68, 0.70)',
+    borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   placeResultImageWrap: {
@@ -4638,13 +4631,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderColor: GinitTheme.colors.deepPurple,
+    backgroundColor: GinitTheme.colors.deepPurple,
   },
   placeResultDetailBtnText: {
     fontSize: 12,
     fontWeight: '600',
-    color: GinitTheme.colors.primary,
+    color: '#FFFFFF',
   },
   placePickedRow: {
     flexDirection: 'row',
@@ -4801,8 +4794,8 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   catTileActive: {
-    borderColor: 'rgba(31, 42, 68, 0.55)',
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: GinitTheme.colors.primarySoft,
   },
   catTilePressed: {
     opacity: 0.9,
@@ -4820,6 +4813,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: -0.15,
     lineHeight: 13,
+  },
+  catLabelActive: {
+    color: GinitTheme.colors.primary,
   },
   segmentRow: {
     flexDirection: 'row',
@@ -4915,12 +4911,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GinitTheme.colors.textSub,
     marginBottom: 8,
+    marginTop: 8,
+    marginLeft: 8,
   },
   wizardFieldHint: {
     fontSize: 12,
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
-    marginBottom: 10,
+    marginBottom: 0,
   },
   wizardTextInput: {
     backgroundColor: GinitTheme.glassModal.inputFill,
@@ -4966,14 +4964,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
-    marginBottom: 10,
+    marginTop: 5,
+    marginBottom: 5,
     lineHeight: 20,
   },
   wizardDoneHint: {
     fontSize: 13,
     fontWeight: '700',
     color: 'rgba(31, 42, 68, 0.85)',
-    marginTop: 10,
+    marginTop: 5,
     marginBottom: 4,
   },
   wizardFormMount: {

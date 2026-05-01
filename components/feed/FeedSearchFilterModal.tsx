@@ -1,14 +1,14 @@
 
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { defaultFeedSearchFilters, type FeedSearchFilters } from '@/src/lib/feed-meeting-utils';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import type {
-  PublicMeetingAgeLimit,
-  PublicMeetingApprovalType,
-  PublicMeetingGenderRatio,
-  PublicMeetingSettlement,
+    PublicMeetingAgeLimit,
+    PublicMeetingApprovalType,
+    PublicMeetingGenderRatio,
+    PublicMeetingSettlement,
 } from '@/src/lib/meetings';
 
 const AGE_CHIPS: { code: PublicMeetingAgeLimit; label: string }[] = [
@@ -343,7 +343,7 @@ const styles = StyleSheet.create({
   closeLinkLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   pressed: {
     opacity: 0.88,

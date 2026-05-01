@@ -4,15 +4,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    InteractionManager,
-    Keyboard,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  InteractionManager,
+  Keyboard,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,10 +25,10 @@ import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import {
-    resolveNaverPlaceCoordinates,
-    resolveNaverPlaceDetailWebUrlLikeVoteChip,
-    sanitizeNaverLocalPlaceLink,
-    searchNaverLocalPlaces,
+  resolveNaverPlaceCoordinates,
+  resolveNaverPlaceDetailWebUrlLikeVoteChip,
+  sanitizeNaverLocalPlaceLink,
+  searchNaverLocalPlaces,
 } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
@@ -245,7 +245,7 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
 
           {loading || resolving ? (
             <View style={GinitStyles.rowCenter}>
-              <ActivityIndicator color={GinitTheme.trustBlue} />
+              <ActivityIndicator color={GinitTheme.themeMainColor} />
               <Text style={GinitStyles.mutedText}>{loading ? '검색 중…' : '선택한 주소로 위치 찾는 중…'}</Text>
             </View>
           ) : null}

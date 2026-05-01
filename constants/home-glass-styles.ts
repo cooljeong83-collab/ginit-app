@@ -72,7 +72,7 @@ export const HomeGlassStyles = StyleSheet.create({
   miniMeta: {
     fontSize: 11,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
     textShadowColor: 'rgba(255, 255, 255, 0.85)',
     textShadowOffset: { width: 0, height: 0.5 },
     textShadowRadius: 2,
@@ -177,7 +177,7 @@ export const HomeGlassStyles = StyleSheet.create({
   phasePillText: {
     fontSize: 11,
     fontWeight: '600',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   phasePillOrange: {
     backgroundColor: 'rgba(255, 138, 0, 0.16)',

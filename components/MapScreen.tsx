@@ -2092,7 +2092,7 @@ export default function MapScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected }}>
                   <Text style={styles.modalRowLabel}>{label}</Text>
-                  {selected ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.trustBlue} /> : <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />}
+                  {selected ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} /> : <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />}
                 </Pressable>
               );
             })}
@@ -2116,7 +2116,7 @@ export default function MapScreen() {
                 style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                 accessibilityRole="button">
                 <Text style={styles.modalRowLabel}>{row.label}</Text>
-                {regionLabel === row.label ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.trustBlue} /> : <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />}
+                {regionLabel === row.label ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} /> : <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />}
               </Pressable>
             ))}
             <Pressable onPress={closeRegionModal} style={styles.modalCloseBtn} accessibilityRole="button">
@@ -2203,8 +2203,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.34)',
   },
   topChipActive: {
-    backgroundColor: GinitTheme.trustBlue,
-    borderColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
+    borderColor: GinitTheme.themeMainColor,
   },
   topChipLabel: {
     fontSize: 15,
@@ -2276,7 +2276,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
     borderWidth: 2,
     borderColor: '#fff',
   },
@@ -2440,7 +2440,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   carouselCardSelected: {
-    borderColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.themeMainColor,
     backgroundColor: 'rgba(0, 82, 204, 0.04)',
   },
   listCard: {
@@ -2455,7 +2455,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   listCardSelected: {
-    borderColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.themeMainColor,
     backgroundColor: 'rgba(0, 82, 204, 0.04)',
   },
   listThumb: {
@@ -2503,13 +2503,13 @@ const styles = StyleSheet.create({
   listDist: {
     fontSize: 13,
     fontWeight: '600',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   joinBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
   },
   joinBtnText: {
     fontSize: 12,
@@ -2588,7 +2588,7 @@ const styles = StyleSheet.create({
   modalCloseLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   mapBoot: {
     ...StyleSheet.absoluteFillObject,

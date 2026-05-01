@@ -574,7 +574,7 @@ export default function LoginScreen() {
   if (!isHydrated) {
     return (
       <View style={styles.bootCenter}>
-        <ActivityIndicator size="large" color={GinitTheme.trustBlue} />
+        <ActivityIndicator size="large" color={GinitTheme.themeMainColor} />
         <Text style={styles.bootHint}>불러오는 중…</Text>
       </View>
     );

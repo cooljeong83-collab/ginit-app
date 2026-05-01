@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -65,7 +66,6 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -1316,7 +1316,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                                 : 'calendar-outline'
                         }
                         size={22}
-                        color={GinitTheme.trustBlue}
+                        color={GinitTheme.themeMainColor}
                       />
                     </View>
                     <View style={styles.alarmTextCol}>
@@ -1389,7 +1389,7 @@ const styles = StyleSheet.create({
   markAllBtnText: {
     fontSize: 14,
     fontWeight: '700',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
   },
   listContent: {
     paddingVertical: 6,

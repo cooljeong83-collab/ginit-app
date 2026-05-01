@@ -90,7 +90,7 @@ export const authScreenStyles = StyleSheet.create({
 
   checkingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   checkingLabel: { fontSize: 13, fontWeight: '700', color: '#475569' },
-  memberBadge: { fontSize: 13, fontWeight: '700', color: GinitTheme.trustBlue, marginBottom: 12, lineHeight: 19 },
+  memberBadge: { fontSize: 13, fontWeight: '700', color: GinitTheme.themeMainColor, marginBottom: 12, lineHeight: 19 },
 
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
   countryCodeBtn: {

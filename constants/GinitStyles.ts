@@ -474,7 +474,7 @@ export const GinitStyles = StyleSheet.create({
   heroTitle: {
     fontSize: 26,
     fontWeight: '600',
-    color: GinitTheme.trustBlue,
+    color: GinitTheme.themeMainColor,
     marginBottom: 16,
     letterSpacing: -0.5,
   },

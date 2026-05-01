@@ -8,7 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -29,6 +29,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -105,7 +106,6 @@ import {
   WITHDRAWN_NICKNAME,
   type UserProfile,
 } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 const WEEKDAY_KO = WEEK_KO;
@@ -2030,7 +2030,6 @@ export default function MeetingDetailScreen() {
                     const has = opts.length > 0;
                     const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
                     const isSelected = dateHostPickMode ? isHostSelected : opts.some((o) => selectedDateIds.includes(o.chipId));
-                    const times = opts.map((o) => o.hm);
                     return (
                       <Pressable
                         key={c.ymd}
@@ -2052,14 +2051,30 @@ export default function MeetingDetailScreen() {
                         ]}
                         accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
                         accessibilityLabel={`${c.ymd}${has ? ` ${opts.length}개` : ''}`}>
-                        <Text style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}>{c.day}</Text>
+                        
+                        <Text
+                          style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}
+                          numberOfLines={1}>
+                          {c.day}
+                        </Text>
                         {has ? (
                           <View style={styles.calendarTimesWrap} pointerEvents="none">
-                            {times.map((t) => (
-                              <Text key={`${c.ymd}-${t}`} style={styles.calendarCellMeta}>
-                                {t}
-                              </Text>
-                            ))}
+                            {opts.map((o) => {
+                              const timeSelected = dateHostPickMode
+                                ? hostTieDateId === o.chipId
+                                : selectedDateIds.includes(o.chipId);
+                              return timeSelected ? (
+                                <View key={o.chipId} style={styles.calendarCellTimePillSelected}>
+                                  <Text style={styles.calendarCellTimeLabelSelected} numberOfLines={1}>
+                                    {o.hm}
+                                  </Text>
+                                </View>
+                              ) : (
+                                <Text key={o.chipId} style={styles.calendarCellMeta} numberOfLines={1}>
+                                  {o.hm}
+                                </Text>
+                              );
+                            })}
                           </View>
                         ) : (
                           <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
@@ -2382,7 +2397,7 @@ export default function MeetingDetailScreen() {
             <View style={styles.infoCard}>
               <View style={styles.infoCardHead}>
                 <LinearGradient
-                  colors={['#0F172A', '#1E3A8A']}
+                  colors={['#4527A0', '#1E3A8A']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.infoCardHeadAccent}
@@ -2835,7 +2850,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="날짜 제안"
               onPress={openDateProposeModal}>
-              <GinitSymbolicIcon name="calendar-outline" size={20} color={GinitTheme.colors.primary} />
+              <GinitSymbolicIcon name="calendar-outline" size={20} color="#FFFFFF" />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
                   </View>
@@ -3208,7 +3223,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="장소 제안"
               onPress={openPlaceProposeModal}>
-              <GinitSymbolicIcon name="location-outline" size={20} color={GinitTheme.colors.primary} />
+              <GinitSymbolicIcon name="location-outline" size={20} color="#FFFFFF" />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
             </Pressable>
               </View>
@@ -4269,7 +4284,7 @@ const styles = StyleSheet.create({
   miniBadgeUnknownText: { fontSize: 12, fontWeight: '600', color: '#475569' },
   movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
   movieVotePosterColumn: { width: 108 },
-  /** 영화 후보 등록 카드 `movieResultDetailBtn`과 동일 스펙 */
+  /** 모임 등록·상세 공통 — `movieResultDetailBtn` / deepPurple 채움 */
   moviePosterInfoBtn: {
     marginTop: 8,
     alignSelf: 'stretch',
@@ -4278,13 +4293,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderColor: GinitTheme.colors.deepPurple,
+    backgroundColor: GinitTheme.colors.deepPurple,
   },
   moviePosterInfoBtnText: {
     fontSize: 12,
     fontWeight: '600',
-    color: GinitTheme.colors.primary,
+    color: '#FFFFFF',
   },
   moviePosterInfoBtnBelowPoster: {
     marginTop: 10,
@@ -4301,7 +4316,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   moviePosterThumbWrapSelected: {
-    borderColor: 'rgba(31, 42, 68, 0.55)',
+    borderColor: GinitTheme.colors.deepPurple,
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   moviePosterThumbWrapPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
@@ -4559,11 +4574,38 @@ const styles = StyleSheet.create({
   calendarCellPressed: { opacity: 0.9 },
   calendarCellDay: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18 },
   calendarCellDayOut: { color: GinitTheme.colors.textMuted },
-  calendarTimesWrap: { alignItems: 'center', justifyContent: 'center' },
-  calendarCellMeta: { marginTop: 2, fontSize: 10, fontWeight: '600', color: GinitTheme.colors.primary },
-  calendarCellMetaEmpty: { marginTop: 2, fontSize: 10, color: 'transparent' },
+  calendarTimesWrap: {
+    //flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    marginTop: 0,
+    marginBottom: 0,
+    gap: 2,
+  },
+  calendarCellMeta: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: GinitTheme.colors.primary,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  calendarCellTimePillSelected: {
+    flexShrink: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 1,
+    borderRadius: 5,
+    backgroundColor: GinitTheme.colors.deepPurple,
+  },
+  calendarCellTimeLabelSelected: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  calendarCellMetaEmpty: { marginTop: 0, marginBottom: 0, fontSize: 10, color: 'transparent' },
   placeVoteCarouselContent: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
-  /** `VoteCandidatesForm` 장소 검색 카드(`placeResultCard` + `placeResultImageCard`)와 동일 톤 */
+  /** `VoteCandidatesForm` 장소 검색 카드(`placeResultCard` + `placeResultImageCard`)와 동일 톤 — 선택은 `placeResultImageCardSelected`와 동일 */
   placeVoteCard: {
     width: 176,
     borderRadius: 14,
@@ -4581,7 +4623,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   placeVoteCardSelected: {
-    borderColor: 'rgba(31, 42, 68, 0.55)',
+    borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
   },
   placeVoteImageWrap: {
@@ -4649,13 +4691,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderColor: GinitTheme.colors.deepPurple,
+    backgroundColor: GinitTheme.colors.deepPurple,
   },
   placeVoteDetailLinkText: {
     fontSize: 11,
     fontWeight: '600',
-    color: GinitTheme.colors.primary,
+    color: '#FFFFFF',
   },
   placeNaverDetailBtn: {
     marginTop: 10,
@@ -4664,14 +4706,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderColor: GinitTheme.colors.deepPurple,
+    backgroundColor: GinitTheme.colors.deepPurple,
   },
   placeNaverDetailBtnInline: { marginTop: 0 },
   placeNaverDetailBtnText: {
     fontSize: 12,
     fontWeight: '600',
-    color: GinitTheme.colors.primary,
+    color: '#FFFFFF',
   },
   candidateListV: { gap: 10, paddingBottom: 6 },
   candidateChipV: {
@@ -4756,11 +4798,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#D0D7E0',
-    backgroundColor: 'rgba(255,255,255,0.65)',
+    borderColor: GinitTheme.colors.deepPurple,
+    backgroundColor: GinitTheme.colors.deepPurple,
   },
   addOutlineText: { fontSize: 15, fontWeight: '600', color: '#5C6570' },
-  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.primary },
+  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   /** 날짜·장소 제안 모달 — 상세 화면 카드(밝은 서피스)와 동일 톤 */
   proposeModalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
   proposeModalBackdrop: {

@@ -20,6 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -55,7 +56,6 @@ import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function friendAppUserKey(raw: string | null | undefined): string {
   const t = raw?.trim() ?? '';
@@ -892,7 +892,7 @@ const s = StyleSheet.create({
     zIndex: 3,
   },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: GinitTheme.trustBlue, flex: 1 },
+  headerTitle: { fontSize: 20, fontWeight: '700', color: GinitTheme.colors.text, flex: 1 },
   headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   iconBtn: { padding: 6, borderRadius: 10 },
   searchWrap: {

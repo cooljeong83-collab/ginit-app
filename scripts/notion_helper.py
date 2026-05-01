@@ -289,7 +289,7 @@ def build_design_blocks() -> list[dict[str, Any]]:
             ["토큰", "HEX / 값"],
             [
                 ["bg", "#FFFFFF"],
-                ["primary (브랜드 딥)", "#1F2A44"],
+                ["primary (브랜드 딥)", "#673AB7"],
                 ["accent (민트)", "#86D3B7"],
                 ["accent2 (옐로)", "#F4C84A"],
                 ["text", "#0F172A"],
@@ -299,7 +299,7 @@ def build_design_blocks() -> list[dict[str, Any]]:
                 ["ctaGradient", "#86D3B7 → #73C7FF"],
             ],
         ),
-        paragraph("레거시 호환: trustBlue / pointOrange 는 점진 마이그레이션용으로 유지."),
+        paragraph("레거시 호환: themeMainColor / pointOrange 는 점진 마이그레이션용으로 유지."),
     ]
 
 

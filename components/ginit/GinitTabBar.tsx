@@ -16,13 +16,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import { getUserProfile, isUserPhoneVerified, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
@@ -365,15 +365,15 @@ const styles = StyleSheet.create({
   fabInner: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.trustBlue,
+    borderColor: GinitTheme.themeMainColor,
   },
   fabBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: GinitTheme.trustBlue,
+    backgroundColor: GinitTheme.themeMainColor,
   },
   fabContent: {
     flexDirection: 'row',

@@ -2,12 +2,12 @@
  * Ginit 디자인 시스템 토큰 (Linear GIN-8)
  * 2026-04 리디자인: 시안(“Warm & Human Gathering”) 톤으로 팔레트/타이포/라운드 규격을 확장합니다.
  *
- * 기존 키(`trustBlue`, `pointOrange`)는 레거시 호환을 위해 유지하되,
+ * 기존 키(`themeMainColor`, `pointOrange`)는 레거시 호환을 위해 유지하되,
  * 신규 화면/컴포넌트는 `colors/*` 토큰을 우선 사용합니다.
  */
 export const GinitTheme = {
   /** Legacy: 기존 코드 호환용(점진적 마이그레이션) */
-  trustBlue: '#1F2A44',
+  themeMainColor: '#673AB7',
   /** Legacy: 기존 코드 호환용(점진적 마이그레이션) */
   pointOrange: '#86D3B7',
 
@@ -18,7 +18,7 @@ export const GinitTheme = {
     bgAlt: '#FFFFFF',
     surface: 'rgba(255, 255, 255)',
     surfaceStrong: '#FFFFFF',
-    border: 'rgba(15, 23, 42, 0.10)',
+    border: 'rgba(103, 58, 183, 0.1)',
     borderStrong: 'rgb(19, 58, 148)',
 
     // text
@@ -28,8 +28,10 @@ export const GinitTheme = {
     textOnDark: '#F8FAFC',
 
     // brand / actions
-    primary: '#1F2A44',
-    primarySoft: 'rgba(31, 42, 68, 0.10)',
+    primary: '#673AB7',
+    /** Material Deep Purple 800 — 진한 보라 배경(밝은 텍스트 버튼 등) */
+    deepPurple: '#4527A0',
+    primarySoft: 'rgba(103, 58, 183, 0.1)',
     accent: '#86D3B7',
     accent2: '#F4C84A',
     warning: '#F59E0B',
@@ -38,8 +40,8 @@ export const GinitTheme = {
 
     // gradients
     // 모임 생성 CTA(네이비 톤) — 선택/완료 포인트와 동일 계열로 맞춤
-    brandGradient: ['#1F2A44', '#2B3A62'] as const,
-    ctaGradient: ['#1F2A44', '#2B3A62'] as const,
+    brandGradient: ['#673AB7', '#2B3A62'] as const,
+    ctaGradient: ['#673AB7', '#2B3A62'] as const,
   },
 
   /** New: 타이포 스케일(플랫폼 기본 폰트 기반) */

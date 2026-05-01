@@ -556,7 +556,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     color: GinitTheme.colors.textMuted,
     lineHeight: 15,
   },
-  /** 장소 후보 `placeResultDetailBtn`과 동일 스펙 */
+  /** 모임 생성 영화 스크롤 카드 — 상세(네이버 등) */
   movieResultDetailBtn: {
     marginTop: 8,
     flexShrink: 0,
@@ -566,13 +566,13 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: GinitTheme.radius.button,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderColor: GinitTheme.colors.deepPurple,
+    backgroundColor: GinitTheme.colors.deepPurple,
   },
   movieResultDetailBtnText: {
     fontSize: 12,
     fontWeight: '600',
-    color: GinitTheme.colors.primary,
+    color: '#FFFFFF',
   },
 });
 
