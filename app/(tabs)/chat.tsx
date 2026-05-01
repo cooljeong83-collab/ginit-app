@@ -208,15 +208,6 @@ export default function ChatTab() {
     [windowWidth],
   );
 
-  const handleEndReachedForKind = useCallback(
-    (kind: ChatKind) => {
-      if (chatKind !== kind) return;
-      if (kind === 'social' && hasMoreSocialRooms) void fetchNextSocialRoomsPage();
-      else if (kind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
-    },
-    [chatKind, hasMoreSocialRooms, hasMoreMeetingsFeed, fetchNextSocialRoomsPage, fetchNextMeetingsFeedPageGuarded],
-  );
-
   useEffect(() => {
     const k = chatKindRef.current;
     const idx = k === 'gather' ? 0 : 1;
@@ -296,6 +287,15 @@ export default function ChatTab() {
     isFetchingNextPage: isFetchingMoreSocialRooms,
     isInitialLoading: socialRoomsInitialLoading,
   } = useChatRoomsInfiniteQuery(userId, signedIn);
+
+  const handleEndReachedForKind = useCallback(
+    (kind: ChatKind) => {
+      if (chatKind !== kind) return;
+      if (kind === 'social' && hasMoreSocialRooms) void fetchNextSocialRoomsPage();
+      else if (kind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
+    },
+    [chatKind, hasMoreSocialRooms, hasMoreMeetingsFeed, fetchNextSocialRoomsPage, fetchNextMeetingsFeedPageGuarded],
+  );
 
   /** 친구 탭: `social_` 1:1 DM만 표시(그룹·기타 룸 제외) */
   const socialFriendDmRooms = useMemo(

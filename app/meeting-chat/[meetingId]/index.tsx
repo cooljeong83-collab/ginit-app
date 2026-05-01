@@ -36,7 +36,6 @@ import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-style
 import type { MeetingChatQuickActionDef } from '@/components/chat/meeting-chat-quick-action-row';
 import { meetingImageViewerMeta, profileForSender } from '@/components/chat/meeting-chat-ui-helpers';
 import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
-import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
@@ -1078,7 +1077,6 @@ export default function MeetingChatRoomScreen() {
                 style={styles.searchIconWrap}>
                 <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
               </Pressable>
-              <InAppAlarmsBellButton />
               <Pressable
                 onPress={() => router.push(`/meeting-chat/${meetingId}/settings`)}
                 accessibilityRole="button"
