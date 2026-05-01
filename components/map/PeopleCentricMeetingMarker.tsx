@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { Animated, Image as RNImage, Platform, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -8,6 +8,7 @@ import { getHomeCategoryVisual } from '@/src/lib/feed-home-visual';
 import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 const AVATAR = 44;
 const BORDER = 2.5;
@@ -149,7 +150,7 @@ function PeopleCentricMeetingMarkerInner({
           {pulseEnabled && isConfirmed ? (
             <Animated.View style={[styles.badgePulseRing, pulseStyle]} pointerEvents="none" />
           ) : null}
-          <Ionicons name={visual.icon} size={12} color="#fff" />
+          <GinitSymbolicIcon name={visual.icon} size={12} color="#fff" />
         </View>
       </View>
 

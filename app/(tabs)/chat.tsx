@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -56,6 +56,7 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 /** 친구 채팅 행 좌측 액센트 — 홈 카드 톤과 어울리는 블루·민트 그라데이션 */
 const SOCIAL_CHAT_LIST_ACCENT = ['rgba(0, 82, 204, 0.28)', 'rgba(134, 211, 183, 0.18)'] as const;
@@ -672,14 +673,14 @@ export default function ChatTab() {
 
   const chatListEmptyCentered = useCallback(
     (
-      icon: React.ComponentProps<typeof Ionicons>['name'],
+      icon: SymbolicIconName,
       title: string,
       body: string,
     ): ReactElement => (
       <View style={[styles.chatListEmptyFill, { minHeight: chatEmptyMinHeight }]}>
         <View style={styles.chatListEmptyInner}>
           <View style={styles.chatListEmptyIconCircle}>
-            <Ionicons name={icon} size={34} color={GinitTheme.colors.primary} />
+            <GinitSymbolicIcon name={icon} size={34} color={GinitTheme.colors.primary} />
           </View>
           <Text style={styles.chatListEmptyTitle}>{title}</Text>
           <Text style={styles.chatListEmptyBody}>{body}</Text>
@@ -706,7 +707,7 @@ export default function ChatTab() {
             accessibilityLabel="채팅 검색"
             hitSlop={10}
             style={styles.searchIconWrap}>
-            <Ionicons name="search-outline" size={24} color="#0f172a" />
+            <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
             {chatSearchFiltersDot ? <View style={styles.searchFilterDot} /> : null}
           </Pressable>
         </View>
@@ -1103,7 +1104,7 @@ const styles = StyleSheet.create({
   },
   feedHeader: {
     marginBottom: 16,
-    paddingTop: 4,
+    paddingTop: 12,
     paddingHorizontal: 20,
     gap: 12,
   },

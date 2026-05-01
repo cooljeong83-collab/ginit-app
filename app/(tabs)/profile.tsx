@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
@@ -6,22 +5,22 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Easing,
-    KeyboardAvoidingView,
-    LayoutChangeEvent,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    ToastAndroid,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  LayoutChangeEvent,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  ToastAndroid,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,46 +31,47 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import {
-    type SignUpGenderCode,
+  type SignUpGenderCode,
 } from '@/src/hooks/useSignUpFlow';
 import {
-    deleteFirebaseAuthUserStrict,
-    purgeUserAccountRemote,
-    purgeUserAccountRemoteByFirebaseUid,
-    wipeLocalAppData,
+  deleteFirebaseAuthUserStrict,
+  purgeUserAccountRemote,
+  purgeUserAccountRemoteByFirebaseUid,
+  wipeLocalAppData,
 } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import {
-    effectiveGTrust,
-    levelBarFillColorForTrust,
-    trustTierForUser,
-    xpProgressWithinLevel,
+  effectiveGTrust,
+  levelBarFillColorForTrust,
+  trustTierForUser,
+  xpProgressWithinLevel,
 } from '@/src/lib/ginit-trust';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import {
-    isProfileRegisterInfoParamOn,
-    PROFILE_REGISTER_INFO_QUERY,
+  isProfileRegisterInfoParamOn,
+  PROFILE_REGISTER_INFO_QUERY,
 } from '@/src/lib/profile-register-info';
 import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
-    ensureUserProfile,
-    firestoreTimestampLikeToDate,
-    hasTermsAgreementRecorded,
-    isDemographicsIncomplete,
-    isMeetingServiceComplianceComplete,
-    isUserPhoneVerified,
-    meetingDemographicsIncomplete,
-    readGooglePeopleDemographicsLocks,
-    updateUserProfile,
-    type UserProfile,
+  ensureUserProfile,
+  firestoreTimestampLikeToDate,
+  hasTermsAgreementRecorded,
+  isDemographicsIncomplete,
+  isMeetingServiceComplianceComplete,
+  isUserPhoneVerified,
+  meetingDemographicsIncomplete,
+  readGooglePeopleDemographicsLocks,
+  updateUserProfile,
+  type UserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function ProfileTab() {
   const router = useRouter();
@@ -277,6 +277,13 @@ export default function ProfileTab() {
   const onGoEditProfile = useCallback(() => {
     router.push('/profile/edit');
   }, [router]);
+
+  const [menuSectionY, setMenuSectionY] = useState(0);
+
+  const onPressProfileMenu = useCallback(() => {
+    const y = menuSectionY > 0 ? Math.max(0, menuSectionY - 12) : 0;
+    scrollRef.current?.scrollTo({ y, animated: true });
+  }, [menuSectionY]);
 
   const onPickHeaderProfilePhoto = useCallback(async () => {
     if (!profilePk) {
@@ -704,8 +711,33 @@ export default function ProfileTab() {
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={[styles.fixedHeader, { paddingHorizontal: 20 }]}>
+          <View style={styles.headerTop}>
+            <Text style={styles.screenHeaderTitle} accessibilityRole="header">
+              프로필
+            </Text>
+            <View style={styles.headerIcons}>
+              <Pressable
+                accessibilityLabel="프로필 편집"
+                hitSlop={8}
+                onPress={onGoEditProfile}
+                style={styles.iconBtn}>
+                <GinitSymbolicIcon name="account-edit-outline" size={22} color="#0f172a" />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="메뉴"
+                hitSlop={8}
+                onPress={onPressProfileMenu}
+                style={styles.iconBtn}>
+                <GinitSymbolicIcon name="ellipsis-vertical" size={22} color="#0f172a" />
+              </Pressable>
+            </View>
+          </View>
+        </View>
+
         <ScrollView
           ref={scrollRef}
+          style={styles.scrollFlex}
           contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
@@ -745,13 +777,6 @@ export default function ProfileTab() {
                         : '(세션 없음)'}
                 </Text>
               </View>
-              <Pressable
-                onPress={onGoEditProfile}
-                style={({ pressed }) => [styles.headerEditBtn, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="프로필 편집">
-                <Text style={styles.headerEditText}>프로필 편집</Text>
-              </Pressable>
             </View>
           </View>
 
@@ -801,7 +826,7 @@ export default function ProfileTab() {
             </View>
           </GinitCard>
 
-          <View style={styles.menuListWrap}>
+          <View style={styles.menuListWrap} onLayout={(e) => setMenuSectionY(e.nativeEvent.layout.y)}>
             <Pressable
               onPress={() => router.push('/profile/meeting-history')}
               style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
@@ -809,7 +834,7 @@ export default function ProfileTab() {
               accessibilityLabel="모임 히스토리">
               <View style={styles.menuLeft}>
                 <View style={styles.menuIconWrap}>
-                  <Ionicons name="time-outline" size={18} color="#0f172a" />
+                  <GinitSymbolicIcon name="time-outline" size={18} color="#0f172a" />
                 </View>
                 <View style={styles.menuTextCol}>
                   <Text style={styles.menuTitle}>모임 히스토리</Text>
@@ -832,7 +857,7 @@ export default function ProfileTab() {
               accessibilityLabel="인증 정보 등록">
               <View style={styles.menuLeft}>
                 <View style={styles.menuIconWrap}>
-                  <Ionicons name="shield-checkmark-outline" size={18} color="#0f172a" />
+                  <GinitSymbolicIcon name="shield-checkmark-outline" size={18} color="#0f172a" />
                 </View>
                 <View style={styles.menuTextCol}>
                   <Text style={styles.menuTitle}>인증 정보 등록</Text>
@@ -862,7 +887,7 @@ export default function ProfileTab() {
                   accessibilityLabel="로그아웃">
                   <View style={styles.menuLeft}>
                     <View style={styles.menuIconWrap}>
-                      <Ionicons name="log-out-outline" size={18} color="#0f172a" />
+                      <GinitSymbolicIcon name="log-out-outline" size={18} color="#0f172a" />
                     </View>
                     <View style={styles.menuTextCol}>
                       <Text style={styles.menuTitle}>로그아웃</Text>
@@ -885,7 +910,7 @@ export default function ProfileTab() {
                   accessibilityLabel="회원 탈퇴">
                   <View style={styles.menuLeft}>
                     <View style={[styles.menuIconWrap, styles.menuIconWrapDanger]}>
-                      <Ionicons name="warning-outline" size={18} color="#b91c1c" />
+                      <GinitSymbolicIcon name="warning-outline" size={18} color="#b91c1c" />
                     </View>
                     <View style={styles.menuTextCol}>
                       <Text style={styles.menuTitleDanger}>{deleteBusy ? '탈퇴 처리 중…' : '회원 탈퇴'}</Text>
@@ -902,7 +927,7 @@ export default function ProfileTab() {
                 accessibilityLabel="로그인">
                 <View style={styles.menuLeft}>
                   <View style={styles.menuIconWrap}>
-                    <Ionicons name="log-in-outline" size={18} color="#0f172a" />
+                    <GinitSymbolicIcon name="log-in-outline" size={18} color="#0f172a" />
                   </View>
                   <View style={styles.menuTextCol}>
                     <Text style={styles.menuTitle}>로그인</Text>
@@ -1149,6 +1174,17 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
   },
+  scrollFlex: { flex: 1 },
+  fixedHeader: {
+    paddingTop: 12,
+    paddingBottom: 10,
+    backgroundColor: GinitTheme.colors.bg,
+    zIndex: 3,
+  },
+  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  screenHeaderTitle: { fontSize: 20, fontWeight: '700', color: GinitTheme.trustBlue, flex: 1 },
+  headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  iconBtn: { padding: 6, borderRadius: 10 },
   scrollBottom: {
     paddingTop: 8,
     paddingBottom: 32,
@@ -1211,20 +1247,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#64748b',
-  },
-  headerEditBtn: {
-    flexShrink: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-  },
-  headerEditText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0f172a',
   },
   quickGrid: {
     flexDirection: 'row',

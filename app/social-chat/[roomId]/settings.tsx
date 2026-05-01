@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
@@ -23,8 +23,9 @@ import { getSocialChatNotifyEnabledForUser, setSocialChatNotifyEnabledForUser } 
 import { parsePeerFromSocialRoomId } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
-type IonIconName = ComponentProps<typeof Ionicons>['name'];
+type IonIconName = SymbolicIconName;
 
 function SettingsRowIcon({ name, destructive }: { name: IonIconName; destructive?: boolean }) {
   return (
@@ -32,7 +33,7 @@ function SettingsRowIcon({ name, destructive }: { name: IonIconName; destructive
       style={[styles.rowIconSlot, destructive && styles.rowIconSlotDanger]}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants">
-      <Ionicons name={name} size={22} color={destructive ? '#dc2626' : '#475569'} />
+      <GinitSymbolicIcon name={name} size={22} color={destructive ? '#dc2626' : '#475569'} />
     </View>
   );
 }
@@ -61,7 +62,7 @@ function SettingsRowChevron({
           </Text>
         ) : null}
       </View>
-      <Ionicons name="chevron-forward" size={18} color={destructive ? '#f87171' : '#94a3b8'} />
+      <GinitSymbolicIcon name="chevron-forward" size={18} color={destructive ? '#f87171' : '#94a3b8'} />
     </Pressable>
   );
 }
@@ -207,7 +208,7 @@ export default function SocialChatSettingsScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
-          <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
+          <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
         </Pressable>
         <Text style={styles.headerTitle}>채팅방 설정</Text>
         <View style={{ width: 28 }} />
@@ -216,7 +217,7 @@ export default function SocialChatSettingsScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.heroCard}>
           <View style={styles.heroIcon}>
-            <Ionicons name="chatbubbles" size={28} color={GinitTheme.colors.primary} />
+            <GinitSymbolicIcon name="chatbubbles" size={28} color={GinitTheme.colors.primary} />
           </View>
           <Text style={styles.heroTitle} numberOfLines={2}>
             {peerName}
@@ -330,7 +331,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingTop: 12,
+    paddingBottom: 8,
     backgroundColor: '#f2f4f7',
   },
   headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },

@@ -4,7 +4,7 @@
  * 일정 확정(`scheduleStep`) 후 `placesStep`에서 장소 후보 카드를 채운 뒤 상세·등록(`detailStep`)으로 이동.
  * 단계 번호: 4(일정)→5(장소)→6(상세). 영화도 동일(선행 장소 단계 없음 — 장소는 `placesStep` 한 번만).
  */
-import { Ionicons } from '@expo/vector-icons';
+
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
@@ -117,6 +117,7 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 import { DateCandidateEditorCard, type DatePickerField } from '../../components/create/DateCandidateEditorCard';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
@@ -1753,7 +1754,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   {voiceRecognizing && voiceTarget === 'scheduleIdea' ? (
                     <VoiceWaveform active color={GinitTheme.colors.primary} />
                   ) : (
-                    <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                    <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                   )}
                 </Pressable>
               </View>
@@ -1858,7 +1859,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="이전 달">
-                <Ionicons name="chevron-back" size={18} color={GinitTheme.colors.primary} />
+                <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
               <Pressable
                 onPress={() => {
@@ -1877,7 +1878,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="다음 달">
-                <Ionicons name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
+                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
             </View>
             <View style={styles.calendarDowRow}>
@@ -2000,7 +2001,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   {voiceRecognizing && voiceTarget === 'placeQuery' ? (
                     <VoiceWaveform active color={GinitTheme.colors.primary} />
                   ) : (
-                    <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                    <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                   )}
                 </Pressable>
               </View>
@@ -2160,7 +2161,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                   </View>
                                 ) : selected ? (
                                   <View style={styles.placeResultImageOverlay}>
-                                    <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                                    <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                                   </View>
                                 ) : null}
                               </View>
@@ -3630,7 +3631,7 @@ export default function CreateDetailsScreen() {
                             {voiceTitleRecognizing ? (
                               <VoiceWaveform active color={GinitTheme.colors.primary} />
                             ) : (
-                              <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                              <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                             )}
                           </Pressable>
                         </View>
@@ -3893,7 +3894,7 @@ export default function CreateDetailsScreen() {
                             {voiceDescriptionRecognizing ? (
                               <VoiceWaveform active color={GinitTheme.colors.primary} />
                             ) : (
-                              <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                              <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                             )}
                           </Pressable>
                         </View>

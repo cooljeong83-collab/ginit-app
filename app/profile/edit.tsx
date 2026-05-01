@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -44,6 +44,7 @@ import {
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
@@ -590,7 +591,7 @@ export default function ProfileEditScreen() {
                   style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
                   accessibilityRole="button"
                   accessibilityLabel="뒤로">
-                  <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+                  <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
                 </Pressable>
               </View>
               <Text style={styles.heroTitle}>프로필 편집</Text>
@@ -615,7 +616,7 @@ export default function ProfileEditScreen() {
                     {photoUploadBusy ? (
                       <ActivityIndicator size="small" color={GinitTheme.colors.primary} />
                     ) : (
-                      <Ionicons name="camera" size={16} color={GinitTheme.colors.primary} />
+                      <GinitSymbolicIcon name="camera" size={16} color={GinitTheme.colors.primary} />
                     )}
                   </View>
                 </View>
@@ -669,7 +670,7 @@ const styles = StyleSheet.create({
   },
   heroInner: {
     paddingHorizontal: 20,
-    paddingTop: 4,
+    paddingTop: 12,
     paddingBottom: 26,
     backgroundColor: GinitTheme.colors.surfaceStrong,
   },

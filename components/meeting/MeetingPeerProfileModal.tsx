@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -18,13 +18,14 @@ import {
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
-    WITHDRAWN_NICKNAME,
-    ensureUserProfile,
-    getUserProfile,
-    isUserProfileWithdrawn,
-    meetingDemographicsIncomplete,
-    type UserProfile,
+  WITHDRAWN_NICKNAME,
+  ensureUserProfile,
+  getUserProfile,
+  isUserProfileWithdrawn,
+  meetingDemographicsIncomplete,
+  type UserProfile,
 } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 function nicknameInitial(nickname: string): string {
   const t = nickname.trim();
@@ -299,7 +300,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
         : friendRelation.status === 'pending_in'
           ? '친구 요청 수락'
           : '친구 신청하기';
-  const friendIconName: keyof typeof Ionicons.glyphMap =
+  const friendIconName: SymbolicIconName =
     friendRelation.status === 'accepted'
       ? 'checkmark-circle'
       : friendRelation.status === 'pending_out'
@@ -337,7 +338,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
               style={({ pressed }) => [styles.profileModalCloseBtn, pressed && { opacity: 0.9 }]}
               accessibilityRole="button"
               accessibilityLabel="닫기">
-              <Ionicons name="close" size={18} color={GinitTheme.colors.textMuted} />
+              <GinitSymbolicIcon name="close" size={18} color={GinitTheme.colors.textMuted} />
             </Pressable>
           </View>
 
@@ -348,7 +349,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
                 style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
                 accessibilityRole="button"
                 accessibilityLabel="내 프로필">
-                <Ionicons name="person" size={16} color="#fff" />
+                <GinitSymbolicIcon name="person" size={16} color="#fff" />
                 <Text style={styles.profileActionPrimaryText}>내 프로필</Text>
               </Pressable>
             ) : isAi ? (
@@ -357,7 +358,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
                 style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
                 accessibilityRole="text"
                 accessibilityLabel="지닛 도우미">
-                <Ionicons name="sparkles" size={16} color="#fff" />
+                <GinitSymbolicIcon name="sparkles" size={16} color="#fff" />
                 <Text style={styles.profileActionPrimaryText}>지닛 도우미</Text>
               </Pressable>
             ) : (
@@ -378,7 +379,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
                 {friendRequestBusy ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Ionicons name={friendIconName} size={16} color="#fff" />
+                  <GinitSymbolicIcon name={friendIconName} size={16} color="#fff" />
                 )}
                 <Text style={styles.profileActionPrimaryText} numberOfLines={1}>
                   {friendLabel}

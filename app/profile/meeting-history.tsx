@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -13,6 +13,7 @@ import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function ProfileMeetingHistoryScreen() {
   const router = useRouter();
@@ -58,7 +59,7 @@ export default function ProfileMeetingHistoryScreen() {
             accessibilityRole="button"
             accessibilityLabel="뒤로"
             style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <Text style={styles.topTitle} numberOfLines={1}>
             참가 모임 히스토리
@@ -99,7 +100,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingTop: 12,
+    paddingBottom: 8,
     gap: 4,
   },
   backBtn: {

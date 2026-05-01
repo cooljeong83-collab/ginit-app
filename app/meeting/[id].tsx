@@ -1,7 +1,7 @@
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
-import { Ionicons } from '@expo/vector-icons';
+
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -105,6 +105,7 @@ import {
   WITHDRAWN_NICKNAME,
   type UserProfile,
 } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 const WEEKDAY_KO = WEEK_KO;
@@ -984,7 +985,7 @@ export default function MeetingDetailScreen() {
   }, [meeting]);
 
   type PublicConditionRow = {
-    icon: ComponentProps<typeof Ionicons>['name'];
+    icon: SymbolicIconName;
     label: string;
     value: string;
     variant?: 'default' | 'trust';
@@ -2283,7 +2284,7 @@ export default function MeetingDetailScreen() {
             style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <Text style={styles.topTitle}>모임 상세</Text>
           {recruitmentBadge ? (
@@ -2373,7 +2374,7 @@ export default function MeetingDetailScreen() {
             keyboardShouldPersistTaps="handled">
             <View style={styles.titleCard}>
               <Pressable style={styles.pencilAbs} accessibilityRole="button" accessibilityLabel="제목 수정">
-                <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
+                <GinitSymbolicIcon name="pencil" size={18} color={GinitTheme.colors.primary} />
               </Pressable>
               <Text style={styles.titleCardText}>{meeting.title || '제목 없음'}</Text>
             </View>
@@ -2394,7 +2395,7 @@ export default function MeetingDetailScreen() {
 
               <View style={styles.infoCategoryCard}>
                 <View style={styles.infoCategoryIconWrap}>
-                  <Ionicons name="pricetag-outline" size={20} color={GinitTheme.colors.primary} />
+                  <GinitSymbolicIcon name="pricetag-outline" size={20} color={GinitTheme.colors.primary} />
                 </View>
                 <View style={styles.infoCategoryTextCol}>
                   <Text style={styles.infoMetaLabel}>카테고리</Text>
@@ -2404,7 +2405,7 @@ export default function MeetingDetailScreen() {
 
               <View style={styles.publicBadgeRow}>
                 <View style={[styles.miniBadge, meeting.isPublic === false && styles.miniBadgeMuted]}>
-                  <Ionicons
+                  <GinitSymbolicIcon
                     name={meeting.isPublic === false ? 'lock-closed-outline' : 'globe-outline'}
                     size={14}
                     color={meeting.isPublic === false ? '#64748B' : GinitTheme.colors.primary}
@@ -2415,13 +2416,13 @@ export default function MeetingDetailScreen() {
                   </Text>
                 </View>
                 <View style={styles.miniBadge}>
-                  <Ionicons name="people-outline" size={14} color={GinitTheme.colors.primary} style={styles.miniBadgeIcon} />
+                  <GinitSymbolicIcon name="people-outline" size={14} color={GinitTheme.colors.primary} style={styles.miniBadgeIcon} />
                   <Text style={styles.miniBadgeText}>인원 {formatCapacityLine(meeting)}</Text>
                 </View>
               </View>
               {representativeScheduleText ? (
                 <View style={styles.scheduleHintRow}>
-                  <Ionicons name="time-outline" size={16} color="#64748B" />
+                  <GinitSymbolicIcon name="time-outline" size={16} color="#64748B" />
                   <Text style={[styles.infoRowMuted, styles.scheduleHintText]}>{representativeScheduleText}</Text>
                 </View>
               ) : null}
@@ -2575,7 +2576,7 @@ export default function MeetingDetailScreen() {
                         <View style={StyleSheet.absoluteFillObject} collapsable={false} />
                       </Pressable>
                       <View style={styles.confirmedMapBadge} pointerEvents="none">
-                        <Ionicons name="navigate-outline" size={14} color="#fff" />
+                        <GinitSymbolicIcon name="navigate-outline" size={14} color="#fff" />
                         <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
                       </View>
                     </View>
@@ -2601,7 +2602,7 @@ export default function MeetingDetailScreen() {
                               />
                             ) : (
                               <View style={[styles.movieDetailPosterLeft, styles.moviePosterPlaceholder]}>
-                                <Ionicons name="film-outline" size={26} color="#94A3B8" />
+                                <GinitSymbolicIcon name="film-outline" size={26} color="#94A3B8" />
                               </View>
                             )}
                           </View>
@@ -2730,7 +2731,7 @@ export default function MeetingDetailScreen() {
                           style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
                           accessibilityRole="button"
                           accessibilityLabel="이전 달">
-                          <Ionicons name="chevron-back" size={18} color={GinitTheme.colors.primary} />
+                          <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
                         </Pressable>
                         <Pressable
                           onPress={() => {
@@ -2749,7 +2750,7 @@ export default function MeetingDetailScreen() {
                           style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
                           accessibilityRole="button"
                           accessibilityLabel="다음 달">
-                          <Ionicons name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
+                          <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
                         </Pressable>
                       </View>
                       <View style={styles.calendarDowRow}>
@@ -2834,7 +2835,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="날짜 제안"
               onPress={openDateProposeModal}>
-              <Ionicons name="calendar-outline" size={20} color={GinitTheme.colors.primary} />
+              <GinitSymbolicIcon name="calendar-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
                   </View>
@@ -2875,7 +2876,7 @@ export default function MeetingDetailScreen() {
                           />
                         ) : (
                           <View style={[styles.movieDetailPosterLeft, styles.moviePosterPlaceholder]}>
-                            <Ionicons name="film-outline" size={26} color="#94A3B8" />
+                            <GinitSymbolicIcon name="film-outline" size={26} color="#94A3B8" />
                           </View>
                         )}
                       </View>
@@ -2973,7 +2974,7 @@ export default function MeetingDetailScreen() {
                                 />
                               ) : (
                                 <View style={[styles.moviePosterThumb, styles.moviePosterPlaceholder]}>
-                                  <Ionicons name="film-outline" size={22} color="#94A3B8" />
+                                  <GinitSymbolicIcon name="film-outline" size={22} color="#94A3B8" />
                                 </View>
                               )}
                               <View style={styles.voteTallyBadgeMoviePoster} pointerEvents="none">
@@ -2981,7 +2982,7 @@ export default function MeetingDetailScreen() {
                               </View>
                               {chipSelected ? (
                                 <View style={styles.moviePosterThumbCheckOverlay} pointerEvents="none">
-                                  <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                                 </View>
                               ) : null}
                             </Pressable>
@@ -3113,7 +3114,7 @@ export default function MeetingDetailScreen() {
                         <View style={StyleSheet.absoluteFillObject} collapsable={false} />
                       </Pressable>
                       <View style={styles.confirmedMapBadge} pointerEvents="none">
-                        <Ionicons name="navigate-outline" size={14} color="#fff" />
+                        <GinitSymbolicIcon name="navigate-outline" size={14} color="#fff" />
                         <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
                       </View>
                     </View>
@@ -3154,7 +3155,7 @@ export default function MeetingDetailScreen() {
                             </View>
                             {chipSelected ? (
                               <View style={styles.placeVoteSelectedOverlay} pointerEvents="none">
-                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                                <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                               </View>
                             ) : null}
                           </View>
@@ -3207,7 +3208,7 @@ export default function MeetingDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel="장소 제안"
               onPress={openPlaceProposeModal}>
-              <Ionicons name="location-outline" size={20} color={GinitTheme.colors.primary} />
+              <GinitSymbolicIcon name="location-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
             </Pressable>
               </View>
@@ -3235,7 +3236,7 @@ export default function MeetingDetailScreen() {
                             isTrust && styles.condRowTrust,
                           ]}>
                           <View style={[styles.condIconWrap, isTrust && styles.condIconWrapTrust]}>
-                            <Ionicons name={row.icon} size={19} color={isTrust ? '#9a3412' : '#0f172a'} />
+                            <GinitSymbolicIcon name={row.icon} size={19} color={isTrust ? '#9a3412' : '#0f172a'} />
                           </View>
                           <View style={styles.condTextCol}>
                             <Text style={[styles.condLabel, isTrust && styles.condLabelTrust]}>{row.label}</Text>
@@ -3249,7 +3250,7 @@ export default function MeetingDetailScreen() {
                 {publicMeetingDetails.approvalType === 'HOST_APPROVAL' &&
                 publicMeetingDetails.requestMessageEnabled === true ? (
                   <View style={styles.condCallout}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={18} color="#0369a1" />
+                    <GinitSymbolicIcon name="chatbubble-ellipses-outline" size={18} color="#0369a1" />
                     <Text style={styles.condCalloutText}>참가 신청 시 호스트가 한 줄 메시지를 받아요.</Text>
                   </View>
                 ) : null}
@@ -3291,7 +3292,7 @@ export default function MeetingDetailScreen() {
                             !withdrawn && g === 'female' ? styles.avatarCircleFemale : null,
                           ]}>
                           {withdrawn ? (
-                            <Ionicons name="person" size={22} color="#94a3b8" />
+                            <GinitSymbolicIcon name="person" size={22} color="#94a3b8" />
                           ) : photo ? (
                             <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
                           ) : (
@@ -3306,7 +3307,7 @@ export default function MeetingDetailScreen() {
                   })}
                   {recruitmentPhase === 'recruiting' ? (
                     <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
-                      <Ionicons name="add" size={26} color={GinitTheme.colors.primary} />
+                      <GinitSymbolicIcon name="add" size={26} color={GinitTheme.colors.primary} />
                     </Pressable>
                   ) : null}
                 </ScrollView>
@@ -3328,7 +3329,7 @@ export default function MeetingDetailScreen() {
                         style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                         accessibilityRole="button"
                         accessibilityLabel="초대">
-                        <Ionicons name="mail-outline" size={18} color="#fff" />
+                        <GinitSymbolicIcon name="mail-outline" size={18} color="#fff" />
                         <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                           초대
                         </Text>
@@ -3338,7 +3339,7 @@ export default function MeetingDetailScreen() {
                         style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                         accessibilityRole="button"
                         accessibilityLabel="모임 채팅">
-                        <Ionicons name="chatbubbles-outline" size={18} color="#fff" />
+                        <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
                         <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                           채팅
                         </Text>
@@ -3359,7 +3360,7 @@ export default function MeetingDetailScreen() {
                     {participantVoteBusy ? (
                       <ActivityIndicator color="#fff" size="small" />
                     ) : (
-                      <Ionicons name="save-outline" size={18} color="#fff" />
+                      <GinitSymbolicIcon name="save-outline" size={18} color="#fff" />
                     )}
                     <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                       저장
@@ -3381,7 +3382,7 @@ export default function MeetingDetailScreen() {
                       {deleteMeetingBusy ? (
                         <ActivityIndicator color="#fff" size="small" />
                       ) : (
-                        <Ionicons name="trash-outline" size={18} color="#fff" />
+                        <GinitSymbolicIcon name="trash-outline" size={18} color="#fff" />
                       )}
                       <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                         삭제
@@ -3407,7 +3408,7 @@ export default function MeetingDetailScreen() {
                       {confirmScheduleBusy ? (
                         <ActivityIndicator color="#fff" size="small" />
                       ) : (
-                        <Ionicons
+                        <GinitSymbolicIcon
                           name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
                           size={18}
                           color={meeting.scheduleConfirmed === true ? '#fff' : GinitTheme.colors.text}
@@ -3436,7 +3437,7 @@ export default function MeetingDetailScreen() {
                         style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                         accessibilityRole="button"
                         accessibilityLabel="초대">
-                        <Ionicons name="mail-outline" size={16} color="#fff" />
+                        <GinitSymbolicIcon name="mail-outline" size={16} color="#fff" />
                         <Text
                           style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
                           numberOfLines={1}
@@ -3449,7 +3450,7 @@ export default function MeetingDetailScreen() {
                         style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                         accessibilityRole="button"
                         accessibilityLabel="모임 채팅">
-                        <Ionicons name="chatbubbles-outline" size={16} color="#fff" />
+                        <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
                         <Text
                           style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
                           numberOfLines={1}
@@ -3473,7 +3474,7 @@ export default function MeetingDetailScreen() {
                     {participantVoteBusy ? (
                       <ActivityIndicator color="#fff" size="small" />
                     ) : (
-                      <Ionicons name="save-outline" size={16} color="#fff" />
+                      <GinitSymbolicIcon name="save-outline" size={16} color="#fff" />
                     )}
                     <Text
                       style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
@@ -3494,7 +3495,7 @@ export default function MeetingDetailScreen() {
                     ]}
                     accessibilityRole="button"
                     accessibilityLabel="퇴장">
-                    <Ionicons name="exit-outline" size={16} color="#fff" />
+                    <GinitSymbolicIcon name="exit-outline" size={16} color="#fff" />
                     <Text
                       style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
                       numberOfLines={1}
@@ -3541,7 +3542,7 @@ export default function MeetingDetailScreen() {
                       {joinBusy ? (
                         <ActivityIndicator color="#fff" size="small" />
                       ) : (
-                        <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                        <GinitSymbolicIcon name="hand-right-outline" size={18} color="#fff" />
                       )}
                       <Text style={styles.joinCtaLabel} numberOfLines={1} ellipsizeMode="tail">
                         참여
@@ -3585,7 +3586,7 @@ export default function MeetingDetailScreen() {
               ]}>
               <View style={styles.proposeModalHeaderRow}>
                 <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
-                  <Ionicons name="calendar-outline" size={22} color={GinitTheme.colors.primary} />
+                  <GinitSymbolicIcon name="calendar-outline" size={22} color={GinitTheme.colors.primary} />
                 </View>
                 <View style={styles.proposeModalHeaderTextCol}>
                   <Text style={styles.proposeModalTitle}>날짜 제안</Text>
@@ -3671,7 +3672,7 @@ export default function MeetingDetailScreen() {
             <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.72) }]}>
               <View style={styles.proposeModalHeaderRow}>
                 <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
-                  <Ionicons name="location-outline" size={22} color={GinitTheme.colors.primary} />
+                  <GinitSymbolicIcon name="location-outline" size={22} color={GinitTheme.colors.primary} />
                 </View>
                 <View style={styles.proposeModalHeaderTextCol}>
                   <Text style={styles.proposeModalTitle}>장소 제안</Text>
@@ -3751,7 +3752,7 @@ export default function MeetingDetailScreen() {
               <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.6) }]}>
                 <View style={styles.proposeModalHeaderRow}>
                   <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
-                    <Ionicons name="time-outline" size={22} color={GinitTheme.colors.primary} />
+                    <GinitSymbolicIcon name="time-outline" size={22} color={GinitTheme.colors.primary} />
                   </View>
                   <View style={styles.proposeModalHeaderTextCol}>
                     <Text style={styles.proposeModalTitle}>시간 선택</Text>
@@ -3788,7 +3789,7 @@ export default function MeetingDetailScreen() {
                             </Text>
                           </View>
                           {selected ? (
-                            <Ionicons name="checkmark-circle" size={18} color={GinitTheme.colors.primary} />
+                            <GinitSymbolicIcon name="checkmark-circle" size={18} color={GinitTheme.colors.primary} />
                           ) : (
                             <View style={styles.timeVoteCheckPlaceholder} />
                           )}
@@ -3929,7 +3930,7 @@ export default function MeetingDetailScreen() {
                       : friendRelation.status === 'pending_in'
                         ? '친구 요청 수락'
                         : '친구 요청';
-                const friendIconName: keyof typeof Ionicons.glyphMap =
+                const friendIconName: SymbolicIconName =
                   friendRelation.status === 'accepted'
                     ? 'checkmark-circle'
                     : friendRelation.status === 'pending_out'
@@ -3964,7 +3965,7 @@ export default function MeetingDetailScreen() {
                         style={({ pressed }) => [styles.profileModalCloseBtn, pressed && { opacity: 0.9 }]}
                         accessibilityRole="button"
                         accessibilityLabel="닫기">
-                        <Ionicons name="close" size={18} color={GinitTheme.colors.textMuted} />
+                        <GinitSymbolicIcon name="close" size={18} color={GinitTheme.colors.textMuted} />
                       </Pressable>
                     </View>
 
@@ -3975,7 +3976,7 @@ export default function MeetingDetailScreen() {
                           style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
                           accessibilityRole="button"
                           accessibilityLabel="내 프로필">
-                          <Ionicons name="person" size={16} color="#fff" />
+                          <GinitSymbolicIcon name="person" size={16} color="#fff" />
                           <Text style={styles.profileActionPrimaryText}>내 프로필</Text>
                         </Pressable>
                       ) : (
@@ -4003,7 +4004,7 @@ export default function MeetingDetailScreen() {
                           {friendRequestBusy ? (
                             <ActivityIndicator color="#fff" size="small" />
                           ) : (
-                            <Ionicons name={friendIconName} size={16} color="#fff" />
+                            <GinitSymbolicIcon name={friendIconName} size={16} color="#fff" />
                           )}
                           <Text style={styles.profileActionPrimaryText} numberOfLines={1}>
                             {friendLabel}
@@ -4036,6 +4037,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
+    paddingTop: 10,
     paddingBottom: 8,
     gap: 4,
   },

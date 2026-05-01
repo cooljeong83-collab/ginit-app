@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
@@ -68,6 +68,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 /** Firestore Timestamp · `{ seconds }` · Ledger ISO 문자열 → ms */
 function coalesceFirestoreTimeMs(v: unknown): number {
@@ -1056,7 +1057,7 @@ export default function MeetingChatRoomScreen() {
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <View style={styles.titleBlock}>
             <Text style={styles.titleMain} numberOfLines={1}>
@@ -1075,7 +1076,7 @@ export default function MeetingChatRoomScreen() {
                 accessibilityLabel="대화 검색"
                 hitSlop={10}
                 style={styles.searchIconWrap}>
-                <Ionicons name="search-outline" size={24} color="#0f172a" />
+                <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
               </Pressable>
               <InAppAlarmsBellButton />
               <Pressable
@@ -1084,7 +1085,7 @@ export default function MeetingChatRoomScreen() {
                 accessibilityLabel="채팅방 설정"
                 hitSlop={10}
                 style={styles.settingsIconWrap}>
-                <Ionicons name="settings-outline" size={24} color="#0f172a" />
+                <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
               </Pressable>
             </View>
           </View>
@@ -1097,11 +1098,11 @@ export default function MeetingChatRoomScreen() {
             accessibilityRole="button"
             accessibilityLabel="공지">
             <BlurView tint="light" intensity={60} style={styles.announcementInner}>
-              <Ionicons name="megaphone-outline" size={16} color="#0052CC" />
+              <GinitSymbolicIcon name="megaphone-outline" size={16} color="#0052CC" />
               <Text style={styles.announcementText} numberOfLines={1}>
                 {announcementText}
               </Text>
-              <Ionicons name="chevron-forward" size={16} color="#64748b" />
+              <GinitSymbolicIcon name="chevron-forward" size={16} color="#64748b" />
             </BlurView>
           </Pressable>
         ) : null}
@@ -1165,13 +1166,13 @@ export default function MeetingChatRoomScreen() {
                 hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel="닫기">
-                <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+                <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
               </Pressable>
               <Text style={styles.chatSearchTitle}>대화 검색</Text>
               <View style={styles.chatSearchHeaderSpacer} />
             </View>
             <View style={styles.chatSearchFieldWrap}>
-              <Ionicons name="search-outline" size={20} color="#94a3b8" style={styles.chatSearchFieldIcon} />
+              <GinitSymbolicIcon name="search-outline" size={20} color="#94a3b8" style={styles.chatSearchFieldIcon} />
               <TextInput
                 ref={chatSearchInputRef}
                 style={styles.chatSearchInput}
@@ -1228,7 +1229,7 @@ export default function MeetingChatRoomScreen() {
                   disabled={imageViewerBusy}
                   accessibilityRole="button"
                   accessibilityLabel="닫기">
-                  <Ionicons name="close" size={26} color="#fff" />
+                  <GinitSymbolicIcon name="close" size={26} color="#fff" />
                 </Pressable>
                 <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
                   <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
@@ -1260,7 +1261,7 @@ export default function MeetingChatRoomScreen() {
                     disabled={imageViewerBusy}
                     accessibilityRole="button"
                     accessibilityLabel="공유">
-                    <Ionicons name="share-outline" size={24} color="#fff" />
+                    <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -1281,7 +1282,7 @@ export default function MeetingChatRoomScreen() {
                     disabled={imageViewerBusy}
                     accessibilityRole="button"
                     accessibilityLabel="저장">
-                    <Ionicons name="download-outline" size={24} color="#fff" />
+                    <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
                   </Pressable>
                   {imageViewer?.canDelete ? (
                     <Pressable
@@ -1316,7 +1317,7 @@ export default function MeetingChatRoomScreen() {
                       disabled={imageViewerBusy}
                       accessibilityRole="button"
                       accessibilityLabel="삭제">
-                      <Ionicons name="trash-outline" size={24} color="#fff" />
+                      <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
                     </Pressable>
                   ) : null}
                 </View>
@@ -1360,7 +1361,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingTop: 12,
+    paddingBottom: 8,
     gap: 6,
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,

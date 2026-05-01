@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { writeAppIntroComplete } from '@/src/lib/onboarding-storage';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SLIDE_HEIGHT = Math.max(400, SCREEN_H - 220);
@@ -62,11 +63,11 @@ function paramToString(v: string | string[] | undefined): string | undefined {
 function IllustrationPlaceholder({ kind }: { kind: IllustrationKind }) {
   const icon =
     kind === 'gathering' ? (
-      <Ionicons name="people-outline" size={56} color="#64748b" />
+      <GinitSymbolicIcon name="people-outline" size={56} color="#64748b" />
     ) : kind === 'calendar' ? (
-      <Ionicons name="calendar-outline" size={56} color="#64748b" />
+      <GinitSymbolicIcon name="calendar-outline" size={56} color="#64748b" />
     ) : (
-      <Ionicons name="images-outline" size={56} color="#64748b" />
+      <GinitSymbolicIcon name="images-outline" size={56} color="#64748b" />
     );
   return (
     <View style={illusStyles.frame} accessibilityLabel="일러스트 영역(추후 이미지 삽입)">

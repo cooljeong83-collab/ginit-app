@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -22,10 +22,11 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import { getUserProfile, isUserPhoneVerified, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
-function iconFor(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
+function iconFor(routeName: string, focused: boolean): SymbolicIconName {
   switch (routeName) {
     case 'index':
       return focused ? 'people' : 'people-outline';
@@ -239,7 +240,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                 onPress={() => onTabPress(route, originalIndex)}
                 style={styles.tab}>
                 <View style={styles.tabIconCluster}>
-                  <Ionicons
+                  <GinitSymbolicIcon
                     name={iconFor(route.name, focused)}
                     size={24}
                     color={focused ? GinitTheme.colors.primary : 'rgba(100, 116, 139, 0.85)'}
@@ -274,7 +275,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
               <View style={styles.fabBg} pointerEvents="none" />
               <Animated.View style={[styles.fabContent, fabContentPadStyle]}>
                 <View style={styles.fabLogo} pointerEvents="none">
-                  <Ionicons name="add" size={24} color="#FFFFFF" />
+                  <GinitSymbolicIcon name="add" size={24} color="#FFFFFF" />
                 </View>
                 <Animated.View style={[styles.fabLabelWrap, fabLabelStyle]}>
                   <Text style={styles.fabLabelText} numberOfLines={1}>

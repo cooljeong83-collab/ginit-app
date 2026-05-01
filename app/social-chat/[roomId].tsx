@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
@@ -19,14 +19,15 @@ import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import {
-    ensureSocialChatRoomDoc,
-    parsePeerFromSocialRoomId,
-    searchSocialChatMessages,
-    subscribeSocialChatMessages,
-    subscribeSocialChatRoom,
-    updateSocialChatReadReceipt,
-    type SocialChatRoomDoc,
+  ensureSocialChatRoomDoc,
+  parsePeerFromSocialRoomId,
+  searchSocialChatMessages,
+  subscribeSocialChatMessages,
+  subscribeSocialChatRoom,
+  updateSocialChatReadReceipt,
+  type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function SocialChatRoomScreen() {
   const router = useRouter();
@@ -259,7 +260,7 @@ export default function SocialChatRoomScreen() {
       <SafeAreaView edges={['top']} style={s.topSafe}>
         <View style={s.topBar}>
           <Pressable onPress={exitSocialChat} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <Pressable
             onPress={() => {
@@ -282,7 +283,7 @@ export default function SocialChatRoomScreen() {
             accessibilityLabel="대화 검색"
             style={s.searchBtn}
           >
-            <Ionicons name="search-outline" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
           </Pressable>
           <Pressable
             onPress={openSettings}
@@ -291,7 +292,7 @@ export default function SocialChatRoomScreen() {
             accessibilityLabel="채팅방 설정"
             style={s.settingsBtn}
           >
-            <Ionicons name="settings-outline" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
           </Pressable>
         </View>
       </SafeAreaView>
@@ -321,13 +322,13 @@ export default function SocialChatRoomScreen() {
         <SafeAreaView style={s.searchSafe} edges={['top', 'bottom']}>
           <View style={s.searchHeader}>
             <Pressable onPress={closeSearch} hitSlop={12} accessibilityRole="button" accessibilityLabel="닫기">
-              <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+              <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
             </Pressable>
             <Text style={s.searchTitle}>대화 검색</Text>
             <View style={s.searchHeaderSpacer} />
           </View>
           <View style={s.searchFieldWrap}>
-            <Ionicons name="search-outline" size={20} color="#94a3b8" style={s.searchFieldIcon} />
+            <GinitSymbolicIcon name="search-outline" size={20} color="#94a3b8" style={s.searchFieldIcon} />
             <TextInput
               ref={searchInputRef}
               style={s.searchInput}
@@ -388,7 +389,8 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingTop: 12,
+    paddingBottom: 8,
     gap: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',

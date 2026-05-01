@@ -1,9 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useCallback, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type TermKey = 'tos' | 'privacy';
 
@@ -93,7 +94,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
               <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-                <Ionicons name="close" size={22} color={GinitTheme.colors.text} />
+                <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
               </Pressable>
             </View>
 
@@ -103,7 +104,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
               accessibilityRole="checkbox"
               accessibilityState={{ checked: allChecked }}
               accessibilityLabel="전체 동의">
-              <Ionicons
+              <GinitSymbolicIcon
                 name={allChecked ? 'checkmark-circle' : 'ellipse-outline'}
                 size={22}
                 color={allChecked ? GinitTheme.colors.primary : '#94a3b8'}
@@ -124,7 +125,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
                       accessibilityRole="checkbox"
                       accessibilityState={{ checked: isChecked }}
                       accessibilityLabel={`${label.required ? '[필수] ' : ''}${label.title} 동의`}>
-                      <Ionicons
+                      <GinitSymbolicIcon
                         name={isChecked ? 'checkmark-circle' : 'ellipse-outline'}
                         size={20}
                         color={isChecked ? GinitTheme.colors.primary : '#94a3b8'}
@@ -168,7 +169,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>{detailTitle}</Text>
             <Pressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-              <Ionicons name="close" size={22} color={GinitTheme.colors.text} />
+              <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.detailBody}>

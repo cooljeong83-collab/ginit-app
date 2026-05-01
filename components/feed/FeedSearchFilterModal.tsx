@@ -1,13 +1,14 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { defaultFeedSearchFilters, type FeedSearchFilters } from '@/src/lib/feed-meeting-utils';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import type {
-    PublicMeetingAgeLimit,
-    PublicMeetingApprovalType,
-    PublicMeetingGenderRatio,
-    PublicMeetingSettlement,
+  PublicMeetingAgeLimit,
+  PublicMeetingApprovalType,
+  PublicMeetingGenderRatio,
+  PublicMeetingSettlement,
 } from '@/src/lib/meetings';
 
 const AGE_CHIPS: { code: PublicMeetingAgeLimit; label: string }[] = [
@@ -180,7 +181,7 @@ export function FeedSearchFilterModal({ visible, filters, onChangeFilters, onClo
               style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
               accessibilityRole="button">
               <Text style={styles.primaryBtnLabel}>적용</Text>
-              <Ionicons name="checkmark" size={20} color="#fff" />
+              <GinitSymbolicIcon name="checkmark" size={20} color="#fff" />
             </Pressable>
           </View>
 

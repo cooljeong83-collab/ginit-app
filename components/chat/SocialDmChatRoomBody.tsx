@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import * as ImagePicker from 'expo-image-picker';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
@@ -39,6 +39,7 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export type SocialDmChatRoomBodyHandle = {
   /** 모임 채팅과 동일하게 `data`는 최신이 index 0(inverted 기준). */
@@ -566,7 +567,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                   disabled={imageViewerBusy}
                   accessibilityRole="button"
                   accessibilityLabel="닫기">
-                  <Ionicons name="close" size={26} color="#fff" />
+                  <GinitSymbolicIcon name="close" size={26} color="#fff" />
                 </Pressable>
                 <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
                   <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
@@ -598,7 +599,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                     disabled={imageViewerBusy}
                     accessibilityRole="button"
                     accessibilityLabel="공유">
-                    <Ionicons name="share-outline" size={24} color="#fff" />
+                    <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
                   </Pressable>
                   <Pressable
                     onPress={() => {
@@ -619,7 +620,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                     disabled={imageViewerBusy}
                     accessibilityRole="button"
                     accessibilityLabel="저장">
-                    <Ionicons name="download-outline" size={24} color="#fff" />
+                    <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
                   </Pressable>
                   {imageViewer?.canDelete ? (
                     <Pressable
@@ -654,7 +655,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                       disabled={imageViewerBusy}
                       accessibilityRole="button"
                       accessibilityLabel="삭제">
-                      <Ionicons name="trash-outline" size={24} color="#fff" />
+                      <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
                     </Pressable>
                   ) : null}
                 </View>

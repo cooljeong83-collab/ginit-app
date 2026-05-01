@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
@@ -34,6 +34,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function profileForSender(map: Map<string, UserProfile>, senderId: string | null): UserProfile | undefined {
   if (!senderId?.trim()) return undefined;
@@ -245,7 +246,7 @@ export default function MeetingChatMediaScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
-          <Ionicons name="chevron-back" size={28} color={GinitTheme.colors.text} />
+          <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
         </Pressable>
         <Text style={styles.headerTitle}>사진</Text>
         <View style={{ width: 28 }} />
@@ -329,7 +330,7 @@ export default function MeetingChatMediaScreen() {
                 disabled={viewerBusy}
                 accessibilityRole="button"
                 accessibilityLabel="닫기">
-                <Ionicons name="close" size={26} color="#fff" />
+                <GinitSymbolicIcon name="close" size={26} color="#fff" />
               </Pressable>
               <View style={styles.viewerMetaCol} pointerEvents="none">
                 <Text style={styles.viewerMetaName} numberOfLines={1}>
@@ -361,7 +362,7 @@ export default function MeetingChatMediaScreen() {
                   disabled={viewerBusy}
                   accessibilityRole="button"
                   accessibilityLabel="공유">
-                  <Ionicons name="share-outline" size={24} color="#fff" />
+                  <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
                 </Pressable>
                 <Pressable
                   onPress={() => {
@@ -382,7 +383,7 @@ export default function MeetingChatMediaScreen() {
                   disabled={viewerBusy}
                   accessibilityRole="button"
                   accessibilityLabel="저장">
-                  <Ionicons name="download-outline" size={24} color="#fff" />
+                  <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
                 </Pressable>
                 {canDelete ? (
                   <Pressable
@@ -417,7 +418,7 @@ export default function MeetingChatMediaScreen() {
                     disabled={viewerBusy}
                     accessibilityRole="button"
                     accessibilityLabel="삭제">
-                    <Ionicons name="trash-outline" size={24} color="#fff" />
+                    <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
                   </Pressable>
                 ) : null}
               </View>
@@ -446,7 +447,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingTop: 12,
+    paddingBottom: 8,
     backgroundColor: '#f2f4f7',
   },
   headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },

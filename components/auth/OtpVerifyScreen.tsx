@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -18,6 +18,7 @@ import {
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { getAuth } from '@react-native-firebase/auth';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type TermKey = 'tos' | 'privacy' | 'safety';
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
@@ -135,7 +136,7 @@ export default function OtpVerifyScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={26} color="#0f172a" />
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <Text style={styles.topTitle}>인증번호</Text>
           <View style={{ width: 26 }} />
@@ -179,7 +180,7 @@ export default function OtpVerifyScreen() {
               <Text style={styles.termsSub}>최초 가입 시에만 필요해요.</Text>
 
               <Pressable onPress={toggleAll} style={({ pressed }) => [styles.allRow, pressed && styles.pressed]}>
-                <Ionicons
+                <GinitSymbolicIcon
                   name={allRequiredChecked ? 'checkmark-circle' : 'ellipse-outline'}
                   size={22}
                   color={allRequiredChecked ? GinitTheme.colors.primary : '#94a3b8'}
@@ -198,7 +199,7 @@ export default function OtpVerifyScreen() {
                       accessibilityRole="checkbox"
                       accessibilityState={{ checked: isChecked }}
                       accessibilityLabel={`${label.title} 동의`}>
-                      <Ionicons
+                      <GinitSymbolicIcon
                         name={isChecked ? 'checkmark-circle' : 'ellipse-outline'}
                         size={20}
                         color={isChecked ? GinitTheme.colors.primary : '#94a3b8'}

@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import {
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 const RIPPLE = 'rgba(15, 23, 42, 0.08)';
 const LABEL = '#000000';
@@ -93,7 +94,7 @@ export function SnsEasySignUpSection({ onGooglePress, googleDisabled, googleLoad
           disabled={googleDisabled}
           loading={googleLoading}
           accessibilityLabel="Google로 시작하기"
-          icon={<Ionicons name="logo-google" size={ICON_SIZE} color={GOOGLE_BLUE} />}
+          icon={<GinitSymbolicIcon name="logo-google" size={ICON_SIZE} color={GOOGLE_BLUE} />}
         />
       </View>
     </View>

@@ -1,13 +1,11 @@
-import { Ionicons } from '@expo/vector-icons';
-import type { ComponentProps } from 'react';
-
 import { getMeetingRecruitmentPhase, type Meeting } from '@/src/lib/meetings';
+import type { SymbolicIconName } from '@/src/lib/ginit-symbolic-icon-map';
 
 /** 2026 홈 글래스 스펙 — Trust Blue / Energetic Orange */
 export const HOME_TRUST_BLUE = '#0052CC';
 export const HOME_ORANGE = '#FF8A00';
 
-export type HomeIonName = ComponentProps<typeof Ionicons>['name'];
+export type HomeIonName = SymbolicIconName;
 
 export type HomeCategoryVisual = {
   icon: HomeIonName;

@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -13,17 +13,18 @@ import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import {
-    formatPublicMeetingAgeSummary,
-    MEETING_CAPACITY_UNLIMITED,
-    meetingCategoryDisplayLabel,
-    meetingParticipantCount,
-    meetingPrimaryStartMs,
-    parsePublicMeetingDetailsConfig,
-    type Meeting,
-    type PublicMeetingDetailsConfig,
-    type PublicMeetingGenderRatio,
-    type PublicMeetingHostGenderSnapshot,
+  formatPublicMeetingAgeSummary,
+  MEETING_CAPACITY_UNLIMITED,
+  meetingCategoryDisplayLabel,
+  meetingParticipantCount,
+  meetingPrimaryStartMs,
+  parsePublicMeetingDetailsConfig,
+  type Meeting,
+  type PublicMeetingDetailsConfig,
+  type PublicMeetingGenderRatio,
+  type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const THUMB_SIZE = 70;
 const THUMB_RADIUS = 10;
@@ -74,7 +75,7 @@ function capacityFillRatio(m: Meeting): number {
 }
 
 function approvalChipParts(a: PublicMeetingDetailsConfig['approvalType']): {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: SymbolicIconName;
   label: string;
 } {
   return a === 'HOST_APPROVAL'
@@ -103,9 +104,9 @@ function GenderSymbolVisual({
     return (
       <View style={s.genderRow} accessibilityLabel="남녀 반반">
         <View style={[s.genderIconPair, { gap: pairGap }]}>
-          <Ionicons name="male" size={sm} color={male} />
+          <GinitSymbolicIcon name="male" size={sm} color={male} />
           {!compact ? <View style={s.genderDot} /> : <View style={s.genderDotCompact} />}
-          <Ionicons name="female" size={sm} color={female} />
+          <GinitSymbolicIcon name="female" size={sm} color={female} />
         </View>
       </View>
     );
@@ -115,26 +116,26 @@ function GenderSymbolVisual({
     if (host === 'male') {
       return (
         <View style={s.genderRow} accessibilityLabel="남성 동성 모집">
-          <Ionicons name="male" size={compact ? 14 : 17} color={male} />
+          <GinitSymbolicIcon name="male" size={compact ? 14 : 17} color={male} />
         </View>
       );
     }
     if (host === 'female') {
       return (
         <View style={s.genderRow} accessibilityLabel="여성 동성 모집">
-          <Ionicons name="female" size={compact ? 14 : 17} color={female} />
+          <GinitSymbolicIcon name="female" size={compact ? 14 : 17} color={female} />
         </View>
       );
     }
     return (
       <View style={s.genderRow} accessibilityLabel="동성만">
-        <Ionicons name="people" size={sm} color={GinitTheme.colors.primary} />
+        <GinitSymbolicIcon name="people" size={sm} color={GinitTheme.colors.primary} />
       </View>
     );
   }
   return (
     <View style={s.genderRow} accessibilityLabel="성별 제한 없음">
-      <Ionicons name="male-female-outline" size={md} color={muted} />
+      <GinitSymbolicIcon name="male-female-outline" size={md} color={muted} />
     </View>
   );
 }
@@ -254,7 +255,7 @@ export function HomeMeetingListItem({
                 accessibilityIgnoresInvertColors
               />
             ) : (
-              <Ionicons name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
+              <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
             )}
           </View>
           {showCapacityBar ? (

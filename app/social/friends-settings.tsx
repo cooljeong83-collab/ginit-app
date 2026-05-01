@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -9,13 +9,14 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
-    friendsAllowRecommendationsStorageKey,
-    friendsAutoAddContactsStorageKey,
-    loadBlockedPeerIds,
-    loadFriendBoolPref,
-    loadHiddenPeerIds,
-    saveFriendBoolPref,
+  friendsAllowRecommendationsStorageKey,
+  friendsAutoAddContactsStorageKey,
+  loadBlockedPeerIds,
+  loadFriendBoolPref,
+  loadHiddenPeerIds,
+  saveFriendBoolPref,
 } from '@/src/lib/friends-privacy-local';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function RowSep() {
   return <View style={styles.sep} />;
@@ -150,7 +151,7 @@ export default function FriendsSettingsScreen() {
                 {hiddenCount > 0 ? `숨긴 친구 ${hiddenCount}명` : '숨긴 친구가 없어요'}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+            <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
           </Pressable>
           <RowSep />
           <Pressable
@@ -164,7 +165,7 @@ export default function FriendsSettingsScreen() {
                 {blockedCount > 0 ? `차단 ${blockedCount}명` : '차단한 친구가 없어요'}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+            <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
           </Pressable>
         </View>
       </ScrollView>

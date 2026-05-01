@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import * as Font from 'expo-font';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +27,7 @@ import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-unti
 import { resolveNaverMovieSearchWebUrl } from '@/src/lib/naver-local-search';
 import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/tmdb-movie-poster';
 
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import {
   INPUT_PLACEHOLDER,
   wizardSpecialtyStyles as S,
@@ -244,7 +245,7 @@ function PosterTrustBlueFallback({ iconSize = 28 }: { iconSize?: number }) {
       end={{ x: 1, y: 1 }}
       style={StyleSheet.absoluteFillObject}>
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name="film" size={iconSize} color={GinitTheme.colors.primary} />
+        <GinitSymbolicIcon name="film" size={iconSize} color={GinitTheme.colors.primary} />
       </View>
     </LinearGradient>
   );
@@ -537,7 +538,7 @@ export function MovieSearch({
                       <MoviePosterFill item={item} recyclingKey={item.id} />
                       {selected ? (
                         <View style={S.movieResultImageOverlay} pointerEvents="none">
-                          <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                          <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                         </View>
                       ) : null}
                     </View>
@@ -607,7 +608,7 @@ export function MovieSearch({
               {voiceRecognizing ? (
                 <VoiceWaveform active color={GinitTheme.colors.primary} />
               ) : (
-                <Ionicons name="mic" size={18} color={GinitTheme.colors.primary} />
+                <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
               )}
             </Pressable>
           </View>

@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import {
@@ -65,6 +65,7 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function previewLine(m: MeetingChatMessage): string {
   if (m.kind === 'system') return m.text?.trim() ? m.text.trim() : '알림';
@@ -1275,7 +1276,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>새 소식</Text>
               <Pressable hitSlop={12} onPress={closeAlarmPanel} accessibilityRole="button" accessibilityLabel="닫기">
-                <Ionicons name="close" size={26} color="#475569" />
+                <GinitSymbolicIcon name="close" size={26} color="#475569" />
               </Pressable>
             </View>
             {alarms.length > 0 ? (
@@ -1304,7 +1305,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                     style={({ pressed }) => [styles.alarmRow, pressed && styles.alarmRowPressed]}
                     onPress={() => onPressAlarmRow(item)}>
                     <View style={styles.alarmIconWrap}>
-                      <Ionicons
+                      <GinitSymbolicIcon
                         name={
                           item.kind === 'chat' || item.kind === 'social_dm'
                             ? 'chatbubble-ellipses-outline'
@@ -1327,7 +1328,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                       </Text>
                       <Text style={styles.alarmTime}>{formatAlarmTime(item.sortMs)}</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
+                    <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
                   </Pressable>
                 )}
               />

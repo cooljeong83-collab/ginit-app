@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { type RefObject, useCallback } from 'react';
@@ -16,6 +16,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export type MeetingChatRenderItemDeps = {
   messages: MeetingChatMessage[];
@@ -189,7 +190,7 @@ export function useMeetingChatRenderItem({
             {showAvatar ? (
               withdrawn ? (
                 <View style={styles.avatarWithdrawn}>
-                  <Ionicons name="person" size={18} color="#94a3b8" />
+                  <GinitSymbolicIcon name="person" size={18} color="#94a3b8" />
                 </View>
               ) : prof?.photoUrl ? (
                 <Image source={{ uri: prof.photoUrl }} style={styles.avatar} contentFit="cover" />
@@ -213,7 +214,7 @@ export function useMeetingChatRenderItem({
                 <Text style={styles.nickname} numberOfLines={1}>
                   {nick}
                 </Text>
-                {isHost ? <Ionicons name="star" size={14} color="#CA8A04" style={styles.crown} /> : null}
+                {isHost ? <GinitSymbolicIcon name="star" size={14} color="#CA8A04" style={styles.crown} /> : null}
               </Pressable>
             ) : null}
             <View style={styles.bubbleOtherWrap}>

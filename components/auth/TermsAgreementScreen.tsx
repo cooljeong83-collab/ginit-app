@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { consumePendingConsentAction } from '@/src/lib/terms-consent-flow';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type TermKey = 'tos' | 'privacy';
 
@@ -98,7 +99,7 @@ export default function TermsAgreementScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
           <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="뒤로">
-            <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <Text style={styles.topTitle}>지닛 시작을 위한 약관 동의</Text>
           <View style={{ width: 26 }} />
@@ -111,7 +112,7 @@ export default function TermsAgreementScreen() {
             accessibilityRole="checkbox"
             accessibilityState={{ checked: allChecked }}
             accessibilityLabel="전체 동의">
-            <Ionicons
+            <GinitSymbolicIcon
               name={allChecked ? 'checkmark-circle' : 'ellipse-outline'}
               size={22}
               color={allChecked ? GinitTheme.colors.primary : '#94a3b8'}
@@ -132,7 +133,7 @@ export default function TermsAgreementScreen() {
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: isChecked }}
                     accessibilityLabel={`${label.required ? '[필수] ' : ''}${label.title} 동의`}>
-                    <Ionicons
+                    <GinitSymbolicIcon
                       name={isChecked ? 'checkmark-circle' : 'ellipse-outline'}
                       size={20}
                       color={isChecked ? GinitTheme.colors.primary : '#94a3b8'}
@@ -176,7 +177,7 @@ export default function TermsAgreementScreen() {
             <View style={styles.detailHeader}>
               <Text style={styles.detailTitle}>{detailTitle}</Text>
               <Pressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-                <Ionicons name="close" size={22} color={GinitTheme.colors.text} />
+                <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={styles.detailBody}>

@@ -1,9 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { type ComponentProps, useCallback, useEffect, useState } from 'react';
 import { Animated, Pressable, Text, View } from 'react-native';
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 const PLUS_QUICK_ROW_H = 50;
 const PLUS_QUICK_ICON = 22;
@@ -21,7 +22,7 @@ function estimateQuickLabelPx(label: string): number {
 export type MeetingChatQuickActionDef = {
   key: string;
   label: string;
-  icon: ComponentProps<typeof Ionicons>['name'];
+  icon: SymbolicIconName;
   onPress: () => void;
 };
 
@@ -122,7 +123,7 @@ export function MeetingChatQuickActionRow({
               paddingHorizontal: PLUS_QUICK_PAD_X,
             }}>
             <View style={styles.plusQuickIconLabelRow}>
-              <Ionicons name={action.icon} size={PLUS_QUICK_ICON} color="#FFFFFF" />
+              <GinitSymbolicIcon name={action.icon} size={PLUS_QUICK_ICON} color="#FFFFFF" />
               <Text style={styles.plusFanLabelMorph} numberOfLines={1}>
                 {action.label}
               </Text>

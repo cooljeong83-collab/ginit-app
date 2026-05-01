@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,6 +18,7 @@ import { GlassInput } from '@/components/social/GlassInput';
 import { NeonBadge } from '@/components/social/NeonBadge';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type UnifiedChatMessage = {
   id: string;
@@ -122,11 +123,11 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
             accessibilityRole="button"
             accessibilityLabel="공지">
             <BlurView tint="light" intensity={60} style={styles.announcementInner}>
-              <Ionicons name="megaphone-outline" size={16} color="#0052CC" />
+              <GinitSymbolicIcon name="megaphone-outline" size={16} color="#0052CC" />
               <Text style={styles.announcementText} numberOfLines={1}>
                 {noticeLine}
               </Text>
-              <Ionicons name="chevron-forward" size={16} color="#64748b" />
+              <GinitSymbolicIcon name="chevron-forward" size={16} color="#64748b" />
             </BlurView>
           </Pressable>
         ) : null}
@@ -195,7 +196,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
             onPress={jumpToLatest}
             accessibilityRole="button"
             accessibilityLabel="최신 메시지로">
-            <Ionicons name="chevron-down" size={22} color="#334155" />
+            <GinitSymbolicIcon name="chevron-down" size={22} color="#334155" />
           </Pressable>
         ) : null}
 
@@ -230,7 +231,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
               style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnDisabled]}
               accessibilityRole="button"
               accessibilityLabel="보내기">
-              <Ionicons name="send" size={20} color="#fff" />
+              <GinitSymbolicIcon name="send" size={20} color="#fff" />
             </Pressable>
           </View>
         </View>

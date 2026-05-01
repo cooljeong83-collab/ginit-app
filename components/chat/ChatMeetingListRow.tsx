@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Image } from 'expo-image';
 import type { Timestamp } from 'firebase/firestore';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -7,6 +7,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function formatRelativeFrom(ts: Timestamp | null | undefined): string {
   if (!ts || typeof ts.toDate !== 'function') return '';
@@ -118,7 +119,7 @@ export function ChatMeetingListRow({
             <View style={styles.hostBubbleMedia}>
               {hostWithdrawn ? (
                 <View style={styles.hostWithdrawnInner}>
-                  <Ionicons name="person" size={24} color="#94a3b8" />
+                  <GinitSymbolicIcon name="person" size={24} color="#94a3b8" />
                 </View>
               ) : hostPhotoUrl ? (
                 <Image

@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -75,6 +75,7 @@ import {
   isMeetingServiceComplianceComplete,
   type UserProfile,
 } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 
 function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean {
   const hay = [m.address, m.location, m.placeName]
@@ -745,11 +746,11 @@ export default function FeedScreen() {
   );
 
   const feedListEmptyCentered = useCallback(
-    (icon: React.ComponentProps<typeof Ionicons>['name'], title: string, body: string): ReactElement => (
+    (icon: SymbolicIconName, title: string, body: string): ReactElement => (
       <View style={[styles.feedGlobalEmptyFill, { minHeight: globalEmptyMinHeight }]}>
         <View style={styles.feedGlobalEmptyInner}>
           <View style={styles.feedGlobalEmptyIconCircle}>
-            <Ionicons name={icon} size={34} color={GinitTheme.colors.primary} />
+            <GinitSymbolicIcon name={icon} size={34} color={GinitTheme.colors.primary} />
           </View>
           <Text style={styles.feedGlobalEmptyTitle}>{title}</Text>
           <Text style={styles.feedGlobalEmptyBody}>{body}</Text>
@@ -761,7 +762,7 @@ export default function FeedScreen() {
 
   const exploreFilteredEmptyCopy = useMemo(():
     | {
-        icon: React.ComponentProps<typeof Ionicons>['name'];
+        icon: SymbolicIconName;
         title: string;
         body: string;
       }
@@ -848,7 +849,7 @@ export default function FeedScreen() {
             accessibilityRole="button"
             accessibilityLabel="등록된 관심 지역 중 표시 지역 선택"
             hitSlop={{ top: 10, bottom: 10, left: 4, right: 10 }}>
-            <Ionicons name="chevron-down" size={20} color={GinitTheme.colors.primary} />
+            <GinitSymbolicIcon name="chevron-down" size={20} color={GinitTheme.colors.primary} />
           </Pressable>
         </View>
         <View style={styles.headerActions}>
@@ -858,7 +859,7 @@ export default function FeedScreen() {
             accessibilityLabel="검색 및 조건 필터"
             hitSlop={10}
             style={styles.searchIconWrap}>
-            <Ionicons name="search-outline" size={24} color="#0f172a" />
+            <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
             {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
           </Pressable>
           <InAppAlarmsBellButton />
@@ -868,7 +869,7 @@ export default function FeedScreen() {
             accessibilityLabel="목록 정렬 및 필터 설정"
             hitSlop={10}
             style={styles.settingsIconWrap}>
-            <Ionicons name="settings-outline" size={24} color="#0f172a" />
+            <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
             {feedListSettingsDotActive ? <View style={styles.settingsFilterDot} /> : null}
           </Pressable>
         </View>
@@ -916,7 +917,7 @@ export default function FeedScreen() {
           <Text style={styles.categoryDropdownText} numberOfLines={1} ellipsizeMode="tail">
             {categoryDropdownLabel}
           </Text>
-          <Ionicons name="chevron-down" size={18} color="#475569" />
+          <GinitSymbolicIcon name="chevron-down" size={18} color="#475569" />
         </Pressable>
       </View>
     </View>
@@ -935,7 +936,7 @@ export default function FeedScreen() {
         <View style={[styles.feedGlobalEmptyFill, { minHeight: globalEmptyMinHeight }]}>
           <View style={styles.feedGlobalEmptyInner}>
             <View style={styles.feedGlobalEmptyIconCircle}>
-              <Ionicons name="people-outline" size={34} color={GinitTheme.colors.primary} />
+              <GinitSymbolicIcon name="people-outline" size={34} color={GinitTheme.colors.primary} />
             </View>
             <Text style={styles.feedGlobalEmptyTitle}>
               {!feedSearchFiltersActive(appliedFeedSearch) ? '등록된 모임이 없습니다.' : '등록된 모임이 아직 없어요'}
@@ -1101,9 +1102,9 @@ export default function FeedScreen() {
                       accessibilityState={{ selected }}>
                       <Text style={styles.modalRowLabel}>{label}</Text>
                       {selected ? (
-                        <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                        <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                       ) : (
-                        <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
+                        <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                       )}
                     </Pressable>
                   );
@@ -1185,7 +1186,7 @@ export default function FeedScreen() {
                             accessibilityRole="button"
                             accessibilityLabel={`${getInterestRegionDisplayLabel(r)} 삭제`}
                             hitSlop={8}>
-                            <Ionicons name="trash-outline" size={22} color="#94a3b8" />
+                            <GinitSymbolicIcon name="trash-outline" size={22} color="#94a3b8" />
                           </Pressable>
                         )}
                       </View>
@@ -1198,9 +1199,9 @@ export default function FeedScreen() {
                     style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                     accessibilityRole="button"
                     accessibilityLabel="관심 지역 추가">
-                    <Ionicons name="add-circle-outline" size={24} color={GinitTheme.colors.primary} />
+                    <GinitSymbolicIcon name="add-circle-outline" size={24} color={GinitTheme.colors.primary} />
                     <Text style={[styles.modalRowLabel, styles.interestRegionAddLabel]}>관심 지역 추가</Text>
-                    <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
+                    <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
                   </Pressable>
                 ) : (
                   <Text style={styles.interestRegionEmptyDraft}>최대 {FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.</Text>
@@ -1260,9 +1261,9 @@ export default function FeedScreen() {
                         accessibilityState={{ selected: active }}>
                         <Text style={styles.modalRowLabel}>{getInterestRegionDisplayLabel(r)}</Text>
                         {active ? (
-                          <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                          <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                         ) : (
-                          <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
+                          <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                         )}
                       </Pressable>
                     );
@@ -1322,7 +1323,7 @@ export default function FeedScreen() {
                       style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                       accessibilityRole="button">
                       <Text style={styles.modalRowLabel}>{hit.label}</Text>
-                      <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
+                      <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
                     </Pressable>
                   ))
                 )}
@@ -1363,9 +1364,9 @@ export default function FeedScreen() {
                     accessibilityState={{ selected }}>
                     <Text style={styles.modalRowLabel}>{chip.label}</Text>
                     {selected ? (
-                      <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                      <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                     ) : (
-                      <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />
+                      <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                     )}
                   </Pressable>
                 );
@@ -1491,7 +1492,7 @@ const styles = StyleSheet.create({
   },
   feedHeader: {
     marginBottom: 16,
-    paddingTop: 4,
+    paddingTop: 12,
     paddingHorizontal: 20,
     gap: 12,
   },

@@ -1,8 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type Props = {
   accessibilityLabel?: string;
@@ -18,7 +19,7 @@ export function InAppAlarmsBellButton({ accessibilityLabel = '새 소식' }: Pro
       accessibilityLabel={accessibilityLabel}
       hitSlop={10}
       style={styles.bellWrap}>
-      <Ionicons name="notifications-outline" size={22} color="#0f172a" />
+      <GinitSymbolicIcon name="notifications-outline" size={22} color="#0f172a" />
       {hasUnread ? <View style={styles.badge} /> : null}
     </Pressable>
   );

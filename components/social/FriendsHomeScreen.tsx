@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -55,6 +55,7 @@ import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 function friendAppUserKey(raw: string | null | undefined): string {
   const t = raw?.trim() ?? '';
@@ -586,7 +587,7 @@ export function FriendsHomeScreen() {
               내 프로필
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color="rgba(100, 116, 139, 0.9)" />
+          <GinitSymbolicIcon name="chevron-forward" size={18} color="rgba(100, 116, 139, 0.9)" />
         </Pressable>
 
         {showRequests ? (
@@ -642,7 +643,7 @@ export function FriendsHomeScreen() {
     () => (
       <GinitCard appearance="light" style={s.emptyCard}>
         <View style={s.emptyIconWrap}>
-          <Ionicons name="people-outline" size={28} color={GinitTheme.colors.primary} />
+          <GinitSymbolicIcon name="people-outline" size={28} color={GinitTheme.colors.primary} />
         </View>
         <Text style={s.emptyTitle}>아직 연결된 지닛이 없어요</Text>
         <Text style={s.emptyBody}>새로운 모임에서 친구를 찾아보세요.</Text>
@@ -734,19 +735,19 @@ export function FriendsHomeScreen() {
             </Text>
             <View style={s.headerIcons}>
               <Pressable accessibilityLabel="검색" hitSlop={8} onPress={onToggleSearch} style={s.iconBtn}>
-                <Ionicons name="search-outline" size={22} color="#0f172a" />
+                <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
               </Pressable>
               <Pressable accessibilityLabel="친구 추가" hitSlop={8} onPress={goAddFriend} style={s.iconBtn}>
-                <Ionicons name="person-add-outline" size={22} color="#0f172a" />
+                <GinitSymbolicIcon name="person-add-outline" size={22} color="#0f172a" />
               </Pressable>
               <Pressable accessibilityLabel="친구 관리" hitSlop={8} onPress={goFriendManage} style={s.iconBtn}>
-                <Ionicons name="settings-outline" size={22} color="#0f172a" />
+                <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
               </Pressable>
             </View>
           </View>
           {searchOpen ? (
             <View style={s.searchWrap}>
-              <Ionicons name="search-outline" size={18} color="#64748b" style={s.searchIcon} />
+              <GinitSymbolicIcon name="search-outline" size={18} color="#64748b" style={s.searchIcon} />
               <TextInput
                 ref={searchInputRef}
                 value={search}
@@ -759,11 +760,11 @@ export function FriendsHomeScreen() {
               />
               {search.length > 0 ? (
                 <Pressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel="검색 지우기">
-                  <Ionicons name="close-circle" size={20} color="#94a3b8" />
+                  <GinitSymbolicIcon name="close-circle" size={20} color="#94a3b8" />
                 </Pressable>
               ) : (
                 <Pressable onPress={onToggleSearch} hitSlop={8} accessibilityLabel="검색 닫기">
-                  <Ionicons name="close" size={20} color="#94a3b8" />
+                  <GinitSymbolicIcon name="close" size={20} color="#94a3b8" />
                 </Pressable>
               )}
             </View>
@@ -863,7 +864,7 @@ export function FriendsHomeScreen() {
                           <Text style={s.sheetMeetingTitle} numberOfLines={2}>
                             {m.title}
                           </Text>
-                          <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
+                          <GinitSymbolicIcon name="chevron-forward" size={18} color="#94a3b8" />
                         </Pressable>
                       ))
                     )}
@@ -885,7 +886,7 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
   fixedHeader: {
-    paddingTop: 4,
+    paddingTop: 12,
     paddingBottom: 10,
     backgroundColor: GinitTheme.colors.bg,
     zIndex: 3,

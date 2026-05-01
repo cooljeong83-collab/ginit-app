@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import type { RefObject } from 'react';
@@ -29,6 +29,7 @@ import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-ch
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export type MeetingChatMainColumnProps = {
   chatError: string | null;
@@ -157,7 +158,7 @@ export function MeetingChatMainColumn({
             onPress={jumpToLatest}
             accessibilityRole="button"
             accessibilityLabel="최신 메시지로">
-            <Ionicons name="chevron-down" size={22} color="#334155" />
+            <GinitSymbolicIcon name="chevron-down" size={22} color="#334155" />
           </Pressable>
         ) : null}
       </View>
@@ -188,7 +189,7 @@ export function MeetingChatMainColumn({
           <View style={styles.replyPreviewRow}>
             <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
               <View style={styles.replyPreviewIconWrap} accessibilityElementsHidden pointerEvents="none">
-                <Ionicons name="return-up-back-outline" size={20} color="#0f172a" />
+                <GinitSymbolicIcon name="return-up-back-outline" size={20} color="#0f172a" />
               </View>
               <View style={styles.replyPreviewTextCol} pointerEvents="none">
                 <Text style={styles.replyPreviewTitle} numberOfLines={1}>
@@ -208,7 +209,7 @@ export function MeetingChatMainColumn({
                 hitSlop={10}
                 accessibilityRole="button"
                 accessibilityLabel="답장 취소">
-                <Ionicons name="close" size={18} color="#475569" />
+                <GinitSymbolicIcon name="close" size={18} color="#475569" />
               </Pressable>
             </BlurView>
           </View>
@@ -256,7 +257,7 @@ export function MeetingChatMainColumn({
                         ],
                       },
                     ]}>
-                    <Ionicons name="add-sharp" size={26} color="#475569" />
+                    <GinitSymbolicIcon name="add-sharp" size={26} color="#475569" />
                   </Animated.View>
                   <Animated.View
                     style={[
@@ -283,7 +284,7 @@ export function MeetingChatMainColumn({
                         ],
                       },
                     ]}>
-                    <Ionicons name="close-sharp" size={26} color="#475569" />
+                    <GinitSymbolicIcon name="close-sharp" size={26} color="#475569" />
                   </Animated.View>
                 </View>
               )}
@@ -318,7 +319,7 @@ export function MeetingChatMainColumn({
               {sending || uploadingImage ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Ionicons name="send" size={20} color="#fff" />
+                <GinitSymbolicIcon name="send" size={20} color="#fff" />
               )}
             </Pressable>
           </View>

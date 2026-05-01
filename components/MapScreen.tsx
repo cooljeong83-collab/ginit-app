@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import {
   NaverMapMarkerOverlay,
   NaverMapView,
@@ -45,6 +44,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -168,6 +168,8 @@ const LIST_ITEM_STRIDE = LIST_CARD_HEIGHT + LIST_CARD_GAP;
 const SHEET_OUTER_PADDING_TOP_PX = 8;
 /** 핸들 히트 영역 + 핸들바(측정에 포함되지 않는 상단 고정 구간) */
 const SHEET_HANDLE_STACK_MIN_PX = 48;
+/** `styles.sheetCta` + 한 줄 라벨(모임 상세 보기) 세로 합 — sheetPeekHeight·캐러셀 상한에서 동일 값 사용 */
+const SHEET_CTA_BLOCK_HEIGHT_PX = 8 + 14 + 14 + 20;
 
 // 초기 화면에서 보이는 북남 방향 지도 높이(미터). 중심 기준 반경 ≈ 1km → 전체 약 2km.
 // 검색·RPC 반경(mapRadiusKm)과는 별도입니다.
@@ -411,8 +413,10 @@ export default function MapScreen() {
     // 상세 정보(칩/주소/시간/참여자/거리)가 잘리지 않도록 카드 영역 높이를 충분히 확보합니다.
     const carousel = LIST_CARD_HEIGHT + 160;
     const dots = 18 + 6;
-    const ctaBlock = 8 + 14 + 14 + 22;
-    return sheetTopPadding + handleRow + carousel + dots + ctaBlock;
+    // CTA(모임 상세 보기) 높이는 시트 피크에 이중 포함하지 않아, 시트가 그만큼 내려가 지도 가시 영역을 넓힙니다.
+    // 기기별로 CTA 하단이 잘리는 경우를 막기 위해 피크 높이에만 소량 여유를 둡니다.
+    const ctaBreathingPx = 14;
+    return sheetTopPadding + handleRow + carousel + dots + ctaBreathingPx;
   }, []);
 
   const sheetRevealStyle = useAnimatedStyle(() => ({
@@ -438,6 +442,7 @@ export default function MapScreen() {
         .failOffsetX([-28, 28])
         .onBegin(() => {
           dragStartShown.value = sheetShown.value;
+          runOnJS(setMapMovedSinceSearch)(true);
         })
         .onUpdate((e) => {
           const next = dragStartShown.value + (-e.translationY / Math.max(1, liftDelta));
@@ -454,7 +459,7 @@ export default function MapScreen() {
             reduceMotion: ReduceMotion.Never,
           });
         }),
-    [dragStartShown, liftDelta, sheetShown, enableFollowSelected],
+    [dragStartShown, liftDelta, sheetShown, enableFollowSelected, setMapMovedSinceSearch],
   );
 
   const setSheetExpandedJS = useCallback((expanded: boolean) => {
@@ -468,6 +473,7 @@ export default function MapScreen() {
         .failOffsetX([-28, 28])
         .onBegin(() => {
           dragStartHeight.value = sheetHeight.value;
+          runOnJS(setMapMovedSinceSearch)(true);
         })
         .onUpdate((e) => {
           const next = dragStartHeight.value - e.translationY;
@@ -480,7 +486,7 @@ export default function MapScreen() {
             if (finished) runOnJS(setSheetExpandedJS)(expand);
           });
         }),
-    [sheetCollapsedPx, sheetExpandedPx, dragStartHeight, sheetHeight, setSheetExpandedJS],
+    [sheetCollapsedPx, sheetExpandedPx, dragStartHeight, sheetHeight, setSheetExpandedJS, setMapMovedSinceSearch],
   );
 
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
@@ -584,6 +590,8 @@ export default function MapScreen() {
   /** 지도 탭 진입·재진입: 시트 펼침 + 내 위치로 카메라·조회 기준 동기화 */
   useFocusEffect(
     useCallback(() => {
+      // 탐색 탭에 들어온 직후에는 지도/시트 초기 레이아웃만으로 "이 지역 재검색"이 뜨지 않게 합니다.
+      setMapMovedSinceSearch(false);
       openSheet();
       sheetHeight.value = withSpring(sheetCollapsedPx, SPRING);
       setIsSheetExpanded(false);
@@ -599,7 +607,7 @@ export default function MapScreen() {
         // 스택(모임 상세 등)으로 가려져 blur/freeze 되기 전에 지도를 내리면, 복귀 시 마커가 사라지는 네이티브 이슈를 피합니다.
         setMapReady(false);
       };
-    }, [openSheet, sheetCollapsedPx, sheetHeight, searchAnchor, snapMapToUserCoords]),
+    }, [openSheet, sheetCollapsedPx, sheetHeight, searchAnchor, snapMapToUserCoords, setMapMovedSinceSearch]),
   );
 
   const driftThresholdM = mapRadiusKm * 1000;
@@ -1369,6 +1377,7 @@ export default function MapScreen() {
 
   const onSheetCarouselBeginDrag = useCallback(() => {
     carouselDragStartIndexRef.current = selectedMeetingIndex;
+    setMapMovedSinceSearch(true);
     enableFollowSelected();
     openSheet();
   }, [selectedMeetingIndex, enableFollowSelected, openSheet]);
@@ -1561,7 +1570,7 @@ export default function MapScreen() {
 
           <View style={styles.sheetBadgesRow}>
             <View style={styles.sheetMiniBadge}>
-              <Ionicons
+              <GinitSymbolicIcon
                 name={m.isPublic === false ? 'lock-closed-outline' : 'globe-outline'}
                 size={14}
                 color={GinitTheme.colors.primary}
@@ -1571,7 +1580,7 @@ export default function MapScreen() {
             </View>
             {capText ? (
               <View style={styles.sheetMiniBadge}>
-                <Ionicons
+                <GinitSymbolicIcon
                   name="people-outline"
                   size={14}
                   color={GinitTheme.colors.primary}
@@ -1600,7 +1609,7 @@ export default function MapScreen() {
           {/* 상세 팩트 영역 (옮기기 전 레이아웃로 롤백) */}
           <View style={styles.sheetFacts}>
             <View style={[styles.sheetFactRow, styles.sheetFactRowLocation]}>
-              <Ionicons name="location-outline" size={16} color="#64748b" />
+              <GinitSymbolicIcon name="location-outline" size={16} color="#64748b" />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.sheetFactText} numberOfLines={1}>
                   {placeTitle || '장소'}
@@ -1618,7 +1627,7 @@ export default function MapScreen() {
                   hitSlop={10}
                   accessibilityRole="button"
                   accessibilityLabel="모임 위치로 이동">
-                  <Ionicons name="locate-outline" size={16} color={GinitTheme.colors.primary} />
+                  <GinitSymbolicIcon name="locate-outline" size={16} color={GinitTheme.colors.primary} />
                   <Text style={styles.sheetMovePinInlineText} numberOfLines={1}>
                     {formatDistanceForList(meetingDistanceMetersFromUser(m, searchAnchor ?? userCoords))}
                   </Text>
@@ -1627,14 +1636,14 @@ export default function MapScreen() {
             </View>
 
             <View style={styles.sheetFactRow}>
-              <Ionicons name="time-outline" size={16} color="#64748b" />
+              <GinitSymbolicIcon name="time-outline" size={16} color="#64748b" />
               <Text style={styles.sheetFactText} numberOfLines={1}>
                 {scheduleText}
               </Text>
             </View>
 
             <View style={styles.sheetFactRow}>
-              <Ionicons name="people-outline" size={16} color="#64748b" />
+              <GinitSymbolicIcon name="people-outline" size={16} color="#64748b" />
               <View style={styles.participantRow}>
                 <Text style={styles.participantText} numberOfLines={1} ellipsizeMode="tail">
                   {participantCount > 0
@@ -1905,10 +1914,10 @@ export default function MapScreen() {
           </View>
         )}
 
-        {(hasPendingRescan || driftTooFar) ? (
+        {mapMovedSinceSearch && (hasPendingRescan || driftTooFar) ? (
           <View style={[styles.rescanWrap, { top: rescanTop }]} pointerEvents="box-none">
             <Pressable onPress={onPressRescanThisArea} style={({ pressed }) => [styles.rescanBtn, pressed && { opacity: 0.9 }]} accessibilityRole="button" accessibilityLabel="이 지역 재검색">
-              <Ionicons name="refresh" size={18} color="#fff" />
+              <GinitSymbolicIcon name="refresh" size={18} color="#fff" />
               <Text style={styles.rescanBtnText}>이 지역 재검색</Text>
             </Pressable>
           </View>
@@ -1919,7 +1928,12 @@ export default function MapScreen() {
           <BlurView intensity={0} tint="light" style={styles.topGlass}>
             <View style={styles.topGlassInner}>
               {/* 지역 표시기(상단 pill) 숨김 */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow} style={styles.chipScroll}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+                style={styles.chipScroll}
+                onScrollBeginDrag={() => setMapMovedSinceSearch(true)}>
                 {mapCategoryChips.map((chip) => {
                   const active = chip.filterId === selectedCategoryId;
                   return (
@@ -1949,21 +1963,21 @@ export default function MapScreen() {
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="약속 잡기">
-            <Ionicons name="add" size={24} color="#0f172a" />
+            <GinitSymbolicIcon name="add" size={22} color="#0f172a" />
           </Pressable>
           <Pressable
             onPress={() => setMapSearchOpen(true)}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="검색">
-            <Ionicons name="search" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="search" size={22} color="#0f172a" />
           </Pressable>
           <Pressable
             onPress={onPressMyLocation}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="내 위치로 이동">
-            <Ionicons name="locate" size={22} color="#0f172a" />
+            <GinitSymbolicIcon name="locate" size={22} color="#0f172a" />
           </Pressable>
         </Animated.View>
       </View>
@@ -1995,8 +2009,8 @@ export default function MapScreen() {
               snapToInterval={carouselWidth}
               decelerationRate="fast"
               contentContainerStyle={{ paddingRight: 0 }}
-              // 상세 텍스트가 길어도 충분히 보이도록 카드 표시 높이 상한을 확대합니다.
-              style={{ maxHeight: LIST_CARD_HEIGHT + 220 }}
+              // 상세 텍스트가 길어도 충분히 보이도록 카드 표시 높이 상한을 확대합니다(피크에서 CTA 분리만큼 상한 축소).
+              style={{ maxHeight: LIST_CARD_HEIGHT + 220 - SHEET_CTA_BLOCK_HEIGHT_PX }}
               getItemLayout={(_, index) => ({
                 length: carouselWidth,
                 offset: carouselWidth * index,
@@ -2078,7 +2092,7 @@ export default function MapScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected }}>
                   <Text style={styles.modalRowLabel}>{label}</Text>
-                  {selected ? <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} /> : <Ionicons name="ellipse-outline" size={22} color="#cbd5e1" />}
+                  {selected ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.trustBlue} /> : <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />}
                 </Pressable>
               );
             })}
@@ -2102,7 +2116,7 @@ export default function MapScreen() {
                 style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                 accessibilityRole="button">
                 <Text style={styles.modalRowLabel}>{row.label}</Text>
-                {regionLabel === row.label ? <Ionicons name="checkmark-circle" size={22} color={GinitTheme.trustBlue} /> : <Ionicons name="chevron-forward" size={20} color="#94a3b8" />}
+                {regionLabel === row.label ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.trustBlue} /> : <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />}
               </Pressable>
             ))}
             <Pressable onPress={closeRegionModal} style={styles.modalCloseBtn} accessibilityRole="button">
