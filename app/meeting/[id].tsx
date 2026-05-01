@@ -3253,30 +3253,28 @@ export default function MeetingDetailScreen() {
                   <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>상세 조건</Text>
                   <Text style={styles.dateVoteSub}>참여 전 꼭 확인해 주세요</Text>
                 </View>
-                <View style={styles.conditionsInsetWrap}>
-                  <View style={styles.conditionsList}>
-                    {publicConditionRows.map((row, idx) => {
-                      const isTrust = row.variant === 'trust';
-                      const isLast = idx === publicConditionRows.length - 1;
-                      return (
-                        <View
-                          key={`${row.label}-${idx}`}
-                          style={[
-                            styles.condRow,
-                            !isLast && styles.condRowBorder,
-                            isTrust && styles.condRowTrust,
-                          ]}>
-                          <View style={[styles.condIconWrap, isTrust && styles.condIconWrapTrust]}>
-                            <GinitSymbolicIcon name={row.icon} size={19} color={isTrust ? '#9a3412' : '#0f172a'} />
-                          </View>
-                          <View style={styles.condTextCol}>
-                            <Text style={[styles.condLabel, isTrust && styles.condLabelTrust]}>{row.label}</Text>
-                            <Text style={[styles.condValue, isTrust && styles.condValueTrust]}>{row.value}</Text>
-                          </View>
+                <View>
+                  {publicConditionRows.map((row, idx) => {
+                    const isTrust = row.variant === 'trust';
+                    const isLast = idx === publicConditionRows.length - 1;
+                    return (
+                      <View
+                        key={`${row.label}-${idx}`}
+                        style={[
+                          styles.condRow,
+                          !isLast && styles.condRowBorder,
+                          isTrust && styles.condRowTrust,
+                        ]}>
+                        <View style={[styles.condIconWrap, isTrust && styles.condIconWrapTrust]}>
+                          <GinitSymbolicIcon name={row.icon} size={19} color={isTrust ? '#9a3412' : '#0f172a'} />
                         </View>
-                      );
-                    })}
-                  </View>
+                        <View style={styles.condTextCol}>
+                          <Text style={[styles.condLabel, isTrust && styles.condLabelTrust]}>{row.label}</Text>
+                          <Text style={[styles.condValue, isTrust && styles.condValueTrust]}>{row.value}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
                 {publicMeetingDetails.approvalType === 'HOST_APPROVAL' &&
                 publicMeetingDetails.requestMessageEnabled === true ? (
@@ -4260,39 +4258,33 @@ const styles = StyleSheet.create({
   scheduleHintText: { flex: 1 },
   infoSectionLabel: { fontSize: 12, fontWeight: '700', color: '#8B95A1', marginTop: 10 },
   infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22, marginTop: 6 },
-  /** 상세 조건 본문 — `모임 등록 정보`의 카테고리 카드와 동일 톤으로 투표·참여자 카드와 맞춤 */
-  conditionsInsetWrap: {
-    borderRadius: 14,
-    padding: 10,
-    backgroundColor: 'rgba(248, 250, 252, 0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
+  condRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
   },
-  conditionsList: {
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-    overflow: 'hidden',
+  condRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
   },
-  condRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 12 },
-  condRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth * 2, borderBottomColor: 'rgba(15, 23, 42, 0.06)' },
   condRowTrust: {
-    backgroundColor: 'rgba(255, 237, 213, 0.55)',
+    backgroundColor: 'rgba(255, 237, 213, 0.45)',
+    borderRadius: GinitTheme.radius.card,
+    paddingHorizontal: 10,
+    marginVertical: 2,
   },
   condIconWrap: {
     width: 42,
     height: 42,
     borderRadius: 13,
-    backgroundColor: 'rgba(241, 245, 249, 0.95)',
+    backgroundColor: GinitTheme.colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   condIconWrapTrust: {
     backgroundColor: 'rgba(255, 247, 237, 0.98)',
-    borderColor: 'rgba(251, 146, 60, 0.35)',
   },
   condTextCol: { flex: 1, minWidth: 0 },
   condLabel: { fontSize: 11, fontWeight: '600', color: '#64748b', letterSpacing: 0.4, textTransform: 'uppercase' },
@@ -4305,10 +4297,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 10,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: GinitTheme.radius.card,
     backgroundColor: 'rgba(224, 242, 254, 0.85)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.35)',
   },
   condCalloutText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#0c4a6e', lineHeight: 19 },
   publicBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },

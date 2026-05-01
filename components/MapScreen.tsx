@@ -72,10 +72,10 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
-import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { approximateCenterLatLngForFeedRegion } from '@/src/lib/feed-region-map-center';
 import { loadActiveFeedRegion, loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
+import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import {
   MAP_AVATAR_CLUSTERING_MAX_DELTA,
   groupMeetingsByCoordinateOverlap,
@@ -127,6 +127,8 @@ const SHEET_VELOCITY_OPEN = -520;
 const SHEET_VELOCITY_CLOSE = 520;
 const MARKER_DARK_NAVY = '#0B1220';
 const MY_LOCATION_CENTER_EXTRA_BOTTOM_PX = 84;
+/** 내 위치 버튼 탭 시 지도 가시 줌 — 중심 기준 반경 2km */
+const MY_LOCATION_BUTTON_VIEW_RADIUS_KM = 1;
 
 function formatSchedulePretty(m: Pick<Meeting, 'scheduleDate' | 'scheduleTime'>): string | null {
   const d = (m.scheduleDate ?? '').trim();
@@ -524,15 +526,16 @@ export default function MapScreen() {
     return Math.max(0.5, Math.min(80, raw));
   }, [appPoliciesVersion]);
 
-  /** 지도 중심을 내 좌표로 맞추고, RPC·구(역지오) 기준을 사용자 위치에 동기화합니다. */
+  /** 지도 중심을 좌표 `u`로 맞추고 조회 영역을 동기화합니다. `viewRadiusKm`이 있으면 그 값으로 줌(내 위치 버튼 등), 없으면 정책 `mapRadiusKm`. */
   const snapMapToUserCoords = useCallback(
-    (u: LatLng) => {
+    (u: LatLng, viewRadiusKm?: number) => {
       enableFollowSelected();
       openSheet();
       setListSortMode('distance');
       setSelectedMeetingIndex(0);
 
-      const base = regionCenteredOnUserRadius(u.latitude, u.longitude, mapRadiusKm);
+      const zoomKm = typeof viewRadiusKm === 'number' && Number.isFinite(viewRadiusKm) ? viewRadiusKm : mapRadiusKm;
+      const base = regionCenteredOnUserRadius(u.latitude, u.longitude, zoomKm);
       const r: Region = {
         ...base,
         latitude: centerLatForBetweenTopAndBottom(
@@ -599,7 +602,11 @@ export default function MapScreen() {
           }
           const regions = await loadRegisteredFeedRegions();
           const activeRaw = await loadActiveFeedRegion();
-          if (regions.length === 0) return;
+          if (regions.length === 0) {
+            const hasCtx = Boolean(lastCompleteRegionRef.current || searchAnchor);
+            if (!hasCtx) snapMapToUserCoords(DEFAULT_NO_LOCATION_CENTER);
+            return;
+          }
           const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
           const exploreActiveNorm =
             activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
@@ -925,21 +932,13 @@ export default function MapScreen() {
     });
   }, [textFilteredMeetings, selectedCategoryId, categories, recruitingOnly]);
 
-  /** 목록·거리 표시: 현재 지도 조회 영역 중심 우선(사용자가 보는 화면 기준), 없으면 검색 앵커·GPS */
-  const mapCenterAnchorForList = useMemo((): LatLng | null => {
-    if (mapGeoQueryRegion) {
-      const { latitude, longitude } = mapGeoQueryRegion;
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        return { latitude, longitude };
-      }
+  /** 목록·거리 표시: 내 위치(GPS) 기준. GPS 없을 때 «가까운 순»은 임박순과 동일하게 정렬 */
+  const sortedFilteredMeetings = useMemo(() => {
+    if (listSortMode === 'distance' && !userCoords) {
+      return sortMeetingsForFeed(filteredMeetings, 'soon', null);
     }
-    return searchAnchor ?? userCoords ?? null;
-  }, [mapGeoQueryRegion, searchAnchor, userCoords]);
-
-  const sortedFilteredMeetings = useMemo(
-    () => sortMeetingsForFeed(filteredMeetings, listSortMode, mapCenterAnchorForList),
-    [filteredMeetings, listSortMode, mapCenterAnchorForList],
-  );
+    return sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords);
+  }, [filteredMeetings, listSortMode, userCoords]);
 
   const meetingsOnMap = useMemo(() => {
     let list = sortedFilteredMeetings.filter(
@@ -1022,21 +1021,10 @@ export default function MapScreen() {
 
   const sheetMeetings = useMemo(() => {
     const r = mapGeoQueryRegion;
-    const list = r
+    return r
       ? sortedFilteredMeetings.filter((m) => meetingInBounds(m, r))
       : [...sortedFilteredMeetings];
-
-    // 바텀시트: 지도 가운데(조회 영역 중심) 기준 가까운 순 — 목록 정렬과 동일 앵커
-    const anchor = mapCenterAnchorForList;
-    list.sort((a, b) => {
-      const da = meetingDistanceMetersFromUser(a, anchor) ?? Number.POSITIVE_INFINITY;
-      const db = meetingDistanceMetersFromUser(b, anchor) ?? Number.POSITIVE_INFINITY;
-      if (da !== db) return da - db;
-      // 동일 거리(같은 좌표 스택): 생성일이 가장 이른 모임이 앞에 오도록
-      return meetingCreatedAtMillis(a) - meetingCreatedAtMillis(b);
-    });
-    return list;
-  }, [sortedFilteredMeetings, mapGeoQueryRegion, mapCenterAnchorForList]);
+  }, [sortedFilteredMeetings, mapGeoQueryRegion]);
 
   const initialMapRegion = useMemo(() => {
     if (searchAnchor) {
@@ -1113,7 +1101,9 @@ export default function MapScreen() {
     [initialMapRegion, insets.top, mapGeoQueryRegion, sheetPeekHeight, windowHeight],
   );
 
-  const initialRegionReady = Boolean(searchAnchor ?? userCoords ?? mapGeoQueryRegion);
+  // GPS·관심지역 상태가 오기 전까지 false면 지도가 마운트되지 않아 이동·탭이 전부 막힙니다.
+  // `initialMapRegion`은 searchAnchor/userCoords 없을 때도 기본 영역을 제공하므로 항상 지도를 띄웁니다.
+  const initialRegionReady = true;
 
   const mapCategoryChips = useMemo(() => buildMapCategoryChips(categories), [categories]);
 
@@ -1149,7 +1139,7 @@ export default function MapScreen() {
       }
       const existing = userCoordsRef.current;
       if (existing) {
-        snapMapToUserCoords(existing);
+        snapMapToUserCoords(existing, MY_LOCATION_BUTTON_VIEW_RADIUS_KM);
         return;
       }
 
@@ -1170,7 +1160,7 @@ export default function MapScreen() {
         }
         userCoordsRef.current = c;
         setUserCoords(c);
-        snapMapToUserCoords(c);
+        snapMapToUserCoords(c, MY_LOCATION_BUTTON_VIEW_RADIUS_KM);
         return;
       }
 
@@ -1526,7 +1516,7 @@ export default function MapScreen() {
               {listMetaText}
             </Text>
             <View style={styles.listFooter}>
-              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, mapCenterAnchorForList))}</Text>
+              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}</Text>
               <View style={styles.joinBtn}>
                 <Text style={styles.joinBtnText}>참가 신청</Text>
               </View>
@@ -1535,7 +1525,7 @@ export default function MapScreen() {
         </Pressable>
       );
     },
-    [router, categories, selectedMeetingId, mapCenterAnchorForList],
+    [router, categories, selectedMeetingId, userCoords],
   );
 
   const renderSheetMeetingText = useCallback(
@@ -1595,13 +1585,7 @@ export default function MapScreen() {
         ].filter(Boolean);
       })();
       return (
-        <Pressable
-          onPress={() => {
-            setSelectedMeetingId(m.id);
-            router.push(`/meeting/${m.id}`);
-          }}
-          style={[styles.sheetInfoWrap, selected && styles.sheetInfoWrapSelected]}
-          accessibilityRole="button">
+        <View style={[styles.sheetInfoWrap, selected && styles.sheetInfoWrapSelected]}>
           <View style={styles.sheetInfoHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.sheetInfoTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -1643,17 +1627,23 @@ export default function MapScreen() {
             ) : null}
           </View>
 
-          {/* 조건 칩(배열) — 인원 조건 + 상세 조건을 이어서 나열 */}
+          {/* 공개 모임 상세 조건: 한 줄 + 가로 스크롤(캐러셀 내 중첩 스크롤) */}
           {detailChips.length > 0 ? (
-            <View style={styles.detailChipRow}>
-              {detailChips.map((t) => (
-                <View key={t} style={styles.detailChip}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              style={styles.detailChipScroll}
+              contentContainerStyle={styles.detailChipScrollContent}>
+              {detailChips.map((t, idx) => (
+                <View key={`${m.id}-detail-${idx}`} style={styles.detailChip}>
                   <Text style={styles.detailChipText} numberOfLines={1}>
                     {t}
                   </Text>
                 </View>
               ))}
-            </View>
+            </ScrollView>
           ) : null}
 
           {/* 상세 팩트 영역 (옮기기 전 레이아웃로 롤백) */}
@@ -1679,7 +1669,7 @@ export default function MapScreen() {
                   accessibilityLabel="모임 위치로 이동">
                   <GinitSymbolicIcon name="locate-outline" size={16} color={GinitTheme.colors.primary} />
                   <Text style={styles.sheetMovePinInlineText} numberOfLines={1}>
-                    {formatDistanceForList(meetingDistanceMetersFromUser(m, mapCenterAnchorForList))}
+                    {formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}
                   </Text>
                 </Pressable>
               </View>
@@ -1705,10 +1695,10 @@ export default function MapScreen() {
           </View>
 
           {/* 모임 설명 숨김 */}
-        </Pressable>
+        </View>
       );
     },
-    [router, categories, selectedMeetingId, mapCenterAnchorForList, moveMapToMeetingPin],
+    [categories, selectedMeetingId, userCoords, moveMapToMeetingPin],
   );
 
   const renderVerticalRow = useCallback(
@@ -1743,7 +1733,7 @@ export default function MapScreen() {
               {listMetaText}
             </Text>
             <View style={styles.listFooter}>
-              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, mapCenterAnchorForList))}</Text>
+              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}</Text>
               <View style={styles.joinBtn}>
                 <Text style={styles.joinBtnText}>참가 신청</Text>
               </View>
@@ -1752,7 +1742,7 @@ export default function MapScreen() {
         </Pressable>
       );
     },
-    [router, categories, selectedMeetingId, mapCenterAnchorForList],
+    [router, categories, selectedMeetingId, userCoords],
   );
 
   const carouselWidth = useMemo(() => Dimensions.get('window').width - 32, []);
@@ -2239,7 +2229,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: 'rgba(31, 42, 68, 0.8)',
+    backgroundColor: GinitTheme.colors.primary,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -2531,6 +2521,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
+    marginRight: 10,
   },
   progressBadgeGreen: { backgroundColor: '#16A34A' },
   progressBadgeYellow: { backgroundColor: '#FACC15' },
@@ -2701,13 +2692,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   // sheetBadgeSubRow/sheetBadgeSubText: (모집 배지 아래 거리 표기 롤백으로 미사용)
-  detailChipRow: {
+  detailChipScroll: {
     marginTop: 10,
+  },
+  detailChipScrollContent: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
+    paddingRight: 12,
   },
   detailChip: {
+    flexShrink: 0,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
