@@ -108,3 +108,38 @@
 ## 4. Gesture Handler Inside Modals
 * If implementing `react-native-gesture-handler` (like `PinchGestureHandler` or `GestureDetector`) inside a React Native `<Modal>`, you MUST wrap the modal's internal root view with `<GestureHandlerRootView style={{ flex: 1 }}>`.
 * Always ensure `flex: 1` is applied to the `GestureHandlerRootView` to prevent touches from being ignored.
+
+---
+
+## 📱 FCM 토큰 & 채팅 푸시 알림 (회귀 방지)
+
+푸시 타깃·권한·포그라운드/백그라운드 경로가 얽이면 “토큰은 있는데 알림만 안 옴”, “재설치 후 토큰 NULL”, “POST_NOTIFICATIONS 중복 요청 멈춤” 등이 재발합니다. 아래를 **단일 진실**로 고정한다.
+
+### 1) `fcm_token` 저장소
+- **앱이 서버 푸시에 쓰는 디바이스 토큰은 Supabase `public.profiles.fcm_token`만** 사용한다. (Static 데이터 규칙과 동일)
+- Firestore `users` 등에 **FCM 토큰을 새로 쓰거나 동기화하는 로직을 추가하지 않는다.**
+
+### 2) 클라이언트 공용 모듈 (`src/lib/fcm-token-supabase-sync.ts`)
+- 토큰 획득·저장·검증의 **공용 진입점**은 이 파일의 `registerFcmDeviceAndGetToken`, `persistFcmTokenAndVerify`, (로그인 직후) `syncFcmTokenFromDeviceToProfile`이다.
+- **Android 13+ `POST_NOTIFICATIONS`**: `ensureAndroidPostNotificationsForFcm()`는 **단일 in-flight Promise**로 묶여 있다. 다른 화면/훅에서 `PermissionsAndroid.request(POST_NOTIFICATIONS)`를 **중복 추가하지 말고**, 필요 시 이 함수만 호출한다.
+- `persistFcmTokenAndVerify` 전에 `assertSupabasePublicReady()`가 깨지면 저장하지 않는다 — **우회 저장 경로를 새로 만들지 말 것.**
+
+### 3) 런타임 부트스트랩 (`components/FcmMessagingBootstrap.tsx`)
+- 로그인 `userId`가 있을 때만 동작한다. **Web(`Platform.OS === 'web'`)은 즉시 return** — 네이티브 FCM 가정 코드를 웹에 섞지 않는다.
+- 포그라운드 `onMessage`: 채팅 계열(`data.action`이 `in_app_chat`, `in_app_social_dm` 등)은 **`isMeetingChatNotifyEnabled` / `isSocialChatNotifyEnabled`**로 사용자 스위치를 존중한다. Android에서는 **`getCurrentChatRoomId()`와 동일 방이면 표시 생략**한다 — 이 분기를 바꿀 때는 백그라운드 동작과 이중 알림 여부를 함께 검토한다.
+- **토큰 갱신(`onTokenRefresh`)**과 **앱이 `active`로 복귀할 때의 재동기화**는 이미 설계되어 있다. 동일 목적의 **중복 타이머/리스너**를 다른 곳에 추가하지 않는다.
+
+### 4) 백그라운드 / Quit (Android data-only 등)
+- **`src/lib/fcm-background-handler.ts`는 `app/_layout.tsx` 최상단에서 side-effect import** (`import '@/src/lib/fcm-background-handler';`)로만 등록한다. lazy 로딩·조건부 import로 옮기면 **백그라운드에서 핸들러 미등록**으로 알림이 빠질 수 있다.
+- `notification` payload가 있는 메시지는 OS 트레이가 처리하는 경우가 많고, **data-only는 Notifee 표시 경로**에 의존한다 — 이 구분을 뒤집지 않는다.
+
+### 5) DB RPC와 “우발적 토큰 삭제”
+- `upsert_profile_payload`의 `fcm_token` 갱신 규칙: **JSON에 키가 없으면 기존 컬럼 유지**, **`fcm_token`이 JSON `null`일 때만 명시적 비우기**(탈퇴 등). 빈 문자열로 기존 값을 NULL로 덮는 실수를 막는 마이그레이션(`0054_...`)과 동일 철학을 유지한다.
+- 클라이언트 `updateUserProfile` 등에서도 **빈 문자열 토큰은 payload에 `fcm_token` 키를 넣지 않는다** — 직렬화/폼 기본값으로 빈 문자열이 RPC에 들어가면 회귀한다.
+
+### 6) 로그아웃 vs 회원탈퇴 (푸시 맥락)
+- **로그아웃**과 **회원탈퇴**는 이미 분리되어 있다. 프로필/토큰 비우기는 **탈퇴 플로우에서만 명시적**으로 수행하고, 로그아웃에서 `fcm_token`을 “정리”한다고 **우발적으로 NULL**로 만드는 경로를 추가하지 않는다.
+
+### 7) 채팅 알림 설정 UX와 저장
+- 모임 채팅 방별 스위치는 `src/lib/meeting-chat-notify-preference.ts`의 AsyncStorage 키 규칙과 **`get_chat_room_notify_enabled` RPC**와 맞춘다. 키/기본값을 바꿀 때는 **설정 화면·포그라운드 FCM·(필요 시) 서버 발송 조건**을 한 세트로 본다.
+- 소셜 DM 등은 `src/lib/social-chat-notify-preference.ts` 등 **기존 모듈**을 우선 확장하고, 동일 방/알림 off 판단을 여러 곳에 **복붙하지 않는다.**

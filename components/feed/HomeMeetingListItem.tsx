@@ -232,6 +232,7 @@ export function HomeMeetingListItem({
   const statusStyle = useMemo(() => {
     if (statusCorner === '일정 확정') return s.statusConfirmed;
     if (statusCorner === '모집 중') return s.statusOpen;
+    if (statusCorner === '정원 마감') return s.statusFull;
     return s.statusDefault;
   }, [statusCorner]);
 
@@ -451,7 +452,10 @@ const s = StyleSheet.create({
     color: GinitTheme.colors.textMuted,
   },
   statusOpen: {
-    color: GinitTheme.colors.textSub,
+    color: '#16A34A',
+  },
+  statusFull: {
+    color: '#ff8800',
   },
   statusConfirmed: {
     color: GinitTheme.colors.primary,

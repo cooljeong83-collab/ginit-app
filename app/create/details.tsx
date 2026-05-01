@@ -101,7 +101,7 @@ import {
   type MeetingTitleSuggestionContext,
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
-import type { PublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import { DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { addMeeting, normalizeProfileGenderToHostSnapshot } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
@@ -2620,17 +2620,9 @@ export default function CreateDetailsScreen() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [isPublicMeeting, setIsPublicMeeting] = useState(pickParam(isPublicParam) !== '0');
 
-  const [meetingConfig, setMeetingConfig] = useState<PublicMeetingDetailsConfig>(() => {
-    return {
-      ageLimit: ['NONE'],
-      genderRatio: 'ALL',
-      settlement: 'DUTCH',
-      minGLevel: 1,
-      minGTrust: null,
-      approvalType: 'INSTANT',
-      requestMessageEnabled: null,
-    };
-  });
+  const [meetingConfig, setMeetingConfig] = useState<PublicMeetingDetailsConfig>(
+    () => DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG,
+  );
 
   const [title, setTitle] = useState('');
   const [minParticipants, setMinParticipants] = useState(PARTICIPANT_COUNT_MIN);
@@ -3836,7 +3828,13 @@ export default function CreateDetailsScreen() {
                       {isPublicMeeting ? (
                         <>
                           <Text style={[styles.wizardFieldLabel, { marginTop: 12 }]}>공개 모임</Text>
-                          <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
+                          <VoteCandidateCard
+                            reduceHeavyEffects={reduceHeavyEffectsUI}
+                            outerStyle={styles.wizardPublicMeetingDetailsCardOuter}
+                            wrapStyleOverride={[
+                              styles.flatWrapNoShadow,
+                              styles.wizardPublicMeetingDetailsWrapOverride,
+                            ]}>
                             <PublicMeetingDetailsCard
                               reduceHeavyEffects={reduceHeavyEffectsUI}
                               value={meetingConfig}
@@ -4911,6 +4909,24 @@ const styles = StyleSheet.create({
     padding: 5,
     backgroundColor: 'transparent',
     borderWidth: 0,
+  },
+  /** `placeResultsScrollHost`와 동일 — 공개 모임 상세(모집 연령대 등) 카드 외곽선 */
+  wizardPublicMeetingDetailsCardOuter: {
+    borderRadius: 16,
+    padding: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    overflow: 'hidden',
+  },
+  wizardPublicMeetingDetailsWrapOverride: {
+    marginBottom: 12,
+    backgroundColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   wizardFieldLabel: {
     fontSize: 13,

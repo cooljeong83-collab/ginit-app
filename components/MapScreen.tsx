@@ -495,7 +495,7 @@ export default function MapScreen() {
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [userHeadingDeg, setUserHeadingDeg] = useState<number | null>(null);
   const [genderByUserId, setGenderByUserId] = useState<Map<string, string>>(new Map());
-  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
+  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
   const [recruitingOnly, setRecruitingOnly] = useState(true);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
@@ -925,9 +925,20 @@ export default function MapScreen() {
     });
   }, [textFilteredMeetings, selectedCategoryId, categories, recruitingOnly]);
 
+  /** 목록·거리 표시: 현재 지도 조회 영역 중심 우선(사용자가 보는 화면 기준), 없으면 검색 앵커·GPS */
+  const mapCenterAnchorForList = useMemo((): LatLng | null => {
+    if (mapGeoQueryRegion) {
+      const { latitude, longitude } = mapGeoQueryRegion;
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        return { latitude, longitude };
+      }
+    }
+    return searchAnchor ?? userCoords ?? null;
+  }, [mapGeoQueryRegion, searchAnchor, userCoords]);
+
   const sortedFilteredMeetings = useMemo(
-    () => sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords ?? searchAnchor),
-    [filteredMeetings, listSortMode, searchAnchor, userCoords],
+    () => sortMeetingsForFeed(filteredMeetings, listSortMode, mapCenterAnchorForList),
+    [filteredMeetings, listSortMode, mapCenterAnchorForList],
   );
 
   const meetingsOnMap = useMemo(() => {
@@ -1015,8 +1026,8 @@ export default function MapScreen() {
       ? sortedFilteredMeetings.filter((m) => meetingInBounds(m, r))
       : [...sortedFilteredMeetings];
 
-    // 바텀시트는 "내 위치" 기준 가까운 순(내 GPS 없을 때만 지도 앵커 사용)
-    const anchor = userCoords ?? searchAnchor;
+    // 바텀시트: 지도 가운데(조회 영역 중심) 기준 가까운 순 — 목록 정렬과 동일 앵커
+    const anchor = mapCenterAnchorForList;
     list.sort((a, b) => {
       const da = meetingDistanceMetersFromUser(a, anchor) ?? Number.POSITIVE_INFINITY;
       const db = meetingDistanceMetersFromUser(b, anchor) ?? Number.POSITIVE_INFINITY;
@@ -1025,7 +1036,7 @@ export default function MapScreen() {
       return meetingCreatedAtMillis(a) - meetingCreatedAtMillis(b);
     });
     return list;
-  }, [sortedFilteredMeetings, mapGeoQueryRegion, searchAnchor, userCoords]);
+  }, [sortedFilteredMeetings, mapGeoQueryRegion, mapCenterAnchorForList]);
 
   const initialMapRegion = useMemo(() => {
     if (searchAnchor) {
@@ -1515,7 +1526,7 @@ export default function MapScreen() {
               {listMetaText}
             </Text>
             <View style={styles.listFooter}>
-              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, searchAnchor ?? userCoords))}</Text>
+              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, mapCenterAnchorForList))}</Text>
               <View style={styles.joinBtn}>
                 <Text style={styles.joinBtnText}>참가 신청</Text>
               </View>
@@ -1524,7 +1535,7 @@ export default function MapScreen() {
         </Pressable>
       );
     },
-    [router, categories, selectedMeetingId, searchAnchor, userCoords],
+    [router, categories, selectedMeetingId, mapCenterAnchorForList],
   );
 
   const renderSheetMeetingText = useCallback(
@@ -1668,7 +1679,7 @@ export default function MapScreen() {
                   accessibilityLabel="모임 위치로 이동">
                   <GinitSymbolicIcon name="locate-outline" size={16} color={GinitTheme.colors.primary} />
                   <Text style={styles.sheetMovePinInlineText} numberOfLines={1}>
-                    {formatDistanceForList(meetingDistanceMetersFromUser(m, searchAnchor ?? userCoords))}
+                    {formatDistanceForList(meetingDistanceMetersFromUser(m, mapCenterAnchorForList))}
                   </Text>
                 </Pressable>
               </View>
@@ -1697,7 +1708,7 @@ export default function MapScreen() {
         </Pressable>
       );
     },
-    [router, categories, selectedMeetingId, searchAnchor, userCoords, moveMapToMeetingPin],
+    [router, categories, selectedMeetingId, mapCenterAnchorForList, moveMapToMeetingPin],
   );
 
   const renderVerticalRow = useCallback(
@@ -1732,7 +1743,7 @@ export default function MapScreen() {
               {listMetaText}
             </Text>
             <View style={styles.listFooter}>
-              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, searchAnchor ?? userCoords))}</Text>
+              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, mapCenterAnchorForList))}</Text>
               <View style={styles.joinBtn}>
                 <Text style={styles.joinBtnText}>참가 신청</Text>
               </View>
@@ -1741,7 +1752,7 @@ export default function MapScreen() {
         </Pressable>
       );
     },
-    [router, categories, selectedMeetingId, searchAnchor, userCoords],
+    [router, categories, selectedMeetingId, mapCenterAnchorForList],
   );
 
   const carouselWidth = useMemo(() => Dimensions.get('window').width - 32, []);

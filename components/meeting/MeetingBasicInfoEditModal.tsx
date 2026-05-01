@@ -8,9 +8,18 @@ import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
-import type { Meeting } from '@/src/lib/meetings';
-import { updateMeetingBasicFieldsByHost } from '@/src/lib/meetings';
+import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import type { Meeting, PublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import {
+  DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG,
+  normalizeProfileGenderToHostSnapshot,
+  parsePublicMeetingDetailsConfig,
+  updateMeetingBasicFieldsByHost,
+} from '@/src/lib/meetings';
+import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
@@ -22,6 +31,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -139,6 +149,7 @@ export function MeetingBasicInfoEditModal({
   onClose,
   onSaved,
 }: MeetingBasicInfoEditModalProps) {
+  const router = useRouter();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   /** 시트 상·하에 남길 최소 여백(px) — 노치·홈 인디케이터 제외 후 최대 높이 */
@@ -234,6 +245,16 @@ export function MeetingBasicInfoEditModal({
   const [maxParticipants, setMaxParticipants] = useState(4);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [meetingConfigDraft, setMeetingConfigDraft] = useState<PublicMeetingDetailsConfig>(
+    DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG,
+  );
+  /** 공개 모임에서 `meetingConfig`가 서버에 있었거나, 상세 조건 팝업에서 한 번 저장됨 */
+  const [publicDetailsAck, setPublicDetailsAck] = useState(false);
+  const [publicDetailsModalOpen, setPublicDetailsModalOpen] = useState(false);
+  const [publicDetailsError, setPublicDetailsError] = useState<string | null>(null);
+  const [publicDetailsBusy, setPublicDetailsBusy] = useState(false);
+  /** 상세 조건 팝업 취소 시 비공개로 되돌릴지(비공개→공개 직후에만 true) */
+  const revertPublicOnDetailsCancelRef = useRef(false);
 
   const [voiceTitleRecognizing, setVoiceTitleRecognizing] = useState(false);
   const [voiceDescriptionRecognizing, setVoiceDescriptionRecognizing] = useState(false);
@@ -328,6 +349,9 @@ export function MeetingBasicInfoEditModal({
       descFieldFocusedRef.current = false;
       setSheetKeyboardLiftPx(0);
       setWizardShellLayoutHeight(0);
+      setPublicDetailsModalOpen(false);
+      setPublicDetailsError(null);
+      revertPublicOnDetailsCancelRef.current = false;
     }
   }, [visible]);
 
@@ -375,6 +399,9 @@ export function MeetingBasicInfoEditModal({
     setDescription(meeting.description?.trim() ?? '');
     const pub = meeting.isPublic !== false;
     setIsPublicMeeting(pub);
+    const parsedCfg = parsePublicMeetingDetailsConfig(meeting.meetingConfig);
+    setMeetingConfigDraft(parsedCfg ?? DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG);
+    setPublicDetailsAck(pub && parsedCfg != null);
     if (pub) {
       const min = Math.max(PARTICIPANT_COUNT_MIN, Math.min(100, meeting.minParticipants ?? PARTICIPANT_COUNT_MIN));
       const cap = meeting.capacity;
@@ -454,6 +481,10 @@ export function MeetingBasicInfoEditModal({
       return;
     }
     if (isPublicMeeting) {
+      if (!publicDetailsAck) {
+        setFormError('「🌐 공개」를 눌러 상세 조건을 확인·저장한 뒤 다시 저장해 주세요.');
+        return;
+      }
       if (!Number.isFinite(minParticipants) || minParticipants < PARTICIPANT_COUNT_MIN || minParticipants > 100) {
         setFormError('최소 인원을 선택해 주세요.');
         return;
@@ -465,6 +496,16 @@ export function MeetingBasicInfoEditModal({
         (maxParticipants > 100 && maxParticipants !== CAPACITY_UNLIMITED)
       ) {
         setFormError('최대 인원을 선택해 주세요.');
+        return;
+      }
+      if (
+        meetingConfigDraft.settlement === 'MEMBERSHIP_FEE' &&
+        (typeof meetingConfigDraft.membershipFeeWon !== 'number' ||
+          !Number.isFinite(meetingConfigDraft.membershipFeeWon) ||
+          meetingConfigDraft.membershipFeeWon < 1 ||
+          meetingConfigDraft.membershipFeeWon > 100_000)
+      ) {
+        setFormError('상세 조건의 회비를 1원 이상 10만 원 이하로 맞춘 뒤 「공개」에서 다시 저장해 주세요.');
         return;
       }
     } else {
@@ -483,6 +524,30 @@ export function MeetingBasicInfoEditModal({
     const capOut = isPublicMeeting ? maxParticipants : minParticipants;
     const minOut = isPublicMeeting ? minParticipants : minParticipants;
 
+    let meetingConfigForSave: PublicMeetingDetailsConfig | null = null;
+    if (isPublicMeeting) {
+      let hostProfile: Awaited<ReturnType<typeof getUserProfile>> = null;
+      try {
+        hostProfile = await getUserProfile(hostUserId.trim());
+      } catch {
+        /* 저장 시 서버·RPC에서도 검증 */
+      }
+      if (meetingConfigDraft.genderRatio === 'SAME_GENDER_ONLY') {
+        if (meetingDemographicsIncomplete(hostProfile, hostUserId.trim())) {
+          setFormError('동성 모집은 프로필 성별·연령대 등록 후 저장할 수 있어요.');
+          return;
+        }
+        const snap = normalizeProfileGenderToHostSnapshot(hostProfile?.gender ?? null);
+        if (snap == null) {
+          setFormError('동성 모집은 프로필에 성별을 입력한 뒤 저장해 주세요.');
+          return;
+        }
+        meetingConfigForSave = { ...meetingConfigDraft, hostGenderSnapshot: snap };
+      } else {
+        meetingConfigForSave = { ...meetingConfigDraft };
+      }
+    }
+
     setSaving(true);
     try {
       await updateMeetingBasicFieldsByHost(meeting.id, hostUserId.trim(), {
@@ -491,6 +556,7 @@ export function MeetingBasicInfoEditModal({
         isPublic: isPublicMeeting,
         capacity: capOut,
         minParticipants: minOut,
+        meetingConfig: meetingConfigForSave,
       });
       onSaved?.();
       onClose();
@@ -509,9 +575,102 @@ export function MeetingBasicInfoEditModal({
     maxParticipants,
     onClose,
     onSaved,
+    publicDetailsAck,
+    meetingConfigDraft,
   ]);
 
+  const onPressPublicSegment = useCallback(() => {
+    if (saving) return;
+    const wasPublic = isPublicMeeting;
+    setIsPublicMeeting(true);
+    /** 비공개→공개 전환, 또는 서버에 상세 조건이 없는 공개 모임 → 팝업 */
+    if (!wasPublic || !publicDetailsAck) {
+      revertPublicOnDetailsCancelRef.current = !wasPublic;
+      setPublicDetailsModalOpen(true);
+    }
+  }, [isPublicMeeting, publicDetailsAck, saving]);
+
+  const onPressPrivateSegment = useCallback(() => {
+    if (saving) return;
+    setIsPublicMeeting(false);
+    setPublicDetailsAck(false);
+    setPublicDetailsModalOpen(false);
+    revertPublicOnDetailsCancelRef.current = false;
+  }, [saving]);
+
+  const onCancelPublicDetailsModal = useCallback(() => {
+    if (publicDetailsBusy) return;
+    setPublicDetailsError(null);
+    if (revertPublicOnDetailsCancelRef.current) {
+      setIsPublicMeeting(false);
+    }
+    revertPublicOnDetailsCancelRef.current = false;
+    setPublicDetailsModalOpen(false);
+  }, [publicDetailsBusy]);
+
+  const onSavePublicDetailsModal = useCallback(async () => {
+    if (!hostUserId?.trim()) {
+      setPublicDetailsError('로그인 정보를 확인해 주세요.');
+      return;
+    }
+    setPublicDetailsError(null);
+    if (
+      meetingConfigDraft.settlement === 'MEMBERSHIP_FEE' &&
+      (typeof meetingConfigDraft.membershipFeeWon !== 'number' ||
+        !Number.isFinite(meetingConfigDraft.membershipFeeWon) ||
+        meetingConfigDraft.membershipFeeWon < 1)
+    ) {
+      setPublicDetailsError('회비를 선택한 경우 1원 이상 입력해 주세요.');
+      return;
+    }
+    if (
+      meetingConfigDraft.settlement === 'MEMBERSHIP_FEE' &&
+      typeof meetingConfigDraft.membershipFeeWon === 'number' &&
+      meetingConfigDraft.membershipFeeWon > 100_000
+    ) {
+      setPublicDetailsError('회비는 최대 10만 원까지 입력할 수 있어요.');
+      return;
+    }
+    setPublicDetailsBusy(true);
+    try {
+      let hostProfile: Awaited<ReturnType<typeof getUserProfile>> = null;
+      try {
+        hostProfile = await getUserProfile(hostUserId.trim());
+      } catch {
+        /* 아래 분기에서 동성만 추가 검증 */
+      }
+      if (meetingConfigDraft.genderRatio === 'SAME_GENDER_ONLY') {
+        if (meetingDemographicsIncomplete(hostProfile, hostUserId.trim())) {
+          Alert.alert(
+            '프로필을 먼저 완성해 주세요',
+            'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
+            [
+              { text: '닫기', style: 'cancel' },
+              { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+            ],
+          );
+          return;
+        }
+        if (normalizeProfileGenderToHostSnapshot(hostProfile?.gender ?? null) == null) {
+          Alert.alert('프로필 확인', '동성 모집은 프로필에 성별을 입력한 뒤 저장할 수 있어요.', [
+            { text: '닫기', style: 'cancel' },
+            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+          ]);
+          return;
+        }
+      }
+      setPublicDetailsAck(true);
+      revertPublicOnDetailsCancelRef.current = false;
+      setPublicDetailsModalOpen(false);
+    } finally {
+      setPublicDetailsBusy(false);
+    }
+  }, [hostUserId, meetingConfigDraft, router]);
+
+  const publicDetailsSheetMaxH = Math.round(sheetWindowMaxHeight * 0.9);
+
   return (
+    <>
     <Modal visible={visible} animationType="fade" transparent onRequestClose={() => !saving && onClose()}>
       <View style={styles.modalRoot}>
         <Pressable
@@ -622,20 +781,33 @@ export function MeetingBasicInfoEditModal({
               <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>공개 / 비공개</Text>
               <View style={styles.segmentRow}>
                 <Pressable
-                  onPress={() => !saving && setIsPublicMeeting(false)}
+                  onPress={onPressPrivateSegment}
                   style={[styles.segmentHalf, !isPublicMeeting && styles.segmentHalfOn]}
                   accessibilityRole="button">
                   <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
                   <Text style={styles.segmentSub}>(초대만)</Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => !saving && setIsPublicMeeting(true)}
+                  onPress={onPressPublicSegment}
                   style={[styles.segmentHalf, isPublicMeeting && styles.segmentHalfOn]}
                   accessibilityRole="button">
                   <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
                   <Text style={styles.segmentSub}>(지역 검색)</Text>
                 </Pressable>
               </View>
+              {isPublicMeeting && publicDetailsAck ? (
+                <Pressable
+                  onPress={() => {
+                    if (saving) return;
+                    revertPublicOnDetailsCancelRef.current = false;
+                    setPublicDetailsModalOpen(true);
+                  }}
+                  style={({ pressed }) => [styles.publicDetailsEditLink, pressed && { opacity: 0.82 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="공개 모임 상세 조건 수정">
+                  <Text style={styles.publicDetailsEditLinkText}>상세 조건 수정</Text>
+                </Pressable>
+              ) : null}
 
               <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>소개</Text>
               <View style={styles.descVoiceShell}>
@@ -712,6 +884,81 @@ export function MeetingBasicInfoEditModal({
         </View>
       </View>
     </Modal>
+
+    <Modal
+      visible={publicDetailsModalOpen}
+      animationType="fade"
+      transparent
+      onRequestClose={() => !publicDetailsBusy && onCancelPublicDetailsModal()}>
+      <View style={styles.modalRoot}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => !publicDetailsBusy && onCancelPublicDetailsModal()}
+          accessibilityRole="button"
+          accessibilityLabel="닫기"
+        />
+        <View style={styles.centerOuter} pointerEvents="box-none">
+          <View
+            style={[
+              styles.publicDetailsSheet,
+              {
+                maxHeight: publicDetailsSheetMaxH,
+                maxWidth: sheetMaxWidth,
+                paddingBottom: Math.max(12, insets.bottom),
+              },
+            ]}>
+            <Text style={styles.headerTitle}>상세 조건 (선택)</Text>
+            <Text style={styles.publicDetailsHint}>
+              공개 모임은 연령·정산·참가 자격 등을 설정할 수 있어요. 아래에서 조정한 뒤 저장해 주세요.
+            </Text>
+            <ScrollView
+              style={styles.publicDetailsScroll}
+              contentContainerStyle={styles.publicDetailsScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}>
+              <View style={styles.publicDetailsCardShell}>
+                <PublicMeetingDetailsCard
+                  reduceHeavyEffects
+                  value={meetingConfigDraft}
+                  onChange={setMeetingConfigDraft}
+                />
+              </View>
+            </ScrollView>
+            {publicDetailsError ? <Text style={styles.errorText}>{publicDetailsError}</Text> : null}
+            <View style={styles.footer}>
+              <Pressable
+                onPress={() => !publicDetailsBusy && onCancelPublicDetailsModal()}
+                style={({ pressed }) => [styles.ghostBtn, pressed && { opacity: 0.85 }]}
+                accessibilityRole="button">
+                <Text style={styles.ghostBtnText}>취소</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void onSavePublicDetailsModal()}
+                disabled={publicDetailsBusy}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  (pressed || publicDetailsBusy) && { opacity: publicDetailsBusy ? 0.7 : 0.9 },
+                ]}
+                accessibilityRole="button">
+                <LinearGradient
+                  colors={GinitTheme.colors.ctaGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                  pointerEvents="none"
+                />
+                {publicDetailsBusy ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.primaryBtnLabel}>저장</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 }
 
@@ -892,6 +1139,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
   },
+  publicDetailsEditLink: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    marginRight: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  publicDetailsEditLinkText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: GinitTheme.colors.primary,
+    textDecorationLine: 'underline',
+  },
   wizardTextInput: {
     backgroundColor: GinitTheme.glassModal.inputFill,
     borderRadius: 14,
@@ -961,5 +1221,39 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  publicDetailsSheet: {
+    alignSelf: 'center',
+    width: '100%',
+    flexDirection: 'column',
+    backgroundColor: GinitTheme.colors.bg,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    ...GinitTheme.shadow.float,
+  },
+  publicDetailsHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    marginBottom: 10,
+    lineHeight: 17,
+  },
+  publicDetailsScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 120,
+  },
+  publicDetailsScrollContent: {
+    paddingBottom: 8,
+  },
+  publicDetailsCardShell: {
+    borderRadius: GinitTheme.radius.card,
+    padding: 10,
+    backgroundColor: GinitTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
   },
 });

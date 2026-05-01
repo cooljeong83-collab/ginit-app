@@ -4,11 +4,11 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GINIT_HIGH_TRUST_HOST_MIN } from '@/src/lib/ginit-trust';
 import type {
-    PublicMeetingAgeLimit,
-    PublicMeetingApprovalType,
-    PublicMeetingDetailsConfig,
-    PublicMeetingGenderRatio,
-    PublicMeetingSettlement,
+  PublicMeetingAgeLimit,
+  PublicMeetingApprovalType,
+  PublicMeetingDetailsConfig,
+  PublicMeetingGenderRatio,
+  PublicMeetingSettlement,
 } from '@/src/lib/meetings';
 
 const RADIUS = 12;
@@ -348,9 +348,8 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   card: {
-    borderRadius: RADIUS,
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.18)',
+    borderRadius: 16,
+    borderWidth: 0,
     backgroundColor: '#FFFFFF',
     overflow: 'hidden',
   },
@@ -378,7 +377,7 @@ const styles = StyleSheet.create({
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 5.5,
   },
   chip: {
     borderRadius: RADIUS,

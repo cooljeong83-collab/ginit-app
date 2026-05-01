@@ -194,6 +194,17 @@ export type PublicMeetingDetailsConfig = {
   requestMessageEnabled?: boolean | null;
 };
 
+/** 모임 생성 화면·기본 정보 수정 등에서 공개 상세 조건 초기값으로 공통 사용 */
+export const DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG: PublicMeetingDetailsConfig = {
+  ageLimit: ['NONE'],
+  genderRatio: 'ALL',
+  settlement: 'DUTCH',
+  minGLevel: 1,
+  minGTrust: null,
+  approvalType: 'INSTANT',
+  requestMessageEnabled: null,
+};
+
 function isPublicMeetingAgeLimit(x: unknown): x is PublicMeetingAgeLimit {
   return x === 'TWENTIES' || x === 'THIRTIES' || x === 'FORTY_PLUS' || x === 'NONE';
 }
@@ -927,6 +938,8 @@ export type MeetingBasicFieldsPatch = {
   isPublic: boolean;
   capacity: number;
   minParticipants: number;
+  /** 공개 모임일 때 필수. 비공개로 저장할 때는 `null`로 비웁니다. */
+  meetingConfig?: PublicMeetingDetailsConfig | null;
 };
 
 /**
@@ -971,6 +984,24 @@ export async function updateMeetingBasicFieldsByHost(
 
   const description = patch.description.trim();
 
+  let meetingConfigOut: PublicMeetingDetailsConfig | Record<string, unknown> | null = null;
+  if (isPublic) {
+    const cfg = patch.meetingConfig;
+    if (cfg == null || typeof cfg !== 'object') {
+      throw new Error('공개 모임은 상세 조건을 저장한 뒤 다시 시도해 주세요.');
+    }
+    if (
+      cfg.settlement === 'MEMBERSHIP_FEE' &&
+      (typeof cfg.membershipFeeWon !== 'number' ||
+        !Number.isFinite(cfg.membershipFeeWon) ||
+        cfg.membershipFeeWon < 1 ||
+        cfg.membershipFeeWon > 100_000)
+    ) {
+      throw new Error('회비를 선택한 경우 1원 이상 10만 원 이하로 입력해 주세요.');
+    }
+    meetingConfigOut = stripUndefinedDeep(cfg) as Record<string, unknown>;
+  }
+
   const assertHostAndCount = (data: Record<string, unknown>, nsHost: string) => {
     const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
     const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
@@ -1000,6 +1031,7 @@ export async function updateMeetingBasicFieldsByHost(
       isPublic,
       capacity,
       minParticipants,
+      meetingConfig: meetingConfigOut,
     };
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(next) as Record<string, unknown>);
     const after = await getMeetingById(mid);
@@ -1021,6 +1053,7 @@ export async function updateMeetingBasicFieldsByHost(
     isPublic,
     capacity,
     minParticipants,
+    meetingConfig: meetingConfigOut,
   });
   const after = await getMeetingById(mid);
   if (after?.createdBy?.trim()) {

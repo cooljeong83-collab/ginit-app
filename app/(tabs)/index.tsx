@@ -43,7 +43,6 @@ import {
   feedMeetingSymbolBox,
   feedSearchFiltersActive,
   listSortModeLabel,
-  meetingCreatedAtMs,
   meetingMatchesCategoryFilter,
   meetingMatchesFeedSearch,
   meetingWithinHomeFeedRadius,
@@ -68,7 +67,7 @@ import {
   meetingOverlapsUserConfirmedSlots,
 } from '@/src/lib/meeting-schedule-overlap';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, meetingPrimaryStartMs } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
@@ -116,7 +115,7 @@ export default function FeedScreen() {
   const [regionSearchKeyboardVisible, setRegionSearchKeyboardVisible] = useState(false);
   const [feedListSettingsModalOpen, setFeedListSettingsModalOpen] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('latest');
+  const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('soon');
   /** true면 모집중(정원 미달·미확정) 모임만 표시. 기본값 off */
   const [recruitingOnly, setRecruitingOnly] = useState(false);
   const [feedSearchModalOpen, setFeedSearchModalOpen] = useState(false);
@@ -401,72 +400,6 @@ export default function FeedScreen() {
     [joinedFilteredMeetings, listSortMode, feedCoords],
   );
 
-  const hostedFilteredMeetings = useMemo(() => {
-    const pk = userId?.trim() ?? '';
-    const ns = pk ? normalizeParticipantId(pk) : '';
-    if (!ns) return [];
-    const base = myTabsMeetings.filter((m) => {
-      const c = m.createdBy?.trim() ?? '';
-      if (!c) return false;
-      return (normalizeParticipantId(c) ?? c) === ns;
-    });
-    return base.filter((m) => {
-      if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
-      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
-      if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
-      return true;
-    });
-  }, [myTabsMeetings, userId, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
-
-  const guestFilteredMeetings = useMemo(() => {
-    const pk = userId?.trim() ?? '';
-    const ns = pk ? normalizeParticipantId(pk) : '';
-    // 게스트: 참여했지만(Joined) 방장은 아닌 모임만
-    const base = filterJoinedMeetings(myTabsMeetings, userId).filter((m) => {
-      if (!ns) return true;
-      const c = m.createdBy?.trim() ?? '';
-      if (!c) return true;
-      return (normalizeParticipantId(c) ?? c) !== ns;
-    });
-    return base.filter((m) => {
-      if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
-      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
-      if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
-      return true;
-    });
-  }, [myTabsMeetings, userId, selectedCategoryId, categories, recruitingOnly, appliedFeedSearch]);
-
-  const unifiedMyMeetings = useMemo(() => {
-    const list = [...hostedFilteredMeetings, ...guestFilteredMeetings];
-    const seen = new Set<string>();
-    const out: Meeting[] = [];
-    for (const m of list) {
-      if (!m?.id) continue;
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
-      out.push(m);
-    }
-
-    const sorted = [...out];
-    sorted.sort((a, b) => {
-      const ac = a.scheduleConfirmed !== true ? 0 : 1;
-      const bc = b.scheduleConfirmed !== true ? 0 : 1;
-      if (ac !== bc) return ac - bc;
-
-      if (ac === 1) {
-        const ta = meetingPrimaryStartMs(a) ?? Number.POSITIVE_INFINITY;
-        const tb = meetingPrimaryStartMs(b) ?? Number.POSITIVE_INFINITY;
-        if (ta !== tb) return ta - tb;
-      } else {
-        const ca = meetingCreatedAtMs(a);
-        const cb = meetingCreatedAtMs(b);
-        if (cb !== ca) return cb - ca;
-      }
-      return a.title.localeCompare(b.title, 'ko');
-    });
-    return sorted;
-  }, [hostedFilteredMeetings, guestFilteredMeetings]);
-
   const goToHomeTab = useCallback(
     (t: 'explore' | 'my') => {
       setHomeTab(t);
@@ -622,7 +555,7 @@ export default function FeedScreen() {
   const closeFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(false), []);
 
   const feedListSettingsDotActive = useMemo(
-    () => recruitingOnly || feedSearchFiltersActive(appliedFeedSearch) || listSortMode !== 'latest',
+    () => recruitingOnly || feedSearchFiltersActive(appliedFeedSearch) || listSortMode !== 'soon',
     [recruitingOnly, appliedFeedSearch, listSortMode],
   );
 
@@ -964,7 +897,7 @@ export default function FeedScreen() {
       !listError &&
       meetings.length > 0 &&
       tab === 'my' &&
-      unifiedMyMeetings.length === 0
+      sortedJoinedMeetings.length === 0
         ? feedListEmptyCentered(
             'albums-outline',
             '조건에 맞는 내 모임이 없어요',
@@ -1010,7 +943,7 @@ export default function FeedScreen() {
               onMomentumScrollEnd={onTabPagerMomentumEnd}
               style={styles.tabPager}>
               {(['explore', 'my'] as const).map((tab) => {
-              const tabData = tab === 'explore' ? exploreFeedMeetings : unifiedMyMeetings;
+              const tabData = tab === 'explore' ? exploreFeedMeetings : sortedJoinedMeetings;
               return (
                 <View key={tab} style={[styles.tabPage, { width: windowWidth }]}>
                   <FlatList
