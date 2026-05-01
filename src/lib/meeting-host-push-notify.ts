@@ -9,6 +9,7 @@ export type MeetingHostPushAction =
   | 'deleted'
   | 'dates_updated'
   | 'places_updated'
+  | 'details_updated'
   | 'auto_cancelled_unconfirmed';
 
 function hostNorm(hostUserId: string): string {
@@ -44,6 +45,11 @@ function copyForPush(action: MeetingHostPushAction, meetingTitle: string): { tit
       };
     case 'dates_updated':
       return { title: '일정 후보가 변경됐어요', body: `「${t}」일정 후보가 바뀌었습니다. 눌러서 확인해 보세요.` };
+    case 'details_updated':
+      return {
+        title: '모임 정보가 바뀌었어요',
+        body: `「${t}」이름·소개·인원 등이 업데이트됐습니다. 눌러서 확인해 보세요.`,
+      };
     default:
       return { title: '장소 후보가 변경됐어요', body: `「${t}」장소 후보가 바뀌었습니다. 눌러서 확인해 보세요.` };
   }

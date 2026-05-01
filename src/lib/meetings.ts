@@ -919,6 +919,104 @@ export async function updateMeetingPlaceCandidates(
   }
 }
 
+export type MeetingBasicFieldsPatch = {
+  title: string;
+  description: string;
+  isPublic: boolean;
+  capacity: number;
+  minParticipants: number;
+};
+
+/**
+ * 주관자가 모임 이름·소개·공개 여부·정원(최소/최대)을 수정합니다. (Firestore 또는 Ledger)
+ */
+export async function updateMeetingBasicFieldsByHost(
+  meetingId: string,
+  hostUserId: string,
+  patch: MeetingBasicFieldsPatch,
+): Promise<void> {
+  const mid = meetingId.trim();
+  const uid = hostUserId.trim();
+  if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
+
+  const title = patch.title.trim();
+  if (!title) throw new Error('모임 이름을 입력해 주세요.');
+
+  const capacity = toFiniteInt(patch.capacity, 1);
+  const minParticipants = toFiniteInt(patch.minParticipants, 1);
+  const isPublic = Boolean(patch.isPublic);
+
+  if (isPublic) {
+    if (minParticipants < 1 || minParticipants > 100) throw new Error('최소 인원을 확인해 주세요.');
+    const maxUnlimited = capacity === MEETING_CAPACITY_UNLIMITED;
+    if (!maxUnlimited && (capacity < 1 || capacity > 100 || capacity < minParticipants)) {
+      throw new Error('최대 인원을 확인해 주세요.');
+    }
+  } else {
+    if (minParticipants < 1 || minParticipants > 100 || minParticipants !== capacity) {
+      throw new Error('참석 인원을 확인해 주세요.');
+    }
+  }
+
+  const description = patch.description.trim();
+
+  const assertHostAndCount = (data: Record<string, unknown>, nsHost: string) => {
+    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+    if (!nsCreated || nsCreated !== nsHost) {
+      throw new Error('모임 주관자만 수정할 수 있어요.');
+    }
+    const m = mapFirestoreMeetingDoc(mid, data);
+    const count = meetingParticipantCount(m);
+    if (capacity !== MEETING_CAPACITY_UNLIMITED && capacity < count) {
+      throw new Error(`현재 참여 ${count}명보다 작은 정원으로 줄일 수 없어요.`);
+    }
+    if (isPublic && capacity !== MEETING_CAPACITY_UNLIMITED && minParticipants > capacity) {
+      throw new Error('최소 인원이 최대 인원보다 클 수 없어요.');
+    }
+  };
+
+  const nsHost = normalizeParticipantId(uid) ?? uid;
+
+  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
+    const data = await ledgerTryLoadMeetingDoc(mid);
+    if (!data) throw new Error('모임을 찾을 수 없어요.');
+    assertHostAndCount(data, nsHost);
+    const next = {
+      ...data,
+      title,
+      description,
+      isPublic,
+      capacity,
+      minParticipants,
+    };
+    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(next) as Record<string, unknown>);
+    const after = await getMeetingById(mid);
+    if (after?.createdBy?.trim()) {
+      notifyMeetingParticipantsOfHostActionFireAndForget(after, 'details_updated', after.createdBy.trim());
+    }
+    return;
+  }
+
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+  const data = snap.data() as Record<string, unknown>;
+  assertHostAndCount(data, nsHost);
+
+  await updateDoc(ref, {
+    title,
+    description,
+    isPublic,
+    capacity,
+    minParticipants,
+  });
+  const after = await getMeetingById(mid);
+  if (after?.createdBy?.trim()) {
+    notifyMeetingParticipantsOfHostActionFireAndForget(after, 'details_updated', after.createdBy.trim());
+  }
+}
+
 /**
  * 참여자 추가 + 선택한 투표 항목마다 득표 +1 (한 트랜잭션).
  * 이미 동일 사용자가 참여 목록에 있으면 아무 것도 하지 않습니다.

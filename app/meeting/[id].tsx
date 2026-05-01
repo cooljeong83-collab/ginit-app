@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -441,6 +442,7 @@ export default function MeetingDetailScreen() {
   const [hostTiePlaceId, setHostTiePlaceId] = useState<string | null>(null);
   const [hostTieMovieId, setHostTieMovieId] = useState<string | null>(null);
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
 
   const [profilePopupUserId, setProfilePopupUserId] = useState<string | null>(null);
   const [friendRequestBusy, setFriendRequestBusy] = useState(false);
@@ -2388,10 +2390,21 @@ export default function MeetingDetailScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled">
             <View style={styles.titleCard}>
-              <Pressable style={styles.pencilAbs} accessibilityRole="button" accessibilityLabel="제목 수정">
-                <GinitSymbolicIcon name="pencil" size={18} color={GinitTheme.colors.primary} />
-              </Pressable>
-              <Text style={styles.titleCardText}>{meeting.title || '제목 없음'}</Text>
+              <View style={styles.titleCardRow}>
+                <Text style={styles.titleCardText} numberOfLines={6}>
+                  {meeting.title || '제목 없음'}
+                </Text>
+                {isHost ? (
+                  <Pressable
+                    onPress={() => setBasicInfoEditOpen(true)}
+                    style={({ pressed }) => [styles.titleEditCircleBtn, pressed && { opacity: 0.82 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="기본 정보 수정"
+                    hitSlop={8}>
+                    <GinitSymbolicIcon name="pencil" size={17} color={GinitTheme.colors.textSub} />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
 
             <View style={styles.infoCard}>
@@ -2956,7 +2969,6 @@ export default function MeetingDetailScreen() {
                         ) : null}
                       </View>
                     </View>
-                    <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
                   </>
                 ) : extraMovies.length > 0 ? (
                   <>
@@ -3103,7 +3115,7 @@ export default function MeetingDetailScreen() {
                     </View>
                   );
                 })()}
-                <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 확정 내역처럼 표시돼요.</Text>
+                
                 {singlePlaceCoords ? (
                   <View style={styles.confirmedMapPress}>
                     <View style={styles.confirmedMapPreviewBox}>
@@ -4034,6 +4046,19 @@ export default function MeetingDetailScreen() {
           </View>
         </Modal>
 
+        <MeetingBasicInfoEditModal
+          visible={basicInfoEditOpen && meeting != null}
+          meeting={meeting}
+          hostUserId={userId}
+          onClose={() => setBasicInfoEditOpen(false)}
+          onSaved={() => {
+            if (meeting) {
+              markRecentSelfMeetingChange(meeting.id);
+              void refetchMeetingDetail();
+            }
+          }}
+        />
+
         <NaverPlaceWebViewModal
           visible={naverPlaceWebModal != null}
           url={naverPlaceWebModal?.url}
@@ -4123,18 +4148,39 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 18,
     padding: 18,
-    paddingRight: 56,
     marginBottom: 20,
     shadowColor: 'rgba(15, 23, 42, 0.12)',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,
     shadowRadius: 14,
     elevation: 4,
-    position: 'relative',
     overflow: 'visible',
   },
-  pencilAbs: { position: 'absolute', top: 14, right: 14, zIndex: 2, padding: 4 },
-  titleCardText: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', lineHeight: 26 },
+  titleCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  /** 원형 라인 + 연필(기본 정보 수정) — 제목 우측 정렬 */
+  titleEditCircleBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    backgroundColor: '#fff',
+  },
+  titleCardText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    lineHeight: 26,
+  },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',

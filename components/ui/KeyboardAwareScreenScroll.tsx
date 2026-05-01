@@ -17,6 +17,13 @@ export type KeyboardAwareScreenScrollProps = {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  /**
+   * `contentContainerStyle`에 `flexGrow: 1`을 합칩니다(기본 true).
+   * 모달 등 짧은 폼에서 스크롤 여백이 필요하면 false로 두고 `paddingBottom`으로 슬랙을 주세요.
+   */
+  contentContainerFlexGrow?: boolean;
+  /** 탭바 안 스크린일 때 true(기본). 모달·풀스크린 폼은 false 권장. */
+  viewIsInsideTabBar?: boolean;
   /** 추가로 위로 밀어올릴 여백(px). 플로팅 CTA/탭바가 있으면 늘리세요. */
   extraScrollHeight?: number;
   /** 키보드가 열릴 때의 스크롤 보정 높이(px). */
@@ -40,6 +47,8 @@ function KeyboardAwareScreenScroll(
   children,
   style,
   contentContainerStyle,
+  contentContainerFlexGrow = true,
+  viewIsInsideTabBar = true,
   extraScrollHeight,
   extraHeight,
   scrollProps,
@@ -64,12 +73,10 @@ function KeyboardAwareScreenScroll(
 
   const mergedContentContainerStyle = useMemo(() => {
     return [
-      {
-        flexGrow: 1,
-      },
+      contentContainerFlexGrow ? { flexGrow: 1 } : null,
       contentContainerStyle,
-    ] as StyleProp<ViewStyle>;
-  }, [contentContainerStyle]);
+    ].filter(Boolean) as StyleProp<ViewStyle>;
+  }, [contentContainerFlexGrow, contentContainerStyle]);
 
   return (
     <KeyboardAwareScrollView
@@ -83,8 +90,7 @@ function KeyboardAwareScreenScroll(
       enableResetScrollToCoords
       extraScrollHeight={resolvedExtraScrollHeight}
       extraHeight={resolvedExtraHeight}
-      // iOS에서 내비게이션/세이프에어리어 고려
-      viewIsInsideTabBar
+      viewIsInsideTabBar={viewIsInsideTabBar}
       keyboardOpeningTime={250}
       {...scrollProps}
       onScrollBeginDrag={onScrollBeginDragMerged}>
