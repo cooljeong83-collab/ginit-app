@@ -67,7 +67,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   pickedTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   pickedSub: {
@@ -262,7 +262,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieRankBadgeText: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.textOnDark,
   },
   movieRightCol: {
@@ -303,12 +303,12 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   movieStarIcon: {
     fontSize: 15,
     color: ENERGETIC_ORANGE,
-    fontWeight: '900',
+    fontWeight: '600',
     marginTop: -1,
   },
   movieRatingNumber: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: ENERGETIC_ORANGE,
     letterSpacing: -0.2,
   },
@@ -329,7 +329,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieRatingBadgeText: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   moviePosterImg: {
@@ -363,7 +363,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieCompactTitle: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   movieCompactMeta: {
@@ -382,7 +382,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieCompactBadgeText: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
   /** 다중 후보: 세로 스택(웹 포함 전체 너비) */
@@ -545,7 +545,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieResultTitle: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 18,
     marginBottom: 6,
@@ -571,7 +571,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
   },
   movieResultDetailBtnText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
 });

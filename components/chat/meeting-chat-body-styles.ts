@@ -66,7 +66,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
   },
   dateChipText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#475569',
   },
   chatErrorBanner: {
@@ -169,7 +169,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
   },
   unreadBubbleCount: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#000000',
     marginBottom: 2,
   },
@@ -302,8 +302,8 @@ export const meetingChatBodyStyles = StyleSheet.create({
     borderLeftWidth: 0,
     borderLeftColor: 'transparent',
   },
-  replyQuoteLabelMine: { fontSize: 11, fontWeight: '900', color: '#0f172a' },
-  replyQuoteLabelOther: { fontSize: 11, fontWeight: '900', color: '#0f172a' },
+  replyQuoteLabelMine: { fontSize: 11, fontWeight: '600', color: '#0f172a' },
+  replyQuoteLabelOther: { fontSize: 11, fontWeight: '600', color: '#0f172a' },
   replyQuoteTextMine: { marginTop: 2, fontSize: 12, color: '#0f172a' },
   replyQuoteTextOther: { marginTop: 2, fontSize: 12, color: '#0f172a' },
   replyQuoteTopRow: {
@@ -363,7 +363,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     flexDirection: 'column',
     gap: 2,
   },
-  replyPreviewTitle: { fontSize: 13, fontWeight: '900', color: '#0f172a' },
+  replyPreviewTitle: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
   replyPreviewBody: { fontSize: 12, fontWeight: '600', color: '#0f172a' },
   replyPreviewThumbOuter: {
     width: 28,

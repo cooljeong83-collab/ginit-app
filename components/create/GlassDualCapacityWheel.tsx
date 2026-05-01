@@ -168,7 +168,7 @@ const col = StyleSheet.create({
   },
   itemTextSelected: {
     color: TRUST_BLUE,
-    fontWeight: '900',
+    fontWeight: '600',
     ...Platform.select({
       ios: {
         textShadowColor: 'rgba(31, 42, 68, 0.55)',
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
   },
   tilde: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     paddingBottom: 2,
   },

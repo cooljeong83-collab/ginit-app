@@ -2,16 +2,16 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    ActivityIndicator,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
-import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import type { FriendAcceptedRow, FriendInboxRow } from '@/src/lib/friends';
 import { acceptGinitRequest, fetchFriendsAcceptedList, fetchFriendsPendingInbox } from '@/src/lib/friends';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
   center: { paddingVertical: 12, alignItems: 'center' },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     letterSpacing: -0.3,
   },
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tileAvatarLetter: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.primary },
+  tileAvatarLetter: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
   trustBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(134, 211, 183, 0.45)',
   },
-  trustBadgeText: { fontSize: 11, fontWeight: '900', color: GinitTheme.colors.textSub },
-  tileNick: { fontSize: 13, fontWeight: '900', color: '#0f172a' },
+  trustBadgeText: { fontSize: 11, fontWeight: '600', color: GinitTheme.colors.textSub },
+  tileNick: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
   tileDna: { fontSize: 11, fontWeight: '700', color: '#64748b', marginTop: 2 },
 });

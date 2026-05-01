@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: '#f2f4f7',
   },
-  headerTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   errorBanner: {
     marginHorizontal: 16,
     marginBottom: 8,

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -159,7 +159,7 @@ const col = StyleSheet.create({
   },
   itemTextSelected: {
     color: TRUST_BLUE,
-    fontWeight: '900',
+    fontWeight: '600',
     ...Platform.select({
       ios: {
         textShadowColor: 'rgba(31, 42, 68, 0.55)',

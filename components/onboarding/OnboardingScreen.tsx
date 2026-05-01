@@ -1,17 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  type ListRenderItem,
-  type NativeSyntheticEvent,
-  type NativeScrollEvent,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
+    Animated,
+    Dimensions,
+    type ListRenderItem,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   logoImg: { width: 48, height: 48 },
   title: {
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     textAlign: 'center',
     letterSpacing: -0.55,
@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
   },
   btnPrimaryLabel: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#FFFFFF',
     letterSpacing: -0.3,
   },
@@ -371,7 +371,7 @@ const styles = StyleSheet.create({
   },
   btnSecondaryLabel: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   pressed: {

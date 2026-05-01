@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   pressed: { opacity: 0.85 },
   header: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 10, gap: 6 },
-  title: { fontSize: 24, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  title: { fontSize: 24, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   sub: { fontSize: 14, fontWeight: '600', color: '#64748b', lineHeight: 20 },
   form: { paddingHorizontal: 20, paddingTop: 16, gap: 12 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -157,8 +157,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  dialText: { fontSize: 15, fontWeight: '900', color: '#0f172a' },
-  dialArrow: { fontSize: 12, fontWeight: '900', color: '#64748b', marginTop: -1 },
+  dialText: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
+  dialArrow: { fontSize: 12, fontWeight: '600', color: '#64748b', marginTop: -1 },
   phoneInput: {
     height: 48,
     borderRadius: 12,
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   nextBtnDisabled: { opacity: 0.35 },
-  nextText: { fontSize: 16, fontWeight: '900', color: '#fff' },
+  nextText: { fontSize: 16, fontWeight: '600', color: '#fff' },
   hint: {
     fontSize: 12,
     fontWeight: '600',
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
   },
-  modalTitle: { fontSize: 14, fontWeight: '900', color: '#0f172a', marginBottom: 10 },
+  modalTitle: { fontSize: 14, fontWeight: '600', color: '#0f172a', marginBottom: 10 },
   countryRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -205,6 +205,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   countryLabel: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
-  countryDial: { fontSize: 14, fontWeight: '900', color: '#64748b' },
+  countryDial: { fontSize: 14, fontWeight: '600', color: '#64748b' },
 });
 

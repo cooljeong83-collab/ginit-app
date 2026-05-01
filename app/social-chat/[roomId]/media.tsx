@@ -2,21 +2,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -24,13 +24,13 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import {
-  deleteSocialChatImageMessageBestEffort,
-  parsePeerFromSocialRoomId,
-  subscribeSocialChatMessages,
-  type SocialChatMessage,
+    deleteSocialChatImageMessageBestEffort,
+    parsePeerFromSocialRoomId,
+    subscribeSocialChatMessages,
+    type SocialChatMessage,
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { getUserProfilesForIds, isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
 
 function profileForSender(map: Map<string, UserProfile>, senderId: string | null): UserProfile | undefined {
   if (!senderId?.trim()) return undefined;
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: '#f2f4f7',
   },
-  headerTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   errorBanner: {
     marginHorizontal: 16,
     marginTop: 12,
@@ -361,7 +361,7 @@ const styles = StyleSheet.create({
   },
   errorText: { flex: 1, minWidth: 0, color: '#b91c1c', fontWeight: '700' },
   retryBtn: { paddingVertical: 8, paddingHorizontal: 12 },
-  retryBtnText: { color: GinitTheme.colors.primary, fontWeight: '900' },
+  retryBtnText: { color: GinitTheme.colors.primary, fontWeight: '600' },
   empty: { marginTop: 48, textAlign: 'center', fontSize: 15, color: '#94a3b8', fontWeight: '700' },
   cell: { borderRadius: 12, overflow: 'hidden' },
   cellInner: { flex: 1, backgroundColor: '#fff', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(15, 23, 42, 0.06)' },
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   viewerMetaCol: { flex: 1, minWidth: 0 },
-  viewerMetaName: { color: '#fff', fontSize: 14, fontWeight: '900' },
+  viewerMetaName: { color: '#fff', fontSize: 14, fontWeight: '600' },
   viewerMetaTime: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700', marginTop: 2 },
   viewerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   viewerImageWrap: { flex: 1, paddingTop: 64 },

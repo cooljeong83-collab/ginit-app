@@ -8,22 +8,22 @@ import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessa
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import {
-  acceptGinitRequest,
-  fetchFriendRelationStatus,
-  sendGinitRequest,
-  type FriendRelationStatusRow,
-} from '@/src/lib/friends';
 import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
+import {
+    acceptGinitRequest,
+    fetchFriendRelationStatus,
+    sendGinitRequest,
+    type FriendRelationStatusRow,
+} from '@/src/lib/friends';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
-  WITHDRAWN_NICKNAME,
-  ensureUserProfile,
-  getUserProfile,
-  isUserProfileWithdrawn,
-  meetingDemographicsIncomplete,
-  type UserProfile,
+    WITHDRAWN_NICKNAME,
+    ensureUserProfile,
+    getUserProfile,
+    isUserProfileWithdrawn,
+    meetingDemographicsIncomplete,
+    type UserProfile,
 } from '@/src/lib/user-profile';
 
 function nicknameInitial(nickname: string): string {
@@ -423,9 +423,9 @@ const styles = StyleSheet.create({
   },
   profileAvatarImg: { width: '100%', height: '100%' },
   profileAvatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  profileAvatarLetter: { fontSize: 20, fontWeight: '900', color: GinitTheme.colors.primary },
+  profileAvatarLetter: { fontSize: 20, fontWeight: '600', color: GinitTheme.colors.primary },
   profileModalTopText: { flex: 1, minWidth: 0, gap: 4 },
-  profileModalNick: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.text, letterSpacing: -0.2 },
+  profileModalNick: { fontSize: 18, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.2 },
   profileModalMeta: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.textMuted },
   profileModalCloseBtn: {
     width: 36,
@@ -447,5 +447,5 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   profileActionPrimary: { backgroundColor: GinitTheme.colors.primary },
-  profileActionPrimaryText: { fontSize: 15, fontWeight: '900', color: '#fff' },
+  profileActionPrimaryText: { fontSize: 15, fontWeight: '600', color: '#fff' },
 });

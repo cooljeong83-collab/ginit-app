@@ -114,32 +114,32 @@ export function ChatMeetingListRow({
       style={({ pressed }) => [styles.pressableRow, pressed && styles.pressablePressed]}>
       <View style={styles.zoneA}>
         <View style={styles.symbolCol}>
-          {hostWithdrawn ? (
-            <View style={styles.hostBubble}>
-              <View style={styles.hostWithdrawnInner}>
-                <Ionicons name="person" size={16} color="#94a3b8" />
-              </View>
+          <View style={styles.hostBubble}>
+            <View style={styles.hostBubbleMedia}>
+              {hostWithdrawn ? (
+                <View style={styles.hostWithdrawnInner}>
+                  <Ionicons name="person" size={24} color="#94a3b8" />
+                </View>
+              ) : hostPhotoUrl ? (
+                <Image
+                  source={{ uri: hostPhotoUrl }}
+                  style={styles.hostBubbleImg}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                  recyclingKey={hostPhotoUrl}
+                />
+              ) : (
+                <View style={styles.hostFallback}>
+                  <Text style={styles.hostFallbackText}>{initial}</Text>
+                </View>
+              )}
             </View>
-          ) : hostPhotoUrl ? (
-            <View style={styles.hostBubble}>
-              <Image
-                source={{ uri: hostPhotoUrl }}
-                style={styles.hostBubbleImg}
-                contentFit="cover"
-                cachePolicy="disk"
-                recyclingKey={hostPhotoUrl}
-              />
+            <View style={styles.hostAvatarFooterBand} pointerEvents="none">
+              <Text style={styles.capacityCountLabel} numberOfLines={1}>
+                {pCount}명
+              </Text>
             </View>
-          ) : (
-            <View style={styles.hostBubble}>
-              <View style={styles.hostFallback}>
-                <Text style={styles.hostFallbackText}>{initial}</Text>
-              </View>
-            </View>
-          )}
-          <Text style={styles.capacityCountLabel} numberOfLines={1} accessibilityLabel={`참여자 ${pCount}명`}>
-            {pCount}명
-          </Text>
+          </View>
         </View>
         <View style={styles.zoneAMain}>
           <View style={styles.titleRow}>
@@ -194,50 +194,59 @@ const styles = StyleSheet.create({
   symbolCol: {
     flexShrink: 0,
     alignItems: 'center',
-    gap: 6,
     paddingTop: 1,
   },
+  /** 채팅 탭 1:1 `socialAvatarBubble`과 동일 크기·테두리 */
   hostBubble: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 52,
+    height: 52,
+    borderRadius: 19,
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: GinitTheme.colors.bgAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    position: 'relative',
+  },
+  hostBubbleMedia: {
+    ...StyleSheet.absoluteFillObject,
   },
   hostBubbleImg: {
     width: '100%',
     height: '100%',
   },
   hostWithdrawnInner: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
   hostFallback: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 82, 204, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   hostFallbackText: {
-    fontSize: 13,
-    fontWeight: '900',
+    fontSize: 21,
+    fontWeight: '600',
     color: GinitTheme.trustBlue,
   },
+  hostAvatarFooterBand: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingVertical: 3,
+    paddingHorizontal: 4,
+    backgroundColor: 'rgba(15, 23, 42, 0.52)',
+    alignItems: 'center',
+  },
   capacityCountLabel: {
-    marginTop: 0,
-    fontSize: 9,
-    fontWeight: '600',
-    color: GinitTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
     letterSpacing: -0.35,
     textAlign: 'center',
-    maxWidth: 40,
   },
   zoneAMain: {
     flex: 1,
@@ -259,7 +268,7 @@ const styles = StyleSheet.create({
   heroTitle: {
     flexShrink: 1,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.2,
     lineHeight: 18,
     color: GinitTheme.colors.text,
@@ -301,15 +310,15 @@ const styles = StyleSheet.create({
   unreadBadgeText: {
     color: '#FFFFFF',
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: -0.2,
     lineHeight: 12,
   },
   previewLine: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '400',
     lineHeight: 17,
-    color: GinitTheme.colors.textSub,
+    color: GinitTheme.colors.textMuted,
     letterSpacing: -0.1,
   },
 });

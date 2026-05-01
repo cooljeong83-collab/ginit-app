@@ -4,16 +4,16 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import {
-  acceptFollowRequest,
-  fetchFollowersList,
-  fetchFollowingList,
-  fetchFollowPendingInbox,
-  fetchFollowPendingOutbox,
-  rejectFollowRequest,
-  unfollow,
-  type FollowListRow,
-  type FollowPendingInboxRow,
-  type FollowPendingOutboxRow,
+    acceptFollowRequest,
+    fetchFollowersList,
+    fetchFollowingList,
+    fetchFollowPendingInbox,
+    fetchFollowPendingOutbox,
+    rejectFollowRequest,
+    unfollow,
+    type FollowListRow,
+    type FollowPendingInboxRow,
+    type FollowPendingOutboxRow,
 } from '@/src/lib/follow';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
@@ -347,7 +347,7 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.colors.primary,
     borderColor: GinitTheme.colors.primary,
   },
-  tabText: { fontSize: 12, fontWeight: '900', color: GinitTheme.colors.textSub },
+  tabText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.textSub },
   tabTextActive: { color: '#fff' },
   list: { paddingHorizontal: 16, paddingBottom: 24, gap: 10 },
   row: {
@@ -364,7 +364,7 @@ const styles = StyleSheet.create({
   rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
   rowTextCol: { flex: 1, minWidth: 0, gap: 2 },
   rowRight: { flexShrink: 0, alignItems: 'flex-end' },
-  rowTitle: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.text },
+  rowTitle: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.text },
   rowSub: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted },
   avatarWrap: {
     width: 44,
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
   },
   avatarImg: { width: '100%', height: '100%' },
   avatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  avatarLetter: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.primary },
+  avatarLetter: { fontSize: 18, fontWeight: '600', color: GinitTheme.colors.primary },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   smallBtn: {
     height: 32,
@@ -389,7 +389,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.08)',
   },
-  smallBtnText: { fontSize: 12, fontWeight: '900', color: GinitTheme.colors.textSub },
+  smallBtnText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.textSub },
   smallBtnGhost: {
     height: 32,
     paddingHorizontal: 12,
@@ -400,7 +400,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
   },
-  smallBtnGhostText: { fontSize: 12, fontWeight: '900', color: GinitTheme.colors.textSub },
+  smallBtnGhostText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.textSub },
   smallBtnPrimary: {
     height: 32,
     paddingHorizontal: 12,
@@ -409,6 +409,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: GinitTheme.colors.primary,
   },
-  smallBtnPrimaryText: { fontSize: 12, fontWeight: '900', color: '#fff' },
+  smallBtnPrimaryText: { fontSize: 12, fontWeight: '600', color: '#fff' },
 });
 

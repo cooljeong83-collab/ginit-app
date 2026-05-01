@@ -820,7 +820,7 @@ const styles = StyleSheet.create({
   },
   resultTitle: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 18,
     marginBottom: 6,
@@ -844,7 +844,7 @@ const styles = StyleSheet.create({
   },
   naverDetailBtnText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   pickedStack: {
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
   },
   pickedRemove: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.danger,
   },
   addMoreBtn: {

@@ -20,7 +20,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
-import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
@@ -710,7 +709,6 @@ export default function ChatTab() {
             <Ionicons name="search-outline" size={24} color="#0f172a" />
             {chatSearchFiltersDot ? <View style={styles.searchFilterDot} /> : null}
           </Pressable>
-          <InAppAlarmsBellButton />
         </View>
       </View>
 
@@ -858,8 +856,6 @@ export default function ChatTab() {
     </>
   );
 
-  const renderChatListSeparator = useCallback(() => <View style={styles.chatListSeparator} />, []);
-
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -902,7 +898,6 @@ export default function ChatTab() {
                 }
                 ListHeaderComponent={chatTabListAlerts('gather')}
                 ListFooterComponent={chatKind === 'gather' ? gatherListFooter : null}
-                ItemSeparatorComponent={renderChatListSeparator}
                 onEndReached={() => handleEndReachedForKind('gather')}
                 onEndReachedThreshold={0.6}
                 renderItem={({ item: m }) => {
@@ -947,7 +942,6 @@ export default function ChatTab() {
                 }
                 ListHeaderComponent={chatTabListAlerts('social')}
                 ListFooterComponent={chatKind === 'social' ? socialListFooter : null}
-                ItemSeparatorComponent={renderChatListSeparator}
                 onEndReached={() => handleEndReachedForKind('social')}
                 onEndReachedThreshold={0.6}
                 renderItem={({ item: row }) => {
@@ -971,20 +965,17 @@ export default function ChatTab() {
                       style={({ pressed }) => [styles.chatPressableRow, pressed && styles.chatPressablePressed]}>
                       <View style={styles.socialZoneA}>
                         <View style={styles.socialSymbolCol}>
-                          {uri ? (
-                            <View style={styles.socialAvatarBubble}>
-                              <Image source={{ uri }} style={styles.socialAvatarImg} contentFit="cover" />
+                          <View style={styles.socialAvatarBubble}>
+                            <View style={styles.socialAvatarMedia}>
+                              {uri ? (
+                                <Image source={{ uri }} style={styles.socialAvatarImg} contentFit="cover" />
+                              ) : (
+                                <View style={styles.socialAvatarFallback}>
+                                  <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                                </View>
+                              )}
                             </View>
-                          ) : (
-                            <View style={styles.socialAvatarBubble}>
-                              <View style={styles.socialAvatarFallback}>
-                                <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
-                              </View>
-                            </View>
-                          )}
-                          <Text style={styles.socialKindUnder} numberOfLines={1}>
-                            1:1
-                          </Text>
+                          </View>
                         </View>
                         <View style={styles.socialZoneMain}>
                           <View style={styles.socialTitleRow}>
@@ -1103,10 +1094,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 28,
     flexGrow: 1,
-  },
-  chatListSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: GinitTheme.colors.border,
   },
   chatPressableRow: {
     paddingVertical: 10,
@@ -1316,40 +1303,31 @@ const styles = StyleSheet.create({
   socialSymbolCol: {
     flexShrink: 0,
     alignItems: 'center',
-    gap: 6,
     paddingTop: 1,
   },
   socialAvatarBubble: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 52,
+    height: 52,
+    borderRadius: 19,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
     backgroundColor: GinitTheme.colors.surfaceStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
+  },
+  socialAvatarMedia: {
+    ...StyleSheet.absoluteFillObject,
   },
   socialAvatarImg: {
     width: '100%',
     height: '100%',
   },
   socialAvatarFallback: {
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 82, 204, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  socialAvatarLetter: { fontSize: 13, fontWeight: '900', color: GinitTheme.trustBlue },
-  socialKindUnder: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: GinitTheme.colors.textMuted,
-    letterSpacing: -0.35,
-    textAlign: 'center',
-    maxWidth: 40,
-  },
+  socialAvatarLetter: { fontSize: 21, fontWeight: '600', color: GinitTheme.trustBlue },
   socialZoneMain: {
     flex: 1,
     minWidth: 0,
@@ -1358,7 +1336,7 @@ const styles = StyleSheet.create({
   },
   socialHeroTitle: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.2,
     lineHeight: 18,
     color: GinitTheme.colors.text,
@@ -1408,14 +1386,15 @@ const styles = StyleSheet.create({
   socialUnreadBadgeText: {
     color: '#FFFFFF',
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.2,
   },
   socialPreviewLine: {
     fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '700',
-    color: GinitTheme.colors.textSub,
+    lineHeight: 17,
+    fontWeight: '400',
+    letterSpacing: -0.1,
+    color: GinitTheme.colors.textMuted,
   },
   centerRow: {
     flexDirection: 'row',

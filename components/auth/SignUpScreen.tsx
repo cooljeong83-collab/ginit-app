@@ -771,7 +771,7 @@ const emailCombo = StyleSheet.create({
   },
   at: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#64748b',
     marginTop: -1,
   },
@@ -793,7 +793,7 @@ const emailCombo = StyleSheet.create({
   },
   domainArrow: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#334155',
     marginTop: -1,
   },
@@ -819,7 +819,7 @@ const emailCombo = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 10,
   },

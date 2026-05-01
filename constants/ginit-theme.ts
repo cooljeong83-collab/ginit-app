@@ -19,7 +19,7 @@ export const GinitTheme = {
     surface: 'rgba(255, 255, 255)',
     surfaceStrong: '#FFFFFF',
     border: 'rgba(15, 23, 42, 0.10)',
-    borderStrong: 'rgba(15, 23, 42, 0.16)',
+    borderStrong: 'rgb(19, 58, 148)',
 
     // text
     text: '#0F172A',
@@ -44,9 +44,9 @@ export const GinitTheme = {
 
   /** New: 타이포 스케일(플랫폼 기본 폰트 기반) */
   typography: {
-    h1: { fontSize: 30, fontWeight: '900' as const, letterSpacing: -0.8 },
-    h2: { fontSize: 22, fontWeight: '900' as const, letterSpacing: -0.4 },
-    title: { fontSize: 18, fontWeight: '900' as const, letterSpacing: -0.2 },
+    h1: { fontSize: 30, fontWeight: '600' as const, letterSpacing: -0.8 },
+    h2: { fontSize: 22, fontWeight: '600' as const, letterSpacing: -0.4 },
+    title: { fontSize: 18, fontWeight: '600' as const, letterSpacing: -0.2 },
     body: { fontSize: 15, fontWeight: '700' as const },
     sub: { fontSize: 13, fontWeight: '600' as const },
     caption: { fontSize: 12, fontWeight: '600' as const },

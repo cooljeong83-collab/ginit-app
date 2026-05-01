@@ -3,18 +3,18 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  ActivityIndicator,
-  Dimensions,
-  Platform,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Platform,
+    StyleSheet,
+    Text,
+    useColorScheme,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { SPLASH_LOGO_FRAME_PX, SPLASH_LOGO_IMAGE_PX } from '@/constants/login-logo-intro';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { SPLASH_LOGO_FRAME_PX, SPLASH_LOGO_IMAGE_PX } from '@/constants/login-logo-intro';
 import { useSplashBootstrap } from '@/src/hooks/useSplashBootstrap';
 
 const WIN_H = Dimensions.get('window').height;
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
   },
   slogan: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.2,
     textAlign: 'center',
   },

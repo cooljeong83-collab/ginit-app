@@ -4050,7 +4050,7 @@ const styles = StyleSheet.create({
   joinCtaLabel: {
     color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.35,
   },
   titleCard: {
@@ -4095,7 +4095,7 @@ const styles = StyleSheet.create({
   infoCardHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
   infoCardHeadAccent: { width: 5, height: 44, borderRadius: 3 },
   infoCardHeadText: { flex: 1, minWidth: 0 },
-  infoCardTitle: { fontSize: 18, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  infoCardTitle: { fontSize: 18, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   infoCardKicker: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#64748b', lineHeight: 17 },
   infoCategoryCard: {
     flexDirection: 'row',
@@ -4132,7 +4132,7 @@ const styles = StyleSheet.create({
   },
   infoSectionLabelStrong: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#64748b',
     letterSpacing: 0.8,
     marginTop: 8,
@@ -4232,7 +4232,7 @@ const styles = StyleSheet.create({
   },
   moviePosterInfoBtnText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   moviePosterInfoBtnBelowPoster: {
@@ -4350,7 +4350,7 @@ const styles = StyleSheet.create({
   movieDetailPosterLeft: { width: '100%', height: '100%' },
   movieDetailInfoCol: { flex: 1, minWidth: 0, paddingTop: 2, justifyContent: 'space-between' },
   movieDetailInfoTop: { flexShrink: 1, minHeight: 0 },
-  movieDetailTitle: { fontSize: 14, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 20 },
+  movieDetailTitle: { fontSize: 14, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 20 },
   movieDetailBody: { marginTop: 6, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 17 },
   moviePosterInfoBtnInDetailCol: { marginTop: 10 },
   movieMetaList: { marginTop: 8, gap: 6 },
@@ -4438,7 +4438,7 @@ const styles = StyleSheet.create({
   },
   voteCalendarTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
@@ -4506,7 +4506,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   calendarCellPressed: { opacity: 0.9 },
-  calendarCellDay: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 18 },
+  calendarCellDay: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18 },
   calendarCellDayOut: { color: GinitTheme.colors.textMuted },
   calendarTimesWrap: { alignItems: 'center', justifyContent: 'center' },
   calendarCellMeta: { marginTop: 2, fontSize: 10, fontWeight: '600', color: GinitTheme.colors.primary },
@@ -4575,7 +4575,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  placeVoteTitle: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
+  placeVoteTitle: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
   placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
   placeDetailBlock: { marginTop: 2 },
   placeDetailHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
@@ -4603,7 +4603,7 @@ const styles = StyleSheet.create({
   },
   placeVoteDetailLinkText: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   placeNaverDetailBtn: {
@@ -4619,7 +4619,7 @@ const styles = StyleSheet.create({
   placeNaverDetailBtnInline: { marginTop: 0 },
   placeNaverDetailBtnText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   candidateListV: { gap: 10, paddingBottom: 6 },
@@ -4823,7 +4823,7 @@ const styles = StyleSheet.create({
   },
   timeVoteTallyText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
   },
   timeVoteTallyTextSelected: {
@@ -5050,9 +5050,9 @@ const styles = StyleSheet.create({
   },
   profileAvatarImg: { width: '100%', height: '100%' },
   profileAvatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  profileAvatarLetter: { fontSize: 20, fontWeight: '900', color: GinitTheme.colors.primary },
+  profileAvatarLetter: { fontSize: 20, fontWeight: '600', color: GinitTheme.colors.primary },
   profileModalTopText: { flex: 1, minWidth: 0, gap: 4 },
-  profileModalNick: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.text, letterSpacing: -0.2 },
+  profileModalNick: { fontSize: 18, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.2 },
   profileModalMeta: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.textMuted },
   profileModalCloseBtn: {
     width: 36,
@@ -5074,5 +5074,5 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   profileActionPrimary: { backgroundColor: GinitTheme.colors.primary },
-  profileActionPrimaryText: { fontSize: 15, fontWeight: '900', color: '#fff' },
+  profileActionPrimaryText: { fontSize: 15, fontWeight: '600', color: '#fff' },
 });

@@ -4,33 +4,33 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  InteractionManager,
-  Keyboard,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    InteractionManager,
+    Keyboard,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
-import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
-import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import {
-  resolveNaverPlaceCoordinates,
-  resolveNaverPlaceDetailWebUrlLikeVoteChip,
-  sanitizeNaverLocalPlaceLink,
-  searchNaverLocalPlaces,
+    resolveNaverPlaceCoordinates,
+    resolveNaverPlaceDetailWebUrlLikeVoteChip,
+    sanitizeNaverLocalPlaceLink,
+    searchNaverLocalPlaces,
 } from '@/src/lib/naver-local-search';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
 function animateListLayout() {
   layoutAnimateEaseInEaseOut();
@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
   },
   placeSearchDetailBtnText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
 });

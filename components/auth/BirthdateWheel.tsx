@@ -155,7 +155,7 @@ const col = StyleSheet.create({
   itemText: { fontSize: 14, fontWeight: '700', color: GinitTheme.colors.textMuted },
   itemTextSelected: {
     color: TRUST_BLUE,
-    fontWeight: '900',
+    fontWeight: '600',
     ...Platform.select({
       ios: {
         textShadowColor: 'rgba(31, 42, 68, 0.55)',

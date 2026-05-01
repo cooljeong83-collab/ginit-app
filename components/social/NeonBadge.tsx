@@ -1,13 +1,13 @@
 import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withTiming,
+    cancelAnimation,
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withRepeat,
+    withSequence,
+    withTiming,
 } from 'react-native-reanimated';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
   },
   neonBadgeStatus: {
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.textSub,
     letterSpacing: -0.2,
     textAlign: 'right',

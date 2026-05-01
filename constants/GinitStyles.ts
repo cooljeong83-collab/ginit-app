@@ -102,7 +102,7 @@ export const GinitStyles = StyleSheet.create({
   // 장소검색 - 화면 제목(장소 검색)
   screenTitleLarge: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.3,
   },
@@ -110,7 +110,7 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록 - 화면 제목(모임 만들기 / 상세 입력)
   screenTitle: {
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
@@ -435,7 +435,7 @@ export const GinitStyles = StyleSheet.create({
 
   checkMark: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     marginTop: -1,
   },
@@ -482,7 +482,7 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록 - 섹션 라벨
   sectionLabel: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 10,
   },
@@ -671,7 +671,7 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록상세 - 스텝2 제목
   step2Title: {
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 14,
     letterSpacing: -0.4,
@@ -684,7 +684,7 @@ export const GinitStyles = StyleSheet.create({
   // 모임등록상세 - 필드 라벨
   fieldLabel: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#1A1A1A',
     marginBottom: 8,
   },
@@ -856,7 +856,7 @@ export const GinitStyles = StyleSheet.create({
 
   modalTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
   },
 

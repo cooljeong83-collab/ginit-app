@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.8 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  title: { flex: 1, fontSize: 16, fontWeight: '900', color: '#0f172a' },
+  title: { flex: 1, fontSize: 16, fontWeight: '600', color: '#0f172a' },
   allRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.10)',
   },
-  allText: { fontSize: 14, fontWeight: '900', color: '#0f172a' },
+  allText: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
   card: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   termLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
   termTitle: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
   viewBtn: { paddingHorizontal: 8, paddingVertical: 6 },
-  viewBtnText: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.primary },
+  viewBtnText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.primary },
   agreeBtn: {
     marginTop: 2,
     paddingVertical: 14,
@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   agreeBtnDisabled: { opacity: 0.45 },
-  agreeBtnText: { fontSize: 15, fontWeight: '900', color: '#fff' },
+  agreeBtnText: { fontSize: 15, fontWeight: '600', color: '#fff' },
   detailSafe: { flex: 1, backgroundColor: '#fff' },
   detailHeader: {
     flexDirection: 'row',
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.10)',
   },
-  detailTitle: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
+  detailTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a' },
   detailBody: { paddingHorizontal: 16, paddingVertical: 14 },
   detailText: { fontSize: 13, lineHeight: 20, color: '#0f172a' },
 });

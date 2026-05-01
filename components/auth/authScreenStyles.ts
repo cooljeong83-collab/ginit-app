@@ -29,7 +29,7 @@ export const authScreenStyles = StyleSheet.create({
   brandSymbol: { width: 92, height: 92 },
   brandName: {
     fontSize: 32,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     letterSpacing: -1.0,
     marginTop: 6,
@@ -38,7 +38,7 @@ export const authScreenStyles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 10,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 24,
   },
@@ -84,7 +84,7 @@ export const authScreenStyles = StyleSheet.create({
     marginBottom: 12,
     gap: 6,
   },
-  expoGoTitle: { fontSize: 14, fontWeight: '900', color: '#9a3412' },
+  expoGoTitle: { fontSize: 14, fontWeight: '600', color: '#9a3412' },
   expoGoBody: { fontSize: 12, fontWeight: '600', color: '#7c2d12', lineHeight: 18 },
   expoGoMono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontWeight: '800' },
 
@@ -105,7 +105,7 @@ export const authScreenStyles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.10)',
   },
   countryCodeText: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
-  countryCodeArrow: { fontSize: 14, fontWeight: '900', color: '#334155', marginTop: -2 },
+  countryCodeArrow: { fontSize: 14, fontWeight: '600', color: '#334155', marginTop: -2 },
   phoneInputNew: {
     flex: 1,
     height: 48,
@@ -179,11 +179,11 @@ export const authScreenStyles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   genderBinaryLabel: { fontSize: 15, fontWeight: '600', color: '#64748b' },
-  genderBinaryLabelSelected: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.primary },
+  genderBinaryLabelSelected: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
 
   registerLinkRow: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' },
   registerLinkMuted: { fontSize: 13, fontWeight: '600', color: '#64748b' },
-  registerLinkAccent: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.primary },
+  registerLinkAccent: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.primary },
 
   /** 가입하기 → 회원가입 화면 이동(인라인 가입과 구분) */
   signupNavHint: { marginTop: 8, fontSize: 12, fontWeight: '600', color: '#94a3b8', textAlign: 'center', lineHeight: 17 },
@@ -199,7 +199,7 @@ export const authScreenStyles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
-  signupNavBtnLabel: { fontSize: 16, fontWeight: '900', color: GinitTheme.colors.primary, letterSpacing: -0.3 },
+  signupNavBtnLabel: { fontSize: 16, fontWeight: '600', color: GinitTheme.colors.primary, letterSpacing: -0.3 },
 
   /** 회원가입 화면: 정보 입력 후 제출 */
   signUpSubmitBtn: {
@@ -212,7 +212,7 @@ export const authScreenStyles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
-  signUpSubmitBtnLabel: { fontSize: 16, fontWeight: '900', color: '#FFFFFF', letterSpacing: -0.3 },
+  signUpSubmitBtnLabel: { fontSize: 16, fontWeight: '600', color: '#FFFFFF', letterSpacing: -0.3 },
   signUpSubmitHint: {
     marginTop: 10,
     fontSize: 12,
@@ -245,8 +245,8 @@ export const authScreenStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(15, 23, 42, 0.10)',
   },
-  backBtnText: { fontSize: 20, fontWeight: '900', color: '#0f172a', marginTop: -2 },
-  topBarTitle: { fontSize: 17, fontWeight: '900', color: GinitTheme.colors.text },
+  backBtnText: { fontSize: 20, fontWeight: '600', color: '#0f172a', marginTop: -2 },
+  topBarTitle: { fontSize: 17, fontWeight: '600', color: GinitTheme.colors.text },
 
   footerRule: { height: 1, backgroundColor: 'rgba(148, 163, 184, 0.55)', marginTop: 10 },
   footerCredit: { marginTop: 10, textAlign: 'center', fontSize: 12, fontWeight: '600', color: '#64748b' },

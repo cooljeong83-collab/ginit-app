@@ -1193,7 +1193,7 @@ const styles = StyleSheet.create({
   },
   avatarFallbackText: {
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   headerTextCol: {
@@ -1203,7 +1203,7 @@ const styles = StyleSheet.create({
   },
   headerName: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     letterSpacing: -0.3,
   },
@@ -1223,7 +1223,7 @@ const styles = StyleSheet.create({
   },
   headerEditText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   quickGrid: {
@@ -1251,7 +1251,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 10,
   },
@@ -1282,12 +1282,12 @@ const styles = StyleSheet.create({
   menuTextCol: { flex: 1, minWidth: 0, gap: 2 },
   menuTitle: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   menuTitleDanger: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#b91c1c',
   },
   menuSub: {
@@ -1338,7 +1338,7 @@ const styles = StyleSheet.create({
   },
   trustCardTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   trustTierPill: {
@@ -1351,12 +1351,12 @@ const styles = StyleSheet.create({
   },
   trustTierPillText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   trustScoreBig: {
     fontSize: 36,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     letterSpacing: -0.8,
   },
@@ -1403,12 +1403,12 @@ const styles = StyleSheet.create({
   },
   trustDropFxText: {
     fontSize: 28,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#FF3B30',
   },
   screenTitle: {
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     marginBottom: 16,
     letterSpacing: -0.4,
@@ -1449,7 +1449,7 @@ const styles = StyleSheet.create({
   },
   authMenuTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   authMenuSub: {
@@ -1502,7 +1502,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 6,
   },
@@ -1548,7 +1548,7 @@ const styles = StyleSheet.create({
   },
   termsCheckMark: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0052CC',
   },
   termsLabel: {
@@ -1612,7 +1612,7 @@ const styles = StyleSheet.create({
   },
   otpLabel: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     marginBottom: 8,
   },
@@ -1641,7 +1641,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
     color: '#0f172a',
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: 2,
   },
   otpSendBtn: {
@@ -1654,7 +1654,7 @@ const styles = StyleSheet.create({
   },
   otpSendText: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#061a3b',
   },
   otpConfirmBtn: {
@@ -1667,7 +1667,7 @@ const styles = StyleSheet.create({
   },
   otpConfirmText: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#7c2d12',
   },
   otpBtnDisabled: {

@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   pressed: { opacity: 0.85 },
   header: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 10, gap: 6 },
-  title: { fontSize: 22, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  title: { fontSize: 22, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   sub: { fontSize: 13, fontWeight: '600', color: '#64748b', lineHeight: 19 },
   form: { paddingHorizontal: 20, paddingTop: 14, gap: 12 },
   otpInput: {
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 23, 42, 0.12)',
     paddingHorizontal: 14,
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: 6,
     color: '#0f172a',
     textAlign: 'center',
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   verifyBtnDisabled: { opacity: 0.35 },
-  verifyText: { fontSize: 16, fontWeight: '900', color: '#fff' },
+  verifyText: { fontSize: 16, fontWeight: '600', color: '#fff' },
   cancelBtn: { height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   cancelText: { fontSize: 14, fontWeight: '600', color: '#475569' },
 });

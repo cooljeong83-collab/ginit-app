@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
   announcementText: {
     flex: 1,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
   },
   listContent: {

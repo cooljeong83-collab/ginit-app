@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   title: {
     color: GinitTheme.colors.text,
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   desc: {
     color: GinitTheme.colors.textSub,
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
   h: {
     color: GinitTheme.colors.text,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   btnText: {
     color: GinitTheme.colors.text,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   edgeBox: {
     borderWidth: StyleSheet.hairlineWidth,

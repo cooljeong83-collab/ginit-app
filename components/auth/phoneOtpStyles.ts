@@ -15,13 +15,13 @@ export const phoneOtpInlineStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendInlineBtnDisabled: { opacity: 0.4 },
-  sendInlineText: { fontSize: 13, fontWeight: '900', color: GinitTheme.colors.primary },
+  sendInlineText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.primary },
   verifiedBadge: {
     marginTop: 8,
     alignSelf: 'stretch',
     textAlign: 'center',
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.success,
   },
   otpRow: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -46,6 +46,6 @@ export const phoneOtpInlineStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   confirmBtnDisabled: { opacity: 0.35 },
-  confirmText: { fontSize: 14, fontWeight: '900', color: '#fff' },
+  confirmText: { fontSize: 14, fontWeight: '600', color: '#fff' },
   otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.danger },
 });

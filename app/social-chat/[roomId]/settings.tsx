@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: '#f2f4f7',
   },
-  headerTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   scroll: { paddingBottom: 32, paddingTop: 4 },
   heroCard: {
     marginHorizontal: 16,
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     textAlign: 'center',
     letterSpacing: -0.4,
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarImg: { width: 48, height: 48 },
-  avatarLetter: { fontSize: 18, fontWeight: '900', color: '#0052CC' },
+  avatarLetter: { fontSize: 18, fontWeight: '600', color: '#0052CC' },
   avatarNick: { marginTop: 6, fontSize: 11, fontWeight: '700', color: '#475569', maxWidth: 56, textAlign: 'center' },
   cardDivider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(15, 23, 42, 0.08)', marginLeft: 16 },
   /** 아이콘(36) + gap(12) + 좌 패딩(16) — 텍스트 시작선에 맞춤 */

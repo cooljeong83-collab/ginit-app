@@ -264,7 +264,7 @@ export function PublicMeetingDetailsCard({
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>신뢰도 높은 모임</Text>
               <Text style={styles.smallHint}>
-                켜면 gTrust <Text style={{ fontWeight: '900' }}>{GINIT_HIGH_TRUST_HOST_MIN}점</Text> 미만은 참여할 수
+                켜면 gTrust <Text style={{ fontWeight: '600' }}>{GINIT_HIGH_TRUST_HOST_MIN}점</Text> 미만은 참여할 수
                 없어요.
               </Text>
             </View>
@@ -302,7 +302,7 @@ export function PublicMeetingDetailsCard({
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>승인 방식</Text>
               <Text style={styles.smallHint}>
-                <Text style={{ color: GinitTheme.colors.accent2, fontWeight: '900' }}>호스트 승인</Text>을 켜면 신청을 받고
+                <Text style={{ color: GinitTheme.colors.accent2, fontWeight: '600' }}>호스트 승인</Text>을 켜면 신청을 받고
                 확정해요.
               </Text>
             </View>
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
   },
   stepBtnText: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   stepValueWrap: {
@@ -552,7 +552,7 @@ const styles = StyleSheet.create({
   },
   checkboxTick: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   checkboxLabel: {

@@ -3923,7 +3923,7 @@ const styles = StyleSheet.create({
   },
   snsGateTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   snsGateBody: {
@@ -3942,7 +3942,7 @@ const styles = StyleSheet.create({
   },
   snsGateBtnLabel: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.textOnDark,
   },
   backLink: {
@@ -3955,7 +3955,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.3,
   },
@@ -4119,7 +4119,7 @@ const styles = StyleSheet.create({
   },
   aiPreviewPillText: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   aiPreviewClickableRow: {
@@ -4141,7 +4141,7 @@ const styles = StyleSheet.create({
   },
   aiPreviewPlusText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     letterSpacing: -0.1,
   },
@@ -4160,7 +4160,7 @@ const styles = StyleSheet.create({
   },
   aiQuickInitCtaLabel: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
@@ -4318,7 +4318,7 @@ const styles = StyleSheet.create({
   },
   scheduleCalendarTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
@@ -4400,7 +4400,7 @@ const styles = StyleSheet.create({
   },
   calendarCellDay: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 18,
   },
@@ -4551,7 +4551,7 @@ const styles = StyleSheet.create({
   },
   placeResultTitle: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 18,
     marginBottom: 6,
@@ -4576,7 +4576,7 @@ const styles = StyleSheet.create({
   },
   placeResultDetailBtnText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   placePickedRow: {
@@ -4596,7 +4596,7 @@ const styles = StyleSheet.create({
   },
   placePickedRemove: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.danger,
   },
   fieldRecessHalf: {
@@ -4807,7 +4807,7 @@ const styles = StyleSheet.create({
   },
   warnTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
   },
   warnBody: {
@@ -4825,7 +4825,7 @@ const styles = StyleSheet.create({
   },
   wizardStepBadge: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: 0.2,
     color: GinitTheme.colors.primary,
     alignSelf: 'flex-start',
@@ -5017,7 +5017,7 @@ const styles = StyleSheet.create({
   detailFinalFloatingLabel: {
     color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.35,
   },
   detailFinalFloatingInner: {

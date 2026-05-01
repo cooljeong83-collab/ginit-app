@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   center: { flex: 1, backgroundColor: GinitTheme.colors.bg, alignItems: 'center', justifyContent: 'center' },
   offWrap: { flex: 1, backgroundColor: GinitTheme.colors.bg, paddingHorizontal: 24, paddingTop: 32, gap: 12 },
-  offTitle: { fontSize: 18, fontWeight: '900', color: GinitTheme.colors.text, letterSpacing: -0.3 },
+  offTitle: { fontSize: 18, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.3 },
   offBody: { fontSize: 14, fontWeight: '600', color: GinitTheme.colors.textMuted, lineHeight: 21 },
   offBtn: {
     alignSelf: 'flex-start',

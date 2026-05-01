@@ -5,28 +5,25 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
-  ActivityIndicator,
-  Alert,
-  Animated,
-  BackHandler,
-  Easing,
-  InteractionManager,
-  Keyboard,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View,
+    AccessibilityInfo,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    BackHandler,
+    Easing,
+    InteractionManager,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    ToastAndroid,
+    useWindowDimensions,
+    View
 } from 'react-native';
 import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
-import { phoneOtpInlineStyles as otpStyles } from '@/components/auth/phoneOtpStyles';
 import { SnsEasySignUpSection } from '@/components/auth/SnsEasySignUpSection';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -35,28 +32,28 @@ import { useUserSession, type AuthProfileSnapshot } from '@/src/context/UserSess
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import {
-  fetchGooglePeopleExtras,
-  mapGooglePeopleGenderToProfileGender,
-  type GooglePeopleExtras,
+    fetchGooglePeopleExtras,
+    mapGooglePeopleGenderToProfileGender,
+    type GooglePeopleExtras,
 } from '@/src/lib/google-people-extras';
 import {
-  consumeGoogleRedirectResultWithMeta,
-  REDIRECT_STARTED,
-  signInWithGoogle,
+    consumeGoogleRedirectResultWithMeta,
+    REDIRECT_STARTED,
+    signInWithGoogle,
 } from '@/src/lib/google-sign-in';
+import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import {
-  applyGoogleSignupProfile,
-  buildGooglePeopleDemographicsMetadataPatch,
-  ensureUserProfile,
-  generateRandomNickname,
-  recordTermsAgreement,
-  resolveSessionUserIdFromVerifiedPhone,
-  updateUserProfile,
+    applyGoogleSignupProfile,
+    buildGooglePeopleDemographicsMetadataPatch,
+    ensureUserProfile,
+    generateRandomNickname,
+    recordTermsAgreement,
+    resolveSessionUserIdFromVerifiedPhone,
+    updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
@@ -712,7 +709,7 @@ const loginScreenStyles = StyleSheet.create({
   },
   brandKr: {
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     letterSpacing: -0.5,
     textAlign: 'center',
@@ -722,7 +719,7 @@ const loginScreenStyles = StyleSheet.create({
   heroTitle: {
     marginTop: 10,
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     letterSpacing: -0.6,
     textAlign: 'center',

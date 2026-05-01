@@ -2464,7 +2464,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.2,
     lineHeight: 20,
     color: GinitTheme.colors.text,
@@ -2642,7 +2642,7 @@ const styles = StyleSheet.create({
   },
   sheetCtaText: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#fff',
     letterSpacing: -0.2,
   },
@@ -2661,7 +2661,7 @@ const styles = StyleSheet.create({
   },
   sheetInfoTitle: {
     fontSize: 19,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#0f172a',
     letterSpacing: -0.2,
   },
@@ -2848,7 +2848,7 @@ const styles = StyleSheet.create({
   },
   naverMapStackCountText: {
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#FFFFFF',
   },
   mapStackCountBubble: {
@@ -2864,7 +2864,7 @@ const styles = StyleSheet.create({
   },
   mapStackCountBubbleText: {
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '600',
     color: '#FFFFFF',
   },
 

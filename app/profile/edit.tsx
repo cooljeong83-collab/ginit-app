@@ -690,7 +690,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 26,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.75,
     color: GinitTheme.colors.text,
   },
@@ -739,7 +739,7 @@ const styles = StyleSheet.create({
   },
   avatarFallbackText: {
     fontSize: 38,
-    fontWeight: '900',
+    fontWeight: '600',
     color: GinitTheme.colors.primary,
     letterSpacing: -1,
   },
@@ -786,7 +786,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.35,
     color: GinitTheme.colors.text,
     marginBottom: 8,
@@ -856,7 +856,7 @@ const styles = StyleSheet.create({
   },
   complianceTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.3,
     color: GinitTheme.colors.text,
   },
@@ -882,7 +882,7 @@ const styles = StyleSheet.create({
   },
   deleteAccountBtnPressed: { opacity: 0.88 },
   deleteIcon: { marginTop: 1 },
-  deleteAccountLabel: { fontSize: 15, fontWeight: '900', color: GinitTheme.colors.danger },
+  deleteAccountLabel: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.danger },
 
   sheetKbWrap: { flex: 1 },
   sheetRoot: { flex: 1 },
@@ -918,14 +918,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.12)',
     marginBottom: 12,
   },
-  sheetTitle: { fontSize: 20, fontWeight: '900', color: '#0f172a', marginBottom: 6 },
+  sheetTitle: { fontSize: 20, fontWeight: '600', color: '#0f172a', marginBottom: 6 },
   sheetLead: { fontSize: 14, fontWeight: '600', color: '#64748b', lineHeight: 20, marginBottom: 14 },
   termsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4 },
   termsRowLocked: { opacity: 0.92 },
   termsBox: { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   termsBoxUnchecked: { borderColor: '#FF8A00', backgroundColor: 'rgba(255, 138, 0, 0.08)' },
   termsBoxChecked: { borderColor: '#0052CC', backgroundColor: 'rgba(0, 82, 204, 0.12)' },
-  termsCheckMark: { fontSize: 16, fontWeight: '900', color: '#0052CC' },
+  termsCheckMark: { fontSize: 16, fontWeight: '600', color: '#0052CC' },
   termsLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: '#0f172a', lineHeight: 20 },
   termsLabelLocked: { color: '#64748b' },
   phoneVerifiedDone: {
@@ -954,7 +954,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 118, 110, 0.14)',
     color: '#0f766e',
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: -0.1,
     overflow: 'hidden',
   },
@@ -973,7 +973,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
   },
-  otpLabel: { fontSize: 13, fontWeight: '900', color: '#0f172a', marginBottom: 8 },
+  otpLabel: { fontSize: 13, fontWeight: '600', color: '#0f172a', marginBottom: 8 },
   otpRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   otpPhoneInput: {
     flex: 1,
@@ -995,7 +995,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
     color: '#0f172a',
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: 2,
   },
   otpSendBtn: {
@@ -1006,7 +1006,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.22)',
     backgroundColor: 'rgba(0, 82, 204, 0.16)',
   },
-  otpSendText: { fontSize: 13, fontWeight: '900', color: '#061a3b' },
+  otpSendText: { fontSize: 13, fontWeight: '600', color: '#061a3b' },
   otpConfirmBtn: {
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -1015,7 +1015,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.22)',
     backgroundColor: 'rgba(0, 82, 204, 0.16)',
   },
-  otpConfirmText: { fontSize: 13, fontWeight: '900', color: '#061a3b' },
+  otpConfirmText: { fontSize: 13, fontWeight: '600', color: '#061a3b' },
   otpBtnDisabled: { opacity: 0.35 },
   otpError: { marginTop: 8, fontSize: 12, fontWeight: '700', color: '#b91c1c' },
 });

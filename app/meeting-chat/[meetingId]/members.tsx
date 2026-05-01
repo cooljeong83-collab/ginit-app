@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: '#f2f4f7',
   },
-  headerTitle: { fontSize: 17, fontWeight: '900', color: '#0f172a', letterSpacing: -0.3 },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
   scroll: { paddingBottom: 24, paddingHorizontal: 16 },
   hint: { fontSize: 12, color: '#64748b', fontWeight: '600', marginBottom: 10, marginTop: 4 },
   card: {
@@ -219,9 +219,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarImg: { width: 40, height: 40 },
-  avatarText: { fontSize: 15, fontWeight: '900', color: '#0052CC' },
+  avatarText: { fontSize: 15, fontWeight: '600', color: '#0052CC' },
   rowBody: { flex: 1, minWidth: 0 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name: { fontSize: 15, fontWeight: '900', color: '#0f172a', flexShrink: 1 },
+  name: { fontSize: 15, fontWeight: '600', color: '#0f172a', flexShrink: 1 },
   meta: { marginTop: 2, fontSize: 12, color: '#475569', fontWeight: '700' },
 });
