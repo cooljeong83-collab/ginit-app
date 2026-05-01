@@ -169,6 +169,18 @@ export function generateRandomNickname(): string {
   return `${a}${b}`;
 }
 
+/** RPC·JSON 경로에서 int가 문자열로 올 때 `isDemographicsIncomplete` 오판을 막습니다. */
+function readFiniteIntField(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  return null;
+}
+
 export function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const isPlainObject = (v: unknown): v is Record<string, unknown> =>
     !!v && typeof v === 'object' && !Array.isArray(v);
@@ -193,9 +205,9 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
       : null;
   const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
   const ageBand = typeof data.ageBand === 'string' ? data.ageBand.trim() : '';
-  const birthYear = typeof data.birthYear === 'number' ? data.birthYear : null;
-  const birthMonth = typeof data.birthMonth === 'number' ? data.birthMonth : null;
-  const birthDay = typeof data.birthDay === 'number' ? data.birthDay : null;
+  const birthYear = readFiniteIntField(data.birthYear);
+  const birthMonth = readFiniteIntField(data.birthMonth);
+  const birthDay = readFiniteIntField(data.birthDay);
   const birthDate = 'birthDate' in data ? (data.birthDate as unknown) : null;
   const baseRegion = typeof data.baseRegion === 'string' ? data.baseRegion.trim() : '';
   const interests = Array.isArray(data.interests)

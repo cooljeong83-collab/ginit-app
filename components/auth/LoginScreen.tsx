@@ -361,6 +361,21 @@ export default function LoginScreen() {
         throw new Error('이메일이 있는 Google 계정으로 시도해 주세요. (계정에 이메일이 없습니다)');
       }
 
+      /** Firebase에 연결된 전화가 있으면 Supabase canonical `app_user_id`(이메일 PK 우선)로 맞춥니다. */
+      let canonicalProfilePk = emailPk;
+      try {
+        const phoneRaw = user.phoneNumber?.trim();
+        if (phoneRaw) {
+          const n = normalizePhoneUserId(phoneRaw);
+          if (n) {
+            const resolved = await resolveSessionUserIdFromVerifiedPhone(n);
+            if (resolved) canonicalProfilePk = resolved;
+          }
+        }
+      } catch {
+        /* 네트워크 등: 이메일 PK 유지 */
+      }
+
       const display = user.displayName?.trim() ?? '';
       const nickname = pickNicknameFromGoogle(display, email);
       const photoUrl = user.photoURL?.trim() ? user.photoURL.trim() : null;
@@ -378,7 +393,7 @@ export default function LoginScreen() {
         birthFromGoogle: Boolean(birthDateTs),
       });
 
-      await applyGoogleSignupProfile(emailPk, {
+      await applyGoogleSignupProfile(canonicalProfilePk, {
         nickname,
         photoUrl,
         email: email || null,
@@ -401,7 +416,7 @@ export default function LoginScreen() {
         firebaseUid: user.uid,
       });
       /** 첫 upsert 직후에도 gender/birth가 비는 환경이 있어, People에서 확보된 값이면 한 번 더 반영합니다. */
-      const pAfterSignup = await ensureUserProfile(emailPk);
+      const pAfterSignup = await ensureUserProfile(canonicalProfilePk);
       const repairGender = Boolean(genderFs) && !pAfterSignup.gender?.trim();
       const repairBirth =
         py != null &&
@@ -411,7 +426,7 @@ export default function LoginScreen() {
           pAfterSignup.birthMonth == null ||
           pAfterSignup.birthDay == null);
       if (repairGender || repairBirth) {
-        await updateUserProfile(emailPk, {
+        await updateUserProfile(canonicalProfilePk, {
           ...(repairGender ? { gender: genderFs } : {}),
           ...(repairBirth
             ? {
@@ -424,16 +439,16 @@ export default function LoginScreen() {
           ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
         });
       }
-      await setUserId(emailPk);
-      await writeSecureAuthSession({ uid: user.uid, userId: emailPk });
-      await registerSignupLocalKeys('', emailPk);
+      await setUserId(canonicalProfilePk);
+      await writeSecureAuthSession({ uid: user.uid, userId: canonicalProfilePk });
+      await registerSignupLocalKeys('', canonicalProfilePk);
       if (Platform.OS !== 'web') {
         void import('@/src/lib/fcm-token-supabase-sync').then(({ syncFcmTokenFromDeviceToProfile }) => {
-          void syncFcmTokenFromDeviceToProfile(emailPk);
+          void syncFcmTokenFromDeviceToProfile(canonicalProfilePk);
         });
       }
-      await recordTermsAgreement(emailPk);
-      await ensureUserProfile(emailPk);
+      await recordTermsAgreement(canonicalProfilePk);
+      await ensureUserProfile(canonicalProfilePk);
 
       setAuthProfile({
         ...snapshotFromFirebaseUser(user),

@@ -122,12 +122,33 @@ export function useSplashBootstrap() {
           setAuthProfile(snapshotFromFirebaseUser(firebaseUser));
           void writeSecureGoogleSession({ uid: firebaseUser.uid, email: firebaseUser.email ?? null });
           const emailNorm = firebaseUser.email ? normalizeUserId(firebaseUser.email) : null;
-          if (emailNorm) {
-            await setUserId(emailNorm);
-            await tryEnsureProfileDuringBoot(emailNorm);
+          let pk: string | null = emailNorm;
+          try {
+            const phoneRaw = firebaseUser.phoneNumber?.trim();
+            if (phoneRaw) {
+              const n = normalizePhoneUserId(phoneRaw);
+              if (n) {
+                const resolved = await resolveSessionUserIdFromVerifiedPhone(n);
+                if (resolved) pk = resolved;
+              }
+            }
+          } catch {
+            /* 네트워크 등: 이메일 PK 유지 */
+          }
+          if (pk) {
+            await setUserId(pk);
+            await tryEnsureProfileDuringBoot(pk);
+            finishedRef.current = true;
+            goTabs();
+            return;
+          }
+          try {
+            await clearStoredUserSession();
+          } catch {
+            /* noop */
           }
           finishedRef.current = true;
-          goTabs();
+          goLogin();
           return;
         }
 

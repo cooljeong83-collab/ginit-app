@@ -24,6 +24,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
@@ -91,6 +92,22 @@ export default function ProfileEditScreen() {
     const scrollMax = Math.max(280, panelMax - 18 - panelPadBottom - 12);
     return { panelMax, panelPadBottom, scrollMax };
   }, [windowHeight, insets.bottom]);
+
+  const otpSmsUserConsent = useOtpSmsRetriever({
+    onCode: (code) => setOtpCode(code.replace(/\D/g, '').slice(0, 6)),
+  });
+
+  useEffect(() => {
+    if (!authSheetVisible) otpSmsUserConsent.stop();
+  }, [authSheetVisible, otpSmsUserConsent]);
+
+  useEffect(() => {
+    if (!otpVerificationId) otpSmsUserConsent.stop();
+  }, [otpVerificationId, otpSmsUserConsent]);
+
+  useEffect(() => {
+    if (otpCode.replace(/\D/g, '').length >= 6) otpSmsUserConsent.stop();
+  }, [otpCode, otpSmsUserConsent]);
 
   useEffect(() => {
     let alive = true;
@@ -317,13 +334,17 @@ export default function ProfileEditScreen() {
       Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
       return;
     }
+    otpSmsUserConsent.stop();
     setOtpError(null);
     setOtpBusy(true);
     try {
       const { verificationId } = await AuthService.verifyPhoneNumber(normalized);
       setOtpVerificationId(verificationId);
       setOtpCode('');
-      if (Platform.OS === 'android') ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
+      if (Platform.OS === 'android') {
+        void otpSmsUserConsent.start();
+        ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증번호 전송에 실패했습니다.';
       setOtpError(msg);
@@ -331,7 +352,7 @@ export default function ProfileEditScreen() {
     } finally {
       setOtpBusy(false);
     }
-  }, [profilePk, phoneField]);
+  }, [profilePk, phoneField, otpSmsUserConsent]);
 
   const onConfirmOtp = useCallback(async () => {
     if (!profilePk) {

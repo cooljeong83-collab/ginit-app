@@ -1,0 +1,245 @@
+diff --git a/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/ReactNativeSmsUserConsentModule.java b/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/ReactNativeSmsUserConsentModule.java
+index 1f0e81e..1c59e6c 100644
+--- a/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/ReactNativeSmsUserConsentModule.java
++++ b/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/ReactNativeSmsUserConsentModule.java
+@@ -5,6 +5,8 @@ import android.app.Activity;
+ import android.content.Context;
+ import android.content.IntentFilter;
+ import android.os.Build;
++import android.os.Handler;
++import android.os.Looper;
+ 
+ import androidx.annotation.NonNull;
+ 
+@@ -28,6 +30,11 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+     public ReactApplicationContext reactContext;
+     private SmsBroadcastReceiver broadcastReceiver;
+     private SmsListener listener;
++    /** 이전 subscribe()가 중간 실패·빠른 재시작 시 Activity 리스너가 이중 등록되지 않도록 */
++    private boolean activityEventListenerAttached = false;
++    private final Handler mainHandler = new Handler(Looper.getMainLooper());
++    private Runnable pendingSubscribeRunnable;
++    private Promise pendingStartPromise;
+ 
+     public ReactNativeSmsUserConsentModule(ReactApplicationContext reactContext) {
+         super(reactContext);
+@@ -35,9 +42,33 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+         listener = new SmsListener(this);
+     }
+ 
++    /** subscribe 직전: receiver·Activity 리스너를 조용히 정리(에러 무시). */
++    private void silentTeardown() {
++        try {
++            Activity a = getCurrentActivity();
++            if (a != null && broadcastReceiver != null) {
++                try {
++                    a.unregisterReceiver(broadcastReceiver);
++                } catch (Exception ignored) {
++                }
++            }
++        } catch (Exception ignored) {
++        }
++        broadcastReceiver = null;
++        try {
++            if (activityEventListenerAttached) {
++                reactContext.removeActivityEventListener(listener);
++                activityEventListenerAttached = false;
++            }
++        } catch (Exception ignored) {
++        }
++    }
++
+     // Suppress warning on getCurrentActivity().registerReceiver for SDK before 33.
+     @SuppressLint("UnspecifiedRegisterReceiverFlag")
+     private void subscribe() throws RNSmsUserConsentException {
++        silentTeardown();
++
+         Activity activity = getCurrentActivity();
+         if (activity == null) {
+             throw new RNSmsUserConsentException(
+@@ -46,11 +77,12 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+             );
+         }
+ 
+-        SmsRetriever.getClient(getCurrentActivity()).startSmsUserConsent(null);
++        SmsRetriever.getClient(activity).startSmsUserConsent(null);
+ 
+-        broadcastReceiver = new SmsBroadcastReceiver(getCurrentActivity(), this);
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+-            getCurrentActivity().registerReceiver(
++        broadcastReceiver = new SmsBroadcastReceiver(activity, this);
++        // API 33+ (targetSdk 33+): 동적 receiver 등록 시 EXPORTED/NOT_EXPORTED 필수.
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++            activity.registerReceiver(
+                     broadcastReceiver,
+                     new IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION),
+                     SmsRetriever.SEND_PERMISSION,
+@@ -58,7 +90,7 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+                     Context.RECEIVER_EXPORTED
+             );
+         } else {
+-            getCurrentActivity().registerReceiver(
++            activity.registerReceiver(
+                     broadcastReceiver,
+                     new IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION),
+                     SmsRetriever.SEND_PERMISSION,
+@@ -67,6 +99,7 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+         }
+ 
+         reactContext.addActivityEventListener(listener);
++        activityEventListenerAttached = true;
+     }
+ 
+     private void unsubscribe() throws RNSmsUserConsentException {
+@@ -90,9 +123,11 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+             activity.unregisterReceiver(broadcastReceiver);
+             broadcastReceiver = null;
+ 
+-            reactContext.removeActivityEventListener(listener);
++            if (activityEventListenerAttached) {
++                reactContext.removeActivityEventListener(listener);
++                activityEventListenerAttached = false;
++            }
+         } catch (IllegalArgumentException e) {
+-            // There is a small chance that the receiver's onReceive(Context, Intent) method is called more than once, since it is registered with multiple IntentFilters, creating the potential for an IllegalArgumentException being thrown from Context#unregisterReceiver(BroadcastReceiver).
+             throw new RNSmsUserConsentException(
+                     Errors.NULL_BROADCAST_RECEIVER,
+                     "Could not unsubscribe, broadcastReceiver is null"
+@@ -126,19 +161,26 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+     }
+ 
+     private void sendSmsEventToJs(String sms) {
+-        WritableMap params = Arguments.createMap();
+-        params.putString("sms", sms);
+-        reactContext
+-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+-                .emit(AKV_SMS_RETRIEVED, params);
++        try {
++            WritableMap params = Arguments.createMap();
++            params.putString("sms", sms);
++            reactContext
++                    .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
++                    .emit(AKV_SMS_RETRIEVED, params);
++        } catch (Throwable ignored) {
++            // New Architecture / bridgeless 등에서 getJSModule 실패 시에도 프로세스 종료 방지
++        }
+     }
+ 
+     private void sendErrorEventToJs(RNSmsUserConsentException e) {
+-        WritableMap params = Arguments.createMap();
+-        params.putString(e.code, e.getMessage());
+-        reactContext
+-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+-                .emit(AKV_SMS_RETRIEVE_ERROR, params);
++        try {
++            WritableMap params = Arguments.createMap();
++            params.putString(e.code, e.getMessage());
++            reactContext
++                    .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
++                    .emit(AKV_SMS_RETRIEVE_ERROR, params);
++        } catch (Throwable ignored) {
++        }
+     }
+ 
+     @ReactMethod
+@@ -149,23 +191,60 @@ public class ReactNativeSmsUserConsentModule extends ReactContextBaseJavaModule
+     public void removeListeners(Integer count) {
+     }
+ 
++    /**
++     * Firebase 전화 인증 직후 Play Integrity / 시스템 UI와 겹치면 즉시 호출 시 Activity가 불안정해져
++     * 네이티브 크래시가 날 수 있어, 메인 스레드에서 짧게 지연한 뒤 subscribe 합니다.
++     */
+     @ReactMethod
+-    public void startNativeSmsListener(Promise promise) {
+-        try {
+-            subscribe();
+-            promise.resolve(null);
+-        } catch (RNSmsUserConsentException e) {
+-            promise.reject(e.code, e.getMessage());
++    public void startNativeSmsListener(final Promise promise) {
++        if (pendingSubscribeRunnable != null) {
++            mainHandler.removeCallbacks(pendingSubscribeRunnable);
++            pendingSubscribeRunnable = null;
++        }
++        if (pendingStartPromise != null) {
++            pendingStartPromise.reject("E_SMS_USER_CONSENT_SUPERSEDED", "New listener start superseded previous");
++            pendingStartPromise = null;
+         }
++        pendingStartPromise = promise;
++        pendingSubscribeRunnable = new Runnable() {
++            @Override
++            public void run() {
++                pendingSubscribeRunnable = null;
++                Promise p = pendingStartPromise;
++                pendingStartPromise = null;
++                if (p == null) {
++                    return;
++                }
++                try {
++                    subscribe();
++                    p.resolve(null);
++                } catch (RNSmsUserConsentException e) {
++                    p.reject(e.code, e.getMessage());
++                } catch (Exception e) {
++                    p.reject("E_SMS_USER_CONSENT", e.getMessage(), e);
++                }
++            }
++        };
++        mainHandler.postDelayed(pendingSubscribeRunnable, 500);
+     }
+ 
+     @ReactMethod
+     public void stopNativeSmsListener(Promise promise) {
++        if (pendingSubscribeRunnable != null) {
++            mainHandler.removeCallbacks(pendingSubscribeRunnable);
++            pendingSubscribeRunnable = null;
++        }
++        if (pendingStartPromise != null) {
++            pendingStartPromise.reject("E_SMS_USER_CONSENT_CANCEL", "Listener start cancelled");
++            pendingStartPromise = null;
++        }
+         try {
+             unsubscribe();
+             promise.resolve(null);
+         } catch (RNSmsUserConsentException e) {
+             promise.reject(e.code, e.getMessage());
++        } catch (Exception e) {
++            promise.reject("E_SMS_USER_CONSENT", e.getMessage(), e);
+         }
+     }
+ 
+diff --git a/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/SmsBroadcastReceiver.java b/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/SmsBroadcastReceiver.java
+index c0bdfed..e3ca55c 100644
+--- a/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/SmsBroadcastReceiver.java
++++ b/node_modules/@eabdullazyanov/react-native-sms-user-consent/android/src/main/java/com/akvelon/reactnativesmsuserconsent/SmsBroadcastReceiver.java
+@@ -4,6 +4,7 @@ import android.app.Activity;
+ import android.content.BroadcastReceiver;
+ import android.content.Context;
+ import android.content.Intent;
++import android.os.Build;
+ import android.os.Bundle;
+ 
+ import com.facebook.react.bridge.ReactApplicationContext;
+@@ -37,11 +38,20 @@ public class SmsBroadcastReceiver extends BroadcastReceiver {
+             return;
+         }
+ 
+-        Intent consentIntent = extras.getParcelable(SmsRetriever.EXTRA_CONSENT_INTENT);
++        Intent consentIntent;
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++            consentIntent = extras.getParcelable(SmsRetriever.EXTRA_CONSENT_INTENT, Intent.class);
++        } else {
++            consentIntent = extras.getParcelable(SmsRetriever.EXTRA_CONSENT_INTENT);
++        }
+ 
+         switch (smsRetrieverStatus.getStatusCode()) {
+             case CommonStatusCodes.SUCCESS:
+                 try {
++                    if (consentIntent == null) {
++                        moduleInstance.handleError(new RNSmsUserConsentException(Errors.COULD_NOT_HANDLE_BROADCAST, "Consent intent is null"));
++                        break;
++                    }
+                     activity.startActivityForResult(consentIntent, SMS_CONSENT_REQUEST);
+                 } catch (Exception e) {
+                     moduleInstance.handleError(new RNSmsUserConsentException(Errors.COULD_NOT_HANDLE_BROADCAST, "'startActivityForResult' failed"));

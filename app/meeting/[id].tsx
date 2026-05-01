@@ -38,6 +38,7 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
+import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
@@ -1924,7 +1925,7 @@ export default function MeetingDetailScreen() {
                   );
                 }
               }
-              router.replace('/(tabs)');
+              resetStackToTabsAfterMeetingLeave(router, { tab: 'index' });
               if (penaltyLedgerOk) {
                 if (Platform.OS === 'web') {
                   setTimeout(() => {
@@ -2268,7 +2269,7 @@ export default function MeetingDetailScreen() {
                 markRecentSelfMeetingChange(meeting.id);
                 await deleteMeetingByHost(meeting.id, userId.trim());
                 void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-                safeBack();
+                resetStackToTabsAfterMeetingLeave(router, { tab: 'index' });
               } catch (e) {
                 Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -2279,7 +2280,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, safeBack, queryClient]);
+  }, [meeting, userId, router, queryClient]);
 
   const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
     if (!meeting || !confirmedPlaceCoords) return;

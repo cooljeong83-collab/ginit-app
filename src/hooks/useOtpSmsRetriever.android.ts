@@ -1,24 +1,52 @@
-/**
- * Android SMS Retriever (OTP 자동 감지)
- *
- * 현재 프로젝트에서는 라이브러리의 TIMEOUT이 콘솔에 ERROR로 기록되어
- * 개발 경험을 크게 해칩니다. OTP 자동 감지는 필수 기능이 아니므로,
- * 당분간은 Android에서도 no-op으로 비활성화합니다.
- *
- * 필요해지면 "명시적으로 start()를 호출했을 때만 listening" 하도록
- * 구현을 교체하는 형태로 다시 활성화하세요.
- */
+import {
+  retrieveVerificationCode,
+  startSmsHandling,
+} from '@eabdullazyanov/react-native-sms-user-consent';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { InteractionManager } from 'react-native';
 
+/**
+ * Android SMS User Consent API — 인증 SMS 수신 시 시스템 동의 UI 후 본문에서 OTP를 추출합니다.
+ * (Firebase 등 앱 해시가 없는 SMS에는 SMS Retriever보다 이 API가 적합합니다.)
+ */
 export type OtpSmsRetriever = {
   start: () => Promise<void>;
   stop: () => void;
 };
 
 export function useOtpSmsRetriever(opts: { onCode: (code: string) => void }): OtpSmsRetriever {
-  void opts;
-  return {
-    start: async () => {},
-    stop: () => {},
-  };
-}
+  const onCodeRef = useRef(opts.onCode);
+  onCodeRef.current = opts.onCode;
+  const stopSmsRef = useRef<(() => void) | null>(null);
 
+  const stop = useCallback(() => {
+    if (stopSmsRef.current) {
+      stopSmsRef.current();
+      stopSmsRef.current = null;
+    }
+  }, []);
+
+  const start = useCallback(async () => {
+    stop();
+    // Modal·전화 인증 직후에는 getCurrentActivity()가 잠깐 null일 수 있어, 네이티브 subscribe를 한 틱 미룹니다.
+    await new Promise<void>((resolve) => {
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
+    const stopSms = startSmsHandling((event) => {
+      const sms = typeof event?.sms === 'string' ? event.sms : '';
+      if (!sms) return;
+      const parsed = retrieveVerificationCode(sms, 6);
+      if (!parsed || !/^\d{6}$/.test(parsed)) return;
+      onCodeRef.current(parsed);
+      stopSms();
+      stopSmsRef.current = null;
+    });
+    stopSmsRef.current = stopSms;
+  }, [stop]);
+
+  useEffect(() => () => stop(), [stop]);
+
+  return useMemo(() => ({ start, stop }), [start, stop]);
+}

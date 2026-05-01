@@ -1825,7 +1825,7 @@ export default function MapScreen() {
                           key={item.key}
                           latitude={c.latitude}
                           longitude={c.longitude}
-                          image={{}}
+                          // image={{}}
                           onTap={() => onPeopleMarkerPress(m)}>
                           <View pointerEvents="none" collapsable={false} style={styles.naverDarkNavyMarker} />
                         </NaverMapMarkerOverlay>
@@ -1841,7 +1841,7 @@ export default function MapScreen() {
                         key={item.key}
                         latitude={c.latitude}
                         longitude={c.longitude}
-                        image={{}}
+                        // image={{}}
                         onTap={() => onPeopleMarkerPress(lead)}>
                         <View pointerEvents="none" collapsable={false} style={styles.naverMapStackCount}>
                           <Text style={styles.naverMapStackCountText}>{item.count}</Text>

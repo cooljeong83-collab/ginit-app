@@ -1,10 +1,11 @@
-
+import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   FlatList,
   Keyboard,
   Modal,
@@ -15,6 +16,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -126,6 +128,8 @@ export default function FeedScreen() {
   const tabPagerRef = useRef<ScrollView | null>(null);
   const homeTabRef = useRef(homeTab);
   homeTabRef.current = homeTab;
+  /** Android: 모임 탭 포커스 시 하드웨어 뒤로가기 이중 탭으로만 종료 */
+  const homeExitBackPressRef = useRef(0);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -185,6 +189,41 @@ export default function FeedScreen() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [feedUserProfile, setFeedUserProfile] = useState<UserProfile | null>(null);
   const [feedCoords, setFeedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return undefined;
+      const anyOverlayOpen =
+        regionSearchModalOpen ||
+        regionDropdownOpen ||
+        regionModalOpen ||
+        feedListSettingsModalOpen ||
+        feedSearchModalOpen ||
+        categoryPickerOpen;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (anyOverlayOpen) return false;
+        const now = Date.now();
+        if (now - homeExitBackPressRef.current < 2200) {
+          BackHandler.exitApp();
+          return true;
+        }
+        homeExitBackPressRef.current = now;
+        ToastAndroid.show('한 번 더 누르면 앱이 종료돼요.', ToastAndroid.SHORT);
+        return true;
+      });
+      return () => {
+        homeExitBackPressRef.current = 0;
+        sub.remove();
+      };
+    }, [
+      regionSearchModalOpen,
+      regionDropdownOpen,
+      regionModalOpen,
+      feedListSettingsModalOpen,
+      feedSearchModalOpen,
+      categoryPickerOpen,
+    ]),
+  );
 
   useEffect(() => {
     if (!userId?.trim()) {

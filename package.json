@@ -25,6 +25,7 @@
     "print:categories-sql": "node ./scripts/print-firestore-categories-sql.mjs"
   },
   "dependencies": {
+    "@eabdullazyanov/react-native-sms-user-consent": "^1.3.0",
     "@ebrimasamba/react-native-sms-retriever": "^2.1.0",
     "@expo/vector-icons": "^15.0.3",
     "@lovesworking/watermelondb-expo-plugin-sdk-52-plus": "^1.0.3",

@@ -209,6 +209,7 @@ export default function SignUpScreen() {
 
   const onSendOtp = useCallback(async () => {
     if (!normalizedPhone || !canSendOtp) return;
+    smsRetriever.stop();
     setOtpBusy(true);
     setOtpError(null);
     try {
@@ -221,6 +222,7 @@ export default function SignUpScreen() {
       }
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
+      if (Platform.OS === 'android') void smsRetriever.start();
       InteractionManager.runAfterInteractions(() => {
         requestAnimationFrame(() => {
           scrollRef.current?.scrollToEnd?.(true);
@@ -232,7 +234,7 @@ export default function SignUpScreen() {
     } finally {
       setOtpBusy(false);
     }
-  }, [normalizedPhone, canSendOtp]);
+  }, [normalizedPhone, canSendOtp, smsRetriever]);
 
   const onConfirmOtp = useCallback(async () => {
     if (!otpVerificationId || !canConfirmOtp) return;
