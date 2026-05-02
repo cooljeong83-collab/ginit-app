@@ -2,6 +2,7 @@ import * as Linking from 'expo-linking';
 import type { Router } from 'expo-router';
 
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { MEETING_REMOVED_BY_HOST_PUSH_ACTION } from '@/src/lib/meeting-host-push-notify';
 import { getMeetingById, type Meeting } from '@/src/lib/meetings';
 import { TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION } from '@/src/lib/trust-penalty-notify';
 
@@ -91,7 +92,7 @@ export function navigateFromPushData(
     if (url) void Linking.openURL(url);
     return;
   }
-  if (action === 'deleted') {
+  if (action === 'deleted' || action === MEETING_REMOVED_BY_HOST_PUSH_ACTION) {
     router.replace('/(tabs)' as never);
     return;
   }
@@ -125,7 +126,8 @@ export async function markAlarmReadFromPushData(
     action === 'participant_join_requested' ||
     action === 'join_request_approved' ||
     action === 'join_request_rejected' ||
-    action === 'host_transferred';
+    action === 'host_transferred' ||
+    action === MEETING_REMOVED_BY_HOST_PUSH_ACTION;
   if (!shouldAckMeeting) return;
   const m = await getMeetingById(meetingId);
   if (!m) {

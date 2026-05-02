@@ -286,3 +286,53 @@ export function notifyMeetingJoinRequestApplicantDecisionFireAndForget(
     }
   });
 }
+
+/** 원격 푸시 `data.action` — `push-open-navigation` 등과 동기 */
+export const MEETING_REMOVED_BY_HOST_PUSH_ACTION = 'meeting_removed_by_host';
+
+function copyForParticipantRemovedByHost(meetingTitle: string): { title: string; body: string } {
+  const t = meetingTitle.trim() || '모임';
+  return {
+    title: '모임에서 퇴장됐어요',
+    body: `호스트에 의해 「${t}」모임에서 퇴장 처리됐습니다. 이 모임에는 다시 참여할 수 없어요.`,
+  };
+}
+
+/**
+ * 호스트 강제 퇴장: 퇴장당한 참가자 1명에게만 푸시(실패는 삼키고 로그만).
+ */
+export async function notifyMeetingParticipantRemovedByHost(
+  meeting: Meeting,
+  removedUserId: string,
+): Promise<void> {
+  const rid = normalizeParticipantId(removedUserId.trim());
+  if (!rid) {
+    ginitNotifyDbg('meeting-host-push', 'removed_by_host_skip_bad_id', { meetingId: meeting.id });
+    return;
+  }
+
+  ginitNotifyDbg('meeting-host-push', 'removed_by_host_dispatch', { meetingId: meeting.id });
+  const { title, body } = copyForParticipantRemovedByHost(meeting.title);
+  await dispatchRemotePushToRecipients({
+    toUserIds: [rid],
+    title,
+    body,
+    data: {
+      meetingId: meeting.id,
+      action: MEETING_REMOVED_BY_HOST_PUSH_ACTION,
+      url: `ginitapp://meeting/${meeting.id}`,
+    },
+  });
+}
+
+export function notifyMeetingParticipantRemovedByHostFireAndForget(
+  meeting: Meeting,
+  removedUserId: string,
+): void {
+  void notifyMeetingParticipantRemovedByHost(meeting, removedUserId).catch((err) => {
+    ginitNotifyDbg('meeting-host-push', 'removed_by_host_error', { message: err instanceof Error ? err.message : String(err) });
+    if (__DEV__) {
+      console.warn('[meeting-push]', err);
+    }
+  });
+}

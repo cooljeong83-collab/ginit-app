@@ -83,6 +83,8 @@ import {
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
+  hostRemoveParticipant,
+  isUserKickedFromMeeting,
   joinMeeting,
   leaveMeeting,
   listMeetingJoinRequests,
@@ -469,6 +471,7 @@ export default function MeetingDetailScreen() {
   const [hostJoinRequestBusyId, setHostJoinRequestBusyId] = useState<string | null>(null);
   /** setState 전에도 연타·중복 비동기 호출로 승인/거절 RPC가 여러 번 나가지 않게 함 */
   const hostJoinRequestActionInFlightRef = useRef(false);
+  const hostKickParticipantInFlightRef = useRef(false);
   const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
   const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(3);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
@@ -1150,6 +1153,11 @@ export default function MeetingDetailScreen() {
   const hasPendingJoinRequest = useMemo(() => {
     if (!sessionPk || !meeting) return false;
     return findMeetingJoinRequestForUser(meeting, sessionPk) != null;
+  }, [meeting, sessionPk]);
+
+  const sessionKickedFromMeeting = useMemo(() => {
+    if (!meeting || !sessionPk) return false;
+    return isUserKickedFromMeeting(meeting, sessionPk);
   }, [meeting, sessionPk]);
 
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
@@ -1847,6 +1855,10 @@ export default function MeetingDetailScreen() {
         Alert.alert('안내', '로그인 후 신청할 수 있어요.');
         return;
       }
+      if (isUserKickedFromMeeting(meeting, sessionPk)) {
+        Alert.alert('안내', '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
+        return;
+      }
       const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
       const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
       const effectiveMovieIds =
@@ -1947,6 +1959,10 @@ export default function MeetingDetailScreen() {
   const onPressRequestJoin = useCallback(() => {
     if (!meeting || !sessionPk) {
       Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+      return;
+    }
+    if (isUserKickedFromMeeting(meeting, sessionPk)) {
+      Alert.alert('안내', '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
       return;
     }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
@@ -2075,6 +2091,47 @@ export default function MeetingDetailScreen() {
       })();
     },
     [meeting, sessionPk, queryClient],
+  );
+
+  const handleHostKickParticipant = useCallback(
+    (targetParticipantId: string) => {
+      if (!meeting || !sessionPk) return;
+      const tid = targetParticipantId.trim();
+      if (!tid) return;
+      if (meeting.scheduleConfirmed === true) return;
+      const hostPk = meeting.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy) : '';
+      const targetPk = normalizeParticipantId(tid);
+      if (hostPk && targetPk === hostPk) return;
+      if (hostKickParticipantInFlightRef.current) return;
+      const prof = participantProfiles[tid];
+      const nickname = (prof?.nickname ?? '').trim() || '이 참여자';
+      Alert.alert(
+        '강제 퇴장',
+        `${nickname}님을 이 모임에서 퇴장시킬까요?\n이후에는 이 모임에 다시 들어오거나 신청할 수 없어요.`,
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '퇴장',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                hostKickParticipantInFlightRef.current = true;
+                try {
+                  await hostRemoveParticipant(meeting.id, sessionPk, tid);
+                  void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+                  showTransientBottomMessage('참여자를 퇴장시켰어요.');
+                } catch (e) {
+                  Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                } finally {
+                  hostKickParticipantInFlightRef.current = false;
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [meeting, sessionPk, queryClient, participantProfiles],
   );
 
   useEffect(() => {
@@ -3939,6 +3996,11 @@ export default function MeetingDetailScreen() {
                 <Text style={styles.sectionTitle}>참여자 ({orderedParticipantIdsList.length}명)</Text>
                 {genderCountLabel ? <Text style={styles.genderCountText}>{genderCountLabel}</Text> : null}
               </View>
+              {isHost && meeting.scheduleConfirmed !== true ? (
+                <Text style={styles.hostKickHintText}>
+                  방장은 참여자를 길게 눌러 퇴장시킬 수 있어요.
+                </Text>
+              ) : null}
               {orderedParticipantIdsList.length === 0 ? (
                 <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
               ) : (
@@ -3957,6 +4019,11 @@ export default function MeetingDetailScreen() {
                       <Pressable
                         key={userId}
                         onPress={() => openParticipantProfile(userId)}
+                        onLongPress={
+                          isHost && meeting.scheduleConfirmed !== true && !isHostUser && !withdrawn
+                            ? () => handleHostKickParticipant(userId)
+                            : undefined
+                        }
                         style={({ pressed }) => [styles.avatarCol, pressed && !withdrawn && { opacity: 0.92 }]}
                         pointerEvents={withdrawn ? 'none' : 'auto'}
                         accessibilityRole="button"
@@ -4185,6 +4252,12 @@ export default function MeetingDetailScreen() {
                     </Text>
                   </Pressable>
                 </View>
+              </View>
+            ) : sessionKickedFromMeeting ? (
+              <View style={styles.guestJoinBottomCol}>
+                <Text style={styles.joinOverlapCaption}>
+                  이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.
+                </Text>
               </View>
             ) : hasPendingJoinRequest ? (
               <View style={styles.guestJoinBottomCol}>
@@ -5871,6 +5944,13 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: 'center',
     fontWeight: '600',
+  },
+  hostKickHintText: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+    color: GinitTheme.colors.danger,
   },
   bottomBar: {
     position: 'absolute',

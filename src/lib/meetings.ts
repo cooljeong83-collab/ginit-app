@@ -50,6 +50,7 @@ import {
   notifyMeetingJoinRequestApplicantDecisionFireAndForget,
   notifyMeetingNewHostAssignedFireAndForget,
   notifyMeetingHostParticipantEventFireAndForget,
+  notifyMeetingParticipantRemovedByHostFireAndForget,
   notifyMeetingParticipantsOfHostActionFireAndForget,
 } from './meeting-host-push-notify';
 import type { MeetingExtraData, SelectedMovieExtra } from './meeting-extra-data';
@@ -170,6 +171,8 @@ export type Meeting = {
   chatReadMessageIdBy?: Record<string, string> | null;
   /** `meetingConfig.approvalType === 'HOST_APPROVAL'` 일 때만 사용 */
   joinRequests?: MeetingJoinRequest[] | null;
+  /** 호스트 강제 퇴장된 app_user_id(정규화 PK). 재참여·재신청 차단용 */
+  kickedParticipantIds?: string[] | null;
 };
 
 /**
@@ -578,6 +581,36 @@ function parseJoinRequestsField(data: Record<string, unknown>): MeetingJoinReque
   return out;
 }
 
+function parseKickedParticipantIdsField(data: Record<string, unknown>): string[] {
+  const raw = data.kickedParticipantIds;
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown[])
+    .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    .map((x) => x.trim());
+}
+
+function assertParticipantNotKickedFromMeetingDoc(data: Record<string, unknown>, nsUid: string): void {
+  const list = parseKickedParticipantIdsField(data);
+  if (list.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) {
+    throw new Error('이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
+  }
+}
+
+function mergeKickedParticipantIdsField(data: Record<string, unknown>, nsUidToAdd: string): string[] {
+  const prev = parseKickedParticipantIdsField(data);
+  const seen = new Set(prev.map((x) => normalizeParticipantId(x) ?? x.trim()));
+  if (seen.has(nsUidToAdd)) return prev;
+  return [...prev, nsUidToAdd];
+}
+
+/** 호스트 킥 등으로 이 모임에 다시 들어오거나 신청할 수 없는지(클라이언트 표시용) */
+export function isUserKickedFromMeeting(meeting: Meeting, phoneUserId: string): boolean {
+  const ns = normalizeParticipantId(phoneUserId.trim());
+  if (!ns) return false;
+  const list = meeting.kickedParticipantIds ?? [];
+  return list.some((x) => (normalizeParticipantId(x) ?? String(x).trim()) === ns);
+}
+
 /** 공개 모임이 호스트 승인 참가 방식인지(문서 원시 기준) */
 export function meetingDocRequiresHostApprovalJoin(data: Record<string, unknown>): boolean {
   if (data.isPublic !== true) return false;
@@ -845,6 +878,10 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
     chatReadAtBy,
     chatReadMessageIdBy,
     joinRequests: parseJoinRequestsField(data),
+    kickedParticipantIds: (() => {
+      const xs = parseKickedParticipantIdsField(data);
+      return xs.length ? xs : null;
+    })(),
   };
 }
 
@@ -1193,6 +1230,7 @@ export async function joinMeeting(
     if (!data) throw new Error('모임을 찾을 수 없어요.');
     const joinBlock = getJoinGamificationBlockReason(profile, data);
     if (joinBlock) throw new Error(joinBlock);
+    assertParticipantNotKickedFromMeetingDoc(data, nsUid);
     const mPre = mapFirestoreMeetingDoc(mid, data);
     const overlapBuf = getScheduleOverlapBufferHours(profile);
     if (mPre.scheduleConfirmed === true) {
@@ -1265,9 +1303,11 @@ export async function joinMeeting(
 
   const preSnap = await getDoc(ref);
   if (!preSnap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const joinBlock = getJoinGamificationBlockReason(profile, preSnap.data() as Record<string, unknown>);
+  const preSnapData = preSnap.data() as Record<string, unknown>;
+  const joinBlock = getJoinGamificationBlockReason(profile, preSnapData);
   if (joinBlock) throw new Error(joinBlock);
-  const mPreFs = mapFirestoreMeetingDoc(mid, preSnap.data() as Record<string, unknown>);
+  assertParticipantNotKickedFromMeetingDoc(preSnapData, nsUid);
+  const mPreFs = mapFirestoreMeetingDoc(mid, preSnapData);
   const overlapBufFs = getScheduleOverlapBufferHours(profile);
   if (mPreFs.scheduleConfirmed === true) {
     const startMs = meetingPrimaryStartMs(mPreFs);
@@ -1295,7 +1335,7 @@ export async function joinMeeting(
     }
   }
 
-  const preJoinData = preSnap.data() as Record<string, unknown>;
+  const preJoinData = preSnapData;
   const preJoinRaw = Array.isArray(preJoinData.participantIds)
     ? (preJoinData.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
     : [];
@@ -1309,6 +1349,7 @@ export async function joinMeeting(
     const snap = await transaction.get(ref);
     if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
     const data = snap.data() as Record<string, unknown>;
+    assertParticipantNotKickedFromMeetingDoc(data, nsUid);
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
@@ -1412,44 +1453,51 @@ export async function requestJoinMeeting(
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
   if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    if (!meetingDocRequiresHostApprovalJoin(data)) {
+    const fresh = await ledgerTryLoadMeetingDoc(mid);
+    if (!fresh) throw new Error('모임을 찾을 수 없어요.');
+    if (!meetingDocRequiresHostApprovalJoin(fresh)) {
       throw new Error('호스트 승인 방식의 공개 모임만 참가 신청을 보낼 수 있어요.');
     }
-    const joinBlock = getJoinGamificationBlockReason(profile, data);
-    if (joinBlock) throw new Error(joinBlock);
-    const mPre = mapFirestoreMeetingDoc(mid, data);
-    assertMeetingHasCapacityForOneMore(mPre);
-    await assertJoinOverlapPrechecks(profile, uid, mid, mPre, votes);
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+    const joinBlockFresh = getJoinGamificationBlockReason(profile, fresh);
+    if (joinBlockFresh) throw new Error(joinBlockFresh);
+    assertParticipantNotKickedFromMeetingDoc(fresh, nsUid);
+    const mPreFresh = mapFirestoreMeetingDoc(mid, fresh);
+    assertMeetingHasCapacityForOneMore(mPreFresh);
+    await assertJoinOverlapPrechecks(profile, uid, mid, mPreFresh, votes);
+    const preWrite = await ledgerTryLoadMeetingDoc(mid);
+    if (!preWrite) throw new Error('모임을 찾을 수 없어요.');
+    assertParticipantNotKickedFromMeetingDoc(preWrite, nsUid);
+    const mPreWrite = mapFirestoreMeetingDoc(mid, preWrite);
+    assertMeetingHasCapacityForOneMore(mPreWrite);
+    const rawListWrite = Array.isArray(preWrite.participantIds)
+      ? (preWrite.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
-    if (rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) return;
-    const hostPk = typeof data.createdBy === 'string' ? normalizeParticipantId(data.createdBy.trim()) ?? data.createdBy.trim() : '';
-    if (hostPk && hostPk === nsUid) throw new Error('호스트는 참가 신청을 보낼 수 없어요.');
-    const cfg = parsePublicMeetingDetailsConfig(data.meetingConfig);
-    let messageOut: string | null | undefined;
-    if (cfg?.requestMessageEnabled === true) {
+    if (rawListWrite.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) return;
+    const hostPkWrite =
+      typeof preWrite.createdBy === 'string' ? normalizeParticipantId(preWrite.createdBy.trim()) ?? preWrite.createdBy.trim() : '';
+    if (hostPkWrite && hostPkWrite === nsUid) throw new Error('호스트는 참가 신청을 보낼 수 없어요.');
+    const cfgWrite = parsePublicMeetingDetailsConfig(preWrite.meetingConfig);
+    let messageOutWrite: string | null | undefined;
+    if (cfgWrite?.requestMessageEnabled === true) {
       const raw = typeof opts?.message === 'string' ? opts.message.trim() : '';
-      messageOut = raw ? raw.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null;
+      messageOutWrite = raw ? raw.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null;
     }
-    const prevJr = parseJoinRequestsField(data);
+    const prevJr = parseJoinRequestsField(preWrite);
     const row: MeetingJoinRequest = {
       userId: nsUid,
       dateChipIds: [...votes.dateChipIds],
       placeChipIds: [...votes.placeChipIds],
       movieChipIds: [...votes.movieChipIds],
       requestedAt: new Date().toISOString(),
-      ...(messageOut !== undefined ? { message: messageOut } : {}),
+      ...(messageOutWrite !== undefined ? { message: messageOutWrite } : {}),
     };
     const nextJr = mergeJoinRequestsReplaceUser(prevJr, nsUid, row);
     const nextDoc = {
-      ...data,
+      ...preWrite,
       joinRequests: stripUndefinedDeep(nextJr) as unknown as MeetingJoinRequest[],
     };
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
-    const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    const hostId = typeof preWrite.createdBy === 'string' ? preWrite.createdBy.trim() : '';
     if (hostId) {
       notifyMeetingHostParticipantEventFireAndForget(
         mapFirestoreMeetingDoc(mid, nextDoc as Record<string, unknown>),
@@ -1470,6 +1518,7 @@ export async function requestJoinMeeting(
   }
   const joinBlock = getJoinGamificationBlockReason(profile, preData);
   if (joinBlock) throw new Error(joinBlock);
+  assertParticipantNotKickedFromMeetingDoc(preData, nsUid);
   const mPreFs = mapFirestoreMeetingDoc(mid, preData);
   assertMeetingHasCapacityForOneMore(mPreFs);
   await assertJoinOverlapPrechecks(profile, uid, mid, mPreFs, votes);
@@ -1494,6 +1543,7 @@ export async function requestJoinMeeting(
     if (!meetingDocRequiresHostApprovalJoin(data)) {
       throw new Error('호스트 승인 방식의 공개 모임만 참가 신청을 보낼 수 있어요.');
     }
+    assertParticipantNotKickedFromMeetingDoc(data, nsUid);
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
@@ -1644,6 +1694,7 @@ export async function approveJoinRequest(
     const prevJr = parseJoinRequestsField(data);
     const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
     if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
+    assertParticipantNotKickedFromMeetingDoc(data, nsApp);
     const votes = {
       dateChipIds: req.dateChipIds,
       placeChipIds: req.placeChipIds,
@@ -1738,6 +1789,7 @@ export async function approveJoinRequest(
     const prevJr = parseJoinRequestsField(data);
     const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
     if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
+    assertParticipantNotKickedFromMeetingDoc(data, nsApp);
     const votes = {
       dateChipIds: req.dateChipIds,
       placeChipIds: req.placeChipIds,
@@ -2193,6 +2245,122 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
     }
     notifyMeetingHostParticipantEventFireAndForget(after, hostId, uid, 'left', nick);
   }
+}
+
+/**
+ * 호스트가 참여자를 강제 퇴장시킵니다. 일정 확정 전에만 가능합니다.
+ * 대상은 `kickedParticipantIds`에 기록되어 동일 모임 재참여·재신청이 차단됩니다.
+ */
+export async function hostRemoveParticipant(
+  meetingId: string,
+  hostPhoneUserId: string,
+  targetUserId: string,
+): Promise<void> {
+  const mid = meetingId.trim();
+  const hostUid = hostPhoneUserId.trim();
+  const targetRaw = targetUserId.trim();
+  if (!mid || !hostUid || !targetRaw) throw new Error('모임 또는 사용자 정보가 없습니다.');
+  const nsHost = normalizeParticipantId(hostUid) ?? hostUid;
+  const nsTarget = normalizeParticipantId(targetRaw) ?? targetRaw;
+  if (!nsTarget) throw new Error('대상 사용자 정보가 올바르지 않아요.');
+  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
+
+  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
+    const data = await ledgerTryLoadMeetingDoc(mid);
+    if (!data) throw new Error('모임을 찾을 수 없어요.');
+    if (data.scheduleConfirmed === true) {
+      throw new Error('일정이 확정된 모임에서는 참여자를 강제 퇴장할 수 없어요.');
+    }
+    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 참여자를 퇴장시킬 수 있어요.');
+    if (nsTarget === nsCreated) throw new Error('호스트 본인은 이 방법으로 퇴장시킬 수 없어요.');
+    const rawList = Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    let removeToken: string | null = null;
+    for (const x of rawList) {
+      if ((normalizeParticipantId(x) ?? x.trim()) === nsTarget) {
+        removeToken = x;
+        break;
+      }
+    }
+    if (!removeToken) throw new Error('참여 중인 참여자만 강제 퇴장할 수 있어요.');
+
+    const log = parseParticipantVoteLog(data);
+    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsTarget);
+    const oldD = old?.dateChipIds ?? [];
+    const oldP = old?.placeChipIds ?? [];
+    const oldM = old?.movieChipIds ?? [];
+    const vt = parseVoteTalliesField(data) ?? {};
+    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
+    const nextKicked = mergeKickedParticipantIdsField(data, nsTarget);
+    const prevJrKick = parseJoinRequestsField(data);
+    const nextJrKick = prevJrKick.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
+    const patch: Record<string, unknown> = {
+      ...data,
+      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
+      kickedParticipantIds: nextKicked,
+      joinRequests: nextJrKick.length ? stripUndefinedDeep(nextJrKick) : null,
+    };
+    patch.participantIds = rawList.filter((x) => x !== removeToken);
+    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(patch) as Record<string, unknown>);
+    const mAfter = mapFirestoreMeetingDoc(mid, patch as Record<string, unknown>);
+    notifyMeetingParticipantRemovedByHostFireAndForget(mAfter, targetRaw);
+    return;
+  }
+
+  await runTransaction(getFirestoreDb(), async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
+    const data = snap.data() as Record<string, unknown>;
+    if (data.scheduleConfirmed === true) {
+      throw new Error('일정이 확정된 모임에서는 참여자를 강제 퇴장할 수 없어요.');
+    }
+    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 참여자를 퇴장시킬 수 있어요.');
+    if (nsTarget === nsCreated) throw new Error('호스트 본인은 이 방법으로 퇴장시킬 수 없어요.');
+    const rawList = Array.isArray(data.participantIds)
+      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    let removeToken: string | null = null;
+    for (const x of rawList) {
+      if ((normalizeParticipantId(x) ?? x.trim()) === nsTarget) {
+        removeToken = x;
+        break;
+      }
+    }
+    if (!removeToken) throw new Error('참여 중인 참여자만 강제 퇴장할 수 있어요.');
+
+    const log = parseParticipantVoteLog(data);
+    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsTarget);
+    const oldD = old?.dateChipIds ?? [];
+    const oldP = old?.placeChipIds ?? [];
+    const oldM = old?.movieChipIds ?? [];
+    const vt = parseVoteTalliesField(data) ?? {};
+    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
+    const nextKicked = mergeKickedParticipantIdsField(data, nsTarget);
+    const prevJrKick = parseJoinRequestsField(data);
+    const nextJrKick = prevJrKick.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
+    transaction.update(ref, {
+      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
+      participantIds: arrayRemove(removeToken),
+      kickedParticipantIds: nextKicked,
+      joinRequests: nextJrKick.length ? stripUndefinedDeep(nextJrKick) : null,
+    });
+  });
+
+  const after = await getMeetingById(mid);
+  if (after) notifyMeetingParticipantRemovedByHostFireAndForget(after, targetRaw);
 }
 
 /** 모임 주관자가 집계 투표(+동점 시 주관자 선택)로 일정·모집 확정 */
