@@ -70,6 +70,10 @@ export function navigateFromPushData(
   }
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const action = typeof data.action === 'string' ? data.action.trim() : '';
+  if (meetingId && action === 'new_meeting_in_feed_region') {
+    navTo(`/meeting/${meetingId}`);
+    return;
+  }
   if (meetingId && action === 'in_app_chat') {
     navigateToChatRoomWithChatTabUnderneath(router, `/meeting-chat/${meetingId}`, opts);
     return;

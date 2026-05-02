@@ -9,11 +9,20 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
 import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
 
 Notifications.setNotificationHandler({
   handleNotification: async (n) => {
     try {
+      if (await isProfileFcmQuietHoursActive()) {
+        return {
+          shouldShowBanner: false,
+          shouldShowList: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
       const data = n?.request?.content?.data as Record<string, unknown> | undefined;
       const action = typeof data?.action === 'string' ? String(data.action).trim() : '';
       const meetingId = typeof data?.meetingId === 'string' ? String(data.meetingId).trim() : '';

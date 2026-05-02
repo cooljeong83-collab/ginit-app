@@ -2,6 +2,7 @@ import notifee, { AndroidImportance } from '@notifee/react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
 
 /** FCM·포그라운드 표시용 Notifee 채널 (Android) */
@@ -46,6 +47,10 @@ function titleBodyFromRemoteMessage(rm: FirebaseMessagingTypes.RemoteMessage): {
 export async function displayFcmRemoteMessageWithNotifeeAndroid(
   rm: FirebaseMessagingTypes.RemoteMessage,
 ): Promise<void> {
+  if (await isProfileFcmQuietHoursActive()) {
+    ginitNotifyDbg('fcm-notifee-display', 'skip_quiet_hours', { messageId: rm.messageId });
+    return;
+  }
   const content = titleBodyFromRemoteMessage(rm);
   if (!content) {
     ginitNotifyDbg('fcm-notifee-display', 'skip_no_content', { messageId: rm.messageId });

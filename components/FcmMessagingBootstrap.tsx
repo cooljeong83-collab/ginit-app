@@ -16,6 +16,8 @@ import {
   registerFcmDeviceAndGetToken,
 } from '@/src/lib/fcm-token-supabase-sync';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
+import { NEW_MEETING_IN_FEED_REGION_FCM_ACTION } from '@/src/lib/meeting-area-notify-fcm';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
 
 function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } {
@@ -176,6 +178,11 @@ export function FcmMessagingBootstrap() {
             hasNotification: Boolean(rm.notification),
             platform: Platform.OS,
           });
+          if (action === NEW_MEETING_IN_FEED_REGION_FCM_ACTION) {
+            ginitNotifyDbg('FcmMessaging', 'on_message_new_meeting_feed_region', {
+              meetingId: meetingId || undefined,
+            });
+          }
           if (action === 'in_app_chat' && meetingId) {
             const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
             if (!notifyOn) {
@@ -200,6 +207,10 @@ export function FcmMessagingBootstrap() {
             }
             await displayFcmRemoteMessageWithNotifeeAndroid(rm);
             ginitNotifyDbg('FcmMessaging', 'foreground_notifee_displayed', { messageId: rm.messageId });
+            return;
+          }
+          if (await isProfileFcmQuietHoursActive()) {
+            ginitNotifyDbg('FcmMessaging', 'foreground_skip_quiet_hours', { messageId: rm.messageId });
             return;
           }
           const { title, body } = formatForegroundAlert(rm);

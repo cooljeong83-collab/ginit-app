@@ -33,8 +33,10 @@ import {
 } from 'firebase/firestore';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
+import { feedRegionNormFromAddressHaystack } from './feed-display-location';
 import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
 import { getFirebaseFirestore } from './firebase';
+import { ginitNotifyDbg } from './ginit-notify-debug';
 import { ledgerWritesToSupabase } from './hybrid-data-source';
 import {
   isLedgerMeetingId,
@@ -2046,6 +2048,12 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
 
   const hostPk = input.createdBy?.trim();
   if (!hostPk) throw new Error('주최자 정보가 없습니다.');
+
+  if (ledgerWritesToSupabase()) {
+    const hay = [input.address, input.placeName].filter(Boolean).join(' ');
+    const feedNorm = feedRegionNormFromAddressHaystack(hay);
+    if (feedNorm) cleaned.feedRegionNorm = feedNorm;
+  }
   const hostProf = await getUserProfile(hostPk);
   if (!isUserPhoneVerified(hostProf)) {
     throw new Error('전화번호 인증을 완료한 사용자만 모임을 만들 수 있어요. 프로필에서 인증을 진행해 주세요.');
@@ -2063,6 +2071,12 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
 
   if (ledgerWritesToSupabase()) {
     return ledgerMeetingCreate(hostPk, cleaned);
+  }
+
+  if (cleaned.isPublic === true) {
+    ginitNotifyDbg('meeting-created-notify', 'skip_no_supabase_ledger', {
+      hint: 'EXPO_PUBLIC_LEDGER_WRITES=firestore 이거나 SUPABASE URL/ANON 미설정 시 Edge 호출 없음',
+    });
   }
 
   console.log('Final Firestore Payload:', toJsonSafeFirestorePreview({ ...cleaned, createdAt: '[serverTimestamp]' }));

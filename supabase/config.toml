@@ -375,6 +375,16 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
+# 공개 모임 생성 알림: 앱은 anon Bearer + JSON(p_host_app_user_id), 웹훅은 x-meeting-notify-secret.
+# 플랫폼 기본 JWT 검증이 핸들러 전에 401을 낼 수 있어, 본 함수는 핸들러 내 검증만 사용합니다.
+[functions.meeting-created-area-notify]
+verify_jwt = false
+
+# Edge 간 fetch(service role Bearer)로 호출될 때 게이트웨이가 JWT 형식 검증에서 401(UNAUTHORIZED_INVALID_JWT_FORMAT)을 낼 수 있음.
+# 본 함수는 핸들러에서 별도 세션 JWT를 요구하지 않음(주석 참고). meeting-created-area-notify 등 내부 호출과 맞춤.
+[functions.fcm-push-send]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

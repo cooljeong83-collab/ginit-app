@@ -505,6 +505,8 @@ export default function MapScreen() {
   const [hybridMeetings, setHybridMeetings] = useState<Meeting[]>([]);
   const [rpcMeetings, setRpcMeetings] = useState<Meeting[]>([]);
   const [meetingsBooted, setMeetingsBooted] = useState(false);
+  /** 반경 RPC(fetchMeetingsWithinRadiusFromSupabase) 진행 중 — 하이브리드 부트 후에도 시트 빈 카피 깜빡임 방지 */
+  const [mapGeoMeetingsLoading, setMapGeoMeetingsLoading] = useState(false);
   const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(null);
   const [driftTooFar, setDriftTooFar] = useState(false);
   const [listingRegion, setListingRegion] = useState<Region | null>(null);
@@ -517,8 +519,8 @@ export default function MapScreen() {
   const [naverZoom, setNaverZoom] = useState<number>(16);
   const isMapScreenFocused = useIsFocused();
 
-  /** 하이브리드(공개 목록) 최초 부트 전에만 시트 스플래시 — 지역 RPC 재조회와 분리해 깜빡임 방지 */
-  const showSheetSplash = !meetingsBooted;
+  /** 하이브리드 최초 부트 전, 또는 지도 반경 RPC 응답 전까지 시트 스플래시 */
+  const showSheetSplash = !meetingsBooted || mapGeoMeetingsLoading;
 
   const { version: appPoliciesVersion } = useAppPolicies();
   const mapRadiusKm = useMemo(() => {
@@ -836,26 +838,34 @@ export default function MapScreen() {
   }, [categories, selectedCategoryId]);
 
   useEffect(() => {
-    if (!searchAnchor && !mapGeoQueryRegion) return;
+    if (!searchAnchor && !mapGeoQueryRegion) {
+      setMapGeoMeetingsLoading(false);
+      return;
+    }
     let alive = true;
+    setMapGeoMeetingsLoading(true);
     void (async () => {
-      const anchor =
-        mapGeoQueryRegion != null
-          ? { latitude: mapGeoQueryRegion.latitude, longitude: mapGeoQueryRegion.longitude }
-          : searchAnchor!;
-      const radiusKm = mapGeoQueryRegion ? regionCoverageRadiusKm(mapGeoQueryRegion, 80) : mapRadiusKm;
-      const res = await fetchMeetingsWithinRadiusFromSupabase(
-        anchor.latitude,
-        anchor.longitude,
-        radiusKm,
-        selectedCategoryId,
-      );
-      if (!alive) return;
-      if (res.ok) {
-        setRpcMeetings(res.meetings);
-        setDriftTooFar(false);
-      } else {
-        setRpcMeetings([]);
+      try {
+        const anchor =
+          mapGeoQueryRegion != null
+            ? { latitude: mapGeoQueryRegion.latitude, longitude: mapGeoQueryRegion.longitude }
+            : searchAnchor!;
+        const radiusKm = mapGeoQueryRegion ? regionCoverageRadiusKm(mapGeoQueryRegion, 80) : mapRadiusKm;
+        const res = await fetchMeetingsWithinRadiusFromSupabase(
+          anchor.latitude,
+          anchor.longitude,
+          radiusKm,
+          selectedCategoryId,
+        );
+        if (!alive) return;
+        if (res.ok) {
+          setRpcMeetings(res.meetings);
+          setDriftTooFar(false);
+        } else {
+          setRpcMeetings([]);
+        }
+      } finally {
+        if (alive) setMapGeoMeetingsLoading(false);
       }
     })();
     return () => {

@@ -65,7 +65,16 @@ export async function persistFcmTokenAndVerify(uid: string, token: string): Prom
     console.log('[fcm] persist start', { uid, tokenLen: token.length });
   }
   await withTimeout(ensureUserProfile(uid), 12_000, '[fcm] ensureUserProfile');
-  await withTimeout(updateUserProfile(uid, { fcmToken: token }), 12_000, '[fcm] updateUserProfile');
+  const fcmPlatform =
+    Platform.OS === 'ios' ? ('ios' as const) : Platform.OS === 'android' ? ('android' as const) : undefined;
+  await withTimeout(
+    updateUserProfile(uid, {
+      fcmToken: token,
+      ...(fcmPlatform ? { fcmPlatform } : {}),
+    }),
+    12_000,
+    '[fcm] updateUserProfile',
+  );
   const profile = await withTimeout(getUserProfile(uid), 8_000, '[fcm] getUserProfile');
   const saved = profile?.fcmToken?.trim() ?? '';
   if (saved !== token) {

@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FF8A00',
+    backgroundColor: GinitTheme.themeMainColor,
     borderWidth: 1,
     borderColor: '#fff',
   },

@@ -1,6 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
+import { invokeMeetingCreatedAreaNotifyFireAndForget } from '@/src/lib/meeting-created-area-notify-client';
 import { supabase } from '@/src/lib/supabase';
 
 /** Ledger 모임 ID: Supabase `meetings.id` (UUID v4). Firestore 자동 ID와 구분. */
@@ -99,7 +100,11 @@ export async function ledgerMeetingCreate(hostAppUserId: string, doc: Record<str
   });
   if (error) throw new Error(error.message);
   if (data == null) throw new Error('ledger_meeting_create returned null');
-  return String(data);
+  const id = String(data);
+  if (doc.isPublic === true) {
+    invokeMeetingCreatedAreaNotifyFireAndForget(id, hostAppUserId);
+  }
+  return id;
 }
 
 export async function ledgerMeetingDelete(meetingId: string): Promise<void> {

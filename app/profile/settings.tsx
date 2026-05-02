@@ -1,14 +1,15 @@
-
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -18,11 +19,12 @@ import {
   ToastAndroid,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingServiceAuthModal } from '@/components/profile/MeetingServiceAuthModal';
 import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
+import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import {
@@ -32,10 +34,15 @@ import {
   wipeLocalAppData,
 } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
+import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { isProfileRegisterInfoParamOn, PROFILE_REGISTER_INFO_QUERY } from '@/src/lib/profile-register-info';
 import {
+  DND_QUIET_HOURS_DEFAULT_END_MIN,
+  DND_QUIET_HOURS_DEFAULT_START_MIN,
   loadProfileDndQuietHoursEnabled,
+  loadProfileDndQuietHoursWindow,
   saveProfileDndQuietHoursEnabled,
+  saveProfileDndQuietHoursWindow,
 } from '@/src/lib/profile-settings-local';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { ensureUserProfile, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
@@ -76,8 +83,29 @@ function sectionTitle(label: string) {
   );
 }
 
+function minutesOfDayFromDate(d: Date): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function dateFromMinutesOfDay(min: number): Date {
+  const h = Math.floor(min / 60) % 24;
+  const m = ((min % 60) + 60) % 60;
+  return new Date(2000, 0, 1, h, m, 0, 0);
+}
+
+function formatDndTimeLabel(min: number): string {
+  return dateFromMinutesOfDay(min).toLocaleTimeString('ko-KR', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+type DndTimePick = { kind: 'start' | 'end'; draft: Date };
+
 export default function ProfileAppSettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { registerInfo: registerInfoParam } = useLocalSearchParams<{ registerInfo?: string | string[] }>();
   const { userId, authProfile, signOutSession } = useUserSession();
 
@@ -87,6 +115,14 @@ export default function ProfileAppSettingsScreen() {
   const [notifyLoaded, setNotifyLoaded] = useState(false);
   const [dndOn, setDndOn] = useState(false);
   const [dndLoaded, setDndLoaded] = useState(false);
+  const [dndStartMin, setDndStartMin] = useState(DND_QUIET_HOURS_DEFAULT_START_MIN);
+  const [dndEndMin, setDndEndMin] = useState(DND_QUIET_HOURS_DEFAULT_END_MIN);
+  const [dndPick, setDndPick] = useState<DndTimePick | null>(null);
+  const dndWindowRef = useRef({ start: DND_QUIET_HOURS_DEFAULT_START_MIN, end: DND_QUIET_HOURS_DEFAULT_END_MIN });
+
+  useEffect(() => {
+    dndWindowRef.current = { start: dndStartMin, end: dndEndMin };
+  }, [dndStartMin, dndEndMin]);
 
   const isSignedIn = Boolean(userId?.trim() || authProfile?.firebaseUid?.trim());
 
@@ -101,6 +137,8 @@ export default function ProfileAppSettingsScreen() {
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
   const [meetingAuthLoaded, setMeetingAuthLoaded] = useState(false);
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
+  const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
+  const [meetingNotifyEffectiveOn, setMeetingNotifyEffectiveOn] = useState(false);
 
   const refreshMeetingAuth = useCallback(async () => {
     const pk = profilePk.trim();
@@ -136,12 +174,41 @@ export default function ProfileAppSettingsScreen() {
     }
   }, []);
 
+  const refreshMeetingNotify = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      setMeetingNotifyLoaded(true);
+      setMeetingNotifyEffectiveOn(false);
+      return;
+    }
+    const pk = profilePk.trim();
+    if (!pk) {
+      setMeetingNotifyLoaded(true);
+      setMeetingNotifyEffectiveOn(false);
+      return;
+    }
+    setMeetingNotifyLoaded(false);
+    try {
+      const m = await fetchMeetingAreaNotifyMatrix(pk);
+      const rn = (m.region_norms ?? []).filter((x) => String(x ?? '').trim() !== '');
+      const ci = (m.category_ids ?? []).filter((x) => String(x ?? '').trim() !== '');
+      setMeetingNotifyEffectiveOn(rn.length > 0 && ci.length > 0);
+    } catch {
+      setMeetingNotifyEffectiveOn(false);
+    } finally {
+      setMeetingNotifyLoaded(true);
+    }
+  }, [profilePk]);
+
   const loadDnd = useCallback(async () => {
     try {
-      const v = await loadProfileDndQuietHoursEnabled();
+      const [v, win] = await Promise.all([loadProfileDndQuietHoursEnabled(), loadProfileDndQuietHoursWindow()]);
       setDndOn(v);
+      setDndStartMin(win.startMin);
+      setDndEndMin(win.endMin);
     } catch {
       setDndOn(false);
+      setDndStartMin(DND_QUIET_HOURS_DEFAULT_START_MIN);
+      setDndEndMin(DND_QUIET_HOURS_DEFAULT_END_MIN);
     } finally {
       setDndLoaded(true);
     }
@@ -151,6 +218,7 @@ export default function ProfileAppSettingsScreen() {
     useCallback(() => {
       void refreshNotify();
       void loadDnd();
+      void refreshMeetingNotify();
       let cancelled = false;
       let clearParamTimer: ReturnType<typeof setTimeout> | undefined;
       void (async () => {
@@ -171,7 +239,7 @@ export default function ProfileAppSettingsScreen() {
         cancelled = true;
         if (clearParamTimer) clearTimeout(clearParamTimer);
       };
-    }, [refreshNotify, loadDnd, refreshMeetingAuth, registerInfoParam, router]),
+    }, [refreshNotify, loadDnd, refreshMeetingNotify, refreshMeetingAuth, registerInfoParam, router]),
   );
 
   const onToggleNotify = useCallback(
@@ -207,17 +275,43 @@ export default function ProfileAppSettingsScreen() {
     [refreshNotify],
   );
 
-  const onToggleDnd = useCallback(
-    async (next: boolean) => {
-      setDndOn(next);
-      try {
-        await saveProfileDndQuietHoursEnabled(next);
-      } catch {
-        setDndOn((v) => !v);
+  const onToggleDnd = useCallback(async (next: boolean) => {
+    setDndOn(next);
+    try {
+      await saveProfileDndQuietHoursEnabled(next);
+      if (next) {
+        const win = await loadProfileDndQuietHoursWindow();
+        await saveProfileDndQuietHoursWindow(win);
+        setDndStartMin(win.startMin);
+        setDndEndMin(win.endMin);
       }
-    },
-    [],
-  );
+    } catch {
+      setDndOn((v) => !v);
+    }
+  }, []);
+
+  const confirmDndIosPick = useCallback(() => {
+    const cur = dndPick;
+    if (!cur) return;
+    const m = minutesOfDayFromDate(cur.draft);
+    const { start, end } = dndWindowRef.current;
+    const startMin = cur.kind === 'start' ? m : start;
+    const endMin = cur.kind === 'end' ? m : end;
+    setDndPick(null);
+    void (async () => {
+      try {
+        await saveProfileDndQuietHoursWindow({ startMin, endMin });
+        setDndStartMin(startMin);
+        setDndEndMin(endMin);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [dndPick]);
+
+  const openMeetingNotifySettings = useCallback(() => {
+    router.push('/profile/meeting-notify-settings');
+  }, [router]);
 
   const onSignOut = useCallback(async () => {
     setBusy(true);
@@ -336,7 +430,7 @@ export default function ProfileAppSettingsScreen() {
             <View style={styles.row}>
               <SettingsRowLeadIcon name="notifications-outline" />
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>알림 설정</Text>
+                <Text style={styles.rowLabel}>시스템 알림 설정</Text>
                 <Text style={styles.rowSub}>
                   {Platform.OS === 'web'
                     ? '웹에서는 브라우저 설정을 이용해 주세요.'
@@ -350,7 +444,7 @@ export default function ProfileAppSettingsScreen() {
                   trackColor={meetingCreateSwitchTrack}
                   thumbColor={notifyGranted ? '#FFFFFF' : '#f1f5f9'}
                   ios_backgroundColor="#cbd5e1"
-                  accessibilityLabel="알림 설정"
+                  accessibilityLabel="시스템 알림 설정"
                 />
               ) : Platform.OS === 'web' ? null : (
                 <ActivityIndicator color={GinitTheme.colors.primary} />
@@ -379,7 +473,74 @@ export default function ProfileAppSettingsScreen() {
                 <ActivityIndicator color={GinitTheme.colors.primary} />
               )}
             </View>
+            {dndOn && dndLoaded && Platform.OS !== 'web' ? (
+              <>
+                
+                <Pressable
+                  onPress={() =>
+                    setDndPick({ kind: 'start', draft: dateFromMinutesOfDay(dndStartMin) })
+                  }
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="방해금지 시작 시각">
+                  
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>시작 시각</Text>
+                  </View>
+                  <Text style={styles.dndTimeValue}>{formatDndTimeLabel(dndStartMin)}</Text>
+                </Pressable>
+                
+                <Pressable
+                  onPress={() => setDndPick({ kind: 'end', draft: dateFromMinutesOfDay(dndEndMin) })}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="방해금지 종료 시각">
+                  
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>종료 시각</Text>
+                  </View>
+                  <Text style={styles.dndTimeValue}>{formatDndTimeLabel(dndEndMin)}</Text>
+                </Pressable>
+                
+              </>
+            ) : null}
+            {isSignedIn && Platform.OS !== 'web' ? (
+              <>
+                <RowSep />
+                <Pressable
+                  onPress={openMeetingNotifySettings}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="모임 생성 알림 설정">
+                  <SettingsRowLeadIcon name="map-outline" />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>공개 모임 생성 알림</Text>
+                    <Text style={styles.rowSub}>관심 지역·카테고리별로 새 공개 모임만 알려요.</Text>
+                  </View>
+                  <Pressable
+                    onPress={openMeetingNotifySettings}
+                    hitSlop={10}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants">
+                    {meetingNotifyLoaded ? (
+                      <Switch
+                        value={meetingNotifyEffectiveOn}
+                        disabled
+                        trackColor={meetingCreateSwitchTrack}
+                        thumbColor={meetingNotifyEffectiveOn ? '#FFFFFF' : '#f1f5f9'}
+                        ios_backgroundColor="#cbd5e1"
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants"
+                      />
+                    ) : (
+                      <ActivityIndicator color={GinitTheme.colors.primary} />
+                    )}
+                  </Pressable>
+                </Pressable>
+              </>
+            ) : null}
           </View>
+          
 
           <View style={[styles.block, styles.blockGap]}>
             {sectionTitle('기타')}
@@ -473,6 +634,94 @@ export default function ProfileAppSettingsScreen() {
             ) : null}
           </View>
         </ScrollView>
+
+        {dndPick && Platform.OS === 'android' ? (
+          <DateTimePicker
+            value={dndPick.draft}
+            mode="time"
+            display="spinner"
+            {...({ accentColor: GinitTheme.colors.primary } as object)}
+            onChange={(event, d) => {
+              const t = (event as unknown as { type?: string } | null)?.type ?? '';
+              if (t === 'dismissed') {
+                setDndPick(null);
+                return;
+              }
+              if (t === 'set' && d && dndPick) {
+                const m = minutesOfDayFromDate(d);
+                const kind = dndPick.kind;
+                setDndPick(null);
+                const { start, end } = dndWindowRef.current;
+                const startMin = kind === 'start' ? m : start;
+                const endMin = kind === 'end' ? m : end;
+                void (async () => {
+                  try {
+                    await saveProfileDndQuietHoursWindow({ startMin, endMin });
+                    setDndStartMin(startMin);
+                    setDndEndMin(endMin);
+                  } catch {
+                    /* ignore */
+                  }
+                })();
+                return;
+              }
+              if (!d) setDndPick(null);
+            }}
+          />
+        ) : null}
+
+        {dndPick && Platform.OS === 'ios' ? (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setDndPick(null)}>
+            <View style={GinitStyles.modalRoot}>
+              <Pressable
+                style={GinitStyles.modalBackdrop}
+                onPress={() => setDndPick(null)}
+                accessibilityRole="button"
+              />
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  top: Math.max(insets.top, 8),
+                  left: 0,
+                  right: 0,
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  paddingHorizontal: 16,
+                }}>
+                <Pressable onPress={() => setDndPick(null)} hitSlop={10} accessibilityRole="button">
+                  <Text style={GinitStyles.modalCancel}>취소</Text>
+                </Pressable>
+                <Pressable onPress={confirmDndIosPick} hitSlop={10} accessibilityRole="button">
+                  <Text style={GinitStyles.modalDone}>완료</Text>
+                </Pressable>
+              </View>
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  paddingBottom: Math.max(insets.bottom, 12),
+                  alignItems: 'center',
+                  backgroundColor: 'transparent',
+                }}>
+                <DateTimePicker
+                  value={dndPick.draft}
+                  mode="time"
+                  display="spinner"
+                  themeVariant="light"
+                  locale="ko-KR"
+                  onChange={(_ev, date) => {
+                    if (!date) return;
+                    setDndPick((prev) => (prev ? { ...prev, draft: date } : prev));
+                  }}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : null}
       </SafeAreaView>
       <MeetingServiceAuthModal
         visible={authSheetVisible}
@@ -530,12 +779,13 @@ const styles = StyleSheet.create({
   rowPressed: { opacity: 0.82 },
   rowDisabled: { opacity: 0.55 },
   rowText: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: 16, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.2 },
+  rowLabel: { fontSize: 16, fontWeight: '400', color: GinitTheme.colors.text, letterSpacing: -0.2 },
   rowLabelDanger: { color: '#b91c1c' },
-  rowSub: { marginTop: 4, fontSize: 12, fontWeight: '600', color: GinitTheme.colors.textMuted, lineHeight: 16 },
+  rowSub: { marginTop: 4, fontSize: 12, fontWeight: '400', color: GinitTheme.colors.textMuted, lineHeight: 16 },
   rowSubOk: { color: '#0f766e' },
   rowSubWarn: { color: '#b91c1c' },
   rowSubDanger: { color: '#991b1b' },
+  dndTimeValue: { fontSize: 16, fontWeight: '400', color: GinitTheme.colors.textSubGray, letterSpacing: -0.2 },
   sep: {
     height: StyleSheet.hairlineWidth,
     marginLeft: 20,

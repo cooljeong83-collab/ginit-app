@@ -66,6 +66,8 @@ export type UserProfile = {
   isMarketingAgreed?: boolean | null;
   /** FCM 푸시 토큰(디바이스별 최신값) */
   fcmToken?: string | null;
+  /** 마지막 FCM 토큰 등록 OS — Edge 푸시 분기용 */
+  fcmPlatform?: 'ios' | 'android' | null;
   /** 마지막 로그인 시각(서버 타임스탬프 권장) */
   lastLoginAt?: unknown | null;
   /** 계정 상태 */
@@ -197,6 +199,8 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const termsAgreedAt = 'termsAgreedAt' in data ? (data.termsAgreedAt as unknown) : null;
   const isMarketingAgreed = typeof data.isMarketingAgreed === 'boolean' ? data.isMarketingAgreed : null;
   const fcmToken = typeof data.fcmToken === 'string' ? data.fcmToken.trim() : '';
+  const fpRaw = typeof data.fcmPlatform === 'string' ? data.fcmPlatform.trim().toLowerCase() : '';
+  const fcmPlatform = fpRaw === 'ios' || fpRaw === 'android' ? (fpRaw as 'ios' | 'android') : null;
   const lastLoginAt = 'lastLoginAt' in data ? (data.lastLoginAt as unknown) : null;
   const statusRaw = typeof data.status === 'string' ? data.status.trim().toUpperCase() : '';
   const status: UserStatus | null =
@@ -272,6 +276,7 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
     termsAgreedAt,
     isMarketingAgreed,
     fcmToken: fcmToken || null,
+    fcmPlatform,
     lastLoginAt,
     status,
     gender: gender || null,
@@ -324,6 +329,7 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
       termsAgreedAt: null,
       isMarketingAgreed: null,
       fcmToken: null,
+      fcmPlatform: null,
       lastLoginAt: null,
       status: 'WITHDRAWN',
       gender: null,
@@ -574,6 +580,8 @@ function supabaseProfileJsonToFirestoreShape(row: Record<string, unknown>): Reco
     signupProvider: sp === 'google_sns' || sp === 'phone_otp' ? sp : null,
     fcmToken:
       typeof row.fcm_token === 'string' && row.fcm_token.trim() !== '' ? row.fcm_token.trim() : null,
+    fcmPlatform:
+      row.fcm_platform === 'ios' || row.fcm_platform === 'android' ? row.fcm_platform : null,
     metadata:
       row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
         ? (row.metadata as Record<string, unknown>)
@@ -609,6 +617,7 @@ function profilePatchToSupabaseJsonb(patch: {
   displayName?: string | null;
   /** 디바이스별 최신 FCM 토큰 */
   fcmToken?: string | null;
+  fcmPlatform?: 'ios' | 'android' | null;
   signupProvider?: 'google_sns' | 'phone_otp' | null;
   isWithdrawn?: boolean | null;
   withdrawnAt?: unknown | null;
@@ -699,6 +708,13 @@ function profilePatchToSupabaseJsonb(patch: {
     // 토큰이 없으면(falsy/빈 문자열) payload에 fcm_token 자체를 포함하지 않습니다.
     // (기존 DB 값이 null로 덮이는 것을 방지)
     if (t) fields.fcm_token = t;
+  }
+  if (patch.fcmPlatform !== undefined) {
+    if (patch.fcmPlatform === null) {
+      fields.fcm_platform = null;
+    } else if (patch.fcmPlatform === 'ios' || patch.fcmPlatform === 'android') {
+      fields.fcm_platform = patch.fcmPlatform;
+    }
   }
   if (patch.signupProvider !== undefined) {
     const sp = patch.signupProvider;
@@ -963,6 +979,7 @@ export async function updateUserProfile(
     status?: UserStatus | null;
     isMarketingAgreed?: boolean | null;
     fcmToken?: string | null;
+    fcmPlatform?: 'ios' | 'android' | null;
     lastLoginAt?: unknown | null;
     rankingPoints?: number | null;
     badges?: string[] | null;
@@ -1023,6 +1040,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
     email: null,
     display_name: null,
     fcm_token: null,
+    fcm_platform: null,
     terms_agreed_at: null,
     gender: null,
     age_band: null,

@@ -164,6 +164,24 @@ export function normalizeFeedRegionLabel(label: string): string {
 }
 
 /**
+ * 모임 생성 시 `feedRegionNorm` 용: 주소·장소 문자열에서 피드와 동일한 구 키를 추정합니다.
+ * 광역시 등 비서울은 `인천 서구`처럼 시·구 두 토큰 형태로 맞추고, 서울은 `○○구`만 둡니다.
+ */
+export function feedRegionNormFromAddressHaystack(hayRaw: string): string | null {
+  const hay = hayRaw.replace(/\s+/g, ' ').trim();
+  if (!hay) return null;
+  const gu = extractGuFromKoreanAddressText(hay);
+  if (!gu) {
+    const norm = normalizeFeedRegionLabel(hay);
+    return norm || null;
+  }
+  const metroCityRaw = inferMetroCityRawFromKoreanBlob(hay);
+  const labeled = withCityPrefixIfNeeded(gu, metroCityRaw);
+  const norm = normalizeFeedRegionLabel(labeled);
+  return norm || null;
+}
+
+/**
  * 모임 주소·장소 문자열이 피드/지도에 선택된 지역(`normalizeFeedRegionLabel` 기준)과 맞는지 판별합니다.
  */
 export function haystackMatchesFeedRegion(hayRaw: string, regionLabel: string): boolean {

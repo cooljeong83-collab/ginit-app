@@ -14,7 +14,9 @@
  * - { "toUserIds": ["010...","..."], "title": "string", "body": "string", "data": { ... } }
  *
  * Notes:
- * - OS가 앱이 꺼져 있어도 표시할 수 있도록 `notification` payload를 포함합니다.
+ * - `profiles.fcm_platform = 'android'` 인 토큰은 **data-only**(title/body는 data에 포함)로 보내
+ *   앱이 Notifee로 표시·방해금지 시간을 적용할 수 있게 합니다.
+ * - `ios` 또는 미기록(null) 토큰은 기존처럼 `notification` payload를 포함합니다.
  * - Android 13+에서는 수신자 디바이스에서 POST_NOTIFICATIONS 권한이 필요합니다.
  */
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
@@ -170,15 +172,21 @@ serve(async (req) => {
 
     const { data: rows, error } = await supabase
       .from('profiles')
-      .select('id, fcm_token')
+      .select('id, fcm_token, fcm_platform')
       .in('app_user_id', toUserIds);
     if (error) return jsonResponse({ ok: false, error: error.message }, 500);
 
-    const tokens = (rows ?? [])
-      .map((r: any) => (typeof r?.fcm_token === 'string' ? r.fcm_token.trim() : ''))
-      .filter((t: string) => t.length > 0);
-    // Dedupe: 한 사람이 여러 profile row를 갖거나(비정상), 같은 토큰이 재저장된 경우 fan-out 중복을 막습니다.
-    const uniqueTokens = [...new Set(tokens)];
+    /** 동일 토큰은 첫 행의 플랫폼만 사용(중복 row 방지) */
+    const tokenPlatform = new Map<string, 'android' | 'legacy'>();
+    for (const r of rows ?? []) {
+      const t = typeof (r as any)?.fcm_token === 'string' ? String((r as any).fcm_token).trim() : '';
+      if (!t || tokenPlatform.has(t)) continue;
+      const platRaw = typeof (r as any)?.fcm_platform === 'string' ? String((r as any).fcm_platform).trim().toLowerCase() : '';
+      tokenPlatform.set(t, platRaw === 'android' ? 'android' : 'legacy');
+    }
+    const androidTokens = [...tokenPlatform.entries()].filter(([, p]) => p === 'android').map(([tok]) => tok);
+    const legacyTokens = [...tokenPlatform.entries()].filter(([, p]) => p === 'legacy').map(([tok]) => tok);
+    const uniqueTokens = [...tokenPlatform.keys()];
     if (uniqueTokens.length === 0) {
       return jsonResponse({ ok: true, attempted: toUserIds.length, sent: 0, reason: 'no_tokens' });
     }
@@ -192,20 +200,42 @@ serve(async (req) => {
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
-    let res;
+    const dataForAndroid = { ...data, title, body };
+    const allResponses: { success: boolean; error?: { message?: string } }[] = [];
+    const allTokensOrdered: string[] = [];
+    let successCount = 0;
+    let failureCount = 0;
+
     try {
-      res = await messaging.sendEachForMulticast({
-        tokens: uniqueTokens,
-        notification: { title, body },
-        data,
-        android: {
-          priority: 'high',
-          notification: {
-            /** 앱 `ensureGinitFcmNotifeeChannel` / `FcmMessagingBootstrap` 과 동일 ID (HIGH) */
-            channelId: 'ginit_fcm',
+      if (androidTokens.length > 0) {
+        const resA = await messaging.sendEachForMulticast({
+          tokens: androidTokens,
+          data: dataForAndroid,
+          android: { priority: 'high' },
+        });
+        successCount += resA.successCount;
+        failureCount += resA.failureCount;
+        allResponses.push(...resA.responses);
+        allTokensOrdered.push(...androidTokens);
+      }
+      if (legacyTokens.length > 0) {
+        const resL = await messaging.sendEachForMulticast({
+          tokens: legacyTokens,
+          notification: { title, body },
+          data,
+          android: {
+            priority: 'high',
+            notification: {
+              /** 앱 `ensureGinitFcmNotifeeChannel` / `FcmMessagingBootstrap` 과 동일 ID (HIGH) */
+              channelId: 'ginit_fcm',
+            },
           },
-        },
-      });
+        });
+        successCount += resL.successCount;
+        failureCount += resL.failureCount;
+        allResponses.push(...resL.responses);
+        allTokensOrdered.push(...legacyTokens);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('[fcm-push-send] sendEachForMulticast_failed', msg);
@@ -216,14 +246,14 @@ serve(async (req) => {
     // 문자열 contains 기반(/invalid/i) 오탐으로 유효 토큰이 지워지는 것을 방지합니다.
     try {
       const invalidTokens: string[] = [];
-      for (let i = 0; i < res.responses.length; i++) {
-        const r = res.responses[i];
+      for (let i = 0; i < allResponses.length; i++) {
+        const r = allResponses[i];
         if (r?.success) continue;
         const code = String((r?.error as { code?: unknown } | undefined)?.code ?? '').trim();
         const isInvalidTokenCode =
           code === 'messaging/invalid-registration-token' || code === 'messaging/registration-token-not-registered';
         if (!isInvalidTokenCode) continue;
-        const tok = uniqueTokens[i];
+        const tok = allTokensOrdered[i];
         if (tok) invalidTokens.push(tok);
       }
       if (invalidTokens.length > 0) {
@@ -236,10 +266,10 @@ serve(async (req) => {
     return jsonResponse({
       ok: true,
       attempted: uniqueTokens.length,
-      successCount: res.successCount,
-      failureCount: res.failureCount,
+      successCount,
+      failureCount,
       // 너무 길어지는 것을 방지하기 위해 샘플만 반환
-      errorsSample: res.responses
+      errorsSample: allResponses
         .map((r, i) => ({ ok: r.success, idx: i, err: r.success ? null : r.error?.message ?? 'error' }))
         .filter((x) => !x.ok)
         .slice(0, 10),

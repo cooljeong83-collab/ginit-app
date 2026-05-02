@@ -24,6 +24,7 @@ export const GinitTheme = {
     // text
     text: '#0F172A',
     textSub: '#334155',
+    textSubGray: '#686774',
     textMuted: '#64748B',
     textOnDark: '#F8FAFC',
 

@@ -14,6 +14,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   ToastAndroid,
@@ -31,7 +32,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import {
@@ -63,6 +64,7 @@ import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
+import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import {
   collectUserConfirmedScheduleSlots,
   getScheduleOverlapBufferHours,
@@ -81,6 +83,9 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 
+/** `app/profile/settings` 공개 모임 생성 알림 스위치 트랙과 동일 */
+const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
+
 function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean {
   const hay = [m.address, m.location, m.placeName]
     .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
@@ -90,7 +95,7 @@ function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean 
 
 export default function FeedScreen() {
   const router = useRouter();
-  const { userId } = useUserSession();
+  const { userId, authProfile } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
@@ -592,6 +597,57 @@ export default function FeedScreen() {
 
   const openFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(true), []);
   const closeFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(false), []);
+
+  const profilePk = useMemo(() => {
+    const u = userId?.trim();
+    if (u) return u;
+    const em = authProfile?.email?.trim();
+    if (em) return normalizeUserId(em) ?? '';
+    return '';
+  }, [userId, authProfile?.email]);
+
+  const isSignedIn = useMemo(
+    () => Boolean(userId?.trim() || authProfile?.firebaseUid?.trim()),
+    [userId, authProfile?.firebaseUid],
+  );
+
+  const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
+  const [meetingNotifyEffectiveOn, setMeetingNotifyEffectiveOn] = useState(false);
+
+  const refreshMeetingNotify = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      setMeetingNotifyLoaded(true);
+      setMeetingNotifyEffectiveOn(false);
+      return;
+    }
+    const pk = profilePk.trim();
+    if (!pk) {
+      setMeetingNotifyLoaded(true);
+      setMeetingNotifyEffectiveOn(false);
+      return;
+    }
+    setMeetingNotifyLoaded(false);
+    try {
+      const m = await fetchMeetingAreaNotifyMatrix(pk);
+      const rn = (m.region_norms ?? []).filter((x) => String(x ?? '').trim() !== '');
+      const ci = (m.category_ids ?? []).filter((x) => String(x ?? '').trim() !== '');
+      setMeetingNotifyEffectiveOn(rn.length > 0 && ci.length > 0);
+    } catch {
+      setMeetingNotifyEffectiveOn(false);
+    } finally {
+      setMeetingNotifyLoaded(true);
+    }
+  }, [profilePk]);
+
+  useEffect(() => {
+    if (!feedListSettingsModalOpen) return;
+    void refreshMeetingNotify();
+  }, [feedListSettingsModalOpen, refreshMeetingNotify]);
+
+  const openMeetingNotifySettings = useCallback(() => {
+    closeFeedListSettingsModal();
+    router.push('/profile/meeting-notify-settings');
+  }, [closeFeedListSettingsModal, router]);
 
   const feedListSettingsDotActive = useMemo(
     () => recruitingOnly || feedSearchFiltersActive(appliedFeedSearch) || listSortMode !== 'soon',
@@ -1100,6 +1156,41 @@ export default function FeedScreen() {
                     </Text>
                   </View>
                 </Pressable>
+
+                {isSignedIn && Platform.OS !== 'web' ? (
+                  <>
+                    <Text style={styles.modalSectionTitle}>알림</Text>
+                    <Pressable
+                      onPress={openMeetingNotifySettings}
+                      style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="모임 생성 알림 설정">
+                      <View style={styles.modalRowLabelBlock}>
+                        <Text style={styles.modalRowLabel}>공개 모임 생성 알림</Text>
+                        <Text style={styles.modalRowSub}>관심 지역·카테고리별로 새 공개 모임만 알려요.</Text>
+                      </View>
+                      <Pressable
+                        onPress={openMeetingNotifySettings}
+                        hitSlop={10}
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants">
+                        {meetingNotifyLoaded ? (
+                          <Switch
+                            value={meetingNotifyEffectiveOn}
+                            disabled
+                            trackColor={meetingCreateSwitchTrack}
+                            thumbColor={meetingNotifyEffectiveOn ? '#FFFFFF' : '#f1f5f9'}
+                            ios_backgroundColor="#cbd5e1"
+                            accessibilityElementsHidden
+                            importantForAccessibility="no-hide-descendants"
+                          />
+                        ) : (
+                          <ActivityIndicator color={GinitTheme.colors.primary} />
+                        )}
+                      </Pressable>
+                    </Pressable>
+                  </>
+                ) : null}
               </ScrollView>
 
               <Pressable onPress={closeFeedListSettingsModal} style={styles.modalCloseBtn} accessibilityRole="button">
@@ -1528,7 +1619,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#EF4444',
+    backgroundColor: GinitTheme.themeMainColor,
     borderWidth: 1.5,
     borderColor: '#fff',
   },
@@ -1543,7 +1634,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#EF4444',
+    backgroundColor: GinitTheme.themeMainColor,
     borderWidth: 1.5,
     borderColor: '#fff',
   },
