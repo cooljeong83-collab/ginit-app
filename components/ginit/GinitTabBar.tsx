@@ -22,7 +22,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
-import { getUserProfile, isUserPhoneVerified, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
+import { getUserProfile, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
@@ -88,21 +88,10 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
       if (pk) {
         try {
           const p = await getUserProfile(pk);
-          if (!isUserPhoneVerified(p)) {
-            Alert.alert('인증 정보 등록', '모임을 이용하시려면 인증 정보 등록을 완료하셔야 합니다.', [
+          if (!isMeetingServiceComplianceComplete(p, pk)) {
+            Alert.alert('인증 정보 등록', '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', [
               { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
             ]);
-            return;
-          }
-          if (meetingDemographicsIncomplete(p, pk)) {
-            Alert.alert(
-              '프로필을 완성해 주세요',
-              'SNS로 가입한 계정은 모임을 만들기 전에 프로필에서 성별과 연령대를 입력해야 해요.',
-              [
-                { text: '닫기', style: 'cancel' },
-                { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-              ],
-            );
             return;
           }
         } catch {

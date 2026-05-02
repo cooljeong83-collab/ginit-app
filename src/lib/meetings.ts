@@ -77,7 +77,7 @@ import {
   isUserTrustRestricted,
 } from './ginit-trust';
 import { supabase } from './supabase';
-import { getUserProfile, isUserPhoneVerified, type UserProfile } from './user-profile';
+import { getUserProfile, isMeetingServiceComplianceComplete, type UserProfile } from './user-profile';
 
 export const MEETINGS_COLLECTION = 'meetings';
 
@@ -1091,8 +1091,8 @@ export async function joinMeeting(
   const nsUid = normalizeParticipantId(uid) ?? uid;
 
   const profile = await getUserProfile(uid);
-  if (!isUserPhoneVerified(profile)) {
-    throw new Error('전화번호 인증을 완료한 사용자만 모임에 참여할 수 있어요. 프로필에서 인증을 진행해 주세요.');
+  if (!profile || !isMeetingServiceComplianceComplete(profile, uid)) {
+    throw new Error('모임 이용 인증(약관 동의·필수 정보)을 완료한 사용자만 모임에 참여할 수 있어요. 설정에서 인증 정보 등록을 완료해 주세요.');
   }
 
   if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
@@ -1257,8 +1257,8 @@ export async function updateParticipantVotes(
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
   const profile = await getUserProfile(uid);
-  if (!isUserPhoneVerified(profile)) {
-    throw new Error('전화번호 인증을 완료한 사용자만 모임에서 투표할 수 있어요. 프로필에서 인증을 진행해 주세요.');
+  if (!profile || !isMeetingServiceComplianceComplete(profile, uid)) {
+    throw new Error('모임 이용 인증(약관 동의·필수 정보)을 완료한 사용자만 모임에서 투표할 수 있어요. 설정에서 인증 정보 등록을 완료해 주세요.');
   }
   const nsUid = normalizeParticipantId(uid) ?? uid;
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
@@ -2096,8 +2096,8 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
     if (feedNorm) cleaned.feedRegionNorm = feedNorm;
   }
   const hostProf = await getUserProfile(hostPk);
-  if (!isUserPhoneVerified(hostProf)) {
-    throw new Error('전화번호 인증을 완료한 사용자만 모임을 만들 수 있어요. 프로필에서 인증을 진행해 주세요.');
+  if (!hostProf || !isMeetingServiceComplianceComplete(hostProf, hostPk)) {
+    throw new Error('모임 이용 인증(약관 동의·필수 정보)을 완료한 사용자만 모임을 만들 수 있어요. 설정에서 인증 정보 등록을 완료해 주세요.');
   }
   const buf = getScheduleOverlapBufferHours(hostProf);
   const starts = collectCreateMeetingProposedStartMs(input);

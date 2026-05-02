@@ -1,4 +1,5 @@
 import {
+  getAdditionalUserInfo,
   GoogleAuthProvider,
   getRedirectResult,
   OAuthCredential,
@@ -135,8 +136,13 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
 
   const auth = getFirebaseAuth();
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
-  if (options?.forRegistration) {
+  if (options?.promptSelectAccount === false) {
+    provider.setCustomParameters({ prompt: 'consent' });
+  } else {
+    provider.setCustomParameters({ prompt: 'select_account' });
+  }
+  const includePeopleScopes = Boolean(options?.forRegistration);
+  if (includePeopleScopes) {
     provider.addScope('https://www.googleapis.com/auth/user.birthday.read');
     provider.addScope('https://www.googleapis.com/auth/user.gender.read');
   }
@@ -170,18 +176,26 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
     const { user } = result;
     const oauth = GoogleAuthProvider.credentialFromResult(result) as OAuthCredential | null;
     const googleAccessToken = oauth?.accessToken ?? null;
+    const addInfo = getAdditionalUserInfo(result);
+    const isNewUser = addInfo?.isNewUser === true;
     log('Auth Step 2: Result Received (popup success)', {
       uid: user.uid,
       email: user.email ?? null,
+      isNewUser,
     });
     logCurrentAuth('signInWithGoogle:after popup success');
-    return { user, googleAccessToken };
+    return { user, googleAccessToken, isNewUser };
   } catch (e) {
     const { code, message } = pickErr(e);
     log('Error:signInWithPopup', { code: code ?? '(no code)', message });
     logCurrentAuth('signInWithGoogle:after popup error');
     throw attachCode(new Error(`Google 팝업 로그인 실패: ${message}`), code);
   }
+}
+
+/** 네이티브 전용 API와 시그니처를 맞추기 위한 웹 스텁(웹은 `signInWithPopup`으로 추가 스코프 요청). */
+export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
+  return null;
 }
 
 export async function signOutGoogle(): Promise<void> {

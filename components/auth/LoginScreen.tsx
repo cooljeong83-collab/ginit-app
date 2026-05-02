@@ -30,11 +30,7 @@ import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '
 import { useUserSession, type AuthProfileSnapshot } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
-import {
-  fetchGooglePeopleExtras,
-  mapGooglePeopleGenderToProfileGender,
-  type GooglePeopleExtras,
-} from '@/src/lib/google-people-extras';
+import { mapGooglePeopleGenderToProfileGender, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
 import {
   consumeGoogleRedirectResultWithMeta,
   REDIRECT_STARTED,
@@ -351,9 +347,7 @@ export default function LoginScreen() {
     setLoginError(null);
     setBusyGoogle(true);
     try {
-      const { user, googleAccessToken } = await signInWithGoogle({ forRegistration: true });
-      const people = await fetchGooglePeopleExtras(googleAccessToken);
-      peopleExtrasRef.current = people;
+      const { user } = await signInWithGoogle({ forRegistration: false });
 
       const email = user.email?.trim() ?? '';
       const emailPk = email ? normalizeUserId(email) : null;
@@ -375,6 +369,10 @@ export default function LoginScreen() {
       } catch {
         /* 네트워크 등: 이메일 PK 유지 */
       }
+
+      await ensureUserProfile(canonicalProfilePk);
+      const people: GooglePeopleExtras | null = null;
+      peopleExtrasRef.current = people;
 
       const display = user.displayName?.trim() ?? '';
       const nickname = pickNicknameFromGoogle(display, email);

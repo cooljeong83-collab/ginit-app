@@ -38,7 +38,6 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
-import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
@@ -100,6 +99,7 @@ import {
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
@@ -419,6 +419,13 @@ export default function MeetingDetailScreen() {
   const [placeThumbByChipId, setPlaceThumbByChipId] = useState<Record<string, string | null>>({});
   const [dateVoteCalendarMonth, setDateVoteCalendarMonth] = useState(() => monthStartYmd(fmtDateYmd(new Date())));
   const [dateVoteCalendarPagerW, setDateVoteCalendarPagerW] = useState(() => Math.max(280, Math.floor(windowWidth)));
+  /** 확정 일시 카드 안 읽기 전용 달력(투표 달력과 동일 월·그리드) */
+  const [confirmedScheduleCalMonth, setConfirmedScheduleCalMonth] = useState(() =>
+    monthStartYmd(fmtDateYmd(new Date())),
+  );
+  const [confirmedScheduleCalPagerW, setConfirmedScheduleCalPagerW] = useState(() =>
+    Math.max(280, Math.floor(windowWidth)),
+  );
   const dateVoteCalendarPagerRef = useRef<ScrollView>(null);
   /** `scrollTo` 가운데 정렬 직후 네이티브가 보내는 가짜 `onMomentumScrollEnd`로 월이 두 칸 넘어가지 않게 함 */
   const dateVoteCalendarPagerIgnoreMomentumEndRef = useRef(false);
@@ -1449,15 +1456,37 @@ export default function MeetingDetailScreen() {
     return votesFingerprint({ date: snap.dateChipIds, place: snap.placeChipIds, movie: snap.movieChipIds });
   }, [meeting, sessionPk, isHost, alreadyJoinedMeeting, votesFingerprint]);
 
+  /** 호스트도 `participantVoteLog`에 저장된 투표가 있으면 로컬 선택과 베이스라인을 맞춥니다. */
+  const hostPersistedVoteFp = useMemo(() => {
+    if (!meeting || !sessionPk || !isHost) return '';
+    const snap = getParticipantVoteSnapshot(meeting, sessionPk);
+    if (!snap) return '';
+    return votesFingerprint({
+      date: snap.dateChipIds,
+      place: snap.placeChipIds,
+      movie: snap.movieChipIds,
+    });
+  }, [meeting, sessionPk, isHost, votesFingerprint]);
+
   useEffect(() => {
-    if (!meeting || !sessionPk || isHost || !alreadyJoinedMeeting) return;
+    if (!meeting || !sessionPk) return;
+    if (isHost) {
+      if (!hostPersistedVoteFp) return;
+      const snap = getParticipantVoteSnapshot(meeting, sessionPk);
+      if (!snap) return;
+      setSelectedDateIds([...snap.dateChipIds]);
+      setSelectedPlaceIds([...snap.placeChipIds]);
+      setSelectedMovieIds([...snap.movieChipIds]);
+      return;
+    }
+    if (!alreadyJoinedMeeting) return;
     if (serverVoteFingerprint === '' || serverVoteFingerprint === 'legacy') return;
     const snap = getParticipantVoteSnapshot(meeting, sessionPk);
     if (!snap) return;
     setSelectedDateIds([...snap.dateChipIds]);
     setSelectedPlaceIds([...snap.placeChipIds]);
     setSelectedMovieIds([...snap.movieChipIds]);
-  }, [meeting?.id, serverVoteFingerprint, sessionPk, isHost, alreadyJoinedMeeting, meeting]);
+  }, [meeting, sessionPk, isHost, alreadyJoinedMeeting, hostPersistedVoteFp, serverVoteFingerprint]);
 
   const participantVoteLogMissing = isParticipantGuest && serverVoteFingerprint === 'legacy';
 
@@ -1486,20 +1515,20 @@ export default function MeetingDetailScreen() {
     // 호스트/신규 생성 모임(로그 없음)은 현재 선택 상태를 기준으로 둡니다.
     if (!isHost && alreadyJoinedMeeting && serverVoteFingerprint && serverVoteFingerprint !== 'legacy') {
       votesBaselineFpRef.current = serverVoteFingerprint;
-      return;
+    } else {
+      const snap = getParticipantVoteSnapshot(meeting, sessionPk);
+      if (snap) {
+        votesBaselineFpRef.current = votesFingerprint({
+          date: snap.dateChipIds,
+          place: snap.placeChipIds,
+          movie: snap.movieChipIds,
+        });
+      } else {
+        votesBaselineFpRef.current = currentVotesFp;
+      }
     }
-
-    const snap = getParticipantVoteSnapshot(meeting, sessionPk);
-    if (snap) {
-      votesBaselineFpRef.current = votesFingerprint({
-        date: snap.dateChipIds,
-        place: snap.placeChipIds,
-        movie: snap.movieChipIds,
-      });
-      return;
-    }
-
-    votesBaselineFpRef.current = currentVotesFp;
+    // ref만 갱신되면 votesDirty useMemo가 재실행되지 않아, 베이스라인 반영 직후 한 번 올려 둡니다.
+    setVotePersistNonce((n) => n + 1);
   }, [
     meeting,
     sessionPk,
@@ -1532,8 +1561,8 @@ export default function MeetingDetailScreen() {
   const safeBack = useCallback(() => {
     if (votesDirty && (isHost || alreadyJoinedMeeting)) {
       Alert.alert(
-        '저장되지 않은 투표',
-        '투표를 변경한 내역이 있어요. 저장을 누르지 않으면 반영되지 않아요.\n\n그래도 화면을 나갈까요?',
+        '투표 미저장',
+        '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
         [
           { text: '머무르기', style: 'cancel' },
           { text: '나가기', style: 'destructive', onPress: proceedScreenBack },
@@ -1550,8 +1579,8 @@ export default function MeetingDetailScreen() {
       if (!votesDirty || !(isHost || alreadyJoinedMeeting)) return;
       e.preventDefault();
       Alert.alert(
-        '저장되지 않은 투표',
-        '투표를 변경한 내역이 있어요. 저장을 누르지 않으면 반영되지 않아요.\n\n그래도 화면을 나갈까요?',
+        '투표 미저장',
+        '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
         [
           { text: '머무르기', style: 'cancel' },
           {
@@ -1653,6 +1682,30 @@ export default function MeetingDetailScreen() {
     });
     return by;
   }, [dateChipsShown, meeting?.dateCandidates, meeting?.voteTallies?.dates]);
+
+  /** 확정된 일시 1건을 달력 셀(시간 pill)에 올리기 위한 ymd 맵 */
+  const confirmedScheduleVoteByYmd = useMemo(() => {
+    if (!meeting || meeting.scheduleConfirmed !== true) return null;
+    const cid = meeting.confirmedDateChipId?.trim();
+    if (!cid) return null;
+    const list = meeting.dateCandidates ?? [];
+    for (let i = 0; i < list.length; i += 1) {
+      const dc = list[i];
+      if (dateCandidateChipId(dc, i) !== cid) continue;
+      const ymd = typeof dc.startDate === 'string' ? dc.startDate.trim() : '';
+      if (!ymd) return null;
+      const hm = normalizeTimeInput(dc.startTime ?? '') || (dc.startTime?.trim() ?? '') || '15:00';
+      return { [ymd]: [{ chipId: cid, hm, tally: 0 }] } as Record<string, { chipId: string; hm: string; tally: number }[]>;
+    }
+    return null;
+  }, [meeting?.id, meeting?.scheduleConfirmed, meeting?.confirmedDateChipId, meeting?.dateCandidates]);
+
+  useEffect(() => {
+    const by = confirmedScheduleVoteByYmd;
+    if (!by) return;
+    const ymd = Object.keys(by)[0];
+    if (ymd) setConfirmedScheduleCalMonth(monthStartYmd(ymd));
+  }, [meeting?.id, confirmedScheduleVoteByYmd]);
 
   const placeChipsShown = useMemo(() => {
     if (!placeHostPickMode) return sortedPlaceChips;
@@ -2161,6 +2214,96 @@ export default function MeetingDetailScreen() {
     [dateVoteByYmd, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
   );
 
+  const renderConfirmedScheduleCalendarMonthGrid = useCallback(
+    (monthAnchorYmd: string, pagerPageW: number) => {
+      const confirmedChipId = meeting?.confirmedDateChipId?.trim() ?? '';
+      const byYmd = confirmedScheduleVoteByYmd;
+      if (!byYmd || !confirmedChipId) {
+        return (
+          <View
+            key={`cf-cal-empty-${monthAnchorYmd}`}
+            style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}
+          />
+        );
+      }
+      const p = parseYmd(monthAnchorYmd);
+      const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
+      const year = base.getFullYear();
+      const month = base.getMonth();
+      const firstDow = new Date(year, month, 1).getDay();
+      const gridStart = new Date(year, month, 1 - firstDow);
+      const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
+      for (let i = 0; i < 42; i += 1) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + i);
+        cells.push({
+          ymd: fmtDateYmd(d),
+          day: d.getDate(),
+          inMonth: d.getMonth() === month,
+        });
+      }
+
+      return (
+        <View
+          key={`cf-cal-${monthAnchorYmd}`}
+          style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}>
+          <View style={styles.calendarGrid}>
+            {Array.from({ length: 6 }).map((_, wi) => {
+              const week = cells.slice(wi * 7, wi * 7 + 7);
+              return (
+                <View key={`cf-week-${monthAnchorYmd}-${wi}`} style={styles.calendarWeekRow}>
+                  {week.map((c) => {
+                    const opts = byYmd[c.ymd] ?? [];
+                    const has = opts.length > 0;
+                    const isSelected = has && opts.some((o) => o.chipId === confirmedChipId);
+                    return (
+                      <View
+                        key={c.ymd}
+                        style={[
+                          styles.calendarCell,
+                          !c.inMonth && styles.calendarCellOut,
+                          has && styles.calendarCellHas,
+                          isSelected && styles.calendarCellSelected,
+                        ]}
+                        accessibilityElementsHidden={!has}
+                        importantForAccessibility={has ? 'yes' : 'no-hide-descendants'}>
+                        <Text
+                          style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}
+                          numberOfLines={1}>
+                          {c.day}
+                        </Text>
+                        {has ? (
+                          <View style={styles.calendarTimesWrap} pointerEvents="none">
+                            {opts.map((o) =>
+                              o.chipId === confirmedChipId ? (
+                                <View key={o.chipId} style={styles.calendarCellTimePillSelected}>
+                                  <Text style={styles.calendarCellTimeLabelSelected} numberOfLines={1}>
+                                    {o.hm}
+                                  </Text>
+                                </View>
+                              ) : (
+                                <Text key={o.chipId} style={styles.calendarCellMeta} numberOfLines={1}>
+                                  {o.hm}
+                                </Text>
+                              ),
+                            )}
+                          </View>
+                        ) : (
+                          <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      );
+    },
+    [meeting?.confirmedDateChipId, confirmedScheduleVoteByYmd],
+  );
+
   useLayoutEffect(() => {
     if (dateVoteCalendarPagerW <= 0) return undefined;
     dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
@@ -2618,17 +2761,78 @@ export default function MeetingDetailScreen() {
             {isScheduleConfirmed ? (
               <View style={styles.infoCard}>
                 <Text style={styles.infoCardTitle}>확정된 일정</Text>
-                <Text style={styles.infoSectionLabel}>일시</Text>
+                {/* <Text style={styles.infoSectionLabel}>일시</Text> */}
                 {confirmedDateChipResolved ? (
                   <>
-                    <Text style={styles.infoRow}>{confirmedDateChipResolved.title}</Text>
-                    {confirmedDateChipResolved.sub ? (
-                      <Text style={styles.infoRowMuted}>{confirmedDateChipResolved.sub}</Text>
+                    <Text style={styles.infoRow}>{confirmedDateChipResolved.title} {confirmedDateChipResolved.sub}</Text>
+
+                    {confirmedScheduleVoteByYmd ? (
+                      (() => {
+                        const p = parseYmd(confirmedScheduleCalMonth);
+                        const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
+                        const year = base.getFullYear();
+                        const month = base.getMonth();
+                        const monthLabel = `${year}.${pad2(month + 1)}`;
+                        const pagerW = confirmedScheduleCalPagerW;
+                        return (
+                          <View
+                            style={styles.voteCalendarWrap}
+                            onLayout={(e) => {
+                              const w = Math.floor(e.nativeEvent.layout.width);
+                              if (w <= 0) return;
+                              setConfirmedScheduleCalPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
+                            }}>
+                            <View style={styles.voteCalendarHeaderRow}>
+                              <Pressable
+                                onPress={() => {
+                                  const prevM = new Date(year, month - 1, 1);
+                                  setConfirmedScheduleCalMonth(monthStartYmd(fmtDateYmd(prevM)));
+                                }}
+                                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
+                                accessibilityRole="button"
+                                accessibilityLabel="이전 달">
+                                <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
+                              </Pressable>
+                              <View
+                                style={styles.voteCalendarTitlePress}
+                                accessible
+                                accessibilityRole="header"
+                                accessibilityLabel={`확정 일시 ${monthLabel}`}>
+                                <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
+                              </View>
+                              <Pressable
+                                onPress={() => {
+                                  const nextM = new Date(year, month + 1, 1);
+                                  setConfirmedScheduleCalMonth(monthStartYmd(fmtDateYmd(nextM)));
+                                }}
+                                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
+                                accessibilityRole="button"
+                                accessibilityLabel="다음 달">
+                                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
+                              </Pressable>
+                            </View>
+                            <View style={styles.calendarDowRow}>
+                              {WEEKDAY_KO.map((w) => (
+                                <Text key={w} style={styles.calendarDowText}>
+                                  {w}
+                                </Text>
+                              ))}
+                            </View>
+                            <View style={styles.voteCalendarCarouselHost}>
+                              {renderConfirmedScheduleCalendarMonthGrid(confirmedScheduleCalMonth, pagerW)}
+                            </View>
+                          </View>
+                        );
+                      })()
                     ) : null}
                   </>
                 ) : (
                   <Text style={styles.infoRowMuted}>저장된 확정 일시가 없어요.</Text>
                 )}
+              </View>
+            ) : null}
+            {isScheduleConfirmed ? (
+              <View style={styles.infoCard}>
                 <Text style={styles.infoSectionLabel}>장소</Text>
                 {confirmedPlaceChipResolved ? (
                   <>
@@ -2717,6 +2921,11 @@ export default function MeetingDetailScreen() {
                     저장된 좌표가 없어 지도를 표시할 수 없어요.
                   </Text>
                 ) : null}
+              </View>
+            ) : null}
+              
+            {isScheduleConfirmed ? (
+              <View style={styles.infoCard}>
                 {(specialtyKind === 'movie' || extraMovies.length > 0) && (
                   <>
                     <Text style={styles.infoSectionLabel}>영화</Text>
@@ -2808,7 +3017,6 @@ export default function MeetingDetailScreen() {
                     )}
                   </>
                 )}
-                <Text style={[styles.placePayNote, styles.confirmedPayNoteSpacer]}>결제: 💵 1/N 정산 (안내)</Text>
               </View>
             ) : (
               <>
@@ -3539,7 +3747,7 @@ export default function MeetingDetailScreen() {
                         <GinitSymbolicIcon
                           name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
                           size={18}
-                          color={meeting.scheduleConfirmed === true ? '#fff' : GinitTheme.colors.text}
+                          color={meeting.scheduleConfirmed === true ? '#fff' : GinitTheme.colors.texWhite}
                         />
                       )}
                       <Text
@@ -4353,9 +4561,9 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   infoSectionLabelStrong: {
-    fontSize: 11,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#64748b',
+    color: GinitTheme.colors.text,
     letterSpacing: 0.8,
     marginTop: 8,
     textTransform: 'uppercase',
@@ -4364,7 +4572,7 @@ const styles = StyleSheet.create({
   infoRow: { fontSize: 14, color: '#1A1A1A', lineHeight: 21 },
   infoRowMuted: { fontSize: 13, color: '#64748b', lineHeight: 19 },
   scheduleHintText: { flex: 1 },
-  infoSectionLabel: { fontSize: 12, fontWeight: '700', color: '#8B95A1', marginTop: 10 },
+  infoSectionLabel: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.text, marginTop: 0 },
   infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22, marginTop: 6 },
   condRow: {
     flexDirection: 'row',
@@ -5258,7 +5466,7 @@ const styles = StyleSheet.create({
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillDanger: { backgroundColor: '#DC2626' },
   pillText: { color: '#fff', fontWeight: '700', fontSize: 14, lineHeight: 18 },
-  pillTextOnOrange: { color: GinitTheme.colors.text },
+  pillTextOnOrange: { color: GinitTheme.colors.texWhite },
   pillTextCompact: { fontSize: 12, lineHeight: 16 },
 
   profileModalRoot: {

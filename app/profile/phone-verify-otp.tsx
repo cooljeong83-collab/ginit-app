@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { serverTimestamp } from 'firebase/firestore';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
+import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
@@ -35,6 +36,12 @@ export default function ProfilePhoneVerifyOtpScreen() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const codeInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!MEETING_PHONE_VERIFICATION_UI_ENABLED) {
+      router.replace('/profile/settings');
+    }
+  }, [router]);
 
   const canVerify = verificationId.trim().length > 0 && code.trim().length === 6 && !busy;
 

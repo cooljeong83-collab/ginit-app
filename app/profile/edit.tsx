@@ -28,6 +28,7 @@ import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
+import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { safeRouterBack } from '@/src/lib/router-safe';
@@ -341,10 +342,9 @@ export default function ProfileEditScreen() {
       const { verificationId } = await AuthService.verifyPhoneNumber(normalized);
       setOtpVerificationId(verificationId);
       setOtpCode('');
-      if (Platform.OS === 'android') {
-        void otpSmsUserConsent.start();
-        ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
-      }
+      // Firebase verifyPhoneNumber가 이미 Android SMS User Consent를 사용하므로,
+      // 여기서 react-native-sms-user-consent를 다시 시작하면 Play 서비스와 충돌해 프로세스가 종료될 수 있음.
+      if (Platform.OS === 'android') ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증번호 전송에 실패했습니다.';
       setOtpError(msg);
@@ -454,7 +454,7 @@ export default function ProfileEditScreen() {
         return;
       }
     }
-    if (!isPhoneVerified) {
+    if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
       Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
       return;
     }
@@ -477,14 +477,16 @@ export default function ProfileEditScreen() {
       await updateUserProfile(profilePk, compliancePatch);
       const p = await ensureUserProfile(profilePk);
       const phoneE164 = p.phone?.trim() ?? normalizePhoneUserId(phoneField)?.trim() ?? '';
-      if (!phoneE164 || !phoneE164.startsWith('+')) throw new Error('전화번호 정보를 찾지 못했습니다.');
-      const verifiedDate = firestoreTimestampLikeToDate(p.phoneVerifiedAt) ?? new Date();
+      if (MEETING_PHONE_VERIFICATION_UI_ENABLED) {
+        if (!phoneE164 || !phoneE164.startsWith('+')) throw new Error('전화번호 정보를 찾지 못했습니다.');
+      }
+      const verifiedDate = firestoreTimestampLikeToDate(p.phoneVerifiedAt);
       const termsDate = firestoreTimestampLikeToDate(p.termsAgreedAt) ?? new Date();
       const sync = await syncMeetingComplianceToSupabase({
         appUserId: profilePk,
         nickname: nickname.trim() || p.nickname,
-        phoneE164,
-        phoneVerifiedAtIso: verifiedDate.toISOString(),
+        phoneE164: phoneE164.startsWith('+') ? phoneE164 : '',
+        phoneVerifiedAtIso: verifiedDate ? verifiedDate.toISOString() : null,
         termsAgreedAtIso: termsDate.toISOString(),
       });
       if (!sync.ok) {

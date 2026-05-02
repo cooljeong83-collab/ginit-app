@@ -5,6 +5,7 @@
 export type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
 export type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 export {
+  addGooglePeopleScopesAndGetAccessToken,
   consumeGoogleRedirectResult,
   consumeGoogleRedirectResultWithMeta,
   REDIRECT_STARTED,

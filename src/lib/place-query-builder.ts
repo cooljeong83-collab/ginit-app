@@ -1,6 +1,6 @@
 /**
  * 모임 생성 장소 단계 — 네이버 지역 검색용 시드 문자열 생성 (클라이언트 전용).
- * 일정(요일·시간대)·인원·카테고리·구역 bias 반영. 날씨는 사용하지 않음.
+ * 인원·카테고리·구역 bias 반영. 일정(날짜·요일·시각)은 추천어·기본 검색어에 넣지 않음. 날씨는 사용하지 않음.
  */
 
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
@@ -22,7 +22,8 @@ export type PlaceQueryScheduleInput = {
 export type PlaceQueryBuilderInput = {
   bias: string | null | undefined;
   categoryLabel: string;
-  schedule: PlaceQueryScheduleInput | null | undefined;
+  /** 미전달 시 일정은 추천어·기본 검색어에 반영하지 않음 */
+  schedule?: PlaceQueryScheduleInput | null | undefined;
   minParticipants?: number;
   maxParticipants?: number;
   /** 있으면 `categoryLabel` 정규식 대신 사용( `major_code` 기반 특화와 정합 ) */
@@ -32,7 +33,7 @@ export type PlaceQueryBuilderInput = {
    * `specialtyKind === 'food'`일 때 풀·추천어·기본 검색어에 반영.
    */
   menuPreferenceLabels?: readonly string[] | null;
-  /** `major_code`가 Eat & Drink일 때 카테고리명·시각·인원을 추천어에 더 밀착하고, 브런치류 단어를 메뉴와 어긋나게 붙이지 않음 */
+  /** `major_code`가 Eat & Drink일 때 카테고리명·인원을 추천어에 더 밀착하고, 브런치류 단어를 메뉴와 어긋나게 붙이지 않음 */
   majorCode?: string | null;
   /** Active & Life Step2 활동 종류 — 네이버 장소 시드에 공원·경기장 등 반영 */
   activityKindLabels?: readonly string[] | null;
@@ -208,16 +209,6 @@ function filterBrunchyTokensFromPool(pool: readonly string[], input: PlaceQueryB
   return out.length ? out : pool;
 }
 
-/** 아침대도 브런치가 아닌 식사 성향이면 시간대 키워드에서 브런치·베이커리 제외 */
-function timeSlotWordsForPlaceQuery(input: PlaceQueryBuilderInput, hour: number): readonly string[] {
-  const base = timeSlotPool(hour);
-  if (!shouldAvoidBrunchyTokens(input)) return base;
-  const filtered = base.filter((w) => !/브런치|베이커리/.test(w));
-  if (filtered.length >= 2) return filtered;
-  if (hour >= 5 && hour < 11) return ['한식', '맛집', '덮밥'] as const;
-  return filtered.length ? filtered : base;
-}
-
 function djb2Hash(str: string): number {
   let h = 5381;
   for (let i = 0; i < str.length; i += 1) {
@@ -229,41 +220,6 @@ function djb2Hash(str: string): number {
 function pick<T>(arr: readonly T[], seed: number): T {
   if (arr.length === 0) throw new Error('pick: empty array');
   return arr[Math.abs(seed) % arr.length]!;
-}
-
-function parseHour(hm: string | undefined): number | null {
-  if (!hm?.trim()) return null;
-  const m = /^(\d{1,2}):(\d{1,2})$/.exec(hm.trim());
-  if (!m) return null;
-  const hh = Number(m[1]);
-  if (!Number.isFinite(hh)) return null;
-  return Math.min(23, Math.max(0, Math.floor(hh)));
-}
-
-function hourForSchedule(sched: PlaceQueryScheduleInput | null | undefined): number {
-  const h = parseHour(sched?.startTime);
-  if (h != null) return h;
-  return 15;
-}
-
-function ymdDow(ymd: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const da = Number(m[3]);
-  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(da)) return null;
-  const d = new Date(y, mo - 1, da);
-  if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return null;
-  return d.getDay();
-}
-
-function timeSlotPool(hour: number): readonly string[] {
-  if (hour >= 5 && hour < 11) return ['브런치', '아침', '베이커리'] as const;
-  if (hour >= 11 && hour < 14) return ['점심', '한식', '덮밥'] as const;
-  if (hour >= 14 && hour < 17) return ['오후', '카페', '디저트'] as const;
-  if (hour >= 17 && hour < 22) return ['저녁', '회식', '술집'] as const;
-  return ['야식', '포장마차', '술집'] as const;
 }
 
 type CapacityHint = 'small' | 'large' | null;
@@ -290,8 +246,6 @@ function capacityKeywords(hint: CapacityHint, seed: number): readonly string[] {
   if (hint === 'large') return ['단체석', '회식', '룸'] as const;
   return [] as const;
 }
-
-const DOW_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 
 /** 추천 칩용 짧은 카테고리 조각(라벨 앞부분 또는 테마 단어) */
 function categoryChipFragment(label: string, specialty: SpecialtyKind | null, seed: number, input: PlaceQueryBuilderInput): string | null {
@@ -339,12 +293,6 @@ function buildHeadcountHint(input: PlaceQueryBuilderInput): string | null {
   }
   if (minN === maxN) return `${minN}명`;
   return `${minN}~${maxN}명`;
-}
-
-function weekdayChipLabel(dow: number | null, seed: number): string | null {
-  if (dow == null || dow < 0 || dow > 6) return null;
-  const w = DOW_KO[dow];
-  return pick([`${w}요일`, `${w}`, dow === 5 || dow === 6 || dow === 0 ? '주말' : `${w}요일`], seed);
 }
 
 const MOVIE_POOL = [
@@ -521,8 +469,6 @@ function themePoolForPlaceQuery(input: PlaceQueryBuilderInput): readonly string[
 function buildSeedNumber(input: PlaceQueryBuilderInput): number {
   const b = (input.bias ?? '').trim();
   const lab = (input.categoryLabel ?? '').trim();
-  const sd = input.schedule?.startDate?.trim() ?? '';
-  const st = input.schedule?.startTime?.trim() ?? '';
   const mn = input.minParticipants ?? '';
   const mx = input.maxParticipants ?? '';
   const mp = normalizedMenuPrefs(input).join('\u0002');
@@ -530,20 +476,41 @@ function buildSeedNumber(input: PlaceQueryBuilderInput): number {
   const fk = normalizedFocusKnowledgePrefs(input).join('\u0004');
   const gg = normalizedGameKinds(input).join('\u0005');
   const mc = (input.majorCode ?? '').trim();
-  return djb2Hash([b, lab, sd, st, String(mn), String(mx), mp, mc, ak, fk, gg].join('\u001f'));
+  return djb2Hash([b, lab, String(mn), String(mx), mp, mc, ak, fk, gg].join('\u001f'));
+}
+
+/** `언어·회화` vs `언어회화` 등 동일 토큰을 한 키로 묶어 중복 제거 */
+function tokenKeyForPlaceQueryDedupe(token: string): string {
+  return token
+    .trim()
+    .toLowerCase()
+    .replace(/[\s·•\-_/.,]+/g, '');
+}
+
+function dedupePlaceQueryTokens(tokens: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tokens) {
+    const t = raw.trim();
+    if (!t) continue;
+    const key = tokenKeyForPlaceQueryDedupe(t);
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
 }
 
 function joinQueryParts(parts: (string | null | undefined)[]): string {
-  return parts
+  const cleaned = parts
     .map((p) => (typeof p === 'string' ? p.trim() : ''))
-    .filter((p) => p.length > 0)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .filter((p) => p.length > 0);
+  return dedupePlaceQueryTokens(cleaned).join(' ').replace(/\s+/g, ' ').trim();
 }
 
 /**
- * 장소 검색 입력란 기본값 (구역 + 시간대·테마·인원 보강).
+ * 장소 검색 입력란 기본값 (구역 + 테마·인원 보강). 모임 일정(날짜·요일·시각)은 반영하지 않음.
  * 영화 모임은 **지역 + 영화관** 고정.
  * Play & Vibe(게임 종류 선택 시)는 **지역 + 게임 종류**만 사용.
  * PcGame major는 **지역 + PC방** 고정(첫 자동 입력). 브랜드 키워드는 추천 칩에서 제공.
@@ -566,28 +533,16 @@ export function buildDefaultPlaceSearchQuery(input: PlaceQueryBuilderInput): str
   const pool = themePoolForPlaceQuery(input);
   const prefs = normalizedMenuPrefs(input);
   const main = pick(pool, seed);
-  const hour = hourForSchedule(input.schedule ?? null);
-  const timeCandidates = timeSlotWordsForPlaceQuery(input, hour);
-  const timeWord = pick(timeCandidates, seed >>> 7);
   const capHint = resolveCapacityHint(input);
   const capPool = capacityKeywords(capHint, seed);
   const capWord = capPool.length ? pick(capPool, seed >>> 11) : null;
 
-  const ymd = input.schedule?.startDate?.trim() ?? '';
-  const dow = ymd ? ymdDow(ymd) : null;
-  const weekendLead =
-    dow != null && (dow === 5 || dow === 6 || dow === 0) && (seed & 3) === 0 ? pick(['주말', '불금'], seed >>> 13) : null;
-
-  const includeTime = (seed & 5) !== 0;
   const includeCap = capWord != null && (seed & 1) === 0;
   const eatDrinkFood = isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food';
   const acts = normalizedActivityKinds(input);
   const activeLifeWithActivity = isActiveLifeSportsPlaceQuery(input) && acts.length > 0;
   const fkPrefs = normalizedFocusKnowledgePrefs(input);
   const knowledgeWithPrefs = specialty === 'knowledge' && fkPrefs.length > 0;
-  const hmRaw = (input.schedule?.startTime ?? '').trim();
-  const hourParsed = parseHour(hmRaw);
-  const timeClockLabel = hourParsed != null ? `${hourParsed}시` : null;
   const headCountHint = buildHeadcountHint(input);
 
   const parts: string[] = [];
@@ -612,12 +567,6 @@ export function buildDefaultPlaceSearchQuery(input: PlaceQueryBuilderInput): str
   if (knowledgeWithPrefs) {
     const sn = eatDrinkCategoryLabelSnippet(label);
     if (sn.length >= 2 && !parts.includes(sn)) parts.push(sn);
-  }
-  if (weekendLead) parts.push(weekendLead);
-  if (eatDrinkFood && timeClockLabel && includeTime && timeClockLabel !== main) {
-    parts.push(timeClockLabel);
-  } else if (!activeLifeWithActivity && !knowledgeWithPrefs && includeTime && timeWord && timeWord !== main) {
-    parts.push(timeWord);
   }
   parts.push(main);
   if (includeCap && capWord) parts.push(capWord);
@@ -696,7 +645,8 @@ function buildPcGamePlaceSuggestedQueries(bias: string, seed: number): string[] 
 }
 
 /**
- * 추천 검색어 칩 — 지역(bias)·카테고리·요일·인원·테마를 조합해 다양하게 생성 (최대 8개). 시각·시간대 단어는 넣지 않음.
+ * 추천 검색어 칩 — 지역(bias)·카테고리·인원·테마를 조합해 다양하게 생성 (최대 8개).
+ * 모임 일정(요일·시각·시간대 단어)은 넣지 않음.
  * 영화 모임은 지역 + CGV·메가박스·롯데시네마·DVD방 등 고정 패턴.
  * Play & Vibe(게임 종류 선택 시)는 지역 + 게임 종류·시설 키워드만 사용.
  * PcGame major는 **지역+PC방**을 선두로, 이어서 탑존·액토즈 등 브랜드 PC방 키워드.
@@ -721,9 +671,6 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
   const capHint = resolveCapacityHint(input);
   const capPool = capacityKeywords(capHint, seed);
   const capWord = capPool.length ? pick(capPool, seed >>> 5) : '';
-  const ymd = input.schedule?.startDate?.trim() ?? '';
-  const dow = ymd ? ymdDow(ymd) : null;
-  const weekdayStr = weekdayChipLabel(dow, seed >>> 9);
   const headCount = buildHeadcountHint(input);
   const catFrag = categoryChipFragment(label, specialty, seed >>> 11, input);
   const eatDrinkFood = isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food';
@@ -806,22 +753,17 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
   rawVariants.push(joinQueryParts([bias, a.main, a.cap]));
   rawVariants.push(joinQueryParts([bias, catFrag, a.main]));
   const b = mk(1);
-  rawVariants.push(joinQueryParts([bias, weekdayStr, b.main]));
+  rawVariants.push(joinQueryParts([bias, labelSnippet, b.main]));
   rawVariants.push(joinQueryParts([bias, headCount, b.main]));
   const c = mk(2);
   rawVariants.push(joinQueryParts([bias, headCount, c.main]));
   rawVariants.push(joinQueryParts([bias, catFrag, c.main]));
   const d = mk(3);
   rawVariants.push(joinQueryParts([bias, catFrag, d.main]));
-  if (dow === 5 || dow === 6 || dow === 0) {
-    const wk = pick(['주말', '불금'], seed >>> 13);
-    rawVariants.push(joinQueryParts([bias, wk, d.main]));
-  } else {
-    rawVariants.push(joinQueryParts([bias, weekdayStr, d.main]));
-  }
+  rawVariants.push(joinQueryParts([bias, labelSnippet, d.main]));
   const e = mk(4);
   rawVariants.push(joinQueryParts([bias, e.main]));
-  rawVariants.push(joinQueryParts([bias, weekdayStr, e.main]));
+  rawVariants.push(joinQueryParts([bias, catFrag, e.main]));
   const f = mk(5);
   rawVariants.push(joinQueryParts([bias, headCount, f.main]));
   rawVariants.push(joinQueryParts([bias, catFrag, f.cap, f.main]));
@@ -838,8 +780,8 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
       const xv = mk(200 + i * 17);
       rawVariants.push(joinQueryParts([bias, p, xv.main]));
       rawVariants.push(joinQueryParts([bias, p, '맛집']));
-      rawVariants.push(joinQueryParts([bias, p, xv.main, weekdayStr]));
-      rawVariants.push(joinQueryParts([bias, p, weekdayStr, xv.main]));
+      rawVariants.push(joinQueryParts([bias, p, xv.main, headCount]));
+      rawVariants.push(joinQueryParts([bias, labelSnippet, p, xv.main]));
     }
   }
 
@@ -849,8 +791,8 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
       const xv = mk(260 + i * 17);
       rawVariants.push(joinQueryParts([bias, p, xv.main]));
       rawVariants.push(joinQueryParts([bias, labelSnippet, p, xv.main]));
-      rawVariants.push(joinQueryParts([bias, p, xv.main, weekdayStr]));
-      rawVariants.push(joinQueryParts([bias, p, weekdayStr, xv.main]));
+      rawVariants.push(joinQueryParts([bias, p, xv.main, headCount]));
+      rawVariants.push(joinQueryParts([bias, catFrag, p, xv.main]));
     }
   }
 
@@ -863,8 +805,8 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
       const xv = mk(240 + i * 19);
       rawVariants.push(joinQueryParts([bias, labelSnippet, p, vn]));
       rawVariants.push(joinQueryParts([bias, p, vn2]));
-      rawVariants.push(joinQueryParts([bias, vn, weekdayStr]));
-      rawVariants.push(joinQueryParts([bias, p, xv.main, weekdayStr]));
+      rawVariants.push(joinQueryParts([bias, vn, headCount]));
+      rawVariants.push(joinQueryParts([bias, p, xv.main, headCount]));
     }
   }
 
@@ -878,7 +820,7 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
   }
   for (let j = 0; j < 24 && out.length < MAX_PLACE_SUGGEST_CHIPS; j += 1) {
     const x = mk(50 + j);
-    push(joinQueryParts([bias, weekdayStr, x.main]));
+    push(joinQueryParts([bias, catFrag, x.main]));
     push(joinQueryParts([bias, x.main, x.cap]));
   }
 

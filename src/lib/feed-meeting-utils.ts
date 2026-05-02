@@ -1,7 +1,8 @@
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
 import { meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { MeetingExtraData } from '@/src/lib/meeting-extra-data';
+import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type {
   Meeting,
   PublicMeetingAgeLimit,
@@ -10,7 +11,6 @@ import type {
   PublicMeetingGenderRatio,
   PublicMeetingSettlement,
 } from '@/src/lib/meetings';
-import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import { parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
 
@@ -118,10 +118,30 @@ export function meetingMatchesCategoryFilter(
   return false;
 }
 
+/**
+ * 피드 상단 카테고리 설정: `filterId`가 있으면 해당 종류만,
+ * 없고 `barVisibleCategoryIds`가 있으면 그 종류들 중 하나에 해당하는 모임만(OR),
+ * 둘 다 없으면(바 표시 = 전체) 종류 제한 없음.
+ */
+export function meetingMatchesFeedCategoryBarAndFilter(
+  m: Meeting,
+  filterId: string | null,
+  barVisibleCategoryIds: string[] | null,
+  categories: Category[],
+): boolean {
+  if (filterId != null) {
+    return meetingMatchesCategoryFilter(m, filterId, categories);
+  }
+  if (barVisibleCategoryIds == null || barVisibleCategoryIds.length === 0) {
+    return true;
+  }
+  return barVisibleCategoryIds.some((id) => meetingMatchesCategoryFilter(m, id, categories));
+}
+
 export function listSortModeLabel(mode: MeetingListSortMode): string {
   switch (mode) {
     case 'distance':
-      return '가까운 순';
+      return '거리순';
     case 'soon':
       return '임박순';
     default:

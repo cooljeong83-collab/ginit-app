@@ -1,26 +1,26 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-    Fragment,
-    type RefObject,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
+  Fragment,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    findNodeHandle,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    UIManager,
-    View,
-    type ViewStyle,
+  ActivityIndicator,
+  Dimensions,
+  findNodeHandle,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  UIManager,
+  View,
+  type ViewStyle,
 } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,10 +33,10 @@ import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import {
-    resolveNaverPlaceCoordinates,
-    resolveNaverPlaceDetailWebUrlLikeVoteChip,
-    sanitizeNaverLocalPlaceLink,
-    searchNaverLocalPlaces,
+  resolveNaverPlaceCoordinates,
+  resolveNaverPlaceDetailWebUrlLikeVoteChip,
+  sanitizeNaverLocalPlaceLink,
+  searchNaverLocalPlaces,
 } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 

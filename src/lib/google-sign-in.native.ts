@@ -1,5 +1,12 @@
 import Constants from 'expo-constants';
-import { GoogleAuthProvider, signInWithCredential, signOut, type User } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  getAdditionalUserInfo,
+  signInWithCredential,
+  signOut,
+  type User,
+  type UserCredential,
+} from 'firebase/auth';
 
 import { publicEnv } from '@/src/config/public-env';
 
@@ -109,6 +116,52 @@ function ensureConfigured(gs: GoogleSigninApi, options?: SignInWithGoogleOptions
   configureSignature = sig;
 }
 
+const GOOGLE_PEOPLE_SCOPES = [
+  'https://www.googleapis.com/auth/user.birthday.read',
+  'https://www.googleapis.com/auth/user.gender.read',
+] as const;
+
+/**
+ * 이미 Google+Firebase 로그인된 상태에서 People API용 스코프만 추가 동의(전체 계정 선택 UI 없이 진행되는 것이 일반적).
+ */
+export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
+  log('addGooglePeopleScopesAndGetAccessToken → start', { expoGo: isExpoGo() });
+  if (isExpoGo()) {
+    throw new Error(
+      'Expo Go에는 Google 네이티브 로그인 모듈이 포함되어 있지 않습니다. `npx expo run:android` / `run:ios`로 개발 빌드를 만든 뒤 테스트하세요.',
+    );
+  }
+  const GoogleSignin = requireGoogleSignin();
+  ensureConfigured(GoogleSignin, { forRegistration: false });
+  if (!GoogleSignin.getCurrentUser?.()) {
+    throw new Error('Google 로그인 세션이 없습니다. 먼저 Google로 로그인해 주세요.');
+  }
+  try {
+    const res = await GoogleSignin.addScopes({ scopes: [...GOOGLE_PEOPLE_SCOPES] });
+    if (res == null) {
+      throw new Error('Google 추가 동의를 진행할 수 없습니다. 다시 로그인해 주세요.');
+    }
+    if (res.type !== 'success') {
+      log('addGooglePeopleScopesAndGetAccessToken → non-success', { type: res.type });
+      throw new Error('로그인이 취소되었습니다.');
+    }
+  } catch (e) {
+    const { code, message } = pickErr(e);
+    log('Error:addScopes', { code: code ?? '(no code)', message });
+    throw new Error(message || 'Google 추가 동의에 실패했습니다.');
+  }
+  try {
+    const t = await GoogleSignin.getTokens();
+    const at = (t.accessToken ?? '').trim() || null;
+    log('addGooglePeopleScopesAndGetAccessToken → success', { hasToken: !!at });
+    return at;
+  } catch (e) {
+    const { message } = pickErr(e);
+    log('Warn:addScopes getTokens', { message });
+    return null;
+  }
+}
+
 export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promise<GoogleSignInResult> {
   log('signInWithGoogle → start (handleLogin equivalent on native)', { expoGo: isExpoGo() });
   logCurrentAuth('signInWithGoogle:start');
@@ -200,10 +253,14 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
   try {
     log('Auth Step 2 → signInWithCredential (Firebase)', { idTokenLength: idToken.length });
     const credential = GoogleAuthProvider.credential(idToken);
-    const { user } = await signInWithCredential(getFirebaseAuth(), credential);
+    const userCred = (await signInWithCredential(getFirebaseAuth(), credential)) as UserCredential;
+    const user = userCred.user;
+    const addInfo = getAdditionalUserInfo(userCred);
+    const isNewUser = addInfo?.isNewUser === true;
     log('Auth Step 2: Result Received (native credential success)', {
       uid: user.uid,
       email: user.email ?? null,
+      isNewUser,
     });
     logCurrentAuth('signInWithGoogle:after credential success');
     if (!googleAccessToken) {
@@ -215,7 +272,7 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
         log('Warn:getTokens after Firebase credential', { message });
       }
     }
-    return { user, googleAccessToken };
+    return { user, googleAccessToken, isNewUser };
   } catch (e) {
     const { code, message } = pickErr(e);
     log('Error:signInWithCredential', { code: code ?? '(no code)', message });

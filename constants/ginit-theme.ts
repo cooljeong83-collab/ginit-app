@@ -9,7 +9,7 @@ export const GinitTheme = {
   /** Legacy: 기존 코드 호환용(점진적 마이그레이션) */
   themeMainColor: '#673AB7',
   /** Legacy: 기존 코드 호환용(점진적 마이그레이션) */
-  pointOrange: '#86D3B7',
+  pointOrange: '#ff7b00',
 
   /** New: 시안 톤 컬러 토큰 */
   colors: {
@@ -23,6 +23,8 @@ export const GinitTheme = {
 
     // text
     text: '#0F172A',
+    texWhite: '#FFFFFF',
+    texBlack: '#000000',
     textSub: '#334155',
     textSubGray: '#686774',
     textMuted: '#64748B',

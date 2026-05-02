@@ -8,6 +8,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { getUserProfile, isUserPhoneVerified, type UserProfile } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 
@@ -30,6 +31,12 @@ export default function ProfilePhoneVerifyEntryScreen() {
     if (em) return normalizeUserId(em) ?? '';
     return '';
   }, [userId, authProfile?.email]);
+
+  useEffect(() => {
+    if (!MEETING_PHONE_VERIFICATION_UI_ENABLED) {
+      router.replace('/profile/settings');
+    }
+  }, [router]);
 
   useEffect(() => {
     const pk = profilePk.trim();

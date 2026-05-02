@@ -1,3 +1,5 @@
+import { useRouter } from 'expo-router';
+import { serverTimestamp, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -14,28 +16,32 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { serverTimestamp, Timestamp } from 'firebase/firestore';
 
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
 import { authScreenStyles as authFormStyles } from '@/components/auth/authScreenStyles';
 import { GinitButton } from '@/components/ginit';
+import { GinitTheme } from '@/constants/ginit-theme';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { type SignUpGenderCode } from '@/src/hooks/useSignUpFlow';
+import { normalizeUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
-import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
+import { fetchGooglePeopleExtras, mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
+import { addGooglePeopleScopesAndGetAccessToken, REDIRECT_STARTED, signInWithGoogle } from '@/src/lib/google-sign-in';
+import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { requestPhoneNumberHint } from '@/src/lib/phone-number-hint';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
+  buildGooglePeopleDemographicsMetadataPatch,
   ensureUserProfile,
   firestoreTimestampLikeToDate,
-  hasTermsAgreementRecorded,
   isDemographicsIncomplete,
   isMeetingServiceComplianceComplete,
   isUserPhoneVerified,
   meetingDemographicsIncomplete,
   readGooglePeopleDemographicsLocks,
   updateUserProfile,
+  type UserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 
@@ -46,6 +52,16 @@ export type MeetingServiceAuthModalProps = {
   onAfterComplianceSuccess?: () => void | Promise<void>;
 };
 
+function isFirebaseGoogleLinked(): boolean {
+  try {
+    const u = getFirebaseAuth().currentUser;
+    if (!u || u.isAnonymous) return false;
+    return u.providerData.some((p) => p.providerId === 'google.com');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 프로필·설정 등에서 공통으로 쓰는「서비스 이용 인증」전체 화면 모달.
  */
@@ -55,6 +71,7 @@ export function MeetingServiceAuthModal({
   profilePk,
   onAfterComplianceSuccess,
 }: MeetingServiceAuthModalProps) {
+  const router = useRouter();
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
@@ -74,8 +91,9 @@ export function MeetingServiceAuthModal({
   const [otpError, setOtpError] = useState<string | null>(null);
   const otpAutoConfirmRef = useRef(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
-  const [termsConsentChecked, setTermsConsentChecked] = useState(false);
   const [complianceBusy, setComplianceBusy] = useState(false);
+  const [googleDemographicsBusy, setGoogleDemographicsBusy] = useState(false);
+  const [hydratedProfile, setHydratedProfile] = useState<UserProfile | null>(null);
   const [googleDemoGenderLocked, setGoogleDemoGenderLocked] = useState(false);
   const [googleDemoBirthLocked, setGoogleDemoBirthLocked] = useState(false);
   const [profileHasStoredGender, setProfileHasStoredGender] = useState(false);
@@ -113,9 +131,9 @@ export function MeetingServiceAuthModal({
       try {
         const p = await ensureUserProfile(pk);
         if (!alive) return;
+        setHydratedProfile(p);
         const complete = isMeetingServiceComplianceComplete(p, pk);
         setMeetingAuthComplete(complete);
-        setTermsConsentChecked(complete ? true : hasTermsAgreementRecorded(p));
 
         const authPhone = getFirebaseAuth().currentUser?.phoneNumber?.trim() ?? '';
         const phone = p.phone?.trim() || authPhone;
@@ -131,7 +149,7 @@ export function MeetingServiceAuthModal({
         setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
         setPhoneField(phoneDisplay);
 
-        if (Platform.OS === 'android' && !isUserPhoneVerified(p) && !phone) {
+        if (MEETING_PHONE_VERIFICATION_UI_ENABLED && Platform.OS === 'android' && !isUserPhoneVerified(p) && !phone) {
           const hintedE164 = await requestPhoneNumberHint();
           if (!alive) return;
           if (hintedE164) {
@@ -185,7 +203,7 @@ export function MeetingServiceAuthModal({
         }
       } catch {
         if (!alive) return;
-        setTermsConsentChecked(false);
+        setHydratedProfile(null);
         setMeetingAuthComplete(false);
         setGoogleDemoGenderLocked(false);
         setGoogleDemoBirthLocked(false);
@@ -198,119 +216,221 @@ export function MeetingServiceAuthModal({
     };
   }, [visible, pk]);
 
+  const showGoogleDemographicsCta = useMemo(() => {
+    return (
+      !meetingAuthComplete &&
+      isFirebaseGoogleLinked() &&
+      hydratedProfile != null &&
+      isDemographicsIncomplete(hydratedProfile)
+    );
+  }, [meetingAuthComplete, hydratedProfile]);
+
+  const persistMeetingComplianceCore = useCallback(
+    async (args: {
+      gender: SignUpGenderCode | null;
+      birth: { year: number; month: number; day: number };
+      metadata?: Record<string, unknown> | null;
+      skipConfirmDialog?: boolean;
+    }) => {
+      if (!pk) {
+        Alert.alert('안내', '로그인 후 진행할 수 있어요.');
+        return;
+      }
+
+      if (!args.skipConfirmDialog) {
+        const ok = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            '저장 전 확인',
+            '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?',
+            [
+              { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+              { text: '저장', style: 'destructive', onPress: () => resolve(true) },
+            ],
+          );
+        });
+        if (!ok) return;
+      }
+
+      const p0 = await ensureUserProfile(pk);
+      if (isDemographicsIncomplete(p0)) {
+        if (!args.gender || !args.birth.year || !args.birth.month || !args.birth.day) {
+          Alert.alert('입력 확인', '성별과 생년월일을 모두 선택해 주세요.');
+          return;
+        }
+      }
+      if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
+        Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
+        return;
+      }
+      setComplianceBusy(true);
+      try {
+        const compliancePatch: Parameters<typeof updateUserProfile>[1] = { termsAgreedAt: serverTimestamp() };
+        if (
+          pk.includes('@') &&
+          (p0.signupProvider == null || String(p0.signupProvider).trim() === '') &&
+          meetingDemographicsIncomplete(p0, pk)
+        ) {
+          compliancePatch.signupProvider = 'google_sns';
+        }
+        if (args.gender) {
+          compliancePatch.gender = args.gender;
+        }
+        if (args.birth.year && args.birth.month && args.birth.day) {
+          compliancePatch.birthDate = Timestamp.fromDate(
+            new Date(args.birth.year, args.birth.month - 1, args.birth.day),
+          );
+        }
+        if (args.metadata && Object.keys(args.metadata).length > 0) {
+          compliancePatch.metadata = args.metadata;
+        }
+        await updateUserProfile(pk, compliancePatch);
+        let p = await ensureUserProfile(pk);
+        if (!p.gender && args.gender) {
+          await updateUserProfile(pk, { gender: args.gender });
+          p = await ensureUserProfile(pk);
+        }
+        const phoneE164 = p.phone?.trim() ?? normalizePhoneUserId(phoneField)?.trim() ?? '';
+        if (MEETING_PHONE_VERIFICATION_UI_ENABLED) {
+          if (!phoneE164 || !phoneE164.startsWith('+')) {
+            throw new Error('전화번호 정보를 찾지 못했습니다.');
+          }
+        }
+        const verifiedDate = firestoreTimestampLikeToDate(p.phoneVerifiedAt);
+        const termsDate = firestoreTimestampLikeToDate(p.termsAgreedAt) ?? new Date();
+        const nicknameForSync = p.nickname?.trim() ?? '';
+        const sync = await syncMeetingComplianceToSupabase({
+          appUserId: pk,
+          nickname: nicknameForSync,
+          phoneE164: phoneE164.startsWith('+') ? phoneE164 : '',
+          phoneVerifiedAtIso: verifiedDate ? verifiedDate.toISOString() : null,
+          termsAgreedAtIso: termsDate.toISOString(),
+        });
+        if (!sync.ok) {
+          Alert.alert('동기화 안내', `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}`);
+        }
+
+        if (args.gender && args.birth.year && args.birth.month && args.birth.day) {
+          const demoSync = await syncMeetingDemographicsToSupabase({
+            appUserId: pk,
+            gender: args.gender,
+            birthYear: args.birth.year,
+            birthMonth: args.birth.month,
+            birthDay: args.birth.day,
+          });
+          if (!demoSync.ok) {
+            Alert.alert('동기화 안내', `성별/생년월일 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${demoSync.message}`);
+          }
+        }
+        setHydratedProfile(p);
+        setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, pk));
+        await onAfterComplianceSuccess?.();
+        onRequestClose();
+        const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
+        if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
+        else Alert.alert('완료', doneMsg);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
+        Alert.alert('저장 실패', msg);
+      } finally {
+        setComplianceBusy(false);
+      }
+    },
+    [pk, isPhoneVerified, phoneField, onAfterComplianceSuccess, onRequestClose],
+  );
+
   const onSubmitMeetingCompliance = useCallback(async () => {
+    await persistMeetingComplianceCore({
+      gender: genderDemo,
+      birth: birthDemo,
+      skipConfirmDialog: false,
+    });
+  }, [persistMeetingComplianceCore, genderDemo, birthDemo]);
+
+  const onGoogleDemographicsImport = useCallback(async () => {
     if (!pk) {
       Alert.alert('안내', '로그인 후 진행할 수 있어요.');
       return;
     }
-
-    const ok = await new Promise<boolean>((resolve) => {
-      Alert.alert(
-        '저장 전 확인',
-        '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?',
-        [
-          { text: '취소', style: 'cancel', onPress: () => resolve(false) },
-          { text: '저장', style: 'destructive', onPress: () => resolve(true) },
-        ],
-      );
-    });
-    if (!ok) return;
-
-    const p0 = await ensureUserProfile(pk);
-    if (!hasTermsAgreementRecorded(p0) && !termsConsentChecked) {
-      Alert.alert('동의 필요', '모임 이용 정보 수집 및 이용에 동의해 주세요.');
+    if (!isFirebaseGoogleLinked()) {
+      Alert.alert('안내', 'Google로 로그인한 계정에서만 사용할 수 있어요.');
       return;
     }
-    if (isDemographicsIncomplete(p0)) {
-      if (!genderDemo || !birthDemo.year || !birthDemo.month || !birthDemo.day) {
-        Alert.alert('입력 확인', '성별과 생년월일을 모두 선택해 주세요.');
-        return;
-      }
-    }
-    if (!isPhoneVerified) {
+    const p0 = await ensureUserProfile(pk);
+    if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
       Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
       return;
     }
-    setComplianceBusy(true);
+    setGoogleDemographicsBusy(true);
     try {
-      const compliancePatch: Parameters<typeof updateUserProfile>[1] = { termsAgreedAt: serverTimestamp() };
-      if (
-        pk.includes('@') &&
-        (p0.signupProvider == null || String(p0.signupProvider).trim() === '') &&
-        meetingDemographicsIncomplete(p0, pk)
-      ) {
-        compliancePatch.signupProvider = 'google_sns';
-      }
-      if (genderDemo) {
-        compliancePatch.gender = genderDemo;
-      }
-      if (birthDemo.year && birthDemo.month && birthDemo.day) {
-        compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
-      }
-      await updateUserProfile(pk, compliancePatch);
-      let p = await ensureUserProfile(pk);
-      if (!p.gender && genderDemo) {
-        await updateUserProfile(pk, { gender: genderDemo });
-        p = await ensureUserProfile(pk);
-      }
-      const phoneE164 = p.phone?.trim() ?? normalizePhoneUserId(phoneField)?.trim() ?? '';
-      if (!phoneE164 || !phoneE164.startsWith('+')) {
-        throw new Error('전화번호 정보를 찾지 못했습니다.');
-      }
-      const verifiedDate = firestoreTimestampLikeToDate(p.phoneVerifiedAt) ?? new Date();
-      const termsDate = firestoreTimestampLikeToDate(p.termsAgreedAt) ?? new Date();
-      const nicknameForSync = p.nickname?.trim() ?? '';
-      const sync = await syncMeetingComplianceToSupabase({
-        appUserId: pk,
-        nickname: nicknameForSync,
-        phoneE164,
-        phoneVerifiedAtIso: verifiedDate.toISOString(),
-        termsAgreedAtIso: termsDate.toISOString(),
-      });
-      if (!sync.ok) {
-        Alert.alert('동기화 안내', `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}`);
-      }
-
-      if (genderDemo && birthDemo.year && birthDemo.month && birthDemo.day) {
-        const demoSync = await syncMeetingDemographicsToSupabase({
-          appUserId: pk,
-          gender: genderDemo,
-          birthYear: birthDemo.year,
-          birthMonth: birthDemo.month,
-          birthDay: birthDemo.day,
+      let googleAccessToken: string | null = null;
+      if (Platform.OS !== 'web') {
+        googleAccessToken = await addGooglePeopleScopesAndGetAccessToken();
+      } else {
+        const { user, googleAccessToken: at } = await signInWithGoogle({
+          forRegistration: true,
+          promptSelectAccount: false,
         });
-        if (!demoSync.ok) {
-          Alert.alert('동기화 안내', `성별/생년월일 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${demoSync.message}`);
+        googleAccessToken = at;
+        const email = user.email?.trim() ?? '';
+        const emailPk = email ? normalizeUserId(email) : null;
+        if (!emailPk || emailPk !== pk) {
+          Alert.alert(
+            '계정 확인',
+            '현재 이 프로필과 동일한 Google 계정으로 다시 로그인해 주세요.',
+          );
+          return;
         }
       }
-      await onAfterComplianceSuccess?.();
-      onRequestClose();
-      const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
-      if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-      else Alert.alert('완료', doneMsg);
+      if (Platform.OS !== 'web') {
+        const u = getFirebaseAuth().currentUser;
+        const email = u?.email?.trim() ?? '';
+        const emailPk = email ? normalizeUserId(email) : null;
+        if (!emailPk || emailPk !== pk) {
+          Alert.alert(
+            '계정 확인',
+            '현재 이 프로필과 동일한 Google 계정으로 로그인돼 있어야 해요.',
+          );
+          return;
+        }
+      }
+      const people = await fetchGooglePeopleExtras(googleAccessToken);
+      const genderFs = mapGooglePeopleGenderToProfileGender(people?.gender ?? null);
+      const py = people?.birthYear ?? null;
+      const pm = people?.birthMonth ?? null;
+      const pd = people?.birthDay ?? null;
+      if (!genderFs || py == null || pm == null || pd == null) {
+        Alert.alert(
+          'Google 정보',
+          '성별과 생년월일을 Google에서 받지 못했어요. Google 계정에 정보가 있고, 동의 화면에서 모두 허용했는지 확인해 주세요.',
+        );
+        return;
+      }
+      const googleDemoMeta = buildGooglePeopleDemographicsMetadataPatch({
+        genderFromGoogle: true,
+        birthFromGoogle: true,
+      });
+      setGenderDemo(genderFs);
+      setBirthDemo({ year: py, month: pm, day: pd });
+      await persistMeetingComplianceCore({
+        gender: genderFs,
+        birth: { year: py, month: pm, day: pd },
+        metadata: Object.keys(googleDemoMeta).length > 0 ? googleDemoMeta : null,
+        skipConfirmDialog: true,
+      });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
-      Alert.alert('저장 실패', msg);
+      const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
+      if (code === REDIRECT_STARTED) return;
+      const msg = e instanceof Error ? e.message : 'Google 연동에 실패했습니다.';
+      Alert.alert('Google 연동 실패', msg);
     } finally {
-      setComplianceBusy(false);
+      setGoogleDemographicsBusy(false);
     }
-  }, [
-    pk,
-    termsConsentChecked,
-    genderDemo,
-    birthDemo.year,
-    birthDemo.month,
-    birthDemo.day,
-    isPhoneVerified,
-    phoneField,
-    onAfterComplianceSuccess,
-    onRequestClose,
-  ]);
+  }, [pk, isPhoneVerified, persistMeetingComplianceCore]);
 
   const canSendOtp = useMemo(() => {
     const normalized = normalizePhoneUserId(phoneField);
-    return !!pk && !!normalized && !profileBusy && !otpBusy && !complianceBusy;
-  }, [pk, phoneField, profileBusy, otpBusy, complianceBusy]);
+    return !!pk && !!normalized && !profileBusy && !otpBusy && !complianceBusy && !googleDemographicsBusy;
+  }, [pk, phoneField, profileBusy, otpBusy, complianceBusy, googleDemographicsBusy]);
 
   const canConfirmOtp = useMemo(() => {
     return (
@@ -319,9 +439,10 @@ export function MeetingServiceAuthModal({
       otpCode.replace(/\D/g, '').length === 6 &&
       !profileBusy &&
       !otpBusy &&
-      !complianceBusy
+      !complianceBusy &&
+      !googleDemographicsBusy
     );
-  }, [pk, otpVerificationId, otpCode, profileBusy, otpBusy, complianceBusy]);
+  }, [pk, otpVerificationId, otpCode, profileBusy, otpBusy, complianceBusy, googleDemographicsBusy]);
 
   const onSendOtp = useCallback(async () => {
     if (!pk) {
@@ -340,10 +461,9 @@ export function MeetingServiceAuthModal({
       const { verificationId } = await AuthService.verifyPhoneNumber(normalized);
       setOtpVerificationId(verificationId);
       setOtpCode('');
-      if (Platform.OS === 'android') {
-        void otpSmsUserConsent.start();
-        ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
-      }
+      // Firebase verifyPhoneNumber가 이미 Android SMS User Consent를 사용하므로,
+      // 여기서 react-native-sms-user-consent를 다시 시작하면 Play 서비스와 충돌해 프로세스가 종료될 수 있음.
+      if (Platform.OS === 'android') ToastAndroid.show('인증번호를 전송했어요.', ToastAndroid.SHORT);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증번호 전송에 실패했습니다.';
       setOtpError(msg);
@@ -417,7 +537,7 @@ export function MeetingServiceAuthModal({
       animationType="fade"
       transparent
       onRequestClose={() => {
-        if (!complianceBusy) onRequestClose();
+        if (!complianceBusy && !googleDemographicsBusy) onRequestClose();
       }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -427,7 +547,7 @@ export function MeetingServiceAuthModal({
           <Pressable
             style={styles.sheetBackdropFill}
             onPress={() => {
-              if (!complianceBusy) onRequestClose();
+              if (!complianceBusy && !googleDemographicsBusy) onRequestClose();
             }}
             accessibilityRole="button"
             accessibilityLabel="닫기"
@@ -447,7 +567,9 @@ export function MeetingServiceAuthModal({
                 <Text style={styles.sheetLead}>
                   {meetingAuthComplete
                     ? '이용 인증이 완료된 계정이에요. 아래에서 등록된 정보를 확인할 수 있어요.'
-                    : '모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.'}
+                    : MEETING_PHONE_VERIFICATION_UI_ENABLED
+                      ? '모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.'
+                      : '모임 만들기·참여를 위해 정보 수집 동의와 필수 프로필 정보 입력이 필요해요.'}
                 </Text>
                 {(googleDemoGenderLocked ||
                   googleDemoBirthLocked ||
@@ -459,176 +581,211 @@ export function MeetingServiceAuthModal({
                   </Text>
                 ) : null}
 
-                <Pressable
-                  onPress={() =>
-                    !complianceBusy && !meetingAuthComplete && setTermsConsentChecked(!termsConsentChecked)
-                  }
-                  disabled={complianceBusy || meetingAuthComplete}
-                  style={({ pressed }) => [
-                    styles.termsRow,
-                    meetingAuthComplete && styles.termsRowLocked,
-                    pressed && !complianceBusy && !meetingAuthComplete && styles.pressed,
-                  ]}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: termsConsentChecked || meetingAuthComplete, disabled: meetingAuthComplete }}
-                  accessibilityLabel="모임 이용 정보 수집 및 이용 동의">
-                  <View
-                    style={[
-                      styles.termsBox,
-                      termsConsentChecked || meetingAuthComplete ? styles.termsBoxChecked : styles.termsBoxUnchecked,
-                    ]}>
-                    {termsConsentChecked || meetingAuthComplete ? <Text style={styles.termsCheckMark}>✓</Text> : null}
+                {showGoogleDemographicsCta ? (
+                  <Text style={styles.googleCtaHint}>
+                    Google에서 생년월일·성별 제공에 동의하면 바로 저장되고 모임 인증이 완료돼요.
+                  </Text>
+                ) : null}
+
+                {!meetingAuthComplete &&
+                hydratedProfile &&
+                isDemographicsIncomplete(hydratedProfile) &&
+                !isFirebaseGoogleLinked() ? (
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={styles.googleCtaHint}>
+                      성별·생년월일은 프로필 편집에서 입력한 뒤, 아래에서 저장을 진행해 주세요.
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        if (!complianceBusy && !googleDemographicsBusy) {
+                          onRequestClose();
+                          router.push('/profile/edit');
+                        }
+                      }}
+                      disabled={complianceBusy || googleDemographicsBusy}
+                      style={({ pressed }) => [styles.profileEditLink, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="프로필 편집으로 이동">
+                      <Text style={styles.profileEditLinkText}>프로필 편집으로 이동</Text>
+                    </Pressable>
                   </View>
-                  <Text style={[styles.termsLabel, meetingAuthComplete && styles.termsLabelLocked]}>
+                ) : null}
+
+                <View
+                  style={[styles.termsRow, styles.termsRowLocked]}
+                  accessibilityRole="text"
+                  accessibilityLabel="모임 이용 정보 수집 및 이용 동의 필수 항목, 동의됨">
+                  <View style={[styles.termsBox, styles.termsBoxChecked]}>
+                    <Text style={styles.termsCheckMark}>✓</Text>
+                  </View>
+                  <Text style={[styles.termsLabel, styles.termsLabelLocked]}>
                     모임 이용 정보 수집 및 이용 동의 (필수)
                   </Text>
-                </Pressable>
+                </View>
 
-                <>
-                  <Text style={[styles.label, { marginTop: 14 }]}>성별 (필수)</Text>
-                  <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
-                    {(
-                      [
-                        { code: 'MALE' as const, label: '남자' },
-                        { code: 'FEMALE' as const, label: '여자' },
-                      ] as const
-                    ).map(({ code, label }) => {
-                      const selected = genderDemo === code;
-                      return (
-                        <Pressable
-                          key={code}
-                          disabled={
-                            profileBusy ||
-                            complianceBusy ||
-                            meetingAuthComplete ||
-                            googleDemoGenderLocked ||
-                            profileHasStoredGender
-                          }
-                          onPress={() => setGenderDemo(code)}
-                          style={({ pressed }) => [
-                            authFormStyles.genderBinaryBtn,
-                            selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
-                            pressed &&
-                              !(
-                                profileBusy ||
-                                complianceBusy ||
-                                meetingAuthComplete ||
-                                googleDemoGenderLocked ||
-                                profileHasStoredGender
-                              ) &&
-                              authFormStyles.pressed,
-                          ]}
-                          accessibilityRole="radio"
-                          accessibilityState={{ selected, checked: selected }}
-                          accessibilityLabel={label}>
-                          <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
-                            {label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                  <Text style={[styles.label, { marginTop: 14 }]}>생년월일 (필수)</Text>
-                  <BirthdateWheel
-                    value={birthDemo}
-                    onChange={setBirthDemo}
-                    disabled={
-                      profileBusy ||
-                      complianceBusy ||
-                      meetingAuthComplete ||
-                      googleDemoBirthLocked ||
-                      profileHasStoredBirth
-                    }
-                  />
-                </>
-
-                <Text style={[styles.label, { marginTop: 16 }]}>전화번호 인증 (필수)</Text>
-                {isPhoneVerified ? (
-                  <Text style={styles.phoneVerifiedDone}>
-                    전화번호 인증 완료{verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}
-                  </Text>
-                ) : (
+                {!showGoogleDemographicsCta ? (
                   <>
-                    <Text style={styles.subHint}>
-                      {isPhoneVerified
-                        ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}`
-                        : '아직 인증되지 않았어요.'}
-                    </Text>
-                    <View style={styles.otpBlock}>
-                      <Text style={styles.otpLabel}>전화번호</Text>
-                      <View style={styles.otpRow}>
-                        <TextInput
-                          value={phoneField}
-                          onChangeText={(t) => {
-                            const digits = t.replace(/\D/g, '').slice(0, 11);
-                            const v =
-                              digits.length <= 3
-                                ? digits
-                                : digits.length <= 7
-                                  ? `${digits.slice(0, 3)}-${digits.slice(3)}`
-                                  : `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-                            setPhoneField(v);
-                          }}
-                          placeholder="010-1234-5678"
-                          placeholderTextColor="#94a3b8"
-                          style={styles.otpPhoneInput}
-                          keyboardType="phone-pad"
-                          inputMode="tel"
-                          editable={!otpBusy && !profileBusy && !complianceBusy && !isPhoneVerified}
-                        />
-                        <Pressable
-                          onPress={() => void onSendOtp()}
-                          disabled={!canSendOtp || isPhoneVerified}
-                          style={({ pressed }) => [
-                            styles.otpSendBtn,
-                            (!canSendOtp || isPhoneVerified) && styles.otpBtnDisabled,
-                            pressed && canSendOtp && !isPhoneVerified && styles.pressed,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="인증번호 받기">
-                          <Text style={styles.otpSendText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
-                        </Pressable>
-                      </View>
-
-                      {otpVerificationId ? (
-                        <View style={[styles.otpRow, { marginTop: 8 }]}>
-                          <TextInput
-                            value={otpCode}
-                            onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
-                            placeholder="인증번호 6자리"
-                            placeholderTextColor="#94a3b8"
-                            style={styles.otpCodeInput}
-                            keyboardType="number-pad"
-                            inputMode="numeric"
-                            textContentType="oneTimeCode"
-                            editable={!otpBusy && !profileBusy && !complianceBusy}
-                          />
+                    <Text style={[styles.label, { marginTop: 14 }]}>성별 (필수)</Text>
+                    <View style={authFormStyles.genderBinaryWrap} accessibilityRole="radiogroup" accessibilityLabel="성별 선택">
+                      {(
+                        [
+                          { code: 'MALE' as const, label: '남자' },
+                          { code: 'FEMALE' as const, label: '여자' },
+                        ] as const
+                      ).map(({ code, label }) => {
+                        const selected = genderDemo === code;
+                        return (
                           <Pressable
-                            onPress={() => void onConfirmOtp()}
-                            disabled={!canConfirmOtp}
+                            key={code}
+                            disabled={
+                              profileBusy ||
+                              complianceBusy ||
+                              googleDemographicsBusy ||
+                              meetingAuthComplete ||
+                              googleDemoGenderLocked ||
+                              profileHasStoredGender
+                            }
+                            onPress={() => setGenderDemo(code)}
                             style={({ pressed }) => [
-                              styles.otpConfirmBtn,
-                              !canConfirmOtp && styles.otpBtnDisabled,
-                              pressed && canConfirmOtp && styles.pressed,
+                              authFormStyles.genderBinaryBtn,
+                              selected ? authFormStyles.genderBinaryBtnSelected : authFormStyles.genderBinaryBtnIdle,
+                              pressed &&
+                                !(
+                                  profileBusy ||
+                                  complianceBusy ||
+                                  googleDemographicsBusy ||
+                                  meetingAuthComplete ||
+                                  googleDemoGenderLocked ||
+                                  profileHasStoredGender
+                                ) &&
+                                authFormStyles.pressed,
                             ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="인증 확인">
-                            <Text style={styles.otpConfirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected, checked: selected }}
+                            accessibilityLabel={label}>
+                            <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
+                              {label}
+                            </Text>
                           </Pressable>
-                        </View>
-                      ) : null}
-
-                      {otpError ? <Text style={styles.otpError}>{otpError}</Text> : null}
+                        );
+                      })}
                     </View>
+                    <Text style={[styles.label, { marginTop: 14 }]}>생년월일 (필수)</Text>
+                    <BirthdateWheel
+                      value={birthDemo}
+                      onChange={setBirthDemo}
+                      disabled={
+                        profileBusy ||
+                        complianceBusy ||
+                        googleDemographicsBusy ||
+                        meetingAuthComplete ||
+                        googleDemoBirthLocked ||
+                        profileHasStoredBirth
+                      }
+                    />
                   </>
-                )}
+                ) : null}
 
-                {!meetingAuthComplete ? (
+                {MEETING_PHONE_VERIFICATION_UI_ENABLED ? (
+                  <>
+                    <Text style={[styles.label, { marginTop: 16 }]}>전화번호 인증 (필수)</Text>
+                    {isPhoneVerified ? (
+                      <Text style={styles.phoneVerifiedDone}>
+                        전화번호 인증 완료{verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={styles.subHint}>
+                          {isPhoneVerified
+                            ? `인증 완료${verifiedPhoneLabel ? ` · ${verifiedPhoneLabel}` : ''}`
+                            : '아직 인증되지 않았어요.'}
+                        </Text>
+                        <View style={styles.otpBlock}>
+                          <Text style={styles.otpLabel}>전화번호</Text>
+                          <View style={styles.otpRow}>
+                            <TextInput
+                              value={phoneField}
+                              onChangeText={(t) => {
+                                const digits = t.replace(/\D/g, '').slice(0, 11);
+                                const v =
+                                  digits.length <= 3
+                                    ? digits
+                                    : digits.length <= 7
+                                      ? `${digits.slice(0, 3)}-${digits.slice(3)}`
+                                      : `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+                                setPhoneField(v);
+                              }}
+                              placeholder="010-1234-5678"
+                              placeholderTextColor="#94a3b8"
+                              style={styles.otpPhoneInput}
+                              keyboardType="phone-pad"
+                              inputMode="tel"
+                              editable={!otpBusy && !profileBusy && !complianceBusy && !isPhoneVerified}
+                            />
+                            <Pressable
+                              onPress={() => void onSendOtp()}
+                              disabled={!canSendOtp || isPhoneVerified}
+                              style={({ pressed }) => [
+                                styles.otpSendBtn,
+                                (!canSendOtp || isPhoneVerified) && styles.otpBtnDisabled,
+                                pressed && canSendOtp && !isPhoneVerified && styles.pressed,
+                              ]}
+                              accessibilityRole="button"
+                              accessibilityLabel="인증번호 받기">
+                              <Text style={styles.otpSendText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
+                            </Pressable>
+                          </View>
+
+                          {otpVerificationId ? (
+                            <View style={[styles.otpRow, { marginTop: 8 }]}>
+                              <TextInput
+                                value={otpCode}
+                                onChangeText={(t) => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
+                                placeholder="인증번호 6자리"
+                                placeholderTextColor="#94a3b8"
+                                style={styles.otpCodeInput}
+                                keyboardType="number-pad"
+                                inputMode="numeric"
+                                textContentType="oneTimeCode"
+                                editable={!otpBusy && !profileBusy && !complianceBusy}
+                              />
+                              <Pressable
+                                onPress={() => void onConfirmOtp()}
+                                disabled={!canConfirmOtp}
+                                style={({ pressed }) => [
+                                  styles.otpConfirmBtn,
+                                  !canConfirmOtp && styles.otpBtnDisabled,
+                                  pressed && canConfirmOtp && styles.pressed,
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel="인증 확인">
+                                <Text style={styles.otpConfirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
+                              </Pressable>
+                            </View>
+                          ) : null}
+
+                          {otpError ? <Text style={styles.otpError}>{otpError}</Text> : null}
+                        </View>
+                      </>
+                    )}
+                  </>
+                ) : null}
+
+                {showGoogleDemographicsCta ? (
+                  <GinitButton
+                    title={googleDemographicsBusy ? 'Google 연동 중…' : 'Google 인증하기'}
+                    variant="primary"
+                    onPress={() => void onGoogleDemographicsImport()}
+                    disabled={complianceBusy || googleDemographicsBusy || otpBusy || profileBusy}
+                  />
+                ) : null}
+
+                {!meetingAuthComplete && !showGoogleDemographicsCta ? (
                   <GinitButton
                     title={complianceBusy ? '저장 중…' : '인증 및 정보 저장'}
                     variant="primary"
                     onPress={() => void onSubmitMeetingCompliance()}
-                    disabled={complianceBusy || otpBusy || profileBusy}
+                    disabled={complianceBusy || googleDemographicsBusy || otpBusy || profileBusy}
                   />
                 ) : null}
               </ScrollView>
@@ -695,6 +852,25 @@ const styles = StyleSheet.create({
     color: '#64748b',
     lineHeight: 19,
     marginBottom: 12,
+  },
+  googleCtaHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.themeMainColor,
+    lineHeight: 19,
+    marginBottom: 10,
+  },
+  profileEditLink: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  profileEditLinkText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0052CC',
+    textDecorationLine: 'underline',
   },
   termsRow: {
     flexDirection: 'row',

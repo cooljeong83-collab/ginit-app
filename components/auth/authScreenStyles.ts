@@ -164,10 +164,10 @@ export const authScreenStyles = StyleSheet.create({
   },
   genderBinaryBtnSelected: {
     // CTA 버튼(프로필 저장 등) 톤에 맞춘 하이라이트(민트 글래스)
-    backgroundColor: 'rgba(134, 211, 183, 0.22)',
+    backgroundColor: 'rgba(60, 0, 100, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(134, 211, 183, 0.55)',
-    shadowColor: 'rgba(134, 211, 183, 0.25)',
+    borderColor: 'rgba(187, 134, 211, 0.55)',
+    shadowColor: 'rgba(208, 134, 211, 0)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 8,

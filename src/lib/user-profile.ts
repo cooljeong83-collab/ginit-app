@@ -12,6 +12,7 @@ import {
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { profilesSource } from '@/src/lib/hybrid-data-source';
 import { supabase } from '@/src/lib/supabase';
+import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from './meeting-phone-verification-ui';
 
 export const USERS_COLLECTION = 'users';
 
@@ -439,13 +440,13 @@ export function hasTermsAgreementRecorded(p: UserProfile | null | undefined): bo
   return p.termsAgreedAt != null;
 }
 
-/** 모임 이용 동의·전화 인증·(간편가입 등) 성별·생년까지 갖춘 경우 */
+/** 모임 이용 동의·(옵션)전화 인증·(간편가입 등) 성별·생년까지 갖춘 경우 — `MEETING_PHONE_VERIFICATION_UI_ENABLED`가 false면 전화 인증을 생략합니다. */
 export function isMeetingServiceComplianceComplete(
   p: UserProfile | null | undefined,
   appUserId?: string | null,
 ): boolean {
   if (!p || p.isWithdrawn === true) return false;
-  if (!isUserPhoneVerified(p)) return false;
+  if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isUserPhoneVerified(p)) return false;
   if (!hasTermsAgreementRecorded(p)) return false;
   if (meetingDemographicsIncomplete(p, appUserId)) return false;
   return true;

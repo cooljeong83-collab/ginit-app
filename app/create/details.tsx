@@ -130,7 +130,7 @@ import {
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
   getUserProfile,
-  isUserPhoneVerified,
+  isMeetingServiceComplianceComplete,
   meetingDemographicsIncomplete,
   type UserProfile,
 } from '@/src/lib/user-profile';
@@ -1517,22 +1517,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
 
-  const firstScheduleForPlaceQuery = useMemo(() => {
-    const first = dateCandidates[0];
-    const sd = (first?.startDate ?? '').trim();
-    if (sd) {
-      const stRaw = (first?.startTime ?? seedTime).trim() || seedTime;
-      return { startDate: sd, startTime: clampHm(stRaw) };
-    }
-    const fallbackDate = seedDate.trim() || fmtDate(new Date());
-    return { startDate: fallbackDate, startTime: clampHm(seedTime.trim() || '15:00') };
-  }, [dateCandidates, seedDate, seedTime]);
-
   const placeSuggestedQueries = useMemo(() => {
     return buildPlaceSuggestedSearchQueries({
       bias: placeBiasHint,
       categoryLabel: (placeThemeLabel || '').trim() || '모임',
-      schedule: firstScheduleForPlaceQuery,
       minParticipants: placeMinParticipants,
       maxParticipants: placeMaxParticipants,
       specialtyKind: placeThemeSpecialtyKind,
@@ -1553,8 +1541,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placeActivityKindLabels,
     placeGameKindLabels,
     placeFocusKnowledgePreferenceLabels,
-    firstScheduleForPlaceQuery.startDate,
-    firstScheduleForPlaceQuery.startTime,
   ]);
 
   useEffect(() => {
@@ -1567,7 +1553,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       const defaultQ = buildDefaultPlaceSearchQuery({
         bias: b,
         categoryLabel: (placeThemeLabel || '').trim() || '모임',
-        schedule: firstScheduleForPlaceQuery,
         minParticipants: placeMinParticipants,
         maxParticipants: placeMaxParticipants,
         specialtyKind: placeThemeSpecialtyKind,
@@ -1586,8 +1571,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       alive = false;
     };
   }, [
-    firstScheduleForPlaceQuery.startDate,
-    firstScheduleForPlaceQuery.startTime,
     placeMinParticipants,
     placeMaxParticipants,
     placeThemeLabel,
@@ -3568,21 +3551,11 @@ export default function CreateDetailsScreen() {
     let hostProfile: UserProfile | null = null;
     try {
       hostProfile = await getUserProfile(userId.trim());
-      if (!isUserPhoneVerified(hostProfile)) {
-        Alert.alert('인증 정보 등록', '모임을 이용하시려면 인증 정보 등록을 완료하셔야 합니다.', [
+      const uid = userId.trim();
+      if (!hostProfile || !isMeetingServiceComplianceComplete(hostProfile, uid)) {
+        Alert.alert('인증 정보 등록', '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', [
           { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
         ]);
-        return;
-      }
-      if (meetingDemographicsIncomplete(hostProfile, userId.trim())) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ],
-        );
         return;
       }
     } catch {

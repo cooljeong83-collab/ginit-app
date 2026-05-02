@@ -14,7 +14,6 @@ const OPTIONS = [
   '커리어·멘토링',
   '글쓰기·기획',
   '취미클래스',
-  '기타',
 ] as const;
 
 export type FocusKnowledgePreferenceProps = {

@@ -222,7 +222,7 @@ export default function SignUpScreen() {
       }
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);
       setOtpVerificationId(verificationId);
-      if (Platform.OS === 'android') void smsRetriever.start();
+      // Firebase verifyPhoneNumber와 SMS User Consent 이중 구독 시 Android에서 프로세스 종료가 날 수 있어 start 생략.
       InteractionManager.runAfterInteractions(() => {
         requestAnimationFrame(() => {
           scrollRef.current?.scrollToEnd?.(true);

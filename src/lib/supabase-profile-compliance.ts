@@ -3,8 +3,10 @@ import { supabase } from '@/src/lib/supabase';
 export type MeetingComplianceSyncInput = {
   appUserId: string;
   nickname: string;
+  /** 비어 있으면 Supabase `profiles.phone`은 null로 반영 */
   phoneE164: string;
-  phoneVerifiedAtIso: string;
+  /** null이면 `phone_verified_at`를 null로 반영(전화 인증 생략 모드) */
+  phoneVerifiedAtIso: string | null;
   termsAgreedAtIso: string;
 };
 
