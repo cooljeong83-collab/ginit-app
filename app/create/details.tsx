@@ -84,6 +84,8 @@ import {
   coerceDateCandidate,
   createPointCandidate,
   fmtDateYmd,
+  maxSelectableScheduleDayStartLocal,
+  maxSelectableScheduleYmdLocal,
   primaryScheduleFromDateCandidate,
   validateDateCandidate,
 } from '@/src/lib/date-candidate';
@@ -1476,6 +1478,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     return undefined;
   }, [picker, dateCandidates]);
 
+  const iosPickerMaximumDate = useMemo(() => {
+    if (!picker || picker.field !== 'startDate') return undefined;
+    const maxD = maxSelectableScheduleDayStartLocal();
+    return new Date(maxD.getFullYear(), maxD.getMonth(), maxD.getDate(), 23, 59, 59, 999);
+  }, [picker]);
+
   const applyIosPicker = useCallback(async () => {
     if (!picker) return;
     const { rowId, field } = picker;
@@ -1752,6 +1760,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       });
 
       const todayYmd = fmtDate(new Date());
+      const maxYmd = maxSelectableScheduleYmdLocal();
       const compactCalendar = bare && wizardSegment === 'schedule';
 
       return (
@@ -1775,12 +1784,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     const has = times.length > 0;
                     const lastTime = times[times.length - 1] ?? '';
                     const isPast = c.ymd < todayYmd;
+                    const isAfterWindow = c.ymd > maxYmd;
+                    const cellDisabled = isPast || isAfterWindow;
                     return (
                       <Pressable
                         key={c.ymd}
-                        disabled={isPast}
+                        disabled={cellDisabled}
                         onPress={() => {
-                          if (isPast) return;
+                          if (cellDisabled) return;
                           openTimePickerForDate(c.ymd, has ? lastTime : DEFAULT_CALENDAR_PICK_TIME, 'calendar');
                         }}
                         style={({ pressed }) => [
@@ -1789,8 +1800,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                           !weekHasAnyTimes && styles.calendarCellRowEmpty,
                           !c.inMonth && styles.calendarCellOut,
                           has && styles.calendarCellHas,
-                          isPast && styles.calendarCellDisabled,
-                          pressed && !isPast && styles.calendarCellPressed,
+                          cellDisabled && styles.calendarCellDisabled,
+                          pressed && !cellDisabled && styles.calendarCellPressed,
                         ]}
                         accessibilityRole="button"
                         accessibilityLabel={`${c.ymd}${has ? ` ${times.length}개` : ''}`}>
@@ -1966,6 +1977,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           fmtDate(new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1)),
         );
         const pagerW = scheduleCalendarPagerW;
+        const maxYmdNav = maxSelectableScheduleYmdLocal();
+        const maxMonthStartNav = monthStartYmd(maxYmdNav);
+        const canGoScheduleCalendarNext = monthStartYmd(nextAnchor) <= maxMonthStartNav;
 
         return (
           <View
@@ -1996,11 +2010,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 <Text style={styles.scheduleCalendarTitle}>{monthLabel}</Text>
               </Pressable>
               <Pressable
+                disabled={!canGoScheduleCalendarNext}
                 onPress={() => {
+                  if (!canGoScheduleCalendarNext) return;
                   const next = new Date(year, month + 1, 1);
                   setCalendarMonth(monthStartYmd(fmtDate(next)));
                 }}
-                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
+                style={({ pressed }) => [
+                  styles.calendarNavBtn,
+                  !canGoScheduleCalendarNext && { opacity: 0.35 },
+                  pressed && canGoScheduleCalendarNext && styles.calendarNavBtnPressed,
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel="다음 달">
                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
@@ -2038,6 +2058,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     scheduleCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
                     setCalendarMonth(monthStartYmd(fmtDate(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))));
                   } else if (ix === 2) {
+                    const nxtMonthStart = monthStartYmd(
+                      fmtDate(new Date(cur.getFullYear(), cur.getMonth() + 1, 1)),
+                    );
+                    if (nxtMonthStart > maxMonthStartNav) return;
                     scheduleCalendarPagerIgnoreMomentumEndRef.current = true;
                     scheduleCalendarFadeAnimRef.current?.stop?.();
                     scheduleCalendarSwipeFadeAfterRecenterRef.current = true;
@@ -2502,6 +2526,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           value={scheduleCalendarYmPick.draft}
           mode="date"
           display="spinner"
+          minimumDate={(() => {
+            const s = new Date();
+            return new Date(s.getFullYear(), s.getMonth(), 1);
+          })()}
+          maximumDate={(() => {
+            const mxd = maxSelectableScheduleDayStartLocal();
+            return new Date(mxd.getFullYear(), mxd.getMonth() + 1, 0, 23, 59, 59, 999);
+          })()}
           onChange={(event, date) => {
             const t = (event as unknown as { type?: string } | null)?.type ?? '';
             if (t === 'dismissed') {
@@ -2561,6 +2593,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 display="spinner"
                 locale="ko-KR"
                 themeVariant="light"
+                minimumDate={(() => {
+                  const s = new Date();
+                  return new Date(s.getFullYear(), s.getMonth(), 1);
+                })()}
+                maximumDate={(() => {
+                  const mxd = maxSelectableScheduleDayStartLocal();
+                  return new Date(mxd.getFullYear(), mxd.getMonth() + 1, 0, 23, 59, 59, 999);
+                })()}
                 onChange={(_event: DateTimePickerEvent, date) => {
                   if (!date) return;
                   setScheduleCalendarYmPick((prev) => (prev ? { draft: date } : prev));
@@ -2598,6 +2638,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   if (date) setIosDraft(date);
                 }}
                 minimumDate={iosPickerMinimumDate}
+                maximumDate={iosPickerMaximumDate}
                 locale="ko-KR"
                 themeVariant="dark"
               />
@@ -2612,6 +2653,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           mode={picker.field === 'startDate' ? 'date' : 'time'}
           display="spinner"
           minimumDate={iosPickerMinimumDate}
+          maximumDate={iosPickerMaximumDate}
           {...({ accentColor: GinitTheme.colors.primary } as any)}
           onChange={(event: DateTimePickerEvent, date) => {
             const { rowId, field } = picker;

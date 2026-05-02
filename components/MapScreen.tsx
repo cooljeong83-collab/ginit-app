@@ -1,3 +1,5 @@
+import Feather from '@expo/vector-icons/Feather';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   NaverMapMarkerOverlay,
   NaverMapView,
@@ -8,9 +10,9 @@ import {
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
-import Feather from '@expo/vector-icons/Feather';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -28,8 +30,9 @@ import {
   UIManager,
   View,
   useWindowDimensions,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
-  type NativeSyntheticEvent
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import MapView from 'react-native-map-clustering';
@@ -73,11 +76,13 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
-import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
 import { approximateCenterLatLngForFeedRegion } from '@/src/lib/feed-region-map-center';
 import { loadActiveFeedRegion, loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
+import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
+import { getMeetingMapPinAccentColor } from '@/src/lib/map-meeting-marker-appearance';
 import {
   MAP_AVATAR_CLUSTERING_MAX_DELTA,
   groupMeetingsByCoordinateOverlap,
@@ -93,6 +98,7 @@ import {
   formatPublicMeetingGenderSummary,
   formatPublicMeetingSettlementSummary,
   getMeetingRecruitmentPhase,
+  isMeetingScheduledTodaySeoul,
   meetingCategoryDisplayLabel,
   meetingParticipantCount,
   parsePublicMeetingDetailsConfig,
@@ -127,7 +133,6 @@ const SHEET_REVEAL_TIMING_MS = 340;
 const SHEET_SNAP_THRESHOLD = 0.52;
 const SHEET_VELOCITY_OPEN = -520;
 const SHEET_VELOCITY_CLOSE = 520;
-const MARKER_DARK_NAVY = '#0B1220';
 const MY_LOCATION_CENTER_EXTRA_BOTTOM_PX = 84;
 /** 내 위치 버튼 탭 시 지도 가시 줌 — 중심 기준 반경 2km */
 const MY_LOCATION_BUTTON_VIEW_RADIUS_KM = 1;
@@ -182,7 +187,7 @@ const SHEET_CTA_BLOCK_HEIGHT_PX = 8 + 14 + 14 + 20;
 // 검색·RPC 반경(mapRadiusKm)과는 별도입니다.
 const INITIAL_VIEW_NS_SPAN_METERS = 2000;
 
-// Android(NaverMap): 이 줌 레벨보다 낮으면 “숫자 클러스터”, 높으면 “아바타 마커” 표시
+/** Android(Naver): 이 줌 이하에서는 SDK 숫자 클러스터, 그 이상에서는 개별 마커(핀+caption) */
 const NAVER_CLUSTER_MAX_ZOOM = 15;
 
 // 위치 권한 미허용·관심 지역 미설정 시 기본 진입 중심(영등포구)
@@ -213,10 +218,6 @@ function meetingProgressPillStyles(phase: MeetingRecruitmentPhase) {
         text: [styles.progressBadgeText, styles.progressBadgeTextLight],
       };
   }
-}
-
-function markerPinColor(m: Meeting): string {
-  return MARKER_DARK_NAVY;
 }
 
 /** 동일 장소 스택에서 `createdAt`이 가장 이른 모임을 대표로 쓰기 위한 정렬 키 */
@@ -505,6 +506,9 @@ export default function MapScreen() {
   const [genderByUserId, setGenderByUserId] = useState<Map<string, string>>(new Map());
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
   const [recruitingOnly, setRecruitingOnly] = useState(true);
+  /** 탐색 상단 카테고리 팝업에서 저장 시 적용 — 서울 달력 기준 오늘 일정 모임만 */
+  const [mapTodayOnly, setMapTodayOnly] = useState(false);
+  const [categoryBarTodayOnlyDraft, setCategoryBarTodayOnlyDraft] = useState(false);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
   const [categories, setCategories] = useState<Category[]>([]);
@@ -523,6 +527,10 @@ export default function MapScreen() {
     INITIAL_VIEW_NS_SPAN_METERS / 111320,
   );
   const [naverZoom, setNaverZoom] = useState<number>(16);
+  /** 상단 카테고리 칩 가로 스크롤 — 오른쪽 «더 있음» 표시용 */
+  const [chipScrollLayoutW, setChipScrollLayoutW] = useState(0);
+  const [chipScrollContentW, setChipScrollContentW] = useState(0);
+  const [chipScrollOffsetX, setChipScrollOffsetX] = useState(0);
   const isMapScreenFocused = useIsFocused();
 
   /** 하이브리드 최초 부트 전, 또는 지도 반경 RPC 응답 전까지 시트 스플래시 */
@@ -954,9 +962,10 @@ export default function MapScreen() {
       if (m.isPublic === false) return false;
       if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
       if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
+      if (mapTodayOnly && !isMeetingScheduledTodaySeoul(m)) return false;
       return true;
     });
-  }, [textFilteredMeetings, selectedCategoryId, categories, recruitingOnly]);
+  }, [textFilteredMeetings, selectedCategoryId, categories, recruitingOnly, mapTodayOnly]);
 
   /** 목록·거리 표시: 내 위치(GPS) 기준. GPS 없을 때 «가까운 순»은 임박순과 동일하게 정렬 */
   const sortedFilteredMeetings = useMemo(() => {
@@ -1144,12 +1153,33 @@ export default function MapScreen() {
     [categories, mapBarVisibleCategoryIds],
   );
 
+  const showMapCategoryChipsScrollMore = useMemo(() => {
+    const lw = chipScrollLayoutW;
+    const cw = chipScrollContentW;
+    const ox = chipScrollOffsetX;
+    if (lw < 8 || cw <= lw + 4) return false;
+    return ox < cw - lw - 8;
+  }, [chipScrollLayoutW, chipScrollContentW, chipScrollOffsetX]);
+
+  const onMapCategoryChipsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setChipScrollOffsetX(e.nativeEvent.contentOffset.x);
+  }, []);
+
+  const onMapCategoryChipsContentSizeChange = useCallback((w: number) => {
+    setChipScrollContentW(w);
+  }, []);
+
+  const onMapCategoryChipsLayout = useCallback((e: LayoutChangeEvent) => {
+    setChipScrollLayoutW(e.nativeEvent.layout.width);
+  }, []);
+
   /** 상단 칩 일부만 표시하도록 저장된 경우 → 옵션 버튼을 선택된 칩 스타일로 */
   const mapCategoryBarFilterActive = useMemo(() => {
+    if (mapTodayOnly) return true;
     if (categories.length === 0) return false;
     if (mapBarVisibleCategoryIds == null) return false;
     return mapBarVisibleCategoryIds.length < categories.length;
-  }, [categories.length, mapBarVisibleCategoryIds]);
+  }, [categories.length, mapBarVisibleCategoryIds, mapTodayOnly]);
 
   useEffect(() => {
     if (!categories.length || mapBarVisibleCategoryIds == null) return;
@@ -1175,8 +1205,9 @@ export default function MapScreen() {
     } else {
       setCategoryBarDraft(ordered.filter((id) => mapBarVisibleCategoryIds.includes(id)));
     }
+    setCategoryBarTodayOnlyDraft(mapTodayOnly);
     setMapCategoryBarModalOpen(true);
-  }, [sortedMapCategoryMaster, mapBarVisibleCategoryIds]);
+  }, [sortedMapCategoryMaster, mapBarVisibleCategoryIds, mapTodayOnly]);
 
   const closeMapCategoryBarModal = useCallback(() => setMapCategoryBarModalOpen(false), []);
 
@@ -1228,8 +1259,9 @@ export default function MapScreen() {
         : [...categoryBarDraft];
     setMapBarVisibleCategoryIds(next);
     await persistMapCategoryBarVisibleIds(next);
+    setMapTodayOnly(categoryBarTodayOnlyDraft);
     setMapCategoryBarModalOpen(false);
-  }, [sortedMapCategoryMaster, categoryBarDraft]);
+  }, [sortedMapCategoryMaster, categoryBarDraft, categoryBarTodayOnlyDraft]);
 
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
@@ -1935,44 +1967,93 @@ export default function MapScreen() {
                   : []
               }
               accessibilityLabel="모임 지도 (네이버맵)">
+              {/*
+               * 줌 아웃: SDK `clusters`로 동그라미+개수. 줌 인: `NaverMapMarkerOverlay`로 기본 핀+caption(이모지).
+               * 클러스터 leaf에는 caption API가 없어, 멀리서는 숫자 묶음만 보이는 것이 정상입니다.
+               */}
               {naverUseClusters
                 ? null
                 : mapMarkerRenderItems.map((item) => {
-                    if (item.kind === 'single') {
-                      const m = item.meeting;
-                      const c = mapMarkerCoordsByMeetingId.get(m.id) ?? {
-                        latitude: m.latitude as number,
-                        longitude: m.longitude as number,
-                      };
-                      return (
-                        <NaverMapMarkerOverlay
-                          key={item.key}
-                          latitude={c.latitude}
-                          longitude={c.longitude}
-                          // image={{}}
-                          onTap={() => onPeopleMarkerPress(m)}>
-                          <View pointerEvents="none" collapsable={false} style={styles.naverDarkNavyMarker} />
-                        </NaverMapMarkerOverlay>
-                      );
-                    }
-                    const lead = item.lead;
-                    const c = mapMarkerCoordsByMeetingId.get(lead.id) ?? {
-                      latitude: lead.latitude as number,
-                      longitude: lead.longitude as number,
-                    };
-                    return (
-                      <NaverMapMarkerOverlay
-                        key={item.key}
-                        latitude={c.latitude}
-                        longitude={c.longitude}
-                        // image={{}}
-                        onTap={() => onPeopleMarkerPress(lead)}>
-                        <View pointerEvents="none" collapsable={false} style={styles.naverMapStackCount}>
-                          <Text style={styles.naverMapStackCountText}>{item.count}</Text>
+                if (item.kind === 'single') {
+                  const m = item.meeting;
+                  const selected = m.id === selectedMeetingId;
+                  const c = mapMarkerCoordsByMeetingId.get(m.id) ?? {
+                    latitude: m.latitude as number,
+                    longitude: m.longitude as number,
+                  };
+                  const pinColor = getMeetingMapPinAccentColor(m, categories);
+                  const emoji = categoryEmojiForMeeting(m, categories);
+                  return (
+                    <NaverMapMarkerOverlay
+                      key={item.key}
+                      latitude={c.latitude}
+                      longitude={c.longitude}
+                      width={56}
+                      height={60}
+                      anchor={{ x: 0.5, y: 1 }}
+                      zIndex={selected ? 1200 : 600}
+                      onTap={() => onPeopleMarkerPress(m)}>
+                      <View
+                        key={`${m.id}:${pinColor}:${emoji}`}
+                        pointerEvents="none"
+                        collapsable={false}
+                        style={styles.naverMeetingPinRoot}>
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={60}
+                          color={pinColor}
+                          style={styles.naverMeetingPinGlyph}
+                        />
+                        <View style={styles.naverMeetingPinEmojiDisc} collapsable={false}>
+                          <Text style={styles.naverMeetingPinEmojiText} allowFontScaling={false}>
+                            {emoji}
+                          </Text>
                         </View>
-                      </NaverMapMarkerOverlay>
-                    );
-                  })}
+                      </View>
+                    </NaverMapMarkerOverlay>
+                  );
+                }
+                const lead = item.lead;
+                const stackSelected = item.meetings.some((x) => x.id === selectedMeetingId);
+                const c = mapMarkerCoordsByMeetingId.get(lead.id) ?? {
+                  latitude: lead.latitude as number,
+                  longitude: lead.longitude as number,
+                };
+                const stackEmoji = categoryEmojiForMeeting(lead, categories);
+                const stackPinColor = getMeetingMapPinAccentColor(lead, categories);
+                return (
+                  <NaverMapMarkerOverlay
+                    key={item.key}
+                    latitude={c.latitude}
+                    longitude={c.longitude}
+                    width={56}
+                    height={60}
+                    anchor={{ x: 0.5, y: 1 }}
+                    zIndex={stackSelected ? 1200 : 600}
+                    onTap={() => onPeopleMarkerPress(lead)}>
+                    <View
+                      key={`${lead.id}:stack:${stackPinColor}:${stackEmoji}:${item.count}`}
+                      pointerEvents="none"
+                      collapsable={false}
+                      style={styles.naverMeetingPinRoot}>
+                      <MaterialCommunityIcons
+                        name="map-marker"
+                        size={60}
+                        color={stackPinColor}
+                        style={styles.naverMeetingPinGlyph}
+                      />
+                      <View style={styles.naverMeetingPinEmojiDiscStack} collapsable={false}>
+                        <Text style={styles.naverMeetingPinEmojiTextStack} allowFontScaling={false}>
+                          {stackEmoji}
+                        </Text>
+                        <Text style={styles.naverMeetingPinStackCountText} allowFontScaling={false}>
+                          {item.count}
+                        </Text>
+                      </View>
+                    </View>
+                  </NaverMapMarkerOverlay>
+                );
+              })}
 
             </NaverMapView>
           ) : (
@@ -2002,19 +2083,28 @@ export default function MapScreen() {
                     latitude: m.latitude as number,
                     longitude: m.longitude as number,
                   };
+                  const iosPinAccent = getMeetingMapPinAccentColor(m, categories);
                   return (
                     <Marker
                       key={item.key}
                       identifier={m.id}
                       coordinate={coord}
+                      anchor={{ x: 0.5, y: 0.5 }}
                       tracksViewChanges={false}
                       onPress={(e) => {
                         (e as any)?.stopPropagation?.();
                         onPeopleMarkerPress(m);
                       }}
-                      pinColor={markerPinColor(m)}
-                      zIndex={selected ? 1200 : 600}
-                    />
+                      zIndex={selected ? 1200 : 600}>
+                      <View
+                        pointerEvents="none"
+                        collapsable={false}
+                        style={[styles.mapCategoryEmojiMarker, { borderColor: iosPinAccent }]}>
+                        <Text style={styles.mapCategoryEmojiMarkerText} allowFontScaling={false}>
+                          {categoryEmojiForMeeting(m, categories)}
+                        </Text>
+                      </View>
+                    </Marker>
                   );
                 }
                 const lead = item.lead;
@@ -2023,6 +2113,7 @@ export default function MapScreen() {
                   latitude: lead.latitude as number,
                   longitude: lead.longitude as number,
                 };
+                const iosStackAccent = getMeetingMapPinAccentColor(lead, categories);
                 return (
                   <Marker
                     key={item.key}
@@ -2035,7 +2126,15 @@ export default function MapScreen() {
                       onPeopleMarkerPress(lead);
                     }}
                     zIndex={stackSelected ? 1200 : 600}>
-                    <View style={styles.mapStackCountBubble} collapsable={false}>
+                    <View
+                      style={[
+                        styles.mapStackCountBubble,
+                        { backgroundColor: iosStackAccent, borderColor: GinitTheme.colors.surfaceStrong },
+                      ]}
+                      collapsable={false}>
+                      <Text style={styles.mapStackCountBubbleEmoji} allowFontScaling={false}>
+                        {categoryEmojiForMeeting(lead, categories)}
+                      </Text>
                       <Text style={styles.mapStackCountBubbleText}>{item.count}</Text>
                     </View>
                   </Marker>
@@ -2108,28 +2207,50 @@ export default function MapScreen() {
                   color={mapCategoryBarFilterActive ? '#ffffff' : '#475569'}
                 />
               </Pressable>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-                style={styles.chipScroll}
-                onScrollBeginDrag={() => setMapMovedSinceSearch(true)}>
-                {mapCategoryChips.map((chip) => {
-                  const active = chip.filterId === selectedCategoryId;
-                  return (
-                    <Pressable
-                      key={chip.filterId ?? 'all'}
-                      onPress={() => setSelectedCategoryId(chip.filterId)}
-                      style={[styles.topChip, active && styles.topChipActive]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}>
-                      <Text style={[styles.topChipLabel, active && styles.topChipLabelActive]} numberOfLines={1}>
-                        {chip.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+              <View style={styles.chipScrollWrap}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chipRow}
+                  style={styles.chipScroll}
+                  onLayout={onMapCategoryChipsLayout}
+                  onContentSizeChange={(w) => onMapCategoryChipsContentSizeChange(w)}
+                  onScroll={onMapCategoryChipsScroll}
+                  scrollEventThrottle={32}
+                  onScrollBeginDrag={() => setMapMovedSinceSearch(true)}>
+                  {mapCategoryChips.map((chip) => {
+                    const active = chip.filterId === selectedCategoryId;
+                    return (
+                      <Pressable
+                        key={chip.filterId ?? 'all'}
+                        onPress={() => setSelectedCategoryId(chip.filterId)}
+                        style={[styles.topChip, active && styles.topChipActive]}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}>
+                        <Text style={[styles.topChipLabel, active && styles.topChipLabelActive]} numberOfLines={1}>
+                          {chip.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                {showMapCategoryChipsScrollMore ? (
+                  <View
+                    pointerEvents="none"
+                    style={styles.chipScrollMoreCue}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants">
+                    <LinearGradient
+                      colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.88)']}
+                      locations={[0.15, 1]}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Feather name="chevron-right" size={18} color="#64748b" style={styles.chipScrollMoreIcon} />
+                  </View>
+                ) : null}
+              </View>
             </View>
           </BlurView>
         </View>
@@ -2265,8 +2386,13 @@ export default function MapScreen() {
             accessibilityLabel="카테고리 표시 설정 닫기"
           />
           <View style={[styles.modalCard, { maxHeight: Math.min(560, Math.floor(windowHeight * 0.82)) }]}>
+            
             <Text style={styles.modalTitle}>상단 카테고리</Text>
-            <Text style={styles.modalHint}>지도 위 가로 칩에 나올 카테고리만 골라요. «전체»는 항상 맨 앞에 있어요.</Text>
+            <Text style={styles.modalHint}>
+              지도 위 가로 칩에 나올 카테고리만 골라요. «전체»는 항상 맨 앞에 있어요. 카테고리와 «당일 모임만 보기»는 «저장»할 때
+              반영돼요.
+            </Text>
+            <View style={styles.mapCategoryBarModalDivider} />
             <Pressable
               onPress={toggleCategoryBarSelectAll}
               style={({ pressed }) => [
@@ -2283,6 +2409,7 @@ export default function MapScreen() {
                 <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
               )}
             </Pressable>
+            <View style={styles.mapCategoryBarModalDivider} />
             <ScrollView
               style={[
                 styles.categoryBarModalScroll,
@@ -2312,6 +2439,31 @@ export default function MapScreen() {
                 );
               })}
             </ScrollView>
+            <View style={[styles.mapCategoryBarModalDivider, styles.mapCategoryBarModalDividerBeforeToday]} />
+            <Pressable
+              onPress={() => setCategoryBarTodayOnlyDraft((v) => !v)}
+              style={({ pressed }) => [
+                styles.mapCategoryBarModalRow,
+                styles.mapCategoryBarModalRowTall,
+                pressed && styles.modalRowPressed,
+              ]}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: categoryBarTodayOnlyDraft }}
+              accessibilityLabel="당일 모임만 보기">
+              <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                <Text style={styles.modalRowLabel}>당일 모임만 보기</Text>
+                <Text style={styles.mapCategoryBarModalSubHint} numberOfLines={2}>
+                  한국 기준 오늘 날짜로 잡힌 일정만 지도·목록에 표시합니다.
+                </Text>
+              </View>
+              <View style={styles.mapCategoryBarModalCheckCol}>
+                {categoryBarTodayOnlyDraft ? (
+                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
+                ) : (
+                  <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+                )}
+              </View>
+            </Pressable>
             <View style={styles.categoryBarModalActions}>
               <Pressable
                 onPress={closeMapCategoryBarModal}
@@ -2404,9 +2556,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
+  chipScrollWrap: {
+    flex: 1,
+    minWidth: 0,
+    position: 'relative',
+  },
   chipScroll: {
     flex: 1,
     maxHeight: 40,
+  },
+  chipScrollMoreCue: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 36,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingRight: 2,
+  },
+  chipScrollMoreIcon: {
+    zIndex: 1,
   },
   chipRow: {
     alignItems: 'center',
@@ -2780,7 +2950,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: '#64748b',
-    marginBottom: 16,
+    marginBottom: 0,
   },
   modalRow: {
     flexDirection: 'row',
@@ -2792,12 +2962,31 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
   /** 상단 카테고리 설정 모달만: 구분선 없음·행 간격 살짝 넓힘 */
+  mapCategoryBarModalDivider: {
+    height: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: GinitTheme.colors.border,
+    marginHorizontal: 4,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  mapCategoryBarModalDividerBeforeToday: {
+    marginTop: 10,
+    marginBottom: 6,
+  },
   mapCategoryBarModalRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 9,
     paddingHorizontal: 4,
+  },
+  mapCategoryBarModalRowTall: {
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+  },
+  mapCategoryBarModalCheckCol: {
+    paddingTop: 2,
   },
   modalRowPressed: {
     backgroundColor: 'rgba(0, 82, 204, 0.06)',
@@ -2806,6 +2995,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#0f172a',
+  },
+  mapCategoryBarModalSubHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
+    color: '#64748b',
   },
   modalCloseBtn: {
     marginTop: 16,
@@ -3086,51 +3282,112 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     lineHeight: 20,
   },
-  naverDarkNavyMarker: {
+  /** Android 네이버: MCI 핀 + 흰 원(이모지) — 핀 머리(상단 둥근 부분) 안에 맞춤 */
+  naverMeetingPinRoot: {
+    width: 56,
+    height: 60,
+    position: 'relative',
+  },
+  naverMeetingPinGlyph: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 0,
+    zIndex: 0,
+  },
+  naverMeetingPinEmojiDisc: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    width: 28,
+    height: 28,
+    marginLeft: 4,
+    borderRadius: 12,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  naverMeetingPinEmojiDiscStack: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    width: 29,
+    height: 29,
+    borderRadius: 14,
+    marginLeft: 4,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  naverMeetingPinEmojiText: {
+    fontSize: 14,
+    lineHeight: 16,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
+  },
+  naverMeetingPinEmojiTextStack: {
+    fontSize: 12,
+    lineHeight: 14,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
+  },
+  naverMeetingPinStackCountText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GinitTheme.colors.text,
+    marginTop: -2,
+  },
+  mapCategoryEmojiMarker: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: MARKER_DARK_NAVY,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
     borderWidth: 2,
-    borderColor: '#fff',
-    shadowColor: 'rgba(15, 23, 42, 0.28)',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  /** 동일 좌표 복수 모임: 클러스터와 동일 톤의 숫자 마커 */
-  naverMapStackCount: {
-    minWidth: 44,
-    height: 44,
-    paddingHorizontal: 8,
-    borderRadius: 22,
+    borderColor: GinitTheme.colors.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: GinitTheme.colors.primary,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
     shadowColor: 'rgba(15, 23, 42, 0.28)',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,
     shadowRadius: 10,
     elevation: 8,
   },
-  naverMapStackCountText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#FFFFFF',
+  mapCategoryEmojiMarkerText: {
+    fontSize: 20,
+    lineHeight: 24,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
   },
   mapStackCountBubble: {
     minWidth: 44,
     height: 44,
     paddingHorizontal: 8,
     borderRadius: 22,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
     backgroundColor: GinitTheme.colors.primary,
     borderWidth: 2,
     borderColor: '#FFFFFF',
+  },
+  mapStackCountBubbleEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
   },
   mapStackCountBubbleText: {
     fontSize: 17,

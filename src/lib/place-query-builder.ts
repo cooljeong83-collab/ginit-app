@@ -546,7 +546,7 @@ function joinQueryParts(parts: (string | null | undefined)[]): string {
  * 장소 검색 입력란 기본값 (구역 + 시간대·테마·인원 보강).
  * 영화 모임은 **지역 + 영화관** 고정.
  * Play & Vibe(게임 종류 선택 시)는 **지역 + 게임 종류**만 사용.
- * PcGame major는 **지역 + 브랜드 PC방** 중 하나(시드 기반).
+ * PcGame major는 **지역 + PC방** 고정(첫 자동 입력). 브랜드 키워드는 추천 칩에서 제공.
  */
 export function buildDefaultPlaceSearchQuery(input: PlaceQueryBuilderInput): string {
   const seed = buildSeedNumber(input);
@@ -557,7 +557,7 @@ export function buildDefaultPlaceSearchQuery(input: PlaceQueryBuilderInput): str
     return joinQueryParts([bias, '영화관']);
   }
   if (isPcGamePlaceQuery(input)) {
-    return joinQueryParts([bias, pick(PC_BANG_BRAND_CHIP_SUFFIXES, seed)]);
+    return joinQueryParts([bias, 'PC방']);
   }
   const playVibeGamesEarly = normalizedGameKinds(input);
   if (isPlayAndVibeGamesPlaceQuery(input) && playVibeGamesEarly.length > 0) {
@@ -676,13 +676,17 @@ function buildPlayVibePlaceSuggestedQueries(bias: string, gameKinds: readonly st
   return out;
 }
 
-/** PcGame major — 추천어: 지역 + 탑존·액토즈 등 브랜드 PC방 키워드(최대 8개) */
+/** PcGame major — 추천어: **지역+PC방**을 맨 앞에 두고, 이어서 탑존·액토즈 등 브랜드 키워드(최대 8개) */
 function buildPcGamePlaceSuggestedQueries(bias: string, seed: number): string[] {
   const b = bias.trim();
+  const head = joinQueryParts([b, 'PC방']);
   const items = PC_BANG_BRAND_CHIP_SUFFIXES.map((suf) => joinQueryParts([b, suf])).filter((q) => q.length > 0);
   const scored = items.map((v, i) => ({ v, k: djb2Hash(`${seed}|pcgamechip|${i}|${v}`) }));
   scored.sort((x, y) => x.k - y.k);
   const out: string[] = [];
+  if (head) {
+    out.push(head);
+  }
   for (const { v } of scored) {
     if (!v || out.includes(v)) continue;
     out.push(v);
@@ -695,7 +699,7 @@ function buildPcGamePlaceSuggestedQueries(bias: string, seed: number): string[] 
  * 추천 검색어 칩 — 지역(bias)·카테고리·요일·인원·테마를 조합해 다양하게 생성 (최대 8개). 시각·시간대 단어는 넣지 않음.
  * 영화 모임은 지역 + CGV·메가박스·롯데시네마·DVD방 등 고정 패턴.
  * Play & Vibe(게임 종류 선택 시)는 지역 + 게임 종류·시설 키워드만 사용.
- * PcGame major는 지역 + 탑존·액토즈 등 브랜드 PC방 키워드.
+ * PcGame major는 **지역+PC방**을 선두로, 이어서 탑존·액토즈 등 브랜드 PC방 키워드.
  */
 export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput): string[] {
   const bias = (input.bias ?? '').trim();

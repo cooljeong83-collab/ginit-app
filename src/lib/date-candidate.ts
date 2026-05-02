@@ -101,6 +101,35 @@ function startOfLocalDay(d: Date): Date {
   return x;
 }
 
+/** 로컬 달력에서 `now`의 날짜 기준 한 달 뒤(달력 `setMonth` 규칙) 같은 일의 00:00 */
+export function maxSelectableScheduleDayStartLocal(now: Date = new Date()): Date {
+  const t0 = startOfLocalDay(now);
+  const x = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate());
+  x.setMonth(x.getMonth() + 1);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+export function maxSelectableScheduleYmdLocal(now: Date = new Date()): string {
+  return fmtDateYmd(maxSelectableScheduleDayStartLocal(now));
+}
+
+/** 날짜 제안·일정 선택용: 오늘(로컬) ~ 한 달 상한 사이로 `YYYY-MM-DD` 보정 */
+export function clampYmdToScheduleProposalWindow(ymd: string, now: Date = new Date()): string {
+  const y = ymd.trim();
+  const todayYmd = fmtDateYmd(startOfLocalDay(now));
+  const maxYmd = maxSelectableScheduleYmdLocal(now);
+  if (!DATE_RE.test(y)) return todayYmd;
+  if (y < todayYmd) return todayYmd;
+  if (y > maxYmd) return maxYmd;
+  return y;
+}
+
+export type DateCandidateValidateOpts = {
+  /** false면 «오늘~한 달 이내» 상한 검사 생략(기존 모임 후보 갱신 등) */
+  oneMonthMax?: boolean;
+};
+
 /** `YYYY-MM-DD` + `HH:mm` → 로컬 `Date` (파싱 실패 시 null). */
 export function combineYmdHmToLocalDate(ymd: string, hmRaw: string): Date | null {
   const ymdT = ymd.trim();
@@ -139,15 +168,25 @@ export function getDateCandidateScheduleInstant(d: DateCandidate): Date | null {
   }
 }
 
-function validateDateCandidateSchedulePolicy(d: DateCandidate, index: number, now: Date): string | null {
+function validateDateCandidateSchedulePolicy(
+  d: DateCandidate,
+  index: number,
+  now: Date,
+  opts?: DateCandidateValidateOpts,
+): string | null {
   const label = `일시 후보 ${index + 1}`;
   const todayStart = startOfLocalDay(now).getTime();
   const minInstant = now.getTime() + MIN_SCHEDULE_LEAD_MS;
+  const oneMonthMax = opts?.oneMonthMax !== false;
+  const maxDayStart = maxSelectableScheduleDayStartLocal(now).getTime();
 
   const checkOne = (dt: Date | null, suffix: string): string | null => {
     if (!dt || Number.isNaN(dt.getTime())) return null;
     if (startOfLocalDay(dt).getTime() < todayStart) {
       return `${label}${suffix}: 약속 날짜는 오늘 이후만 선택할 수 있어요.`;
+    }
+    if (oneMonthMax && startOfLocalDay(dt).getTime() > maxDayStart) {
+      return `${label}${suffix}: 약속 날짜는 오늘부터 한 달 이내만 선택할 수 있어요.`;
     }
     if (dt.getTime() < minInstant) {
       return `${label}${suffix}: 약속 일시는 지금부터 최소 1시간 이상 남은 시각만 등록할 수 있어요.`;
@@ -182,20 +221,35 @@ export function validatePrimaryScheduleForSave(scheduleDate: string, scheduleTim
     startDate: scheduleDate.trim(),
     startTime: normalizeTimeInput(scheduleTime) || scheduleTime.trim(),
   };
-  const err = validateDateCandidate(d, 0, now);
+  const err = validateDateCandidate(d, 0, now, { oneMonthMax: true });
   return err ? err.replace('일시 후보 1', '모임 대표 일시') : null;
 }
 
-export function validateDateCandidatesForSave(dateCandidates: readonly DateCandidate[], now = new Date()): string | null {
+export function validateDateCandidatesForSave(
+  dateCandidates: readonly DateCandidate[],
+  now = new Date(),
+  opts?: DateCandidateValidateOpts,
+): string | null {
   for (let i = 0; i < dateCandidates.length; i += 1) {
-    const err = validateDateCandidate(dateCandidates[i], i, now);
+    const err = validateDateCandidate(dateCandidates[i], i, now, opts);
     if (err) return err;
   }
   return null;
 }
 
+/** `updateMeetingDateCandidates` 등: 이번에 새로 들어온 후보만 한 달 창 검증 */
+export function validateNewDateProposalCandidate(d: DateCandidate, now = new Date()): string | null {
+  const err = validateDateCandidate(d, 0, now, { oneMonthMax: true });
+  return err ? err.replace(/^일시 후보 1/u, '제안 일시') : null;
+}
+
 /** `buildPayload` 검증 — 오류 메시지 또는 null. */
-export function validateDateCandidate(d: DateCandidate, index: number, nowArg: Date = new Date()): string | null {
+export function validateDateCandidate(
+  d: DateCandidate,
+  index: number,
+  nowArg: Date = new Date(),
+  opts?: DateCandidateValidateOpts,
+): string | null {
   const label = `일시 후보 ${index + 1}`;
   if (!validDate(d.startDate)) {
     return `${label}: 시작 날짜는 YYYY-MM-DD 형식이어야 합니다.`;
@@ -264,7 +318,7 @@ export function validateDateCandidate(d: DateCandidate, index: number, nowArg: D
     default:
       break;
   }
-  return validateDateCandidateSchedulePolicy(d, index, nowArg);
+  return validateDateCandidateSchedulePolicy(d, index, nowArg, opts);
 }
 
 /** n박 m일 뱃지용 (자정 기준 일 수). */

@@ -58,6 +58,7 @@ import {
   getDateCandidateScheduleInstant,
   primaryScheduleFromDateCandidate,
   validateDateCandidatesForSave,
+  validateNewDateProposalCandidate,
   validatePrimaryScheduleForSave,
 } from './date-candidate';
 import {
@@ -874,10 +875,21 @@ export function subscribeMeetingById(
 export async function updateMeetingDateCandidates(
   meetingId: string,
   dateCandidates: DateCandidate[],
+  opts?: { priorDateCandidates?: readonly DateCandidate[] | null },
 ): Promise<void> {
   const id = meetingId.trim();
   if (!id) return;
-  const dateErr = validateDateCandidatesForSave(dateCandidates);
+  const prior = opts?.priorDateCandidates ?? null;
+  if (prior != null) {
+    const priorIds = new Set(prior.map((c) => String(c.id ?? '').trim()).filter(Boolean));
+    for (const c of dateCandidates) {
+      const cid = String(c.id ?? '').trim();
+      if (!cid || priorIds.has(cid)) continue;
+      const addErr = validateNewDateProposalCandidate(c);
+      if (addErr) throw new Error(addErr);
+    }
+  }
+  const dateErr = validateDateCandidatesForSave(dateCandidates, new Date(), { oneMonthMax: false });
   if (dateErr) throw new Error(dateErr);
   if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
     const data = await ledgerTryLoadMeetingDoc(id);
@@ -1849,6 +1861,35 @@ export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'schedule
   const t = m.scheduleTime?.trim() ?? '';
   const parsed = parseScheduleToTimestamp(d, t);
   return parsed ? parsed.toMillis() : null;
+}
+
+const SEOUL_YMD = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** 한국(서울) 달력 기준 오늘의 `YYYY-MM-DD` */
+function todayYmdSeoul(): string {
+  return SEOUL_YMD.format(new Date());
+}
+
+/**
+ * 대표 일시가 한국(서울) 달력 기준 «오늘»인지.
+ * `scheduleDate`가 `YYYY-MM-DD`면 그 문자열과 비교하고, 아니면 `meetingPrimaryStartMs`로 판별합니다.
+ */
+export function isMeetingScheduledTodaySeoul(
+  m: Pick<Meeting, 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>,
+): boolean {
+  const today = todayYmdSeoul();
+  const d = (m.scheduleDate ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    return d === today;
+  }
+  const ms = meetingPrimaryStartMs(m);
+  if (ms == null) return false;
+  return SEOUL_YMD.format(new Date(ms)) === today;
 }
 
 /**

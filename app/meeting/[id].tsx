@@ -42,7 +42,12 @@ import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
-import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
+import {
+  clampYmdToScheduleProposalWindow,
+  createPointCandidate,
+  fmtDateYmd,
+  normalizeTimeInput,
+} from '@/src/lib/date-candidate';
 import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import {
   acceptGinitRequest,
@@ -1113,7 +1118,7 @@ export default function MeetingDetailScreen() {
     const dates = [
       createPointCandidate(
         newDateCandidateId(),
-        insertModalSchedule.scheduleDate,
+        clampYmdToScheduleProposalWindow(insertModalSchedule.scheduleDate),
         insertModalSchedule.scheduleTime,
       ),
     ];
@@ -1177,7 +1182,7 @@ export default function MeetingDetailScreen() {
     setProposeSaving(true);
     try {
       markRecentSelfMeetingChange(meeting.id);
-      await updateMeetingDateCandidates(meeting.id, merged);
+      await updateMeetingDateCandidates(meeting.id, merged, { priorDateCandidates: existing });
       let refreshed: Meeting | null = null;
       try {
         refreshed = await getMeetingById(meeting.id);
