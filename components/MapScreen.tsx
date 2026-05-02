@@ -533,8 +533,14 @@ export default function MapScreen() {
   const [chipScrollOffsetX, setChipScrollOffsetX] = useState(0);
   const isMapScreenFocused = useIsFocused();
 
-  /** 하이브리드 최초 부트 전, 또는 지도 반경 RPC 응답 전까지 시트 스플래시 */
-  const showSheetSplash = !meetingsBooted || mapGeoMeetingsLoading;
+  /**
+   * 하이브리드 최초 부트 전, 지도 조회 앵커·영역 미확정(이때는 RPC 이펙트가 로딩을 켜지 않음),
+   * 또는 반경 RPC 진행 중까지 시트 스플래시 — 그 사이 빈 시트 카피가 먼저 깜빡이지 않게 함.
+   */
+  const showSheetSplash =
+    !meetingsBooted ||
+    mapGeoMeetingsLoading ||
+    (searchAnchor == null && mapGeoQueryRegion == null);
 
   const { version: appPoliciesVersion } = useAppPolicies();
   const mapRadiusKm = useMemo(() => {
