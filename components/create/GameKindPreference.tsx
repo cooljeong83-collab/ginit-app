@@ -3,16 +3,28 @@ import { Pressable, Text, View } from 'react-native';
 
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
-const OPTIONS = ['한식', '일식', '중식', '양식', '분식', '퓨전', '카페·디저트', '브런치', '주점·호프', '이자카야', '와인.바', '포차', '오마카세'] as const;
+const OPTIONS = [
+  '보드게임',
+  '방탈출',
+  '볼링',
+  '노래방',
+  '모바일·e스포츠',
+  '콘솔·스위치',
+  '당구·포켓볼',
+  'VR·체험',
+  '카드게임',
+  '오락실·아케이드',
+  '기타',
+] as const;
 
-export type MenuPreferenceProps = {
+export type GameKindPreferenceProps = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
 };
 
-export function MenuPreference({ value, onChange, disabled }: MenuPreferenceProps) {
-  /** 한 가지만 선택. 동일 칩을 다시 누르면 해제(다른 항목으로 바꿀 수 있게). */
+/** Play & Vibe Step2 — `ActivityKindPreference`와 동일한 글래스 칩(단일 선택) */
+export function GameKindPreference({ value, onChange, disabled }: GameKindPreferenceProps) {
   const selectOne = useCallback(
     (label: string) => {
       if (value.length === 1 && value[0] === label) {

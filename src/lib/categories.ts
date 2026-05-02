@@ -6,7 +6,7 @@
  * Firestore 문서 필드 권장:
  *   label, emoji, order
  *
- * Supabase 컬럼: id, label, emoji, sort_order (`0006_meeting_categories.sql`)
+ * Supabase 컬럼: id, label, emoji, sort_order, major_code (`0006` + `0061`)
  */
 import { collection, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 
@@ -22,13 +22,19 @@ export type Category = {
   label: string;
   emoji: string;
   order: number;
+  /** `meeting_categories.major_code` — Step 2 특화·정책 키 */
+  majorCode?: string | null;
 };
 
 function normalizeCategory(id: string, data: Record<string, unknown>): Category {
   const label = typeof data.label === 'string' && data.label.trim() ? data.label.trim() : '이름 없음';
   const emoji = typeof data.emoji === 'string' && data.emoji.trim() ? data.emoji.trim() : '📌';
   const order = typeof data.order === 'number' && Number.isFinite(data.order) ? data.order : 999;
-  return { id, label, emoji, order };
+  const mc =
+    (typeof data.major_code === 'string' ? data.major_code.trim() : '') ||
+    (typeof data.majorCode === 'string' ? data.majorCode.trim() : '');
+  const majorCode = mc.length > 0 ? mc : null;
+  return { id, label, emoji, order, majorCode };
 }
 
 function sortCategories(list: Category[]): Category[] {
@@ -41,7 +47,9 @@ function mapSupabaseCategoryRow(row: Record<string, unknown>): Category {
   const emoji = typeof row.emoji === 'string' && row.emoji.trim() ? row.emoji.trim() : '📌';
   const order =
     typeof row.sort_order === 'number' && Number.isFinite(row.sort_order) ? Math.trunc(row.sort_order) : 999;
-  return { id, label, emoji, order };
+  const mcRaw = typeof row.major_code === 'string' ? row.major_code.trim() : '';
+  const majorCode = mcRaw.length > 0 ? mcRaw : null;
+  return { id, label, emoji, order, majorCode };
 }
 
 async function fetchMeetingCategoriesFromSupabase(): Promise<
@@ -49,7 +57,7 @@ async function fetchMeetingCategoriesFromSupabase(): Promise<
 > {
   const { data, error } = await supabase
     .from('meeting_categories')
-    .select('id,label,emoji,sort_order')
+    .select('id,label,emoji,sort_order,major_code')
     .order('sort_order', { ascending: true });
   if (error) return { ok: false, message: error.message };
   const list = (data ?? []).map((r) => mapSupabaseCategoryRow(r as Record<string, unknown>)).filter((c) => c.id);

@@ -41,7 +41,7 @@ import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-me
 import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
+import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import {
@@ -52,7 +52,7 @@ import {
 } from '@/src/lib/friends';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
+import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
@@ -177,22 +177,10 @@ function getExtraDataSpecialtyKind(meeting: Meeting): SpecialtyKind | null {
   const raw = meeting.extraData;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const k = (raw as { specialtyKind?: unknown }).specialtyKind;
-    if (k === 'movie' || k === 'food' || k === 'sports') return k;
+    if (k === 'movie' || k === 'food' || k === 'sports' || k === 'knowledge') return k;
   }
   const label = meeting.categoryLabel?.trim() ?? '';
   return label ? resolveSpecialtyKind(label) : null;
-}
-
-function sportIntensityKo(level: SportIntensityLevel | null | undefined): string {
-  switch (level) {
-    case 'easy':
-      return '가볍게';
-    case 'hard':
-      return '강하게';
-    case 'normal':
-    default:
-      return '보통';
-  }
 }
 
 function formatCapacityLine(m: Meeting): string {
@@ -225,11 +213,31 @@ function extractMenuPreferences(extra: Meeting['extraData']): string[] {
   return prefs.map((s) => String(s).trim()).filter(Boolean);
 }
 
-function extractSportIntensity(extra: Meeting['extraData']): SportIntensityLevel | null {
+function extractActivityKinds(extra: Meeting['extraData']): string[] {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
+  const kinds = (extra as MeetingExtraData).activityKinds;
+  if (!Array.isArray(kinds)) return [];
+  return kinds.map((s) => String(s).trim()).filter(Boolean);
+}
+
+function extractGameKinds(extra: Meeting['extraData']): string[] {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
+  const kinds = (extra as MeetingExtraData).gameKinds;
+  if (!Array.isArray(kinds)) return [];
+  return kinds.map((s) => String(s).trim()).filter(Boolean);
+}
+
+function extractFocusKnowledgePreferences(extra: Meeting['extraData']): string[] {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
+  const prefs = (extra as MeetingExtraData).focusKnowledgePreferences;
+  if (!Array.isArray(prefs)) return [];
+  return prefs.map((s) => String(s).trim()).filter(Boolean);
+}
+
+function extractCategoryMajorCode(extra: Meeting['extraData']): string | null {
   if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return null;
-  const v = (extra as MeetingExtraData).sportIntensity;
-  if (v === 'easy' || v === 'normal' || v === 'hard') return v;
-  return null;
+  const mc = (extra as MeetingExtraData).categoryMajorCode;
+  return typeof mc === 'string' && mc.trim() !== '' ? mc.trim() : null;
 }
 
 function placeCandidateChipId(p: { id?: string }, index: number): string {
@@ -756,6 +764,7 @@ export default function MeetingDetailScreen() {
     if (sk === 'movie') return '영화';
     if (sk === 'food') return '맛집';
     if (sk === 'sports') return '운동';
+    if (sk === 'knowledge') return '스터디';
     if (extractMoviesFromExtra(meeting.extraData).length > 0) return '영화';
     return '';
   }, [meeting]);
@@ -984,7 +993,32 @@ export default function MeetingDetailScreen() {
   }, []);
 
   const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
-  const extraSport = useMemo(() => (meeting ? extractSportIntensity(meeting.extraData) : null), [meeting?.extraData]);
+  const extraActivityKinds = useMemo(
+    () => (meeting ? extractActivityKinds(meeting.extraData) : []),
+    [meeting?.extraData],
+  );
+  const extraGameKinds = useMemo(
+    () => (meeting ? extractGameKinds(meeting.extraData) : []),
+    [meeting?.extraData],
+  );
+  const extraFocusKnowledge = useMemo(
+    () => (meeting ? extractFocusKnowledgePreferences(meeting.extraData) : []),
+    [meeting?.extraData],
+  );
+
+  const placeThemeMajorForProposeForm = useMemo(() => {
+    if (!meeting) return undefined;
+    const snap = extractCategoryMajorCode(meeting.extraData);
+    if (snap) return snap;
+    return extraGameKinds.length > 0 ? 'Play & Vibe' : undefined;
+  }, [meeting, meeting?.extraData, extraGameKinds.length]);
+
+  const placeGameKindLabelsForProposeForm = useMemo(() => {
+    if (placeThemeMajorForProposeForm && isPlayAndVibeMajorCode(placeThemeMajorForProposeForm) && extraGameKinds.length > 0) {
+      return extraGameKinds;
+    }
+    return undefined;
+  }, [placeThemeMajorForProposeForm, extraGameKinds]);
 
   const publicMeetingDetails = useMemo(() => {
     if (!meeting || meeting.isPublic === false) return null;
@@ -2509,10 +2543,46 @@ export default function MeetingDetailScreen() {
                 </>
               )}
 
-              {(specialtyKind === 'sports' || extraSport != null) && (
+              {extraActivityKinds.length > 0 ? (
                 <>
-                  <Text style={styles.infoSectionLabel}>운동 강도</Text>
-                  <Text style={styles.infoRow}>{sportIntensityKo(extraSport ?? 'normal')}</Text>
+                  <Text style={styles.infoSectionLabel}>활동 종류</Text>
+                  <View style={styles.menuChipWrap}>
+                    {extraActivityKinds.map((label, ai) => (
+                      <View key={`${label}-${ai}`} style={styles.menuChipRead}>
+                        <Text style={styles.menuChipReadText}>{label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+
+              {extraGameKinds.length > 0 ? (
+                <>
+                  <Text style={styles.infoSectionLabel}>게임 종류</Text>
+                  <View style={styles.menuChipWrap}>
+                    {extraGameKinds.map((label, gi) => (
+                      <View key={`${label}-${gi}`} style={styles.menuChipRead}>
+                        <Text style={styles.menuChipReadText}>{label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+
+              {(specialtyKind === 'knowledge' || extraFocusKnowledge.length > 0) && (
+                <>
+                  <Text style={styles.infoSectionLabel}>모임 성격</Text>
+                  {extraFocusKnowledge.length > 0 ? (
+                    <View style={styles.menuChipWrap}>
+                      {extraFocusKnowledge.map((label, ki) => (
+                        <View key={`${label}-${ki}`} style={styles.menuChipRead}>
+                          <Text style={styles.menuChipReadText}>{label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.infoRowMuted}>등록된 모임 성격이 없어요.</Text>
+                  )}
                 </>
               )}
 
@@ -3672,6 +3742,7 @@ export default function MeetingDetailScreen() {
                     initialPayload={proposeInitialPayload}
                     bare
                     wizardSegment="schedule"
+                    scheduleAiReplacesFirstCandidate
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
@@ -3749,6 +3820,14 @@ export default function MeetingDetailScreen() {
                     seedScheduleDate={insertModalSchedule.scheduleDate}
                     seedScheduleTime={insertModalSchedule.scheduleTime}
                     placeThemeLabel={placeProposePlaceThemeLabel}
+                    placeThemeSpecialtyKind={specialtyKind}
+                    placeThemeMajorCode={placeThemeMajorForProposeForm}
+                    placeGameKindLabels={placeGameKindLabelsForProposeForm}
+                    placeFocusKnowledgePreferenceLabels={
+                      specialtyKind === 'knowledge' && extraFocusKnowledge.length > 0
+                        ? extraFocusKnowledge
+                        : undefined
+                    }
                     initialPayload={placeProposeInitialPayload}
                     bare
                     wizardSegment="places"

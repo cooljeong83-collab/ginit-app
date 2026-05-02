@@ -12,6 +12,8 @@ const THUMB_FOOD =
   'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400&h=400&fit=crop&q=80';
 const THUMB_SPORTS =
   'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=400&fit=crop&q=80';
+const THUMB_KNOWLEDGE =
+  'https://images.unsplash.com/photo-1521587760476-6c12a4b0402b?w=400&h=400&fit=crop&q=80';
 
 function isHttpsImageUrl(s: string): boolean {
   const t = s.trim();
@@ -34,11 +36,11 @@ function posterFromExtra(extra: unknown): string | null {
   return null;
 }
 
-function specialtyFromMeeting(m: Meeting): 'movie' | 'food' | 'sports' | null {
+function specialtyFromMeeting(m: Meeting): 'movie' | 'food' | 'sports' | 'knowledge' | null {
   const raw = m.extraData;
   if (raw && typeof raw === 'object' && 'specialtyKind' in raw) {
     const sk = (raw as MeetingExtraData).specialtyKind;
-    if (sk === 'movie' || sk === 'food' || sk === 'sports') return sk;
+    if (sk === 'movie' || sk === 'food' || sk === 'sports' || sk === 'knowledge') return sk;
   }
   return resolveSpecialtyKind(m.categoryLabel ?? '');
 }
@@ -63,6 +65,9 @@ export function resolveMeetingListThumbnailUri(m: Meeting): string {
   }
   if (spec === 'sports') {
     return THUMB_SPORTS;
+  }
+  if (spec === 'knowledge') {
+    return THUMB_KNOWLEDGE;
   }
 
   const custom = m.imageUrl?.trim();

@@ -2,7 +2,7 @@
  * 모임 이름 AI 스타일 추천 — 카테고리·현재 시각 기반 (클라이언트 전용, 시드 조합).
  */
 
-import type { SpecialtyKind } from './category-specialty';
+import { isPcGameMajorCode, isPlayAndVibeMajorCode, type SpecialtyKind } from './category-specialty';
 
 const FRIDAY_MOODS = ['불금', '드디어 금요일'];
 const MORNING_LUNCH_MOODS = ['활기찬', '브런치', '상쾌한'];
@@ -17,6 +17,20 @@ export type MeetingTitleSuggestionContext = {
   regionLabel?: string | null;
   /** 날씨 기반 짧은 수식 (예: 맑은, 비 오는·쌀쌀한) */
   weatherMood?: string | null;
+  /** `meeting_categories.major_code` — 대분류 톤·시드 */
+  majorCode?: string | null;
+  /** Step2 특화 종류(영화·맛집·운동·지식 등) */
+  specialtyKind?: SpecialtyKind | null;
+  /** 영화 Step2 — 선택한 후보 제목들 */
+  movieTitles?: readonly string[] | null;
+  /** Eat & Drink Step2 — 메뉴 성향 칩 */
+  menuPreferences?: readonly string[] | null;
+  /** Active & Life Step2 — 활동 종류 칩 */
+  activityKinds?: readonly string[] | null;
+  /** Play & Vibe Step2 — 게임 종류 칩 */
+  gameKinds?: readonly string[] | null;
+  /** Focus & Knowledge Step2 — 모임 성격 칩 */
+  focusKnowledgePreferences?: readonly string[] | null;
 };
 
 type CategoryBundle = { noun: string; keywords: string[] };
@@ -32,6 +46,9 @@ function resolveCategoryBundle(label: string): CategoryBundle {
   if (/운동|헬스|러닝|런닝|등산|요가|헬창|짐/.test(L)) {
     return { noun: '운동', keywords: ['오운완', '크루', '버닝'] };
   }
+  if (/스터디|북카페|강연|세미나|토론|학습|카공|코워킹|워크숍|자격증|북클럽|독서/.test(L)) {
+    return { noun: '학습 모임', keywords: ['집중', '카공', '나눔'] };
+  }
   const noun = L.length > 10 ? `${L.slice(0, 10)}…` : L;
   return { noun: noun || '모임', keywords: ['번개', '한판', '모여'] };
 }
@@ -40,6 +57,147 @@ function pick<T>(arr: readonly T[], salt: number): T {
   if (arr.length === 0) throw new Error('empty pick');
   const i = Math.abs(salt) % arr.length;
   return arr[i]!;
+}
+
+function hashString(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i += 1) {
+    h = (h * 33) ^ s.charCodeAt(i);
+  }
+  return h >>> 0;
+}
+
+function truncateNoun(s: string, max = 14): string {
+  const t = s.trim();
+  if (!t) return '모임';
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+function uniqKeywords(...groups: readonly string[][]): string[] {
+  const out: string[] = [];
+  for (const g of groups) {
+    for (const x of g) {
+      const t = String(x ?? '').trim();
+      if (t && !out.includes(t)) out.push(t);
+    }
+  }
+  return out.slice(0, 5);
+}
+
+/** `major_code`가 라벨보다 먼저일 때도 톤을 보강 */
+function mergeMajorCodeHints(majorCode: string | null | undefined, b: CategoryBundle): CategoryBundle {
+  const mc = (majorCode ?? '').trim().toLowerCase();
+  if (!mc) return b;
+  if (mc === 'eat & drink') {
+    return { ...b, keywords: uniqKeywords(['한 끼', '수다'], b.keywords) };
+  }
+  if (mc === 'active & life') {
+    return { ...b, keywords: uniqKeywords(['크루', '모여'], b.keywords) };
+  }
+  if (mc === 'play & vibe') {
+    return { ...b, keywords: uniqKeywords(['번개', '한판'], b.keywords) };
+  }
+  if (mc === 'pcgame') {
+    return { ...b, keywords: uniqKeywords(['PC방', '듀오'], b.keywords) };
+  }
+  if (mc === 'focus & knowledge') {
+    const noun = b.noun === '모임' ? '학습 모임' : b.noun;
+    return { noun, keywords: uniqKeywords(['집중', '나눔'], b.keywords) };
+  }
+  return b;
+}
+
+function resolveCategoryBundleFromContext(label: string, ctx?: MeetingTitleSuggestionContext): CategoryBundle {
+  const base = resolveCategoryBundle(label);
+  if (!ctx?.specialtyKind) {
+    return mergeMajorCodeHints(ctx?.majorCode, base);
+  }
+
+  const sk = ctx.specialtyKind;
+  const mt = (ctx.movieTitles ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  const mp = (ctx.menuPreferences ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  const ak = (ctx.activityKinds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  const gk = (ctx.gameKinds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  const fk = (ctx.focusKnowledgePreferences ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+
+  let out: CategoryBundle;
+  if (sk === 'movie' && mt.length > 0) {
+    const h = hashString(mt.join('|'));
+    out = {
+      noun: truncateNoun(mt[0]!, 14),
+      keywords: ['관람', '토크', pick(['극장', '스크린'], h)],
+    };
+  } else if (sk === 'food' && mp.length > 0) {
+    out = { noun: truncateNoun(mp[0]!, 10), keywords: uniqKeywords(mp, base.keywords) };
+  } else if (sk === 'sports' && isPlayAndVibeMajorCode(ctx.majorCode) && gk.length > 0) {
+    const first = gk[0]!;
+    const short = first.includes('·') ? first.split('·')[0]!.trim() : first;
+    out = {
+      noun: truncateNoun(short || '게임', 10),
+      keywords: uniqKeywords(gk, ['한판', '파티']),
+    };
+  } else if (sk === 'sports' && isPcGameMajorCode(ctx.majorCode) && gk.length > 0) {
+    const first = gk[0]!;
+    out = {
+      noun: truncateNoun(first || 'PC 게임', 12),
+      keywords: uniqKeywords(gk, ['PC방', '랭크']),
+    };
+  } else if (sk === 'sports' && ak.length > 0) {
+    const first = ak[0]!;
+    const short = first.includes('·') ? first.split('·')[0]!.trim() : first;
+    out = {
+      noun: truncateNoun(short || base.noun, 10) || base.noun,
+      keywords: uniqKeywords(ak, base.keywords),
+    };
+  } else if (sk === 'knowledge' && fk.length > 0) {
+    out = { noun: truncateNoun(fk[0]!, 12), keywords: uniqKeywords([...fk, '모각', '집중'], []) };
+  } else {
+    out = base;
+  }
+  return mergeMajorCodeHints(ctx.majorCode, out);
+}
+
+function resolveActivityPhraseFromContext(label: string, cat: CategoryBundle, ctx?: MeetingTitleSuggestionContext): string {
+  const sk = ctx?.specialtyKind;
+  if (sk === 'movie' && ctx?.movieTitles?.length) {
+    const t = String(ctx.movieTitles[0] ?? '').trim();
+    if (t) return `${truncateNoun(t, 18)} 보기`;
+  }
+  if (sk === 'food' && ctx?.menuPreferences?.length) {
+    const m = String(ctx.menuPreferences[0] ?? '').trim();
+    if (m) return `${m}로 한 끼`;
+  }
+  if (sk === 'sports' && isPlayAndVibeMajorCode(ctx?.majorCode) && ctx?.gameKinds?.length) {
+    const g = String(ctx.gameKinds[0] ?? '').trim();
+    if (g) return `${g} 한 판`;
+  }
+  if (sk === 'sports' && isPcGameMajorCode(ctx?.majorCode) && ctx?.gameKinds?.length) {
+    const g = String(ctx.gameKinds[0] ?? '').trim();
+    if (g) return `${g} 같이`;
+  }
+  if (sk === 'sports' && ctx?.activityKinds?.length) {
+    const a = String(ctx.activityKinds[0] ?? '').trim();
+    if (a) return `${a} 같이`;
+  }
+  if (sk === 'knowledge' && ctx?.focusKnowledgePreferences?.length) {
+    const f = String(ctx.focusKnowledgePreferences[0] ?? '').trim();
+    if (f) return `${f} 모여`;
+  }
+  return resolveActivityPhrase(label, cat);
+}
+
+function flavorSeed(ctx?: MeetingTitleSuggestionContext): number {
+  if (!ctx) return 0;
+  const key = [
+    (ctx.majorCode ?? '').trim(),
+    ctx.specialtyKind ?? '',
+    (ctx.movieTitles ?? []).join('|'),
+    (ctx.menuPreferences ?? []).join('|'),
+    (ctx.activityKinds ?? []).join('|'),
+    (ctx.gameKinds ?? []).join('|'),
+    (ctx.focusKnowledgePreferences ?? []).join('|'),
+  ].join('\u001f');
+  return hashString(key) % 499_979;
 }
 
 /** 지역·날씨 문맥에 맞는 한 줄 활동 문구 */
@@ -51,6 +209,7 @@ function resolveActivityPhrase(label: string, cat: CategoryBundle): string {
   if (/산책|공원/.test(L)) return '산책';
   if (/운동|헬스|러닝|런닝|등산|요가|짐|스포츠/.test(L)) return '가볍게 운동';
   if (/전시|미술|공연|문화/.test(L)) return '전시 한번';
+  if (/스터디|북카페|강연|세미나|토론|학습|카공|코워킹|워크숍|자격증|북클럽|독서/.test(L)) return '함께 집중해서 배우기';
   return `${cat.noun} 한번`;
 }
 
@@ -67,7 +226,6 @@ function pickAmbientFromWeather(weather: string, seed: number): string {
 }
 
 function buildWeatherOnlyCasualTitle(input: {
-  label: string;
   cat: CategoryBundle;
   weather: string;
   seed: number;
@@ -77,9 +235,9 @@ function buildWeatherOnlyCasualTitle(input: {
   morningMood: string;
   eveningMood: string;
   catKw: string;
+  activityPhrase: string;
 }): string {
-  const { label, cat, weather, seed, dow, h, slotWord, morningMood, eveningMood, catKw } = input;
-  const activity = resolveActivityPhrase(label, cat);
+  const { cat, weather, seed, dow, h, slotWord, morningMood, eveningMood, catKw, activityPhrase: activity } = input;
   const ambient = pickAmbientFromWeather(weather, seed);
   const dayName = DAY_NAMES_KO[dow];
   const wx = weather.trim();
@@ -95,7 +253,6 @@ function buildWeatherOnlyCasualTitle(input: {
 
 /** 위치·날씨 모두 없을 때(또는 아직 로딩 전) — 캐주얼 톤 */
 function buildNoGeoCasualTitle(input: {
-  label: string;
   cat: CategoryBundle;
   seed: number;
   dow: number;
@@ -104,9 +261,9 @@ function buildNoGeoCasualTitle(input: {
   morningMood: string;
   eveningMood: string;
   catKw: string;
+  activityPhrase: string;
 }): string {
-  const { label, cat, seed, dow, h, slotWord, morningMood, eveningMood, catKw } = input;
-  const activity = resolveActivityPhrase(label, cat);
+  const { cat, seed, dow, h, slotWord, morningMood, eveningMood, catKw, activityPhrase: activity } = input;
   const lazy = pick(LAZY_SLOT_MOODS, seed + 41);
   const dayName = DAY_NAMES_KO[dow];
   const p = seed % 7;
@@ -120,7 +277,6 @@ function buildNoGeoCasualTitle(input: {
 }
 
 function buildLocationAwareTitle(input: {
-  label: string;
   cat: CategoryBundle;
   region: string;
   weather: string;
@@ -131,10 +287,10 @@ function buildLocationAwareTitle(input: {
   morningMood: string;
   eveningMood: string;
   catKw: string;
+  activityPhrase: string;
 }): string {
-  const { label, cat, region, weather, seed, dow, h, slotWord, morningMood, eveningMood, catKw } = input;
+  const { cat, region, weather, seed, dow, h, slotWord, morningMood, eveningMood, catKw, activityPhrase: activity } = input;
   const dayName = DAY_NAMES_KO[dow];
-  const activity = resolveActivityPhrase(label, cat);
   const wx = weather.trim();
   const wxLead = wx ? `${wx} ` : '';
   const lazy = pick(LAZY_SLOT_MOODS, seed + 41);
@@ -166,7 +322,8 @@ export function generateSuggestedMeetingTitle(
   ctx?: MeetingTitleSuggestionContext,
 ): string {
   const label = categoryLabel.trim() || '모임';
-  const cat = resolveCategoryBundle(label);
+  const cat = resolveCategoryBundleFromContext(label, ctx);
+  const activityPhrase = resolveActivityPhraseFromContext(label, cat, ctx);
   const h = now.getHours();
   const dow = now.getDay();
   const seed =
@@ -176,7 +333,8 @@ export function generateSuggestedMeetingTitle(
     now.getHours() * 60 +
     now.getMinutes() +
     label.length * 997 +
-    variantSalt * 7919;
+    variantSalt * 7919 +
+    flavorSeed(ctx);
 
   const slotWord =
     h >= 5 && h < 11 ? '아침' : h >= 11 && h < 14 ? '점심' : h >= 14 && h < 17 ? '오후' : h >= 17 && h < 22 ? '저녁' : '밤';
@@ -190,7 +348,6 @@ export function generateSuggestedMeetingTitle(
 
   if (region.length > 0) {
     return buildLocationAwareTitle({
-      label,
       cat,
       region,
       weather,
@@ -201,12 +358,12 @@ export function generateSuggestedMeetingTitle(
       morningMood,
       eveningMood,
       catKw,
+      activityPhrase,
     });
   }
 
   if (weather.length > 0) {
     return buildWeatherOnlyCasualTitle({
-      label,
       cat,
       weather,
       seed,
@@ -216,13 +373,13 @@ export function generateSuggestedMeetingTitle(
       morningMood,
       eveningMood,
       catKw,
+      activityPhrase,
     });
   }
 
   /** 약속 잡기 화면 등: 컨텍스트 객체는 있으나 위치·날씨 없음 → 오류 표시 없이 가벼운 추천만 */
   if (ctx !== undefined) {
     return buildNoGeoCasualTitle({
-      label,
       cat,
       seed,
       dow,
@@ -231,6 +388,7 @@ export function generateSuggestedMeetingTitle(
       morningMood,
       eveningMood,
       catKw,
+      activityPhrase,
     });
   }
 
@@ -327,6 +485,9 @@ export function getFinalDescriptionPlaceholder(input: {
   }
   if (sk === 'sports') {
     return `함께 가볍게 땀 빼고 같이 쉬실 분? ${tail}`;
+  }
+  if (sk === 'knowledge') {
+    return `함께 배우고 나누며 집중할 분? ${tail}`;
   }
 
   if (!label) {

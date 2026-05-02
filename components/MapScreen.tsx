@@ -10,6 +10,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
+import Feather from '@expo/vector-icons/Feather';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -72,6 +73,7 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
+import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
 import { approximateCenterLatLngForFeedRegion } from '@/src/lib/feed-region-map-center';
 import { loadActiveFeedRegion, loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
@@ -494,6 +496,10 @@ export default function MapScreen() {
   const [mapSearchOpen, setMapSearchOpen] = useState(false);
   const [mapSearchFilters, setMapSearchFilters] = useState<FeedSearchFilters>(defaultFeedSearchFilters());
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  /** `null`이면 상단 칩에 카테고리 마스터 전부 표시 */
+  const [mapBarVisibleCategoryIds, setMapBarVisibleCategoryIds] = useState<string[] | null>(null);
+  const [mapCategoryBarModalOpen, setMapCategoryBarModalOpen] = useState(false);
+  const [categoryBarDraft, setCategoryBarDraft] = useState<string[]>([]);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [userHeadingDeg, setUserHeadingDeg] = useState<number | null>(null);
   const [genderByUserId, setGenderByUserId] = useState<Map<string, string>>(new Map());
@@ -820,6 +826,16 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadMapCategoryBarVisibleIds().then((v) => {
+      if (!cancelled) setMapBarVisibleCategoryIds(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const unsub = subscribeMeetingsHybrid(
       (list) => {
         setHybridMeetings(list);
@@ -1115,7 +1131,105 @@ export default function MapScreen() {
   // `initialMapRegion`은 searchAnchor/userCoords 없을 때도 기본 영역을 제공하므로 항상 지도를 띄웁니다.
   const initialRegionReady = true;
 
-  const mapCategoryChips = useMemo(() => buildMapCategoryChips(categories), [categories]);
+  const sortedMapCategoryMaster = useMemo(
+    () =>
+      [...categories].sort((a, b) =>
+        a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko'),
+      ),
+    [categories],
+  );
+
+  const mapCategoryChips = useMemo(
+    () => buildMapCategoryChips(categories, mapBarVisibleCategoryIds),
+    [categories, mapBarVisibleCategoryIds],
+  );
+
+  /** 상단 칩 일부만 표시하도록 저장된 경우 → 옵션 버튼을 선택된 칩 스타일로 */
+  const mapCategoryBarFilterActive = useMemo(() => {
+    if (categories.length === 0) return false;
+    if (mapBarVisibleCategoryIds == null) return false;
+    return mapBarVisibleCategoryIds.length < categories.length;
+  }, [categories.length, mapBarVisibleCategoryIds]);
+
+  useEffect(() => {
+    if (!categories.length || mapBarVisibleCategoryIds == null) return;
+    const idSet = new Set(categories.map((c) => c.id));
+    const valid = mapBarVisibleCategoryIds.filter((id) => idSet.has(id));
+    if (valid.length === mapBarVisibleCategoryIds.length) return;
+    const next =
+      valid.length === 0 || valid.length === categories.length ? null : valid;
+    setMapBarVisibleCategoryIds(next);
+    void persistMapCategoryBarVisibleIds(next);
+  }, [categories, mapBarVisibleCategoryIds]);
+
+  useEffect(() => {
+    if (selectedCategoryId == null) return;
+    const ok = mapCategoryChips.some((c) => c.filterId === selectedCategoryId);
+    if (!ok) setSelectedCategoryId(null);
+  }, [mapCategoryChips, selectedCategoryId]);
+
+  const openMapCategoryBarModal = useCallback(() => {
+    const ordered = sortedMapCategoryMaster.map((c) => c.id);
+    if (mapBarVisibleCategoryIds == null) {
+      setCategoryBarDraft(ordered);
+    } else {
+      setCategoryBarDraft(ordered.filter((id) => mapBarVisibleCategoryIds.includes(id)));
+    }
+    setMapCategoryBarModalOpen(true);
+  }, [sortedMapCategoryMaster, mapBarVisibleCategoryIds]);
+
+  const closeMapCategoryBarModal = useCallback(() => setMapCategoryBarModalOpen(false), []);
+
+  const toggleCategoryBarDraft = useCallback(
+    (id: string) => {
+      setCategoryBarDraft((prev) => {
+        const ordered = sortedMapCategoryMaster.map((c) => c.id);
+        const set = new Set(prev);
+        if (set.has(id)) {
+          set.delete(id);
+        } else {
+          set.add(id);
+        }
+        return ordered.filter((oid) => set.has(oid));
+      });
+    },
+    [sortedMapCategoryMaster],
+  );
+
+  /** 켜져 있으면 마스터 전부 선택(저장 시 null=전체 칩). 끄면 개별 선택을 비움 → 저장 시 최소 1개 검증. */
+  const toggleCategoryBarSelectAll = useCallback(() => {
+    setCategoryBarDraft((prev) => {
+      const ordered = sortedMapCategoryMaster.map((c) => c.id);
+      if (ordered.length === 0) return prev;
+      const allOn =
+        prev.length === ordered.length && ordered.every((id) => prev.includes(id));
+      return allOn ? [] : [...ordered];
+    });
+  }, [sortedMapCategoryMaster]);
+
+  const categoryBarSelectAllChecked = useMemo(() => {
+    const ordered = sortedMapCategoryMaster.map((c) => c.id);
+    if (ordered.length === 0) return false;
+    return (
+      categoryBarDraft.length === ordered.length &&
+      ordered.every((id) => categoryBarDraft.includes(id))
+    );
+  }, [sortedMapCategoryMaster, categoryBarDraft]);
+
+  const saveMapCategoryBarModal = useCallback(async () => {
+    const ordered = sortedMapCategoryMaster.map((c) => c.id);
+    if (ordered.length > 0 && categoryBarDraft.length === 0) {
+      Alert.alert('선택 필요', '상단 칩에 표시할 카테고리를 최소 하나 이상 선택해 주세요.');
+      return;
+    }
+    const next =
+      ordered.length === 0 || categoryBarDraft.length === ordered.length
+        ? null
+        : [...categoryBarDraft];
+    setMapBarVisibleCategoryIds(next);
+    await persistMapCategoryBarVisibleIds(next);
+    setMapCategoryBarModalOpen(false);
+  }, [sortedMapCategoryMaster, categoryBarDraft]);
 
   const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
@@ -1977,6 +2091,23 @@ export default function MapScreen() {
         <View style={[styles.layerTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
           <BlurView intensity={0} tint="light" style={styles.topGlass}>
             <View style={styles.topGlassInner}>
+              <Pressable
+                onPress={openMapCategoryBarModal}
+                style={({ pressed }) => [
+                  styles.topChip,
+                  mapCategoryBarFilterActive && styles.topChipActive,
+                  { flexShrink: 0 },
+                  pressed && { opacity: 0.88 },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: mapCategoryBarFilterActive }}
+                accessibilityLabel="상단에 표시할 카테고리 설정">
+                <Feather
+                  name="sliders"
+                  size={20}
+                  color={mapCategoryBarFilterActive ? '#ffffff' : '#475569'}
+                />
+              </Pressable>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -2120,6 +2251,84 @@ export default function MapScreen() {
           </Animated.View>
         ) : null}
       </Animated.View>
+
+      <Modal
+        visible={mapCategoryBarModalOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={closeMapCategoryBarModal}>
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={closeMapCategoryBarModal}
+            accessibilityRole="button"
+            accessibilityLabel="카테고리 표시 설정 닫기"
+          />
+          <View style={[styles.modalCard, { maxHeight: Math.min(560, Math.floor(windowHeight * 0.82)) }]}>
+            <Text style={styles.modalTitle}>상단 카테고리</Text>
+            <Text style={styles.modalHint}>지도 위 가로 칩에 나올 카테고리만 골라요. «전체»는 항상 맨 앞에 있어요.</Text>
+            <Pressable
+              onPress={toggleCategoryBarSelectAll}
+              style={({ pressed }) => [
+                styles.mapCategoryBarModalRow,
+                pressed && styles.modalRowPressed,
+              ]}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: categoryBarSelectAllChecked }}
+              accessibilityLabel="모든 카테고리 표시">
+              <Text style={styles.modalRowLabel}>모두 표시</Text>
+              {categoryBarSelectAllChecked ? (
+                <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
+              ) : (
+                <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+              )}
+            </Pressable>
+            <ScrollView
+              style={[
+                styles.categoryBarModalScroll,
+                { maxHeight: Math.min(380, Math.floor(windowHeight * 0.42)) },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}>
+              {sortedMapCategoryMaster.map((c) => {
+                const on = categoryBarDraft.includes(c.id);
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => toggleCategoryBarDraft(c.id)}
+                    style={({ pressed }) => [
+                      styles.mapCategoryBarModalRow,
+                      pressed && styles.modalRowPressed,
+                    ]}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}>
+                    <Text style={styles.modalRowLabel}>{c.label}</Text>
+                    {on ? (
+                      <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
+                    ) : (
+                      <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={styles.categoryBarModalActions}>
+              <Pressable
+                onPress={closeMapCategoryBarModal}
+                style={({ pressed }) => [styles.categoryBarActionGhost, pressed && { opacity: 0.85 }]}
+                accessibilityRole="button">
+                <Text style={styles.categoryBarActionGhostLabel}>취소</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void saveMapCategoryBarModal()}
+                style={({ pressed }) => [styles.categoryBarActionPrimary, pressed && { opacity: 0.9 }]}
+                accessibilityRole="button">
+                <Text style={styles.modalCloseLabel}>저장</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={sortFilterModalOpen} animationType="fade" transparent onRequestClose={closeSortFilterModal}>
         <View style={styles.modalRoot}>
@@ -2582,6 +2791,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
+  /** 상단 카테고리 설정 모달만: 구분선 없음·행 간격 살짝 넓힘 */
+  mapCategoryBarModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 9,
+    paddingHorizontal: 4,
+  },
   modalRowPressed: {
     backgroundColor: 'rgba(0, 82, 204, 0.06)',
   },
@@ -2600,6 +2817,30 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: GinitTheme.themeMainColor,
+  },
+  categoryBarModalScroll: {
+    flexGrow: 0,
+  },
+  categoryBarModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 20,
+    marginTop: 14,
+    paddingTop: 4,
+  },
+  categoryBarActionGhost: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  categoryBarActionGhostLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  categoryBarActionPrimary: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
   },
   mapBoot: {
     ...StyleSheet.absoluteFillObject,

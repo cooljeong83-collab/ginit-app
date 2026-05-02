@@ -54,7 +54,10 @@ import {
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
-import { IntensityPicker } from '@/components/create/IntensityPicker';
+import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
+import { GameKindPreference } from '@/components/create/GameKindPreference';
+import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
+import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
@@ -68,7 +71,15 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
-import { resolveSpecialtyKind, specialtyStepBadge } from '@/src/lib/category-specialty';
+import type { SpecialtyKind } from '@/src/lib/category-specialty';
+import {
+  categoryNeedsSpecialty,
+  isActiveLifeMajorCode,
+  isPcGameMajorCode,
+  isPlayAndVibeMajorCode,
+  resolveSpecialtyKindForCategory,
+  specialtyStepBadge,
+} from '@/src/lib/category-specialty';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -78,11 +89,7 @@ import {
 } from '@/src/lib/date-candidate';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
-import {
-  buildMeetingExtraData,
-  type SelectedMovieExtra,
-  type SportIntensityLevel,
-} from '@/src/lib/meeting-extra-data';
+import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   consumePendingMeetingPlace,
@@ -101,8 +108,7 @@ import {
   type MeetingTitleSuggestionContext,
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
-import { DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
-import { addMeeting, normalizeProfileGenderToHostSnapshot } from '@/src/lib/meetings';
+import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
@@ -114,6 +120,11 @@ import {
 } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
+import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
+import {
+  buildDefaultPlaceSearchQuery,
+  buildPlaceSuggestedSearchQueries,
+} from '@/src/lib/place-query-builder';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
   getUserProfile,
@@ -125,8 +136,8 @@ import { DateCandidateEditorCard, type DatePickerField } from '../../components/
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
-const PLACE_SEARCH_INITIAL_PAGE_SIZE = 10;
-const PLACE_SEARCH_PAGE_SIZE = 5;
+const PLACE_SEARCH_INITIAL_PAGE_SIZE = 15;
+const PLACE_SEARCH_PAGE_SIZE = 10;
 const DEFAULT_CALENDAR_PICK_TIME = '19:00';
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 /** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
@@ -536,6 +547,21 @@ export type VoteCandidatesFormProps = {
   seedScheduleTime: string;
   /** 장소 후보 단계: AI 검색어 생성에 쓰는 테마(카테고리 라벨) */
   placeThemeLabel?: string;
+  /** `major_code` 기반 특화 — 장소 시드가 라벨 정규식과 어긋나지 않게 전달 */
+  placeThemeSpecialtyKind?: SpecialtyKind | null;
+  /** `major_code` Eat & Drink 등 — Step2 메뉴 성향이 장소 추천어에 반영되도록 전달 */
+  placeMenuPreferenceLabels?: readonly string[] | null;
+  /** 장소 시드·추천어에서 Eat & Drink 전용(카테고리명·시각·인원·브런치 제외 규칙) 분기 */
+  placeThemeMajorCode?: string | null;
+  /** Active & Life — Step2 활동 종류를 장소 추천어·시드 풀에 반영 */
+  placeActivityKindLabels?: readonly string[] | null;
+  /** Play & Vibe — Step2 게임 종류를 장소 시드에 반영 */
+  placeGameKindLabels?: readonly string[] | null;
+  /** Focus & Knowledge — Step2 모임 성격 칩을 장소 시드에 반영 */
+  placeFocusKnowledgePreferenceLabels?: readonly string[] | null;
+  /** 비공개 모임 인원 — 장소 검색어 보강(소수/다인원). 공개 모임에서는 생략 */
+  placeMinParticipants?: number;
+  placeMaxParticipants?: number;
   initialPayload?: VoteCandidatesPayload | null;
   embedded?: boolean;
   /** true면 부모 ScrollView 안에만 렌더(내부 스크롤·scrollTo 없음) */
@@ -596,6 +622,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     seedScheduleDate,
     seedScheduleTime,
     placeThemeLabel = '',
+    placeThemeSpecialtyKind = null,
+    placeMenuPreferenceLabels = undefined,
+    placeThemeMajorCode = undefined,
+    placeActivityKindLabels = undefined,
+    placeGameKindLabels = undefined,
+    placeFocusKnowledgePreferenceLabels = undefined,
+    placeMinParticipants,
+    placeMaxParticipants,
     initialPayload = null,
     embedded = false,
     bare = false,
@@ -614,6 +648,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const insets = useSafeAreaInsets();
   const [voiceTarget, setVoiceTarget] = useState<'scheduleIdea' | 'placeQuery' | null>(null);
   const [voiceRecognizing, setVoiceRecognizing] = useState(false);
+  /** 장소 검색어 자동 시드 갱신 시 덮어쓰지 않도록(직접 입력·음성·칩) */
+  const placeQueryUserTouchedRef = useRef(false);
+  /** 일정 음성 입력 종료 후 AI 프리뷰와 동일하게 달력·후보에 반영(칩 탭 생략) */
+  const pendingVoiceScheduleApplyRef = useRef(false);
+  const voiceScheduleAutoApplyTranscriptRef = useRef('');
 
   useSpeechRecognitionEvent('start', () => {
     if (!voiceTarget) return;
@@ -635,8 +674,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (!t) return;
     if (!voiceTarget) return;
     if (voiceTarget === 'scheduleIdea') setNlpScheduleInput(t);
-    if (voiceTarget === 'placeQuery') setPlaceQuery(t);
+    if (voiceTarget === 'placeQuery') {
+      if (t.trim().length > 0) placeQueryUserTouchedRef.current = true;
+      else placeQueryUserTouchedRef.current = false;
+      setPlaceQuery(t);
+    }
     if (event?.isFinal) {
+      if (voiceTarget === 'scheduleIdea' && t) {
+        pendingVoiceScheduleApplyRef.current = true;
+        voiceScheduleAutoApplyTranscriptRef.current = t;
+      }
       setVoiceRecognizing(false);
       setVoiceTarget(null);
       ExpoSpeechRecognitionModule.stop();
@@ -819,17 +866,30 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (!trimmed) {
       setNlpParsed(null);
       setWeekendPreviewSlots([]);
+      if (pendingVoiceScheduleApplyRef.current) {
+        pendingVoiceScheduleApplyRef.current = false;
+        voiceScheduleAutoApplyTranscriptRef.current = '';
+      }
       return undefined;
     }
     if (weekendAnytimeMatches(trimmed)) {
       setNlpParsed(null);
       const pool = upcomingWeekendSlotPool(new Date());
       setWeekendPreviewSlots(pickRandomUniqueSlots(pool, WEEKEND_ANYTIME_PREVIEW_COUNT));
+      if (pendingVoiceScheduleApplyRef.current) {
+        pendingVoiceScheduleApplyRef.current = false;
+        voiceScheduleAutoApplyTranscriptRef.current = '';
+      }
       return undefined;
     }
     setWeekendPreviewSlots([]);
     const t = setTimeout(() => {
-      setNlpParsed(parseSmartNaturalSchedule(trimmed, new Date()));
+      const p = parseSmartNaturalSchedule(trimmed, new Date());
+      setNlpParsed(p);
+      if (pendingVoiceScheduleApplyRef.current && !p) {
+        pendingVoiceScheduleApplyRef.current = false;
+        voiceScheduleAutoApplyTranscriptRef.current = '';
+      }
     }, 500);
     return () => clearTimeout(t);
   }, [nlpScheduleInput]);
@@ -1089,6 +1149,33 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const hm = st || DEFAULT_CALENDAR_PICK_TIME;
     void commitPointCandidate(ymd, hm);
   }, [commitPointCandidate, nlpParsed]);
+
+  useEffect(() => {
+    if (!pendingVoiceScheduleApplyRef.current) return;
+    const expected = (voiceScheduleAutoApplyTranscriptRef.current ?? '').trim();
+    const cur = nlpScheduleInput.trim();
+    if (!cur || !expected) {
+      pendingVoiceScheduleApplyRef.current = false;
+      voiceScheduleAutoApplyTranscriptRef.current = '';
+      return;
+    }
+    if (cur !== expected) {
+      pendingVoiceScheduleApplyRef.current = false;
+      voiceScheduleAutoApplyTranscriptRef.current = '';
+      return;
+    }
+    if (weekendPreviewSlots.length > 0) {
+      pendingVoiceScheduleApplyRef.current = false;
+      voiceScheduleAutoApplyTranscriptRef.current = '';
+      return;
+    }
+    if (!nlpParsed) return;
+    const verify = parseSmartNaturalSchedule(cur, new Date());
+    if (!verify || verify.summary !== nlpParsed.summary) return;
+    pendingVoiceScheduleApplyRef.current = false;
+    voiceScheduleAutoApplyTranscriptRef.current = '';
+    void onPressAiPreviewParsed();
+  }, [nlpScheduleInput, nlpParsed, weekendPreviewSlots.length, onPressAiPreviewParsed]);
 
   useImperativeHandle(
     ref,
@@ -1422,36 +1509,45 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
 
-  const placeThemeSeed = useMemo(() => {
-    const label = (placeThemeLabel || '').trim();
-    if (!label) return '맛집';
-    const sk = resolveSpecialtyKind(label);
-    if (sk === 'movie') return '영화관';
-    if (sk === 'sports') return '운동';
-    if (sk === 'food') return '맛집';
-    if (label.includes('영화')) return '영화관';
-    if (label.includes('카페')) return '카페';
-    if (label.includes('술') || label.includes('맥주') || label.includes('바')) return '술집';
-    if (label.includes('운동') || label.includes('스포츠') || label.includes('헬스')) return '운동';
-    if (label.includes('전시') || label.includes('미술') || label.includes('공연')) return '전시';
-    if (label.includes('산책') || label.includes('공원')) return '공원';
-    if (label.includes('밥') || label.includes('식') || label.includes('맛집')) return '맛집';
-    return '맛집';
-  }, [placeThemeLabel]);
+  const firstScheduleForPlaceQuery = useMemo(() => {
+    const first = dateCandidates[0];
+    const sd = (first?.startDate ?? '').trim();
+    if (sd) {
+      const stRaw = (first?.startTime ?? seedTime).trim() || seedTime;
+      return { startDate: sd, startTime: clampHm(stRaw) };
+    }
+    const fallbackDate = seedDate.trim() || fmtDate(new Date());
+    return { startDate: fallbackDate, startTime: clampHm(seedTime.trim() || '15:00') };
+  }, [dateCandidates, seedDate, seedTime]);
 
   const placeSuggestedQueries = useMemo(() => {
-    const bias = (placeBiasHint ?? '').trim();
-    const head = bias ? `${bias} ` : '';
-    const base = [
-      `${head}${placeThemeSeed}`,
-      `${head}맛집`,
-      `${head}카페`,
-      `${head}데이트`,
-      `${head}술집`,
-    ];
-    // 중복 제거 + 빈 문자열 제거
-    return Array.from(new Set(base.map((s) => s.trim()).filter(Boolean))).slice(0, 5);
-  }, [placeBiasHint, placeThemeSeed]);
+    return buildPlaceSuggestedSearchQueries({
+      bias: placeBiasHint,
+      categoryLabel: (placeThemeLabel || '').trim() || '모임',
+      schedule: firstScheduleForPlaceQuery,
+      minParticipants: placeMinParticipants,
+      maxParticipants: placeMaxParticipants,
+      specialtyKind: placeThemeSpecialtyKind,
+      menuPreferenceLabels: placeMenuPreferenceLabels,
+      majorCode: placeThemeMajorCode,
+      activityKindLabels: placeActivityKindLabels,
+      placeGameKindLabels,
+      focusKnowledgePreferenceLabels: placeFocusKnowledgePreferenceLabels,
+    });
+  }, [
+    placeBiasHint,
+    placeMinParticipants,
+    placeMaxParticipants,
+    placeThemeLabel,
+    placeThemeSpecialtyKind,
+    placeMenuPreferenceLabels,
+    placeThemeMajorCode,
+    placeActivityKindLabels,
+    placeGameKindLabels,
+    placeFocusKnowledgePreferenceLabels,
+    firstScheduleForPlaceQuery.startDate,
+    firstScheduleForPlaceQuery.startTime,
+  ]);
 
   useEffect(() => {
     let alive = true;
@@ -1460,17 +1556,42 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       if (!alive) return;
       const b = bias?.trim() ?? null;
       setPlaceBiasHint(b);
-      // 사용자가 이미 입력한 검색어가 있으면 존중
+      const defaultQ = buildDefaultPlaceSearchQuery({
+        bias: b,
+        categoryLabel: (placeThemeLabel || '').trim() || '모임',
+        schedule: firstScheduleForPlaceQuery,
+        minParticipants: placeMinParticipants,
+        maxParticipants: placeMaxParticipants,
+        specialtyKind: placeThemeSpecialtyKind,
+        menuPreferenceLabels: placeMenuPreferenceLabels,
+        majorCode: placeThemeMajorCode,
+        activityKindLabels: placeActivityKindLabels,
+        placeGameKindLabels,
+        focusKnowledgePreferenceLabels: placeFocusKnowledgePreferenceLabels,
+      });
       setPlaceQuery((prev) => {
-        if (prev.trim().length > 0) return prev;
-        const seed = `${b ? `${b} ` : ''}${placeThemeSeed}`.trim();
-        return seed;
+        if (placeQueryUserTouchedRef.current) return prev;
+        return defaultQ;
       });
     });
     return () => {
       alive = false;
     };
-  }, [placeThemeSeed, placesListOnly, showPlaces]);
+  }, [
+    firstScheduleForPlaceQuery.startDate,
+    firstScheduleForPlaceQuery.startTime,
+    placeMinParticipants,
+    placeMaxParticipants,
+    placeThemeLabel,
+    placeThemeSpecialtyKind,
+    placeMenuPreferenceLabels,
+    placeThemeMajorCode,
+    placeActivityKindLabels,
+    placeGameKindLabels,
+    placeFocusKnowledgePreferenceLabels,
+    placesListOnly,
+    showPlaces,
+  ]);
 
   useEffect(() => {
     if (!showPlaces || placesListOnly) return undefined;
@@ -1985,7 +2106,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   ref={placeQueryInputRef}
                   {...placeQueryDeferKb}
                   value={placeQuery}
-                  onChangeText={setPlaceQuery}
+                  onChangeText={(t) => {
+                    if (t.trim().length > 0) placeQueryUserTouchedRef.current = true;
+                    else placeQueryUserTouchedRef.current = false;
+                    setPlaceQuery(t);
+                  }}
                   placeholder='예: "영등포 맛집", "합정 카페"'
                   placeholderTextColor={INPUT_PLACEHOLDER}
                   style={[styles.aiQuickInitInput, styles.voiceInput, { minHeight: 0 }]}
@@ -2022,7 +2147,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               {placeSuggestedQueries.map((q) => (
                 <Pressable
                   key={q}
-                  onPress={() => setPlaceQuery(q)}
+                  onPress={() => {
+                    placeQueryUserTouchedRef.current = true;
+                    setPlaceQuery(q);
+                  }}
                   style={({ pressed }) => [styles.placeSuggestChip, pressed && styles.placeSuggestChipPressed]}
                   accessibilityRole="button">
                   <Text style={styles.placeSuggestChipText} numberOfLines={1}>
@@ -2618,6 +2746,10 @@ export default function CreateDetailsScreen() {
   const [catLoading, setCatLoading] = useState(true);
   const [catError, setCatError] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const meetingCreateRules = useMemo(
+    () => resolveMeetingCreateRules(categories.find((c) => c.id === selectedCategoryId)?.majorCode ?? null),
+    [categories, selectedCategoryId],
+  );
   const [isPublicMeeting, setIsPublicMeeting] = useState(pickParam(isPublicParam) !== '0');
 
   const [meetingConfig, setMeetingConfig] = useState<PublicMeetingDetailsConfig>(
@@ -2642,27 +2774,29 @@ export default function CreateDetailsScreen() {
     if (prev === true && isPublicMeeting === false) {
       const min = minParticipantsRef.current;
       const max = maxParticipantsRef.current;
+      const capMax = meetingCreateRules.capacityMax;
       const n =
-        max === CAPACITY_UNLIMITED || max > 100
-          ? Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, min))
-          : Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, max));
+        max === CAPACITY_UNLIMITED || max > capMax
+          ? Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, min))
+          : Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, max));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
-  }, [isPublicMeeting]);
+  }, [isPublicMeeting, meetingCreateRules.capacityMax]);
 
   useEffect(() => {
     if (!isPublicMeeting && (minParticipants !== maxParticipants || maxParticipants === CAPACITY_UNLIMITED)) {
       const min = minParticipants;
       const max = maxParticipants;
+      const capMax = meetingCreateRules.capacityMax;
       const n =
-        max === CAPACITY_UNLIMITED || max > 100
-          ? Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, min))
-          : Math.min(100, Math.max(PARTICIPANT_COUNT_MIN, max));
+        max === CAPACITY_UNLIMITED || max > capMax
+          ? Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, min))
+          : Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, max));
       setMinParticipants(n);
       setMaxParticipants(n);
     }
-  }, [isPublicMeeting, maxParticipants, minParticipants]);
+  }, [isPublicMeeting, maxParticipants, minParticipants, meetingCreateRules.capacityMax]);
 
   const [description, setDescription] = useState('');
   const [descFocused, setDescFocused] = useState(false);
@@ -2761,7 +2895,9 @@ export default function CreateDetailsScreen() {
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
   const [movieCandidates, setMovieCandidates] = useState<SelectedMovieExtra[]>([]);
   const [menuPreferences, setMenuPreferences] = useState<string[]>([]);
-  const [sportIntensity, setSportIntensity] = useState<SportIntensityLevel>('normal');
+  const [activityKinds, setActivityKinds] = useState<string[]>([]);
+  const [gameKinds, setGameKinds] = useState<string[]>([]);
+  const [focusKnowledgePreferences, setFocusKnowledgePreferences] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
@@ -2777,10 +2913,43 @@ export default function CreateDetailsScreen() {
     [categories, selectedCategoryId],
   );
 
-  const specialtyKind = useMemo(
-    () => (selectedCategory?.label ? resolveSpecialtyKind(selectedCategory.label) : null),
-    [selectedCategory?.label],
+  const specialtyKind = useMemo(() => resolveSpecialtyKindForCategory(selectedCategory), [selectedCategory]);
+  const activeLifeMajor = useMemo(
+    () => isActiveLifeMajorCode(selectedCategory?.majorCode),
+    [selectedCategory?.majorCode],
   );
+  const playAndVibeMajor = useMemo(
+    () => isPlayAndVibeMajorCode(selectedCategory?.majorCode),
+    [selectedCategory?.majorCode],
+  );
+  const pcGameMajor = useMemo(
+    () => isPcGameMajorCode(selectedCategory?.majorCode),
+    [selectedCategory?.majorCode],
+  );
+  /** Eat & Drink 대분류일 때만 Step2 메뉴 성향을 네이버 장소 시드에 넘김 */
+  const placeMenuPreferenceLabelsForPlaceQuery = useMemo(() => {
+    const mc = (selectedCategory?.majorCode ?? '').trim().toLowerCase();
+    if (mc !== 'eat & drink') return undefined;
+    const prefs = menuPreferences.map((x) => x.trim()).filter(Boolean);
+    return prefs.length ? prefs : undefined;
+  }, [selectedCategory?.majorCode, menuPreferences]);
+  /** Active & Life일 때만 Step2 활동 종류를 네이버 장소 시드에 넘김 */
+  const placeActivityKindLabelsForPlaceQuery = useMemo(() => {
+    if (!activeLifeMajor) return undefined;
+    const prefs = activityKinds.map((x) => x.trim()).filter(Boolean);
+    return prefs.length ? prefs : undefined;
+  }, [activeLifeMajor, activityKinds]);
+  /** Play & Vibe일 때만 Step2 게임 종류를 네이버 장소 시드에 넘김 */
+  const placeGameKindLabelsForPlaceQuery = useMemo(() => {
+    if (!playAndVibeMajor) return undefined;
+    const prefs = gameKinds.map((x) => x.trim()).filter(Boolean);
+    return prefs.length ? prefs : undefined;
+  }, [playAndVibeMajor, gameKinds]);
+  const placeFocusKnowledgePreferenceLabelsForPlaceQuery = useMemo(() => {
+    if (specialtyKind !== 'knowledge') return undefined;
+    const prefs = focusKnowledgePreferences.map((x) => x.trim()).filter(Boolean);
+    return prefs.length ? prefs : undefined;
+  }, [specialtyKind, focusKnowledgePreferences]);
   const descriptionPlaceholder = useMemo(
     () =>
       getFinalDescriptionPlaceholder({
@@ -2789,19 +2958,21 @@ export default function CreateDetailsScreen() {
       }),
     [paramCategoryLabel, selectedCategory?.label, specialtyKind],
   );
-  const needsSpecialty = specialtyKind != null;
+  const needsSpecialty = categoryNeedsSpecialty(selectedCategory);
   const scheduleStep: WizardStep = 4;
   const placesStep: WizardStep = 5;
   const detailStep: WizardStep = 6;
 
   const resetWizardState = useCallback(() => {
     setTitle('');
-    setMinParticipants(1);
+    setMinParticipants(PARTICIPANT_COUNT_MIN);
     setMaxParticipants(4);
     setDescription('');
     setMovieCandidates([]);
     setMenuPreferences([]);
-    setSportIntensity('normal');
+    setActivityKinds([]);
+    setGameKinds([]);
+    setFocusKnowledgePreferences([]);
     setVotePayload(null);
     setPlaceSearchSeed('');
     setVoteHydrateKey((k) => k + 1);
@@ -2879,10 +3050,50 @@ export default function CreateDetailsScreen() {
     }, []),
   );
 
+  const titleSuggestionCtx = useMemo(
+    (): MeetingTitleSuggestionContext => ({
+      regionLabel: titleRegion,
+      weatherMood: titleWeatherMood,
+      majorCode: selectedCategory?.majorCode ?? null,
+      specialtyKind,
+      movieTitles:
+        specialtyKind === 'movie'
+          ? movieCandidates.map((m) => String(m.title ?? '').trim()).filter(Boolean)
+          : undefined,
+      menuPreferences:
+        specialtyKind === 'food' ? menuPreferences.map((x) => x.trim()).filter(Boolean) : undefined,
+      activityKinds:
+        specialtyKind === 'sports' && activeLifeMajor
+          ? activityKinds.map((x) => x.trim()).filter(Boolean)
+          : undefined,
+      gameKinds:
+        specialtyKind === 'sports' && (playAndVibeMajor || pcGameMajor)
+          ? gameKinds.map((x) => x.trim()).filter(Boolean)
+          : undefined,
+      focusKnowledgePreferences:
+        specialtyKind === 'knowledge'
+          ? focusKnowledgePreferences.map((x) => x.trim()).filter(Boolean)
+          : undefined,
+    }),
+    [
+      titleRegion,
+      titleWeatherMood,
+      selectedCategory?.majorCode,
+      specialtyKind,
+      movieCandidates,
+      menuPreferences,
+      activityKinds,
+      gameKinds,
+      focusKnowledgePreferences,
+      activeLifeMajor,
+      playAndVibeMajor,
+      pcGameMajor,
+    ],
+  );
+
   useEffect(() => {
     const label = selectedCategory?.label?.trim() ?? paramCategoryLabel.trim();
     if (!label) {
-      setAiTitleSuggestions([]);
       setTitleRegion(null);
       setTitleWeatherMood(null);
       return;
@@ -2897,17 +3108,12 @@ export default function CreateDetailsScreen() {
           weather = await fetchTitleWeatherMood(coords);
         }
         if (!alive || gen !== titleSuggestionsGenRef.current) return;
-        const region = bias?.trim() ?? null;
-        setTitleRegion(region);
+        setTitleRegion(bias?.trim() ?? null);
         setTitleWeatherMood(weather);
-        const ctx: MeetingTitleSuggestionContext = { regionLabel: region, weatherMood: weather };
-        setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5, ctx));
       } catch {
         if (!alive || gen !== titleSuggestionsGenRef.current) return;
         setTitleRegion(null);
         setTitleWeatherMood(null);
-        /** 위치·날씨 실패 시에도 오류 문구 없이 지역/날씨 없는 캐주얼 추천만 생성 */
-        setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5, {}));
       }
     })();
     return () => {
@@ -2915,13 +3121,14 @@ export default function CreateDetailsScreen() {
     };
   }, [paramCategoryLabel, selectedCategory?.label]);
 
-  const titleSuggestionCtx = useMemo(
-    (): MeetingTitleSuggestionContext => ({
-      regionLabel: titleRegion,
-      weatherMood: titleWeatherMood,
-    }),
-    [titleRegion, titleWeatherMood],
-  );
+  useEffect(() => {
+    const label = selectedCategory?.label?.trim() ?? paramCategoryLabel.trim();
+    if (!label) {
+      setAiTitleSuggestions([]);
+      return;
+    }
+    setAiTitleSuggestions(generateSuggestedMeetingTitles(label, new Date(), 5, titleSuggestionCtx));
+  }, [paramCategoryLabel, selectedCategory?.label, titleSuggestionCtx]);
 
   /** 직접 입력이 없으면 AI 추천 첫 항목 → 없으면 카테고리 기반 한 줄 생성 */
   const effectiveMeetingTitle = useMemo(() => {
@@ -3115,25 +3322,49 @@ export default function CreateDetailsScreen() {
       setWizardError('메뉴 성향을 한 가지 이상 선택해 주세요.');
       return;
     }
+    if (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) {
+      setWizardError('활동 종류를 한 가지 선택해 주세요.');
+      return;
+    }
+    if (specialtyKind === 'sports' && (playAndVibeMajor || pcGameMajor) && gameKinds.length === 0) {
+      setWizardError(pcGameMajor ? 'PC 게임을 한 가지 선택해 주세요.' : '게임 종류를 한 가지 선택해 주세요.');
+      return;
+    }
+    if (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0) {
+      setWizardError('모임 성격을 한 가지 선택해 주세요.');
+      return;
+    }
     pendingScrollAfterStepRef.current = 3;
     setCurrentStep(3);
-  }, [menuPreferences.length, movieCandidates.length, specialtyKind]);
+  }, [
+    activeLifeMajor,
+    playAndVibeMajor,
+    pcGameMajor,
+    activityKinds.length,
+    gameKinds.length,
+    focusKnowledgePreferences.length,
+    menuPreferences.length,
+    movieCandidates.length,
+    specialtyKind,
+  ]);
 
   const onStep3BasicNext = useCallback(() => {
     setWizardError(null);
     if (!title.trim()) {
       setTitle(effectiveMeetingTitle);
     }
+    const capMax = meetingCreateRules.capacityMax;
+    const minFloor = Math.max(PARTICIPANT_COUNT_MIN, meetingCreateRules.minParticipantsFloor);
     if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < PARTICIPANT_COUNT_MIN || minParticipants > 100) {
+      if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
         setWizardError('최소 인원을 선택해 주세요.');
         return;
       }
       if (
         !Number.isFinite(maxParticipants) ||
-        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < PARTICIPANT_COUNT_MIN) ||
+        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < minFloor) ||
         maxParticipants < minParticipants ||
-        (maxParticipants > 100 && maxParticipants !== CAPACITY_UNLIMITED)
+        (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
       ) {
         setWizardError('최대 인원을 선택해 주세요.');
         return;
@@ -3141,8 +3372,8 @@ export default function CreateDetailsScreen() {
     } else {
       if (
         !Number.isFinite(minParticipants) ||
-        minParticipants < PARTICIPANT_COUNT_MIN ||
-        minParticipants > 100 ||
+        minParticipants < minFloor ||
+        minParticipants > capMax ||
         minParticipants !== maxParticipants ||
         maxParticipants === CAPACITY_UNLIMITED
       ) {
@@ -3152,7 +3383,15 @@ export default function CreateDetailsScreen() {
     }
     pendingScrollAfterStepRef.current = 4;
     setCurrentStep(4);
-  }, [effectiveMeetingTitle, isPublicMeeting, maxParticipants, minParticipants, title]);
+  }, [
+    effectiveMeetingTitle,
+    isPublicMeeting,
+    maxParticipants,
+    meetingCreateRules.capacityMax,
+    meetingCreateRules.minParticipantsFloor,
+    minParticipants,
+    title,
+  ]);
 
   const handleConfirmSchedule = useCallback(async () => {
     setWizardError(null);
@@ -3196,17 +3435,20 @@ export default function CreateDetailsScreen() {
       Alert.alert('오류', '카테고리를 선택해 주세요.');
       return;
     }
+    const capMax = meetingCreateRules.capacityMax;
+    const minFloor = Math.max(PARTICIPANT_COUNT_MIN, meetingCreateRules.minParticipantsFloor);
+    const feeMax = meetingCreateRules.membershipFeeWonMax;
     if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < PARTICIPANT_COUNT_MIN || minParticipants > 100) {
+      if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
         setWizardError('최소 인원을 선택해 주세요.');
         Alert.alert('입력 확인', '최소 인원을 선택해 주세요.');
         return;
       }
       if (
         !Number.isFinite(maxParticipants) ||
-        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < PARTICIPANT_COUNT_MIN) ||
+        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < minFloor) ||
         maxParticipants < minParticipants ||
-        (maxParticipants > 100 && maxParticipants !== CAPACITY_UNLIMITED)
+        (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
       ) {
         setWizardError('최대 인원을 선택해 주세요.');
         Alert.alert('입력 확인', '최대 인원을 선택해 주세요.');
@@ -3223,17 +3465,18 @@ export default function CreateDetailsScreen() {
         return;
       }
       if (meetingConfig.settlement === 'MEMBERSHIP_FEE' && typeof meetingConfig.membershipFeeWon === 'number') {
-        if (meetingConfig.membershipFeeWon > 100000) {
-          setWizardError('회비는 최대 10만원까지 입력할 수 있어요.');
-          Alert.alert('입력 확인', '회비는 최대 10만원까지 입력할 수 있어요.');
+        if (meetingConfig.membershipFeeWon > feeMax) {
+          const wonLabel = `${feeMax.toLocaleString('ko-KR')}원`;
+          setWizardError(`회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
+          Alert.alert('입력 확인', `회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
           return;
         }
       }
     } else {
       if (
         !Number.isFinite(minParticipants) ||
-        minParticipants < PARTICIPANT_COUNT_MIN ||
-        minParticipants > 100 ||
+        minParticipants < minFloor ||
+        minParticipants > capMax ||
         minParticipants !== maxParticipants ||
         maxParticipants === CAPACITY_UNLIMITED
       ) {
@@ -3250,6 +3493,22 @@ export default function CreateDetailsScreen() {
     if (specialtyKind === 'food' && menuPreferences.length === 0) {
       setWizardError('메뉴 성향을 한 가지 이상 선택해 주세요.');
       Alert.alert('입력 확인', '메뉴 성향을 한 가지 이상 선택해 주세요.');
+      return;
+    }
+    if (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) {
+      setWizardError('활동 종류를 한 가지 선택해 주세요.');
+      Alert.alert('입력 확인', '활동 종류를 한 가지 선택해 주세요.');
+      return;
+    }
+    if (specialtyKind === 'sports' && (playAndVibeMajor || pcGameMajor) && gameKinds.length === 0) {
+      const msg = pcGameMajor ? 'PC 게임을 한 가지 선택해 주세요.' : '게임 종류를 한 가지 선택해 주세요.';
+      setWizardError(msg);
+      Alert.alert('입력 확인', msg);
+      return;
+    }
+    if (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0) {
+      setWizardError('모임 성격을 한 가지 선택해 주세요.');
+      Alert.alert('입력 확인', '모임 성격을 한 가지 선택해 주세요.');
       return;
     }
     const built = (placesFormRef.current ?? scheduleFormRef.current)?.buildPayload();
@@ -3322,7 +3581,12 @@ export default function CreateDetailsScreen() {
             kind: specialtyKind,
             movies: movieCandidates,
             menuPreferences,
-            sportIntensity,
+            activityKinds: specialtyKind === 'sports' && activeLifeMajor ? activityKinds : undefined,
+            gameKinds:
+              specialtyKind === 'sports' && (playAndVibeMajor || pcGameMajor) ? gameKinds : undefined,
+            focusKnowledgePreferences:
+              specialtyKind === 'knowledge' ? focusKnowledgePreferences : undefined,
+            categoryMajorCode: selectedCategory?.majorCode ?? null,
           })
         : null;
 
@@ -3367,6 +3631,9 @@ export default function CreateDetailsScreen() {
     effectiveMeetingTitle,
     isPublicMeeting,
     maxParticipants,
+    meetingCreateRules.capacityMax,
+    meetingCreateRules.membershipFeeWonMax,
+    meetingCreateRules.minParticipantsFloor,
     minParticipants,
     userId,
     router,
@@ -3375,7 +3642,13 @@ export default function CreateDetailsScreen() {
     specialtyKind,
     movieCandidates,
     menuPreferences,
-    sportIntensity,
+    activityKinds,
+    gameKinds,
+    focusKnowledgePreferences,
+    activeLifeMajor,
+    playAndVibeMajor,
+    pcGameMajor,
+    selectedCategory?.majorCode,
     meetingConfig,
   ]);
 
@@ -3535,10 +3808,12 @@ export default function CreateDetailsScreen() {
 
               {selectedCategory != null && needsSpecialty && specialtyKind && currentStep >= 2 ? (
                 <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(2, e)}>
-                  <Text style={[styles.wizardStepBadge, { marginTop: 0 }]}>{specialtyStepBadge(specialtyKind)}</Text>
+                  <Text style={[styles.wizardStepBadge, { marginTop: 0 }]}>
+                    {specialtyStepBadge(specialtyKind, selectedCategory?.majorCode ?? null)}
+                  </Text>
                   <Text style={styles.wizardLockedHint}>카테고리에 맞춰 선택해 주세요.</Text>
-                  <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
-                    {specialtyKind === 'movie' ? (
+                  {specialtyKind === 'movie' ? (
+                    <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
                       <MovieSearch
                         value={movieCandidates}
                         onChange={setMovieCandidates}
@@ -3546,28 +3821,61 @@ export default function CreateDetailsScreen() {
                         parentScrollRef={mainScrollRef}
                         parentScrollYRef={mainScrollYRef}
                       />
-                    ) : null}
-                    {specialtyKind === 'food' ? (
-                      <MenuPreference value={menuPreferences} onChange={setMenuPreferences} disabled={busy} />
-                    ) : null}
-                    {specialtyKind === 'sports' ? (
-                      <IntensityPicker value={sportIntensity} onChange={setSportIntensity} disabled={busy} />
-                    ) : null}
-                  </VoteCandidateCard>
+                    </VoteCandidateCard>
+                  ) : null}
+                  {specialtyKind === 'food' ? (
+                    <MenuPreference value={menuPreferences} onChange={setMenuPreferences} disabled={busy} />
+                  ) : null}
+                  {specialtyKind === 'sports' && activeLifeMajor ? (
+                    <ActivityKindPreference value={activityKinds} onChange={setActivityKinds} disabled={busy} />
+                  ) : null}
+                  {specialtyKind === 'sports' && playAndVibeMajor ? (
+                    <GameKindPreference value={gameKinds} onChange={setGameKinds} disabled={busy} />
+                  ) : null}
+                  {specialtyKind === 'sports' && pcGameMajor ? (
+                    <PcGameKindPreference value={gameKinds} onChange={setGameKinds} disabled={busy} />
+                  ) : null}
+                  {specialtyKind === 'knowledge' ? (
+                    <FocusKnowledgePreference
+                      value={focusKnowledgePreferences}
+                      onChange={setFocusKnowledgePreferences}
+                      disabled={busy}
+                    />
+                  ) : null}
                   {currentStep === 2 ? (
                     <Pressable
                       onPress={onStep2SpecialtyNext}
                       disabled={
                         busy ||
-                        (specialtyKind === 'movie' && movieCandidates.length === 0)
+                        (specialtyKind === 'movie' && movieCandidates.length === 0) ||
+                        (specialtyKind === 'food' && menuPreferences.length === 0) ||
+                        (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) ||
+                        (specialtyKind === 'sports' &&
+                          (playAndVibeMajor || pcGameMajor) &&
+                          gameKinds.length === 0) ||
+                        (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0)
                       }
                       style={({ pressed }) => [
                         styles.wizardPrimaryBtn,
-                        specialtyKind === 'movie' &&
-                          movieCandidates.length === 0 &&
-                          styles.addCandidateBtnDisabled,
+                        (specialtyKind === 'movie' && movieCandidates.length === 0) ||
+                        (specialtyKind === 'food' && menuPreferences.length === 0) ||
+                        (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) ||
+                        (specialtyKind === 'sports' &&
+                          (playAndVibeMajor || pcGameMajor) &&
+                          gameKinds.length === 0) ||
+                        (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0)
+                          ? styles.addCandidateBtnDisabled
+                          : undefined,
                         pressed &&
-                          !(specialtyKind === 'movie' && movieCandidates.length === 0) &&
+                          !(
+                            (specialtyKind === 'movie' && movieCandidates.length === 0) ||
+                            (specialtyKind === 'food' && menuPreferences.length === 0) ||
+                            (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) ||
+                            (specialtyKind === 'sports' &&
+                              (playAndVibeMajor || pcGameMajor) &&
+                              gameKinds.length === 0) ||
+                            (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0)
+                          ) &&
                           styles.addCandidateBtnPressed,
                       ]}
                       accessibilityRole="button">
@@ -3728,6 +4036,12 @@ export default function CreateDetailsScreen() {
                               seedScheduleDate={seedDate}
                               seedScheduleTime={seedTime}
                               placeThemeLabel={selectedCategory?.label ?? ''}
+                              placeThemeSpecialtyKind={specialtyKind}
+                              placeMenuPreferenceLabels={placeMenuPreferenceLabelsForPlaceQuery}
+                              placeThemeMajorCode={selectedCategory?.majorCode ?? null}
+                              placeActivityKindLabels={placeActivityKindLabelsForPlaceQuery}
+                              placeGameKindLabels={placeGameKindLabelsForPlaceQuery}
+                              placeFocusKnowledgePreferenceLabels={placeFocusKnowledgePreferenceLabelsForPlaceQuery}
                               initialPayload={votePayload}
                               bare
                               wizardSegment="schedule"
@@ -3762,6 +4076,12 @@ export default function CreateDetailsScreen() {
                             seedScheduleDate={seedDate}
                             seedScheduleTime={seedTime}
                             placeThemeLabel={selectedCategory?.label ?? ''}
+                            placeThemeSpecialtyKind={specialtyKind}
+                            placeMenuPreferenceLabels={placeMenuPreferenceLabelsForPlaceQuery}
+                            placeThemeMajorCode={selectedCategory?.majorCode ?? null}
+                            placeActivityKindLabels={placeActivityKindLabelsForPlaceQuery}
+                            placeGameKindLabels={placeGameKindLabelsForPlaceQuery}
+                            placeFocusKnowledgePreferenceLabels={placeFocusKnowledgePreferenceLabelsForPlaceQuery}
                             initialPayload={votePayload}
                             bare
                             wizardSegment="schedule"
@@ -3789,6 +4109,14 @@ export default function CreateDetailsScreen() {
                           seedScheduleDate={seedDate}
                           seedScheduleTime={seedTime}
                           placeThemeLabel={selectedCategory?.label ?? ''}
+                          placeThemeSpecialtyKind={specialtyKind}
+                          placeMenuPreferenceLabels={placeMenuPreferenceLabelsForPlaceQuery}
+                          placeThemeMajorCode={selectedCategory?.majorCode ?? null}
+                          placeActivityKindLabels={placeActivityKindLabelsForPlaceQuery}
+                          placeGameKindLabels={placeGameKindLabelsForPlaceQuery}
+                          placeFocusKnowledgePreferenceLabels={placeFocusKnowledgePreferenceLabelsForPlaceQuery}
+                          placeMinParticipants={isPublicMeeting ? undefined : minParticipants}
+                          placeMaxParticipants={isPublicMeeting ? undefined : maxParticipants}
                           initialPayload={votePayload}
                           bare
                           wizardSegment="places"

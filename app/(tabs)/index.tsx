@@ -41,7 +41,6 @@ import {
   resolveFeedLocationContextWithoutPermissionPrompt,
 } from '@/src/lib/feed-display-location';
 import {
-  buildFeedChips,
   defaultFeedSearchFilters,
   feedMeetingSymbolBox,
   feedSearchFiltersActive,
@@ -53,6 +52,7 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
+import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
   FEED_REGISTERED_REGIONS_MAX,
   loadActiveFeedRegion,
@@ -192,6 +192,13 @@ export default function FeedScreen() {
     };
   }, [shouldLoadMyMeetings, userId]);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  /** 피드 카테고리 모달 초안: 표시할 마스터 id + 현재 필터(null=전체) */
+  const [categoryPickerDraft, setCategoryPickerDraft] = useState<{
+    visibility: string[];
+    filter: string | null;
+  }>({ visibility: [], filter: null });
+  /** `null`이면 드롭다운에 카테고리 마스터 전부 표시 */
+  const [feedBarVisibleCategoryIds, setFeedBarVisibleCategoryIds] = useState<string[] | null>(null);
   const [feedUserProfile, setFeedUserProfile] = useState<UserProfile | null>(null);
   const [feedCoords, setFeedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
@@ -350,11 +357,37 @@ export default function FeedScreen() {
   }, [userId, meetings]);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadFeedCategoryBarVisibleIds().then((v) => {
+      if (!cancelled) setFeedBarVisibleCategoryIds(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!categories.length || feedBarVisibleCategoryIds == null) return;
+    const idSet = new Set(categories.map((c) => c.id));
+    const valid = feedBarVisibleCategoryIds.filter((id) => idSet.has(id));
+    if (valid.length === feedBarVisibleCategoryIds.length) return;
+    const next =
+      valid.length === 0 || valid.length === categories.length ? null : valid;
+    setFeedBarVisibleCategoryIds(next);
+    void persistFeedCategoryBarVisibleIds(next);
+  }, [categories, feedBarVisibleCategoryIds]);
+
+  useEffect(() => {
     if (selectedCategoryId == null) return;
-    if (categories.length > 0 && !categories.some((c) => c.id === selectedCategoryId)) {
+    const id = selectedCategoryId;
+    if (categories.length > 0 && !categories.some((c) => c.id === id)) {
+      setSelectedCategoryId(null);
+      return;
+    }
+    if (feedBarVisibleCategoryIds != null && !feedBarVisibleCategoryIds.includes(id)) {
       setSelectedCategoryId(null);
     }
-  }, [categories, selectedCategoryId]);
+  }, [categories, feedBarVisibleCategoryIds, selectedCategoryId]);
 
   const meetingsWithinRadius = useMemo(() => {
     // 탐색 목록은 좌측 상단 선택 구(문자열)로 거르고, GPS 5km 반경은 쓰지 않습니다.
@@ -362,9 +395,12 @@ export default function FeedScreen() {
     return meetings.filter((m) => meetingWithinHomeFeedRadius(m, null));
   }, [meetings]);
 
-  const feedChips = useMemo(
-    () => buildFeedChips(meetingsWithinRadius, categories),
-    [categories, meetingsWithinRadius],
+  const sortedFeedCategoryMaster = useMemo(
+    () =>
+      [...categories].sort((a, b) =>
+        a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko'),
+      ),
+    [categories],
   );
 
   /** 탐색에 적용할 단일 구(등록 목록·active 동기화) */
@@ -654,8 +690,74 @@ export default function FeedScreen() {
     [recruitingOnly, appliedFeedSearch, listSortMode],
   );
 
-  const openCategoryPicker = useCallback(() => setCategoryPickerOpen(true), []);
   const closeCategoryPicker = useCallback(() => setCategoryPickerOpen(false), []);
+
+  const openCategoryPicker = useCallback(() => {
+    const ordered = sortedFeedCategoryMaster.map((c) => c.id);
+    const vis =
+      feedBarVisibleCategoryIds == null
+        ? [...ordered]
+        : ordered.filter((id) => feedBarVisibleCategoryIds.includes(id));
+    setCategoryPickerDraft({ visibility: vis, filter: selectedCategoryId });
+    setCategoryPickerOpen(true);
+  }, [sortedFeedCategoryMaster, feedBarVisibleCategoryIds, selectedCategoryId]);
+
+  const toggleFeedCategoryPickerVisibilityDraft = useCallback((id: string) => {
+    setCategoryPickerDraft((d) => {
+      const ordered = sortedFeedCategoryMaster.map((c) => c.id);
+      const set = new Set(d.visibility);
+      if (set.has(id)) set.delete(id);
+      else set.add(id);
+      const nextVis = ordered.filter((oid) => set.has(oid));
+      const nextFilter =
+        d.filter != null && !nextVis.includes(d.filter) ? null : d.filter;
+      return { visibility: nextVis, filter: nextFilter };
+    });
+  }, [sortedFeedCategoryMaster]);
+
+  const toggleFeedCategoryPickerSelectAll = useCallback(() => {
+    setCategoryPickerDraft((d) => {
+      const ordered = sortedFeedCategoryMaster.map((c) => c.id);
+      if (ordered.length === 0) return d;
+      const allOn =
+        d.visibility.length === ordered.length &&
+        ordered.every((oid) => d.visibility.includes(oid));
+      return allOn ? { visibility: [], filter: null } : { visibility: [...ordered], filter: d.filter };
+    });
+  }, [sortedFeedCategoryMaster]);
+
+  const categoryPickerSelectAllChecked = useMemo(() => {
+    const ordered = sortedFeedCategoryMaster.map((c) => c.id);
+    if (ordered.length === 0) return false;
+    return (
+      categoryPickerDraft.visibility.length === ordered.length &&
+      ordered.every((id) => categoryPickerDraft.visibility.includes(id))
+    );
+  }, [sortedFeedCategoryMaster, categoryPickerDraft.visibility]);
+
+  const saveCategoryPickerModal = useCallback(async () => {
+    const ordered = sortedFeedCategoryMaster.map((c) => c.id);
+    if (ordered.length > 0 && categoryPickerDraft.visibility.length === 0) {
+      Alert.alert(
+        '선택 필요',
+        '피드에서 고를 카테고리를 최소 하나 이상 선택해 주세요.',
+      );
+      return;
+    }
+    const nextVisible =
+      ordered.length === 0 || categoryPickerDraft.visibility.length === ordered.length
+        ? null
+        : [...categoryPickerDraft.visibility];
+    let nextFilter = categoryPickerDraft.filter;
+    if (nextFilter != null) {
+      if (!ordered.includes(nextFilter)) nextFilter = null;
+      else if (nextVisible != null && !nextVisible.includes(nextFilter)) nextFilter = null;
+    }
+    setFeedBarVisibleCategoryIds(nextVisible);
+    await persistFeedCategoryBarVisibleIds(nextVisible);
+    setSelectedCategoryId(nextFilter);
+    setCategoryPickerOpen(false);
+  }, [sortedFeedCategoryMaster, categoryPickerDraft]);
 
   const openFeedSearch = useCallback(() => {
     setDraftFeedSearch(appliedFeedSearch);
@@ -1411,33 +1513,107 @@ export default function FeedScreen() {
               accessibilityRole="button"
               accessibilityLabel="카테고리 선택 닫기"
             />
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>카테고리</Text>
-              <Text style={styles.modalHint}>표시할 모임 종류를 선택하세요.</Text>
-              {feedChips.map((chip) => {
-                const selected = chip.filterId === selectedCategoryId;
-                return (
-                  <Pressable
-                    key={chip.filterId ?? 'all'}
-                    onPress={() => {
-                      setSelectedCategoryId(chip.filterId);
-                      closeCategoryPicker();
-                    }}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}>
-                    <Text style={styles.modalRowLabel}>{chip.label}</Text>
-                    {selected ? (
-                      <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                    ) : (
-                      <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                    )}
-                  </Pressable>
-                );
-              })}
-              <Pressable onPress={closeCategoryPicker} style={styles.modalCloseBtn} accessibilityRole="button">
-                <Text style={styles.modalCloseLabel}>닫기</Text>
-              </Pressable>
+            <View style={[styles.modalCard, styles.categoryPickerCard]}>
+              <Text style={[styles.modalTitle, styles.categoryPickerTitle]}>카테고리</Text>
+              <Text style={[styles.modalHint, styles.categoryPickerHint]}>
+                드롭다운에 나올 모임 종류를 고른 뒤, 아래에서 지금 볼 종류를 선택해 주세요. «전체»는 항상 고를 수 있어요.
+              </Text>
+              <ScrollView
+                style={styles.categoryPickerScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled>
+                <Pressable
+                  onPress={toggleFeedCategoryPickerSelectAll}
+                  style={({ pressed }) => [
+                    styles.categoryPickerItemRow,
+                    pressed && styles.modalRowPressed,
+                  ]}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: categoryPickerSelectAllChecked }}
+                  accessibilityLabel="모든 카테고리 표시">
+                  <Text style={styles.modalRowLabel}>모두 표시</Text>
+                  {categoryPickerSelectAllChecked ? (
+                    <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                  ) : (
+                    <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+                  )}
+                </Pressable>
+                {sortedFeedCategoryMaster.map((c) => {
+                  const on = categoryPickerDraft.visibility.includes(c.id);
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => toggleFeedCategoryPickerVisibilityDraft(c.id)}
+                      style={({ pressed }) => [
+                        styles.categoryPickerItemRow,
+                        pressed && styles.modalRowPressed,
+                      ]}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: on }}>
+                      <Text style={styles.modalRowLabel}>{c.label}</Text>
+                      {on ? (
+                        <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                      ) : (
+                        <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+                      )}
+                    </Pressable>
+                  );
+                })}
+                <Text style={styles.categoryPickerSectionTitle}>지금 보기</Text>
+                <Pressable
+                  onPress={() => setCategoryPickerDraft((d) => ({ ...d, filter: null }))}
+                  style={({ pressed }) => [
+                    styles.categoryPickerItemRow,
+                    pressed && styles.modalRowPressed,
+                  ]}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: categoryPickerDraft.filter == null }}>
+                  <Text style={styles.modalRowLabel}>전체</Text>
+                  {categoryPickerDraft.filter == null ? (
+                    <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                  ) : (
+                    <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+                  )}
+                </Pressable>
+                {sortedFeedCategoryMaster
+                  .filter((c) => categoryPickerDraft.visibility.includes(c.id))
+                  .map((c) => {
+                    const selected = categoryPickerDraft.filter === c.id;
+                    return (
+                      <Pressable
+                        key={`f-${c.id}`}
+                        onPress={() => setCategoryPickerDraft((d) => ({ ...d, filter: c.id }))}
+                        style={({ pressed }) => [
+                          styles.categoryPickerItemRow,
+                          pressed && styles.modalRowPressed,
+                        ]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}>
+                        <Text style={styles.modalRowLabel}>{c.label}</Text>
+                        {selected ? (
+                          <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                        ) : (
+                          <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
+                        )}
+                      </Pressable>
+                    );
+                  })}
+              </ScrollView>
+              <View style={styles.categoryPickerModalActions}>
+                <Pressable
+                  onPress={closeCategoryPicker}
+                  style={({ pressed }) => [styles.categoryPickerActionGhost, pressed && { opacity: 0.85 }]}
+                  accessibilityRole="button">
+                  <Text style={styles.categoryPickerActionGhostLabel}>취소</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void saveCategoryPickerModal()}
+                  style={({ pressed }) => [styles.categoryPickerActionPrimary, pressed && { opacity: 0.9 }]}
+                  accessibilityRole="button">
+                  <Text style={styles.modalCloseLabel}>저장</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </Modal>
@@ -1740,6 +1916,58 @@ const styles = StyleSheet.create({
   },
   modalCardWide: {
     maxHeight: '92%',
+  },
+  /** 홈 피드 — 카테고리 선택 모달만 */
+  categoryPickerCard: {
+    maxHeight: '82%',
+    paddingVertical: 16,
+  },
+  categoryPickerTitle: {
+    marginBottom: 4,
+  },
+  categoryPickerHint: {
+    marginBottom: 8,
+  },
+  categoryPickerScroll: {
+    maxHeight: 520,
+  },
+  /** 카테고리 모달 전용: 구분선 없음(다른 모달의 modalRow는 유지) */
+  categoryPickerItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 9,
+    paddingHorizontal: 4,
+  },
+  categoryPickerSectionTitle: {
+    marginTop: 8,
+    marginBottom: 0,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  categoryPickerModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 20,
+    marginTop: 14,
+    paddingTop: 4,
+  },
+  categoryPickerActionGhost: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  categoryPickerActionGhostLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  categoryPickerActionPrimary: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
   },
   feedSettingsScroll: {
     maxHeight: 400,

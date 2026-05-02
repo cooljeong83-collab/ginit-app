@@ -156,12 +156,24 @@ export function buildFeedChips(meetings: Meeting[], categories: Category[]): Fee
   return [{ filterId: null, label: '전체' }, ...sorted.map((c) => ({ filterId: c.id, label: c.label }))];
 }
 
-/** 지도 탭 상단: `meeting_categories` 마스터 기준 칩(주변에 모임이 없어도 식사·운동 등 전부 표시). */
-export function buildMapCategoryChips(categories: Category[]): FeedChip[] {
+/**
+ * 지도 탭 상단: `meeting_categories` 마스터 기준 칩(주변에 모임이 없어도 식사·운동 등 전부 표시).
+ * `visibleCategoryIds`가 있으면 해당 id만(마스터 순서 유지), 없거나 필터 결과가 비면 전체.
+ */
+export function buildMapCategoryChips(
+  categories: Category[],
+  visibleCategoryIds?: readonly string[] | null,
+): FeedChip[] {
   const sorted = [...categories].sort((a, b) =>
     a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko'),
   );
-  return [{ filterId: null, label: '전체' }, ...sorted.map((c) => ({ filterId: c.id, label: c.label }))];
+  let listed = sorted;
+  if (visibleCategoryIds != null && visibleCategoryIds.length > 0) {
+    const allow = new Set(visibleCategoryIds);
+    const filtered = sorted.filter((c) => allow.has(c.id));
+    if (filtered.length > 0) listed = filtered;
+  }
+  return [{ filterId: null, label: '전체' }, ...listed.map((c) => ({ filterId: c.id, label: c.label }))];
 }
 
 export function sortMeetingsForFeed(

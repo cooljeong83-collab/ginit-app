@@ -3,16 +3,29 @@ import { Pressable, Text, View } from 'react-native';
 
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
-const OPTIONS = ['한식', '일식', '중식', '양식', '분식', '퓨전', '카페·디저트', '브런치', '주점·호프', '이자카야', '와인.바', '포차', '오마카세'] as const;
+const OPTIONS = [
+  '러닝·조깅',
+  '등산·트레킹',
+  '헬스·근력',
+  '요가·필라테스',
+  '수영',
+  '클라이밍',
+  '풋살·축구',
+  '배드민턴·테니스',
+  '자전거·라이딩',
+  '산책·워킹',
+  '크로스핏',
+  '댄스·에어로빅',
+] as const;
 
-export type MenuPreferenceProps = {
+export type ActivityKindPreferenceProps = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
 };
 
-export function MenuPreference({ value, onChange, disabled }: MenuPreferenceProps) {
-  /** 한 가지만 선택. 동일 칩을 다시 누르면 해제(다른 항목으로 바꿀 수 있게). */
+/** Active & Life Step2 — `MenuPreference`와 동일한 글래스 칩 레이아웃 */
+export function ActivityKindPreference({ value, onChange, disabled }: ActivityKindPreferenceProps) {
   const selectOne = useCallback(
     (label: string) => {
       if (value.length === 1 && value[0] === label) {

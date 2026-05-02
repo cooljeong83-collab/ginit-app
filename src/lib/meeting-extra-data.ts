@@ -1,7 +1,5 @@
 import type { SpecialtyKind } from '@/src/lib/category-specialty';
 
-export type SportIntensityLevel = 'easy' | 'normal' | 'hard';
-
 export type SelectedMovieExtra = {
   id: string;
   title: string;
@@ -30,7 +28,14 @@ export type MeetingExtraData = {
   /** 영화 모임 후보 전체 */
   movies?: SelectedMovieExtra[] | null;
   menuPreferences?: string[] | null;
-  sportIntensity?: SportIntensityLevel | null;
+  /** Active & Life 등 — 메뉴 성향과 동일하게 복수 칩으로 저장 */
+  activityKinds?: string[] | null;
+  /** Play & Vibe — 선호 게임 종류 칩 */
+  gameKinds?: string[] | null;
+  /** Focus & Knowledge — 모임 성향 칩 */
+  focusKnowledgePreferences?: string[] | null;
+  /** 모임 생성 시점 `meeting_categories.major_code` — 상세·장소 제안에서 PcGame 등 구분 */
+  categoryMajorCode?: string | null;
 };
 
 /** Firestore에 undefined가 들어가지 않도록 영화 후보만 정제 */
@@ -57,9 +62,26 @@ export function buildMeetingExtraData(params: {
   /** 영화 카테고리일 때 후보 목록(순서 유지) */
   movies?: SelectedMovieExtra[];
   menuPreferences: string[];
-  sportIntensity: SportIntensityLevel;
+  /** `specialtyKind === 'sports'`이고 Active & Life 등에서 선택한 활동 종류 */
+  activityKinds?: string[];
+  /** `specialtyKind === 'sports'`이고 Play & Vibe에서 선택한 게임 종류 */
+  gameKinds?: string[];
+  /** `specialtyKind === 'knowledge'`일 때 모임 성격 칩 */
+  focusKnowledgePreferences?: string[];
+  categoryMajorCode?: string | null;
 }): MeetingExtraData {
-  const { kind, movies, menuPreferences, sportIntensity } = params;
+  const {
+    kind,
+    movies,
+    menuPreferences,
+    activityKinds,
+    gameKinds,
+    focusKnowledgePreferences,
+    categoryMajorCode,
+  } = params;
+  const majorSnap = String(categoryMajorCode ?? '').trim();
+  const majorField: Pick<MeetingExtraData, 'categoryMajorCode'> | Record<string, never> =
+    majorSnap.length > 0 ? { categoryMajorCode: majorSnap } : {};
   if (kind === 'movie') {
     const raw = movies?.filter((x) => x != null && String(x.id ?? '').trim() !== '') ?? [];
     const list = raw.map(sanitizeMovieForFirestore);
@@ -68,10 +90,31 @@ export function buildMeetingExtraData(params: {
       specialtyKind: 'movie',
       movie: first,
       movies: list.length > 0 ? list : null,
+      ...majorField,
     };
   }
   if (kind === 'food') {
-    return { specialtyKind: 'food', menuPreferences: menuPreferences.length ? [...menuPreferences] : null };
+    return {
+      specialtyKind: 'food',
+      menuPreferences: menuPreferences.length ? [...menuPreferences] : null,
+      ...majorField,
+    };
   }
-  return { specialtyKind: 'sports', sportIntensity: sportIntensity ?? 'normal' };
+  if (kind === 'knowledge') {
+    const fk = (focusKnowledgePreferences ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+    return {
+      specialtyKind: 'knowledge',
+      focusKnowledgePreferences: fk.length ? [...fk] : null,
+      ...majorField,
+    };
+  }
+  const out: MeetingExtraData = {
+    specialtyKind: 'sports',
+    ...majorField,
+  };
+  const acts = (activityKinds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  if (acts.length > 0) out.activityKinds = acts;
+  const gk = (gameKinds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean);
+  if (gk.length > 0) out.gameKinds = gk;
+  return out;
 }

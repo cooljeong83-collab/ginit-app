@@ -2,26 +2,26 @@
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import {
-    createContext,
-    type ReactNode,
-    useCallback,
-    useContext,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from 'react';
 import {
-    AppState,
-    type AppStateStatus,
-    FlatList,
-    Modal,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    useWindowDimensions,
-    View,
+  AppState,
+  type AppStateStatus,
+  FlatList,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -30,21 +30,21 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
-    fetchFriendsAcceptedList,
-    fetchFriendsPendingInbox,
-    fetchFriendsPendingOutbox,
-    type FriendAcceptedRow,
-    type FriendInboxRow,
+  fetchFriendsAcceptedList,
+  fetchFriendsPendingInbox,
+  fetchFriendsPendingOutbox,
+  type FriendAcceptedRow,
+  type FriendInboxRow,
 } from '@/src/lib/friends';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
 import {
-    chatMessageTimeMs,
-    defaultInAppAlarmReadState,
-    type InAppAlarmReadState,
-    type InAppAlarmRow,
-    MEETING_INFO_FP_PREFIX,
-    meetingInfoFingerprint,
+  chatMessageTimeMs,
+  defaultInAppAlarmReadState,
+  type InAppAlarmReadState,
+  type InAppAlarmRow,
+  MEETING_INFO_FP_PREFIX,
+  meetingInfoFingerprint,
 } from '@/src/lib/in-app-alarms';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
@@ -57,12 +57,12 @@ import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
-    fetchSocialChatReadPointersForUser,
-    fetchSocialChatUnreadCount,
-    socialDmPreviewLine,
-    socialMessageTimeMs,
-    subscribeMySocialChatRooms,
-    subscribeSocialChatLatestMessage,
+  fetchSocialChatReadPointersForUser,
+  fetchSocialChatUnreadCount,
+  socialDmPreviewLine,
+  socialMessageTimeMs,
+  subscribeMySocialChatRooms,
+  subscribeSocialChatLatestMessage,
 } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
@@ -136,7 +136,7 @@ export function useInAppAlarms(): InAppAlarmsContextValue {
 export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
   const { userId } = useUserSession();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -958,6 +958,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const hasUnread = alarms.length > 0;
 
+  /** 새 소식 모달: 소식이 많을 때 스크롤되며 화면을 넘지 않도록 카드·목록 최대 높이 */
+  const alarmPanelLayout = useMemo(() => {
+    const topUsed = insets.top + 8;
+    const bottomPad = insets.bottom + 12;
+    const cardMaxHeight = Math.max(200, Math.floor(windowHeight - topUsed - bottomPad));
+    const headerBlock = 56;
+    const markAllBlock = alarms.length > 0 ? 48 : 0;
+    const listMaxHeight = Math.max(120, cardMaxHeight - headerBlock - markAllBlock);
+    return { cardMaxHeight, listMaxHeight };
+  }, [windowHeight, insets.top, insets.bottom, alarms.length]);
+
   /** 홈 상단 종 알람 패널과 동일한 건수 — iOS·지원 Android 런처의 앱 아이콘 배지 */
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -1049,11 +1060,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!cancelled) {
-        ginitNotifyDbg('InAppAlarms', 'chat_tab_unread_computed', {
-          sum,
-          meetingRooms: joined.length,
-          socialRooms: socialRooms.length,
-        });
+        // ginitNotifyDbg('InAppAlarms', 'chat_tab_unread_computed', {
+        //   sum,
+        //   meetingRooms: joined.length,
+        //   socialRooms: socialRooms.length,
+        // });
         setChatTabUnreadTotal(sum);
       }
     })();
@@ -1261,8 +1272,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  const modalMaxH = Math.min(520, Math.round(width * 0.85));
-
   return (
     <InAppAlarmsContext.Provider value={ctx}>
       {children}
@@ -1272,7 +1281,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         animationType="fade"
         onRequestClose={closeAlarmPanel}>
         <Pressable style={styles.modalBackdrop} onPress={closeAlarmPanel}>
-          <Pressable style={[styles.modalCard, { marginTop: insets.top + 8, maxHeight: modalMaxH }]} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            style={[
+              styles.modalCard,
+              { marginTop: insets.top + 8, maxHeight: alarmPanelLayout.cardMaxHeight },
+            ]}
+            onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>새 소식</Text>
               <Pressable hitSlop={12} onPress={closeAlarmPanel} accessibilityRole="button" accessibilityLabel="닫기">
@@ -1299,7 +1313,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
               <FlatList
                 data={alarms}
                 keyExtractor={(item) => item.id}
+                style={{ maxHeight: alarmPanelLayout.listMaxHeight, flexGrow: 0 }}
                 contentContainerStyle={styles.listContent}
+                keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
                   <Pressable
                     style={({ pressed }) => [styles.alarmRow, pressed && styles.alarmRowPressed]}
