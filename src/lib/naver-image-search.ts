@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import { publicEnv } from '@/src/config/public-env';
 import { withCorsProxyForWeb } from '@/src/lib/naver-ncp-maps';
+import { withNaverOpenApiClientRateLimit } from '@/src/lib/naver-openapi-rate-limit';
 
 type NaverOpenApiImageJson = {
   items?: {
@@ -39,23 +40,25 @@ async function fetchOpenApiImageSearch(query: string): Promise<NaverOpenApiImage
   const q = query.trim();
   const baseUrl = `https://openapi.naver.com/v1/search/image?query=${encodeURIComponent(q)}&display=1&sort=sim`;
 
-  let url = baseUrl;
-  if (Platform.OS === 'web') {
-    url = withCorsProxyForWeb(baseUrl);
-  }
+  return withNaverOpenApiClientRateLimit(async () => {
+    let url = baseUrl;
+    if (Platform.OS === 'web') {
+      url = withCorsProxyForWeb(baseUrl);
+    }
 
-  const headers: Record<string, string> = {
-    'X-Naver-Client-Id': id,
-    'X-Naver-Client-Secret': secret,
-    Accept: 'application/json',
-  };
+    const headers: Record<string, string> = {
+      'X-Naver-Client-Id': id,
+      'X-Naver-Client-Secret': secret,
+      Accept: 'application/json',
+    };
 
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`이미지 검색 API 오류 (${res.status}): ${t.slice(0, 200)}`);
-  }
-  return (await res.json()) as NaverOpenApiImageJson;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`이미지 검색 API 오류 (${res.status}): ${t.slice(0, 200)}`);
+    }
+    return (await res.json()) as NaverOpenApiImageJson;
+  });
 }
 
 export async function searchNaverImageThumbnail(query: string): Promise<string | null> {

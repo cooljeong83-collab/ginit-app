@@ -7,6 +7,7 @@ import {
   type NaverMapsGeocodeAddress,
   type NaverMapsGeocodeResponse,
 } from '@/src/lib/naver-ncp-maps';
+import { withNaverOpenApiClientRateLimit } from '@/src/lib/naver-openapi-rate-limit';
 
 export type NaverLocalPlace = {
   id: string;
@@ -348,23 +349,25 @@ async function fetchOpenApiLocalSearch(
   const start = Math.max(1, Math.floor(opts?.start ?? 1));
   const baseUrl = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=${display}&start=${start}&sort=comment`;
 
-  let url = baseUrl;
-  if (Platform.OS === 'web') {
-    url = withCorsProxyForWeb(baseUrl);
-  }
+  return withNaverOpenApiClientRateLimit(async () => {
+    let url = baseUrl;
+    if (Platform.OS === 'web') {
+      url = withCorsProxyForWeb(baseUrl);
+    }
 
-  const headers: Record<string, string> = {
-    'X-Naver-Client-Id': id,
-    'X-Naver-Client-Secret': secret,
-    Accept: 'application/json',
-  };
+    const headers: Record<string, string> = {
+      'X-Naver-Client-Id': id,
+      'X-Naver-Client-Secret': secret,
+      Accept: 'application/json',
+    };
 
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`지역 검색 API 오류 (${res.status}): ${t.slice(0, 200)}`);
-  }
-  return (await res.json()) as NaverOpenApiLocalJson;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`지역 검색 API 오류 (${res.status}): ${t.slice(0, 200)}`);
+    }
+    return (await res.json()) as NaverOpenApiLocalJson;
+  });
 }
 
 /**

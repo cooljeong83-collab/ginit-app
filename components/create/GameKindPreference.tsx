@@ -8,13 +8,12 @@ const OPTIONS = [
   '방탈출',
   '볼링',
   '노래방',
-  '모바일·e스포츠',
-  '콘솔·스위치',
-  '당구·포켓볼',
-  'VR·체험',
+  'e스포츠',
+  '콘솔',
+  '당구',
+  'VR체험',
   '카드게임',
-  '오락실·아케이드',
-  '기타',
+  '오락실',
 ] as const;
 
 export type GameKindPreferenceProps = {

@@ -1,6 +1,6 @@
 /**
  * 모임 생성 장소 단계 — 네이버 지역 검색용 시드 문자열 생성 (클라이언트 전용).
- * 인원·카테고리·구역 bias 반영. 일정(날짜·요일·시각)은 추천어·기본 검색어에 넣지 않음. 날씨는 사용하지 않음.
+ * 추천어·기본 검색어는 **행정구역(bias) + 테마 한 덩어리** 두 조각만. 일정·인원·용량 단어는 넣지 않음. 날씨는 사용하지 않음.
  */
 
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
@@ -116,21 +116,21 @@ function venueSearchTokensForGameKind(gameLabel: string): readonly string[] {
       return ['보드게임카페', '보드게임 카페', '테이블게임'] as const;
     case '방탈출':
       return ['방탈출카페', '방탈출 카페', '테마카페'] as const;
-    case '콘솔·스위치':
+    case '콘솔':
       return ['콘솔카페', '닌텐도', '플스방', '게임카페'] as const;
-    case '모바일·e스포츠':
+    case 'e스포츠':
       return ['PC방', 'e스포츠', '게임장'] as const;
     case '볼링':
       return ['볼링장', '볼링'] as const;
-    case '당구·포켓볼':
+    case '당구':
       return ['당구장', '포켓볼'] as const;
-    case 'VR·체험':
+    case 'VR체험':
       return ['VR체험', 'VR카페', '체험관'] as const;
     case '노래방':
       return ['노래방', '코인노래방'] as const;
     case '카드게임':
       return ['보드게임카페', '카드게임'] as const;
-    case '오락실·아케이드':
+    case '오락실':
       return ['오락실', '아케이드', '게임랜드'] as const;
     case '기타':
       return ['게임카페', '오락실'] as const;
@@ -176,15 +176,16 @@ function isEatAndDrinkMajorCode(majorCode: string | null | undefined): boolean {
   return (majorCode ?? '').trim().toLowerCase() === 'eat & drink';
 }
 
-/** 카페·브런치 계열 메뉴/카테고리일 때만 아침 슬롯의 브런치·베이커리 단어를 허용 */
-function prefersBrunchyOrCafeMenuTokens(prefs: readonly string[], categoryLabel: string): boolean {
-  if (labelExtraKind(categoryLabel) === 'cafe') return true;
-  const L = categoryLabel.trim();
-  if (/브런치/.test(L)) return true;
+function isFocusKnowledgeMajorCode(majorCode: string | null | undefined): boolean {
+  return (majorCode ?? '').trim().toLowerCase() === 'focus & knowledge';
+}
+
+/** Eat & Drink major — 브런치·베이커리 허용 여부는 메뉴 성향만 반영 */
+function prefersBrunchyOrCafeMenuTokensFromPrefs(prefs: readonly string[]): boolean {
   for (const p of prefs) {
     const t = String(p ?? '').trim();
     if (!t) continue;
-    if (/브런치|카페·디저트|디저트|카페|커피|티타임/.test(t)) return true;
+    if (/브런치|카페|디저트|커피|티타임/.test(t)) return true;
   }
   return false;
 }
@@ -193,8 +194,7 @@ function shouldAvoidBrunchyTokens(input: PlaceQueryBuilderInput): boolean {
   if (!isEatAndDrinkMajorCode(input.majorCode)) return false;
   if (placeQuerySpecialty(input) !== 'food') return false;
   const prefs = normalizedMenuPrefs(input);
-  const label = (input.categoryLabel ?? '').trim();
-  return !prefersBrunchyOrCafeMenuTokens(prefs, label);
+  return !prefersBrunchyOrCafeMenuTokensFromPrefs(prefs);
 }
 
 function eatDrinkCategoryLabelSnippet(label: string): string {
@@ -253,6 +253,13 @@ function categoryChipFragment(label: string, specialty: SpecialtyKind | null, se
   const ap = normalizedActivityKinds(input);
   const gk = normalizedGameKinds(input);
   const fk = normalizedFocusKnowledgePrefs(input);
+  if (isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food') {
+    if (mp.length > 0) return pick(mp, seed);
+    return pick(['맛집', '한식', '식당'], seed);
+  }
+  if (isFocusKnowledgeMajorCode(input.majorCode) && specialty === 'knowledge') {
+    return pick(FOCUS_KNOWLEDGE_PLACE_POOL, seed);
+  }
   if (specialty === 'knowledge' && fk.length > 0) {
     return pick(fk, seed);
   }
@@ -327,6 +334,26 @@ const CAFE_POOL = [
   '루프탑 카페',
 ] as const;
 
+/**
+ * Eat & Drink Step2 메뉴 성향(`MenuPreference` 칩)별 네이버 장소 시드 풀.
+ * major가 Eat & Drink일 때 카테고리 라벨은 쓰지 않고 이 맵만 연결합니다.
+ */
+const EAT_DRINK_MENU_PREF_PLACE_POOL: Readonly<Record<string, readonly string[]>> = {
+  한식: ['한식', '맛집', '삼겹살', '한정식', '곱창', '백반', '찌개'],
+  일식: ['일식', '스시', '라멘', '돈까스', '우동', '이자카야'],
+  중식: ['중식', '짜장면', '딤섬', '마라탕', '훠궈'],
+  양식: ['양식', '파스타', '스테이크', '브런치', '이탈리안'],
+  분식: ['분식', '떡볶이', '김밥', '순대', '튀김'],
+  퓨전: ['퓨전', '맛집', '레스토랑', '다이닝'],
+  '카페·디저트': ['카페', '디저트', '브런치 카페', '베이커리', '감성 카페', '대형 카페', '루프탑 카페'],
+  브런치: ['브런치', '브런치 카페', '베이커리', '카페'],
+  '주점·호프': ['호프', '술집', '맥주', '맛집', '포장마차'],
+  이자카야: ['이자카야', '술집', '일식', '사케'],
+  '와인.바': ['와인바', '와인바', '바', '술집'],
+  포차: ['포장마차', '포차', '술집', '맥주집'],
+  오마카세: ['오마카세', '스시', '일식', '맛집'],
+};
+
 const SPORTS_POOL = [
   '헬스장',
   '공원',
@@ -356,6 +383,21 @@ const KNOWLEDGE_POOL = [
   '루프탑 카페',
   '브런치 카페',
   '프랜차이즈 카페',
+] as const;
+
+/** Focus & Knowledge major — 카테고리·Step2 모임 성격과 무관하게 장소 시드에만 사용 */
+const FOCUS_KNOWLEDGE_PLACE_POOL = [
+  '카페',
+  '스터디카페',
+  '독서실',
+  '코워킹스페이스',
+  '조용한 카페',
+  '커피숍',
+  '북카페',
+  '노트북 카페',
+  '도서관',
+  '스터디룸',
+  '대형 카페',
 ] as const;
 
 const BAR_POOL = ['술집', '이자카야', '와인바', '맥주집', '포장마차', '하이볼'] as const;
@@ -421,6 +463,12 @@ function themePoolForPlaceQuery(input: PlaceQueryBuilderInput): readonly string[
   const prefs = normalizedMenuPrefs(input);
   const acts = normalizedActivityKinds(input);
   const fk = normalizedFocusKnowledgePrefs(input);
+  if (isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food') {
+    return filterBrunchyTokensFromPool(buildEatDrinkPlacePoolFromMenuPreferences(prefs), input);
+  }
+  if (isFocusKnowledgeMajorCode(input.majorCode) && specialty === 'knowledge') {
+    return FOCUS_KNOWLEDGE_PLACE_POOL;
+  }
   if (placeQuerySpecialty(input) === 'knowledge' && fk.length > 0) {
     const merged: string[] = [...fk];
     for (const x of KNOWLEDGE_POOL) {
@@ -468,12 +516,15 @@ function themePoolForPlaceQuery(input: PlaceQueryBuilderInput): readonly string[
 
 function buildSeedNumber(input: PlaceQueryBuilderInput): number {
   const b = (input.bias ?? '').trim();
-  const lab = (input.categoryLabel ?? '').trim();
+  const lab =
+    isEatAndDrinkMajorCode(input.majorCode) || isFocusKnowledgeMajorCode(input.majorCode)
+      ? ''
+      : (input.categoryLabel ?? '').trim();
   const mn = input.minParticipants ?? '';
   const mx = input.maxParticipants ?? '';
   const mp = normalizedMenuPrefs(input).join('\u0002');
   const ak = normalizedActivityKinds(input).join('\u0003');
-  const fk = normalizedFocusKnowledgePrefs(input).join('\u0004');
+  const fk = isFocusKnowledgeMajorCode(input.majorCode) ? '' : normalizedFocusKnowledgePrefs(input).join('\u0004');
   const gg = normalizedGameKinds(input).join('\u0005');
   const mc = (input.majorCode ?? '').trim();
   return djb2Hash([b, lab, String(mn), String(mx), mp, mc, ak, fk, gg].join('\u001f'));
@@ -487,33 +538,58 @@ function tokenKeyForPlaceQueryDedupe(token: string): string {
     .replace(/[\s·•\-_/.,]+/g, '');
 }
 
-function dedupePlaceQueryTokens(tokens: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of tokens) {
-    const t = raw.trim();
-    if (!t) continue;
-    const key = tokenKeyForPlaceQueryDedupe(t);
-    if (!key) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(t);
-  }
-  return out;
+function eatDrinkPlacePoolForMenuPreference(prefLabel: string): readonly string[] {
+  const key = prefLabel.trim();
+  const pool = EAT_DRINK_MENU_PREF_PLACE_POOL[key];
+  return pool && pool.length > 0 ? pool : FOOD_GENERAL_POOL;
 }
 
-function joinQueryParts(parts: (string | null | undefined)[]): string {
-  const cleaned = parts
-    .map((p) => (typeof p === 'string' ? p.trim() : ''))
-    .filter((p) => p.length > 0);
-  return dedupePlaceQueryTokens(cleaned).join(' ').replace(/\s+/g, ' ').trim();
+/** Eat & Drink major — 선택한 메뉴 성향별 풀을 합쳐 중복 제거(칩 라벨 + 검색 토큰). 성향 없으면 일반 맛집 풀. */
+function buildEatDrinkPlacePoolFromMenuPreferences(prefs: readonly string[]): string[] {
+  if (!prefs.length) {
+    return [...FOOD_GENERAL_POOL];
+  }
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const p of prefs) {
+    const chip = String(p ?? '').trim();
+    if (!chip) continue;
+    const kChip = tokenKeyForPlaceQueryDedupe(chip);
+    if (kChip && !seen.has(kChip)) {
+      seen.add(kChip);
+      merged.push(chip);
+    }
+    for (const w of eatDrinkPlacePoolForMenuPreference(chip)) {
+      const t = String(w ?? '').trim();
+      if (!t) continue;
+      const k = tokenKeyForPlaceQueryDedupe(t);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      merged.push(t);
+    }
+  }
+  return merged.length > 0 ? merged : [...FOOD_GENERAL_POOL];
+}
+
+/** 테마 조각: 내부 공백 제거해 한 덩어리로 (예: `대형 카페` → `대형카페`) */
+function collapsePlaceThemeToken(raw: string): string {
+  return raw.replace(/\s+/g, '').trim();
 }
 
 /**
- * 장소 검색 입력란 기본값 (구역 + 테마·인원 보강). 모임 일정(날짜·요일·시각)은 반영하지 않음.
- * 영화 모임은 **지역 + 영화관** 고정.
- * Play & Vibe(게임 종류 선택 시)는 **지역 + 게임 종류**만 사용.
- * PcGame major는 **지역 + PC방** 고정(첫 자동 입력). 브랜드 키워드는 추천 칩에서 제공.
+ * 장소 AI 검색어: `[행정구역 bias 전체]` + 공백 1칸 + `[테마 한 덩어리]` (bias 없으면 테마만).
+ */
+function joinTwoPartPlaceQuery(bias: string | null | undefined, theme: string | null | undefined): string {
+  const b = (typeof bias === 'string' ? bias : '').trim();
+  const t = collapsePlaceThemeToken(typeof theme === 'string' ? theme.trim() : String(theme ?? '').trim());
+  if (!t) return b;
+  if (!b) return t;
+  return `${b} ${t}`;
+}
+
+/**
+ * 장소 검색 입력란 기본값 — **행정구역(bias) + 테마 토큰 한 덩어리**만. 일정·인원·용량 단어는 넣지 않음.
+ * 영화: 지역 + 영화관. PcGame: 지역 + PC방. Play & Vibe(게임 종류 있음): 지역 + 게임 종류.
  */
 export function buildDefaultPlaceSearchQuery(input: PlaceQueryBuilderInput): string {
   const seed = buildSeedNumber(input);
@@ -521,59 +597,56 @@ export function buildDefaultPlaceSearchQuery(input: PlaceQueryBuilderInput): str
   const label = (input.categoryLabel ?? '').trim() || '모임';
   const specialty = placeQuerySpecialty(input);
   if (isMovieCategoryLabel(label, specialty)) {
-    return joinQueryParts([bias, '영화관']);
+    return joinTwoPartPlaceQuery(bias, '영화관');
   }
   if (isPcGamePlaceQuery(input)) {
-    return joinQueryParts([bias, 'PC방']);
+    return joinTwoPartPlaceQuery(bias, 'PC방');
   }
   const playVibeGamesEarly = normalizedGameKinds(input);
   if (isPlayAndVibeGamesPlaceQuery(input) && playVibeGamesEarly.length > 0) {
-    return joinQueryParts([bias, pick(playVibeGamesEarly, seed)]);
+    return joinTwoPartPlaceQuery(bias, pick(playVibeGamesEarly, seed));
   }
   const pool = themePoolForPlaceQuery(input);
   const prefs = normalizedMenuPrefs(input);
-  const main = pick(pool, seed);
-  const capHint = resolveCapacityHint(input);
-  const capPool = capacityKeywords(capHint, seed);
-  const capWord = capPool.length ? pick(capPool, seed >>> 11) : null;
-
-  const includeCap = capWord != null && (seed & 1) === 0;
   const eatDrinkFood = isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food';
   const acts = normalizedActivityKinds(input);
   const activeLifeWithActivity = isActiveLifeSportsPlaceQuery(input) && acts.length > 0;
   const fkPrefs = normalizedFocusKnowledgePrefs(input);
-  const knowledgeWithPrefs = specialty === 'knowledge' && fkPrefs.length > 0;
-  const headCountHint = buildHeadcountHint(input);
+  const knowledgeWithPrefs =
+    specialty === 'knowledge' && fkPrefs.length > 0 && !isFocusKnowledgeMajorCode(input.majorCode);
+  const catFrag = categoryChipFragment(label, specialty, seed, input);
 
-  const parts: string[] = [];
-  if (bias) parts.push(bias);
-  if (specialty === 'food' && prefs.length > 0 && (seed & 7) !== 0) {
-    parts.push(pick(prefs, seed >>> 5));
-  }
-  if (activeLifeWithActivity && (seed & 7) !== 0) {
-    parts.push(pick(acts, seed >>> 5));
-  }
-  if (knowledgeWithPrefs && (seed & 7) !== 0) {
-    parts.push(pick(fkPrefs, seed >>> 5));
-  }
+  const raws: (string | null | undefined)[] = [pick(pool, seed)];
+  if (catFrag) raws.push(catFrag);
   if (eatDrinkFood) {
-    const sn = eatDrinkCategoryLabelSnippet(label);
-    if (sn.length >= 2 && !parts.includes(sn)) parts.push(sn);
+    if (prefs.length > 0) {
+      raws.push(pick(prefs, seed >>> 5));
+      raws.push(pick(prefs, seed >>> 7));
+    }
   }
   if (activeLifeWithActivity) {
     const sn = eatDrinkCategoryLabelSnippet(label);
-    if (sn.length >= 2 && !parts.includes(sn)) parts.push(sn);
+    if (sn.length >= 2) raws.push(sn);
+    if (acts.length > 0) raws.push(pick(acts, seed >>> 5));
   }
   if (knowledgeWithPrefs) {
     const sn = eatDrinkCategoryLabelSnippet(label);
-    if (sn.length >= 2 && !parts.includes(sn)) parts.push(sn);
+    if (sn.length >= 2) raws.push(sn);
+    if (fkPrefs.length > 0) raws.push(pick(fkPrefs, seed >>> 5));
   }
-  parts.push(main);
-  if (includeCap && capWord) parts.push(capWord);
-  if (eatDrinkFood && headCountHint && (seed & 2) === 0) parts.push(headCountHint);
-  if (activeLifeWithActivity && headCountHint && (seed & 2) === 0) parts.push(headCountHint);
-  if (knowledgeWithPrefs && headCountHint && (seed & 2) === 0) parts.push(headCountHint);
-  return joinQueryParts(parts);
+
+  const uniq: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of raws) {
+    const c = collapsePlaceThemeToken(String(raw ?? '').trim());
+    if (!c) continue;
+    const k = tokenKeyForPlaceQueryDedupe(c);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(c);
+  }
+  const second = pick(uniq.length > 0 ? uniq : [collapsePlaceThemeToken(pick(pool, seed))], seed);
+  return joinTwoPartPlaceQuery(bias, second);
 }
 
 const MAX_PLACE_SUGGEST_CHIPS = 8;
@@ -591,7 +664,7 @@ const MOVIE_VENUE_CHIP_SUFFIXES = [
 
 function buildMoviePlaceSuggestedQueries(bias: string, seed: number): string[] {
   const b = bias.trim();
-  const items = MOVIE_VENUE_CHIP_SUFFIXES.map((suf) => joinQueryParts([b, suf])).filter((q) => q.length > 0);
+  const items = MOVIE_VENUE_CHIP_SUFFIXES.map((suf) => joinTwoPartPlaceQuery(b, suf)).filter((q) => q.length > 0);
   const scored = items.map((v, i) => ({ v, k: djb2Hash(`${seed}|moviechip|${i}|${v}`) }));
   scored.sort((x, y) => x.k - y.k);
   const out: string[] = [];
@@ -609,9 +682,9 @@ function buildPlayVibePlaceSuggestedQueries(bias: string, gameKinds: readonly st
   for (const g of gameKinds) {
     const gtrim = String(g ?? '').trim();
     if (!gtrim) continue;
-    items.push(joinQueryParts([b, gtrim]));
+    items.push(joinTwoPartPlaceQuery(b, gtrim));
     for (const tok of venueSearchTokensForGameKind(gtrim)) {
-      items.push(joinQueryParts([b, tok]));
+      items.push(joinTwoPartPlaceQuery(b, tok));
     }
   }
   const scored = items.map((v, i) => ({ v, k: djb2Hash(`${seed}|playvibechip|${i}|${v}`) }));
@@ -628,8 +701,8 @@ function buildPlayVibePlaceSuggestedQueries(bias: string, gameKinds: readonly st
 /** PcGame major — 추천어: **지역+PC방**을 맨 앞에 두고, 이어서 탑존·액토즈 등 브랜드 키워드(최대 8개) */
 function buildPcGamePlaceSuggestedQueries(bias: string, seed: number): string[] {
   const b = bias.trim();
-  const head = joinQueryParts([b, 'PC방']);
-  const items = PC_BANG_BRAND_CHIP_SUFFIXES.map((suf) => joinQueryParts([b, suf])).filter((q) => q.length > 0);
+  const head = joinTwoPartPlaceQuery(b, 'PC방');
+  const items = PC_BANG_BRAND_CHIP_SUFFIXES.map((suf) => joinTwoPartPlaceQuery(b, suf)).filter((q) => q.length > 0);
   const scored = items.map((v, i) => ({ v, k: djb2Hash(`${seed}|pcgamechip|${i}|${v}`) }));
   scored.sort((x, y) => x.k - y.k);
   const out: string[] = [];
@@ -644,12 +717,82 @@ function buildPcGamePlaceSuggestedQueries(bias: string, seed: number): string[] 
   return out;
 }
 
+/** 추천 칩용 테마 토큰 목록(공백 제거·중복 키 제거) — bias와 조합 전에만 사용 */
+function collectPlaceSuggestThemeTokens(
+  input: PlaceQueryBuilderInput,
+  label: string,
+  specialty: SpecialtyKind | null,
+  seed: number,
+): string[] {
+  const pool = themePoolForPlaceQuery(input);
+  const prefs = normalizedMenuPrefs(input);
+  const catFrag = categoryChipFragment(label, specialty, seed >>> 11, input);
+  const eatDrinkFood = isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food';
+  const actKinds = normalizedActivityKinds(input);
+  const activeLifeSports = isActiveLifeSportsPlaceQuery(input) && actKinds.length > 0;
+  const fkList = normalizedFocusKnowledgePrefs(input);
+  const focusKnowledgePlaces = isFocusKnowledgeMajorCode(input.majorCode) && specialty === 'knowledge';
+  const knowledgePrefs =
+    specialty === 'knowledge' && fkList.length > 0 && !isFocusKnowledgeMajorCode(input.majorCode);
+  const labelSnippet = eatDrinkFood
+    ? pick(prefs.length > 0 ? prefs : (['맛집', '한식'] as const), seed >>> 13)
+    : focusKnowledgePlaces
+      ? pick(FOCUS_KNOWLEDGE_PLACE_POOL, seed >>> 13)
+      : activeLifeSports || knowledgePrefs
+        ? eatDrinkCategoryLabelSnippet(label)
+        : label.length <= 10
+          ? label
+          : catFrag;
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string | null | undefined) => {
+    const c = collapsePlaceThemeToken(String(raw ?? '').trim());
+    if (!c) return;
+    const k = tokenKeyForPlaceQueryDedupe(c);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(c);
+  };
+
+  for (const p of pool) add(p);
+  add(catFrag);
+  add(labelSnippet);
+
+  if (eatDrinkFood) {
+    for (const p of prefs) add(p);
+    add('맛집');
+  }
+  if (knowledgePrefs) {
+    for (const p of fkList) add(p);
+  }
+  if (specialty === 'knowledge' && !focusKnowledgePlaces) {
+    add(pick(['카페', '커피숍', '노트북 카페', '스터디카페'], seed >>> 29));
+    add(pick(['북카페', '조용한 카페', '대형 카페'], seed >>> 31));
+  }
+  if (activeLifeSports) {
+    for (const p of actKinds) {
+      add(p);
+      for (const tok of venueSearchTokensForActivityKind(p)) add(tok);
+    }
+  }
+  if (specialty === 'food' && prefs.length > 0) {
+    for (let i = 0; i < prefs.length; i += 1) add(pick(pool, seed + 200 + i * 17));
+  }
+  if (knowledgePrefs) {
+    for (let i = 0; i < fkList.length; i += 1) add(pick(pool, seed + 260 + i * 17));
+  }
+  if (activeLifeSports) {
+    for (let i = 0; i < actKinds.length; i += 1) add(pick(pool, seed + 240 + i * 19));
+  }
+  for (let j = 0; j < Math.min(pool.length, 24); j += 1) add(pick(pool, seed + 50 + j * 31));
+
+  return out;
+}
+
 /**
- * 추천 검색어 칩 — 지역(bias)·카테고리·인원·테마를 조합해 다양하게 생성 (최대 8개).
- * 모임 일정(요일·시각·시간대 단어)은 넣지 않음.
- * 영화 모임은 지역 + CGV·메가박스·롯데시네마·DVD방 등 고정 패턴.
- * Play & Vibe(게임 종류 선택 시)는 지역 + 게임 종류·시설 키워드만 사용.
- * PcGame major는 **지역+PC방**을 선두로, 이어서 탑존·액토즈 등 브랜드 PC방 키워드.
+ * 추천 검색어 칩 — **행정구역(bias) + 테마 토큰 한 덩어리**만 (최대 8개). 일정·인원·용량 단어 없음.
+ * 영화 / PcGame / Play&Vibe(게임 종류)는 전용 분기 유지.
  */
 export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput): string[] {
   const bias = (input.bias ?? '').trim();
@@ -666,24 +809,11 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
   if (isPlayAndVibeGamesPlaceQuery(input) && gameKindsEarly.length > 0) {
     return buildPlayVibePlaceSuggestedQueries(bias, gameKindsEarly, seed);
   }
+
   const pool = themePoolForPlaceQuery(input);
-  const prefs = normalizedMenuPrefs(input);
-  const capHint = resolveCapacityHint(input);
-  const capPool = capacityKeywords(capHint, seed);
-  const capWord = capPool.length ? pick(capPool, seed >>> 5) : '';
-  const headCount = buildHeadcountHint(input);
   const catFrag = categoryChipFragment(label, specialty, seed >>> 11, input);
-  const eatDrinkFood = isEatAndDrinkMajorCode(input.majorCode) && specialty === 'food';
-  const actKinds = normalizedActivityKinds(input);
-  const activeLifeSports = isActiveLifeSportsPlaceQuery(input) && actKinds.length > 0;
-  const fkList = normalizedFocusKnowledgePrefs(input);
-  const knowledgePrefs = specialty === 'knowledge' && fkList.length > 0;
-  const labelSnippet =
-    eatDrinkFood || activeLifeSports || knowledgePrefs
-      ? eatDrinkCategoryLabelSnippet(label)
-      : label.length <= 10
-        ? label
-        : catFrag;
+  const themes = collectPlaceSuggestThemeTokens(input, label, specialty, seed);
+  const rawVariants = themes.map((t) => joinTwoPartPlaceQuery(bias, t));
 
   const out: string[] = [];
   const push = (q: string) => {
@@ -691,124 +821,6 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
     if (!t || out.includes(t)) return;
     out.push(t);
   };
-
-  const mk = (salt: number) => {
-    const s = seed + salt * 7919;
-    return {
-      main: pick(pool, s),
-      cap: capPool.length ? pick(capPool, s >>> 7) : capWord,
-    };
-  };
-
-  const rawVariants: string[] = [];
-
-  if (eatDrinkFood) {
-    const p0 = prefs[0];
-    const mainAlt = pick(pool, seed + 401);
-    rawVariants.push(
-      joinQueryParts([bias, labelSnippet, p0, headCount]),
-      joinQueryParts([bias, labelSnippet, catFrag, headCount]),
-      joinQueryParts([bias, labelSnippet, headCount]),
-      joinQueryParts([bias, p0, labelSnippet]),
-      joinQueryParts([bias, catFrag, headCount, mainAlt]),
-    );
-  }
-
-  if (knowledgePrefs) {
-    const p0 = fkList[0]!;
-    const mainAlt = pick(pool, seed + 401);
-    rawVariants.push(
-      joinQueryParts([bias, labelSnippet, p0, headCount]),
-      joinQueryParts([bias, labelSnippet, catFrag, headCount]),
-      joinQueryParts([bias, labelSnippet, headCount]),
-      joinQueryParts([bias, p0, labelSnippet]),
-      joinQueryParts([bias, catFrag, headCount, mainAlt]),
-    );
-  }
-
-  if (specialty === 'knowledge') {
-    const cafeLead = pick(['카페', '커피숍', '노트북 카페', '스터디카페'], seed >>> 29);
-    const cafeAlt = pick(['북카페', '조용한 카페', '대형 카페'], seed >>> 31);
-    rawVariants.push(joinQueryParts([bias, cafeLead, labelSnippet]));
-    rawVariants.push(joinQueryParts([bias, cafeAlt, headCount]));
-    rawVariants.push(joinQueryParts([bias, labelSnippet, cafeLead, catFrag]));
-  }
-
-  if (activeLifeSports) {
-    const p0 = actKinds[0]!;
-    const toks = [...venueSearchTokensForActivityKind(p0)];
-    const vn0 = pick(toks, seed + 411);
-    const vn1 = pick(toks, seed + 433);
-    const mainAlt = pick(pool, seed + 401);
-    rawVariants.push(
-      joinQueryParts([bias, labelSnippet, p0, vn0]),
-      joinQueryParts([bias, labelSnippet, vn1, headCount]),
-      joinQueryParts([bias, p0, vn0]),
-      joinQueryParts([bias, labelSnippet, catFrag, vn1]),
-      joinQueryParts([bias, catFrag, headCount, mainAlt]),
-    );
-  }
-
-  const a = mk(0);
-  rawVariants.push(joinQueryParts([bias, a.main, a.cap]));
-  rawVariants.push(joinQueryParts([bias, catFrag, a.main]));
-  const b = mk(1);
-  rawVariants.push(joinQueryParts([bias, labelSnippet, b.main]));
-  rawVariants.push(joinQueryParts([bias, headCount, b.main]));
-  const c = mk(2);
-  rawVariants.push(joinQueryParts([bias, headCount, c.main]));
-  rawVariants.push(joinQueryParts([bias, catFrag, c.main]));
-  const d = mk(3);
-  rawVariants.push(joinQueryParts([bias, catFrag, d.main]));
-  rawVariants.push(joinQueryParts([bias, labelSnippet, d.main]));
-  const e = mk(4);
-  rawVariants.push(joinQueryParts([bias, e.main]));
-  rawVariants.push(joinQueryParts([bias, catFrag, e.main]));
-  const f = mk(5);
-  rawVariants.push(joinQueryParts([bias, headCount, f.main]));
-  rawVariants.push(joinQueryParts([bias, catFrag, f.cap, f.main]));
-  const g = mk(6);
-  rawVariants.push(joinQueryParts([bias, labelSnippet, g.main]));
-  if (!bias) {
-    rawVariants.push(joinQueryParts([catFrag, g.main]));
-    rawVariants.push(joinQueryParts([headCount, g.main]));
-  }
-
-  if (specialty === 'food' && prefs.length > 0) {
-    for (let i = 0; i < prefs.length; i += 1) {
-      const p = prefs[i]!;
-      const xv = mk(200 + i * 17);
-      rawVariants.push(joinQueryParts([bias, p, xv.main]));
-      rawVariants.push(joinQueryParts([bias, p, '맛집']));
-      rawVariants.push(joinQueryParts([bias, p, xv.main, headCount]));
-      rawVariants.push(joinQueryParts([bias, labelSnippet, p, xv.main]));
-    }
-  }
-
-  if (knowledgePrefs) {
-    for (let i = 0; i < fkList.length; i += 1) {
-      const p = fkList[i]!;
-      const xv = mk(260 + i * 17);
-      rawVariants.push(joinQueryParts([bias, p, xv.main]));
-      rawVariants.push(joinQueryParts([bias, labelSnippet, p, xv.main]));
-      rawVariants.push(joinQueryParts([bias, p, xv.main, headCount]));
-      rawVariants.push(joinQueryParts([bias, catFrag, p, xv.main]));
-    }
-  }
-
-  if (activeLifeSports) {
-    for (let i = 0; i < actKinds.length; i += 1) {
-      const p = actKinds[i]!;
-      const toks = [...venueSearchTokensForActivityKind(p)];
-      const vn = pick(toks, seed + 280 + i * 23);
-      const vn2 = pick(toks, seed + 290 + i * 23);
-      const xv = mk(240 + i * 19);
-      rawVariants.push(joinQueryParts([bias, labelSnippet, p, vn]));
-      rawVariants.push(joinQueryParts([bias, p, vn2]));
-      rawVariants.push(joinQueryParts([bias, vn, headCount]));
-      rawVariants.push(joinQueryParts([bias, p, xv.main, headCount]));
-    }
-  }
 
   const scored = rawVariants
     .filter((v) => v.length > 0)
@@ -818,11 +830,11 @@ export function buildPlaceSuggestedSearchQueries(input: PlaceQueryBuilderInput):
     push(v);
     if (out.length >= MAX_PLACE_SUGGEST_CHIPS) break;
   }
-  for (let j = 0; j < 24 && out.length < MAX_PLACE_SUGGEST_CHIPS; j += 1) {
-    const x = mk(50 + j);
-    push(joinQueryParts([bias, catFrag, x.main]));
-    push(joinQueryParts([bias, x.main, x.cap]));
+
+  for (let j = 0; j < 60 && out.length < MAX_PLACE_SUGGEST_CHIPS; j += 1) {
+    push(joinTwoPartPlaceQuery(bias, pick(pool, seed + 50 + j * 31)));
   }
+  if (catFrag) push(joinTwoPartPlaceQuery(bias, catFrag));
 
   return out.slice(0, MAX_PLACE_SUGGEST_CHIPS);
 }

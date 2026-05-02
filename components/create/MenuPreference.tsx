@@ -3,7 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
-const OPTIONS = ['한식', '일식', '중식', '양식', '분식', '퓨전', '카페·디저트', '브런치', '주점·호프', '이자카야', '와인.바', '포차', '오마카세'] as const;
+const OPTIONS = ['한식', '일식', '중식', '양식', '분식', '퓨전', '카페', '브런치', '주점·호프', '이자카야', '와인.바', '포차', '오마카세'] as const;
 
 export type MenuPreferenceProps = {
   value: string[];

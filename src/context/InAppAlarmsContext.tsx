@@ -37,7 +37,6 @@ import {
   type FriendInboxRow,
 } from '@/src/lib/friends';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
-import { notifyInAppAlarmHeadsUpFireAndForget } from '@/src/lib/in-app-alarm-push';
 import {
   chatMessageTimeMs,
   defaultInAppAlarmReadState,
@@ -461,15 +460,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       const createdMs = fr.created_at ? Date.parse(fr.created_at) : 0;
       if (createdMs && !isRecentEnoughForHeadsUp(createdMs)) continue;
       friendHeadsUpNotifiedIdsRef.current.add(frid);
-      const title = friendRequesterNickById.get(fr.requester_app_user_id) ?? '친구';
-      ginitNotifyDbg('InAppAlarms', 'friend_request_heads_up', { friendshipId: frid });
-      notifyInAppAlarmHeadsUpFireAndForget({
-        userId,
-        kind: 'friend_request',
-        meetingId: frid,
-        meetingTitle: title,
-        preview: '친구 요청이 왔어요. 눌러서 확인해 보세요.',
-      });
+      /** 송신 측 `notifyFriendRequestReceived` 원격 푸시와 중복되므로 헤드업(로컬/2차 원격)은 보내지 않고 소비만 표시합니다. */
+      ginitNotifyDbg('InAppAlarms', 'friend_request_skip_heads_up_remote_already_sent', { friendshipId: frid });
       setReadState((p) => ({
         ...p,
         friendRequestHeadsUpSentIds: { ...(p.friendRequestHeadsUpSentIds ?? {}), [frid]: true },
@@ -486,7 +478,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     friendInbox,
     readState.friendRequestDismissedIds,
     readState.friendRequestHeadsUpSentIds,
-    friendRequesterNickById,
   ]);
 
   useEffect(() => {

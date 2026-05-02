@@ -1,5 +1,6 @@
 import notifee, { AndroidImportance } from '@notifee/react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import { consumeNotifeeDisplayOnceGlobalSync } from '@/src/lib/fcm-foreground-message-dedupe';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
@@ -73,6 +74,10 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
       ginitNotifyDbg('fcm-notifee-display', 'skip_social_notify_off', { meetingId });
       return;
     }
+  }
+  if (!consumeNotifeeDisplayOnceGlobalSync(rm)) {
+    ginitNotifyDbg('fcm-notifee-display', 'skip_duplicate_message_id', { messageId: rm.messageId });
+    return;
   }
   ginitNotifyDbg('fcm-notifee-display', 'display', {
     messageId: rm.messageId,

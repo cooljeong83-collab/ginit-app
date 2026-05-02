@@ -2,121 +2,24 @@
 import * as Font from 'expo-font';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from 'react-native';
-
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
+import { type RefObject, useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
-import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import { resolveNaverMovieSearchWebUrl } from '@/src/lib/naver-local-search';
 import { enrichMoviesWithTmdbPosters, normalizeTmdbPosterUrl } from '@/src/lib/tmdb-movie-poster';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
-import {
-    INPUT_PLACEHOLDER,
-    wizardSpecialtyStyles as S,
-} from './wizard-specialty-styles';
+import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
 const TRUST_BLUE = GinitTheme.colors.primary;
 
 const PRETENDARD_BOLD_URI =
   'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/Pretendard-Bold.otf';
-
-type SpeechRecognitionErrorEvent = {
-  error?: string;
-  message?: string;
-  code?: string | number;
-};
-
-function humanizeSpeechRecognitionError(event: SpeechRecognitionErrorEvent | null | undefined): string {
-  const rawMsg = String(event?.message ?? '').trim();
-  const code = String(event?.code ?? '').trim();
-  const map: Record<string, string> = {
-    'not-allowed': '마이크 또는 음성 인식 권한이 없어요. 설정에서 권한을 허용해 주세요.',
-    'service-not-available':
-      '이 기기에서 음성 인식 서비스를 사용할 수 없어요. (음성 인식/구글 음성 서비스 설정을 확인해 주세요)',
-    network: '네트워크 문제로 음성 인식에 실패했어요. 연결 상태를 확인하고 다시 시도해 주세요.',
-    aborted: '음성 인식이 중단되었어요.',
-    interrupted: '다른 오디오(통화/알람 등) 때문에 음성 인식이 중단되었어요.',
-    'bad-grammar': '음성 인식 요청 형식이 올바르지 않아요. 앱을 최신으로 업데이트한 뒤 다시 시도해 주세요.',
-  };
-
-  if (code && map[code]) return map[code];
-  if (rawMsg) {
-    if (/[가-힣]/.test(rawMsg)) return rawMsg;
-    return `음성 인식에 실패했어요.\n\n원인: ${rawMsg}${code ? `\n코드: ${code}` : ''}`;
-  }
-  return '음성 인식에 실패했어요. 잠시 후 다시 시도해 주세요.';
-}
-
-function VoiceWaveform({ active, color }: { active: boolean; color: string }) {
-  const v1 = useRef(new Animated.Value(0)).current;
-  const v2 = useRef(new Animated.Value(0)).current;
-  const v3 = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!active) return;
-    const mk = (v: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(v, { toValue: 1, duration: 220, useNativeDriver: true }),
-          Animated.timing(v, { toValue: 0, duration: 260, useNativeDriver: true }),
-        ]),
-      );
-    const l1 = mk(v1, 0);
-    const l2 = mk(v2, 90);
-    const l3 = mk(v3, 180);
-    l1.start();
-    l2.start();
-    l3.start();
-    return () => {
-      l1.stop();
-      l2.stop();
-      l3.stop();
-      v1.setValue(0);
-      v2.setValue(0);
-      v3.setValue(0);
-    };
-  }, [active, v1, v2, v3]);
-
-  if (!active) return null;
-
-  const barStyle = (v: Animated.Value) => ({
-    transform: [
-      {
-        scaleY: v.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.35, 1.0],
-        }),
-      },
-    ],
-  });
-
-  return (
-    <View style={styles.voiceWaveWrap} pointerEvents="none">
-      <Animated.View style={[styles.voiceWaveBar, { backgroundColor: color }, barStyle(v1)]} />
-      <Animated.View style={[styles.voiceWaveBar, { backgroundColor: color }, barStyle(v2)]} />
-      <Animated.View style={[styles.voiceWaveBar, { backgroundColor: color }, barStyle(v3)]} />
-    </View>
-  );
-}
 
 /** 데모 포스터(항상 로드). 운영 시 TMDB/KOBIS 등으로 교체 가능. */
 function demoPosterUrl(label: string): string {
@@ -207,27 +110,6 @@ const STATIC_BOX_OFFICE_FALLBACK: SelectedMovieExtra[] = [
   },
 ];
 
-const SEARCH_EXTRA: SelectedMovieExtra[] = [
-  {
-    id: 'wicked',
-    title: '위키드',
-    year: '2024',
-    rating: '7.0',
-    posterUrl: demoPosterUrl('Wicked'),
-    info: '오즈의 마법사 이전 시대, 서로 다른 성격의 두 마법사가 만나 운명을 바꾸는 뮤지컬 판타지. 무대의 화려함이 스크린으로 옮겨졌다.',
-  },
-  {
-    id: 'gladiator2',
-    title: '글래디에이터 II',
-    year: '2024',
-    rating: '6.6',
-    posterUrl: demoPosterUrl('Gladiator'),
-    info: '노예에서 검투사로 살아남은 루시우스가 콜로세움과 제국의 음모 속에서 다시 길을 찾는다. 리들리 스콧의史詩 액션 속편.',
-  },
-];
-
-const SEARCH_LIMIT = 24;
-
 /** TMDB `w500` 절대 URL 우선, 그 외 HTTPS는 그대로, 없으면 폴백 단계에서 그라데이션 */
 function resolveDisplayPosterUrl(m: SelectedMovieExtra): string | undefined {
   const n = normalizeTmdbPosterUrl(m.posterUrl);
@@ -315,80 +197,11 @@ export function MovieSearch({
   parentScrollRef: _parentScrollRef,
   parentScrollYRef: _parentScrollYRef,
 }: MovieSearchProps) {
-  const [query, setQuery] = useState('');
-  const searchInputRef = useRef<TextInput>(null);
-  const searchInputDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(searchInputRef), []);
-  const [voiceRecognizing, setVoiceRecognizing] = useState(false);
-  const voiceActiveRef = useRef(false);
   const [pretendardFamily, setPretendardFamily] = useState<string | undefined>(undefined);
   const [rankRows, setRankRows] = useState<SelectedMovieExtra[]>([]);
   const [rankReady, setRankReady] = useState(false);
   const [rankErr, setRankErr] = useState<string | null>(null);
   const [movieNaverWeb, setMovieNaverWeb] = useState<{ url: string; title: string } | null>(null);
-
-  useSpeechRecognitionEvent('start', () => {
-    if (!voiceActiveRef.current) return;
-    setVoiceRecognizing(true);
-  });
-  useSpeechRecognitionEvent('end', () => {
-    if (!voiceActiveRef.current) return;
-    setVoiceRecognizing(false);
-    voiceActiveRef.current = false;
-  });
-  useSpeechRecognitionEvent('error', (event) => {
-    if (!voiceActiveRef.current) return;
-    setVoiceRecognizing(false);
-    voiceActiveRef.current = false;
-    Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
-  });
-  useSpeechRecognitionEvent('result', (event) => {
-    if (!voiceActiveRef.current) return;
-    const t = String((event as { results?: Array<{ transcript?: unknown }> })?.results?.[0]?.transcript ?? '').trim();
-    if (!t) return;
-    setQuery(t);
-    requestAnimationFrame(() => searchInputRef.current?.focus());
-    if (event?.isFinal) {
-      setVoiceRecognizing(false);
-      voiceActiveRef.current = false;
-      ExpoSpeechRecognitionModule.stop();
-    }
-  });
-
-  useEffect(() => {
-    return () => {
-      try {
-        voiceActiveRef.current = false;
-        ExpoSpeechRecognitionModule.stop();
-      } catch {
-        // noop
-      }
-    };
-  }, []);
-
-  const onPressVoiceInput = useCallback(async () => {
-    if (disabled) return;
-    if (voiceRecognizing) {
-      ExpoSpeechRecognitionModule.stop();
-      return;
-    }
-    try {
-      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
-        return;
-      }
-      voiceActiveRef.current = true;
-      ExpoSpeechRecognitionModule.start({
-        lang: 'ko-KR',
-        interimResults: true,
-        maxAlternatives: 1,
-        continuous: false,
-        requiresOnDeviceRecognition: false,
-      });
-    } catch (e) {
-      Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError({ message: String(e) }));
-    }
-  }, [disabled, voiceRecognizing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -428,29 +241,10 @@ export function MovieSearch({
     };
   }, []);
 
-  const searchCatalog = useMemo(() => {
-    const map = new Map<string, SelectedMovieExtra>();
-    [...SEARCH_EXTRA, ...rankRows].forEach((m) => map.set(m.id, m));
-    return [...map.values()];
-  }, [rankRows]);
-
-  const isRankingView = query.trim().length === 0;
-
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) {
-      if (!rankReady) return [];
-      return rankRows;
-    }
-    return searchCatalog
-      .filter(
-        (m) =>
-          m.title.toLowerCase().includes(q) ||
-          (m.info && m.info.toLowerCase().includes(q)) ||
-          (m.year && m.year.includes(q)),
-      )
-      .slice(0, SEARCH_LIMIT);
-  }, [query, rankReady, rankRows, searchCatalog]);
+    if (!rankReady) return [];
+    return rankRows;
+  }, [rankReady, rankRows]);
 
   const titleFontStyle = useMemo(
     () => (pretendardFamily ? { fontFamily: pretendardFamily } : undefined),
@@ -465,18 +259,16 @@ export function MovieSearch({
       layoutAnimateEaseInEaseOut();
       if (value.some((x) => x.id === m.id)) {
         onChange(value.filter((x) => x.id !== m.id));
-        setQuery('');
         return;
       }
       onChange([...value, m]);
-      setQuery('');
       onSelect?.(m);
     },
     [disabled, onChange, onSelect, value],
   );
 
-  const centerEmpty = (!rankReady && isRankingView) || rows.length === 0;
-  const showLoadingBlock = isRankingView && !rankReady;
+  const centerEmpty = !rankReady || rows.length === 0;
+  const showLoadingBlock = !rankReady;
 
   const carousel = (
     <View style={[S.movieResultsScrollHost, S.movieResultsCarouselHost]}>
@@ -498,11 +290,7 @@ export function MovieSearch({
           </View>
         ) : rows.length === 0 ? (
           <View style={{ paddingVertical: 16, width: '100%' }}>
-            <Text style={S.movieResultsStatusText}>
-              {isRankingView
-                ? rankErr || '목록이 비어 있어요.'
-                : '검색 결과가 없어요. 다른 키워드를 써 보세요.'}
-            </Text>
+            <Text style={S.movieResultsStatusText}>{rankErr || '목록이 비어 있어요.'}</Text>
           </View>
         ) : (
           rows.map((item, index) => {
@@ -514,7 +302,7 @@ export function MovieSearch({
             const movieDetailUrl = resolveNaverMovieSearchWebUrl(item.title);
             return (
               <View
-                key={`${query}-${item.id}`}
+                key={item.id}
                 style={[
                   S.movieResultImageCard,
                   S.movieResultProposalCardWrap,
@@ -525,16 +313,12 @@ export function MovieSearch({
                   disabled={disabled}
                   style={({ pressed }) => [S.movieResultProposalPressFill, pressed && S.movieResultCardPressed]}
                   accessibilityRole="button"
-                  accessibilityLabel={
-                    isRankingView ? `${item.kobisRank ?? index + 1}위 ${item.title}` : item.title
-                  }>
+                  accessibilityLabel={`${item.kobisRank ?? index + 1}위 ${item.title}`}>
                   <View style={S.movieResultProposalPressInner}>
                     <View style={S.movieResultImageWrap}>
-                      {isRankingView ? (
-                        <View style={S.movieRankBadge} pointerEvents="none">
-                          <Text style={S.movieRankBadgeText}>{item.kobisRank ?? index + 1}</Text>
-                        </View>
-                      ) : null}
+                      <View style={S.movieRankBadge} pointerEvents="none">
+                        <Text style={S.movieRankBadgeText}>{item.kobisRank ?? index + 1}</Text>
+                      </View>
                       <MoviePosterFill item={item} recyclingKey={item.id} />
                       {selected ? (
                         <View style={S.movieResultImageOverlay} pointerEvents="none">
@@ -575,46 +359,6 @@ export function MovieSearch({
 
   return (
     <View style={Platform.OS === 'web' ? ({ width: '100%', flexDirection: 'column' } as const) : undefined}>
-      <LinearGradient
-        colors={[...GinitTheme.colors.brandGradient, GinitTheme.colors.ctaGradient[1]]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={S.movieWizardAiBorder}>
-        <View style={S.movieWizardAiInner}>
-          <View style={styles.voiceInputRow}>
-            <TextInput
-              ref={searchInputRef}
-              {...searchInputDeferKb}
-              value={query}
-              onChangeText={setQuery}
-              placeholder='예: "듄", "기생충"'
-              placeholderTextColor={INPUT_PLACEHOLDER}
-              style={S.movieWizardAiInput}
-              editable={!disabled}
-              returnKeyType="search"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="default"
-              inputMode="text"
-              underlineColorAndroid="transparent"
-              {...(Platform.OS === 'ios' ? { clearButtonMode: 'while-editing' as const } : {})}
-            />
-            <Pressable
-              onPress={onPressVoiceInput}
-              style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel="영화 제목 음성 입력">
-              {voiceRecognizing ? (
-                <VoiceWaveform active color={GinitTheme.colors.primary} />
-              ) : (
-                <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </LinearGradient>
-
       {carousel}
 
       <NaverPlaceWebViewModal
@@ -626,36 +370,3 @@ export function MovieSearch({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  voiceInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minWidth: 0,
-  },
-  voiceBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: GinitTheme.colors.bgAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  voiceBtnPressed: {
-    opacity: 0.88,
-  },
-  voiceWaveWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  voiceWaveBar: {
-    width: 3,
-    height: 16,
-    borderRadius: 2,
-  },
-});

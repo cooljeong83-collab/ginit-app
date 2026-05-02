@@ -22,6 +22,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -69,9 +70,12 @@ import {
 import type { Meeting } from '@/src/lib/meetings';
 import {
   applyTrustPenaltyLeaveConfirmedMeeting,
+  approveJoinRequest,
+  cancelJoinRequest,
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
   deleteMeetingByHost,
+  findMeetingJoinRequestForUser,
   formatPublicMeetingAgeSummary,
   formatPublicMeetingApprovalSummary,
   formatPublicMeetingGenderSummary,
@@ -81,8 +85,12 @@ import {
   getParticipantVoteSnapshot,
   joinMeeting,
   leaveMeeting,
+  listMeetingJoinRequests,
+  MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
   meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
+  rejectJoinRequest,
+  requestJoinMeeting,
   resolveVoteTopTies,
   unconfirmMeetingSchedule,
   updateMeetingDateCandidates,
@@ -456,6 +464,11 @@ export default function MeetingDetailScreen() {
   const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, retryNonce);
   const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
   const [joinBusy, setJoinBusy] = useState(false);
+  const [joinRequestMessageOpen, setJoinRequestMessageOpen] = useState(false);
+  const [joinRequestDraftMessage, setJoinRequestDraftMessage] = useState('');
+  const [hostJoinRequestBusyId, setHostJoinRequestBusyId] = useState<string | null>(null);
+  /** setState 전에도 연타·중복 비동기 호출로 승인/거절 RPC가 여러 번 나가지 않게 함 */
+  const hostJoinRequestActionInFlightRef = useRef(false);
   const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
   const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(3);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
@@ -494,7 +507,11 @@ export default function MeetingDetailScreen() {
       setParticipantProfiles({});
       return;
     }
-    const ids = orderedParticipantIds(meeting);
+    const base = orderedParticipantIds(meeting);
+    const jrIds = listMeetingJoinRequests(meeting)
+      .map((r) => normalizeParticipantId(r.userId) ?? r.userId.trim())
+      .filter((x) => Boolean(x));
+    const ids = [...new Set([...base, ...jrIds])];
     if (ids.length === 0) {
       setParticipantProfiles({});
       return;
@@ -1119,6 +1136,21 @@ export default function MeetingDetailScreen() {
     if (!sessionPk) return false;
     return orderedParticipantIdsList.includes(sessionPk);
   }, [sessionPk, orderedParticipantIdsList]);
+
+  const joinRequestsSorted = useMemo(() => {
+    if (!meeting) return [];
+    return [...listMeetingJoinRequests(meeting)].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
+  }, [meeting]);
+
+  const needsHostApprovalJoin = useMemo(
+    () => Boolean(meeting?.isPublic === true && publicMeetingDetails?.approvalType === 'HOST_APPROVAL'),
+    [meeting?.isPublic, publicMeetingDetails?.approvalType],
+  );
+
+  const hasPendingJoinRequest = useMemo(() => {
+    if (!sessionPk || !meeting) return false;
+    return findMeetingJoinRequestForUser(meeting, sessionPk) != null;
+  }, [meeting, sessionPk]);
 
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
@@ -1807,6 +1839,243 @@ export default function MeetingDetailScreen() {
     queryClient,
     scrollToVoteBlock,
   ]);
+
+  const proceedJoinRequestSubmit = useCallback(
+    async (messageFromModal: string | null) => {
+      if (!meeting) return;
+      if (!sessionPk) {
+        Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+        return;
+      }
+      const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
+      const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
+      const effectiveMovieIds =
+        autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
+      if (!guestVotesReady) {
+        const parts: string[] = [];
+        if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
+        if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
+        if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
+        const firstScrollSection: 'date' | 'movie' | 'place' | null =
+          needsDatePick && !autoDatePick && effectiveDateIds.length === 0
+            ? 'date'
+            : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
+              ? 'movie'
+              : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
+                ? 'place'
+                : null;
+        Alert.alert(
+          '투표를 완료해 주세요',
+          parts.length > 0
+            ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
+            : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
+          firstScrollSection != null
+            ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
+            : [{ text: '확인' }],
+        );
+        return;
+      }
+      setJoinBusy(true);
+      try {
+        await ensureUserProfile(sessionPk);
+        const profGate = await getUserProfile(sessionPk);
+        if (meetingDemographicsIncomplete(profGate, sessionPk)) {
+          Alert.alert(
+            '프로필을 먼저 완성해 주세요',
+            'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
+            [
+              { text: '닫기', style: 'cancel' },
+              { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
+            ],
+          );
+          return;
+        }
+        const joinVotes =
+          meeting.scheduleConfirmed === true
+            ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }
+            : {
+                dateChipIds: effectiveDateIds,
+                placeChipIds: effectivePlaceIds,
+                movieChipIds: effectiveMovieIds,
+              };
+        const msgTrim = (messageFromModal ?? '').trim();
+        const opts =
+          publicMeetingDetails?.requestMessageEnabled === true
+            ? {
+                message: msgTrim ? msgTrim.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null,
+              }
+            : undefined;
+        await requestJoinMeeting(meeting.id, sessionPk, joinVotes, opts);
+        setJoinRequestMessageOpen(false);
+        void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+        showTransientBottomMessage('참가 신청을 보냈어요. 호스트 승인을 기다려 주세요.');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '';
+        if (isConfirmedScheduleOverlapErrorMessage(msg)) {
+          showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+        } else {
+          Alert.alert('신청 실패', msg || '다시 시도해 주세요.');
+        }
+      } finally {
+        setJoinBusy(false);
+      }
+    },
+    [
+      router,
+      meeting,
+      sessionPk,
+      guestVotesReady,
+      meeting?.scheduleConfirmed,
+      needsDatePick,
+      needsPlacePick,
+      needsMoviePick,
+      autoDatePick,
+      autoPlacePick,
+      autoMoviePick,
+      dateChips,
+      placeChips,
+      extraMovies,
+      selectedDateIds,
+      selectedPlaceIds,
+      selectedMovieIds,
+      queryClient,
+      scrollToVoteBlock,
+      publicMeetingDetails?.requestMessageEnabled,
+    ],
+  );
+
+  const onPressRequestJoin = useCallback(() => {
+    if (!meeting || !sessionPk) {
+      Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+      return;
+    }
+    const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
+    const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
+    const effectiveMovieIds =
+      autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
+    if (!guestVotesReady) {
+      const parts: string[] = [];
+      if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
+      if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
+      if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
+      const firstScrollSection: 'date' | 'movie' | 'place' | null =
+        needsDatePick && !autoDatePick && effectiveDateIds.length === 0
+          ? 'date'
+          : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
+            ? 'movie'
+            : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
+              ? 'place'
+              : null;
+      Alert.alert(
+        '투표를 완료해 주세요',
+        parts.length > 0
+          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
+          : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
+        firstScrollSection != null
+          ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
+          : [{ text: '확인' }],
+      );
+      return;
+    }
+    if (publicMeetingDetails?.requestMessageEnabled === true) {
+      setJoinRequestDraftMessage('');
+      setJoinRequestMessageOpen(true);
+      return;
+    }
+    void proceedJoinRequestSubmit(null);
+  }, [
+    meeting,
+    sessionPk,
+    guestVotesReady,
+    needsDatePick,
+    needsPlacePick,
+    needsMoviePick,
+    autoDatePick,
+    autoPlacePick,
+    autoMoviePick,
+    dateChips,
+    placeChips,
+    extraMovies,
+    selectedDateIds,
+    selectedPlaceIds,
+    selectedMovieIds,
+    scrollToVoteBlock,
+    publicMeetingDetails?.requestMessageEnabled,
+    proceedJoinRequestSubmit,
+  ]);
+
+  const onCancelJoinRequestPress = useCallback(() => {
+    if (!meeting || !sessionPk) return;
+    Alert.alert('신청 취소', '참가 신청을 취소할까요?', [
+      { text: '닫기', style: 'cancel' },
+      {
+        text: '취소하기',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setJoinBusy(true);
+            try {
+              await cancelJoinRequest(meeting.id, sessionPk);
+              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+              showTransientBottomMessage('참가 신청을 취소했어요.');
+            } catch (e) {
+              Alert.alert('안내', e instanceof Error ? e.message : '다시 시도해 주세요.');
+            } finally {
+              setJoinBusy(false);
+            }
+          })();
+        },
+      },
+    ]);
+  }, [meeting, sessionPk, queryClient]);
+
+  const onHostApproveJoin = useCallback(
+    (applicantId: string) => {
+      if (!meeting || !sessionPk) return;
+      const aid = applicantId.trim();
+      if (!aid) return;
+      if (hostJoinRequestActionInFlightRef.current) return;
+      hostJoinRequestActionInFlightRef.current = true;
+      void (async () => {
+        setHostJoinRequestBusyId(aid);
+        try {
+          await approveJoinRequest(meeting.id, sessionPk, aid);
+          void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+          showTransientBottomMessage('참가 신청을 승인했어요.');
+        } catch (e) {
+          Alert.alert('승인 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+        } finally {
+          setHostJoinRequestBusyId(null);
+          hostJoinRequestActionInFlightRef.current = false;
+        }
+      })();
+    },
+    [meeting, sessionPk, queryClient],
+  );
+
+  const onHostRejectJoin = useCallback(
+    (applicantId: string) => {
+      if (!meeting || !sessionPk) return;
+      const aid = applicantId.trim();
+      if (!aid) return;
+      if (hostJoinRequestActionInFlightRef.current) return;
+      hostJoinRequestActionInFlightRef.current = true;
+      void (async () => {
+        setHostJoinRequestBusyId(aid);
+        try {
+          await rejectJoinRequest(meeting.id, sessionPk, aid);
+          void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+          showTransientBottomMessage('참가 신청을 거절했어요.');
+        } catch (e) {
+          Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+        } finally {
+          setHostJoinRequestBusyId(null);
+          hostJoinRequestActionInFlightRef.current = false;
+        }
+      })();
+    },
+    [meeting, sessionPk, queryClient],
+  );
 
   useEffect(() => {
     if (placeChipsShown.length === 0) return;
@@ -2617,6 +2886,84 @@ export default function MeetingDetailScreen() {
               </View>
             </View>
 
+            {isHost && joinRequestsSorted.length > 0 ? (
+              <View style={styles.infoCard}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionTitle}>참가 신청 ({joinRequestsSorted.length})</Text>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
+                  {joinRequestsSorted.map((jr) => {
+                    const aid = normalizeParticipantId(jr.userId) ?? jr.userId.trim();
+                    const prof = participantProfiles[aid];
+                    const withdrawn = isUserProfileWithdrawn(prof);
+                    const nickname = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '…');
+                    const g = withdrawn ? null : normalizeGender(prof?.gender);
+                    const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
+                    const rowBusy = hostJoinRequestBusyId === aid;
+                    return (
+                      <View key={`${aid}-${jr.requestedAt}`} style={styles.avatarCol}>
+                        <Pressable
+                          onPress={() => openParticipantProfile(aid)}
+                          style={({ pressed }) => [pressed && !withdrawn && { opacity: 0.92 }]}
+                          pointerEvents={withdrawn ? 'none' : 'auto'}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${nickname} 프로필 열기`}>
+                          <View
+                            style={[
+                              styles.avatarCircle,
+                              withdrawn ? styles.avatarCircleWithdrawn : null,
+                              !withdrawn && g === 'male' ? styles.avatarCircleMale : null,
+                              !withdrawn && g === 'female' ? styles.avatarCircleFemale : null,
+                            ]}>
+                            {withdrawn ? (
+                              <GinitSymbolicIcon name="person" size={22} color="#94a3b8" />
+                            ) : photo ? (
+                              <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
+                            ) : (
+                              <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
+                            )}
+                          </View>
+                          <Text style={styles.avatarLabel} numberOfLines={2}>
+                            {nickname}
+                          </Text>
+                        </Pressable>
+                        <View style={styles.joinRequestIconMenuRow}>
+                          <Pressable
+                            onPress={() => onHostApproveJoin(aid)}
+                            disabled={rowBusy}
+                            style={({ pressed }) => [
+                              styles.joinRequestIconMenuBtn,
+                              rowBusy && { opacity: 0.75 },
+                              pressed && !rowBusy && { opacity: 0.88 },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="참가 승인">
+                            {rowBusy ? (
+                              <ActivityIndicator color={GinitTheme.colors.primary} size="small" />
+                            ) : (
+                              <GinitSymbolicIcon name="checkmark-done-outline" size={22} color={GinitTheme.colors.primary} />
+                            )}
+                          </Pressable>
+                          <Pressable
+                            onPress={() => onHostRejectJoin(aid)}
+                            disabled={rowBusy}
+                            style={({ pressed }) => [
+                              styles.joinRequestIconMenuBtn,
+                              rowBusy && { opacity: 0.75 },
+                              pressed && !rowBusy && { opacity: 0.88 },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="참가 거절">
+                            <GinitSymbolicIcon name="close-circle-outline" size={22} color={GinitTheme.colors.danger} />
+                          </Pressable>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ) : null}
+
             <View style={styles.infoCard}>
               <View style={styles.infoCardHead}>
                 <LinearGradient
@@ -3375,11 +3722,11 @@ export default function MeetingDetailScreen() {
               <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                 장소 투표 ({placeChips.length > 0 ? placeChips.length : 0}건)
               </Text>
-              <Text style={styles.dateVoteSub}>
+              {/* <Text style={styles.dateVoteSub}>
                 {placeHostPickMode
                   ? '동점 장소만 표시됩니다. 한 곳만 탭하세요. (집계 표 숫자에는 반영되지 않아요.)'
                   : '가능한 장소를 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
-              </Text>
+              </Text> */}
               {placeHostPickMode ? (
                 <Text style={styles.tieHostHint}>
                   확정용 선택은 투표 참여 내역과 별도이며, <Text style={styles.tieHostHintEm}>득표 수는 변하지 않습니다.</Text>
@@ -3393,13 +3740,7 @@ export default function MeetingDetailScreen() {
                   const thumb = placeThumbByChipId[chip.id] ?? null;
                   return (
                     <View style={styles.placeDetailBlock}>
-                      <View style={styles.placeDetailImageWrap}>
-                        {thumb ? (
-                          <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                        ) : (
-                          <View style={styles.placeVoteImageFallback} />
-                        )}
-                      </View>
+                      
                       <View style={styles.placeDetailHeaderRow}>
                         <View style={styles.placeDetailHeaderTextCol}>
                           <Text style={styles.placeVoteTitle} numberOfLines={3}>
@@ -3682,26 +4023,28 @@ export default function MeetingDetailScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  <Pressable
-                    onPress={onPressSaveVotes}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      styles.bottomPillFlex,
-                      participantVoteBusy && { opacity: 0.75 },
-                      pressed && !participantVoteBusy && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="저장">
-                    {participantVoteBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <GinitSymbolicIcon name="save-outline" size={18} color="#fff" />
-                    )}
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      저장
-                    </Text>
-                  </Pressable>
+                  {!isScheduleConfirmed ? (
+                    <Pressable
+                      onPress={onPressSaveVotes}
+                      style={({ pressed }) => [
+                        styles.bottomPill,
+                        styles.pillBlue,
+                        styles.bottomPillFlex,
+                        participantVoteBusy && { opacity: 0.75 },
+                        pressed && !participantVoteBusy && { opacity: 0.9 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="저장">
+                      {participantVoteBusy ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <GinitSymbolicIcon name="save-outline" size={18} color="#fff" />
+                      )}
+                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                        저장
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   {meeting.scheduleConfirmed !== true ? (
                     <Pressable
                       onPress={handleDeleteMeeting}
@@ -3796,29 +4139,31 @@ export default function MeetingDetailScreen() {
                       </Pressable>
                     </>
                   ) : null}
-                  <Pressable
-                    onPress={onPressSaveVotes}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      styles.bottomPillFlex,
-                      participantVoteBusy && { opacity: 0.75 },
-                      pressed && !participantVoteBusy && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="저장">
-                    {participantVoteBusy ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <GinitSymbolicIcon name="save-outline" size={16} color="#fff" />
-                    )}
-                    <Text
-                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      저장
-                    </Text>
-                  </Pressable>
+                  {!isScheduleConfirmed ? (
+                    <Pressable
+                      onPress={onPressSaveVotes}
+                      style={({ pressed }) => [
+                        styles.bottomPill,
+                        styles.pillBlue,
+                        styles.bottomPillFlex,
+                        participantVoteBusy && { opacity: 0.75 },
+                        pressed && !participantVoteBusy && { opacity: 0.9 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="저장">
+                      {participantVoteBusy ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <GinitSymbolicIcon name="save-outline" size={16} color="#fff" />
+                      )}
+                      <Text
+                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
+                        저장
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     onPress={handleLeaveParticipant}
                     disabled={participantVoteBusy}
@@ -3841,6 +4186,34 @@ export default function MeetingDetailScreen() {
                   </Pressable>
                 </View>
               </View>
+            ) : hasPendingJoinRequest ? (
+              <View style={styles.guestJoinBottomCol}>
+                <Text style={styles.joinOverlapCaption}>호스트 승인을 기다리는 중이에요.</Text>
+                <View style={styles.bottomBarEqualRow}>
+                  <Pressable
+                    onPress={() => {
+                      if (joinBusy) {
+                        Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
+                        return;
+                      }
+                      onCancelJoinRequestPress();
+                    }}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillDanger,
+                      styles.bottomPillFlex,
+                      joinBusy && { opacity: 0.75 },
+                      pressed && !joinBusy && { opacity: 0.88 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="참가 신청 취소">
+                    <GinitSymbolicIcon name="close-circle-outline" size={18} color="#fff" />
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      신청 취소
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
             ) : (
               <View style={styles.guestJoinBottomCol}>
                 <View style={styles.bottomBarEqualRow}>
@@ -3857,6 +4230,10 @@ export default function MeetingDetailScreen() {
                         );
                         return;
                       }
+                      if (needsHostApprovalJoin) {
+                        void onPressRequestJoin();
+                        return;
+                      }
                       void handleJoinMeeting();
                     }}
                     style={({ pressed }) => [
@@ -3866,7 +4243,7 @@ export default function MeetingDetailScreen() {
                       pressed && !joinBusy && { opacity: 0.9 },
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel="모임 참여">
+                    accessibilityLabel={needsHostApprovalJoin ? '참가 신청' : '모임 참여'}>
                     <LinearGradient
                       colors={GinitTheme.colors.ctaGradient}
                       start={{ x: 0, y: 0 }}
@@ -3881,7 +4258,7 @@ export default function MeetingDetailScreen() {
                         <GinitSymbolicIcon name="hand-right-outline" size={18} color="#fff" />
                       )}
                       <Text style={styles.joinCtaLabel} numberOfLines={1} ellipsizeMode="tail">
-                        참여
+                        {needsHostApprovalJoin ? '참가 신청' : '참여'}
                       </Text>
                     </View>
                   </Pressable>
@@ -3895,6 +4272,85 @@ export default function MeetingDetailScreen() {
             )}
           </View>
         ) : null}
+
+        <Modal
+          visible={joinRequestMessageOpen}
+          animationType="fade"
+          transparent
+          onRequestClose={() => !joinBusy && setJoinRequestMessageOpen(false)}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.proposeModalRoot}>
+            <Pressable
+              style={styles.proposeModalBackdrop}
+              onPress={() => !joinBusy && setJoinRequestMessageOpen(false)}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+            />
+            <View style={[styles.proposeModalSheet, { paddingHorizontal: 18, paddingBottom: 16 }]}>
+              <Text style={styles.proposeModalTitle}>호스트에게 메시지</Text>
+              <Text style={styles.dateVoteSub}>
+                {MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN}자 이내로 입력할 수 있어요.
+              </Text>
+              <TextInput
+                value={joinRequestDraftMessage}
+                onChangeText={(t) => setJoinRequestDraftMessage(t.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN))}
+                placeholder="한 줄로 자기소개나 각오를 남겨 보세요."
+                placeholderTextColor={GinitTheme.colors.textMuted}
+                multiline
+                editable={!joinBusy}
+                style={{
+                  marginTop: 12,
+                  minHeight: 88,
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: GinitTheme.colors.border,
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  fontSize: 15,
+                  color: GinitTheme.colors.text,
+                  textAlignVertical: 'top',
+                }}
+                accessibilityLabel="참가 신청 메시지"
+              />
+              <View style={styles.bottomBarEqualRow}>
+                <Pressable
+                  onPress={() => !joinBusy && setJoinRequestMessageOpen(false)}
+                  style={({ pressed }) => [
+                    styles.bottomPill,
+                    styles.pillBlue,
+                    styles.bottomPillFlex,
+                    joinBusy && { opacity: 0.75 },
+                    pressed && !joinBusy && { opacity: 0.88 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기">
+                  <Text style={[styles.pillText, styles.bottomPillLabel]}>닫기</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (joinBusy) return;
+                    void proceedJoinRequestSubmit(joinRequestDraftMessage);
+                  }}
+                  style={({ pressed }) => [
+                    styles.bottomPill,
+                    styles.pillOrange,
+                    styles.bottomPillFlex,
+                    joinBusy && { opacity: 0.75 },
+                    pressed && !joinBusy && { opacity: 0.88 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="참가 신청 보내기">
+                  {joinBusy ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={[styles.pillText, styles.bottomPillLabel]}>보내기</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         <Modal
           visible={proposeOpen}
@@ -4412,7 +4868,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeGreen: { backgroundColor: '#16A34A' },
   statusBadgeYellow: { backgroundColor: '#FACC15' },
-  statusBadgeBlack: { backgroundColor: '#171717' },
+  statusBadgeBlack: { backgroundColor: GinitTheme.colors.deepPurple },
   statusBadgeText: { fontSize: 12, fontWeight: '700' },
   statusBadgeTextLight: { color: '#fff' },
   statusBadgeTextOnYellow: { color: '#422006' },
@@ -5026,7 +5482,7 @@ const styles = StyleSheet.create({
   },
   placeVoteTitle: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
   placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
-  placeDetailBlock: { marginTop: 2 },
+  placeDetailBlock: { marginTop: 0 },
   placeDetailHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
   placeDetailHeaderTextCol: { flex: 1, minWidth: 0 },
   placeDetailImageWrap: {
@@ -5385,6 +5841,17 @@ const styles = StyleSheet.create({
     marginTop: 0,
     opacity: 0.85,
   },
+  joinRequestIconMenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 6,
+  },
+  joinRequestIconMenuBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+  },
   guestJoinHintWrap: {
     paddingHorizontal: 16,
     paddingTop: 6,
@@ -5462,7 +5929,7 @@ const styles = StyleSheet.create({
   },
   /** 게스트 2버튼일 때 가로 폭 균등 */
   bottomPillFlex: { flex: 1, minWidth: 0 },
-  pillBlue: { backgroundColor: GinitTheme.colors.primary },
+  pillBlue: { backgroundColor: GinitTheme.colors.textSub },
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillDanger: { backgroundColor: '#DC2626' },
   pillText: { color: '#fff', fontWeight: '700', fontSize: 14, lineHeight: 18 },

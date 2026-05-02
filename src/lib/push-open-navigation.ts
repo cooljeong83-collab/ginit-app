@@ -122,6 +122,9 @@ export async function markAlarmReadFromPushData(
     action === 'in_app_meeting' ||
     action === 'participant_joined' ||
     action === 'participant_left' ||
+    action === 'participant_join_requested' ||
+    action === 'join_request_approved' ||
+    action === 'join_request_rejected' ||
     action === 'host_transferred';
   if (!shouldAckMeeting) return;
   const m = await getMeetingById(meetingId);

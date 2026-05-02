@@ -74,12 +74,27 @@ export async function sendFcmPushToUsersWithResult(params: FcmPushSendParams): P
     const suffix = status ? ` (status ${status})` : '';
     throw new Error(`${error.message}${suffix}${bodyText ? `: ${bodyText.slice(0, 500)}` : ''}`);
   }
+  const dataType =
+    data === null ? 'null' : data === undefined ? 'undefined' : Array.isArray(data) ? 'array' : typeof data;
+  const invokeShape: Record<string, unknown> = { dataType };
+  if (data != null && typeof data === 'object' && !Array.isArray(data)) {
+    invokeShape.objectKeyCount = Object.keys(data as object).length;
+    invokeShape.objectKeysSample = Object.keys(data as object)
+      .slice(0, 14)
+      .join(',');
+  } else if (typeof data === 'string') {
+    invokeShape.stringHead = data.slice(0, 200);
+  }
+  ginitNotifyDbg('fcm-push-api', 'invoke_raw_shape', invokeShape);
+
   const parsed = parseFcmInvokeData(data);
+  const computedOk = fcmPushSuccessCount(parsed);
   ginitNotifyDbg('fcm-push-api', 'invoke_ok', {
     ok: parsed.ok,
     successCount: parsed.successCount,
     sent: parsed.sent,
     reason: parsed.reason,
+    fcmPushSuccessCountComputed: computedOk,
   });
   return parsed;
 }

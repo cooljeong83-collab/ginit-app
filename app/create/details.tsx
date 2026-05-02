@@ -48,18 +48,18 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
+import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
+import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
+import { GameKindPreference } from '@/components/create/GameKindPreference';
 import {
   CAPACITY_UNLIMITED,
   GlassDualCapacityWheel,
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
-import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
-import { GameKindPreference } from '@/components/create/GameKindPreference';
-import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
-import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
+import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
@@ -91,6 +91,7 @@ import {
 } from '@/src/lib/date-candidate';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
+import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
@@ -122,7 +123,6 @@ import {
 } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
-import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import {
   buildDefaultPlaceSearchQuery,
   buildPlaceSuggestedSearchQueries,
@@ -3826,9 +3826,8 @@ export default function CreateDetailsScreen() {
                   <Text style={[styles.wizardStepBadge, { marginTop: 0 }]}>
                     {specialtyStepBadge(specialtyKind, selectedCategory?.majorCode ?? null)}
                   </Text>
-                  <Text style={styles.wizardLockedHint}>카테고리에 맞춰 선택해 주세요.</Text>
                   {specialtyKind === 'movie' ? (
-                    <VoteCandidateCard reduceHeavyEffects={reduceHeavyEffectsUI} outerStyle={styles.wizardGlassCard}>
+                    
                       <MovieSearch
                         value={movieCandidates}
                         onChange={setMovieCandidates}
@@ -3836,7 +3835,7 @@ export default function CreateDetailsScreen() {
                         parentScrollRef={mainScrollRef}
                         parentScrollYRef={mainScrollYRef}
                       />
-                    </VoteCandidateCard>
+                    
                   ) : null}
                   {specialtyKind === 'food' ? (
                     <MenuPreference value={menuPreferences} onChange={setMenuPreferences} disabled={busy} />

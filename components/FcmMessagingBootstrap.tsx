@@ -19,6 +19,10 @@ import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-prefer
 import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
 import { NEW_MEETING_IN_FEED_REGION_FCM_ACTION } from '@/src/lib/meeting-area-notify-fcm';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
+import {
+  consumeForegroundOnMessageOnceGlobalSync,
+  fcmForegroundDedupeKey,
+} from '@/src/lib/fcm-foreground-message-dedupe';
 
 function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } {
   const n = message.notification;
@@ -31,6 +35,22 @@ function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): {
 const FCM_REGISTER_RETRY_DELAYS_MS = [0, 1800, 3200, 6000, 10_000] as const;
 /** 포그라운드 복귀 시 DB와 불일치 복구(너무 잦은 RPC 방지) */
 const FCM_FOREGROUND_SYNC_MIN_INTERVAL_MS = 22_000;
+
+/**
+ * 동일 JS 런타임에서 `onMessage`/`onTokenRefresh`가 중복 등록되면 한 수신에 리스너 수만큼 반복됩니다.
+ * effect cleanup 순서·Strict Mode와 무관하게 항상 직전 구독을 먼저 끊습니다.
+ */
+let releaseForegroundFcmMessaging: (() => void) | null = null;
+
+function teardownForegroundFcmMessaging(): void {
+  if (!releaseForegroundFcmMessaging) return;
+  try {
+    releaseForegroundFcmMessaging();
+  } catch {
+    /* ignore */
+  }
+  releaseForegroundFcmMessaging = null;
+}
 
 /**
  * FCM 토큰 등록 + Foreground 메시지 핸들링.
@@ -51,11 +71,111 @@ export function FcmMessagingBootstrap() {
     if (!userId?.trim()) return;
 
     const uid = userId.trim();
-    let unsubToken: null | (() => void) = null;
-    let unsubOnMessage: null | (() => void) = null;
     let unsubAppState: null | (() => void) = null;
     let alive = true;
     const m = getMessaging();
+
+    teardownForegroundFcmMessaging();
+
+    /**
+     * onMessage/onTokenRefresh는 비동기 IIFE 안에 두면 effect cleanup 시점에 아직 unsub이 없어
+     * 구독이 누적될 수 있습니다(Strict Mode·userId 갱신 등). 반드시 동기 구간에서 등록합니다.
+     */
+    let unsubOnMessage: (() => void) | undefined;
+    let unsubToken: (() => void) | undefined;
+    try {
+      unsubOnMessage = onMessage(m, async (rm) => {
+        if (!consumeForegroundOnMessageOnceGlobalSync(rm)) {
+          ginitNotifyDbg('FcmMessaging', 'on_message_skip_duplicate_listener', {
+            messageId: rm.messageId,
+            dedupeKey: fcmForegroundDedupeKey(rm) || undefined,
+          });
+          return;
+        }
+        const action = String(rm?.data?.action ?? '').trim();
+        const meetingId = String(rm?.data?.meetingId ?? '').trim();
+        ginitNotifyDbg('FcmMessaging', 'on_message', {
+          messageId: rm.messageId,
+          action: action || undefined,
+          meetingId: meetingId || undefined,
+          hasNotification: Boolean(rm.notification),
+          platform: Platform.OS,
+        });
+        if (action === NEW_MEETING_IN_FEED_REGION_FCM_ACTION) {
+          ginitNotifyDbg('FcmMessaging', 'on_message_new_meeting_feed_region', {
+            meetingId: meetingId || undefined,
+          });
+        }
+        if (action === 'in_app_chat' && meetingId) {
+          const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
+          if (!notifyOn) {
+            ginitNotifyDbg('FcmMessaging', 'foreground_skip_meeting_notify_off', { meetingId });
+            return;
+          }
+        }
+        if (action === 'in_app_social_dm' && meetingId) {
+          const notifyOn = await isSocialChatNotifyEnabled(meetingId);
+          if (!notifyOn) {
+            ginitNotifyDbg('FcmMessaging', 'foreground_skip_social_notify_off', { meetingId });
+            return;
+          }
+        }
+        if (Platform.OS === 'android') {
+          if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
+            const cur = getCurrentChatRoomId();
+            if (cur && cur === meetingId) {
+              ginitNotifyDbg('FcmMessaging', 'foreground_skip_same_room', { meetingId });
+              return;
+            }
+          }
+          await displayFcmRemoteMessageWithNotifeeAndroid(rm);
+          ginitNotifyDbg('FcmMessaging', 'foreground_notifee_displayed', { messageId: rm.messageId });
+          return;
+        }
+        if (await isProfileFcmQuietHoursActive()) {
+          ginitNotifyDbg('FcmMessaging', 'foreground_skip_quiet_hours', { messageId: rm.messageId });
+          return;
+        }
+        const { title, body } = formatForegroundAlert(rm);
+        Alert.alert(title, body);
+      });
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      unsubToken = onTokenRefresh(m, (t) => {
+        const next = String(t ?? '').trim();
+        if (!next || next === lastSavedTokenRef.current) return;
+        fcmDebugSetToken(next || null);
+        void persistFcmTokenAndVerify(uid, next)
+          .then(() => {
+            lastSavedTokenRef.current = next;
+            fcmDebugSetSaveOk(true);
+          })
+          .catch((e) => {
+            fcmDebugSetSaveOk(false);
+            fcmDebugSetError(e);
+            ginitNotifyDbg('FcmMessaging', 'token_refresh_save_failed', { message: e instanceof Error ? e.message : String(e) });
+            if (__DEV__) console.warn('[fcm] tokenRefresh save failed:', e);
+          });
+      });
+    } catch {
+      /* ignore */
+    }
+
+    releaseForegroundFcmMessaging = () => {
+      try {
+        unsubOnMessage?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        unsubToken?.();
+      } catch {
+        /* ignore */
+      }
+    };
 
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -106,6 +226,29 @@ export function FcmMessagingBootstrap() {
       }
     };
 
+    const onAppStateChange = (next: AppStateStatus) => {
+      if (next !== 'active' || !alive) return;
+      const id = userIdRef.current;
+      if (!id || id !== uid) return;
+      const now = Date.now();
+      if (now - lastForegroundSyncAtRef.current < FCM_FOREGROUND_SYNC_MIN_INTERVAL_MS) return;
+      lastForegroundSyncAtRef.current = now;
+      void (async () => {
+        const outcome = await tryGetTokenAndPersist(false);
+        if (outcome === 'saved' && __DEV__) {
+          console.log('[fcm] foreground sync persisted', { uid: id });
+        }
+      })();
+    };
+    const appStateSub = AppState.addEventListener('change', onAppStateChange);
+    unsubAppState = () => {
+      try {
+        appStateSub.remove();
+      } catch {
+        /* ignore */
+      }
+    };
+
     void (async () => {
       // 권한은 "토큰 발급/표시" 안정성에 영향 (Android 13+)
       await ensureAndroidPostNotificationsForFcm();
@@ -145,123 +288,16 @@ export function FcmMessagingBootstrap() {
       if (!tokenPersistOk) {
         ginitNotifyDbg('FcmMessaging', 'register_retries_exhausted', { uidSuffix: uid.slice(-6) });
       }
-
-      try {
-        unsubToken = onTokenRefresh(m, (t) => {
-          const next = String(t ?? '').trim();
-          if (!next || next === lastSavedTokenRef.current) return;
-          fcmDebugSetToken(next || null);
-          void persistFcmTokenAndVerify(uid, next)
-            .then(() => {
-              lastSavedTokenRef.current = next;
-              fcmDebugSetSaveOk(true);
-            })
-            .catch((e) => {
-              fcmDebugSetSaveOk(false);
-              fcmDebugSetError(e);
-              ginitNotifyDbg('FcmMessaging', 'token_refresh_save_failed', { message: e instanceof Error ? e.message : String(e) });
-              if (__DEV__) console.warn('[fcm] tokenRefresh save failed:', e);
-            });
-        });
-      } catch {
-        /* ignore */
-      }
-
-      try {
-        unsubOnMessage = onMessage(m, async (rm) => {
-          const action = String(rm?.data?.action ?? '').trim();
-          const meetingId = String(rm?.data?.meetingId ?? '').trim();
-          ginitNotifyDbg('FcmMessaging', 'on_message', {
-            messageId: rm.messageId,
-            action: action || undefined,
-            meetingId: meetingId || undefined,
-            hasNotification: Boolean(rm.notification),
-            platform: Platform.OS,
-          });
-          if (action === NEW_MEETING_IN_FEED_REGION_FCM_ACTION) {
-            ginitNotifyDbg('FcmMessaging', 'on_message_new_meeting_feed_region', {
-              meetingId: meetingId || undefined,
-            });
-          }
-          if (action === 'in_app_chat' && meetingId) {
-            const notifyOn = await isMeetingChatNotifyEnabled(meetingId);
-            if (!notifyOn) {
-              ginitNotifyDbg('FcmMessaging', 'foreground_skip_meeting_notify_off', { meetingId });
-              return;
-            }
-          }
-          if (action === 'in_app_social_dm' && meetingId) {
-            const notifyOn = await isSocialChatNotifyEnabled(meetingId);
-            if (!notifyOn) {
-              ginitNotifyDbg('FcmMessaging', 'foreground_skip_social_notify_off', { meetingId });
-              return;
-            }
-          }
-          if (Platform.OS === 'android') {
-            if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
-              const cur = getCurrentChatRoomId();
-              if (cur && cur === meetingId) {
-                ginitNotifyDbg('FcmMessaging', 'foreground_skip_same_room', { meetingId });
-                return;
-              }
-            }
-            await displayFcmRemoteMessageWithNotifeeAndroid(rm);
-            ginitNotifyDbg('FcmMessaging', 'foreground_notifee_displayed', { messageId: rm.messageId });
-            return;
-          }
-          if (await isProfileFcmQuietHoursActive()) {
-            ginitNotifyDbg('FcmMessaging', 'foreground_skip_quiet_hours', { messageId: rm.messageId });
-            return;
-          }
-          const { title, body } = formatForegroundAlert(rm);
-          Alert.alert(title, body);
-        });
-      } catch {
-        /* ignore */
-      }
-
-      const onAppStateChange = (next: AppStateStatus) => {
-        if (next !== 'active' || !alive) return;
-        const id = userIdRef.current;
-        if (!id || id !== uid) return;
-        const now = Date.now();
-        if (now - lastForegroundSyncAtRef.current < FCM_FOREGROUND_SYNC_MIN_INTERVAL_MS) return;
-        lastForegroundSyncAtRef.current = now;
-        void (async () => {
-          const outcome = await tryGetTokenAndPersist(false);
-          if (outcome === 'saved' && __DEV__) {
-            console.log('[fcm] foreground sync persisted', { uid: id });
-          }
-        })();
-      };
-      const appStateSub = AppState.addEventListener('change', onAppStateChange);
-      unsubAppState = () => {
-        try {
-          appStateSub.remove();
-        } catch {
-          /* ignore */
-        }
-      };
     })();
 
     return () => {
       alive = false;
-      lastSavedTokenRef.current = '';
       try {
         unsubAppState?.();
       } catch {
         /* ignore */
       }
-      try {
-        unsubToken?.();
-      } catch {
-        /* ignore */
-      }
-      try {
-        unsubOnMessage?.();
-      } catch {
-        /* ignore */
-      }
+      teardownForegroundFcmMessaging();
     };
   }, [userId]);
 

@@ -95,14 +95,16 @@ export async function dispatchRemotePushToRecipients(params: RemotePushHubPayloa
 
   const fcmOk = fcmPushSuccessCount(fcmRes);
   const fcmReason = String(fcmRes.reason ?? '').trim();
+  const willExpoFallback = shouldExpoFallbackAfterFcm(fcmRes);
   ginitNotifyDbg('remote-push-hub', 'fcm_result', {
     recipientCount: toUserIds.length,
     fcmSuccessApprox: fcmOk,
     reason: fcmReason || undefined,
     dataAction: typeof data?.action === 'string' ? data.action : undefined,
+    willExpoFallback,
   });
 
-  if (!shouldExpoFallbackAfterFcm(fcmRes)) return;
+  if (!willExpoFallback) return;
 
   ginitNotifyDbg('remote-push-hub', 'expo_fallback_start', {
     singleRecipient: toUserIds.length === 1,

@@ -3,6 +3,18 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { dispatchRemotePushToRecipients } from '@/src/lib/remote-push-hub';
 
+/** 동일 모임·동일 상대 짧은 간격 중복 발송 방지(연타·비동기 중복 호출 등). */
+const HOST_PUSH_DEDUPE_MS = 4500;
+const hostParticipantPushLastAt = new Map<string, number>();
+const joinRequestApplicantPushLastAt = new Map<string, number>();
+
+function dedupeSkipPush(map: Map<string, number>, key: string, now: number): boolean {
+  const prev = map.get(key) ?? 0;
+  if (now - prev < HOST_PUSH_DEDUPE_MS) return true;
+  map.set(key, now);
+  return false;
+}
+
 export type MeetingHostPushAction =
   | 'confirmed'
   | 'unconfirmed'
@@ -56,7 +68,7 @@ function copyForPush(action: MeetingHostPushAction, meetingTitle: string): { tit
 }
 
 function copyForHostParticipantEvent(
-  action: 'joined' | 'left',
+  action: 'joined' | 'left' | 'join_requested',
   meetingTitle: string,
   participantNickname: string,
 ): { title: string; body: string } {
@@ -64,6 +76,9 @@ function copyForHostParticipantEvent(
   const who = participantNickname.trim() || '참여자';
   if (action === 'joined') {
     return { title: '참여자가 들어왔어요', body: `「${t}」에 ${who}님이 참여했습니다.` };
+  }
+  if (action === 'join_requested') {
+    return { title: '참가 신청이 왔어요', body: `「${t}」에 ${who}님이 참가를 신청했습니다. 눌러서 확인해 주세요.` };
   }
   return { title: '참여자가 나갔어요', body: `「${t}」에서 ${who}님이 나갔습니다.` };
 }
@@ -159,7 +174,7 @@ export async function notifyMeetingHostParticipantEvent(
   meeting: Meeting,
   hostUserId: string,
   participantUserId: string,
-  event: 'joined' | 'left',
+  event: 'joined' | 'left' | 'join_requested',
   participantNickname: string,
 ): Promise<void> {
   const host = normalizeParticipantId(hostUserId.trim());
@@ -170,11 +185,20 @@ export async function notifyMeetingHostParticipantEvent(
   }
   if (host === participant) return;
 
+  const dedupeKey = `${meeting.id}\u001f${participant}\u001f${event}`;
+  const now = Date.now();
+  if (dedupeSkipPush(hostParticipantPushLastAt, dedupeKey, now)) {
+    ginitNotifyDbg('meeting-host-push', 'participant_event_dedupe_skip', { meetingId: meeting.id, event });
+    return;
+  }
+
   ginitNotifyDbg('meeting-host-push', 'participant_event_dispatch', { meetingId: meeting.id, event });
   const { title, body } = copyForHostParticipantEvent(event, meeting.title, participantNickname);
+  const actionData =
+    event === 'joined' ? 'participant_joined' : event === 'left' ? 'participant_left' : 'participant_join_requested';
   const data: Record<string, unknown> = {
     meetingId: meeting.id,
-    action: event === 'joined' ? 'participant_joined' : 'participant_left',
+    action: actionData,
     participantId: participant,
     url: `ginitapp://meeting/${meeting.id}`,
   };
@@ -186,11 +210,77 @@ export function notifyMeetingHostParticipantEventFireAndForget(
   meeting: Meeting,
   hostUserId: string,
   participantUserId: string,
-  event: 'joined' | 'left',
+  event: 'joined' | 'left' | 'join_requested',
   participantNickname: string,
 ): void {
   void notifyMeetingHostParticipantEvent(meeting, hostUserId, participantUserId, event, participantNickname).catch((err) => {
     ginitNotifyDbg('meeting-host-push', 'participant_event_error', { message: err instanceof Error ? err.message : String(err) });
+    if (__DEV__) {
+      console.warn('[meeting-push]', err);
+    }
+  });
+}
+
+function copyForJoinRequestApplicantDecision(
+  decision: 'approved' | 'rejected',
+  meetingTitle: string,
+): { title: string; body: string } {
+  const t = meetingTitle.trim() || '모임';
+  if (decision === 'approved') {
+    return {
+      title: '참가가 승인됐어요',
+      body: `「${t}」모임 참가가 승인됐습니다. 눌러서 확인해 보세요.`,
+    };
+  }
+  return {
+    title: '참가 신청이 거절됐어요',
+    body: `「${t}」모임 참가 신청이 거절됐습니다.`,
+  };
+}
+
+/**
+ * 참가 신청자에게: 호스트가 승인했거나 거절했을 때 원격 푸시(실패는 삼키고 로그만).
+ */
+export async function notifyMeetingJoinRequestApplicantDecision(
+  meeting: Meeting,
+  applicantUserId: string,
+  decision: 'approved' | 'rejected',
+): Promise<void> {
+  const aid = normalizeParticipantId(applicantUserId.trim());
+  if (!aid) {
+    ginitNotifyDbg('meeting-host-push', 'join_req_applicant_skip_bad_id', { meetingId: meeting.id, decision });
+    return;
+  }
+
+  const dedupeKey = `${meeting.id}\u001f${aid}\u001f${decision}`;
+  const now = Date.now();
+  if (dedupeSkipPush(joinRequestApplicantPushLastAt, dedupeKey, now)) {
+    ginitNotifyDbg('meeting-host-push', 'join_req_applicant_dedupe_skip', { meetingId: meeting.id, decision });
+    return;
+  }
+
+  ginitNotifyDbg('meeting-host-push', 'join_req_applicant_dispatch', { meetingId: meeting.id, decision });
+  const { title, body } = copyForJoinRequestApplicantDecision(decision, meeting.title);
+  const action = decision === 'approved' ? 'join_request_approved' : 'join_request_rejected';
+  await dispatchRemotePushToRecipients({
+    toUserIds: [aid],
+    title,
+    body,
+    data: {
+      meetingId: meeting.id,
+      action,
+      url: `ginitapp://meeting/${meeting.id}`,
+    },
+  });
+}
+
+export function notifyMeetingJoinRequestApplicantDecisionFireAndForget(
+  meeting: Meeting,
+  applicantUserId: string,
+  decision: 'approved' | 'rejected',
+): void {
+  void notifyMeetingJoinRequestApplicantDecision(meeting, applicantUserId, decision).catch((err) => {
+    ginitNotifyDbg('meeting-host-push', 'join_req_applicant_error', { message: err instanceof Error ? err.message : String(err) });
     if (__DEV__) {
       console.warn('[meeting-push]', err);
     }

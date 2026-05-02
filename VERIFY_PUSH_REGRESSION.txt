@@ -1,0 +1,19 @@
+푸시·알람 회귀 재현 시 분리 기록 (Git diff / 플랜 기준)
+============================================================
+
+1) 한 계정·한 기기
+   - 동일 단말·동일 로그인 상태에서 트레이 알림 개수를 센다.
+   - 채팅 DM, 모임 변경, 참가 승인 등 유형별로 각각 몇 통인지 구분한다.
+
+2) 호스트 기기 + 신청자 기기 (두 대)
+   - 승인 1회당 호스트에 participant_joined, 신청자에 join_request_approved가 각각 1통씩 나가는 설계일 수 있다.
+   - "한 번에 여러 통"이 두 계정 합산이면 정상 동작과 혼동하지 않도록 한다.
+
+3) 승인과 무관한 푸시
+   - 참가 승인 없이 채팅만 보내거나 다른 알림만 발생시켜도 동일하게 중복·3중인지 확인한다.
+   - 여기서도 중복이면 전역 경로(fcm-push-api / remote-push-hub Expo 폴백) 쪽을 우선 의심한다.
+
+로그 상관 (앱에서 ginitNotifyDbg 수집 시)
+----------------------------------------
+- fcm-push-api: invoke_raw_shape (dataType·objectKeysSample·stringHead), invoke_ok (fcmPushSuccessCountComputed 포함)
+- remote-push-hub: fcm_result (willExpoFallback 포함), expo_fallback_start, expo_fallback_sent
