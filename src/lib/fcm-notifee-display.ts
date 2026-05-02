@@ -3,10 +3,15 @@ import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { consumeNotifeeDisplayOnceGlobalSync } from '@/src/lib/fcm-foreground-message-dedupe';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import {
+  getGinitFcmDisplayNotifeeChannelId,
+  loadProfileNotificationSoundId,
+  notifeeAndroidRawBaseName,
+} from '@/src/lib/profile-notification-sound-preference';
 import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
 
-/** FCM·포그라운드 표시용 Notifee 채널 (Android) */
+/** 레거시 FCM·서버 `channelId` 호환용 (항상 시스템 기본음) */
 export const GINIT_FCM_NOTIFEE_CHANNEL = 'ginit_fcm';
 
 export function fcmDataToStringRecord(data: FirebaseMessagingTypes.RemoteMessage['data']): Record<string, string> {
@@ -26,6 +31,16 @@ export async function ensureGinitFcmNotifeeChannel(): Promise<void> {
     importance: AndroidImportance.HIGH,
     sound: 'default',
     // Notifee 요구사항: 양수만, 짝수 개(대기/진동 ms 쌍)
+    vibrationPattern: [220, 220],
+  });
+  const displayId = await getGinitFcmDisplayNotifeeChannelId();
+  const pref = await loadProfileNotificationSoundId();
+  const raw = notifeeAndroidRawBaseName(pref);
+  await notifee.createChannel({
+    id: displayId,
+    name: '새 소식',
+    importance: AndroidImportance.HIGH,
+    sound: raw ?? 'default',
     vibrationPattern: [220, 220],
   });
 }
@@ -85,12 +100,13 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
     meetingId: meetingId || undefined,
   });
   await ensureGinitFcmNotifeeChannel();
+  const channelId = await getGinitFcmDisplayNotifeeChannelId();
   await notifee.displayNotification({
     title,
     body,
     data,
     android: {
-      channelId: GINIT_FCM_NOTIFEE_CHANNEL,
+      channelId,
       importance: AndroidImportance.HIGH,
       smallIcon: 'notification_icon',
       pressAction: { id: 'default' },

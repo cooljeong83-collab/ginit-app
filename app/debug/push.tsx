@@ -143,7 +143,12 @@ export default function PushDebugScreen() {
     const all = [...expoChannels, ...notifeeChannels];
     if (all.length === 0) return '(채널 없음/조회 실패)';
     const pick = all
-      .filter((c) => c.id === 'ginit_fcm' || c.id === 'default')
+      .filter(
+        (c) =>
+          c.id === 'ginit_fcm' ||
+          c.id === 'default' ||
+          (typeof c.id === 'string' && (c.id.startsWith('ginit_fcm_w_') || c.id.startsWith('ginit_in_app_w_'))),
+      )
       .map((c) => `${c.id}(importance=${c.importance ?? 'n/a'})`)
       .join(', ');
     return pick || '(ginit_fcm/default 채널 미생성)';

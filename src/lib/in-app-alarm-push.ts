@@ -6,19 +6,30 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
+import {
+  getExpoNotificationContentSound,
+  getGinitInAppAndroidChannelId,
+  loadProfileNotificationSoundId,
+  PROFILE_NOTIFICATION_SOUND_OPTIONS,
+} from '@/src/lib/profile-notification-sound-preference';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
 
-/** Android 헤드업 배너용 — `HIGH` 이상이어야 다른 앱 사용 중에도 상단 배너가 뜨는 경우가 많습니다. */
+/** @deprecated 동적 채널 `getGinitInAppAndroidChannelId` 사용 */
 export const GINIT_IN_APP_ANDROID_CHANNEL = 'ginit_in_app';
 
 export async function ensureGinitInAppAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync(GINIT_IN_APP_ANDROID_CHANNEL, {
+  const channelId = await getGinitInAppAndroidChannelId();
+  const pref = await loadProfileNotificationSoundId();
+  const opt = PROFILE_NOTIFICATION_SOUND_OPTIONS.find((o) => o.id === pref);
+  const channelSound = pref === 'default' ? 'default' : opt?.expoFilename ?? 'default';
+  await Notifications.setNotificationChannelAsync(channelId, {
     name: '새 소식',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 220],
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
+    sound: channelSound,
   });
 }
 
@@ -126,6 +137,8 @@ async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<vo
   }
   await ensureGinitInAppAndroidChannel();
   const c = buildHeadsUpContent(params);
+  const contentSound = await getExpoNotificationContentSound();
+  const androidChannelId = await getGinitInAppAndroidChannelId();
   ginitNotifyDbg('in-app-alarm-push', 'local_heads_up_present', {
     kind: params.kind,
     meetingId: c.meetingId,
@@ -140,7 +153,7 @@ async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<vo
       title: c.title,
       body: c.body,
       subtitle: c.subtitle,
-      sound: 'default',
+      sound: contentSound,
       data: { meetingId: c.meetingId, action: c.action, url: c.url },
       interruptionLevel: 'active',
       ...(Platform.OS === 'android'
@@ -149,7 +162,7 @@ async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<vo
     },
     trigger:
       Platform.OS === 'android'
-        ? { channelId: GINIT_IN_APP_ANDROID_CHANNEL }
+        ? { channelId: androidChannelId }
         : null,
   });
 }

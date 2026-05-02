@@ -217,7 +217,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-notifications',
         {
           icon: './assets/images/notification_icon_monochrome.png',
-          sounds: [],
+          sounds: ['./assets/sounds/ginit_ring_w.wav'],
           /** FCM v1: 페이로드에 channelId가 없을 때 기본으로 쓸 채널(앱 종료·콜드 스타트 수신 보강) */
           defaultChannel: 'default',
         },

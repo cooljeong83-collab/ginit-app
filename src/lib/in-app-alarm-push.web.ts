@@ -2,6 +2,10 @@
 
 export const GINIT_IN_APP_ANDROID_CHANNEL = 'ginit_in_app';
 
+export async function getGinitInAppAndroidChannelId(): Promise<string> {
+  return 'ginit_in_app_w_default';
+}
+
 export type InAppAlarmPushKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
 
 export type SendInAppAlarmPushParams = {

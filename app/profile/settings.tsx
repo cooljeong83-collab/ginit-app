@@ -8,6 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -17,6 +19,7 @@ import {
   Switch,
   Text,
   ToastAndroid,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,6 +39,15 @@ import {
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { isProfileRegisterInfoParamOn, PROFILE_REGISTER_INFO_QUERY } from '@/src/lib/profile-register-info';
+import { ensureGinitFcmNotifeeChannel } from '@/src/lib/fcm-notifee-display';
+import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
+import {
+  labelForProfileNotificationSoundId,
+  loadProfileNotificationSoundId,
+  PROFILE_NOTIFICATION_SOUND_OPTIONS,
+  saveProfileNotificationSoundId,
+  type ProfileNotificationSoundId,
+} from '@/src/lib/profile-notification-sound-preference';
 import {
   DND_QUIET_HOURS_DEFAULT_END_MIN,
   DND_QUIET_HOURS_DEFAULT_START_MIN,
@@ -139,6 +151,17 @@ export default function ProfileAppSettingsScreen() {
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
   const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
   const [meetingNotifyEffectiveOn, setMeetingNotifyEffectiveOn] = useState(false);
+  const [soundId, setSoundId] = useState<ProfileNotificationSoundId>('default');
+  const [soundLoaded, setSoundLoaded] = useState(false);
+  const [soundPickOpen, setSoundPickOpen] = useState(false);
+
+  const { height: windowHeight } = useWindowDimensions();
+  const soundSheetLayout = useMemo(() => {
+    const panelMax = Math.floor(windowHeight * 0.96);
+    const panelPadBottom = Math.max(16, insets.bottom);
+    const scrollMax = Math.max(280, panelMax - 18 - panelPadBottom - 12);
+    return { panelMax, panelPadBottom, scrollMax };
+  }, [windowHeight, insets.bottom]);
 
   const refreshMeetingAuth = useCallback(async () => {
     const pk = profilePk.trim();
@@ -214,10 +237,40 @@ export default function ProfileAppSettingsScreen() {
     }
   }, []);
 
+  const loadNotificationSound = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      setSoundLoaded(true);
+      return;
+    }
+    try {
+      const id = await loadProfileNotificationSoundId();
+      setSoundId(id);
+    } catch {
+      setSoundId('default');
+    } finally {
+      setSoundLoaded(true);
+    }
+  }, []);
+
+  const onPickNotificationSound = useCallback(async (id: ProfileNotificationSoundId) => {
+    if (Platform.OS === 'web') return;
+    try {
+      await saveProfileNotificationSoundId(id);
+      setSoundId(id);
+      await ensureGinitFcmNotifeeChannel();
+      await ensureGinitInAppAndroidChannel();
+      if (Platform.OS === 'ios' || Platform.OS === 'android') void Haptics.selectionAsync();
+      setSoundPickOpen(false);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void refreshNotify();
       void loadDnd();
+      void loadNotificationSound();
       void refreshMeetingNotify();
       let cancelled = false;
       let clearParamTimer: ReturnType<typeof setTimeout> | undefined;
@@ -239,7 +292,7 @@ export default function ProfileAppSettingsScreen() {
         cancelled = true;
         if (clearParamTimer) clearTimeout(clearParamTimer);
       };
-    }, [refreshNotify, loadDnd, refreshMeetingNotify, refreshMeetingAuth, registerInfoParam, router]),
+    }, [refreshNotify, loadDnd, loadNotificationSound, refreshMeetingNotify, refreshMeetingAuth, registerInfoParam, router]),
   );
 
   const onToggleNotify = useCallback(
@@ -451,6 +504,27 @@ export default function ProfileAppSettingsScreen() {
               )}
             </View>
             <RowSep />
+            {Platform.OS !== 'web' ? (
+              <>
+                <Pressable
+                  onPress={() => {
+                    if (soundLoaded) setSoundPickOpen(true);
+                  }}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="알림음">
+                  <SettingsRowLeadIcon name="musical-notes-outline" />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>알림음</Text>
+                    <Text style={styles.rowSub}>
+                      {soundLoaded ? labelForProfileNotificationSoundId(soundId) : '불러오는 중…'}
+                    </Text>
+                  </View>
+                  <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+                </Pressable>
+                <RowSep />
+              </>
+            ) : null}
             <View style={styles.row}>
               <SettingsRowLeadIcon name="moon-outline" />
               <View style={styles.rowText}>
@@ -670,6 +744,63 @@ export default function ProfileAppSettingsScreen() {
           />
         ) : null}
 
+        {soundPickOpen && Platform.OS !== 'web' ? (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setSoundPickOpen(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+              style={styles.soundSheetKbWrap}>
+              <View style={styles.soundSheetRoot}>
+                <Pressable
+                  style={styles.soundSheetBackdropFill}
+                  onPress={() => setSoundPickOpen(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기"
+                />
+                <View style={styles.soundSheetCenterWrap} pointerEvents="box-none">
+                  <View
+                    style={[
+                      styles.soundSheetPanel,
+                      {
+                        maxHeight: soundSheetLayout.panelMax,
+                        paddingBottom: soundSheetLayout.panelPadBottom,
+                      },
+                    ]}>
+                    <Text style={styles.soundSheetTitle}>알림음</Text>
+                    <Text style={styles.soundSheetLead}>푸시·로컬 알림에 사용할 소리를 골라요.</Text>
+                    <FlatList
+                      data={[...PROFILE_NOTIFICATION_SOUND_OPTIONS]}
+                      keyExtractor={(item) => item.id}
+                      style={{ maxHeight: soundSheetLayout.scrollMax }}
+                      scrollEnabled={PROFILE_NOTIFICATION_SOUND_OPTIONS.length > 6}
+                      showsVerticalScrollIndicator={false}
+                      ItemSeparatorComponent={() => <View style={styles.soundListSep} />}
+                      renderItem={({ item }) => {
+                        const selected = soundId === item.id;
+                        return (
+                          <Pressable
+                            onPress={() => void onPickNotificationSound(item.id)}
+                            style={({ pressed }) => [styles.soundPickRow, pressed && styles.soundSheetPressed]}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
+                            accessibilityLabel={item.label}>
+                            <Text style={styles.soundPickLabel}>{item.label}</Text>
+                            {selected ? (
+                              <Text style={styles.soundPickCheck}>✓</Text>
+                            ) : (
+                              <View style={styles.soundPickSpacer} />
+                            )}
+                          </Pressable>
+                        );
+                      }}
+                    />
+                  </View>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+        ) : null}
+
         {dndPick && Platform.OS === 'ios' ? (
           <Modal visible transparent animationType="fade" onRequestClose={() => setDndPick(null)}>
             <View style={GinitStyles.modalRoot}>
@@ -791,4 +922,79 @@ const styles = StyleSheet.create({
     marginLeft: 20,
     backgroundColor: GinitTheme.colors.border,
   },
+  /** `MeetingServiceAuthModal`과 동일한 시트 스타일 */
+  soundSheetKbWrap: {
+    flex: 1,
+  },
+  soundSheetRoot: {
+    flex: 1,
+  },
+  soundSheetBackdropFill: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  soundSheetCenterWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+  },
+  soundSheetPanel: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.65)',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  soundSheetTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#0f172a',
+    marginBottom: 6,
+  },
+  soundSheetLead: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  soundSheetPressed: {
+    opacity: 0.85,
+  },
+  soundListSep: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  soundPickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  soundPickLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0f172a',
+    lineHeight: 20,
+  },
+  soundPickCheck: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0052CC',
+    width: 22,
+    textAlign: 'center',
+  },
+  soundPickSpacer: { width: 22, height: 22 },
 });

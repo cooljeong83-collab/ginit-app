@@ -3253,42 +3253,45 @@ export default function MeetingDetailScreen() {
                       });
                       return (
                         <View style={styles.placeDetailBlock}>
-                          <View style={styles.placeDetailImageWrap}>
-                            {thumb ? (
-                              <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                            ) : (
-                              <View style={styles.placeVoteImageFallback} />
-                            )}
-                          </View>
-                          <View style={styles.placeDetailHeaderRow}>
-                            <View style={styles.placeDetailHeaderTextCol}>
-                              <Text style={styles.placeVoteTitle} numberOfLines={3}>
-                                {confirmedPlaceChipResolved.title}
-                              </Text>
-                              {confirmedPlaceChipResolved.sub ? (
-                                <Text style={styles.placeVoteSub} numberOfLines={4}>
-                                  {confirmedPlaceChipResolved.sub}
+                          <View style={styles.placeDetailHeroRow}>
+                            <View style={styles.placeDetailSquareThumbWrap}>
+                              {thumb ? (
+                                <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+                              ) : (
+                                <View style={styles.placeVoteImageFallback} />
+                              )}
+                            </View>
+                            <View style={styles.placeDetailRightCol}>
+                              <View style={styles.placeDetailRightColTop}>
+                                <Text style={styles.placeVoteTitle} numberOfLines={3}>
+                                  {confirmedPlaceChipResolved.title}
                                 </Text>
+                                {confirmedPlaceChipResolved.sub ? (
+                                  <Text style={styles.placeVoteSub} numberOfLines={6}>
+                                    {confirmedPlaceChipResolved.sub}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              {detailUrl ? (
+                                <Pressable
+                                  onPress={() =>
+                                    setNaverPlaceWebModal({
+                                      url: detailUrl,
+                                      title: confirmedPlaceChipResolved.title.trim() || '상세 정보',
+                                    })
+                                  }
+                                  style={({ pressed }) => [
+                                    styles.placeNaverDetailBtn,
+                                    styles.placeNaverDetailBtnInline,
+                                    styles.placeDetailRightColBtn,
+                                    pressed && { opacity: 0.88 },
+                                  ]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="상세 정보">
+                                  <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
+                                </Pressable>
                               ) : null}
                             </View>
-                            {detailUrl ? (
-                              <Pressable
-                                onPress={() =>
-                                  setNaverPlaceWebModal({
-                                    url: detailUrl,
-                                    title: confirmedPlaceChipResolved.title.trim() || '상세 정보',
-                                  })
-                                }
-                                style={({ pressed }) => [
-                                  styles.placeNaverDetailBtn,
-                                  styles.placeNaverDetailBtnInline,
-                                  pressed && { opacity: 0.88 },
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel="상세 정보">
-                                <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
-                              </Pressable>
-                            ) : null}
                           </View>
                         </View>
                       );
@@ -3801,29 +3804,38 @@ export default function MeetingDetailScreen() {
                   const thumb = placeThumbByChipId[chip.id] ?? null;
                   return (
                     <View style={styles.placeDetailBlock}>
-                      
-                      <View style={styles.placeDetailHeaderRow}>
-                        <View style={styles.placeDetailHeaderTextCol}>
-                          <Text style={styles.placeVoteTitle} numberOfLines={3}>
-                            {chip.title}
-                          </Text>
-                          {chip.sub ? (
-                            <Text style={styles.placeVoteSub} numberOfLines={4}>
-                              {chip.sub}
-                            </Text>
-                          ) : null}
+                      <View style={styles.placeDetailHeroRow}>
+                        <View style={styles.placeDetailSquareThumbWrap}>
+                          {thumb ? (
+                            <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+                          ) : (
+                            <View style={styles.placeVoteImageFallback} />
+                          )}
                         </View>
-                        <Pressable
-                          onPress={() => openPlaceVoteDetailWeb(placeChips[0])}
-                          style={({ pressed }) => [
-                            styles.placeNaverDetailBtn,
-                            styles.placeNaverDetailBtnInline,
-                            pressed && { opacity: 0.88 },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="상세 정보">
-                          <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
-                        </Pressable>
+                        <View style={styles.placeDetailRightCol}>
+                          <View style={styles.placeDetailRightColTop}>
+                            <Text style={styles.placeVoteTitle} numberOfLines={3}>
+                              {chip.title}
+                            </Text>
+                            {chip.sub ? (
+                              <Text style={styles.placeVoteSub} numberOfLines={6}>
+                                {chip.sub}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Pressable
+                            onPress={() => openPlaceVoteDetailWeb(chip)}
+                            style={({ pressed }) => [
+                              styles.placeNaverDetailBtn,
+                              styles.placeNaverDetailBtnInline,
+                              styles.placeDetailRightColBtn,
+                              pressed && { opacity: 0.88 },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="상세 정보">
+                            <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
+                          </Pressable>
+                        </View>
                       </View>
                     </View>
                   );
@@ -5538,18 +5550,30 @@ const styles = StyleSheet.create({
   placeVoteTitle: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
   placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
   placeDetailBlock: { marginTop: 0 },
-  placeDetailHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
-  placeDetailHeaderTextCol: { flex: 1, minWidth: 0 },
-  placeDetailImageWrap: {
-    width: '100%',
-    height: 160,
+  placeDetailHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+    marginBottom: 10,
+  },
+  placeDetailSquareThumbWrap: {
+    width: 150,
+    height: 112,
     borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.55)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
   },
+  placeDetailRightCol: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 112,
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+  },
+  placeDetailRightColTop: { flexShrink: 1 },
+  placeDetailRightColBtn: { alignSelf: 'flex-start' },
   placeVoteDetailLink: {
     marginTop: 8,
     alignSelf: 'stretch',
