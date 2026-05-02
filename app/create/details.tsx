@@ -113,14 +113,16 @@ import {
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
-import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
+import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import {
-  resolveNaverPlaceCoordinates,
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
   sanitizeNaverLocalPlaceLink,
-  searchNaverLocalPlaces,
 } from '@/src/lib/naver-local-search';
+import {
+  resolvePlaceSearchRowCoordinates,
+  searchPlacesText,
+  type PlaceSearchRow,
+} from '@/src/lib/google-places-text-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import {
@@ -138,8 +140,8 @@ import { DateCandidateEditorCard, type DatePickerField } from '../../components/
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
-const PLACE_SEARCH_INITIAL_PAGE_SIZE = 15;
-const PLACE_SEARCH_PAGE_SIZE = 10;
+/** Google Places Text Search — 첫 페이지·추가 로드 모두 5건 */
+const PLACE_SEARCH_PAGE_SIZE = 5;
 const DEFAULT_CALENDAR_PICK_TIME = '19:00';
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 /** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
@@ -755,12 +757,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   // 장소 후보 단계: 인라인 검색 UI (AI 초기 검색어 + 추천 검색어 + 결과 그리드)
   const [placeQuery, setPlaceQuery] = useState('');
   const [placeBiasHint, setPlaceBiasHint] = useState<string | null>(null);
-  const [placeSearchRows, setPlaceSearchRows] = useState<NaverLocalPlace[]>([]);
+  const [placeSearchRows, setPlaceSearchRows] = useState<PlaceSearchRow[]>([]);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
   const [placeSearchLoadingMore, setPlaceSearchLoadingMore] = useState(false);
   const [placeSearchErr, setPlaceSearchErr] = useState<string | null>(null);
-  const [placeSearchNextStart, setPlaceSearchNextStart] = useState<number | null>(null);
+  const [placeSearchNextPageToken, setPlaceSearchNextPageToken] = useState<string | null>(null);
   const placeSearchQueryKeyRef = useRef<string>('');
+  /** 가로 스크롤 끝에서 `loadMore`가 연속 호출되는 것 방지 */
+  const placeSearchLoadMoreGuardRef = useRef(false);
   const [placeThumbById, setPlaceThumbById] = useState<Record<string, string | null>>({});
   const [placeSelectedById, setPlaceSelectedById] = useState<Record<string, { placeName: string; address: string }>>(
     {},
@@ -1592,7 +1596,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       setPlaceSearchErr(null);
       setPlaceSearchLoading(false);
       setPlaceSearchLoadingMore(false);
-      setPlaceSearchNextStart(null);
+      setPlaceSearchNextPageToken(null);
       placeSearchQueryKeyRef.current = '';
       setPlaceThumbById({});
       return undefined;
@@ -1603,24 +1607,23 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const t = setTimeout(() => {
       void (async () => {
         try {
-          const { bias } = await ensureNearbySearchBias();
+          const { bias, coords } = await ensureNearbySearchBias();
           if (!alive) return;
-          const list = await searchNaverLocalPlaces(qTrim, {
+          const { places: list, nextPageToken } = await searchPlacesText(qTrim, {
             locationBias: bias,
-            start: 1,
-            display: PLACE_SEARCH_INITIAL_PAGE_SIZE,
+            userCoords: coords,
+            maxResultCount: PLACE_SEARCH_PAGE_SIZE,
           });
           if (!alive) return;
           setPlaceSearchRows(list);
-          // 첫 페이지가 5개 미만이어도 다음 페이지를 시도할 수 있게 nextStart를 열어둡니다.
-          setPlaceSearchNextStart(list.length > 0 ? 1 + PLACE_SEARCH_INITIAL_PAGE_SIZE : null);
+          setPlaceSearchNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
           placeSearchQueryKeyRef.current = qTrim;
           setPlaceThumbById({});
         } catch (e) {
           if (!alive) return;
           setPlaceSearchRows([]);
           setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
-          setPlaceSearchNextStart(null);
+          setPlaceSearchNextPageToken(null);
         } finally {
           if (alive) setPlaceSearchLoading(false);
         }
@@ -1645,9 +1648,22 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         for (const row of visible) {
           if (!alive) return;
           if (placeThumbById[row.id] !== undefined) continue;
-          const q = `${row.title} ${(row.roadAddress || row.address || row.category || '').trim()}`.trim();
+          const pre = row.thumbnailUrl?.trim() ?? '';
+          if (pre.startsWith('https://')) {
+            setPlaceThumbById((prev) => {
+              if (prev[row.id] !== undefined) return prev;
+              return { ...prev, [row.id]: pre };
+            });
+            continue;
+          }
           try {
-            const thumb = await searchNaverImageThumbnail(q);
+            const thumb = await searchNaverPlaceImageThumbnail({
+              title: row.title,
+              roadAddress: row.roadAddress,
+              address: row.address,
+              category: row.category,
+              preferredPhotoMediaUrl: row.thumbnailUrl ?? undefined,
+            });
             if (!alive) return;
             setPlaceThumbById((prev) => {
               if (prev[row.id] !== undefined) return prev;
@@ -1676,31 +1692,35 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (!showPlaces || placesListOnly) return;
     if (placeSearchLoading || placeSearchLoadingMore) return;
     if (placeSearchErr) return;
-    const nextStart = placeSearchNextStart;
-    if (nextStart == null) return;
+    const pageToken = placeSearchNextPageToken;
+    if (pageToken == null) return;
     const qTrim = placeQuery.trim();
     if (!qTrim) return;
     if (placeSearchQueryKeyRef.current !== qTrim) return;
+    if (placeSearchLoadMoreGuardRef.current) return;
+    placeSearchLoadMoreGuardRef.current = true;
 
     setPlaceSearchLoadingMore(true);
     void (async () => {
       try {
-        const { bias } = await ensureNearbySearchBias();
-        const list = await searchNaverLocalPlaces(qTrim, {
+        const { bias, coords } = await ensureNearbySearchBias();
+        const { places: list, nextPageToken } = await searchPlacesText(qTrim, {
           locationBias: bias,
-          start: nextStart,
-          display: PLACE_SEARCH_PAGE_SIZE,
+          userCoords: coords,
+          pageToken,
+          maxResultCount: PLACE_SEARCH_PAGE_SIZE,
         });
         setPlaceSearchRows((prev) => {
           const seen = new Set(prev.map((r) => r.id));
           const add = list.filter((r) => !seen.has(r.id));
           return add.length > 0 ? [...prev, ...add] : prev;
         });
-        setPlaceSearchNextStart(list.length > 0 ? nextStart + PLACE_SEARCH_PAGE_SIZE : null);
+        setPlaceSearchNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
       } catch (e) {
         setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
-        setPlaceSearchNextStart(null);
+        setPlaceSearchNextPageToken(null);
       } finally {
+        placeSearchLoadMoreGuardRef.current = false;
         setPlaceSearchLoadingMore(false);
       }
     })();
@@ -1709,7 +1729,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placeSearchErr,
     placeSearchLoading,
     placeSearchLoadingMore,
-    placeSearchNextStart,
+    placeSearchNextPageToken,
     placesListOnly,
     showPlaces,
   ]);
@@ -2253,7 +2273,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                               setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
                               void (async () => {
                                 try {
-                                  const resolved = await resolveNaverPlaceCoordinates(item);
+                                  const resolved = await resolvePlaceSearchRowCoordinates(item);
                                   const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
                                   if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
                                   const placeName = resolved.title.trim() || title.trim();

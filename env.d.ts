@@ -25,6 +25,11 @@ declare namespace NodeJS {
     EXPO_PUBLIC_FIREBASE_APP_ID?: string;
     WEB_CLIENT_ID?: string;
     EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?: string;
+    /** Places API(New) Text Search·사진 — 웹 서비스용 키 권장 */
+    EXPO_PUBLIC_GOOGLE_PLACES_API_KEY?: string;
+    GOOGLE_PLACES_API_KEY?: string;
+    EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY?: string;
+    GOOGLE_MAPS_ANDROID_API_KEY?: string;
     /** KOBIS 오픈API (kobis.or.kr 발급) */
     EXPO_PUBLIC_KOBIS_KEY?: string;
     KOBIS_KEY?: string;

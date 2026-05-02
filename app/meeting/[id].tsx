@@ -100,7 +100,7 @@ import {
   updateParticipantVotes,
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
-import { searchNaverImageThumbnail } from '@/src/lib/naver-image-search';
+import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import {
   resolveNaverMovieSearchWebUrl,
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
@@ -1599,7 +1599,7 @@ export default function MeetingDetailScreen() {
   }, [router]);
 
   const safeBack = useCallback(() => {
-    if (votesDirty && (isHost || alreadyJoinedMeeting)) {
+    if (votesDirty && alreadyJoinedMeeting && !isHost) {
       Alert.alert(
         '투표 미저장',
         '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
@@ -1616,7 +1616,7 @@ export default function MeetingDetailScreen() {
   useEffect(() => {
     if (!meeting) return undefined;
     const unsub = navigation.addListener('beforeRemove', (e) => {
-      if (!votesDirty || !(isHost || alreadyJoinedMeeting)) return;
+      if (!votesDirty || !alreadyJoinedMeeting || isHost) return;
       e.preventDefault();
       Alert.alert(
         '투표 미저장',
@@ -2143,9 +2143,11 @@ export default function MeetingDetailScreen() {
         for (const chip of visible) {
           if (!alive) return;
           if (placeThumbByChipId[chip.id] !== undefined) continue;
-          const q = `${chip.title} ${(chip.sub ?? '').trim()}`.trim();
           try {
-            const thumb = await searchNaverImageThumbnail(q);
+            const thumb = await searchNaverPlaceImageThumbnail({
+              title: chip.title,
+              addressLine: chip.sub,
+            });
             if (!alive) return;
             setPlaceThumbByChipId((prev) => {
               if (prev[chip.id] !== undefined) return prev;
@@ -2177,9 +2179,11 @@ export default function MeetingDetailScreen() {
     let alive = true;
     const t = setTimeout(() => {
       void (async () => {
-        const q = `${chip.title} ${(chip.sub ?? '').trim()}`.trim();
         try {
-          const thumb = await searchNaverImageThumbnail(q);
+          const thumb = await searchNaverPlaceImageThumbnail({
+            title: chip.title,
+            addressLine: chip.sub,
+          });
           if (!alive) return;
           setPlaceThumbByChipId((prev) => {
             if (prev[chip.id] !== undefined) return prev;
@@ -4089,28 +4093,6 @@ export default function MeetingDetailScreen() {
                         </Text>
                       </Pressable>
                     </>
-                  ) : null}
-                  {!isScheduleConfirmed ? (
-                    <Pressable
-                      onPress={onPressSaveVotes}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.pillBlue,
-                        styles.bottomPillFlex,
-                        participantVoteBusy && { opacity: 0.75 },
-                        pressed && !participantVoteBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="저장">
-                      {participantVoteBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="save-outline" size={18} color="#fff" />
-                      )}
-                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        저장
-                      </Text>
-                    </Pressable>
                   ) : null}
                   {meeting.scheduleConfirmed !== true ? (
                     <Pressable

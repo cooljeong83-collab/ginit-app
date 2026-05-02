@@ -1,6 +1,6 @@
 
 import { Image } from 'expo-image';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -11,6 +11,7 @@ import {
   homeMeetingStatusBadgeLabel,
 } from '@/src/lib/feed-home-visual';
 import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
+import { placeImageSearchCacheKey, searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import {
@@ -195,12 +196,40 @@ export function HomeMeetingListItem({
 
   const approvalParts = useMemo(() => (cfg ? approvalChipParts(cfg.approvalType) : null), [cfg]);
 
+  const placeFieldsForThumb = symbolBox?.source === 'place_with_host' ? symbolBox.placeImageFields : null;
+  const placeThumbCacheKey = placeFieldsForThumb ? placeImageSearchCacheKey(placeFieldsForThumb) : '';
+  const placeFieldsForThumbRef = useRef(placeFieldsForThumb);
+  placeFieldsForThumbRef.current = placeFieldsForThumb;
+  const [placeThumbUrl, setPlaceThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!placeThumbCacheKey) {
+      setPlaceThumbUrl(null);
+      return;
+    }
+    const fields = placeFieldsForThumbRef.current;
+    if (!fields) {
+      setPlaceThumbUrl(null);
+      return;
+    }
+    setPlaceThumbUrl(null);
+    let cancelled = false;
+    void searchNaverPlaceImageThumbnail(fields).then((u) => {
+      if (!cancelled) setPlaceThumbUrl(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [placeThumbCacheKey]);
+
   const symbolAccessibilityLabel =
     symbolBox?.source === 'movie_poster'
-      ? '영화 포스터'
+      ? `영화 포스터${symbolBox.hostPhotoUrl ? ', 주관자 프로필' : ''}`
       : symbolBox?.source === 'host_profile'
         ? '주관자 프로필'
-        : meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() || '모임';
+        : symbolBox?.source === 'place_with_host'
+          ? `장소${symbolBox.hostPhotoUrl ? ', 주관자 프로필' : ''}`
+          : meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() || '모임';
 
   const categoryTitlePrefix = useMemo(
     () => meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() ?? '',
@@ -247,7 +276,29 @@ export function HomeMeetingListItem({
         <View style={s.lead}>
           <View style={s.symbolRing} accessibilityLabel={symbolAccessibilityLabel}>
             {!symbolBox ? <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} /> : null}
-            {symbolBox ? (
+            {symbolBox?.source === 'movie_poster' ? (
+              <>
+                <Image
+                  source={{ uri: symbolBox.url }}
+                  style={s.symbolPhoto}
+                  contentFit="cover"
+                  transition={140}
+                  cachePolicy="disk"
+                  recyclingKey={symbolBox.url}
+                  accessibilityIgnoresInvertColors
+                />
+                {symbolBox.hostPhotoUrl ? (
+                  <Image
+                    source={{ uri: symbolBox.hostPhotoUrl }}
+                    style={s.symbolHostBadge}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={symbolBox.hostPhotoUrl}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : null}
+              </>
+            ) : symbolBox?.source === 'host_profile' ? (
               <Image
                 source={{ uri: symbolBox.url }}
                 style={s.symbolPhoto}
@@ -257,9 +308,38 @@ export function HomeMeetingListItem({
                 recyclingKey={symbolBox.url}
                 accessibilityIgnoresInvertColors
               />
-            ) : (
+            ) : symbolBox?.source === 'place_with_host' ? (
+              <>
+                {!placeThumbUrl ? (
+                  <>
+                    <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} />
+                    <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
+                  </>
+                ) : (
+                  <Image
+                    source={{ uri: placeThumbUrl }}
+                    style={s.symbolPhoto}
+                    contentFit="cover"
+                    transition={140}
+                    cachePolicy="disk"
+                    recyclingKey={placeThumbUrl}
+                    accessibilityIgnoresInvertColors
+                  />
+                )}
+                {symbolBox.hostPhotoUrl ? (
+                  <Image
+                    source={{ uri: symbolBox.hostPhotoUrl }}
+                    style={s.symbolHostBadge}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={symbolBox.hostPhotoUrl}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : null}
+              </>
+            ) : !symbolBox ? (
               <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
-            )}
+            ) : null}
           </View>
           {showCapacityBar ? (
             <>
@@ -377,6 +457,18 @@ const s = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: THUMB_RADIUS - 1,
     zIndex: 2,
+  },
+  symbolHostBadge: {
+    position: 'absolute',
+    bottom: 3,
+    right: 3,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#FFFFFF',
+    zIndex: 4,
+    backgroundColor: GinitTheme.colors.bgAlt,
   },
   capRow: {
     width: THUMB_SIZE,

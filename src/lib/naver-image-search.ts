@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { publicEnv } from '@/src/config/public-env';
+import { fetchGooglePlacePhotoMediaUrlFromTextQuery } from '@/src/lib/google-place-photo';
 import { withCorsProxyForWeb } from '@/src/lib/naver-ncp-maps';
 import { withNaverOpenApiClientRateLimit } from '@/src/lib/naver-openapi-rate-limit';
 
@@ -27,8 +28,126 @@ function cacheKeyForQuery(query: string): string {
 }
 
 const thumbnailCache = new Map<string, string | null>();
+/** 장소 전용: 검색어 보강 + 다중 후보 중 상호·주소 정합도로 고름 */
+const placeThumbnailCache = new Map<string, string | null>();
 
-async function fetchOpenApiImageSearch(query: string): Promise<NaverOpenApiImageJson> {
+function stripHtmlTags(s: string): string {
+  return s.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+export type NaverPlaceImageSearchFields = {
+  title: string;
+  roadAddress?: string | null;
+  address?: string | null;
+  /** 한 줄 주소(도로명·지번 혼합) — 투표 칩 `sub` 등 */
+  addressLine?: string | null;
+  category?: string | null;
+  /** Places API(New) 등에서 이미 구한 사진 URL이 있으면 추가 검색을 하지 않습니다. */
+  preferredPhotoMediaUrl?: string | null;
+};
+
+/**
+ * 네이버 이미지 검색 쿼리: 상호 + (도로명·지번 동시 반영 시 둘 다) + 주소 한 줄,
+ * 주소가 전혀 없을 때만 카테고리를 붙입니다.
+ */
+export function buildNaverPlaceImageSearchQuery(f: NaverPlaceImageSearchFields): string {
+  let title = stripHtmlTags(typeof f.title === 'string' ? f.title : '');
+  const line = typeof f.addressLine === 'string' ? f.addressLine.trim() : '';
+  let road = typeof f.roadAddress === 'string' ? f.roadAddress.trim() : '';
+  let jibun = typeof f.address === 'string' ? f.address.trim() : '';
+  const cat = typeof f.category === 'string' ? f.category.trim() : '';
+
+  if (!road && !jibun && line) {
+    road = line;
+  }
+
+  if (road && jibun) {
+    const rLower = road.toLowerCase();
+    const jLower = jibun.toLowerCase();
+    if (rLower === jLower) {
+      jibun = '';
+    } else if (rLower.includes(jLower) || jLower.includes(rLower)) {
+      if (road.length >= jibun.length) jibun = '';
+      else road = '';
+    }
+  }
+
+  if (!title) {
+    const fallback = [line, road, jibun, cat].find((x) => typeof x === 'string' && x.trim().length > 0);
+    return (fallback ?? '').trim();
+  }
+
+  const parts: string[] = [title];
+  if (road) parts.push(road);
+  if (jibun) parts.push(jibun);
+  if (!road && !jibun && cat) parts.push(cat);
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** `useEffect` 의존값용 안정 키 */
+export function placeImageSearchCacheKey(f: NaverPlaceImageSearchFields): string {
+  return [
+    cacheKeyForQuery(f.title),
+    cacheKeyForQuery(typeof f.roadAddress === 'string' ? f.roadAddress : ''),
+    cacheKeyForQuery(typeof f.address === 'string' ? f.address : ''),
+    cacheKeyForQuery(typeof f.addressLine === 'string' ? f.addressLine : ''),
+    cacheKeyForQuery(typeof f.category === 'string' ? f.category : ''),
+    cacheKeyForQuery(typeof f.preferredPhotoMediaUrl === 'string' ? f.preferredPhotoMediaUrl : ''),
+  ].join('\x1e');
+}
+
+function resolveRoadJibunForScoring(f: NaverPlaceImageSearchFields): { road: string; jibun: string } {
+  const line = typeof f.addressLine === 'string' ? f.addressLine.trim() : '';
+  let road = typeof f.roadAddress === 'string' ? f.roadAddress.trim() : '';
+  let jibun = typeof f.address === 'string' ? f.address.trim() : '';
+  if (!road && !jibun && line) {
+    road = line;
+  }
+  if (road && jibun) {
+    const rLower = road.toLowerCase();
+    const jLower = jibun.toLowerCase();
+    if (rLower === jLower) jibun = '';
+    else if (rLower.includes(jLower) || jLower.includes(rLower)) {
+      if (road.length >= jibun.length) jibun = '';
+      else road = '';
+    }
+  }
+  return { road, jibun };
+}
+
+function scoreImageTitleAgainstPlace(
+  imageTitleRaw: string,
+  placeTitle: string,
+  road: string,
+  jibun: string,
+): number {
+  const img = cacheKeyForQuery(stripHtmlTags(imageTitleRaw));
+  if (!img) return 0;
+  const pt = cacheKeyForQuery(stripHtmlTags(placeTitle));
+  let score = 0;
+  if (pt.length >= 4 && img.includes(pt)) score += 100;
+
+  const tokens = pt.split(/[\s>]+/).filter((t) => t.length >= 3);
+  const seen = new Set<string>();
+  for (const tok of tokens) {
+    if (seen.has(tok)) continue;
+    seen.add(tok);
+    if (img.includes(tok)) score += Math.min(15, tok.length);
+  }
+
+  for (const fragRaw of [road, jibun]) {
+    const frag = cacheKeyForQuery(fragRaw);
+    if (frag.length >= 10 && img.includes(frag.slice(0, 22))) score += 25;
+    else if (frag.length >= 6 && img.includes(frag.slice(0, 12))) score += 12;
+  }
+  return score;
+}
+
+async function fetchOpenApiImageSearch(
+  query: string,
+  opts?: { display?: number },
+): Promise<NaverOpenApiImageJson> {
   const id = publicEnv.naverSearchClientId?.trim();
   const secret = publicEnv.naverSearchClientSecret?.trim();
   if (!id || !secret) {
@@ -38,7 +157,8 @@ async function fetchOpenApiImageSearch(query: string): Promise<NaverOpenApiImage
   }
 
   const q = query.trim();
-  const baseUrl = `https://openapi.naver.com/v1/search/image?query=${encodeURIComponent(q)}&display=1&sort=sim`;
+  const display = Math.min(100, Math.max(1, Math.floor(opts?.display ?? 1)));
+  const baseUrl = `https://openapi.naver.com/v1/search/image?query=${encodeURIComponent(q)}&display=${display}&sort=sim`;
 
   return withNaverOpenApiClientRateLimit(async () => {
     let url = baseUrl;
@@ -68,10 +188,62 @@ export async function searchNaverImageThumbnail(query: string): Promise<string |
   const key = cacheKeyForQuery(trimmed);
   if (thumbnailCache.has(key)) return thumbnailCache.get(key) ?? null;
 
-  const json = await fetchOpenApiImageSearch(trimmed);
+  const json = await fetchOpenApiImageSearch(trimmed, { display: 1 });
   const first = json.items?.[0];
   const thumb = normalizeHttpsUrl(first?.thumbnail) ?? normalizeHttpsUrl(first?.link);
   thumbnailCache.set(key, thumb);
   return thumb;
 }
 
+/**
+ * 장소 행·투표 칩용: **Google Places 사진 미디어 URL**을 우선 시도하고,
+ * 키가 없거나 결과가 없으면 네이버 이미지 검색(`display` 10건 + 제목 정합도)으로 폴백합니다.
+ */
+export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFields): Promise<string | null> {
+  const q = buildNaverPlaceImageSearchQuery(f);
+  if (!q) return null;
+
+  const cacheKey = `p|${cacheKeyForQuery(q)}`;
+  if (placeThumbnailCache.has(cacheKey)) return placeThumbnailCache.get(cacheKey) ?? null;
+
+  const pref = typeof f.preferredPhotoMediaUrl === 'string' ? f.preferredPhotoMediaUrl.trim() : '';
+  if (pref.startsWith('https://')) {
+    placeThumbnailCache.set(cacheKey, pref);
+    return pref;
+  }
+
+  try {
+    const googleUri = await fetchGooglePlacePhotoMediaUrlFromTextQuery(q);
+    if (googleUri) {
+      placeThumbnailCache.set(cacheKey, googleUri);
+      return googleUri;
+    }
+  } catch {
+    /* 네이버 이미지 검색으로 폴백 */
+  }
+
+  const placeTitle = stripHtmlTags(typeof f.title === 'string' ? f.title : '');
+  const { road, jibun } = resolveRoadJibunForScoring(f);
+
+  const json = await fetchOpenApiImageSearch(q, { display: 10 });
+  const items = json.items ?? [];
+
+  type Ranked = { score: number; thumb: string };
+  const ranked: Ranked[] = [];
+  for (const it of items) {
+    const titleRaw = typeof it?.title === 'string' ? it.title : '';
+    const score = scoreImageTitleAgainstPlace(titleRaw, placeTitle, road, jibun);
+    const thumb = normalizeHttpsUrl(it?.thumbnail) ?? normalizeHttpsUrl(it?.link);
+    if (thumb) ranked.push({ score, thumb });
+  }
+
+  if (ranked.length === 0) {
+    placeThumbnailCache.set(cacheKey, null);
+    return null;
+  }
+
+  ranked.sort((a, b) => b.score - a.score);
+  const best = ranked[0]!.thumb;
+  placeThumbnailCache.set(cacheKey, best);
+  return best;
+}

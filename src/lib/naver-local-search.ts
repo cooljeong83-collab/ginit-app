@@ -128,7 +128,7 @@ function truncateAddressForNaverSearchQuery(address: string): string {
   return out || normalized;
 }
 
-/** 상호·주소·카테고리로 네이버 **모바일 통합검색**(m.search) 검색어를 만듭니다. `link`는 사용하지 않습니다. */
+/** 한 줄 주소(행정 **구**까지 잘린 뒤) + 상호(+ 폴백 시 카테고리)로 네이버 **모바일 통합검색**(m.search) 검색어를 만듭니다. `link`는 사용하지 않습니다. */
 function buildNaverMobileSearchUrlFromPlaceFields(input: {
   title: string;
   roadAddress?: string | null | undefined;
@@ -141,7 +141,7 @@ function buildNaverMobileSearchUrlFromPlaceFields(input: {
   const cat = typeof input.category === 'string' ? input.category.trim() : '';
   const addrLine = road || jibun;
   const addrForQuery = addrLine ? truncateAddressForNaverSearchQuery(addrLine) : '';
-  const primary = [title, addrForQuery].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const primary = [addrForQuery, title].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   const q =
     primary.length > 0
       ? primary
@@ -155,7 +155,7 @@ function buildNaverMobileSearchUrlFromPlaceFields(input: {
 
 /**
  * 상세(WebView) URL: 네이버 플레이스가 아니라 **모바일 네이버 통합검색**(`m.search.naver.com`)으로
- * 상호명 + 주소(행정 **구** 단위까지 잘린 한 줄, 또는 카테고리) 검색 결과를 띄웁니다. API `link`는 검색어에 쓰지 않습니다.
+ * 주소(행정 **구** 단위까지 잘린 한 줄) + 상호(또는 카테고리 폴백) 검색 결과를 띄웁니다. API `link`는 검색어에 쓰지 않습니다.
  */
 export function resolveNaverPlaceDetailWebUrl(input: {
   link?: string | null | undefined;
@@ -173,7 +173,7 @@ export function resolveNaverPlaceDetailWebUrl(input: {
 }
 
 /**
- * 모임 상세 **장소 투표 칩**(`naverPlaceLink`는 무시·한 줄 `address` + 제목)과 동일한 인자로
+ * 모임 상세 **장소 투표 칩**(`naverPlaceLink`는 무시·한 줄 `address` + 상호 순)과 동일한 인자로
  * 네이버 모바일 **통합검색** URL을 만듭니다.
  */
 export function resolveNaverPlaceDetailWebUrlLikeVoteChip(input: {

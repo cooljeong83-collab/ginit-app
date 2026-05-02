@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
   Dimensions,
   findNodeHandle,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -31,12 +33,14 @@ import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
-import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import {
-  resolveNaverPlaceCoordinates,
+  resolvePlaceSearchRowCoordinates,
+  searchPlacesText,
+  type PlaceSearchRow,
+} from '@/src/lib/google-places-text-search';
+import {
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
   sanitizeNaverLocalPlaceLink,
-  searchNaverLocalPlaces,
 } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
@@ -107,6 +111,8 @@ const WEB_SCROLLBAR_STYLE_ID = 'ginit-early-place-nested-scroll-style';
 const CINEMA_SCROLL_MAX = 168;
 /** details 플로팅「n개의 장소로 일정 정하기」+ 여백(대략) */
 const FLOATING_CTA_RESERVE = 100;
+/** Google Places Text Search — 첫 페이지·추가 로드 모두 5건 */
+const PLACE_PAGE = 5;
 
 /** 영화 카테고리: 상단 시드(서울 일대 예시 좌표) */
 const NEARBY_CINEMA_SEEDS: PlaceCandidate[] = [
@@ -173,8 +179,12 @@ export function EarlyPlaceSearch({
   const [query, setQuery] = useState('');
   const [addingMore, setAddingMore] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<NaverLocalPlace[]>([]);
+  const [rows, setRows] = useState<PlaceSearchRow[]>([]);
+  const [rowsNextPageToken, setRowsNextPageToken] = useState<string | null>(null);
+  const [rowsLoadingMore, setRowsLoadingMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const rowsSearchQueryKeyRef = useRef('');
+  const rowsLoadMoreGuardRef = useRef(false);
   /** GPS 확보 시 영화관 시드 정렬·검색 재실행용 */
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [nearbyHint, setNearbyHint] = useState<string | null>(null);
@@ -317,6 +327,7 @@ export function EarlyPlaceSearch({
     if (!pickerOpen) return;
     if (qTrim.length === 0) {
       setRows([]);
+      setRowsNextPageToken(null);
       setErr(null);
       setLoading(false);
       return;
@@ -324,17 +335,25 @@ export function EarlyPlaceSearch({
     let alive = true;
     setLoading(true);
     setErr(null);
+    setRowsNextPageToken(null);
+    rowsSearchQueryKeyRef.current = qTrim;
     const t = setTimeout(() => {
       void (async () => {
         try {
-          const { bias } = await ensureNearbySearchBias();
+          const { bias, coords } = await ensureNearbySearchBias();
           if (!alive) return;
-          const list = await searchNaverLocalPlaces(qTrim, { locationBias: bias });
+          const { places: list, nextPageToken } = await searchPlacesText(qTrim, {
+            locationBias: bias,
+            userCoords: coords,
+            maxResultCount: PLACE_PAGE,
+          });
           if (!alive) return;
           setRows(list);
+          setRowsNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
         } catch (e) {
           if (!alive) return;
           setRows([]);
+          setRowsNextPageToken(null);
           setErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
         } finally {
           if (alive) setLoading(false);
@@ -346,6 +365,56 @@ export function EarlyPlaceSearch({
       clearTimeout(t);
     };
   }, [pickerOpen, qTrim, locationReady]);
+
+  const loadMoreRows = useCallback(() => {
+    const qt = query.trim();
+    if (!pickerOpen || qt.length === 0) return;
+    if (rowsSearchQueryKeyRef.current !== qt) return;
+    if (rowsLoadMoreGuardRef.current || loading || rowsLoadingMore) return;
+    if (err) return;
+    const pageToken = rowsNextPageToken;
+    if (pageToken == null) return;
+    rowsLoadMoreGuardRef.current = true;
+    setRowsLoadingMore(true);
+    void (async () => {
+      try {
+        const { bias, coords } = await ensureNearbySearchBias();
+        const qt2 = query.trim();
+        if (rowsSearchQueryKeyRef.current !== qt2) return;
+        const { places: list, nextPageToken } = await searchPlacesText(qt2, {
+          locationBias: bias,
+          userCoords: coords,
+          pageToken,
+          maxResultCount: PLACE_PAGE,
+        });
+        const qt3 = query.trim();
+        if (rowsSearchQueryKeyRef.current !== qt3) return;
+        setRows((prev) => {
+          const seen = new Set(prev.map((r) => r.id));
+          return [...prev, ...list.filter((r) => !seen.has(r.id))];
+        });
+        setRowsNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
+      } catch (e) {
+        if (rowsSearchQueryKeyRef.current === qt) {
+          setErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
+        }
+      } finally {
+        rowsLoadMoreGuardRef.current = false;
+        setRowsLoadingMore(false);
+      }
+    })();
+  }, [pickerOpen, query, loading, rowsLoadingMore, err, rowsNextPageToken]);
+
+  const handleListNearEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      const threshold = 72;
+      if (layoutMeasurement.height + contentOffset.y >= contentSize.height - threshold) {
+        loadMoreRows();
+      }
+    },
+    [loadMoreRows],
+  );
 
   const onPickCandidate = useCallback(
     (p: PlaceCandidate) => {
@@ -364,13 +433,13 @@ export function EarlyPlaceSearch({
     [onChange, value],
   );
 
-  const onPickNaver = useCallback(
-    async (item: NaverLocalPlace) => {
+  const onPickPlaceRow = useCallback(
+    async (item: PlaceSearchRow) => {
       if (disabled) return;
       layoutAnimateEaseInEaseOut();
       setLoading(true);
       try {
-        const resolved = await resolveNaverPlaceCoordinates(item);
+        const resolved = await resolvePlaceSearchRowCoordinates(item);
         const addr = resolved.roadAddress?.trim() || resolved.address?.trim() || '';
         if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
         const linkFromApi =
@@ -558,48 +627,55 @@ export function EarlyPlaceSearch({
         ) : rows.length === 0 ? (
           <Text style={S.resultMeta}>검색 결과가 없어요.</Text>
         ) : (
-          rows.map((item) => {
-            const addr = (item.roadAddress || item.address || '').trim() || item.category;
-            const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-              naverPlaceLink: item.link,
-              title: item.title,
-              addressLine: typeof addr === 'string' && addr.trim() ? addr.trim() : undefined,
-            });
-            return (
-              <Animated.View
-                key={item.id}
-                style={Platform.OS === 'web' ? ({ width: '100%' } as const) : { alignSelf: 'stretch' }}
-                entering={FadeInDown.duration(320)}>
-                <View style={[styles.resultCard, Platform.OS === 'web' && { width: '100%' as const }]}>
-                  <Pressable
-                    onPress={() => void onPickNaver(item)}
-                    disabled={disabled || loading}
-                    style={({ pressed }) => [pressed && styles.resultCardPressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel={item.title}>
-                    <Text style={styles.resultTitle} numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.resultAddr} numberOfLines={3}>
-                      {addr}
-                    </Text>
-                  </Pressable>
-                  {detailUrl ? (
+          <>
+            {rows.map((item) => {
+              const addr = (item.roadAddress || item.address || '').trim() || item.category;
+              const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
+                naverPlaceLink: item.link,
+                title: item.title,
+                addressLine: typeof addr === 'string' && addr.trim() ? addr.trim() : undefined,
+              });
+              return (
+                <Animated.View
+                  key={item.id}
+                  style={Platform.OS === 'web' ? ({ width: '100%' } as const) : { alignSelf: 'stretch' }}
+                  entering={FadeInDown.duration(320)}>
+                  <View style={[styles.resultCard, Platform.OS === 'web' && { width: '100%' as const }]}>
                     <Pressable
-                      onPress={() =>
-                        setNaverPlaceWebModal({ url: detailUrl, title: item.title.trim() || '상세 정보' })
-                      }
+                      onPress={() => void onPickPlaceRow(item)}
                       disabled={disabled || loading}
-                      style={({ pressed }) => [styles.naverDetailBtn, pressed && { opacity: 0.88 }]}
+                      style={({ pressed }) => [pressed && styles.resultCardPressed]}
                       accessibilityRole="button"
-                      accessibilityLabel="상세 정보">
-                      <Text style={styles.naverDetailBtnText}>상세 정보</Text>
+                      accessibilityLabel={item.title}>
+                      <Text style={styles.resultTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.resultAddr} numberOfLines={3}>
+                        {addr}
+                      </Text>
                     </Pressable>
-                  ) : null}
-                </View>
-              </Animated.View>
-            );
-          })
+                    {detailUrl ? (
+                      <Pressable
+                        onPress={() =>
+                          setNaverPlaceWebModal({ url: detailUrl, title: item.title.trim() || '상세 정보' })
+                        }
+                        disabled={disabled || loading}
+                        style={({ pressed }) => [styles.naverDetailBtn, pressed && { opacity: 0.88 }]}
+                        accessibilityRole="button"
+                        accessibilityLabel="상세 정보">
+                        <Text style={styles.naverDetailBtnText}>상세 정보</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </Animated.View>
+              );
+            })}
+            {rowsLoadingMore ? (
+              <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                <ActivityIndicator color={GinitTheme.colors.primary} />
+              </View>
+            ) : null}
+          </>
         )
       ) : showCinemaBlock ? null : (
         <Text style={S.resultMeta}>
@@ -631,7 +707,9 @@ export function EarlyPlaceSearch({
         overScrollMode="never"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        onScroll={handleListNearEnd}
+        scrollEventThrottle={400}>
         {searchListBody}
       </ScrollView>
     </View>

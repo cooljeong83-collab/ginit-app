@@ -44,6 +44,10 @@ type Extra = {
   naverSearchClientId?: string;
   naverSearchClientSecret?: string;
   googleWebClientId?: string;
+  /** Google Places API(New) Text Search·사진 — 웹 서비스용(권장). 비우면 `googleMapsPlatformApiKey` 폴백 */
+  googlePlacesApiKey?: string;
+  /** Google Maps 플랫폼 API 키(예: Android SDK용) — Places 전용 키가 없을 때 사진 조회 폴백 */
+  googleMapsPlatformApiKey?: string;
   /** KOBIS(영화진흥위원회) 오픈API 키 — 일별 박스오피스 등 */
   kobisKey?: string;
   /** TMDB v3 API 키 — 제목 검색으로 포스터 URL */
@@ -84,6 +88,8 @@ export const publicEnv: {
   naverSearchClientId: string;
   naverSearchClientSecret: string;
   googleWebClientId: string;
+  googlePlacesApiKey: string;
+  googleMapsPlatformApiKey: string;
   kobisKey: string;
   tmdbApiKey: string;
   expoAccessToken: string;
@@ -130,6 +136,13 @@ export const publicEnv: {
   naverSearchClientSecret:
     e.naverSearchClientSecret ?? process.env.EXPO_PUBLIC_NAVER_SEARCH_CLIENT_SECRET ?? '',
   googleWebClientId: e.googleWebClientId ?? process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
+  googlePlacesApiKey:
+    e.googlePlacesApiKey ?? process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY ?? process.env.GOOGLE_PLACES_API_KEY ?? '',
+  googleMapsPlatformApiKey:
+    e.googleMapsPlatformApiKey ??
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ??
+    process.env.GOOGLE_MAPS_ANDROID_API_KEY ??
+    '',
   kobisKey: e.kobisKey ?? process.env.EXPO_PUBLIC_KOBIS_KEY ?? process.env.KOBIS_KEY ?? '',
   tmdbApiKey: e.tmdbApiKey ?? process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY ?? '',
   expoAccessToken: e.expoAccessToken ?? process.env.EXPO_PUBLIC_EXPO_ACCESS_TOKEN ?? '',

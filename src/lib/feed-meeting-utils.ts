@@ -12,6 +12,7 @@ import type {
   PublicMeetingSettlement,
 } from '@/src/lib/meetings';
 import { parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import type { NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import type { UserProfile } from '@/src/lib/user-profile';
 
 export type MeetingListSortMode = 'distance' | 'latest' | 'soon';
@@ -233,10 +234,51 @@ export function sortMeetingsForFeed(
   return list;
 }
 
-/** 홈 리스트 심볼 박스: 영화 포스터 우선, 없으면 주관자 프로필 사진 */
+/** 홈 리스트 심볼 박스: 영화 포스터(+호스트 배지) / 첫 장소 썸네일+호스트 / 호스트만 */
 export type FeedMeetingSymbolBox =
-  | { source: 'movie_poster'; url: string }
+  | { source: 'movie_poster'; url: string; hostPhotoUrl: string | null }
+  | {
+      source: 'place_with_host';
+      placeQuery: string;
+      placeImageFields: NaverPlaceImageSearchFields;
+      hostPhotoUrl: string | null;
+    }
   | { source: 'host_profile'; url: string };
+
+/**
+ * 모임 상세 `buildPlaceChipsFromMeeting`과 동일한 검색어 규칙: 첫 `placeCandidates` 행의 장소명+주소,
+ * 없으면 `placeName`+`address`(또는 `location`).
+ */
+export function firstPlaceThumbnailQuery(m: Meeting): string {
+  const list = m.placeCandidates ?? [];
+  if (list.length > 0) {
+    const p = list[0];
+    const title = typeof p.placeName === 'string' ? p.placeName.trim() : '';
+    const sub = typeof p.address === 'string' ? p.address.trim() : '';
+    return `${title} ${sub}`.trim();
+  }
+  const name = m.placeName?.trim() || m.location?.trim() || '';
+  const addr = m.address?.trim() || '';
+  return `${name} ${addr}`.trim();
+}
+
+/** `searchNaverPlaceImageThumbnail`용 — `firstPlaceThumbnailQuery`와 동일 출처, 필드 분리 */
+export function firstPlaceImageSearchFields(m: Meeting): NaverPlaceImageSearchFields | null {
+  const list = m.placeCandidates ?? [];
+  if (list.length > 0) {
+    const p = list[0];
+    const title = typeof p.placeName === 'string' ? p.placeName.trim() : '';
+    const addressLine = typeof p.address === 'string' ? p.address.trim() : '';
+    const combined = `${title} ${addressLine}`.trim();
+    if (!combined) return null;
+    return { title: title || addressLine, addressLine: title ? addressLine || undefined : undefined };
+  }
+  const name = m.placeName?.trim() || m.location?.trim() || '';
+  const addr = m.address?.trim() || '';
+  const combined = `${name} ${addr}`.trim();
+  if (!combined) return null;
+  return { title: name || addr, addressLine: name ? addr || undefined : undefined };
+}
 
 function firstMoviePosterUrl(extra: MeetingExtraData): string | null {
   const fromMovie = extra.movie?.posterUrl?.trim();
@@ -250,24 +292,39 @@ function firstMoviePosterUrl(extra: MeetingExtraData): string | null {
   return null;
 }
 
+function resolveCreatorPhotoUrl(
+  m: Meeting,
+  hostProfiles: ReadonlyMap<string, UserProfile>,
+): string | null {
+  const hostRaw = m.createdBy?.trim();
+  if (!hostRaw) return null;
+  const hostKey = normalizeParticipantId(hostRaw) ?? hostRaw;
+  const prof = hostProfiles.get(hostKey) ?? hostProfiles.get(hostRaw);
+  const u = prof?.photoUrl?.trim();
+  return u && u.length > 0 ? u : null;
+}
+
 export function feedMeetingSymbolBox(
   m: Meeting,
   hostProfiles: ReadonlyMap<string, UserProfile>,
 ): FeedMeetingSymbolBox | null {
+  const hostPhotoUrl = resolveCreatorPhotoUrl(m, hostProfiles);
+
   const raw = m.extraData;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const extra = raw as MeetingExtraData;
     if (extra.specialtyKind === 'movie') {
       const poster = firstMoviePosterUrl(extra);
-      if (poster) return { source: 'movie_poster', url: poster };
+      if (poster) return { source: 'movie_poster', url: poster, hostPhotoUrl };
     }
   }
 
-  const hostRaw = m.createdBy?.trim();
-  if (!hostRaw) return null;
-  const hostKey = normalizeParticipantId(hostRaw) ?? hostRaw;
-  const prof = hostProfiles.get(hostKey) ?? hostProfiles.get(hostRaw);
-  const url = prof?.photoUrl?.trim();
-  if (url) return { source: 'host_profile', url };
+  const placeQuery = firstPlaceThumbnailQuery(m);
+  const placeImageFields = firstPlaceImageSearchFields(m);
+
+  if (placeQuery.length > 0 && placeImageFields) {
+    return { source: 'place_with_host', placeQuery, placeImageFields, hostPhotoUrl };
+  }
+  if (hostPhotoUrl) return { source: 'host_profile', url: hostPhotoUrl };
   return null;
 }

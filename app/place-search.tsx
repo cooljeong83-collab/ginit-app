@@ -22,15 +22,16 @@ import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
-import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
-import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import {
-  resolveNaverPlaceCoordinates,
-  resolveNaverPlaceDetailWebUrlLikeVoteChip,
-  sanitizeNaverLocalPlaceLink,
-  searchNaverLocalPlaces,
-} from '@/src/lib/naver-local-search';
+  resolvePlaceSearchRowCoordinates,
+  searchPlacesText,
+  type PlaceSearchRow,
+} from '@/src/lib/google-places-text-search';
+import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
+import { resolveNaverPlaceDetailWebUrlLikeVoteChip, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+
+const PLACE_PAGE = 5;
 
 function animateListLayout() {
   layoutAnimateEaseInEaseOut();
@@ -66,12 +67,16 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
   }, []);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<NaverLocalPlace[]>([]);
-  const [selected, setSelected] = useState<NaverLocalPlace | null>(null);
+  const [results, setResults] = useState<PlaceSearchRow[]>([]);
+  const [selected, setSelected] = useState<PlaceSearchRow | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const lastListSearchKeyRef = useRef('');
+  const loadMoreGuardRef = useRef(false);
 
   const canConfirm =
     selected != null && selected.latitude != null && selected.longitude != null && !resolving;
@@ -86,13 +91,20 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
       }
       setQuery(trimmed);
       setError(null);
+      setNextPageToken(null);
       setLoading(true);
       try {
-        const { bias } = await ensureNearbySearchBias();
-        const list = await searchNaverLocalPlaces(trimmed, { locationBias: bias });
+        const { bias, coords } = await ensureNearbySearchBias();
+        const { places: list, nextPageToken: nxt } = await searchPlacesText(trimmed, {
+          locationBias: bias,
+          userCoords: coords,
+          maxResultCount: PLACE_PAGE,
+        });
         if (opts?.signal?.aborted) return;
         setHasSearched(true);
         setResults(list);
+        lastListSearchKeyRef.current = trimmed;
+        setNextPageToken(nxt?.trim() ? nxt.trim() : null);
         if (useInlineMapPreview) {
           InteractionManager.runAfterInteractions(() => animateListLayout());
         }
@@ -102,6 +114,8 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
         const msg = e instanceof Error ? e.message : '검색에 실패했습니다.';
         setError(msg);
         setResults([]);
+        lastListSearchKeyRef.current = '';
+        setNextPageToken(null);
         setSelected(null);
       } finally {
         setLoading(false);
@@ -109,6 +123,42 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
     },
     [useInlineMapPreview],
   );
+
+  const loadMore = useCallback(() => {
+    const key = query.trim();
+    if (!key || loadMoreGuardRef.current || loading || loadingMore || resolving) return;
+    if (key !== lastListSearchKeyRef.current) return;
+    const pageToken = nextPageToken;
+    if (pageToken == null) return;
+    loadMoreGuardRef.current = true;
+    setLoadingMore(true);
+    void (async () => {
+      try {
+        const { bias, coords } = await ensureNearbySearchBias();
+        const key2 = query.trim();
+        if (key2 !== lastListSearchKeyRef.current) return;
+        const { places: list, nextPageToken: nxt } = await searchPlacesText(key2, {
+          locationBias: bias,
+          userCoords: coords,
+          pageToken,
+          maxResultCount: PLACE_PAGE,
+        });
+        const key3 = query.trim();
+        if (key3 !== lastListSearchKeyRef.current) return;
+        setResults((prev) => {
+          const seen = new Set(prev.map((r) => r.id));
+          return [...prev, ...list.filter((p) => !seen.has(p.id))];
+        });
+        setNextPageToken(nxt?.trim() ? nxt.trim() : null);
+      } catch {
+        // 목록은 유지, 추가 페이지만 생략
+        setNextPageToken(null);
+      } finally {
+        loadMoreGuardRef.current = false;
+        setLoadingMore(false);
+      }
+    })();
+  }, [query, loading, loadingMore, resolving, nextPageToken]);
 
   const onSearchPress = useCallback(() => {
     void runSearch(query);
@@ -136,7 +186,7 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
   );
 
   const onSelectPlace = useCallback(
-    async (item: NaverLocalPlace) => {
+    async (item: PlaceSearchRow) => {
       Keyboard.dismiss();
       if (useInlineMapPreview) {
         InteractionManager.runAfterInteractions(() => animateListLayout());
@@ -145,7 +195,7 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
       setSelected(item);
       setResolving(true);
       try {
-        const resolved = await resolveNaverPlaceCoordinates(item);
+        const resolved = await resolvePlaceSearchRowCoordinates(item);
         if (useInlineMapPreview) {
           InteractionManager.runAfterInteractions(() => animateListLayout());
         }
@@ -273,11 +323,20 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
                   <Text style={GinitStyles.mutedText}>검색어를 입력하고 검색을 눌러 주세요.</Text>
                 ) : (
                   <Text style={GinitStyles.mutedText}>
-                    검색 결과가 없어요. EXPO_PUBLIC_NAVER_SEARCH_CLIENT_ID·SECRET과 지역 검색 API 사용 신청을
-                    확인하거나, 도로명·지번 주소로 다시 검색해 보세요.
+                    검색 결과가 없어요. EXPO_PUBLIC_GOOGLE_PLACES_API_KEY(또는 Maps 키)와 Places API(New) 사용
+                    설정을 확인하거나, 다른 검색어로 다시 시도해 보세요.
                   </Text>
                 )
               }
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                    <ActivityIndicator color={GinitTheme.themeMainColor} />
+                  </View>
+                ) : null
+              }
+              onEndReached={() => void loadMore()}
+              onEndReachedThreshold={0.35}
               renderItem={({ item }) => {
                 const active = selected?.id === item.id;
                 const resolved = active && item.latitude != null && item.longitude != null;
