@@ -45,3 +45,11 @@ export const MEETING_CREATE_FAB_SHADOW_PULSE_MUL_MAX = 5.18;
  * 상승 중 translateY가 이 값에서 0으로 스프링할 때 바닥 그림자를 opacity·스케일로 페이드인(자리는 처음부터 유지).
  */
 export const MEETING_CREATE_FAB_SHADOW_FADE_IN_FROM_TY = 26;
+
+/** 모임 생성 AI FAB·모임 탭 인트로 — 말풍선 등장 지연(FAB 상승과 겹침) */
+export const CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS = 1200;
+/** 말풍선 애니 시작 후 첫 타이핑까지 */
+export const CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS = 120;
+export const CREATE_MEETING_AGENT_TYPING_INTERVAL_MS = 34;
+export const CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS = 520;
+export const CREATE_MEETING_AGENT_BUBBLE_SPRING = { damping: 17, stiffness: 180 } as const;

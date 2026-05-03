@@ -5,6 +5,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -54,7 +55,6 @@ const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 const MEETING_TAB_CREATE_FAB_LIFT_PX = 8;
 /** 상승 스프링이 끝나기 전에 알약 펼침을 시작해 동그라미 정착~확장 사이 공백을 줄임 */
 const MEETING_TAB_CREATE_FAB_INTRO_START_DELAY_MS = 1300;
-
 /** 상승 완료 후 원 → 알약 펼침(스크롤 도킹 중에는 intro=1이어도 원 유지). overshootClamping으로 1 초과 진동 시 라벨 opacity·레이아웃 미세 깜빡임 방지 */
 const FAB_INTRO_EXPAND_SPRING = { damping: 17, stiffness: 140, overshootClamping: true } as const;
 
@@ -254,6 +254,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     fabFloorP.value = 1;
     fabRiseTy.value = withSpring(0, MEETING_CREATE_FAB_RISE_SPRING);
     fabRiseScale.value = withSpring(1, MEETING_CREATE_FAB_RISE_SPRING);
+    cancelAnimation(fabIntroExpand);
     fabIntroExpand.value = withDelay(
       MEETING_TAB_CREATE_FAB_INTRO_START_DELAY_MS,
       withSpring(1, FAB_INTRO_EXPAND_SPRING),

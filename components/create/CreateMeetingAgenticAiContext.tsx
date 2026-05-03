@@ -3,9 +3,12 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+
+import type { AgentCoachPhase, AgentHydrationStatus, AgentWelcomeSnapshot } from '@/src/lib/agentic-guide/types';
 
 /** 아침·점심·저녁 등 시간대(실제 날씨·스케줄 주입 시 확장) */
 export type AgenticTimeSlot = 'morning' | 'lunch' | 'afternoon' | 'evening' | 'night';
@@ -41,6 +44,21 @@ export type CreateMeetingAgenticAiContextValue = {
   data: CreateMeetingAgenticAiInjectedData;
   /** 부분 갱신 — 실제 API 연동 시 사용 */
   setInjectedData: (patch: Partial<CreateMeetingAgenticAiInjectedData>) => void;
+  /** `intelligentSuggestion` 없이 mzLine만 덮을 때(생각 중·패턴 문구) */
+  setIntelligentSuggestionDirect: (text: string | null) => void;
+  hydrationStatus: AgentHydrationStatus;
+  setHydrationStatus: (s: AgentHydrationStatus) => void;
+  coachPhase: AgentCoachPhase | null;
+  setCoachPhase: (p: AgentCoachPhase | null) => void;
+  agentSnapshot: AgentWelcomeSnapshot | null;
+  setAgentSnapshot: (s: AgentWelcomeSnapshot | null) => void;
+  showAcceptButton: boolean;
+  setShowAcceptButton: (v: boolean) => void;
+  registerAcceptSuggestion: (fn: (() => void) | null) => void;
+  runAcceptSuggestion: () => void;
+  secondaryActionLabel: string | null;
+  registerSecondaryAction: (fn: (() => void) | null, label: string | null) => void;
+  runSecondaryAction: () => void;
   /** 현재 데이터로 생성된 MZ 톤 한 줄 메시지 */
   mzLine: string;
 };
@@ -51,7 +69,7 @@ const defaultInjected: CreateMeetingAgenticAiInjectedData = {
   temperatureC: 22,
   locationHint: '지하철역 근처',
   displayName: null,
-  intelligentSuggestion: DEFAULT_AGENT_INTELLIGENT_SUGGESTION,
+  intelligentSuggestion: null,
 };
 
 const CreateMeetingAgenticAiContext = createContext<CreateMeetingAgenticAiContextValue | null>(null);
@@ -167,23 +185,88 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
     };
   });
 
+  const [overrideMzLine, setOverrideMzLine] = useState<string | null>(null);
+  const [hydrationStatus, setHydrationStatus] = useState<AgentHydrationStatus>('loading');
+  const [coachPhase, setCoachPhase] = useState<AgentCoachPhase | null>(null);
+  const [agentSnapshot, setAgentSnapshot] = useState<AgentWelcomeSnapshot | null>(null);
+  const [showAcceptButton, setShowAcceptButton] = useState(false);
+  const acceptRef = useRef<(() => void) | null>(null);
+  const secondaryRef = useRef<(() => void) | null>(null);
+  const [secondaryActionLabel, setSecondaryActionLabel] = useState<string | null>(null);
+
   const setInjectedData = useCallback((patch: Partial<CreateMeetingAgenticAiInjectedData>) => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'intelligentSuggestion')) {
+      setOverrideMzLine(null);
+    }
     setData((prev) => ({ ...prev, ...patch }));
   }, []);
 
+  const setIntelligentSuggestionDirect = useCallback((text: string | null) => {
+    setOverrideMzLine(text?.trim() ? text : null);
+    setData((prev) => ({ ...prev, intelligentSuggestion: null }));
+  }, []);
+
+  const registerAcceptSuggestion = useCallback((fn: (() => void) | null) => {
+    acceptRef.current = fn;
+  }, []);
+
+  const runAcceptSuggestion = useCallback(() => {
+    acceptRef.current?.();
+  }, []);
+
+  const registerSecondaryAction = useCallback((fn: (() => void) | null, label: string | null) => {
+    secondaryRef.current = fn;
+    setSecondaryActionLabel(label?.trim() ? label.trim() : null);
+  }, []);
+
+  const runSecondaryAction = useCallback(() => {
+    secondaryRef.current?.();
+  }, []);
+
   const mzLine = useMemo(() => {
+    if (hydrationStatus === 'loading') return '생각 중입니다…';
+    const ov = overrideMzLine?.trim();
+    if (ov) return ov;
     const o = data.intelligentSuggestion?.trim();
     if (o) return o;
     return buildMzAgentMessage(data);
-  }, [data]);
+  }, [data, hydrationStatus, overrideMzLine]);
 
   const value = useMemo<CreateMeetingAgenticAiContextValue>(
     () => ({
       data,
       setInjectedData,
+      setIntelligentSuggestionDirect,
+      hydrationStatus,
+      setHydrationStatus,
+      coachPhase,
+      setCoachPhase,
+      agentSnapshot,
+      setAgentSnapshot,
+      showAcceptButton,
+      setShowAcceptButton,
+      registerAcceptSuggestion,
+      runAcceptSuggestion,
+      secondaryActionLabel,
+      registerSecondaryAction,
+      runSecondaryAction,
       mzLine,
     }),
-    [data, setInjectedData, mzLine],
+    [
+      data,
+      setInjectedData,
+      setIntelligentSuggestionDirect,
+      hydrationStatus,
+      coachPhase,
+      agentSnapshot,
+      showAcceptButton,
+      registerAcceptSuggestion,
+      runAcceptSuggestion,
+      secondaryActionLabel,
+      registerSecondaryAction,
+      runSecondaryAction,
+      mzLine,
+    ],
   );
 
   return (

@@ -19,6 +19,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgenticAiContext';
 import {
+  CREATE_MEETING_AGENT_BUBBLE_SPRING as BUBBLE_SPRING,
+  CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS,
+  CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS,
+  CREATE_MEETING_AGENT_TYPING_INTERVAL_MS,
+  CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS,
   MEETING_CREATE_FAB_BTN_SIZE as BTN_SIZE,
   MEETING_CREATE_FAB_STACK_H as FAB_STACK_H,
   MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT as FLOOR_SHADOW_SLOT,
@@ -46,11 +51,6 @@ import {
 } from '@/src/lib/create-meeting-agent-bubble-dismiss';
 
 const FAB_MARGIN = 26;
-const BUBBLE_SPRING = { damping: 17, stiffness: 180 } as const;
-/** 상승 완료를 기다리지 않고 말풍선 펼침 시작(FAB 등장과 겹침) */
-const CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS = 1200;
-/** 말풍선 애니 시작 후 첫 타이핑까지 */
-const CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS = 120;
 
 function AiCircleButton({ pressed }: { pressed?: boolean }) {
   return (
@@ -71,7 +71,13 @@ function AiCircleButton({ pressed }: { pressed?: boolean }) {
  */
 export function CreateMeetingAgenticAiFab() {
   const insets = useSafeAreaInsets();
-  const { mzLine } = useCreateMeetingAgenticAi();
+  const {
+    mzLine,
+    showAcceptButton,
+    runAcceptSuggestion,
+    secondaryActionLabel,
+    runSecondaryAction,
+  } = useCreateMeetingAgenticAi();
 
   const geo = useMemo(
     () => ({
@@ -98,6 +104,7 @@ export function CreateMeetingAgenticAiFab() {
 
   const fullText = mzLine;
   const graphemes = useMemo(() => Array.from(fullText), [fullText]);
+  const isThinkingLine = fullText.trim() === '생각 중입니다…';
 
   const clearTypingTimers = useCallback(() => {
     if (typingTimerRef.current != null) {
@@ -133,7 +140,7 @@ export function CreateMeetingAgenticAiFab() {
         }
         return next;
       });
-    }, 34);
+    }, CREATE_MEETING_AGENT_TYPING_INTERVAL_MS);
   }, [graphemes.length]);
 
   const onRiseSettled = useCallback(() => {
@@ -185,14 +192,22 @@ export function CreateMeetingAgenticAiFab() {
       CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS,
       withSpring(1, BUBBLE_SPRING),
     );
-    const typingKickMs =
-      CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS;
-    typingKickoffRef.current = setTimeout(() => {
-      startTypingLoop();
-      caretTimerRef.current = setInterval(() => {
-        setShowCaret((c) => !c);
-      }, 520);
-    }, typingKickMs);
+
+    if (isThinkingLine) {
+      typingKickoffRef.current = setTimeout(() => {
+        setTypedLen(graphemes.length);
+        setShowCaret(false);
+      }, CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS + 40);
+    } else {
+      const typingKickMs =
+        CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS;
+      typingKickoffRef.current = setTimeout(() => {
+        startTypingLoop();
+        caretTimerRef.current = setInterval(() => {
+          setShowCaret((c) => !c);
+        }, CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS);
+      }, typingKickMs);
+    }
 
     btnTy.value = withSpring(0, RISE_SPRING, (finished) => {
       if (finished) {
@@ -205,7 +220,14 @@ export function CreateMeetingAgenticAiFab() {
     return () => {
       clearTypingTimers();
     };
-  }, [fullText, clearTypingTimers, graphemes.length, invokePostRiseFromUi, startTypingLoop]); // eslint-disable-line react-hooks/exhaustive-deps -- 문구 변경 시에만 시퀀스 재생
+  }, [
+    fullText,
+    clearTypingTimers,
+    graphemes.length,
+    invokePostRiseFromUi,
+    isThinkingLine,
+    startTypingLoop,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps -- 문구 변경 시에만 시퀀스 재생
 
   const typingDone = typedLen >= graphemes.length;
   const displayText = graphemes.slice(0, typedLen).join('');
@@ -282,8 +304,8 @@ export function CreateMeetingAgenticAiFab() {
           },
         ]}
         pointerEvents="box-none">
-        <Animated.View style={[styles.bubbleWrap, bubbleStyle]} pointerEvents="none">
-          <View style={styles.bubbleClip}>
+        <Animated.View style={[styles.bubbleWrap, bubbleStyle]} pointerEvents="box-none">
+          <View style={styles.bubbleClip} pointerEvents="box-none">
             {staticGlass ? (
               <View style={[StyleSheet.absoluteFillObject, styles.bubbleStaticGlass]} />
             ) : (
@@ -294,12 +316,34 @@ export function CreateMeetingAgenticAiFab() {
                 style={StyleSheet.absoluteFillObject}
               />
             )}
-            <Text style={styles.bubbleText}>
+            <Text style={styles.bubbleText} pointerEvents="none">
               {displayText}
               {!typingDone ? (
                 <Text style={[styles.bubbleCaret, { opacity: showCaret ? 1 : 0.2 }]}>▍</Text>
               ) : null}
             </Text>
+            {typingDone && (showAcceptButton || secondaryActionLabel) ? (
+              <View style={styles.bubbleActions} pointerEvents="box-none">
+                {showAcceptButton ? (
+                  <Pressable
+                    onPress={() => runAcceptSuggestion()}
+                    style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="수락">
+                    <Text style={styles.bubbleActionLabel}>수락</Text>
+                  </Pressable>
+                ) : null}
+                {secondaryActionLabel ? (
+                  <Pressable
+                    onPress={() => runSecondaryAction()}
+                    style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={secondaryActionLabel}>
+                    <Text style={styles.bubbleActionLabel}>{secondaryActionLabel}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         </Animated.View>
 
@@ -399,6 +443,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 19,
+  },
+  bubbleActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+    justifyContent: 'flex-end',
+  },
+  bubbleActionBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(49, 27, 146, 0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+  },
+  bubbleActionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: GinitTheme.colors.deepPurple,
   },
   pressFill: {
     flex: 1,

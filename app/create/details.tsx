@@ -48,8 +48,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
+import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
 import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
 import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
+import { CreateMeetingWizardAgentBridge } from '@/components/create/CreateMeetingWizardAgentBridge';
 import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
 import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
 import { GameKindPreference } from '@/components/create/GameKindPreference';
@@ -82,6 +84,7 @@ import {
   resolveSpecialtyKindForCategory,
   specialtyStepBadge,
 } from '@/src/lib/category-specialty';
+import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -611,6 +614,8 @@ export type VoteCandidatesFormHandle = {
   focusPlaceQueryInput: () => void;
   /** 첫 장소 행에 검색어를 넣고 장소 검색 화면을 열어 자동 검색·포커스 */
   openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => void;
+  /** 인라인 장소 검색어 주입 후 debounce 검색(에이전트) */
+  setPlaceQueryFromAgent: (q: string) => void;
   /** 장소 검색 대기 행·모달 등 파생 UI 정리 */
   resetPlaceSearchSession: () => void;
   /** 장소 후보가 비어 있으면 등록 가능한 플레이스홀더 1행 삽입(일정 확정 후 장소 단계 생략 시) */
@@ -1265,6 +1270,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             });
           });
         });
+      },
+      setPlaceQueryFromAgent: (q: string) => {
+        const qt = q.trim();
+        if (!qt) return;
+        placeQueryUserTouchedRef.current = true;
+        setPlaceQuery(qt);
       },
       resetPlaceSearchSession: () => {
         pendingEphemeralPlaceRowIdRef.current = null;
@@ -3396,6 +3407,27 @@ export default function CreateDetailsScreen() {
     specialtyKind,
   ]);
 
+  const applyWizardSuggestion = useCallback(
+    (sugg: WizardSuggestion) => {
+      layoutAnimateEaseInEaseOut();
+      setSelectedCategoryId(sugg.categoryId);
+      const cat = categories.find((c) => c.id === sugg.categoryId) ?? null;
+      const sk = resolveSpecialtyKindForCategory(cat);
+      if (sk === 'food' && sugg.menuPreferenceLabel) {
+        setMenuPreferences([sugg.menuPreferenceLabel]);
+      }
+      setTimeout(() => {
+        onStep1Next();
+        if (sugg.canAutoCompleteThroughStep3 && sk === 'food' && sugg.menuPreferenceLabel) {
+          setTimeout(() => {
+            onStep2SpecialtyNext();
+          }, 80);
+        }
+      }, 80);
+    },
+    [categories, onStep1Next, onStep2SpecialtyNext],
+  );
+
   const onStep3BasicNext = useCallback(() => {
     setWizardError(null);
     if (!title.trim()) {
@@ -3696,6 +3728,18 @@ export default function CreateDetailsScreen() {
   return (
     <View style={styles.screenRoot}>
       <CreateMeetingAgenticAiProvider>
+        <CreateMeetingAgenticAiBootstrap />
+        <CreateMeetingWizardAgentBridge
+          currentStep={currentStep}
+          scheduleStep={scheduleStep}
+          placesStep={placesStep}
+          detailStep={detailStep}
+          seedDate={seedDate}
+          seedTime={seedTime}
+          categories={categories}
+          applyWizardSuggestion={applyWizardSuggestion}
+          placesFormRef={placesFormRef}
+        />
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
           <View style={styles.topBarRow}>
             <Pressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
