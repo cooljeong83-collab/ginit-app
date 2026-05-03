@@ -18,9 +18,9 @@ export function buildStepCoachMessage(input: StepCoachInput): string {
       return `${name ? `${name}님, ` : ''}모임 이름과 참가 인원을 선택해 주세요✨ 아래 확인을 누르시면 일정 단계로 이동하실 수 있어요 🙌`;
     case 'details_step4_schedule':
       if (cold) {
-        return `하나 이상의 일정 후보를 ⌨️입력해 선택하시거나,\n🎤말씀하시거나 📅달력에서 선택해 등록해 보세요.`;
+        return `하나 이상의 일정 후보를 입력해 선택하시거나,\n🎤말씀하시거나 📅달력에서 선택해 등록해 보세요.`;
       }
-      return `하나 이상의 일정 후보를 ⌨️입력해 선택하시거나,\n🎤말씀하시거나 📅달력에서 선택해 바로 등록해 보세요.`;
+      return `하나 이상의 일정 후보를 입력해 선택하시거나,\n🎤말씀하시거나 📅달력에서 선택해 바로 등록해 보세요.`;
     case 'details_step5_place_suggest': {
       const q = frequentPlace?.displayQuery?.trim();
       const habitPlace = meetingHabits?.topPlaces?.[0]?.displayQuery?.trim();

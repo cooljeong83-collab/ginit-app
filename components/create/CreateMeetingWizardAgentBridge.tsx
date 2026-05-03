@@ -3,6 +3,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgenticAiContext';
 import { buildStep1FrequentPatternOfferMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
 import { buildStepCoachMessage } from '@/src/lib/agentic-guide/build-step-coach-message';
+import { buildStep2SpecialtyCoachMessage } from '@/src/lib/agentic-guide/build-step2-specialty-coach-message';
 import { buildWizardSuggestion } from '@/src/lib/agentic-guide/build-wizard-suggestion';
 import { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
 import { summarizeFrequentPlaceNames } from '@/src/lib/agentic-guide/summarize-frequent-place-names';
@@ -17,6 +18,8 @@ export type CreateMeetingWizardAgentBridgeProps = {
   seedDate: string;
   seedTime: string;
   categories: Category[];
+  /** Step 2 안내 — `major_code`·특화 카드와 맞추기 위해 1단계에서 선택된 카테고리 id */
+  selectedCategoryId: string | null;
   applyWizardSuggestion: (s: WizardSuggestion) => void;
   placesFormRef: RefObject<null | { setPlaceQueryFromAgent?: (q: string) => void }>;
 };
@@ -32,6 +35,7 @@ export function CreateMeetingWizardAgentBridge({
   seedDate,
   seedTime,
   categories,
+  selectedCategoryId,
   applyWizardSuggestion,
   placesFormRef,
 }: CreateMeetingWizardAgentBridgeProps) {
@@ -79,10 +83,11 @@ export function CreateMeetingWizardAgentBridge({
 
     if (currentStep === 2) {
       setCoachPhase('details_pattern_suggest');
+      const selectedCat = selectedCategoryId
+        ? (categories.find((c) => c.id === selectedCategoryId) ?? null)
+        : null;
       setIntelligentSuggestionDirect(
-        isColdStartForAgentSnapshot(agentSnapshot)
-          ? '이 단계에서는 옵션 하나만 선택하시면 돼요. \n선택 후 아래 확인을 누르시면 다음 단계로 이동해요.'
-          : '옵션만 골라 주시면 바로 다음 단계로 넘어가실 수 있어요 ✨',
+        buildStep2SpecialtyCoachMessage(selectedCat, isColdStartForAgentSnapshot(agentSnapshot)),
       );
       setShowAcceptButton(false);
       registerAcceptSuggestion(null);
@@ -167,6 +172,7 @@ export function CreateMeetingWizardAgentBridge({
     applyWizardSuggestion,
     categories,
     currentStep,
+    selectedCategoryId,
     detailStep,
     hydrationStatus,
     placesFormRef,

@@ -6,11 +6,13 @@ import { GinitTheme } from '@/constants/ginit-theme';
 /** 자동 적용 한 단계의 리플·눌림이 인지될 만큼 유지(ms) jjg */
 export const AGENT_APPLY_TAP_HOLD_MS = 560;
 /** 단계 사이 손가락을 옮기는 듯한 짧은 간격(ms) */
-export const AGENT_APPLY_STEP_GAP_MS = 500;
+export const AGENT_APPLY_STEP_GAP_MS = 300;
 /** 2단계 레이아웃 안정화 후 메뉴 칩 연출까지 여유(ms) */
 export const AGENT_APPLY_POST_LAYOUT_MS = 680;
 /** 이미 맞춰진 공개/비공개만 짧게 재강조(ms) */
 export const AGENT_APPLY_QUICK_ACK_MS = 340;
+/** 자동 생성 모임 이름 — 코드포인트마다 `value` 갱신 간격(ms), 사람이 타이핑하는 듯한 속도 */
+export const AGENT_APPLY_TITLE_MS_PER_CODEPOINT = 42;
 
 const RIPPLE_EXPAND_MS = 420;
 

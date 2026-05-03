@@ -1,8 +1,13 @@
 import type { Category } from '@/src/lib/categories';
 import { categoryNeedsSpecialty, resolveSpecialtyKindForCategory } from '@/src/lib/category-specialty';
 
+import { computeHistoryParticipantAveragesForSelectedMajor } from '@/src/lib/agentic-guide/compute-history-participant-bands';
+import { pickAutoWizardScheduleFromSnapshot } from '@/src/lib/agentic-guide/pick-auto-wizard-schedule';
+import { pickWizardAutoMeetingTitleFromAiSuggestions } from '@/src/lib/agentic-guide/pick-wizard-auto-meeting-title-ai';
 import type { AgentWelcomeSnapshot, WizardSuggestion } from '@/src/lib/agentic-guide/types';
 import { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
+import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
+import { MEETING_PARTICIPANT_MIN } from '@/src/lib/meetings';
 import { summarizeRecentMeetings } from '@/src/lib/agentic-guide/summarize-recent-meetings';
 
 function pickMenuLabelForFood(topLabel: string | null): string {
@@ -66,6 +71,23 @@ export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSna
   const topP = s.meetingHabits?.topPlaces?.[0];
   const placeSearchHint =
     topP && (topP.score ?? 0) >= 2 && topP.searchQuery.trim().length > 0 ? topP.searchQuery.trim() : null;
+  const rules = resolveMeetingCreateRules(cat.majorCode ?? null);
+  const categoryIdToMajor = new Map<string, string | null | undefined>(
+    categories.map((c) => [c.id.trim(), c.majorCode ?? null]),
+  );
+  const bands = computeHistoryParticipantAveragesForSelectedMajor(
+    s.recentMeetings,
+    categoryIdToMajor,
+    cat.majorCode ?? null,
+  );
+  const minF = Math.max(MEETING_PARTICIPANT_MIN, rules.minParticipantsFloor);
+  const defaultMax = Math.min(4, rules.capacityMax);
+  const autoBasicInfo = {
+    title: pickWizardAutoMeetingTitleFromAiSuggestions(s, cat, menu),
+    avgMinParticipants: bands?.avgMin ?? minF,
+    avgMaxParticipants: bands?.avgMax ?? defaultMax,
+  };
+  const autoSchedule = pickAutoWizardScheduleFromSnapshot(s);
   return {
     categoryId: cat.id,
     categoryLabel: cat.label,
@@ -73,6 +95,8 @@ export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSna
     canAutoCompleteThroughStep3: canAuto,
     placeSearchHint: placeSearchHint,
     suggestedIsPublic: null,
+    autoBasicInfo,
+    autoSchedule,
   };
 }
 

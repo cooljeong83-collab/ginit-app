@@ -49,6 +49,14 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
 import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
+import {
+  AGENT_APPLY_POST_LAYOUT_MS,
+  AGENT_APPLY_QUICK_ACK_MS,
+  AGENT_APPLY_STEP_GAP_MS,
+  AGENT_APPLY_TAP_HOLD_MS,
+  AGENT_APPLY_TITLE_MS_PER_CODEPOINT,
+  AgentApplyRippleLayer,
+} from '@/components/create/agent-apply-ripple';
 import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
 import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
 import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
@@ -61,13 +69,6 @@ import {
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
-import {
-  AgentApplyRippleLayer,
-  AGENT_APPLY_POST_LAYOUT_MS,
-  AGENT_APPLY_QUICK_ACK_MS,
-  AGENT_APPLY_STEP_GAP_MS,
-  AGENT_APPLY_TAP_HOLD_MS,
-} from '@/components/create/agent-apply-ripple';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
@@ -119,7 +120,7 @@ import {
   searchPlacesText,
   type PlaceSearchRow,
 } from '@/src/lib/google-places-text-search';
-import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
+import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
@@ -643,6 +644,15 @@ export type VoteCandidatesFormHandle = {
   capturePlaceCandidatesOnly: () => VoteCandidatesBuildResult;
   /** 스냅샷을 폼 내부 상태에 반영 — 리마운트 없이 buildPayload와 일치시킴 */
   applyCapturedPayload: (p: VoteCandidatesPayload) => void;
+  /**
+   * FAB 자동 적용: 달력 월 맞춤 → 날짜 셀 강조 →(iOS·웹) 시간 피커 스피너 값을 단계적으로 갱신한 뒤 후보 확정.
+   * Android는 네이티브 시간 피커를 프로그램으로 돌릴 수 없어 동일 후보를 강조 후 바로 반영합니다.
+   */
+  playAgentSchedulePickAnimation: (opts: {
+    ymd: string;
+    hm: string;
+    isAlive: () => boolean;
+  }) => Promise<void>;
 };
 
 export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandidatesFormProps>(function VoteCandidatesForm(
@@ -767,6 +777,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   /** 일정 달력 헤더 년·월 탭 → 네이티브 날짜 피커(년·월 반영 후 해당 월 1일로 정규화) */
   const [scheduleCalendarYmPick, setScheduleCalendarYmPick] = useState<{ draft: Date } | null>(null);
   const [timePick, setTimePick] = useState<{ ymd: string; draft: Date; source?: 'calendar' | 'ai' } | null>(null);
+  /** FAB 자동 일정 — 탭한 날처럼 보이도록 달력 셀만 잠시 강조 */
+  const [agentScheduleDemoHighlightYmd, setAgentScheduleDemoHighlightYmd] = useState<string | null>(null);
   const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
   const [deadlineTick, setDeadlineTick] = useState(0);
   const dateScrollRef = useRef<ScrollView>(null);
@@ -1208,6 +1220,92 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     void onPressAiPreviewParsed();
   }, [nlpScheduleInput, nlpParsed, weekendPreviewSlots.length, onPressAiPreviewParsed]);
 
+  const playAgentSchedulePickAnimation = useCallback(
+    async (opts: { ymd: string; hm: string; isAlive: () => boolean }) => {
+      const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+      const targetYmd = (opts.ymd ?? '').trim();
+      const targetHm = clampHm((opts.hm ?? '').trim());
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(targetYmd)) {
+        setAgentScheduleDemoHighlightYmd(null);
+        return;
+      }
+
+      setAgentScheduleDemoHighlightYmd(null);
+      setTimePick(null);
+      setCalendarMonth(monthStartYmd(targetYmd));
+      await sleepMs(380);
+      if (!opts.isAlive()) return;
+
+      setAgentScheduleDemoHighlightYmd(targetYmd);
+      await sleepMs(480);
+      if (!opts.isAlive()) {
+        setAgentScheduleDemoHighlightYmd(null);
+        return;
+      }
+
+      const runWheelDemo = Platform.OS === 'ios' || Platform.OS === 'web';
+      const dayBase = dateFromYmd(targetYmd) ?? new Date();
+
+      const toMin = (hm: string) => {
+        const x = clampHm(hm);
+        const m = /^(\d{2}):(\d{2})$/.exec(x);
+        if (!m) return 19 * 60;
+        return Number(m[1]) * 60 + Number(m[2]);
+      };
+      const fromMin = (total: number) => {
+        const u = ((Math.round(total) % (24 * 60)) + 24 * 60) % (24 * 60);
+        return `${pad2(Math.floor(u / 60))}:${pad2(u % 60)}`;
+      };
+
+      if (runWheelDemo) {
+        const startHm = toMin(targetHm) >= 18 * 60 ? '15:00' : '10:00';
+        openTimePickerForDate(targetYmd, startHm, 'calendar');
+        await sleepMs(300);
+        if (!opts.isAlive()) {
+          setTimePick(null);
+          setAgentScheduleDemoHighlightYmd(null);
+          return;
+        }
+        const steps = 8;
+        for (let s = 0; s <= steps; s += 1) {
+          if (!opts.isAlive()) {
+            setTimePick(null);
+            setAgentScheduleDemoHighlightYmd(null);
+            return;
+          }
+          const a = s / steps;
+          const midM = Math.round(toMin(startHm) + (toMin(targetHm) - toMin(startHm)) * a);
+          const hmStr = fromMin(midM);
+          const mHm = /^(\d{2}):(\d{2})$/.exec(hmStr);
+          const hh = mHm ? Number(mHm[1]) : 19;
+          const mm = mHm ? Number(mHm[2]) : 0;
+          const draft = new Date(dayBase.getFullYear(), dayBase.getMonth(), dayBase.getDate(), hh, mm, 0, 0);
+          setTimePick((prev) =>
+            prev ? { ...prev, draft } : { ymd: targetYmd, draft, source: 'calendar' },
+          );
+          await sleepMs(s === 0 ? 160 : 80);
+        }
+        await sleepMs(240);
+        if (!opts.isAlive()) {
+          setTimePick(null);
+          setAgentScheduleDemoHighlightYmd(null);
+          return;
+        }
+        setTimePick(null);
+        await commitPointCandidate(targetYmd, targetHm);
+      } else {
+        await sleepMs(200);
+        if (!opts.isAlive()) {
+          setAgentScheduleDemoHighlightYmd(null);
+          return;
+        }
+        await commitPointCandidate(targetYmd, targetHm);
+      }
+      setAgentScheduleDemoHighlightYmd(null);
+    },
+    [commitPointCandidate, openTimePickerForDate],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -1350,8 +1448,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         setPlaceCandidates(next.placeCandidates);
         setDateCandidates(next.dateCandidates);
       },
+      playAgentSchedulePickAnimation,
     }),
-    [router, seedQ, seedDate, seedTime, sessionUserId],
+    [router, seedQ, seedDate, seedTime, sessionUserId, playAgentSchedulePickAnimation],
   );
 
   useFocusEffect(
@@ -1834,6 +1933,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                           !weekHasAnyTimes && styles.calendarCellRowEmpty,
                           !c.inMonth && styles.calendarCellOut,
                           has && styles.calendarCellHas,
+                          agentScheduleDemoHighlightYmd === c.ymd && styles.calendarCellAgentDemo,
                           cellDisabled && styles.calendarCellDisabled,
                           pressed && !cellDisabled && styles.calendarCellPressed,
                         ]}
@@ -1877,7 +1977,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </View>
       );
     },
-    [bare, dateCandidates, openTimePickerForDate, wizardSegment],
+    [agentScheduleDemoHighlightYmd, bare, dateCandidates, openTimePickerForDate, wizardSegment],
   );
 
   const scheduleSection = (
@@ -2739,10 +2839,54 @@ type AgentWizardApplyCue =
   | { kind: 'public'; side: 'public' | 'private' }
   | { kind: 'confirm1' }
   | { kind: 'menu'; label: string }
-  | { kind: 'confirm2' };
+  | { kind: 'confirm2' }
+  | { kind: 'confirmSchedule' };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** FAB 자동 적용 시 모임 이름 필드에 한 글자씩 채워 넣는 연출(이모지 등은 코드포인트 단위). */
+async function typewriterAutoMeetingTitle(opts: {
+  fullTitle: string;
+  setTitle: (next: string) => void;
+  isAlive: () => boolean;
+  msPerCodePoint: number;
+}): Promise<void> {
+  const full = opts.fullTitle.trim();
+  if (!full) {
+    if (opts.isAlive()) opts.setTitle('');
+    return;
+  }
+  const chars = [...full];
+  if (!opts.isAlive()) return;
+  opts.setTitle('');
+  for (let i = 0; i < chars.length; i += 1) {
+    if (!opts.isAlive()) return;
+    opts.setTitle(chars.slice(0, i + 1).join(''));
+    await sleep(opts.msPerCodePoint);
+  }
+}
+
+/** 자동 위저드 — 참여 이력 평균 인원을 `meeting_create` 정책·공개 여부에 맞게 보정 */
+function clampAutoWizardParticipants(
+  isPublic: boolean,
+  avgMin: number,
+  avgMax: number,
+  rules: ResolvedMeetingCreateRules,
+): { min: number; max: number } {
+  const capMax = rules.capacityMax;
+  const minFloor = Math.max(PARTICIPANT_COUNT_MIN, rules.minParticipantsFloor);
+  let nMin = Math.round(avgMin);
+  let nMax = Math.round(avgMax);
+  if (!isPublic) {
+    const mid = Math.round((nMin + nMax) / 2);
+    const n = Math.min(capMax, Math.max(minFloor, mid));
+    return { min: n, max: n };
+  }
+  nMin = Math.min(capMax, Math.max(minFloor, nMin));
+  nMax = Math.min(capMax, Math.max(nMin, nMax));
+  return { min: nMin, max: nMax };
 }
 
 function waitAgentStep1FabUnlocked(): Promise<void> {
@@ -2797,6 +2941,8 @@ export default function CreateDetailsScreen() {
   const reduceHeavyEffectsUI = Platform.OS === 'android';
   const scheduleFormRef = useRef<VoteCandidatesFormHandle>(null);
   const placesFormRef = useRef<VoteCandidatesFormHandle>(null);
+  /** `applyWizardSuggestion`가 `handleConfirmSchedule`보다 위에 있어 ref로 최신 콜백을 참조 */
+  const handleConfirmScheduleRef = useRef<() => Promise<void>>(async () => {});
   // KeyboardAwareScrollView로 래핑되므로 ref는 any로 두고 scrollTo만 사용합니다.
   const mainScrollRef = useRef<any>(null);
   /** `measureInWindow()` 가능한 메인 스크롤 호스트(View) */
@@ -2807,6 +2953,8 @@ export default function CreateDetailsScreen() {
   const placesStepHeaderAnchorRef = useRef<View>(null);
   /** Step 3 기본 정보: 모임 이름 입력 포커스 */
   const meetingTitleInputRef = useRef<TextInput>(null);
+  /** `applyWizardSuggestion` 비동기 런 id — 새 자동 적용 시 이전 타이핑 연출 중단 */
+  const agentWizardApplyRunIdRef = useRef(0);
   /** 상세 조건 단계: 소개글 입력 포커스 */
   const detailDescriptionInputRef = useRef<TextInput>(null);
   const meetingTitleDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(meetingTitleInputRef), []);
@@ -3651,6 +3799,7 @@ export default function CreateDetailsScreen() {
 
   const onStep1NextRef = useRef(onStep1Next);
   const onStep2SpecialtyNextRef = useRef(onStep2SpecialtyNext);
+  const onStep3BasicNextRef = useRef(() => {});
   onStep1NextRef.current = onStep1Next;
   onStep2SpecialtyNextRef.current = onStep2SpecialtyNext;
 
@@ -3660,6 +3809,8 @@ export default function CreateDetailsScreen() {
       layoutAnimateMeetingCreateWizard();
 
       void (async () => {
+        const runId = ++agentWizardApplyRunIdRef.current;
+        const isApplyRunAlive = () => runId === agentWizardApplyRunIdRef.current;
         const tapHoldMs = AGENT_APPLY_TAP_HOLD_MS;
         const stepGapMs = AGENT_APPLY_STEP_GAP_MS;
 
@@ -3722,6 +3873,9 @@ export default function CreateDetailsScreen() {
           suppressStepLayoutAnimateFromCategoryRef.current = true;
           onStep1NextRef.current();
 
+          const needsSpecAfter = catForSk ? categoryNeedsSpecialty(catForSk) : false;
+          let reachedBasicStep = false;
+
           if (sugg.canAutoCompleteThroughStep3 && sk === 'food' && sugg.menuPreferenceLabel) {
             await new Promise<void>((r) => {
               InteractionManager.runAfterInteractions(() => r());
@@ -3737,7 +3891,67 @@ export default function CreateDetailsScreen() {
             setAgentWizardApplyCue(null);
             await sleep(stepGapMs);
             onStep2SpecialtyNextRef.current();
+            reachedBasicStep = true;
+          } else if (!needsSpecAfter) {
+            reachedBasicStep = true;
           }
+
+          if (!reachedBasicStep) {
+            return;
+          }
+
+          await new Promise<void>((r) => {
+            InteractionManager.runAfterInteractions(() => r());
+          });
+          await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+
+          const rules = resolveMeetingCreateRules(catForSk?.majorCode ?? null);
+          const pub = isPublicMeetingRef.current;
+          const { min, max } = clampAutoWizardParticipants(
+            pub,
+            sugg.autoBasicInfo.avgMinParticipants,
+            sugg.autoBasicInfo.avgMaxParticipants,
+            rules,
+          );
+          setMinParticipants(min);
+          setMaxParticipants(max);
+          await typewriterAutoMeetingTitle({
+            fullTitle: sugg.autoBasicInfo.title,
+            setTitle,
+            isAlive: isApplyRunAlive,
+            msPerCodePoint: AGENT_APPLY_TITLE_MS_PER_CODEPOINT,
+          });
+          if (!isApplyRunAlive()) return;
+          await sleep(64);
+          onStep3BasicNextRef.current();
+          if (!isApplyRunAlive()) return;
+
+          await new Promise<void>((r) => {
+            InteractionManager.runAfterInteractions(() => r());
+          });
+          await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+
+          let formReady: VoteCandidatesFormHandle | null = null;
+          for (let i = 0; i < 48; i += 1) {
+            formReady = scheduleFormRef.current;
+            if (formReady?.playAgentSchedulePickAnimation) break;
+            await sleep(55);
+            if (!isApplyRunAlive()) return;
+          }
+          if (!formReady?.playAgentSchedulePickAnimation || !isApplyRunAlive()) return;
+
+          await formReady.playAgentSchedulePickAnimation({
+            ymd: sugg.autoSchedule.ymd,
+            hm: sugg.autoSchedule.hm,
+            isAlive: isApplyRunAlive,
+          });
+          if (!isApplyRunAlive()) return;
+          await sleep(stepGapMs);
+          setAgentWizardApplyCue({ kind: 'confirmSchedule' });
+          await sleep(tapHoldMs);
+          setAgentWizardApplyCue(null);
+          await sleep(stepGapMs);
+          await handleConfirmScheduleRef.current();
         } catch {
           setAgentWizardApplyCue(null);
         } finally {
@@ -3796,6 +4010,8 @@ export default function CreateDetailsScreen() {
     title,
   ]);
 
+  onStep3BasicNextRef.current = onStep3BasicNext;
+
   const handleConfirmSchedule = useCallback(async () => {
     setWizardError(null);
     const r = await scheduleFormRef.current?.validateScheduleStep();
@@ -3817,6 +4033,10 @@ export default function CreateDetailsScreen() {
     }
     setCurrentStep(placesStep);
   }, [placesStep]);
+
+  useEffect(() => {
+    handleConfirmScheduleRef.current = handleConfirmSchedule;
+  }, [handleConfirmSchedule]);
 
   const onPlacesStepConfirm = useCallback(() => {
     setWizardError(null);
@@ -4066,6 +4286,7 @@ export default function CreateDetailsScreen() {
           seedDate={seedDate}
           seedTime={seedTime}
           categories={categories}
+          selectedCategoryId={selectedCategoryId}
           applyWizardSuggestion={applyWizardSuggestion}
           placesFormRef={placesFormRef}
         />
@@ -4147,7 +4368,6 @@ export default function CreateDetailsScreen() {
               <View collapsable={false}>
               <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
                 <Text style={styles.wizardStepBadge}>모임 성격</Text>
-                <Text style={styles.wizardHeroHint}>어떤 모임인지 골라 주세요. 언제든 바꿀 수 있어요.</Text>
 
                 {catLoading ? (
                   <View style={styles.centerRow}>
@@ -4540,7 +4760,11 @@ export default function CreateDetailsScreen() {
 
                           <Pressable
                             onPress={handleConfirmSchedule}
-                            style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
+                            style={({ pressed }) => [
+                              styles.wizardPrimaryBtn,
+                              (pressed || agentWizardApplyCue?.kind === 'confirmSchedule') &&
+                                styles.addCandidateBtnPressed,
+                            ]}
                             accessibilityRole="button">
                             <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
                               <LinearGradient
@@ -4550,6 +4774,10 @@ export default function CreateDetailsScreen() {
                                 style={StyleSheet.absoluteFillObject}
                               />
                             </View>
+                            <AgentApplyRippleLayer
+                              active={agentWizardApplyCue?.kind === 'confirmSchedule'}
+                              size="lg"
+                            />
                             <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
                           </Pressable>
                         </>
@@ -5289,6 +5517,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
     borderWidth: 1,
     borderColor: 'rgba(31, 42, 68, 0.45)',
+  },
+  calendarCellAgentDemo: {
+    backgroundColor: `${GinitTheme.colors.primary}22`,
   },
   calendarCellPressed: {
     opacity: 0.9,

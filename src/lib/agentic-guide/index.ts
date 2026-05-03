@@ -10,6 +10,7 @@ export type {
   StepCoachInput,
   UserMeetingHabitsAggregate,
   WeightedPlaceHit,
+  WizardAutoBasicInfo,
   WizardSuggestion,
 } from '@/src/lib/agentic-guide/types';
 export { aggregateUserMeetingHabits } from '@/src/lib/agentic-guide/aggregate-user-meeting-habits';
@@ -34,4 +35,8 @@ export {
   buildStep1FrequentPatternOfferMessage,
 } from '@/src/lib/agentic-guide/build-details-pattern-message';
 export { buildWizardSuggestion } from '@/src/lib/agentic-guide/build-wizard-suggestion';
+export { pickAutoWizardScheduleFromSnapshot } from '@/src/lib/agentic-guide/pick-auto-wizard-schedule';
+export { buildWizardTitleSuggestionContextFromSnapshot } from '@/src/lib/agentic-guide/build-wizard-title-suggestion-context';
+export { pickWizardAutoMeetingTitleFromAiSuggestions } from '@/src/lib/agentic-guide/pick-wizard-auto-meeting-title-ai';
 export { buildStepCoachMessage } from '@/src/lib/agentic-guide/build-step-coach-message';
+export { buildStep2SpecialtyCoachMessage } from '@/src/lib/agentic-guide/build-step2-specialty-coach-message';

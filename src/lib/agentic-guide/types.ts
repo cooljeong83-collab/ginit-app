@@ -82,6 +82,15 @@ export type AgentWelcomeSnapshot = {
   meetingHabits: UserMeetingHabitsAggregate | null;
 };
 
+export type WizardAutoBasicInfo = {
+  /** 기본정보(3단계) 자동 입력 제목 */
+  title: string;
+  /** 참여 모임 정원의 평균 최소(반올림, 적용 시 정책·공개 여부로 클램프) */
+  avgMinParticipants: number;
+  /** 참여 모임 정원의 평균 최대(반올림, 적용 시 정책·공개 여부로 클램프) */
+  avgMaxParticipants: number;
+};
+
 export type WizardSuggestion = {
   categoryId: string;
   categoryLabel: string;
@@ -93,6 +102,10 @@ export type WizardSuggestion = {
   placeSearchHint: string | null;
   /** 에이전트 수락 시 공개 여부(null이면 UI만 펄스·상태 유지) */
   suggestedIsPublic?: boolean | null;
+  /** 3단계 기본정보 자동 — 인원은 참여 이력 평균 */
+  autoBasicInfo: WizardAutoBasicInfo;
+  /** FAB 자동 일정 — 습관·시간대 반영 후 검증 통과한 YYYY-MM-DD / HH:mm */
+  autoSchedule: { ymd: string; hm: string };
 };
 
 export type StepCoachInput = {
