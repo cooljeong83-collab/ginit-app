@@ -48,6 +48,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
+import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
+import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
 import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
 import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
 import { GameKindPreference } from '@/components/create/GameKindPreference';
@@ -93,6 +95,7 @@ import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-unti
 import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
 import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
+import { notifyCreateMeetingAgentBubbleDismiss } from '@/src/lib/create-meeting-agent-bubble-dismiss';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   consumePendingMeetingPlace,
@@ -3074,7 +3077,7 @@ export default function CreateDetailsScreen() {
         setSelectedCategoryId((prev) => {
           if (paramCategoryId && list.some((c) => c.id === paramCategoryId)) return paramCategoryId;
           if (prev && list.some((c) => c.id === prev)) return prev;
-          return list[0]?.id ?? null;
+          return null;
         });
       },
       (msg) => {
@@ -3692,6 +3695,7 @@ export default function CreateDetailsScreen() {
 
   return (
     <View style={styles.screenRoot}>
+      <CreateMeetingAgenticAiProvider>
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
           <View style={styles.topBarRow}>
             <Pressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
@@ -3734,6 +3738,12 @@ export default function CreateDetailsScreen() {
                 scrollEventThrottle: 1,
                 onScroll: (e) => {
                   mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+                },
+                onScrollBeginDrag: () => {
+                  notifyCreateMeetingAgentBubbleDismiss();
+                },
+                onTouchStart: () => {
+                  notifyCreateMeetingAgentBubbleDismiss();
                 },
                 decelerationRate: 'normal',
               }}
@@ -4303,6 +4313,8 @@ export default function CreateDetailsScreen() {
             </Text>
           ) : null}
       </SafeAreaView>
+      {!snsDemographicsBlocked ? <CreateMeetingAgenticAiFab /> : null}
+      </CreateMeetingAgenticAiProvider>
     </View>
   );
 }
