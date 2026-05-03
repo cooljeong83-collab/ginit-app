@@ -2,6 +2,7 @@ import type { Category } from '@/src/lib/categories';
 import { categoryNeedsSpecialty, resolveSpecialtyKindForCategory } from '@/src/lib/category-specialty';
 
 import type { AgentWelcomeSnapshot, WizardSuggestion } from '@/src/lib/agentic-guide/types';
+import { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
 import { summarizeRecentMeetings } from '@/src/lib/agentic-guide/summarize-recent-meetings';
 
 function pickMenuLabelForFood(topLabel: string | null): string {
@@ -24,6 +25,15 @@ function findCategoryIdForLabel(categories: Category[], label: string): Category
 
 function pickCategoryFromSnapshot(categories: Category[], s: AgentWelcomeSnapshot): Category | null {
   if (categories.length === 0) return null;
+  const h = s.meetingHabits;
+  if (
+    h?.weekendTopCategoryLabel &&
+    h.weekendTopCategoryCount >= 2 &&
+    (h.weekendDayPortion ?? 0) >= 0.35
+  ) {
+    const hit = findCategoryIdForLabel(categories, h.weekendTopCategoryLabel);
+    if (hit) return hit;
+  }
   for (const m of s.recentMeetings.slice(0, 15)) {
     const cid = (m.categoryId ?? '').trim();
     if (cid) {
@@ -44,6 +54,8 @@ function pickCategoryFromSnapshot(categories: Category[], s: AgentWelcomeSnapsho
  * 수락 시 적용할 카테고리·메뉴 추천.
  */
 export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSnapshot): WizardSuggestion | null {
+  if (isColdStartForAgentSnapshot(s)) return null;
+  if ((s.recentMeetings?.length ?? 0) === 0) return null;
   const cat = pickCategoryFromSnapshot(categories, s);
   if (!cat) return null;
   const sk = resolveSpecialtyKindForCategory(cat);
@@ -51,11 +63,15 @@ export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSna
   const food = sk === 'food';
   const menu = food ? pickMenuLabelForFood(sumTopLabel(s)) : null;
   const canAuto = !needs || (food && Boolean(menu));
+  const topP = s.meetingHabits?.topPlaces?.[0];
+  const placeSearchHint =
+    topP && (topP.score ?? 0) >= 2 && topP.searchQuery.trim().length > 0 ? topP.searchQuery.trim() : null;
   return {
     categoryId: cat.id,
     categoryLabel: cat.label,
     menuPreferenceLabel: menu,
     canAutoCompleteThroughStep3: canAuto,
+    placeSearchHint: placeSearchHint,
   };
 }
 

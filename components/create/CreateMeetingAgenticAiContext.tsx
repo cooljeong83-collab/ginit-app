@@ -61,6 +61,9 @@ export type CreateMeetingAgenticAiContextValue = {
   runSecondaryAction: () => void;
   /** 현재 데이터로 생성된 MZ 톤 한 줄 메시지 */
   mzLine: string;
+  /** 위저드 마지막 카드(제출 직전) — 오토파일럿·하이라이트 연동용 */
+  wizardAwaitingFinalSubmit: boolean;
+  setWizardAwaitingFinalSubmit: (v: boolean) => void;
 };
 
 const defaultInjected: CreateMeetingAgenticAiInjectedData = {
@@ -193,6 +196,7 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
   const acceptRef = useRef<(() => void) | null>(null);
   const secondaryRef = useRef<(() => void) | null>(null);
   const [secondaryActionLabel, setSecondaryActionLabel] = useState<string | null>(null);
+  const [wizardAwaitingFinalSubmit, setWizardAwaitingFinalSubmit] = useState(false);
 
   const setInjectedData = useCallback((patch: Partial<CreateMeetingAgenticAiInjectedData>) => {
     if (Object.prototype.hasOwnProperty.call(patch, 'intelligentSuggestion')) {
@@ -251,6 +255,8 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
       registerSecondaryAction,
       runSecondaryAction,
       mzLine,
+      wizardAwaitingFinalSubmit,
+      setWizardAwaitingFinalSubmit,
     }),
     [
       data,
@@ -266,6 +272,7 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
       registerSecondaryAction,
       runSecondaryAction,
       mzLine,
+      wizardAwaitingFinalSubmit,
     ],
   );
 

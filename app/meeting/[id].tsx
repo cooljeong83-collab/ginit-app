@@ -3892,33 +3892,38 @@ export default function MeetingDetailScreen() {
                         style={[styles.placeVoteCard, chipSelected ? styles.placeVoteCardSelected : null]}>
                         <Pressable
                           onPress={() => onPlaceChipPress(chip.id)}
-                          style={({ pressed }) => [pressed ? styles.dateChipPressed : null]}
+                          style={({ pressed }) => [
+                            styles.placeVoteCardPressFill,
+                            pressed ? styles.dateChipPressed : null,
+                          ]}
                           accessibilityRole={placeHostPickMode ? 'radio' : 'checkbox'}
                           accessibilityState={{ checked: chipSelected, selected: chipSelected }}
                           accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
-                          <View style={styles.placeVoteImageWrap}>
-                            {thumb ? (
-                              <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                            ) : (
-                              <View style={styles.placeVoteImageFallback} />
-                            )}
-                            <View style={styles.placeVoteTallyBadge} pointerEvents="none">
-                              <Text style={styles.voteTallyBadgeText}>{tally}</Text>
-                            </View>
-                            {chipSelected ? (
-                              <View style={styles.placeVoteSelectedOverlay} pointerEvents="none">
-                                <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                          <View style={styles.placeVoteCardPressInner}>
+                            <View style={styles.placeVoteImageWrap}>
+                              {thumb ? (
+                                <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+                              ) : (
+                                <View style={styles.placeVoteImageFallback} />
+                              )}
+                              <View style={styles.placeVoteTallyBadge} pointerEvents="none">
+                                <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                               </View>
+                              {chipSelected ? (
+                                <View style={styles.placeVoteSelectedOverlay} pointerEvents="none">
+                                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
+                                </View>
+                              ) : null}
+                            </View>
+                            <Text style={styles.placeVoteTitle} numberOfLines={2}>
+                              {chip.title}
+                            </Text>
+                            {chip.sub ? (
+                              <Text style={styles.placeVoteSub} numberOfLines={2}>
+                                {chip.sub}
+                              </Text>
                             ) : null}
                           </View>
-                          <Text style={styles.placeVoteTitle} numberOfLines={2}>
-                            {chip.title}
-                          </Text>
-                          {chip.sub ? (
-                            <Text style={styles.placeVoteSub} numberOfLines={2}>
-                              {chip.sub}
-                            </Text>
-                          ) : null}
                         </Pressable>
                         <Pressable
                           onPress={() => openPlaceVoteDetailWeb(chip)}
@@ -5483,10 +5488,18 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   calendarCellMetaEmpty: { marginTop: 0, marginBottom: 0, fontSize: 10, color: 'transparent' },
-  placeVoteCarouselContent: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
+  placeVoteCarouselContent: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+    paddingBottom: 6,
+    paddingRight: 8,
+  },
   /** `VoteCandidatesForm` 장소 검색 카드(`placeResultCard` + `placeResultImageCard`)와 동일 톤 — 선택은 `placeResultImageCardSelected`와 동일 */
   placeVoteCard: {
     width: 176,
+    minHeight: 254,
+    flexDirection: 'column',
     borderRadius: 14,
     backgroundColor: 'rgba(255, 255, 255, 0.72)',
     borderWidth: 1,
@@ -5501,6 +5514,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  /** `details.tsx` `placeResultProposalCardWrap` — 본문이 늘어나도「상세 정보」는 카드 하단에 고정 */
+  placeVoteCardPressFill: { flex: 1, minHeight: 0 },
+  placeVoteCardPressInner: { flexGrow: 1 },
   placeVoteCardSelected: {
     borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
@@ -5576,6 +5592,7 @@ const styles = StyleSheet.create({
   placeDetailRightColBtn: { alignSelf: 'flex-start' },
   placeVoteDetailLink: {
     marginTop: 8,
+    flexShrink: 0,
     alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',

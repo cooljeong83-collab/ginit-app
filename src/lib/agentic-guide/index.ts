@@ -8,8 +8,12 @@ export type {
   OngoingMeetingsChatHint,
   RecentMeetingsSummary,
   StepCoachInput,
+  UserMeetingHabitsAggregate,
+  WeightedPlaceHit,
   WizardSuggestion,
 } from '@/src/lib/agentic-guide/types';
+export { aggregateUserMeetingHabits } from '@/src/lib/agentic-guide/aggregate-user-meeting-habits';
+export { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
 export { pickAgentTimeSlot } from '@/src/lib/agentic-guide/pick-time-slot';
 export { fetchOpenMeteoCurrent } from '@/src/lib/agentic-guide/fetch-open-meteo-current';
 export { wmoCodeToAgentWeatherMood } from '@/src/lib/agentic-guide/map-wmo-to-agent-weather';

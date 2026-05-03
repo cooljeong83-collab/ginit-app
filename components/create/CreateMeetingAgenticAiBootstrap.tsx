@@ -51,7 +51,7 @@ export function CreateMeetingAgenticAiBootstrap() {
         setCoachPhase('details_pattern_suggest');
         setIntelligentSuggestionDirect(buildStep1FrequentPatternOfferMessage(snap));
         setHydrationStatus('ready');
-        setShowAcceptButton(true);
+        setShowAcceptButton(false);
       } catch {
         if (cancelled) return;
         const slot = pickTimeSlot();

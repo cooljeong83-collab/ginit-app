@@ -4,9 +4,10 @@ import { useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgen
 import { buildStep1FrequentPatternOfferMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
 import { buildStepCoachMessage } from '@/src/lib/agentic-guide/build-step-coach-message';
 import { buildWizardSuggestion } from '@/src/lib/agentic-guide/build-wizard-suggestion';
-import type { Category } from '@/src/lib/categories';
-import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
+import { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
 import { summarizeFrequentPlaceNames } from '@/src/lib/agentic-guide/summarize-frequent-place-names';
+import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
+import type { Category } from '@/src/lib/categories';
 
 export type CreateMeetingWizardAgentBridgeProps = {
   currentStep: number;
@@ -42,6 +43,7 @@ export function CreateMeetingWizardAgentBridge({
     setShowAcceptButton,
     registerAcceptSuggestion,
     registerSecondaryAction,
+    setWizardAwaitingFinalSubmit,
   } = useCreateMeetingAgenticAi();
 
   const snapRef = useRef(agentSnapshot);
@@ -50,16 +52,26 @@ export function CreateMeetingWizardAgentBridge({
   catRef.current = categories;
 
   useEffect(() => {
-    if (hydrationStatus !== 'ready' || !agentSnapshot) return;
+    if (hydrationStatus !== 'ready' || !agentSnapshot) {
+      setWizardAwaitingFinalSubmit(false);
+      return;
+    }
+
+    setWizardAwaitingFinalSubmit(currentStep === detailStep);
 
     if (currentStep === 1) {
       setCoachPhase('details_pattern_suggest');
       setIntelligentSuggestionDirect(buildStep1FrequentPatternOfferMessage(agentSnapshot));
-      const sugg = buildWizardSuggestion(categories, agentSnapshot);
-      registerAcceptSuggestion(() => {
-        const s = buildWizardSuggestion(catRef.current, snapRef.current!);
-        if (s) applyWizardSuggestion(s);
-      });
+      const cold = isColdStartForAgentSnapshot(agentSnapshot);
+      const sugg = cold ? null : buildWizardSuggestion(categories, agentSnapshot);
+      registerAcceptSuggestion(
+        cold
+          ? null
+          : () => {
+              const s = buildWizardSuggestion(catRef.current, snapRef.current!);
+              if (s) applyWizardSuggestion(s);
+            },
+      );
       setShowAcceptButton(Boolean(sugg));
       registerSecondaryAction(null, null);
       return;
@@ -67,7 +79,11 @@ export function CreateMeetingWizardAgentBridge({
 
     if (currentStep === 2) {
       setCoachPhase('details_pattern_suggest');
-      setIntelligentSuggestionDirect('세부만 골라주면 바로 다음으로 갈 수 있어 ✨');
+      setIntelligentSuggestionDirect(
+        isColdStartForAgentSnapshot(agentSnapshot)
+          ? '이 단계에서는 옵션 하나만 선택 하면 돼요. \n선택 후 아래 확인으로 다음 단계로 가요.'
+          : '옵션만 골라주면 바로 다음으로 갈 수 있어 ✨',
+      );
       setShowAcceptButton(false);
       registerAcceptSuggestion(null);
       registerSecondaryAction(null, null);
@@ -80,6 +96,7 @@ export function CreateMeetingWizardAgentBridge({
         buildStepCoachMessage({
           phase: 'details_step3_capacity',
           snapshot: agentSnapshot,
+          meetingHabits: agentSnapshot.meetingHabits ?? undefined,
         }),
       );
       setShowAcceptButton(false);
@@ -96,6 +113,7 @@ export function CreateMeetingWizardAgentBridge({
           phase: 'details_step4_schedule',
           snapshot: agentSnapshot,
           firstScheduleSummary,
+          meetingHabits: agentSnapshot.meetingHabits ?? undefined,
         }),
       );
       setShowAcceptButton(false);
@@ -107,14 +125,17 @@ export function CreateMeetingWizardAgentBridge({
     if (currentStep === placesStep) {
       setCoachPhase('details_step5_place_suggest');
       const freq = summarizeFrequentPlaceNames(agentSnapshot.recentMeetings);
+      const habitQ = agentSnapshot.meetingHabits?.topPlaces?.[0]?.searchQuery?.trim() ?? '';
+      const freqQ = freq?.searchQuery?.trim() ?? '';
+      const q = habitQ || freqQ;
       const msg = buildStepCoachMessage({
         phase: 'details_step5_place_suggest',
         snapshot: agentSnapshot,
         frequentPlace: freq ?? undefined,
+        meetingHabits: agentSnapshot.meetingHabits ?? undefined,
       });
       setIntelligentSuggestionDirect(msg);
-      if (freq?.searchQuery) {
-        const q = freq.searchQuery;
+      if (q) {
         setShowAcceptButton(true);
         registerAcceptSuggestion(() => {
           placesFormRef.current?.setPlaceQueryFromAgent?.(q);
@@ -134,6 +155,7 @@ export function CreateMeetingWizardAgentBridge({
         buildStepCoachMessage({
           phase: 'details_step6_optional',
           snapshot: agentSnapshot,
+          meetingHabits: agentSnapshot.meetingHabits ?? undefined,
         }),
       );
       setShowAcceptButton(false);
@@ -157,6 +179,8 @@ export function CreateMeetingWizardAgentBridge({
     setCoachPhase,
     setIntelligentSuggestionDirect,
     setShowAcceptButton,
+    setWizardAwaitingFinalSubmit,
+    detailStep,
   ]);
 
   useEffect(() => {

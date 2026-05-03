@@ -4563,7 +4563,7 @@ export default function CreateDetailsScreen() {
                   <Text style={styles.detailFinalFloatingLabel}>등록 중…</Text>
                 </View>
               ) : (
-                <Text style={styles.detailFinalFloatingLabel}>지닛 모임 등록 완료</Text>
+                <Text style={styles.detailFinalFloatingLabel}>지닛 시작하기</Text>
               )}
             </Pressable>
           ) : null}

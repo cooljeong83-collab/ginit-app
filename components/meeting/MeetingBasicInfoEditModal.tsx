@@ -4,12 +4,11 @@ import {
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
+import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
-import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
-import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import type { Meeting, PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import {
   DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG,
@@ -17,6 +16,7 @@ import {
   parsePublicMeetingDetailsConfig,
   updateMeetingBasicFieldsByHost,
 } from '@/src/lib/meetings';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -1070,7 +1070,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(31, 42, 68, 0.12)',
+    backgroundColor: 'rgb(255, 255, 255)',
     borderWidth: 1,
     borderColor: 'rgba(31, 42, 68, 0.45)',
   },

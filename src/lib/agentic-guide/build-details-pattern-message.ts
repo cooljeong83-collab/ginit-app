@@ -1,6 +1,7 @@
-import type { AgentTimeSlot, AgentWelcomeSnapshot } from '@/src/lib/agentic-guide/types';
+import { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
 import { isOngoingForChat } from '@/src/lib/agentic-guide/pick-next-ongoing-meeting-for-chat';
 import { isUsefulMeetingPatternLabel, topUsefulPatternInMeetings } from '@/src/lib/agentic-guide/summarize-recent-meetings';
+import type { AgentTimeSlot, AgentWelcomeSnapshot } from '@/src/lib/agentic-guide/types';
 
 function pickUsefulTopPair(sum: AgentWelcomeSnapshot['recentSummary']): { top: string; second: string | null } | null {
   const labels = (sum?.topCategoryLabels ?? [])
@@ -74,6 +75,12 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
  * 위저드 1단계(카테고리) — 참여 중·완료 모임을 나눠 세밀한 제안 멘트.
  */
 export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): string {
+  if (isColdStartForAgentSnapshot(s)) {
+    const name = s.displayName?.trim();
+    const greet = name ? `${name}님, ` : '';
+    return `${greet}첫 모임이네요, 반가워요. \n지금 단계에서는 모임 종류만 골라 주세요. \n아래로 단계마다 내용을 짧게 설명해 줄게요. \n부담 없이 본인 취향대로 선택하면 돼요.`;
+  }
+
   const acceptHint = ' 수락 누르면 맞춰 줄게 🙌';
   const now = s.now;
   const meetings = s.recentMeetings ?? [];

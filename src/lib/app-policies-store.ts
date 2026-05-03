@@ -26,6 +26,16 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     },
   },
   xp: { meeting_confirm: 50, meeting_vote: 20 },
+  agentic_guide: {
+    meeting_habits: {
+      lightning_max_gap_days: 1,
+      roll_weeks: 8,
+      weight_confirmed: 5,
+      weight_user_vote: 3,
+      weight_tally: 1,
+      weight_display: 1,
+    },
+  },
   trust: {
     /** 서버 `ensure_profile_minimal`이 신규 `g_trust`에 사용(폴백). */
     default_score: 100,

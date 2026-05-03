@@ -8,6 +8,7 @@ import { fetchOpenMeteoCurrent } from '@/src/lib/agentic-guide/fetch-open-meteo-
 import { wmoCodeToAgentWeatherMood } from '@/src/lib/agentic-guide/map-wmo-to-agent-weather';
 import { pickAgentTimeSlot } from '@/src/lib/agentic-guide/pick-time-slot';
 import { pickOngoingMeetingsChatHint } from '@/src/lib/agentic-guide/pick-next-ongoing-meeting-for-chat';
+import { aggregateUserMeetingHabits } from '@/src/lib/agentic-guide/aggregate-user-meeting-habits';
 import { summarizeRecentMeetings } from '@/src/lib/agentic-guide/summarize-recent-meetings';
 import type { AgentWelcomeSnapshot, AgentWeatherMood } from '@/src/lib/agentic-guide/types';
 
@@ -78,6 +79,7 @@ export async function loadWelcomeSnapshot(appUserId: string | null | undefined):
 
   const recentSummary = summarizeRecentMeetings(meetings);
   const ongoingChatHint = pickOngoingMeetingsChatHint(meetings, now);
+  const meetingHabits = meetings.length > 0 ? aggregateUserMeetingHabits(meetings, now, uid) : null;
 
   return {
     now,
@@ -92,5 +94,6 @@ export async function loadWelcomeSnapshot(appUserId: string | null | undefined):
     recentSummary,
     ongoingChatHint,
     profile,
+    meetingHabits,
   };
 }
