@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { AgentApplyRippleLayer } from './agent-apply-ripple';
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
 const OPTIONS = ['한식', '일식', '중식', '양식', '분식', '퓨전', '카페', '브런치', '주점·호프', '이자카야', '와인.바', '포차', '오마카세'] as const;
@@ -44,6 +45,7 @@ export function MenuPreference({ value, onChange, disabled, agentCueLabel = null
               ]}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}>
+              <AgentApplyRippleLayer active={isAgentCue} size="md" />
               <Text style={S.glassChipText}>{label}</Text>
             </Pressable>
           );

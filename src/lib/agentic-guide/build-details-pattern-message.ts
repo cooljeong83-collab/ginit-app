@@ -37,11 +37,11 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
   const sum = s.recentSummary;
   const pair = pickUsefulTopPair(sum);
   const dna = s.gDnaChips.slice(0, 2).join('·');
-  const dnaBit = dna ? ` 성향 ${dna} 느낌이라` : '';
+  const dnaBit = dna ? ` 성향 ${dna}에 가깝게 보이셔서` : '';
 
   if (pair) {
-    const secondBit = pair.second ? `, ${pair.second}도 자주 썼고` : '';
-    return `기록 보면 ${pair.top}${secondBit}${dnaBit} 오늘도 그 라인으로 갈래? ✨ 수락 누르면 바로 맞춰 줄게요 🙌`;
+    const secondBit = pair.second ? `, ${pair.second}도 자주 이용하셨고` : '';
+    return `기록을 보면 ${pair.top}${secondBit}${dnaBit} 오늘도 그 라인으로 진행해 보시겠어요? ✨ 수락을 누르시면 바로 맞춰 드릴게요 🙌`;
   }
 
   const feedN = sum?.meetingCountSample ?? s.recentMeetings.length;
@@ -49,11 +49,11 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
   const usefulLast = lastTitle && lastTitle !== '모임' ? lastTitle : null;
 
   if (feedN > 0 && usefulLast) {
-    return `최근 ${usefulLast} 기억나${dnaBit} ✨ 오늘도 비슷한 무드로 갈래? 수락 누르면 맞춰 줄게요 🙌`;
+    return `최근 ${usefulLast}가 기억에 남으실 것 같아요${dnaBit} ✨ 오늘도 비슷한 무드로 진행해 보시겠어요? 수락을 누르시면 맞춰 드릴게요 🙌`;
   }
 
   if (feedN > 0) {
-    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게요 🙌`;
+    return `이미 모임도 꽤 진행하셨네요${dnaBit} ✨ 이번에는 추천 카테고리로 바로 맞춰 드릴까요? 수락을 누르시면 세팅해 드릴게요 🙌`;
   }
 
   const profileN = s.profileMeetingCount;
@@ -61,15 +61,15 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
   const strictFirstTimer = typeof profileN === 'number' && profileN === 0;
 
   if (strictFirstTimer) {
-    return `첫 모임 각이면 일단 분위기부터 잡아보자 ✨ 수락 누르면 추천 카테고리로 세팅해 줄게요 🙌`;
+    return `첫 모임이시라면, 일단 분위기부터 잡아 보시죠 ✨ 수락을 누르시면 추천 카테고리로 세팅해 드릴게요 🙌`;
   }
 
   if (typeof profileN === 'number' && profileN > 0) {
     // meeting_count만 있고 피드 목록이 비어 있을 때 — ‘목록 비어’ 멘트는 오해 소지가 있어 피드N>0과 동일 톤
-    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게  🙌`;
+    return `이미 모임도 꽤 진행하셨네요${dnaBit} ✨ 이번에는 추천 카테고리로 바로 맞춰 드릴까요? 수락을 누르시면 세팅해 드릴게요 🙌`;
   }
 
-  return `모임 패턴은 아직 수집 중이야${dnaBit} ✨ 수락 누르면 추천으로 세팅해 볼래? 🙌`;
+  return `모임 패턴은 아직 수집 중이에요${dnaBit} ✨ 수락을 누르시면 추천으로 세팅해 보시겠어요? 🙌`;
 }
 
 /**
@@ -79,17 +79,17 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
   if (isColdStartForAgentSnapshot(s)) {
     const name = s.displayName?.trim();
     const greet = name ? `${name}님, ` : '';
-    return `${greet}첫 모임이네요, 반가워요. \n지금 단계에서는 모임 종류만 골라 주세요. \n아래로 단계마다 내용을 짧게 설명해 줄게요. \n부담 없이 본인 취향대로 선택하면 돼요.`;
+    return `${greet}첫 모임이시군요, 반갑습니다. \n지금 단계에서는 모임 종류만 골라 주세요. \n아래로 단계마다 내용을 짧게 설명해 드릴게요. \n부담 없이 본인 취향대로 선택하시면 됩니다.`;
   }
 
-  const acceptHint = '\n수락 누르면 맞춰 줄게요 🙌';
+  const acceptHint = '\n수락을 누르시면 맞춰 드릴게요 🙌';
   const now = s.now;
   const meetings = s.recentMeetings ?? [];
   const ongoing = meetings.filter((m) => isOngoingForChat(m, now));
   const completed = meetings.filter((m) => !isOngoingForChat(m, now));
 
   const dna = s.gDnaChips.slice(0, 2).join('·');
-  const dnaBit = dna ? `${dna}` : '';
+  const dnaTail = dna ? ` (${dna} 성향)` : '';
 
   if (completed.length > 0) {
     const topDone = topUsefulPatternInMeetings(completed);
@@ -98,7 +98,7 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
       const { label } = topDone;
       return `완료된 모임 기록을 보면 ${label} 쪽을 많이 하셨네요. 오늘 ${slotKo} ${label} 모임을 만들어 드릴까요?${acceptHint}`;
     }
-    return `완료된 모임이 ${completed.length}건 있어요.${dnaBit} 자주 하던 라인으로 새 모임 잡아 드릴까요?${acceptHint}`;
+    return `완료된 모임이 ${completed.length}건 있어요${dnaTail}. 자주 하시던 라인으로 새 모임을 잡아 드릴까요?${acceptHint}`;
   }
 
   if (ongoing.length > 0) {
@@ -120,7 +120,7 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
       return `지금까지 완료된 모임은 없고, ${nStr}개의 모임에 참여 중이시네요~${tail} 오늘은 어떤 카테고리로 잡아 드릴까요?${acceptHint}`;
     }
     if (n === 1) {
-      return `지금까지 완료된 모임은 없고, 참여 중인 모임이 1개네요.${dnaBit} 그 톤으로 새 모임 잡아 드릴까요?${acceptHint}`;
+      return `지금까지 완료된 모임은 없고, 참여 중인 모임이 1개네요${dnaTail}. 그 톤으로 새 모임을 잡아 드릴까요?${acceptHint}`;
     }
   }
 
@@ -128,8 +128,8 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
   const pair = pickUsefulTopPair(sum);
 
   if (pair) {
-    const secondBit = pair.second ? `, ${pair.second}도 자주 쓰고` : '';
-    return `참여 중이거나 지나왔던 모임 기록을 보면 ${pair.top}${secondBit} 쪽을 자주 썼어.${dnaBit} 그 패턴(자주 하던 모임 느낌)으로 이번에도 만들어 줄까?${acceptHint}`;
+    const secondBit = pair.second ? `, ${pair.second}도 자주 이용하시고` : '';
+    return `참여 중이거나 지나왔던 모임 기록을 보면 ${pair.top}${secondBit} 쪽을 자주 이용하셨어요${dnaTail}. 그 패턴(자주 하시던 모임 느낌)으로 이번에도 만들어 드릴까요?${acceptHint}`;
   }
 
   const feedN = sum?.meetingCountSample ?? s.recentMeetings.length;
@@ -137,23 +137,25 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
   const usefulLast = lastTitle && lastTitle !== '모임' ? lastTitle : null;
 
   if (feedN > 0 && usefulLast) {
-    return `참여했던 모임들을 훑어보면 ${usefulLast} 무드가 눈에 띄어${dnaBit}. 비슷하게 자주 하던 쪽으로 이번 모임도 세팅해 줄까?${acceptHint}`;
+    return `참여하셨던 모임을 살보면 ${usefulLast} 무드가 눈에 띄시는 편이에요${dnaTail}. 비슷하게 자주 하시던 쪽으로 이번 모임도 세팅해 드릴까요?${acceptHint}`;
   }
 
   if (feedN > 0) {
-    return `당신은 ${dnaBit}성향이네요! \n평소 선호하시던 톤으로 새 모임을 만들어 드릴까요?${acceptHint}`;
+    const dnaPhrase = dna ? `${dna} ` : '';
+    return `활동 패턴은 ${dnaPhrase}뚜렷해 보여요! \n평소 선호하시던 톤으로 새 모임을 만들어 드릴까요?${acceptHint}`;
   }
 
   const profileN = s.profileMeetingCount;
   const strictFirstTimer = typeof profileN === 'number' && profileN === 0;
 
   if (strictFirstTimer) {
-    return `아직 참여 기록이 거의 없어서 패턴 분석은 가볍게 가도 돼${dnaBit}. 일단 추천 카테고리로 같이 시작해 볼래?${acceptHint}`;
+    return `아직 참여 기록이 거의 없어서 패턴 분석은 가볍게 보셔도 돼요${dnaTail}. 일단 추천 카테고리로 함께 시작해 보시겠어요?${acceptHint}`;
   }
 
   if (typeof profileN === 'number' && profileN > 0) {
-    return `당신은 ${dnaBit}. 성향이네요! \n선호하시던 톤으로 모임을 만들어 드릴까요?${acceptHint}`;
+    const dnaPhrase = dna ? `${dna} ` : '';
+    return `프로필 기준으로 ${dnaPhrase}성향으로 보여요! \n선호하시던 톤으로 모임을 만들어 드릴까요?${acceptHint}`;
   }
 
-  return `참여·지나온 모임 신호가 아직 얇아서 패턴은 천천히 쌓을게${dnaBit}. 그래도 오늘은 추천으로 바로 잡아볼래?${acceptHint}`;
+  return `참여·지나온 모임 신호가 아직 얇아서 패턴은 천천히 쌓여 갈 거예요${dnaTail}. 그래도 오늘은 추천으로 바로 맞춰 보시겠어요?${acceptHint}`;
 }

@@ -35,7 +35,7 @@ export type CreateMeetingAgenticAiInjectedData = {
   displayName: string | null;
   /**
    * 비어 있지 않으면 말풍선에 이 문구를 우선 표시.
-   * 비우면 `buildMzAgentMessage` 기반 MZ 문구로 폴백.
+   * 비우면 `buildMzAgentMessage` 기반 안내 문구로 폴백.
    */
   intelligentSuggestion: string | null;
 };
@@ -59,7 +59,7 @@ export type CreateMeetingAgenticAiContextValue = {
   secondaryActionLabel: string | null;
   registerSecondaryAction: (fn: (() => void) | null, label: string | null) => void;
   runSecondaryAction: () => void;
-  /** 현재 데이터로 생성된 MZ 톤 한 줄 메시지 */
+  /** 현재 데이터로 생성된 안내 한 줄 메시지 */
   mzLine: string;
   /** 위저드 마지막 카드(제출 직전) — 오토파일럿·하이라이트 연동용 */
   wizardAwaitingFinalSubmit: boolean;
@@ -124,41 +124,41 @@ function weatherEmoji(m: AgenticWeatherMood): string {
 }
 
 function weatherPhrase(m: AgenticWeatherMood, t: number | null): string {
-  const temp = t != null ? `${t}° 느낌` : '오늘 공기';
+  const temp = t != null ? `${t}° 체감` : '오늘 공기';
   switch (m) {
     case 'clear':
-      return `하늘 미쳤다 ${temp}`;
+      return `맑고 탁 트인 ${temp}이에요`;
     case 'cloudy':
-      return `구름 많은 ${temp}인데`;
+      return `구름이 많은 ${temp}예요`;
     case 'rain':
-      return `비 올 수도 있는 ${temp}`;
+      return `비가 올 수도 있는 ${temp}예요`;
     case 'wind':
-      return `바람 살짝 도는 ${temp}`;
+      return `바람이 살짝 도는 ${temp}예요`;
     case 'snow':
-      return `포근 챙기기 좋은 ${temp}`;
+      return `따뜻하게 챙기시기 좋은 ${temp}예요`;
     default:
-      return temp;
+      return `${temp}예요`;
   }
 }
 
 function slotGreeting(slot: AgenticTimeSlot): string {
   switch (slot) {
     case 'morning':
-      return '아침부터 텐션 올려보자고 ☀️';
+      return '아침부터 기분 좋게 시작해 보세요 ☀️';
     case 'lunch':
-      return '점심 먹고 나면 딱 모임 각이잖아요 🍚';
+      return '점심 식사 후에는 모임 잡기 좋은 시간이에요 🍚';
     case 'afternoon':
-      return '오후는 살짝 졸릴 타이밍이라 모임으로 깨워버리기 ✨';
+      return '오후에는 살짝 졸리실 수 있어요. 모임으로 기분 전환해 보세요 ✨';
     case 'evening':
-      return '퇴근 후엔 역시 사람 냄새 나는 게 최고죠 🌙';
+      return '퇴근 후에는 사람들과 어울리기 좋은 시간이에요 🌙';
     case 'night':
     default:
-      return '야간엔 조용히 몰입 각이에요 🌃';
+      return '늦은 시간에는 조용히 몰입하기 좋아요 🌃';
   }
 }
 
 /**
- * MZ 톤 + 이모지 한 줄 (비즈니스 로직은 여기만 키우면 됨).
+ * 날씨·시간대 기반 안내 한 줄(존댓말, 이모지 포함).
  */
 export function buildMzAgentMessage(d: CreateMeetingAgenticAiInjectedData): string {
   const loc = d.locationHint?.trim() || '이 근처';
@@ -167,7 +167,7 @@ export function buildMzAgentMessage(d: CreateMeetingAgenticAiInjectedData): stri
   const greet = slotGreeting(d.timeSlot);
   const nameBit = d.displayName?.trim() ? `${d.displayName.trim()}님, ` : '';
 
-  return `${nameBit}${greet} ${wx} ${em} ${loc}니까 커피 한잔 어때요? ☕️ 지금 모임 만들면 딱일 듯! ✨`;
+  return `${nameBit}${greet} ${wx} ${em} ${loc}라서 커피 한잔 어떠세요? ☕️ 지금 모임을 만드시기 좋은 타이밍이에요! ✨`;
 }
 
 type ProviderProps = {

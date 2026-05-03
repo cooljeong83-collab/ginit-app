@@ -61,6 +61,13 @@ import {
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
+import {
+  AgentApplyRippleLayer,
+  AGENT_APPLY_POST_LAYOUT_MS,
+  AGENT_APPLY_QUICK_ACK_MS,
+  AGENT_APPLY_STEP_GAP_MS,
+  AGENT_APPLY_TAP_HOLD_MS,
+} from '@/components/create/agent-apply-ripple';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
@@ -3661,8 +3668,8 @@ export default function CreateDetailsScreen() {
       layoutAnimateMeetingCreateWizard();
 
       void (async () => {
-        const pulseMs = 280;
-        const settleMs = 56;
+        const tapHoldMs = AGENT_APPLY_TAP_HOLD_MS;
+        const stepGapMs = AGENT_APPLY_STEP_GAP_MS;
 
         const runFallbackImmediate = () => {
           setSelectedCategoryId(sugg.categoryId);
@@ -3687,38 +3694,38 @@ export default function CreateDetailsScreen() {
           }
 
           await waitAgentStep1FabUnlocked();
-          await sleep(settleMs);
+          await sleep(stepGapMs);
 
           const catForSk = categories.find((c) => c.id === sugg.categoryId) ?? null;
           const sk = resolveSpecialtyKindForCategory(catForSk);
 
           setAgentWizardApplyCue({ kind: 'category', id: sugg.categoryId });
-          await sleep(pulseMs);
+          await sleep(tapHoldMs);
           setSelectedCategoryId(sugg.categoryId);
           setAgentWizardApplyCue(null);
-          await sleep(settleMs);
+          await sleep(stepGapMs);
 
           const pubTarget = sugg.suggestedIsPublic;
           if (pubTarget != null && pubTarget !== isPublicMeetingRef.current) {
             setAgentWizardApplyCue({ kind: 'public', side: pubTarget ? 'public' : 'private' });
-            await sleep(pulseMs);
+            await sleep(tapHoldMs);
             setIsPublicMeeting(pubTarget);
             setAgentWizardApplyCue(null);
-            await sleep(settleMs);
+            await sleep(stepGapMs);
           } else {
             setAgentWizardApplyCue({
               kind: 'public',
               side: isPublicMeetingRef.current ? 'public' : 'private',
             });
-            await sleep(200);
+            await sleep(AGENT_APPLY_QUICK_ACK_MS);
             setAgentWizardApplyCue(null);
-            await sleep(settleMs);
+            await sleep(stepGapMs);
           }
 
           setAgentWizardApplyCue({ kind: 'confirm1' });
-          await sleep(pulseMs);
+          await sleep(tapHoldMs);
           setAgentWizardApplyCue(null);
-          await sleep(settleMs);
+          await sleep(stepGapMs);
 
           suppressStepLayoutAnimateFromCategoryRef.current = true;
           onStep1NextRef.current();
@@ -3727,16 +3734,16 @@ export default function CreateDetailsScreen() {
             await new Promise<void>((r) => {
               InteractionManager.runAfterInteractions(() => r());
             });
-            await sleep(460);
+            await sleep(AGENT_APPLY_POST_LAYOUT_MS);
             setAgentWizardApplyCue({ kind: 'menu', label: sugg.menuPreferenceLabel });
-            await sleep(pulseMs);
+            await sleep(tapHoldMs);
             setMenuPreferences([sugg.menuPreferenceLabel]);
             setAgentWizardApplyCue(null);
-            await sleep(settleMs);
+            await sleep(stepGapMs);
             setAgentWizardApplyCue({ kind: 'confirm2' });
-            await sleep(pulseMs);
+            await sleep(tapHoldMs);
             setAgentWizardApplyCue(null);
-            await sleep(settleMs);
+            await sleep(stepGapMs);
             onStep2SpecialtyNextRef.current();
           }
         } catch {
@@ -4181,6 +4188,7 @@ export default function CreateDetailsScreen() {
                         ]}
                         accessibilityRole="button"
                         accessibilityState={{ selected: active }}>
+                        <AgentApplyRippleLayer active={agentCatCue} />
                         <Text style={styles.catEmoji}>{c.emoji}</Text>
                         <Text style={[styles.catLabel, active && styles.catLabelActive]} numberOfLines={2}>
                           {c.label}
@@ -4206,6 +4214,12 @@ export default function CreateDetailsScreen() {
                           styles.segmentHalfAgentCue,
                       ]}
                       accessibilityRole="button">
+                      <AgentApplyRippleLayer
+                        active={
+                          agentWizardApplyCue?.kind === 'public' && agentWizardApplyCue.side === 'private'
+                        }
+                        size="md"
+                      />
                       <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
                       <Text style={styles.segmentSub}>(초대만)</Text>
                     </Pressable>
@@ -4219,6 +4233,12 @@ export default function CreateDetailsScreen() {
                           styles.segmentHalfAgentCue,
                       ]}
                       accessibilityRole="button">
+                      <AgentApplyRippleLayer
+                        active={
+                          agentWizardApplyCue?.kind === 'public' && agentWizardApplyCue.side === 'public'
+                        }
+                        size="md"
+                      />
                       <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
                       <Text style={styles.segmentSub}>(지역 검색)</Text>
                     </Pressable>
@@ -4246,6 +4266,10 @@ export default function CreateDetailsScreen() {
                         style={StyleSheet.absoluteFillObject}
                       />
                     </View>
+                    <AgentApplyRippleLayer
+                      active={agentWizardApplyCue?.kind === 'confirm1'}
+                      size="lg"
+                    />
                     <Text style={styles.wizardPrimaryBtnLabel}>
                       {needsSpecialty ? '확인' : '확인'}
                     </Text>
@@ -4340,6 +4364,10 @@ export default function CreateDetailsScreen() {
                           style={StyleSheet.absoluteFillObject}
                         />
                       </View>
+                      <AgentApplyRippleLayer
+                        active={agentWizardApplyCue?.kind === 'confirm2'}
+                        size="lg"
+                      />
                       <Text style={styles.wizardPrimaryBtnLabel}>
                         {specialtyKind === 'movie'
                           ? '이 후보들로 모임 만들기'
@@ -5599,6 +5627,7 @@ const styles = StyleSheet.create({
     minWidth: '22%',
     maxWidth: '25%',
     borderRadius: 12,
+    overflow: 'hidden',
     paddingVertical: 8,
     paddingHorizontal: 6,
     alignItems: 'center',
@@ -5649,6 +5678,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
   segmentHalfOn: {
     backgroundColor: 'rgba(31, 42, 68, 0.06)',

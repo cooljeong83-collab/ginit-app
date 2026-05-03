@@ -81,8 +81,8 @@ export function CreateMeetingWizardAgentBridge({
       setCoachPhase('details_pattern_suggest');
       setIntelligentSuggestionDirect(
         isColdStartForAgentSnapshot(agentSnapshot)
-          ? '이 단계에서는 옵션 하나만 선택 하면 돼요. \n선택 후 아래 확인으로 다음 단계로 가요.'
-          : '옵션만 골라주면 바로 다음으로 갈 수 있어 ✨',
+          ? '이 단계에서는 옵션 하나만 선택하시면 돼요. \n선택 후 아래 확인을 누르시면 다음 단계로 이동해요.'
+          : '옵션만 골라 주시면 바로 다음 단계로 넘어가실 수 있어요 ✨',
       );
       setShowAcceptButton(false);
       registerAcceptSuggestion(null);

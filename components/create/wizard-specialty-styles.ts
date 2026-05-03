@@ -99,6 +99,7 @@ export const wizardSpecialtyStyles = StyleSheet.create({
     backgroundColor: GinitTheme.fixedGlassCard.fill,
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
+    overflow: 'hidden',
   },
   glassChipOn: {
     backgroundColor: GinitTheme.colors.primarySoft,
