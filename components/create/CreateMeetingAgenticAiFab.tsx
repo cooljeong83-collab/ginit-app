@@ -12,7 +12,6 @@ import Animated, {
   useSharedValue,
   withDelay,
   withRepeat,
-  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -55,7 +54,6 @@ import {
 } from '@/src/lib/create-meeting-agent-bubble-dismiss';
 import {
   getAgentFabMotionMode,
-  registerFabMicroNudge,
   setAgentFabMotionMode,
   setAgentStep1InteractionUnlocked,
   subscribeAgentFabMotionMode,
@@ -64,9 +62,7 @@ import {
 const FAB_MARGIN = 26;
 /** `user` 모드 idle 배율 — 자동 진행 적용 전·직접 입력 구간(둥실·호흡 약화) */
 const FAB_MOTION_USER_IDLE_MUL = 0.58;
-/** 수락 자동 클릭: 변위 도달 후 잠시 유지한 뒤 도크로 복귀(도착 직후 스프링 시 ‘바로 끌려옴’ 완화) */
-const ACCEPT_AUTOPILOT_DWELL_MS = 165;
-/** 더블 탭 방지 — dwell·복귀 스프링이 끝날 때까지(첫 micro nudge는 details 쪽 지연으로 겹침 방지) */
+/** 더블 탭 방지 — 수락 처리 직후 연속 탭 차단 */
 const ACCEPT_AUTOPILOT_BUSY_CLEAR_MS = 640;
 const BUBBLE_FADE_IN_EASE = { duration: CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS, easing: Easing.out(Easing.quad) } as const;
 const BUBBLE_FADE_OUT_EASE = { duration: CREATE_MEETING_AGENT_BUBBLE_FADE_OUT_MS, easing: Easing.in(Easing.quad) } as const;
@@ -698,16 +694,13 @@ export function CreateMeetingAgenticAiFab({
 
   const staticGlass = shouldUseStaticGlassInsteadOfBlur();
 
-  const runApplyAndResetAcceptAutopilot = useCallback(() => {
+  const playAcceptAutopilotThenApply = useCallback(() => {
+    if (acceptAutopilotBusyRef.current) return;
+    acceptAutopilotBusyRef.current = true;
+    setAgentFabMotionMode('auto');
+    suppressBubbleUntilUserFabPressRef.current = true;
+    runBubbleDismiss();
     runAcceptSuggestion();
-    acceptAutopilotX.value = withDelay(
-      ACCEPT_AUTOPILOT_DWELL_MS,
-      withSpring(0, RISE_SPRING),
-    );
-    acceptAutopilotY.value = withDelay(
-      ACCEPT_AUTOPILOT_DWELL_MS,
-      withSpring(0, RISE_SPRING),
-    );
     if (acceptAutopilotBusyClearTimerRef.current != null) {
       clearTimeout(acceptAutopilotBusyClearTimerRef.current);
     }
@@ -715,78 +708,7 @@ export function CreateMeetingAgenticAiFab({
       acceptAutopilotBusyClearTimerRef.current = null;
       acceptAutopilotBusyRef.current = false;
     }, ACCEPT_AUTOPILOT_BUSY_CLEAR_MS);
-  }, [acceptAutopilotX, acceptAutopilotY, runAcceptSuggestion]);
-
-  const playAcceptAutopilotThenApply = useCallback(() => {
-    if (acceptAutopilotBusyRef.current) return;
-    acceptAutopilotBusyRef.current = true;
-    setAgentFabMotionMode('auto');
-    suppressBubbleUntilUserFabPressRef.current = true;
-    runBubbleDismiss();
-    const w = resolvedScreenW;
-    const isCard = layoutMode === 'cardTopRight';
-    const dx = isCard ? -Math.min(96, w * 0.24) : -Math.min(132, w * 0.32);
-    const dy = isCard ? Math.min(56, w * 0.12) : -Math.min(72, w * 0.16);
-
-    btnScale.value = withSequence(
-      withTiming(0.9, { duration: 100, easing: Easing.out(Easing.quad) }),
-      withSpring(1, RISE_SPRING),
-    );
-
-    acceptAutopilotX.value = withTiming(dx, { duration: 300, easing: Easing.out(Easing.cubic) }, (finished) => {
-      if (finished) {
-        runOnJS(runApplyAndResetAcceptAutopilot)();
-      } else {
-        runOnJS(() => {
-          if (acceptAutopilotBusyClearTimerRef.current != null) {
-            clearTimeout(acceptAutopilotBusyClearTimerRef.current);
-            acceptAutopilotBusyClearTimerRef.current = null;
-          }
-          acceptAutopilotBusyRef.current = false;
-          setAgentFabMotionMode('user');
-          acceptAutopilotX.value = 0;
-          acceptAutopilotY.value = 0;
-        })();
-      }
-    });
-    acceptAutopilotY.value = withTiming(dy, { duration: 300, easing: Easing.out(Easing.cubic) });
-  }, [
-    btnScale,
-    acceptAutopilotX,
-    acceptAutopilotY,
-    layoutMode,
-    resolvedScreenW,
-    runApplyAndResetAcceptAutopilot,
-    runBubbleDismiss,
-  ]);
-
-  const runFabMicroNudge = useCallback(() => {
-    suppressBubbleUntilUserFabPressRef.current = true;
-    runBubbleDismiss();
-    const w = resolvedScreenW;
-    const isCard = layoutMode === 'cardTopRight';
-    const dx = isCard ? -Math.min(56, w * 0.14) : -Math.min(72, w * 0.18);
-    const dy = isCard ? Math.min(34, w * 0.08) : -Math.min(40, w * 0.09);
-    acceptAutopilotX.value = withSequence(
-      withTiming(dx, { duration: 170, easing: Easing.out(Easing.cubic) }),
-      withSpring(0, RISE_SPRING),
-    );
-    acceptAutopilotY.value = withSequence(
-      withTiming(dy, { duration: 170, easing: Easing.out(Easing.cubic) }),
-      withSpring(0, RISE_SPRING),
-    );
-    btnScale.value = withSequence(
-      withTiming(0.93, { duration: 85, easing: Easing.out(Easing.quad) }),
-      withSpring(1, RISE_SPRING),
-    );
-  }, [acceptAutopilotX, acceptAutopilotY, btnScale, layoutMode, resolvedScreenW, runBubbleDismiss]);
-
-  useEffect(() => {
-    registerFabMicroNudge(() => {
-      runFabMicroNudge();
-    });
-    return () => registerFabMicroNudge(null);
-  }, [runFabMicroNudge]);
+  }, [runAcceptSuggestion, runBubbleDismiss]);
 
   useEffect(() => {
     if (wizardStep !== 1) {

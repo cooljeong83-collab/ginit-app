@@ -92,7 +92,6 @@ import {
 import {
   getAgentFabMotionMode,
   getAgentStep1InteractionUnlocked,
-  playFabMicroNudge,
   setAgentFabMotionMode,
   setAgentStep1InteractionUnlocked,
   subscribeAgentFabMotionMode,
@@ -3689,13 +3688,10 @@ export default function CreateDetailsScreen() {
 
           await waitAgentStep1FabUnlocked();
           await sleep(settleMs);
-          /** FAB 수락 연출(이동→dwell→복귀)과 첫 micro nudge가 같은 축을 두지 않도록 */
-          await sleep(380);
 
           const catForSk = categories.find((c) => c.id === sugg.categoryId) ?? null;
           const sk = resolveSpecialtyKindForCategory(catForSk);
 
-          playFabMicroNudge();
           setAgentWizardApplyCue({ kind: 'category', id: sugg.categoryId });
           await sleep(pulseMs);
           setSelectedCategoryId(sugg.categoryId);
@@ -3704,14 +3700,12 @@ export default function CreateDetailsScreen() {
 
           const pubTarget = sugg.suggestedIsPublic;
           if (pubTarget != null && pubTarget !== isPublicMeetingRef.current) {
-            playFabMicroNudge();
             setAgentWizardApplyCue({ kind: 'public', side: pubTarget ? 'public' : 'private' });
             await sleep(pulseMs);
             setIsPublicMeeting(pubTarget);
             setAgentWizardApplyCue(null);
             await sleep(settleMs);
           } else {
-            playFabMicroNudge();
             setAgentWizardApplyCue({
               kind: 'public',
               side: isPublicMeetingRef.current ? 'public' : 'private',
@@ -3721,7 +3715,6 @@ export default function CreateDetailsScreen() {
             await sleep(settleMs);
           }
 
-          playFabMicroNudge();
           setAgentWizardApplyCue({ kind: 'confirm1' });
           await sleep(pulseMs);
           setAgentWizardApplyCue(null);
@@ -3735,13 +3728,11 @@ export default function CreateDetailsScreen() {
               InteractionManager.runAfterInteractions(() => r());
             });
             await sleep(460);
-            playFabMicroNudge();
             setAgentWizardApplyCue({ kind: 'menu', label: sugg.menuPreferenceLabel });
             await sleep(pulseMs);
             setMenuPreferences([sugg.menuPreferenceLabel]);
             setAgentWizardApplyCue(null);
             await sleep(settleMs);
-            playFabMicroNudge();
             setAgentWizardApplyCue({ kind: 'confirm2' });
             await sleep(pulseMs);
             setAgentWizardApplyCue(null);

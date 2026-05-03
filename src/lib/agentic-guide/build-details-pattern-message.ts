@@ -41,7 +41,7 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
 
   if (pair) {
     const secondBit = pair.second ? `, ${pair.second}도 자주 썼고` : '';
-    return `기록 보면 ${pair.top}${secondBit}${dnaBit} 오늘도 그 라인으로 갈래? ✨ 수락 누르면 바로 맞춰 줄게 🙌`;
+    return `기록 보면 ${pair.top}${secondBit}${dnaBit} 오늘도 그 라인으로 갈래? ✨ 수락 누르면 바로 맞춰 줄게요 🙌`;
   }
 
   const feedN = sum?.meetingCountSample ?? s.recentMeetings.length;
@@ -49,11 +49,11 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
   const usefulLast = lastTitle && lastTitle !== '모임' ? lastTitle : null;
 
   if (feedN > 0 && usefulLast) {
-    return `최근 ${usefulLast} 기억나${dnaBit} ✨ 오늘도 비슷한 무드로 갈래? 수락 누르면 맞춰 줄게 🙌`;
+    return `최근 ${usefulLast} 기억나${dnaBit} ✨ 오늘도 비슷한 무드로 갈래? 수락 누르면 맞춰 줄게요 🙌`;
   }
 
   if (feedN > 0) {
-    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게 🙌`;
+    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게요 🙌`;
   }
 
   const profileN = s.profileMeetingCount;
@@ -61,12 +61,12 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
   const strictFirstTimer = typeof profileN === 'number' && profileN === 0;
 
   if (strictFirstTimer) {
-    return `첫 모임 각이면 일단 분위기부터 잡아보자 ✨ 수락 누르면 추천 카테고리로 세팅해 줄게 🙌`;
+    return `첫 모임 각이면 일단 분위기부터 잡아보자 ✨ 수락 누르면 추천 카테고리로 세팅해 줄게요 🙌`;
   }
 
   if (typeof profileN === 'number' && profileN > 0) {
     // meeting_count만 있고 피드 목록이 비어 있을 때 — ‘목록 비어’ 멘트는 오해 소지가 있어 피드N>0과 동일 톤
-    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게 🙌`;
+    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게  🙌`;
   }
 
   return `모임 패턴은 아직 수집 중이야${dnaBit} ✨ 수락 누르면 추천으로 세팅해 볼래? 🙌`;
@@ -82,7 +82,7 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
     return `${greet}첫 모임이네요, 반가워요. \n지금 단계에서는 모임 종류만 골라 주세요. \n아래로 단계마다 내용을 짧게 설명해 줄게요. \n부담 없이 본인 취향대로 선택하면 돼요.`;
   }
 
-  const acceptHint = '\n수락 누르면 맞춰 줄게 🙌';
+  const acceptHint = '\n수락 누르면 맞춰 줄게요 🙌';
   const now = s.now;
   const meetings = s.recentMeetings ?? [];
   const ongoing = meetings.filter((m) => isOngoingForChat(m, now));

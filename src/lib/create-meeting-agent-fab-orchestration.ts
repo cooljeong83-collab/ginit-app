@@ -14,8 +14,6 @@ const step1Listeners = new Set<VoidFn>();
 let fabMotionMode: AgentFabMotionMode = 'user';
 const fabMotionListeners = new Set<VoidFn>();
 
-let fabMicroNudgeImpl: (() => void) | null = null;
-
 export function setAgentStep1InteractionUnlocked(v: boolean): void {
   step1InteractionUnlocked = v;
   step1Listeners.forEach((l) => l());
@@ -47,12 +45,4 @@ export function subscribeAgentFabMotionMode(cb: VoidFn): () => void {
   return () => {
     fabMotionListeners.delete(cb);
   };
-}
-
-export function registerFabMicroNudge(fn: (() => void) | null): void {
-  fabMicroNudgeImpl = fn;
-}
-
-export function playFabMicroNudge(): void {
-  fabMicroNudgeImpl?.();
 }
