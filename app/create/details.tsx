@@ -48,11 +48,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
+import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
 import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
 import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
 import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
 import { CreateMeetingWizardAgentBridge } from '@/components/create/CreateMeetingWizardAgentBridge';
-import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
 import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
 import { GameKindPreference } from '@/components/create/GameKindPreference';
 import {
@@ -72,7 +72,8 @@ import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessa
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
+import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
 import type { SpecialtyKind } from '@/src/lib/category-specialty';
@@ -84,7 +85,7 @@ import {
   resolveSpecialtyKindForCategory,
   specialtyStepBadge,
 } from '@/src/lib/category-specialty';
-import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
+import { notifyCreateMeetingAgentBubbleDismiss } from '@/src/lib/create-meeting-agent-bubble-dismiss';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -96,9 +97,13 @@ import {
 } from '@/src/lib/date-candidate';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
+import {
+  resolvePlaceSearchRowCoordinates,
+  searchPlacesText,
+  type PlaceSearchRow,
+} from '@/src/lib/google-places-text-search';
 import { resolveMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
-import { notifyCreateMeetingAgentBubbleDismiss } from '@/src/lib/create-meeting-agent-bubble-dismiss';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   consumePendingMeetingPlace,
@@ -124,11 +129,6 @@ import {
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
   sanitizeNaverLocalPlaceLink,
 } from '@/src/lib/naver-local-search';
-import {
-  resolvePlaceSearchRowCoordinates,
-  searchPlacesText,
-  type PlaceSearchRow,
-} from '@/src/lib/google-places-text-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import {
@@ -264,9 +264,9 @@ function VoiceWaveform({ active, color }: { active: boolean; color: string }) {
   );
 }
 
-/** 단계 전환 시 카드가 `LayoutAnimation.Presets.easeInEaseOut` 으로 부드럽게 펼쳐지도록 설정 */
+/** 단계 전환 시 카드가 레이아웃 애니메이션으로 펼쳐지도록 설정 */
 function animate() {
-  layoutAnimateEaseInEaseOut();
+  layoutAnimateMeetingCreateWizard();
 }
 
 /** 스택 전환 중에는 BlurView 대신 정적 View로 GPU 부하를 줄입니다. */
@@ -2262,7 +2262,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                           <Pressable
                             onPress={() => {
                               if (resolving) return;
-                              layoutAnimateEaseInEaseOut();
+                              layoutAnimateMeetingCreateWizard();
 
                               if (selected) {
                                 const picked = placeSelectedById[item.id];
@@ -2720,6 +2720,7 @@ type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export default function CreateDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { userId } = useUserSession();
   const [snsDemographicsBlocked, setSnsDemographicsBlocked] = useState(false);
 
@@ -2776,6 +2777,30 @@ export default function CreateDetailsScreen() {
   /** 연속 scrollToStep 호출 시 이전 rAF·타이머 취소 */
   const scrollToStepRafRef = useRef<number | null>(null);
   const scrollToStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 프로그램 스크롤 중 — `onWizardStepShellLayout`이 FAB 앵커를 중간 프레임에 갱신하지 않도록 */
+  const programmaticScrollPendingRef = useRef(false);
+  /** 프로그램 스크롤 종료 후 FAB measure 백업(모멘텀 미발화 대비) */
+  const scrollSettleMeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 사용자 스크롤 중 말풍선 dismiss 알림 스로틀(ms) */
+  const scrollDismissLastNotifyMsRef = useRef(0);
+  const scheduleAgentFabMeasureRef = useRef<() => void>(() => {});
+  const armAgentFabScrollSettleMeasureRef = useRef<() => void>(() => {});
+  /** 세로 스크롤 목표 오프셋으로 FAB 앵커 창 좌표를 예측한 뒤 `runScroll` 실행 */
+  const predictAgentFabWindowRectBeforeVerticalScrollRef = useRef(
+    (_anchorStep: WizardStep, _targetScrollY: number, runScroll: () => void) => {
+      runScroll();
+    },
+  );
+  /** 에이전트 FAB — `measureInWindow`로 현재 단계 `wizardStepShell` 우상단에 맞춤 */
+  const agentStepShellRefs = useRef<Partial<Record<WizardStep, View | null>>>({});
+  const [agentFabWindowRect, setAgentFabWindowRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const currentStepRef = useRef<WizardStep>(1);
+  const agentFabMeasureRafRef = useRef<number | null>(null);
 
   const {
     initialQuery: initialQueryParam,
@@ -2829,7 +2854,7 @@ export default function CreateDetailsScreen() {
     const prev = prevIsPublicForCapacityRef.current;
     prevIsPublicForCapacityRef.current = isPublicMeeting;
     if (prev === null) return;
-    layoutAnimateEaseInEaseOut();
+    layoutAnimateMeetingCreateWizard();
     if (prev === true && isPublicMeeting === false) {
       const min = minParticipantsRef.current;
       const max = maxParticipantsRef.current;
@@ -2960,6 +2985,22 @@ export default function CreateDetailsScreen() {
   const [busy, setBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
+  currentStepRef.current = currentStep;
+
+  const prevWizardStepForFabScrollRef = useRef(currentStep);
+  if (currentStep !== prevWizardStepForFabScrollRef.current) {
+    if (currentStep > 1) {
+      programmaticScrollPendingRef.current = true;
+      if (scrollSettleMeasureTimerRef.current != null) {
+        clearTimeout(scrollSettleMeasureTimerRef.current);
+        scrollSettleMeasureTimerRef.current = null;
+      }
+    }
+    if (currentStep === 1) {
+      programmaticScrollPendingRef.current = false;
+    }
+    prevWizardStepForFabScrollRef.current = currentStep;
+  }
 
   useEffect(() => {
     if (!wizardError) return undefined;
@@ -3048,7 +3089,7 @@ export default function CreateDetailsScreen() {
           {
             text: '확인',
             onPress: () => {
-              layoutAnimateEaseInEaseOut();
+              layoutAnimateMeetingCreateWizard();
               suppressStepLayoutAnimateFromCategoryRef.current = true;
               resetWizardState();
               setSelectedCategoryId(id);
@@ -3067,7 +3108,7 @@ export default function CreateDetailsScreen() {
         return;
       }
       // Step 1에서는 선택 즉시 UI가 바뀌도록 애니메이션으로 피드백을 강화합니다.
-      layoutAnimateEaseInEaseOut();
+      layoutAnimateMeetingCreateWizard();
       setSelectedCategoryId(id);
     },
     [currentStep, resetWizardState, selectedCategoryId],
@@ -3212,18 +3253,25 @@ export default function CreateDetailsScreen() {
         const scrollY = mainScrollYRef.current;
         const pad = Platform.OS === 'android' ? 10 : 8;
         const nextY = Math.max(0, scrollY + (hy - sy) - pad);
-        if (typeof scrollView.scrollTo === 'function') {
-          scrollView.scrollTo({ y: nextY, animated: true });
-        } else if (typeof scrollView.scrollToPosition === 'function') {
-          scrollView.scrollToPosition(0, nextY, true);
-        }
+        predictAgentFabWindowRectBeforeVerticalScrollRef.current(placesStep, nextY, () => {
+          armAgentFabScrollSettleMeasureRef.current();
+          if (typeof scrollView.scrollTo === 'function') {
+            scrollView.scrollTo({ y: nextY, animated: true });
+          } else if (typeof scrollView.scrollToPosition === 'function') {
+            scrollView.scrollToPosition(0, nextY, true);
+          }
+        });
       });
     });
   }, []);
 
   const scrollToStep = useCallback((s: WizardStep) => {
     const y = stepPositions.current[s];
-    if (y == null || !mainScrollRef.current) return;
+    if (y == null || !mainScrollRef.current) {
+      programmaticScrollPendingRef.current = false;
+      scheduleAgentFabMeasureRef.current();
+      return;
+    }
     // 장소 후보 카드(placesStep)는 가능한 화면 상단에 붙여 보여야 해서 여백을 최소화합니다.
     const topPad = s === placesStep ? 4 : 20;
     const targetY = Math.max(0, y - topPad);
@@ -3236,20 +3284,36 @@ export default function CreateDetailsScreen() {
       clearTimeout(scrollToStepTimerRef.current);
       scrollToStepTimerRef.current = null;
     }
+    if (scrollSettleMeasureTimerRef.current != null) {
+      clearTimeout(scrollSettleMeasureTimerRef.current);
+      scrollSettleMeasureTimerRef.current = null;
+    }
+    programmaticScrollPendingRef.current = true;
 
-    layoutAnimateEaseInEaseOut();
+    layoutAnimateMeetingCreateWizard();
 
     scrollToStepRafRef.current = requestAnimationFrame(() => {
       scrollToStepRafRef.current = null;
-      const postFrameMs = Platform.OS === 'android' ? 100 : 48;
+      /** LayoutAnimation이 한 박자 진행된 뒤 스크롤 — 카드 펼침과 스크롤이 덜 충돌하도록 여유 */
+      const postFrameMs = Platform.OS === 'android' ? 220 : 175;
       scrollToStepTimerRef.current = setTimeout(() => {
         scrollToStepTimerRef.current = null;
-        const scroller = mainScrollRef.current as any;
-        if (typeof scroller?.scrollToPosition === 'function') {
-          scroller.scrollToPosition(0, targetY, true);
-          return;
-        }
-        scroller?.scrollTo?.({ y: targetY, animated: true });
+        InteractionManager.runAfterInteractions(() => {
+          const scroller = mainScrollRef.current as any;
+          if (!scroller) {
+            programmaticScrollPendingRef.current = false;
+            scheduleAgentFabMeasureRef.current();
+            return;
+          }
+          predictAgentFabWindowRectBeforeVerticalScrollRef.current(s, targetY, () => {
+            armAgentFabScrollSettleMeasureRef.current();
+            if (typeof scroller.scrollToPosition === 'function') {
+              scroller.scrollToPosition(0, targetY, true);
+              return;
+            }
+            scroller.scrollTo?.({ y: targetY, animated: true });
+          });
+        });
       }, postFrameMs);
     });
   }, [placesStep]);
@@ -3263,7 +3327,7 @@ export default function CreateDetailsScreen() {
       suppressStepLayoutAnimateFromCategoryRef.current = false;
       return;
     }
-    layoutAnimateEaseInEaseOut();
+    layoutAnimateMeetingCreateWizard();
   }, [currentStep]);
 
   useEffect(() => {
@@ -3284,7 +3348,7 @@ export default function CreateDetailsScreen() {
     pendingScrollAfterStepRef.current = null;
     const id = setTimeout(() => {
       scrollToStep(target);
-    }, 48);
+    }, 96);
     return () => clearTimeout(id);
   }, [currentStep, scrollToStep]);
 
@@ -3300,9 +3364,9 @@ export default function CreateDetailsScreen() {
     };
     const rafId = requestAnimationFrame(() => {
       if (cancelled) return;
-      t1 = setTimeout(run, Platform.OS === 'android' ? 100 : 56);
-      t2 = setTimeout(run, Platform.OS === 'android' ? 280 : 200);
-      t3 = setTimeout(run, Platform.OS === 'android' ? 520 : 380);
+      t1 = setTimeout(run, Platform.OS === 'android' ? 120 : 72);
+      t2 = setTimeout(run, Platform.OS === 'android' ? 320 : 240);
+      t3 = setTimeout(run, Platform.OS === 'android' ? 560 : 420);
     });
     return () => {
       cancelled = true;
@@ -3323,6 +3387,10 @@ export default function CreateDetailsScreen() {
         clearTimeout(scrollToStepTimerRef.current);
         scrollToStepTimerRef.current = null;
       }
+      if (scrollSettleMeasureTimerRef.current != null) {
+        clearTimeout(scrollSettleMeasureTimerRef.current);
+        scrollSettleMeasureTimerRef.current = null;
+      }
     },
     [],
   );
@@ -3330,6 +3398,109 @@ export default function CreateDetailsScreen() {
   const captureStepPosition = useCallback((s: WizardStep, e: LayoutChangeEvent) => {
     stepPositions.current[s] = e.nativeEvent.layout.y;
   }, []);
+
+  const measureAgentFabAnchor = useCallback(() => {
+    const cs = currentStepRef.current;
+    if (cs === 1) {
+      setAgentFabWindowRect(null);
+      return;
+    }
+    const node = agentStepShellRefs.current[cs];
+    if (!node) {
+      setAgentFabWindowRect(null);
+      return;
+    }
+    node.measureInWindow((x, y, w, h) => {
+      setAgentFabWindowRect({ x, y, width: w, height: h });
+    });
+  }, []);
+
+  const scheduleAgentFabMeasure = useCallback(() => {
+    if (agentFabMeasureRafRef.current != null) {
+      cancelAnimationFrame(agentFabMeasureRafRef.current);
+    }
+    agentFabMeasureRafRef.current = requestAnimationFrame(() => {
+      agentFabMeasureRafRef.current = null;
+      measureAgentFabAnchor();
+    });
+  }, [measureAgentFabAnchor]);
+
+  scheduleAgentFabMeasureRef.current = scheduleAgentFabMeasure;
+
+  const armAgentFabScrollSettleMeasure = useCallback(() => {
+    programmaticScrollPendingRef.current = true;
+    if (scrollSettleMeasureTimerRef.current != null) {
+      clearTimeout(scrollSettleMeasureTimerRef.current);
+      scrollSettleMeasureTimerRef.current = null;
+    }
+    const settleMs = Platform.OS === 'android' ? 480 : 420;
+    scrollSettleMeasureTimerRef.current = setTimeout(() => {
+      scrollSettleMeasureTimerRef.current = null;
+      programmaticScrollPendingRef.current = false;
+      scheduleAgentFabMeasureRef.current();
+    }, settleMs);
+  }, []);
+
+  armAgentFabScrollSettleMeasureRef.current = armAgentFabScrollSettleMeasure;
+
+  const onAgentFabMainScrollSettled = useCallback(() => {
+    if (scrollSettleMeasureTimerRef.current != null) {
+      clearTimeout(scrollSettleMeasureTimerRef.current);
+      scrollSettleMeasureTimerRef.current = null;
+    }
+    programmaticScrollPendingRef.current = false;
+    scheduleAgentFabMeasureRef.current();
+  }, []);
+
+  const predictAgentFabWindowRectBeforeVerticalScroll = useCallback(
+    (anchorStep: WizardStep, targetScrollY: number, runScroll: () => void) => {
+      if (anchorStep <= 1) {
+        runScroll();
+        return;
+      }
+      const node = agentStepShellRefs.current[anchorStep];
+      if (!node) {
+        runScroll();
+        return;
+      }
+      node.measureInWindow((x, y, w, h) => {
+        const cur = mainScrollYRef.current;
+        const dy = targetScrollY - cur;
+        setAgentFabWindowRect({ x, y: y - dy, width: w, height: h });
+        runScroll();
+      });
+    },
+    [],
+  );
+
+  predictAgentFabWindowRectBeforeVerticalScrollRef.current = predictAgentFabWindowRectBeforeVerticalScroll;
+
+  const onWizardStepShellLayout = useCallback(
+    (step: WizardStep, e: LayoutChangeEvent) => {
+      captureStepPosition(step, e);
+      if (currentStepRef.current === step && !programmaticScrollPendingRef.current) {
+        scheduleAgentFabMeasure();
+      }
+    },
+    [captureStepPosition, scheduleAgentFabMeasure],
+  );
+
+  useEffect(() => {
+    if (currentStep === 1) {
+      programmaticScrollPendingRef.current = false;
+      setAgentFabWindowRect(null);
+    }
+  }, [currentStep]);
+
+  useEffect(
+    () => () => {
+      if (agentFabMeasureRafRef.current != null) {
+        cancelAnimationFrame(agentFabMeasureRafRef.current);
+        agentFabMeasureRafRef.current = null;
+      }
+    },
+    [],
+  );
 
   const onPlacesBlockLayout = useCallback(
     (e: LayoutChangeEvent) => {
@@ -3409,7 +3580,7 @@ export default function CreateDetailsScreen() {
 
   const applyWizardSuggestion = useCallback(
     (sugg: WizardSuggestion) => {
-      layoutAnimateEaseInEaseOut();
+      layoutAnimateMeetingCreateWizard();
       setSelectedCategoryId(sugg.categoryId);
       const cat = categories.find((c) => c.id === sugg.categoryId) ?? null;
       const sk = resolveSpecialtyKindForCategory(cat);
@@ -3779,9 +3950,22 @@ export default function CreateDetailsScreen() {
                 showsVerticalScrollIndicator: false,
                 removeClippedSubviews: false,
                 keyboardShouldPersistTaps: 'handled',
-                scrollEventThrottle: 1,
+                scrollEventThrottle: 16,
                 onScroll: (e) => {
                   mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+                  if (!programmaticScrollPendingRef.current) {
+                    const now = Date.now();
+                    if (now - scrollDismissLastNotifyMsRef.current >= 160) {
+                      scrollDismissLastNotifyMsRef.current = now;
+                      notifyCreateMeetingAgentBubbleDismiss();
+                    }
+                  }
+                },
+                onMomentumScrollEnd: () => {
+                  onAgentFabMainScrollSettled();
+                },
+                onScrollEndDrag: () => {
+                  onAgentFabMainScrollSettled();
                 },
                 onScrollBeginDrag: () => {
                   notifyCreateMeetingAgentBubbleDismiss();
@@ -3789,7 +3973,13 @@ export default function CreateDetailsScreen() {
                 onTouchStart: () => {
                   notifyCreateMeetingAgentBubbleDismiss();
                 },
-                decelerationRate: 'normal',
+                /**
+                 * 손가락 플링(손을 뗀 뒤 관성)에만 적용. 단계 이동용 `scrollTo(..., animated: true)`는
+                 * RN Android가 고정 길이(~250ms) 애니메이터로 처리해 이 값과 무관합니다.
+                 */
+                decelerationRate: Platform.OS === 'ios' ? 0.9999 : 0.999,
+                /** 키보드 열릴 때 자동 스크롤 보정을 조금 더 천천히 */
+                keyboardOpeningTime: 400,
               }}
               contentContainerStyle={[
                 styles.scrollContent,
@@ -3896,7 +4086,13 @@ export default function CreateDetailsScreen() {
               </View>
 
               {selectedCategory != null && needsSpecialty && specialtyKind && currentStep >= 2 ? (
-                <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(2, e)}>
+                <View
+                  ref={(n) => {
+                    agentStepShellRefs.current[2] = n;
+                  }}
+                  collapsable={false}
+                  style={styles.wizardStepShell}
+                  onLayout={(e) => onWizardStepShellLayout(2, e)}>
                   <Text style={[styles.wizardStepBadge, { marginTop: 0 }]}>
                     {specialtyStepBadge(specialtyKind, selectedCategory?.majorCode ?? null)}
                   </Text>
@@ -3986,7 +4182,13 @@ export default function CreateDetailsScreen() {
               ) : null}
 
               {currentStep >= 3 ? (
-                <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(3, e)}>
+                <View
+                  ref={(n) => {
+                    agentStepShellRefs.current[3] = n;
+                  }}
+                  collapsable={false}
+                  style={styles.wizardStepShell}
+                  onLayout={(e) => onWizardStepShellLayout(3, e)}>
                   <Text style={styles.wizardStepBadge}>기본 정보</Text>
                   <Text style={styles.wizardFieldLabel}>모임 이름</Text>  
                     <LinearGradient
@@ -4100,7 +4302,13 @@ export default function CreateDetailsScreen() {
 
               {currentStep >= scheduleStep ? (
                 <>
-                    <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(scheduleStep, e)}>
+                    <View
+                      ref={(n) => {
+                        agentStepShellRefs.current[scheduleStep] = n;
+                      }}
+                      collapsable={false}
+                      style={styles.wizardStepShell}
+                      onLayout={(e) => onWizardStepShellLayout(scheduleStep, e)}>
                       <View style={styles.scheduleStepHeader}>
                         <Text style={styles.wizardStepBadge}>일정 설정</Text>
                         {/* <Text style={styles.wizardLockedHint}>
@@ -4181,7 +4389,13 @@ export default function CreateDetailsScreen() {
                     </View>
 
                   {currentStep >= placesStep ? (
-                    <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(placesStep, e)}>
+                    <View
+                      ref={(n) => {
+                        agentStepShellRefs.current[placesStep] = n;
+                      }}
+                      collapsable={false}
+                      style={styles.wizardStepShell}
+                      onLayout={(e) => onWizardStepShellLayout(placesStep, e)}>
                       <View
                         ref={placesStepHeaderAnchorRef}
                         collapsable={false}
@@ -4234,7 +4448,13 @@ export default function CreateDetailsScreen() {
                   ) : null}
 
                   {currentStep >= detailStep ? (
-                    <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(detailStep, e)}>
+                    <View
+                      ref={(n) => {
+                        agentStepShellRefs.current[detailStep] = n;
+                      }}
+                      collapsable={false}
+                      style={styles.wizardStepShell}
+                      onLayout={(e) => onWizardStepShellLayout(detailStep, e)}>
                       <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>상세 조건 (선택)</Text>
                       <Text style={styles.wizardLockedHint}>
                         위에서 확정한 일정을 확인한 뒤 등록해 주세요. 소개를 비워 두면 지닛이 맞춤 소개글을
@@ -4357,7 +4577,13 @@ export default function CreateDetailsScreen() {
             </Text>
           ) : null}
       </SafeAreaView>
-      {!snsDemographicsBlocked ? <CreateMeetingAgenticAiFab /> : null}
+      {!snsDemographicsBlocked ? (
+        <CreateMeetingAgenticAiFab
+          layoutMode={currentStep === 1 ? 'screenBottom' : 'cardTopRight'}
+          cardWindowRect={currentStep === 1 ? null : agentFabWindowRect}
+          windowWidth={windowWidth}
+        />
+      ) : null}
       </CreateMeetingAgenticAiProvider>
     </View>
   );

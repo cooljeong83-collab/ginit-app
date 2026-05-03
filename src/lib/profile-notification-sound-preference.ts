@@ -24,9 +24,10 @@ const BUNDLED_IDS = new Set<string>(PROFILE_NOTIFICATION_SOUND_OPTIONS.filter((o
 
 function normalizeStored(raw: string | null): ProfileNotificationSoundId {
   const s = (raw ?? '').trim();
-  if (s === 'default' || s === '') return 'default';
+  if (s === 'default') return 'default';
+  if (s === '') return 'ginit_ring_w';
   if (BUNDLED_IDS.has(s)) return s as ProfileBundledNotificationSoundId;
-  return 'default';
+  return 'ginit_ring_w';
 }
 
 export async function loadProfileNotificationSoundId(): Promise<ProfileNotificationSoundId> {
@@ -34,12 +35,12 @@ export async function loadProfileNotificationSoundId(): Promise<ProfileNotificat
     const v = await AsyncStorage.getItem(STORAGE_KEY);
     return normalizeStored(v);
   } catch {
-    return 'default';
+    return 'ginit_ring_w';
   }
 }
 
 export async function saveProfileNotificationSoundId(id: ProfileNotificationSoundId): Promise<void> {
-  const next = id === 'default' || BUNDLED_IDS.has(id) ? id : 'default';
+  const next = id === 'default' || BUNDLED_IDS.has(id) ? id : 'ginit_ring_w';
   await AsyncStorage.setItem(STORAGE_KEY, next);
 }
 

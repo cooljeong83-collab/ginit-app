@@ -24,3 +24,17 @@ export function layoutAnimateEaseInEaseOut(): void {
   ensureAndroidLayoutAnimationExperimental();
   LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 }
+
+/**
+ * 모임 생성 마법사 등 단계 카드 전용 — Preset보다 긴 duration으로 펼침·스크롤 전환이 덜 딱딱하게 느껴지도록.
+ * (Fabric에서는 LayoutAnimation이 no-op일 수 있음 — 기존과 동일)
+ */
+export function layoutAnimateMeetingCreateWizard(): void {
+  ensureAndroidLayoutAnimationExperimental();
+  LayoutAnimation.configureNext({
+    duration: 400,
+    create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+    update: { type: LayoutAnimation.Types.easeInEaseOut },
+    delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+  });
+}
