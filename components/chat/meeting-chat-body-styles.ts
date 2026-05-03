@@ -459,7 +459,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     paddingBottom: 8,
   },
   plusBtn: {
-    width: 44,
+    width: 30,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',

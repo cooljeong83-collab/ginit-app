@@ -178,7 +178,7 @@ export function CreateMeetingNluComposerDock({
               <TextInput
                 value={draft}
                 onChangeText={onChangeDraft}
-                placeholder="메시지 보내기"
+                placeholder="말 한마디로 모임을 완성해 보세요."
                 placeholderTextColor="#94a3b8"
                 style={meetingChatBodyStyles.input}
                 multiline

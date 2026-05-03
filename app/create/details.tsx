@@ -58,6 +58,10 @@ import {
   AGENT_APPLY_TITLE_MS_PER_CODEPOINT,
   AgentApplyRippleLayer,
 } from '@/components/create/agent-apply-ripple';
+import {
+  CreateMeetingAgenticSurfaceBinder,
+  type MeetingCreateAgenticSurfaceHandles,
+} from '@/components/create/CreateMeetingAgenticSurfaceBinder';
 import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
 import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
 import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
@@ -107,6 +111,13 @@ import {
   setAgentStep1InteractionUnlocked,
   subscribeAgentStep1InteractionUnlocked,
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
+import {
+  appendMeetingCreateAgentChatMessage,
+  createEmptyMeetingCreateAgentChatSession,
+  fingerprintMeetingCreateParsedPlan,
+  isLikelyMeetingCreateGreetingOnly,
+  meetingCreateAgentChatHistoryLines,
+} from '@/src/lib/meeting-create-agent-chat/session';
 import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   coerceDateCandidate,
@@ -2970,6 +2981,14 @@ export default function CreateDetailsScreen() {
   const meetingTitleInputRef = useRef<TextInput>(null);
   /** `applyWizardSuggestion` 비동기 런 id — 새 자동 적용 시 이전 타이핑 연출 중단 */
   const agentWizardApplyRunIdRef = useRef(0);
+  /** Provider 내부 `CreateMeetingAgenticSurfaceBinder`가 채우는 말풍선·수락 핸들 */
+  const agenticSurfaceRef = useRef<MeetingCreateAgenticSurfaceHandles | null>(null);
+  /** NLU 멀티턴: Edge와 동기화한 누적 JSON */
+  const agentNluAccumulatedRef = useRef<Record<string, unknown>>({});
+  const agentNluSessionRef = useRef(createEmptyMeetingCreateAgentChatSession());
+  const agentNluLastFingerprintRef = useRef<string | null>(null);
+  /** NLU 수락 CTA → 최종 등록 (정의 순서 때문에 ref로 최신 콜백 유지) */
+  const onFinalRegisterRef = useRef<() => Promise<void>>(async () => {});
   /** 상세 조건 단계: 소개글 입력 포커스 */
   const detailDescriptionInputRef = useRef<TextInput>(null);
   const meetingTitleDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(meetingTitleInputRef), []);
@@ -3417,6 +3436,21 @@ export default function CreateDetailsScreen() {
       if (mp?.placeName?.trim()) {
         setPlaceSearchSeed(mp.placeName.trim());
       }
+    }, []),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        agentNluAccumulatedRef.current = {};
+        agentNluSessionRef.current = createEmptyMeetingCreateAgentChatSession();
+        agentNluLastFingerprintRef.current = null;
+        const surf = agenticSurfaceRef.current;
+        surf?.setAgentOwnsWizardBubble(false);
+        surf?.setIntelligentSuggestionDirect(null);
+        surf?.setShowAcceptButton(false);
+        surf?.registerAcceptSuggestion(null);
+      };
     }, []),
   );
 
@@ -3872,11 +3906,11 @@ export default function CreateDetailsScreen() {
   onStep2SpecialtyNextRef.current = onStep2SpecialtyNext;
 
   const applyWizardSuggestion = useCallback(
-    (sugg: WizardSuggestion) => {
+    (sugg: WizardSuggestion): Promise<void> => {
       setAgentFabMotionMode('auto');
       layoutAnimateMeetingCreateWizard();
 
-      void (async () => {
+      return (async () => {
         const runId = ++agentWizardApplyRunIdRef.current;
         const isApplyRunAlive = () => runId === agentWizardApplyRunIdRef.current;
         const tapHoldMs = AGENT_APPLY_TAP_HOLD_MS;
@@ -4076,28 +4110,82 @@ export default function CreateDetailsScreen() {
       Alert.alert('잠시만요', '카테고리를 불러오는 중입니다.');
       return;
     }
+    const surf = agenticSurfaceRef.current;
     setNluBusy(true);
     setWizardError(null);
+    surf?.setShowAcceptButton(false);
+    surf?.registerAcceptSuggestion(null);
     try {
       const todayYmd = fmtDate(new Date());
+      const priorUserTurns = agentNluSessionRef.current.messages.filter((m) => m.role === 'user').length;
+      if (isLikelyMeetingCreateGreetingOnly(raw) && priorUserTurns === 0) {
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'user', raw);
+        const greetReply =
+          '안녕하세요! 어떤 모임을 만들고 싶으신가요? 모임 종류, 날짜·시간, 장소를 알려 주시면 단계별로 도와드릴게요.';
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
+          agentNluSessionRef.current,
+          'assistant',
+          greetReply,
+        );
+        surf?.setAgentOwnsWizardBubble(true);
+        surf?.setIntelligentSuggestionDirect(greetReply);
+        return;
+      }
+
+      agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'user', raw);
+      surf?.setAgentOwnsWizardBubble(true);
+
+      const history = meetingCreateAgentChatHistoryLines(agentNluSessionRef.current, 6);
       const inv = await invokeParseMeetingCreateIntent({
         text: raw,
         categories: categories.map((c) => ({ id: c.id, label: c.label })),
         todayYmd,
+        mode: 'chat_turn',
+        history,
+        accumulated: agentNluAccumulatedRef.current,
       });
       if (!inv.ok) {
         setWizardError(inv.error);
         showTransientBottomMessage(inv.error);
         return;
       }
-      const parsed = parseMeetingCreateNluPayload(categories, inv.result, new Date());
+
+      const nextAcc =
+        typeof inv.result === 'object' && inv.result !== null && !Array.isArray(inv.result)
+          ? ({ ...(inv.result as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+      agentNluAccumulatedRef.current = nextAcc;
+
+      const assist = inv.assistantReply?.trim() ?? '';
+      const parsed = parseMeetingCreateNluPayload(categories, agentNluAccumulatedRef.current, new Date());
       if (!parsed.ok) {
-        setWizardError(parsed.error);
-        showTransientBottomMessage(parsed.error);
+        const bubbleBase = assist || '조금만 더 알려 주세요.';
+        const bubble = `${bubbleBase}\n\n(${parsed.error})`;
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'assistant', bubble);
+        surf?.setIntelligentSuggestionDirect(bubble);
         return;
       }
+
+      const fp = fingerprintMeetingCreateParsedPlan(parsed.plan);
       const sugg = wizardSuggestionFromNluPlan(parsed.plan, categories);
-      applyWizardSuggestionRef.current(sugg);
+      if (agentNluLastFingerprintRef.current !== fp) {
+        agentNluLastFingerprintRef.current = fp;
+        await applyWizardSuggestionRef.current(sugg);
+      }
+
+      const confirmMsg = assist
+        ? `${assist}\n\n이 설정으로 모임을 생성할까요? 확인을 눌러 주세요.`
+        : '이제 필요한 정보가 모였어요! 모임을 생성할까요? 확인을 눌러 주세요.';
+      agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
+        agentNluSessionRef.current,
+        'assistant',
+        confirmMsg,
+      );
+      surf?.setIntelligentSuggestionDirect(confirmMsg);
+      surf?.setShowAcceptButton(true);
+      surf?.registerAcceptSuggestion(() => {
+        void onFinalRegisterRef.current();
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '분석에 실패했습니다.';
       setWizardError(msg);
@@ -4420,6 +4508,8 @@ export default function CreateDetailsScreen() {
     meetingConfig,
   ]);
 
+  onFinalRegisterRef.current = onFinalRegister;
+
   /** 등록 버튼: 로딩 중만 비활성화. 소개글 길이는 눌렀을 때 검증(짧으면 안내). */
   const finalDisabled = busy;
 
@@ -4467,6 +4557,7 @@ export default function CreateDetailsScreen() {
     <View style={styles.screenRoot}>
       <CreateMeetingAgenticAiProvider>
         <CreateMeetingAgenticAiBootstrap />
+        <CreateMeetingAgenticSurfaceBinder handlesRef={agenticSurfaceRef} />
         <CreateMeetingWizardAgentBridge
           currentStep={currentStep}
           scheduleStep={scheduleStep}

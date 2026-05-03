@@ -2,8 +2,9 @@
  * 자연어 → 모임 생성 위저드용 구조화 JSON (Google Gemini).
  *
  * Secret: GEMINI_API_KEY
- * Request JSON: { text, categories: [{ id, label }], todayYmd?: string }
- * Response JSON: { result } — 클라이언트 파서용 필드 + 모델 출력에 반드시 포함: 이름, 인원, 날짜, 장소 (시각 권장)
+ * Request JSON: { text, categories, todayYmd?, mode?, history?, accumulated? }
+ * - mode 생략 또는 `wizard_fill`: 기존 원샷 동작, 응답 `{ result }`
+ * - mode `chat_turn`: 멀티턴, 응답 `{ assistantReply, result, readyToConfirm? }` — result는 누적 병합 후 전체 상태
  */
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 
@@ -28,7 +29,40 @@ type ReqBody = {
   text?: string;
   categories?: CategoryRow[];
   todayYmd?: string;
+  mode?: string;
+  history?: string[];
+  accumulated?: Record<string, unknown>;
 };
+
+function mergeMeetingCreateNluAccumulated(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null || v === undefined) continue;
+    if (k === '인원' && typeof v === 'object' && !Array.isArray(v)) {
+      const prev =
+        typeof out['인원'] === 'object' && out['인원'] !== null && !Array.isArray(out['인원'])
+          ? (out['인원'] as Record<string, unknown>)
+          : {};
+      out['인원'] = { ...prev, ...(v as Record<string, unknown>) };
+      continue;
+    }
+    if (k === 'publicMeetingDetails' && typeof v === 'object' && !Array.isArray(v)) {
+      const prev =
+        typeof out.publicMeetingDetails === 'object' &&
+        out.publicMeetingDetails !== null &&
+        !Array.isArray(out.publicMeetingDetails)
+          ? (out.publicMeetingDetails as Record<string, unknown>)
+          : {};
+      out.publicMeetingDetails = { ...prev, ...(v as Record<string, unknown>) };
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
 
 /** Gemini가 한글 키로 내려준 값을 기존 클라이언트(`parseMeetingCreateNluPayload`) 필드로 병합 */
 function mergeKoreanKeysIntoPayload(raw: Record<string, unknown>): Record<string, unknown> {
@@ -128,7 +162,10 @@ serve(async (req) => {
     .map((c) => `- id: "${String(c.id).trim()}"  label: "${String(c.label).trim()}"`)
     .join('\n');
 
-  const systemPrompt = `You are a strict JSON generator for a Korean meeting ("모임") creation wizard.
+  const mode = String(body.mode ?? '').trim();
+  const isChatTurn = mode === 'chat_turn';
+
+  const systemPromptWizard = `You are a strict JSON generator for a Korean meeting ("모임") creation wizard.
 Respond with a single JSON object only (no markdown).
 
 You MUST include these keys (Korean), populated from the user message:
@@ -153,7 +190,44 @@ Rules:
 Allowed categories:
 ${catLines}`;
 
-  const userText = `오늘 날짜(로컬): ${todayYmd}\n사용자 입력:\n${text}`;
+  const systemPromptChat = `You help a Korean user create a meeting ("모임") in multiple turns.
+Respond with a single JSON object only (no markdown).
+
+REQUIRED top-level keys:
+- assistantReply: string — 1–3 short Korean sentences: friendly, acknowledge greetings, ask for the next missing piece (category, title, schedule, headcount, place, public/private, food menu preference if food).
+- readyToConfirm: boolean or null — true only if you believe every required wizard field is confidently filled; else null/false.
+
+Also include the SAME schema as the one-shot wizard (merge new facts from the latest user message into prior state mentally, then output the FULL updated snapshot):
+- "이름": string or null if unknown yet.
+- "인원": object with "최소"/"최대" integers or null fields inside if unknown.
+- "날짜", "시각", "장소" (Korean) — use null or "" when unknown.
+- categoryId: one of the listed ids OR null if unknown.
+- categoryLabel, suggestedIsPublic, menuPreferenceLabel, canAutoCompleteThroughStep3, publicMeetingDetails, unknowns — same rules as wizard mode.
+- Use JSON null for anything not yet known (do not erase prior values: the server merges with accumulated).
+
+Rules:
+- Relative dates use todayYmd=${todayYmd}.
+- If the user only greets, reply warmly and ask what kind of meeting (category) they want.
+
+Allowed categories:
+${catLines}`;
+
+  const systemPrompt = isChatTurn ? systemPromptChat : systemPromptWizard;
+
+  const accumulated =
+    body.accumulated && typeof body.accumulated === 'object' && !Array.isArray(body.accumulated)
+      ? (body.accumulated as Record<string, unknown>)
+      : {};
+
+  const histLines = Array.isArray(body.history)
+    ? body.history.map((h) => String(h ?? '').trim()).filter((h) => h.length > 0)
+    : [];
+
+  const userText = isChatTurn
+    ? `오늘 날짜(로컬): ${todayYmd}\n이전에 수집된 상태(JSON):\n${JSON.stringify(accumulated)}\n\n최근 대화:\n${
+      histLines.length ? histLines.map((l, i) => `${i + 1}. ${l}`).join('\n') : '(없음)'
+    }\n\n새 사용자 메시지:\n${text}`
+    : `오늘 날짜(로컬): ${todayYmd}\n사용자 입력:\n${text}`;
 
   const geminiUrl =
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${
@@ -205,6 +279,23 @@ ${catLines}`;
   } catch (e) {
     console.error('[parse-meeting-create-intent] Ginit_AI_Error', 'model_text_not_json', String(e), content.slice(0, 400));
     return jsonResponse({ error: 'Model returned non-JSON' }, 502);
+  }
+
+  if (isChatTurn) {
+    const assistantRaw = parsed['assistantReply'];
+    const assistantReply = typeof assistantRaw === 'string' && assistantRaw.trim()
+      ? assistantRaw.trim()
+      : '알겠어요. 모임 종류나 일정을 조금만 더 알려 주세요.';
+    const rtcRaw = parsed['readyToConfirm'];
+    const readyToConfirm = typeof rtcRaw === 'boolean' ? rtcRaw : null;
+
+    delete parsed['assistantReply'];
+    delete parsed['readyToConfirm'];
+
+    const mergedModel = mergeKoreanKeysIntoPayload(parsed);
+    const merged = mergeMeetingCreateNluAccumulated(accumulated, mergedModel);
+
+    return jsonResponse({ assistantReply, readyToConfirm, result: merged });
   }
 
   const merged = mergeKoreanKeysIntoPayload(parsed);

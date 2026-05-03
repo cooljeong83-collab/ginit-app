@@ -19,7 +19,7 @@ export type CreateMeetingWizardAgentBridgeProps = {
   categories: Category[];
   /** Step 2 안내 — `major_code`·특화 카드와 맞추기 위해 1단계에서 선택된 카테고리 id */
   selectedCategoryId: string | null;
-  applyWizardSuggestion: (s: WizardSuggestion) => void;
+  applyWizardSuggestion: (s: WizardSuggestion) => void | Promise<void>;
   placesFormRef: RefObject<null | { setPlaceQueryFromAgent?: (q: string) => void }>;
   /** 오토파일럿이 말풍선·수락을 직접 제어하는 동안 브리지가 덮어쓰지 않음 */
   autopilotCoachLocked?: boolean;
@@ -50,6 +50,7 @@ export function CreateMeetingWizardAgentBridge({
     registerAcceptSuggestion,
     registerSecondaryAction,
     setWizardAwaitingFinalSubmit,
+    agentOwnsWizardBubble,
   } = useCreateMeetingAgenticAi();
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export function CreateMeetingWizardAgentBridge({
 
     setWizardAwaitingFinalSubmit(currentStep === detailStep);
 
-    if (autopilotCoachLocked) {
+    if (autopilotCoachLocked || agentOwnsWizardBubble) {
       return;
     }
 
@@ -179,6 +180,7 @@ export function CreateMeetingWizardAgentBridge({
     setWizardAwaitingFinalSubmit,
     detailStep,
     autopilotCoachLocked,
+    agentOwnsWizardBubble,
   ]);
 
   useEffect(() => {

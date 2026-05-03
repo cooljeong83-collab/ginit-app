@@ -64,6 +64,12 @@ export type CreateMeetingAgenticAiContextValue = {
   /** 위저드 마지막 카드(제출 직전) — 오토파일럿·하이라이트 연동용 */
   wizardAwaitingFinalSubmit: boolean;
   setWizardAwaitingFinalSubmit: (v: boolean) => void;
+  /**
+   * NLU 멀티턴 대화가 말풍선·수락 CTA를 소유할 때 true.
+   * `CreateMeetingWizardAgentBridge`가 코치 멘트로 덮어쓰지 않도록 사용합니다.
+   */
+  agentOwnsWizardBubble: boolean;
+  setAgentOwnsWizardBubble: (v: boolean) => void;
 };
 
 const defaultInjected: CreateMeetingAgenticAiInjectedData = {
@@ -197,6 +203,7 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
   const secondaryRef = useRef<(() => void) | null>(null);
   const [secondaryActionLabel, setSecondaryActionLabel] = useState<string | null>(null);
   const [wizardAwaitingFinalSubmit, setWizardAwaitingFinalSubmit] = useState(false);
+  const [agentOwnsWizardBubble, setAgentOwnsWizardBubble] = useState(false);
 
   const setInjectedData = useCallback((patch: Partial<CreateMeetingAgenticAiInjectedData>) => {
     if (Object.prototype.hasOwnProperty.call(patch, 'intelligentSuggestion')) {
@@ -257,6 +264,8 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
       mzLine,
       wizardAwaitingFinalSubmit,
       setWizardAwaitingFinalSubmit,
+      agentOwnsWizardBubble,
+      setAgentOwnsWizardBubble,
     }),
     [
       data,
@@ -273,6 +282,7 @@ export function CreateMeetingAgenticAiProvider({ children, initialData }: Provid
       runSecondaryAction,
       mzLine,
       wizardAwaitingFinalSubmit,
+      agentOwnsWizardBubble,
     ],
   );
 
