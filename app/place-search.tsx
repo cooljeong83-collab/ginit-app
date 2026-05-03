@@ -28,6 +28,7 @@ import {
   type PlaceSearchRow,
 } from '@/src/lib/google-places-text-search';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
+import { setCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import { resolveNaverPlaceDetailWebUrlLikeVoteChip, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
@@ -52,9 +53,16 @@ export type PlaceSearchScreenProps = {
   initialQuery?: string;
   /** 후보 행에서 열었을 때 — 확인 시 이 ID로만 브리지에 저장 */
   voteRowId?: string;
+  /** `1`이면 검색 완료 후 첫 결과 선택·확인까지 자동(모임 생성 오토파일럿) */
+  createAutopilot?: string;
 };
 
-function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, voteRowId }: PlaceSearchScreenProps) {
+function PlaceSearchScreenInner({
+  useInlineMapPreview = false,
+  initialQuery,
+  voteRowId,
+  createAutopilot,
+}: PlaceSearchScreenProps) {
   const router = useRouter();
   const searchInputRef = useRef<TextInput>(null);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -77,6 +85,17 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const lastListSearchKeyRef = useRef('');
   const loadMoreGuardRef = useRef(false);
+  const autopilotEmptyHandledRef = useRef(false);
+  const autopilotPickStartedRef = useRef(false);
+  const autopilotConfirmStartedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      autopilotEmptyHandledRef.current = false;
+      autopilotPickStartedRef.current = false;
+      autopilotConfirmStartedRef.current = false;
+    };
+  }, []);
 
   const canConfirm =
     selected != null && selected.latitude != null && selected.longitude != null && !resolving;
@@ -232,6 +251,46 @@ function PlaceSearchScreenInner({ useInlineMapPreview = false, initialQuery, vot
     }
     router.back();
   }, [router, selected, voteRowId]);
+
+  const onConfirmRef = useRef(onConfirm);
+  onConfirmRef.current = onConfirm;
+
+  const createAutopilotOn = createAutopilot === '1';
+
+  useEffect(() => {
+    if (!createAutopilotOn) return;
+    if (!hasSearched || loading) return;
+    if (results.length > 0) return;
+    if (autopilotEmptyHandledRef.current) return;
+    autopilotEmptyHandledRef.current = true;
+    setCreateMeetingPlaceAutopilotError(error?.trim() ? error : '검색 결과가 없어요.');
+    router.back();
+  }, [createAutopilotOn, hasSearched, loading, results.length, error, router]);
+
+  useEffect(() => {
+    if (!createAutopilotOn) return;
+    if (!hasSearched || loading || resolving) return;
+    if (results.length === 0) return;
+    if (autopilotPickStartedRef.current) return;
+    autopilotPickStartedRef.current = true;
+    const first = results[0];
+    const t = setTimeout(() => {
+      void onSelectPlace(first);
+    }, 420);
+    return () => clearTimeout(t);
+  }, [createAutopilotOn, hasSearched, loading, resolving, results, onSelectPlace]);
+
+  useEffect(() => {
+    if (!createAutopilotOn) return;
+    if (!selected || resolving) return;
+    if (selected.latitude == null || selected.longitude == null) return;
+    if (autopilotConfirmStartedRef.current) return;
+    autopilotConfirmStartedRef.current = true;
+    const t = setTimeout(() => {
+      onConfirmRef.current();
+    }, 520);
+    return () => clearTimeout(t);
+  }, [createAutopilotOn, selected, resolving]);
 
   return (
     <View style={GinitStyles.screenRoot}>
@@ -462,15 +521,17 @@ const styles = StyleSheet.create({
 });
 
 export default function PlaceSearchRoute() {
-  const { initialQuery, voteRowId } = useLocalSearchParams<{
+  const { initialQuery, voteRowId, createAutopilot } = useLocalSearchParams<{
     initialQuery?: string | string[];
     voteRowId?: string | string[];
+    createAutopilot?: string | string[];
   }>();
   return (
     <PlaceSearchScreen
       useInlineMapPreview
       initialQuery={pickParam(initialQuery)?.trim()}
       voteRowId={pickParam(voteRowId)?.trim()}
+      createAutopilot={pickParam(createAutopilot)?.trim()}
     />
   );
 }

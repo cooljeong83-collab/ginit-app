@@ -60,6 +60,7 @@ import {
 import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
 import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
 import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
+import { CreateMeetingNluComposerDock } from '@/components/create/CreateMeetingNluComposerDock';
 import { CreateMeetingWizardAgentBridge } from '@/components/create/CreateMeetingWizardAgentBridge';
 import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
 import { GameKindPreference } from '@/components/create/GameKindPreference';
@@ -97,6 +98,7 @@ import {
   notifyCreateMeetingAgentBubbleDismissFromManualScroll,
   notifyCreateMeetingAgentBubbleShow,
 } from '@/src/lib/create-meeting-agent-bubble-dismiss';
+import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   getAgentFabMotionMode,
   getAgentStep1InteractionUnlocked,
@@ -140,6 +142,12 @@ import {
   type MeetingTitleSuggestionContext,
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
+import {
+  applyPartialPublicMeetingDetails,
+  parseMeetingCreateNluPayload,
+  wizardSuggestionFromNluPlan,
+} from '@/src/lib/meeting-create-nlu';
+import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
 import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
@@ -631,7 +639,7 @@ export type VoteCandidatesFormHandle = {
   /** 장소 스텝 첫 입력(검색어) 포커스 */
   focusPlaceQueryInput: () => void;
   /** 첫 장소 행에 검색어를 넣고 장소 검색 화면을 열어 자동 검색·포커스 */
-  openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => void;
+  openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string, opts?: { createAutopilot?: boolean }) => void;
   /** 인라인 장소 검색어 주입 후 debounce 검색(에이전트) */
   setPlaceQueryFromAgent: (q: string) => void;
   /** 장소 검색 대기 행·모달 등 파생 UI 정리 */
@@ -1367,7 +1375,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       /** 키보드는 사용자가 입력창을 탭할 때만 뜨도록, 자동 포커스는 하지 않습니다. */
       focusScheduleIdeaInput: () => {},
       focusPlaceQueryInput: () => {},
-      openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string) => {
+      openFirstPlaceSearchWithSuggestedQuery: (suggestedQuery: string, opts?: { createAutopilot?: boolean }) => {
         const q = suggestedQuery.trim() || '카페';
         setPlaceCandidates((prev) => {
           if (prev.length === 0) return [emptyPlaceRow(q)];
@@ -1380,7 +1388,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               if (!r0) return;
               router.push({
                 pathname: '/place-search',
-                params: { initialQuery: q, voteRowId: r0.id },
+                params: {
+                  initialQuery: q,
+                  voteRowId: r0.id,
+                  ...(opts?.createAutopilot ? { createAutopilot: '1' } : {}),
+                },
               });
             });
           });
@@ -2943,6 +2955,7 @@ export default function CreateDetailsScreen() {
   const placesFormRef = useRef<VoteCandidatesFormHandle>(null);
   /** `applyWizardSuggestion`가 `handleConfirmSchedule`보다 위에 있어 ref로 최신 콜백을 참조 */
   const handleConfirmScheduleRef = useRef<() => Promise<void>>(async () => {});
+  const onPlacesStepConfirmRef = useRef<() => void>(() => {});
   // KeyboardAwareScrollView로 래핑되므로 ref는 any로 두고 scrollTo만 사용합니다.
   const mainScrollRef = useRef<any>(null);
   /** `measureInWindow()` 가능한 메인 스크롤 호스트(View) */
@@ -3089,19 +3102,22 @@ export default function CreateDetailsScreen() {
 
   const [voiceTitleRecognizing, setVoiceTitleRecognizing] = useState(false);
   const [voiceDescriptionRecognizing, setVoiceDescriptionRecognizing] = useState(false);
-  /** 제목·상세 소개 음성 입력이 같은 모듈 리스너를 쓰므로 결과 라우팅용 */
-  const voiceCreateTargetRef = useRef<'title' | 'description' | null>(null);
+  const [voiceNluDraftRecognizing, setVoiceNluDraftRecognizing] = useState(false);
+  /** 제목·상세·자연어 입력 음성이 같은 모듈 리스너를 쓰므로 결과 라우팅용 */
+  const voiceCreateTargetRef = useRef<'title' | 'description' | 'nluDraft' | null>(null);
 
   useSpeechRecognitionEvent('start', () => {
     const k = voiceCreateTargetRef.current;
     if (k === 'title') setVoiceTitleRecognizing(true);
     if (k === 'description') setVoiceDescriptionRecognizing(true);
+    if (k === 'nluDraft') setVoiceNluDraftRecognizing(true);
   });
   useSpeechRecognitionEvent('end', () => {
     const k = voiceCreateTargetRef.current;
     if (!k) return;
     setVoiceTitleRecognizing(false);
     setVoiceDescriptionRecognizing(false);
+    setVoiceNluDraftRecognizing(false);
     voiceCreateTargetRef.current = null;
   });
   useSpeechRecognitionEvent('error', (event) => {
@@ -3109,6 +3125,7 @@ export default function CreateDetailsScreen() {
     if (!k) return;
     setVoiceTitleRecognizing(false);
     setVoiceDescriptionRecognizing(false);
+    setVoiceNluDraftRecognizing(false);
     voiceCreateTargetRef.current = null;
     Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
   });
@@ -3119,16 +3136,18 @@ export default function CreateDetailsScreen() {
     if (!k) return;
     if (k === 'title') setTitle(t);
     if (k === 'description') setDescription(t);
+    if (k === 'nluDraft') setNaturalLanguageDraft(t);
     if (event?.isFinal) {
       setVoiceTitleRecognizing(false);
       setVoiceDescriptionRecognizing(false);
+      setVoiceNluDraftRecognizing(false);
       voiceCreateTargetRef.current = null;
       ExpoSpeechRecognitionModule.stop();
     }
   });
 
   const onPressVoiceInputTitle = useCallback(async () => {
-    if (voiceTitleRecognizing || voiceDescriptionRecognizing) {
+    if (voiceTitleRecognizing || voiceDescriptionRecognizing || voiceNluDraftRecognizing) {
       ExpoSpeechRecognitionModule.stop();
       return;
     }
@@ -3144,10 +3163,10 @@ export default function CreateDetailsScreen() {
       maxAlternatives: 1,
       continuous: false,
     });
-  }, [voiceDescriptionRecognizing, voiceTitleRecognizing]);
+  }, [voiceDescriptionRecognizing, voiceNluDraftRecognizing, voiceTitleRecognizing]);
 
   const onPressVoiceInputDescription = useCallback(async () => {
-    if (voiceTitleRecognizing || voiceDescriptionRecognizing) {
+    if (voiceTitleRecognizing || voiceDescriptionRecognizing || voiceNluDraftRecognizing) {
       ExpoSpeechRecognitionModule.stop();
       return;
     }
@@ -3163,7 +3182,26 @@ export default function CreateDetailsScreen() {
       maxAlternatives: 1,
       continuous: false,
     });
-  }, [voiceDescriptionRecognizing, voiceTitleRecognizing]);
+  }, [voiceDescriptionRecognizing, voiceNluDraftRecognizing, voiceTitleRecognizing]);
+
+  const onPressVoiceNaturalLanguageDraft = useCallback(async () => {
+    if (voiceTitleRecognizing || voiceDescriptionRecognizing || voiceNluDraftRecognizing) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      return;
+    }
+    voiceCreateTargetRef.current = 'nluDraft';
+    ExpoSpeechRecognitionModule.start({
+      lang: 'ko-KR',
+      interimResults: true,
+      maxAlternatives: 1,
+      continuous: false,
+    });
+  }, [voiceDescriptionRecognizing, voiceNluDraftRecognizing, voiceTitleRecognizing]);
 
   const [aiTitleSuggestions, setAiTitleSuggestions] = useState<string[]>([]);
   const [titleRegion, setTitleRegion] = useState<string | null>(null);
@@ -3178,6 +3216,10 @@ export default function CreateDetailsScreen() {
   const [focusKnowledgePreferences, setFocusKnowledgePreferences] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
+  const [naturalLanguageDraft, setNaturalLanguageDraft] = useState('');
+  const [nluBusy, setNluBusy] = useState(false);
+  const [nluDockHeightPx, setNluDockHeightPx] = useState(152);
+  const [autopilotCoachLocked, setAutopilotCoachLocked] = useState(false);
   const [agentWizardApplyCue, setAgentWizardApplyCue] = useState<AgentWizardApplyCue | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   currentStepRef.current = currentStep;
@@ -3813,6 +3855,7 @@ export default function CreateDetailsScreen() {
         const isApplyRunAlive = () => runId === agentWizardApplyRunIdRef.current;
         const tapHoldMs = AGENT_APPLY_TAP_HOLD_MS;
         const stepGapMs = AGENT_APPLY_STEP_GAP_MS;
+        setAutopilotCoachLocked(true);
 
         const runFallbackImmediate = () => {
           setSelectedCategoryId(sugg.categoryId);
@@ -3952,15 +3995,91 @@ export default function CreateDetailsScreen() {
           setAgentWizardApplyCue(null);
           await sleep(stepGapMs);
           await handleConfirmScheduleRef.current();
+          if (!isApplyRunAlive()) return;
+
+          const placeQ = (sugg.placeAutoPickQuery ?? sugg.placeSearchHint ?? '').trim();
+          if (placeQ) {
+            placesFormRef.current?.openFirstPlaceSearchWithSuggestedQuery(placeQ, { createAutopilot: true });
+            for (let j = 0; j < 120; j += 1) {
+              await sleep(250);
+              if (!isApplyRunAlive()) return;
+              const placeErr = consumeCreateMeetingPlaceAutopilotError();
+              if (placeErr) {
+                setWizardError(placeErr);
+                showTransientBottomMessage(placeErr);
+                return;
+              }
+              const vr = placesFormRef.current?.validatePlacesStep();
+              if (vr?.ok) break;
+            }
+            if (!placesFormRef.current?.validatePlacesStep()?.ok) {
+              const msg = '장소 후보를 자동으로 채우지 못했어요. 장소를 선택해 주세요.';
+              setWizardError(msg);
+              showTransientBottomMessage(msg);
+              return;
+            }
+            await sleep(stepGapMs);
+            onPlacesStepConfirmRef.current();
+          }
+
+          if (!isApplyRunAlive()) return;
+          if (isPublicMeetingRef.current && sugg.publicMeetingDetailsPartial) {
+            setMeetingConfig((prev) => applyPartialPublicMeetingDetails(prev, sugg.publicMeetingDetailsPartial!));
+          }
         } catch {
           setAgentWizardApplyCue(null);
         } finally {
+          setAutopilotCoachLocked(false);
           setAgentFabMotionMode('user');
         }
       })();
     },
     [categories],
   );
+
+  const applyWizardSuggestionRef = useRef(applyWizardSuggestion);
+  applyWizardSuggestionRef.current = applyWizardSuggestion;
+
+  const onPressAnalyzeNaturalLanguage = useCallback(async () => {
+    const raw = naturalLanguageDraft.trim();
+    if (!raw) {
+      Alert.alert('입력', '모임 내용을 입력하거나 음성으로 말해 주세요.');
+      return;
+    }
+    if (catLoading || categories.length === 0) {
+      Alert.alert('잠시만요', '카테고리를 불러오는 중입니다.');
+      return;
+    }
+    setNluBusy(true);
+    setWizardError(null);
+    try {
+      const todayYmd = fmtDate(new Date());
+      const inv = await invokeParseMeetingCreateIntent({
+        text: raw,
+        categories: categories.map((c) => ({ id: c.id, label: c.label })),
+        todayYmd,
+      });
+      if (!inv.ok) {
+        setWizardError(inv.error);
+        showTransientBottomMessage(inv.error);
+        return;
+      }
+      const parsed = parseMeetingCreateNluPayload(categories, inv.result, new Date());
+      if (!parsed.ok) {
+        setWizardError(parsed.error);
+        showTransientBottomMessage(parsed.error);
+        return;
+      }
+      const sugg = wizardSuggestionFromNluPlan(parsed.plan, categories);
+      applyWizardSuggestionRef.current(sugg);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '분석에 실패했습니다.';
+      setWizardError(msg);
+      showTransientBottomMessage(msg);
+    } finally {
+      setNluBusy(false);
+    }
+  }, [catLoading, categories, naturalLanguageDraft]);
 
   const onStep3BasicNext = useCallback(() => {
     setWizardError(null);
@@ -4051,6 +4170,10 @@ export default function CreateDetailsScreen() {
     }
     setCurrentStep(detailStep);
   }, [detailStep]);
+
+  useEffect(() => {
+    onPlacesStepConfirmRef.current = onPlacesStepConfirm;
+  }, [onPlacesStepConfirm]);
 
   const handleBack = useCallback(() => {
     router.back();
@@ -4289,8 +4412,9 @@ export default function CreateDetailsScreen() {
           selectedCategoryId={selectedCategoryId}
           applyWizardSuggestion={applyWizardSuggestion}
           placesFormRef={placesFormRef}
+          autopilotCoachLocked={autopilotCoachLocked}
         />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
           <View style={styles.topBarRow}>
             <Pressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
               <Text style={styles.backLink}>← 닫기</Text>
@@ -4317,6 +4441,7 @@ export default function CreateDetailsScreen() {
             </View>
           ) : null}
 
+          <View style={styles.nluWizardBodyHost}>
           <View ref={mainScrollHostRef} collapsable={false} style={GinitStyles.flexFill}>
             <KeyboardAwareScreenScroll
               ref={mainScrollRef}
@@ -4362,8 +4487,11 @@ export default function CreateDetailsScreen() {
               contentContainerStyle={[
                 styles.scrollContent,
                 styles.wizardScrollPad,
-                // 상세 단계: 하단 floating CTA가 마지막 카드를 가리지 않도록 추가 여백 확보
                 currentStep === detailStep && { paddingBottom: 132 + insets.bottom },
+                !snsDemographicsBlocked && {
+                  paddingBottom:
+                    (currentStep === detailStep ? 132 + insets.bottom : 120) + nluDockHeightPx,
+                },
               ]}>
               <View collapsable={false}>
               <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
@@ -4954,6 +5082,25 @@ export default function CreateDetailsScreen() {
               </View>
             </KeyboardAwareScreenScroll>
           </View>
+          {!snsDemographicsBlocked ? (
+            <View style={styles.nluComposerOverlay} pointerEvents="box-none">
+              <CreateMeetingNluComposerDock
+                draft={naturalLanguageDraft}
+                onChangeDraft={setNaturalLanguageDraft}
+                onSend={() => {
+                  void onPressAnalyzeNaturalLanguage();
+                }}
+                onPressVoice={onPressVoiceNaturalLanguageDraft}
+                voiceRecognizing={voiceNluDraftRecognizing}
+                nluBusy={nluBusy}
+                catLoading={catLoading}
+                busy={busy}
+                horizontalBleedPx={0}
+                onDockHeightChange={setNluDockHeightPx}
+              />
+            </View>
+          ) : null}
+            </View>
 
           {currentStep === detailStep ? (
             <Pressable
@@ -4962,7 +5109,10 @@ export default function CreateDetailsScreen() {
               style={({ pressed }) => [
                 styles.detailFinalFloatingBtn,
                 {
-                  bottom: (wizardError ? 88 : 28) + insets.bottom,
+                  bottom:
+                    (wizardError ? 88 : 28) +
+                    insets.bottom +
+                    (!snsDemographicsBlocked ? nluDockHeightPx : 0),
                 },
                 finalDisabled && styles.addCandidateBtnDisabled,
                 pressed && !finalDisabled && styles.addCandidateBtnPressed,
@@ -4989,7 +5139,12 @@ export default function CreateDetailsScreen() {
           ) : null}
 
           {wizardError ? (
-            <Text pointerEvents="none" style={styles.wizardFloatingError}>
+            <Text
+              pointerEvents="none"
+              style={[
+                styles.wizardFloatingError,
+                !snsDemographicsBlocked && { bottom: 24 + nluDockHeightPx },
+              ]}>
               {wizardError}
             </Text>
           ) : null}
@@ -5000,6 +5155,7 @@ export default function CreateDetailsScreen() {
           cardWindowRect={aiFabScreenBottomLayout ? null : agentFabWindowRect}
           windowWidth={windowWidth}
           wizardStep={currentStep}
+          extraScreenBottomPx={snsDemographicsBlocked ? 0 : nluDockHeightPx}
         />
       ) : null}
       </CreateMeetingAgenticAiProvider>
@@ -5025,6 +5181,20 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     marginBottom: 4,
     gap: 8,
+  },
+  /** NLU 도크 absolute 기준 — 스크롤이 세로 전체를 쓰도록 */
+  nluWizardBodyHost: {
+    flex: 1,
+    minHeight: 0,
+    position: 'relative',
+  },
+  /** safeArea `paddingHorizontal` 상쇄 + 스크롤 위 z-order */
+  nluComposerOverlay: {
+    position: 'absolute',
+    left: -GinitTheme.spacing.md,
+    right: -GinitTheme.spacing.md,
+    bottom: 0,
+    zIndex: 95,
   },
   snsGateBanner: {
     marginBottom: 12,

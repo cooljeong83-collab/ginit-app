@@ -94,6 +94,8 @@ export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSna
     menuPreferenceLabel: menu,
     canAutoCompleteThroughStep3: canAuto,
     placeSearchHint: placeSearchHint,
+    placeAutoPickQuery: placeSearchHint,
+    publicMeetingDetailsPartial: null,
     suggestedIsPublic: null,
     autoBasicInfo,
     autoSchedule,

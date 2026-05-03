@@ -1,4 +1,4 @@
-import type { Meeting } from '@/src/lib/meetings';
+import type { Meeting, PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
 
 /** 로컬 시간대 기준 슬롯 — `CreateMeetingAgenticAiContext`와 동일 규칙 */
@@ -100,6 +100,13 @@ export type WizardSuggestion = {
   canAutoCompleteThroughStep3: boolean;
   /** Step 5 등 — 집계 기반 장소 검색 힌트 */
   placeSearchHint: string | null;
+  /**
+   * 일정 이후 place-search 자동 동선에 넣을 쿼리.
+   * 없으면 `placeSearchHint`를 그대로 씁니다.
+   */
+  placeAutoPickQuery?: string | null;
+  /** 자연어 등 — 상세(`meetingConfig`)에 병합할 공개 모임 조건(비공개면 무시) */
+  publicMeetingDetailsPartial?: Partial<PublicMeetingDetailsConfig> | null;
   /** 에이전트 수락 시 공개 여부(null이면 UI만 펄스·상태 유지) */
   suggestedIsPublic?: boolean | null;
   /** 3단계 기본정보 자동 — 인원은 참여 이력 평균 */

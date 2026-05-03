@@ -86,6 +86,8 @@ export type CreateMeetingAgenticAiFabProps = {
   windowWidth?: number;
   /** 위저드 단계가 올라갈 때마다 말풍선을 스크롤 닫힘과 무관하게 다시 등장(인트로)시킴 */
   wizardStep?: number;
+  /** 하단 NLU 채팅 도크 등으로 `screenBottom` FAB을 위로 올릴 추가 px */
+  extraScreenBottomPx?: number;
 };
 
 function AiCircleButton({ pressed }: { pressed?: boolean }) {
@@ -111,9 +113,10 @@ export function CreateMeetingAgenticAiFab({
   cardWindowRect,
   windowWidth,
   wizardStep,
+  extraScreenBottomPx = 0,
 }: CreateMeetingAgenticAiFabProps = {}) {
   const insets = useSafeAreaInsets();
-  const AIFAB_BUBBLE_WIDTH = 270;
+  const AIFAB_BUBBLE_WIDTH = 280;
   const { width: layoutWindowWidth, height: layoutWindowHeight } = useWindowDimensions();
   const resolvedScreenW = windowWidth ?? layoutWindowWidth;
   /** 말풍선이 화면 왼쪽에 붙지 않도록 — FAB·여백 제외한 상한(최대 약 256) jjg 말풍선 width 설정 */
@@ -121,7 +124,7 @@ export function CreateMeetingAgenticAiFab({
     const w = resolvedScreenW;
     if (!Number.isFinite(w) || w <= 0) return AIFAB_BUBBLE_WIDTH;
     const reserve = BTN_SIZE + 8 + FAB_MARGIN * 2 + insets.left + insets.right;
-    return Math.max(270, Math.min(AIFAB_BUBBLE_WIDTH, Math.floor(w - reserve)));
+    return Math.max(280, Math.min(AIFAB_BUBBLE_WIDTH, Math.floor(w - reserve)));
   }, [resolvedScreenW, insets.left, insets.right]);
   const bubbleMinW = Math.min(AIFAB_BUBBLE_WIDTH, bubbleMaxW);
 
@@ -136,9 +139,9 @@ export function CreateMeetingAgenticAiFab({
   const geo = useMemo(
     () => ({
       finalRight: FAB_MARGIN + insets.right,
-      finalBottom: FAB_MARGIN + insets.bottom,
+      finalBottom: FAB_MARGIN + insets.bottom + Math.max(0, extraScreenBottomPx),
     }),
-    [insets.right, insets.bottom],
+    [extraScreenBottomPx, insets.right, insets.bottom],
   );
 
   /** 말풍선이 길어져도 FAB 도크가 안전영역·화면 안에 남도록 잡는 여유(대략적 상한) */

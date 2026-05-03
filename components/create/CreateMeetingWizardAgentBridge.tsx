@@ -22,6 +22,8 @@ export type CreateMeetingWizardAgentBridgeProps = {
   selectedCategoryId: string | null;
   applyWizardSuggestion: (s: WizardSuggestion) => void;
   placesFormRef: RefObject<null | { setPlaceQueryFromAgent?: (q: string) => void }>;
+  /** 오토파일럿이 말풍선·수락을 직접 제어하는 동안 브리지가 덮어쓰지 않음 */
+  autopilotCoachLocked?: boolean;
 };
 
 /**
@@ -38,6 +40,7 @@ export function CreateMeetingWizardAgentBridge({
   selectedCategoryId,
   applyWizardSuggestion,
   placesFormRef,
+  autopilotCoachLocked = false,
 }: CreateMeetingWizardAgentBridgeProps) {
   const {
     agentSnapshot,
@@ -62,6 +65,10 @@ export function CreateMeetingWizardAgentBridge({
     }
 
     setWizardAwaitingFinalSubmit(currentStep === detailStep);
+
+    if (autopilotCoachLocked) {
+      return;
+    }
 
     if (currentStep === 1) {
       setCoachPhase('details_pattern_suggest');
@@ -187,6 +194,7 @@ export function CreateMeetingWizardAgentBridge({
     setShowAcceptButton,
     setWizardAwaitingFinalSubmit,
     detailStep,
+    autopilotCoachLocked,
   ]);
 
   useEffect(() => {
