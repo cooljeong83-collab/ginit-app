@@ -34,6 +34,14 @@ export {
   buildDetailsPatternSuggestMessage,
   buildStep1FrequentPatternOfferMessage,
 } from '@/src/lib/agentic-guide/build-details-pattern-message';
+export {
+  buildStep1ConversationalGreetingFromParts,
+  buildStep1ConversationalGreetingMessage,
+  formatKoWeekdaySlot,
+  locationLineKo,
+  weatherMoodShortKo,
+} from '@/src/lib/agentic-guide/build-step1-conversational-greeting';
+export type { Step1GreetingParts } from '@/src/lib/agentic-guide/build-step1-conversational-greeting';
 export { buildWizardSuggestion } from '@/src/lib/agentic-guide/build-wizard-suggestion';
 export { pickAutoWizardScheduleFromSnapshot } from '@/src/lib/agentic-guide/pick-auto-wizard-schedule';
 export { buildWizardTitleSuggestionContextFromSnapshot } from '@/src/lib/agentic-guide/build-wizard-title-suggestion-context';

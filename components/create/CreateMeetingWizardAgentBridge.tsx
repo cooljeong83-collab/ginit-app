@@ -1,10 +1,9 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, type RefObject } from 'react';
 
 import { useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgenticAiContext';
-import { buildStep1FrequentPatternOfferMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
 import { buildStepCoachMessage } from '@/src/lib/agentic-guide/build-step-coach-message';
 import { buildStep2SpecialtyCoachMessage } from '@/src/lib/agentic-guide/build-step2-specialty-coach-message';
-import { buildWizardSuggestion } from '@/src/lib/agentic-guide/build-wizard-suggestion';
+import { buildStep1ConversationalGreetingMessage } from '@/src/lib/agentic-guide/build-step1-conversational-greeting';
 import { isColdStartForAgentSnapshot } from '@/src/lib/agentic-guide/cold-start';
 import { summarizeFrequentPlaceNames } from '@/src/lib/agentic-guide/summarize-frequent-place-names';
 import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
@@ -53,11 +52,6 @@ export function CreateMeetingWizardAgentBridge({
     setWizardAwaitingFinalSubmit,
   } = useCreateMeetingAgenticAi();
 
-  const snapRef = useRef(agentSnapshot);
-  const catRef = useRef(categories);
-  snapRef.current = agentSnapshot;
-  catRef.current = categories;
-
   useEffect(() => {
     if (hydrationStatus !== 'ready' || !agentSnapshot) {
       setWizardAwaitingFinalSubmit(false);
@@ -72,18 +66,9 @@ export function CreateMeetingWizardAgentBridge({
 
     if (currentStep === 1) {
       setCoachPhase('details_pattern_suggest');
-      setIntelligentSuggestionDirect(buildStep1FrequentPatternOfferMessage(agentSnapshot));
-      const cold = isColdStartForAgentSnapshot(agentSnapshot);
-      const sugg = cold ? null : buildWizardSuggestion(categories, agentSnapshot);
-      registerAcceptSuggestion(
-        cold
-          ? null
-          : () => {
-              const s = buildWizardSuggestion(catRef.current, snapRef.current!);
-              if (s) applyWizardSuggestion(s);
-            },
-      );
-      setShowAcceptButton(Boolean(sugg));
+      setIntelligentSuggestionDirect(buildStep1ConversationalGreetingMessage(agentSnapshot));
+      setShowAcceptButton(false);
+      registerAcceptSuggestion(null);
       registerSecondaryAction(null, null);
       return;
     }
@@ -176,7 +161,6 @@ export function CreateMeetingWizardAgentBridge({
     }
   }, [
     agentSnapshot,
-    applyWizardSuggestion,
     categories,
     currentStep,
     selectedCategoryId,

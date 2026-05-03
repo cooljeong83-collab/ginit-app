@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react';
 
+import { buildVirtualWeatherForSlot, pickTimeSlot, useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgenticAiContext';
 import {
-  buildMzAgentMessage,
-  buildVirtualWeatherForSlot,
-  pickTimeSlot,
-  useCreateMeetingAgenticAi,
-} from '@/components/create/CreateMeetingAgenticAiContext';
-import { buildStep1FrequentPatternOfferMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
+  buildStep1ConversationalGreetingFromParts,
+  buildStep1ConversationalGreetingMessage,
+} from '@/src/lib/agentic-guide/build-step1-conversational-greeting';
 import { loadWelcomeSnapshot } from '@/src/lib/agentic-guide/load-welcome-snapshot';
 import { useUserSession } from '@/src/context/UserSessionContext';
 
@@ -49,7 +47,7 @@ export function CreateMeetingAgenticAiBootstrap() {
           intelligentSuggestion: null,
         });
         setCoachPhase('details_pattern_suggest');
-        setIntelligentSuggestionDirect(buildStep1FrequentPatternOfferMessage(snap));
+        setIntelligentSuggestionDirect(buildStep1ConversationalGreetingMessage(snap));
         setHydrationStatus('ready');
         setShowAcceptButton(false);
       } catch {
@@ -58,13 +56,12 @@ export function CreateMeetingAgenticAiBootstrap() {
         const vw = buildVirtualWeatherForSlot(slot);
         setHydrationStatus('error');
         setIntelligentSuggestionDirect(
-          buildMzAgentMessage({
-            timeSlot: slot,
-            weatherMood: vw.weatherMood,
-            temperatureC: vw.temperatureC,
-            locationHint: null,
+          buildStep1ConversationalGreetingFromParts({
+            now: new Date(),
             displayName: null,
-            intelligentSuggestion: null,
+            locationHint: null,
+            weatherMood: vw.weatherMood,
+            timeSlot: slot,
           }),
         );
         setShowAcceptButton(false);

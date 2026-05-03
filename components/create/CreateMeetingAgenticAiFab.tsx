@@ -60,6 +60,8 @@ import {
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
 
 const FAB_MARGIN = 26;
+/** 화면 우하단(`screenBottom`) 안착 시 `bottom`에 더해 FAB·말풍선 도크를 살짝 위로 */
+const FAB_SCREEN_BOTTOM_INITIAL_LIFT_PX = 20;
 /** `user` 모드 idle 배율 — 자동 진행 적용 전·직접 입력 구간(둥실·호흡 약화) */
 const FAB_MOTION_USER_IDLE_MUL = 0.58;
 /** 더블 탭 방지 — 수락 처리 직후 연속 탭 차단 */
@@ -71,7 +73,7 @@ const AGENT_THINKING_LINE = '생각 중입니다…';
 /** `cardTopRight` — 카드 테두리 대비 안쪽 여백 (버튼 우상단 기준) */
 const CARD_TOP_RIGHT_INSET = 10;
 /** FAB 스택 상단 → 원형 버튼 상단까지 오프셋(말풍선 top 정렬용) jjg ai 말풍선 높이 설정. */
-const FAB_CIRCLE_TOP_OFFSET_IN_STACK = FAB_STACK_H - FLOOR_SHADOW_SLOT - BTN_SIZE - 26;
+const FAB_CIRCLE_TOP_OFFSET_IN_STACK = FAB_STACK_H - FLOOR_SHADOW_SLOT - BTN_SIZE - 35;
 
 /** 도크 래퍼 높이 추정 — 1단계 하단 도크와 동일한 화면 Y에서 카드 우상단으로 스프링 시작 */
 function estimatedAgentDockOuterHeightPx(): number {
@@ -116,7 +118,7 @@ export function CreateMeetingAgenticAiFab({
   extraScreenBottomPx = 0,
 }: CreateMeetingAgenticAiFabProps = {}) {
   const insets = useSafeAreaInsets();
-  const AIFAB_BUBBLE_WIDTH = 280;
+  const AIFAB_BUBBLE_WIDTH = 270;
   const { width: layoutWindowWidth, height: layoutWindowHeight } = useWindowDimensions();
   const resolvedScreenW = windowWidth ?? layoutWindowWidth;
   /** 말풍선이 화면 왼쪽에 붙지 않도록 — FAB·여백 제외한 상한(최대 약 256) jjg 말풍선 width 설정 */
@@ -124,7 +126,7 @@ export function CreateMeetingAgenticAiFab({
     const w = resolvedScreenW;
     if (!Number.isFinite(w) || w <= 0) return AIFAB_BUBBLE_WIDTH;
     const reserve = BTN_SIZE + 8 + FAB_MARGIN * 2 + insets.left + insets.right;
-    return Math.max(280, Math.min(AIFAB_BUBBLE_WIDTH, Math.floor(w - reserve)));
+    return Math.max(270, Math.min(AIFAB_BUBBLE_WIDTH, Math.floor(w - reserve)));
   }, [resolvedScreenW, insets.left, insets.right]);
   const bubbleMinW = Math.min(AIFAB_BUBBLE_WIDTH, bubbleMaxW);
 
@@ -139,7 +141,11 @@ export function CreateMeetingAgenticAiFab({
   const geo = useMemo(
     () => ({
       finalRight: FAB_MARGIN + insets.right,
-      finalBottom: FAB_MARGIN + insets.bottom + Math.max(0, extraScreenBottomPx),
+      finalBottom:
+        FAB_MARGIN +
+        insets.bottom +
+        Math.max(0, extraScreenBottomPx) +
+        FAB_SCREEN_BOTTOM_INITIAL_LIFT_PX,
     }),
     [extraScreenBottomPx, insets.right, insets.bottom],
   );
@@ -748,7 +754,12 @@ export function CreateMeetingAgenticAiFab({
         bubbleStyle,
       ]}
       pointerEvents={bubbleHidden ? 'none' : 'box-none'}>
-      <View style={styles.bubbleClip} pointerEvents="box-none">
+      <View
+        style={[
+          styles.bubbleClip,
+          typingDone && (showAcceptButton || secondaryActionLabel) ? styles.bubbleClipWithActionOverlay : null,
+        ]}
+        pointerEvents="box-none">
         {staticGlass ? (
           <View style={[StyleSheet.absoluteFillObject, styles.bubbleStaticGlass]} />
         ) : (
@@ -766,25 +777,27 @@ export function CreateMeetingAgenticAiFab({
           ) : null}
         </Text>
         {typingDone && (showAcceptButton || secondaryActionLabel) ? (
-          <View style={styles.bubbleActions} pointerEvents="box-none">
-            {showAcceptButton ? (
-              <Pressable
-                onPress={() => playAcceptAutopilotThenApply()}
-                style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
-                accessibilityRole="button"
-                accessibilityLabel="수락">
-                <Text style={styles.bubbleActionLabel}>수락</Text>
-              </Pressable>
-            ) : null}
-            {secondaryActionLabel ? (
-              <Pressable
-                onPress={() => runSecondaryAction()}
-                style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
-                accessibilityRole="button"
-                accessibilityLabel={secondaryActionLabel}>
-                <Text style={styles.bubbleActionLabel}>{secondaryActionLabel}</Text>
-              </Pressable>
-            ) : null}
+          <View style={styles.bubbleActionOverlay} pointerEvents="box-none">
+            <View style={styles.bubbleActions} pointerEvents="box-none">
+              {showAcceptButton ? (
+                <Pressable
+                  onPress={() => playAcceptAutopilotThenApply()}
+                  style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="수락">
+                  <Text style={styles.bubbleActionLabel}>수락</Text>
+                </Pressable>
+              ) : null}
+              {secondaryActionLabel ? (
+                <Pressable
+                  onPress={() => runSecondaryAction()}
+                  style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={secondaryActionLabel}>
+                  <Text style={styles.bubbleActionLabel}>{secondaryActionLabel}</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         ) : null}
       </View>
@@ -896,6 +909,7 @@ const styles = StyleSheet.create({
 
   bubbleClip: {
     alignSelf: 'stretch',
+    position: 'relative',
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
@@ -903,6 +917,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.28)',
+  },
+  /** 하단 오버레이 액션 행 높이 — 본문과 겹치지 않게 */
+  bubbleClipWithActionOverlay: {
+    paddingBottom: 44,
   },
   //jjg ai말풍선 배경 설정 
   bubbleStaticGlass: {
@@ -921,12 +939,20 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     lineHeight: 19,
   },
+  /** 본문 레이아웃과 분리 — 한 줄 유지(줄바꿈 없음) */
+  bubbleActionOverlay: {
+    position: 'absolute',
+    left: 8,
+    right: 6,
+    bottom: 6,
+    zIndex: 2,
+  },
   bubbleActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     gap: 8,
-    marginTop: 10,
     justifyContent: 'flex-end',
+    alignItems: 'center',
   },
   bubbleActionBtn: {
     paddingVertical: 6,

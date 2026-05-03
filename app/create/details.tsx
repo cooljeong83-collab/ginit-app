@@ -31,6 +31,7 @@ import {
   Easing,
   Image,
   InteractionManager,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -80,6 +81,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
+import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
 import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
@@ -98,7 +100,6 @@ import {
   notifyCreateMeetingAgentBubbleDismissFromManualScroll,
   notifyCreateMeetingAgentBubbleShow,
 } from '@/src/lib/create-meeting-agent-bubble-dismiss';
-import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   getAgentFabMotionMode,
   getAgentStep1InteractionUnlocked,
@@ -106,6 +107,7 @@ import {
   setAgentStep1InteractionUnlocked,
   subscribeAgentStep1InteractionUnlocked,
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
+import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -122,6 +124,12 @@ import {
   searchPlacesText,
   type PlaceSearchRow,
 } from '@/src/lib/google-places-text-search';
+import {
+  applyPartialPublicMeetingDetails,
+  parseMeetingCreateNluPayload,
+  wizardSuggestionFromNluPlan,
+} from '@/src/lib/meeting-create-nlu';
+import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
 import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
@@ -142,12 +150,6 @@ import {
   type MeetingTitleSuggestionContext,
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
-import {
-  applyPartialPublicMeetingDetails,
-  parseMeetingCreateNluPayload,
-  wizardSuggestionFromNluPlan,
-} from '@/src/lib/meeting-create-nlu';
-import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
 import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
@@ -3219,6 +3221,12 @@ export default function CreateDetailsScreen() {
   const [naturalLanguageDraft, setNaturalLanguageDraft] = useState('');
   const [nluBusy, setNluBusy] = useState(false);
   const [nluDockHeightPx, setNluDockHeightPx] = useState(152);
+  /** 스텝1에서 사용자가 확인을 눌러 NLU 도크를 페이드아웃으로 숨긴 뒤 — 카테고리 단계 초기화 시 해제 */
+  const [nluComposerUserDismissed, setNluComposerUserDismissed] = useState(false);
+  const nluComposerDismissOpacity = useRef(new Animated.Value(1)).current;
+  const [nluKeyboardDimActive, setNluKeyboardDimActive] = useState(false);
+  const nluDimOpacity = useRef(new Animated.Value(0)).current;
+  const [nluDimLayerMounted, setNluDimLayerMounted] = useState(false);
   const [autopilotCoachLocked, setAutopilotCoachLocked] = useState(false);
   const [agentWizardApplyCue, setAgentWizardApplyCue] = useState<AgentWizardApplyCue | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
@@ -3349,6 +3357,8 @@ export default function CreateDetailsScreen() {
               resetWizardState();
               setSelectedCategoryId(id);
               setCurrentStep(1);
+              nluComposerDismissOpacity.setValue(1);
+              setNluComposerUserDismissed(false);
               requestAnimationFrame(() => {
                 const scroller = mainScrollRef.current as any;
                 if (typeof scroller?.scrollToPosition === 'function') {
@@ -3372,6 +3382,11 @@ export default function CreateDetailsScreen() {
   const screenTitle = useMemo(
     () => (selectedCategory?.label ? `${selectedCategory.label}  모임 생성` : '모임 생성'),
     [selectedCategory?.label],
+  );
+
+  const nluDockReservePx = useMemo(
+    () => (!snsDemographicsBlocked && !nluComposerUserDismissed ? nluDockHeightPx : 0),
+    [snsDemographicsBlocked, nluComposerUserDismissed, nluDockHeightPx],
   );
 
   useEffect(() => {
@@ -3782,11 +3797,22 @@ export default function CreateDetailsScreen() {
     setMaxParticipants(n);
   }, []);
 
-  const onStep1Next = useCallback(() => {
+  const onStep1Next = useCallback((opts?: { fromUserPress?: boolean }) => {
     setWizardError(null);
     if (!selectedCategoryId || !selectedCategory) {
       setWizardError('카테고리를 선택해 주세요.');
       return;
+    }
+    if (opts?.fromUserPress) {
+      nluComposerDismissOpacity.stopAnimation();
+      Animated.timing(nluComposerDismissOpacity, {
+        toValue: 0,
+        duration: 280,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setNluComposerUserDismissed(true);
+      });
     }
     if (getAgentFabMotionMode() === 'user') {
       notifyCreateMeetingAgentBubbleShow();
@@ -3798,7 +3824,7 @@ export default function CreateDetailsScreen() {
       pendingScrollAfterStepRef.current = 3;
       setCurrentStep(3);
     }
-  }, [needsSpecialty, selectedCategory, selectedCategoryId]);
+  }, [needsSpecialty, selectedCategory, selectedCategoryId, nluComposerDismissOpacity]);
 
   const onStep2SpecialtyNext = useCallback(() => {
     setWizardError(null);
@@ -4397,6 +4423,46 @@ export default function CreateDetailsScreen() {
   /** 등록 버튼: 로딩 중만 비활성화. 소개글 길이는 눌렀을 때 검증(짧으면 안내). */
   const finalDisabled = busy;
 
+  const onNluKeyboardOpenChange = useCallback((open: boolean) => {
+    setNluKeyboardDimActive(open);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (nluKeyboardDimActive) {
+      setNluDimLayerMounted(true);
+      nluDimOpacity.stopAnimation();
+      const raf = requestAnimationFrame(() => {
+        if (!cancelled) {
+          Animated.timing(nluDimOpacity, {
+            toValue: 1,
+            duration: 240,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }).start();
+        }
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(raf);
+        nluDimOpacity.stopAnimation();
+      };
+    }
+    nluDimOpacity.stopAnimation();
+    Animated.timing(nluDimOpacity, {
+      toValue: 0,
+      duration: 200,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished && !cancelled) setNluDimLayerMounted(false);
+    });
+    return () => {
+      cancelled = true;
+      nluDimOpacity.stopAnimation();
+    };
+  }, [nluKeyboardDimActive, nluDimOpacity]);
+
   return (
     <View style={styles.screenRoot}>
       <CreateMeetingAgenticAiProvider>
@@ -4490,12 +4556,12 @@ export default function CreateDetailsScreen() {
                 currentStep === detailStep && { paddingBottom: 132 + insets.bottom },
                 !snsDemographicsBlocked && {
                   paddingBottom:
-                    (currentStep === detailStep ? 132 + insets.bottom : 120) + nluDockHeightPx,
+                    (currentStep === detailStep ? 132 + insets.bottom : 120) + nluDockReservePx,
                 },
               ]}>
               <View collapsable={false}>
               <View style={styles.wizardStepShell} onLayout={(e) => captureStepPosition(1, e)}>
-                <Text style={styles.wizardStepBadge}>모임 성격</Text>
+                <Text style={styles.wizardStepBadge}>카테고리</Text>
 
                 {catLoading ? (
                   <View style={styles.centerRow}>
@@ -4587,7 +4653,7 @@ export default function CreateDetailsScreen() {
 
                 {currentStep === 1 ? (
                   <Pressable
-                    onPress={onStep1Next}
+                    onPress={() => onStep1Next({ fromUserPress: true })}
                     disabled={!selectedCategoryId || categories.length === 0}
                     style={({ pressed }) => [
                       styles.wizardPrimaryBtn,
@@ -5083,22 +5149,27 @@ export default function CreateDetailsScreen() {
             </KeyboardAwareScreenScroll>
           </View>
           {!snsDemographicsBlocked ? (
-            <View style={styles.nluComposerOverlay} pointerEvents="box-none">
-              <CreateMeetingNluComposerDock
-                draft={naturalLanguageDraft}
-                onChangeDraft={setNaturalLanguageDraft}
-                onSend={() => {
-                  void onPressAnalyzeNaturalLanguage();
-                }}
-                onPressVoice={onPressVoiceNaturalLanguageDraft}
-                voiceRecognizing={voiceNluDraftRecognizing}
-                nluBusy={nluBusy}
-                catLoading={catLoading}
-                busy={busy}
-                horizontalBleedPx={0}
-                onDockHeightChange={setNluDockHeightPx}
-              />
-            </View>
+            <Animated.View
+              style={[styles.nluComposerOverlay, { opacity: nluComposerDismissOpacity }]}
+              pointerEvents={nluComposerUserDismissed ? 'none' : 'box-none'}>
+              {!nluComposerUserDismissed ? (
+                <CreateMeetingNluComposerDock
+                  draft={naturalLanguageDraft}
+                  onChangeDraft={setNaturalLanguageDraft}
+                  onSend={() => {
+                    void onPressAnalyzeNaturalLanguage();
+                  }}
+                  onPressVoice={onPressVoiceNaturalLanguageDraft}
+                  voiceRecognizing={voiceNluDraftRecognizing}
+                  nluBusy={nluBusy}
+                  catLoading={catLoading}
+                  busy={busy}
+                  horizontalBleedPx={0}
+                  onDockHeightChange={setNluDockHeightPx}
+                  onKeyboardOpenChange={onNluKeyboardOpenChange}
+                />
+              ) : null}
+            </Animated.View>
           ) : null}
             </View>
 
@@ -5112,7 +5183,7 @@ export default function CreateDetailsScreen() {
                   bottom:
                     (wizardError ? 88 : 28) +
                     insets.bottom +
-                    (!snsDemographicsBlocked ? nluDockHeightPx : 0),
+                    nluDockReservePx,
                 },
                 finalDisabled && styles.addCandidateBtnDisabled,
                 pressed && !finalDisabled && styles.addCandidateBtnPressed,
@@ -5143,10 +5214,31 @@ export default function CreateDetailsScreen() {
               pointerEvents="none"
               style={[
                 styles.wizardFloatingError,
-                !snsDemographicsBlocked && { bottom: 24 + nluDockHeightPx },
+                !snsDemographicsBlocked && { bottom: 24 + nluDockReservePx },
               ]}>
               {wizardError}
             </Text>
+          ) : null}
+
+          {nluDimLayerMounted && !snsDemographicsBlocked ? (
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              style={[styles.nluKeyboardDimFullScreen, { bottom: nluDockReservePx }]}
+              accessibilityRole="button"
+              accessibilityLabel="키보드 내리기">
+              <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: nluDimOpacity }]} pointerEvents="none">
+                {shouldUseStaticGlassInsteadOfBlur() || reduceHeavyEffectsUI ? (
+                  <View style={[StyleSheet.absoluteFillObject, styles.nluKeyboardDimStatic]} />
+                ) : (
+                  <BlurView
+                    intensity={homeBlurIntensity}
+                    tint="light"
+                    experimentalBlurMethod="dimezisBlurView"
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                )}
+              </Animated.View>
+            </Pressable>
           ) : null}
       </SafeAreaView>
       {!snsDemographicsBlocked ? (
@@ -5155,7 +5247,7 @@ export default function CreateDetailsScreen() {
           cardWindowRect={aiFabScreenBottomLayout ? null : agentFabWindowRect}
           windowWidth={windowWidth}
           wizardStep={currentStep}
-          extraScreenBottomPx={snsDemographicsBlocked ? 0 : nluDockHeightPx}
+          extraScreenBottomPx={snsDemographicsBlocked ? 0 : nluDockReservePx}
         />
       ) : null}
       </CreateMeetingAgenticAiProvider>
@@ -5170,8 +5262,21 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+    position: 'relative',
     backgroundColor: GinitTheme.colors.bg,
     paddingHorizontal: GinitTheme.spacing.md,
+  },
+  /** NLU 키보드 시 SafeArea 전역 흐림 — 하단 NLU 도크·(Provider 밖) AI FAB 제외 */
+  nluKeyboardDimFullScreen: {
+    position: 'absolute',
+    left: -GinitTheme.spacing.md,
+    right: -GinitTheme.spacing.md,
+    top: 0,
+    zIndex: 105,
+    overflow: 'hidden',
+  },
+  nluKeyboardDimStatic: {
+    backgroundColor: 'rgba(15, 23, 42, 0.48)',
   },
   topBarRow: {
     flexDirection: 'row',
@@ -5194,7 +5299,7 @@ const styles = StyleSheet.create({
     left: -GinitTheme.spacing.md,
     right: -GinitTheme.spacing.md,
     bottom: 0,
-    zIndex: 95,
+    zIndex: 120,
   },
   snsGateBanner: {
     marginBottom: 12,

@@ -83,6 +83,8 @@ export type CreateMeetingNluComposerDockProps = {
   /** `SafeAreaView` 등 부모 `paddingHorizontal`만큼 음수 마진으로 채팅 도크 풀블리드 */
   horizontalBleedPx: number;
   onDockHeightChange: (heightPx: number) => void;
+  /** 키보드 올라옴 여부 — 상위에서 배경 흐림 등에 사용 */
+  onKeyboardOpenChange?: (open: boolean) => void;
 };
 
 export function CreateMeetingNluComposerDock({
@@ -96,6 +98,7 @@ export function CreateMeetingNluComposerDock({
   busy,
   horizontalBleedPx,
   onDockHeightChange,
+  onKeyboardOpenChange,
 }: CreateMeetingNluComposerDockProps) {
   const insets = useSafeAreaInsets();
   /** 모임 채팅과 동일한 이벤트로 키보드 높이 추적 — 적용 방식은 플랫폼·부모 SafeArea와 맞춤 */
@@ -130,6 +133,10 @@ export function CreateMeetingNluComposerDock({
     }
     return () => subs.forEach((s) => s.remove());
   }, []);
+
+  useEffect(() => {
+    onKeyboardOpenChange?.(keyboardBottomInset > 0);
+  }, [keyboardBottomInset, onKeyboardOpenChange]);
 
   /** 모임 채팅방과 동일 — 부모는 `SafeAreaView` `bottom` 없이 풀블리드 하단( `details.tsx` ) */
   const composerBottomPad =

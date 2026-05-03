@@ -74,6 +74,7 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
 
 /**
  * 위저드 1단계(카테고리) — 참여 중·완료 모임을 나눠 세밀한 제안 멘트.
+ * 스텝1 **첫 말풍선 인사**는 `buildStep1ConversationalGreetingMessage`를 사용합니다(자동 제안·수락 흐름 제거).
  */
 export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): string {
   if (isColdStartForAgentSnapshot(s)) {
