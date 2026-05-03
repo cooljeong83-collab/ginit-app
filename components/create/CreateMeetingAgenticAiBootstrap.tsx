@@ -6,7 +6,7 @@ import {
   pickTimeSlot,
   useCreateMeetingAgenticAi,
 } from '@/components/create/CreateMeetingAgenticAiContext';
-import { buildDetailsPatternSuggestMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
+import { buildStep1FrequentPatternOfferMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
 import { loadWelcomeSnapshot } from '@/src/lib/agentic-guide/load-welcome-snapshot';
 import { useUserSession } from '@/src/context/UserSessionContext';
 
@@ -49,7 +49,7 @@ export function CreateMeetingAgenticAiBootstrap() {
           intelligentSuggestion: null,
         });
         setCoachPhase('details_pattern_suggest');
-        setIntelligentSuggestionDirect(buildDetailsPatternSuggestMessage(snap));
+        setIntelligentSuggestionDirect(buildStep1FrequentPatternOfferMessage(snap));
         setHydrationStatus('ready');
         setShowAcceptButton(true);
       } catch {

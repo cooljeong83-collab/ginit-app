@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 
 import { useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgenticAiContext';
+import { buildStep1FrequentPatternOfferMessage } from '@/src/lib/agentic-guide/build-details-pattern-message';
 import { buildStepCoachMessage } from '@/src/lib/agentic-guide/build-step-coach-message';
 import { buildWizardSuggestion } from '@/src/lib/agentic-guide/build-wizard-suggestion';
 import type { Category } from '@/src/lib/categories';
@@ -53,6 +54,7 @@ export function CreateMeetingWizardAgentBridge({
 
     if (currentStep === 1) {
       setCoachPhase('details_pattern_suggest');
+      setIntelligentSuggestionDirect(buildStep1FrequentPatternOfferMessage(agentSnapshot));
       const sugg = buildWizardSuggestion(categories, agentSnapshot);
       registerAcceptSuggestion(() => {
         const s = buildWizardSuggestion(catRef.current, snapRef.current!);

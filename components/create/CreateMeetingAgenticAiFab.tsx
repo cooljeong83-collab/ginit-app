@@ -20,7 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCreateMeetingAgenticAi } from '@/components/create/CreateMeetingAgenticAiContext';
 import {
   MEETING_CREATE_FAB_BTN_SIZE as BTN_SIZE,
-  CREATE_MEETING_AGENT_BUBBLE_SPRING as BUBBLE_SPRING,
+  CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS,
+  CREATE_MEETING_AGENT_BUBBLE_FADE_OUT_MS,
   CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS,
   CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS,
   CREATE_MEETING_AGENT_TYPING_INTERVAL_MS,
@@ -51,6 +52,8 @@ import {
 } from '@/src/lib/create-meeting-agent-bubble-dismiss';
 
 const FAB_MARGIN = 26;
+const BUBBLE_FADE_IN_EASE = { duration: CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS, easing: Easing.out(Easing.quad) } as const;
+const BUBBLE_FADE_OUT_EASE = { duration: CREATE_MEETING_AGENT_BUBBLE_FADE_OUT_MS, easing: Easing.in(Easing.quad) } as const;
 /** `CreateMeetingAgenticAiBootstrap`·컨텍스트 로딩과 동일 */
 const AGENT_THINKING_LINE = '생각 중입니다…';
 /** `cardTopRight` — 카드 테두리 대비 안쪽 여백 (버튼 우상단 기준) */
@@ -64,6 +67,8 @@ export type CreateMeetingAgenticAiFabProps = {
   /** `layoutMode === 'cardTopRight'`일 때 `measureInWindow` 결과 */
   cardWindowRect?: { x: number; y: number; width: number; height: number } | null;
   windowWidth?: number;
+  /** 위저드 단계가 올라갈 때마다 말풍선을 스크롤 닫힘과 무관하게 다시 등장(인트로)시킴 */
+  wizardStep?: number;
 };
 
 function AiCircleButton({ pressed }: { pressed?: boolean }) {
@@ -88,6 +93,7 @@ export function CreateMeetingAgenticAiFab({
   layoutMode = 'screenBottom',
   cardWindowRect,
   windowWidth,
+  wizardStep,
 }: CreateMeetingAgenticAiFabProps = {}) {
   const insets = useSafeAreaInsets();
   const AIFAB_BUBBLE_WIDTH = 270;
@@ -185,6 +191,8 @@ export function CreateMeetingAgenticAiFab({
   const suppressBubbleUntilUserFabPressRef = useRef(false);
   /** 첫 FAB 상승 완료 후 — 단계별 문구만 바뀔 때 인트로·FAB 리셋 생략 */
   const fabEntranceDoneRef = useRef(false);
+  /** `wizardStep` prop 직전 값 — 단계 증가 시 말풍선 재생 구분 */
+  const prevWizardStepForBubbleRef = useRef<number | null>(null);
 
   const layoutKindSv = useSharedValue(0);
   const screenRightSv = useSharedValue(geo.finalRight);
@@ -267,7 +275,7 @@ export function CreateMeetingAgenticAiFab({
   const runBubbleDismiss = useCallback(() => {
     clearTypingTimers();
     setBubbleHidden(true);
-    bubbleDismiss.value = withTiming(1, { duration: 220, easing: Easing.in(Easing.quad) });
+    bubbleDismiss.value = withTiming(1, BUBBLE_FADE_OUT_EASE);
   }, [bubbleDismiss, clearTypingTimers]);
 
   useEffect(() => {
@@ -328,10 +336,52 @@ export function CreateMeetingAgenticAiFab({
   });
 
   useEffect(() => {
+    const prevW = prevWizardStepForBubbleRef.current;
+    const wizardStepIncreased =
+      wizardStep != null && prevW != null && wizardStep > prevW;
+    if (wizardStep != null) {
+      prevWizardStepForBubbleRef.current = wizardStep;
+    }
+
     const prevLine = prevMzLineRef.current;
     const softFromThinking =
       prevLine != null && prevLine.trim() === AGENT_THINKING_LINE && !isThinkingLine;
     prevMzLineRef.current = fullText;
+
+    if (wizardStepIncreased && fabEntranceDoneRef.current) {
+      suppressBubbleUntilUserFabPressRef.current = false;
+      clearTypingTimers();
+      if (pendingCardDockSpringRef.current) {
+        return () => {
+          clearTypingTimers();
+        };
+      }
+      setBubbleHidden(false);
+      bubbleDismiss.value = 0;
+      bubbleProg.value = 0;
+      bubbleProg.value = withDelay(
+        CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS,
+        withTiming(1, BUBBLE_FADE_IN_EASE),
+      );
+      if (isThinkingLine) {
+        typingKickoffRef.current = setTimeout(() => {
+          setTypedLen(graphemes.length);
+          setShowCaret(false);
+        }, CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS + 40);
+      } else {
+        const typingKickMs =
+          CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS;
+        typingKickoffRef.current = setTimeout(() => {
+          startTypingLoop();
+          caretTimerRef.current = setInterval(() => {
+            setShowCaret((c) => !c);
+          }, CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS);
+        }, typingKickMs);
+      }
+      return () => {
+        clearTypingTimers();
+      };
+    }
 
     const contentOnlyUpdate = softFromThinking || fabEntranceDoneRef.current;
 
@@ -349,7 +399,8 @@ export function CreateMeetingAgenticAiFab({
       }
       setBubbleHidden(false);
       bubbleDismiss.value = 0;
-      bubbleProg.value = 1;
+      bubbleProg.value = 0;
+      bubbleProg.value = withTiming(1, BUBBLE_FADE_IN_EASE);
       setTypedLen(0);
       setShowCaret(true);
       typingKickoffRef.current = setTimeout(() => {
@@ -357,7 +408,7 @@ export function CreateMeetingAgenticAiFab({
         caretTimerRef.current = setInterval(() => {
           setShowCaret((c) => !c);
         }, CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS);
-      }, CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS);
+      }, CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS);
       return () => {
         clearTypingTimers();
       };
@@ -385,7 +436,7 @@ export function CreateMeetingAgenticAiFab({
       bubbleProg.value = 0;
       bubbleProg.value = withDelay(
         CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS,
-        withSpring(1, BUBBLE_SPRING),
+        withTiming(1, BUBBLE_FADE_IN_EASE),
       );
 
       if (isThinkingLine) {
@@ -423,7 +474,8 @@ export function CreateMeetingAgenticAiFab({
     invokePostRiseFromUi,
     isThinkingLine,
     startTypingLoop,
-  ]); // eslint-disable-line react-hooks/exhaustive-deps -- 문구 변경 시에만 시퀀스 재생
+    wizardStep,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps -- 문구·단계 변경 시 시퀀스 재생
 
   bubbleAfterDockRef.current = () => {
     clearTypingTimers();
@@ -437,7 +489,7 @@ export function CreateMeetingAgenticAiFab({
     bubbleProg.value = 0;
     bubbleProg.value = withDelay(
       CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS,
-      withSpring(1, BUBBLE_SPRING),
+      withTiming(1, BUBBLE_FADE_IN_EASE),
     );
     if (isThinkingLine) {
       typingKickoffRef.current = setTimeout(() => {
@@ -507,13 +559,9 @@ export function CreateMeetingAgenticAiFab({
   const bubbleStyle = useAnimatedStyle(() => {
     const p = bubbleProg.value;
     const baseO = interpolate(p, [0, 1], [0, 1], Extrapolation.CLAMP);
-    /** FAB 왼쪽 배치 — 살짝 왼쪽에서 붙는 느낌 */
-    const tx = interpolate(p, [0, 1], [-18, 0], Extrapolation.CLAMP);
-    const ty = interpolate(p, [0, 1], [6, 0], Extrapolation.CLAMP);
     const dismissMul = interpolate(bubbleDismiss.value, [0, 1], [1, 0], Extrapolation.CLAMP);
     return {
       opacity: baseO * dismissMul,
-      transform: [{ translateX: tx }, { translateY: ty }],
     };
   });
 
@@ -523,8 +571,9 @@ export function CreateMeetingAgenticAiFab({
     if (bubbleHidden) {
       suppressBubbleUntilUserFabPressRef.current = false;
       setBubbleHidden(false);
-      bubbleDismiss.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.quad) });
-      bubbleProg.value = 1;
+      bubbleDismiss.value = 0;
+      bubbleProg.value = 0;
+      bubbleProg.value = withTiming(1, BUBBLE_FADE_IN_EASE);
       clearTypingTimers();
       if (isThinkingLine) {
         setTypedLen(graphemes.length);
@@ -537,7 +586,7 @@ export function CreateMeetingAgenticAiFab({
           caretTimerRef.current = setInterval(() => {
             setShowCaret((c) => !c);
           }, CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS);
-        }, CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS);
+        }, CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS);
       }
     } else {
       suppressBubbleUntilUserFabPressRef.current = true;

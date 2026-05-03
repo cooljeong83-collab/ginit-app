@@ -22,7 +22,8 @@ function meetingSortTimeMs(m: Meeting, now: Date): number {
   return now.getTime();
 }
 
-function isOngoingForChat(m: Meeting, now: Date): boolean {
+/** 모집 중·정원·일정상 아직 “진행/예정”으로 보는 모임(과거·종료 피드와 구분용). */
+export function isOngoingForChat(m: Meeting, now: Date): boolean {
   const phase = getMeetingRecruitmentPhase(m);
   if (phase === 'recruiting' || phase === 'full') return true;
   const ymd = (m.scheduleDate ?? '').trim();

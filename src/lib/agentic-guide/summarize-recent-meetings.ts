@@ -2,10 +2,45 @@ import type { Meeting } from '@/src/lib/meetings';
 
 import type { RecentMeetingsSummary } from '@/src/lib/agentic-guide/types';
 
-function labelOf(m: Meeting): string {
+const GENERIC_MEETING_LABEL = '모임';
+
+export function isUsefulMeetingPatternLabel(raw: string | null | undefined): boolean {
+  const t = raw?.trim();
+  if (!t) return false;
+  if (t === GENERIC_MEETING_LABEL) return false;
+  return true;
+}
+
+/** 카테고리 라벨 우선, 없으면 제목(패턴 요약용). */
+export function patternLabelFromMeeting(m: Meeting): string {
   const l = (m.categoryLabel ?? '').trim();
   if (l) return l;
-  return (m.title ?? '').trim() || '모임';
+  return (m.title ?? '').trim() || GENERIC_MEETING_LABEL;
+}
+
+function labelOf(m: Meeting): string {
+  return patternLabelFromMeeting(m);
+}
+
+/**
+ * 주어진 모임 목록에서 유의미한 카테고리(라벨) 최빈값 1개.
+ */
+export function topUsefulPatternInMeetings(
+  meetings: Meeting[],
+  maxSample = 40,
+): { label: string; count: number; sampled: number } | null {
+  const slice = meetings.slice(0, maxSample);
+  if (slice.length === 0) return null;
+  const freq = new Map<string, number>();
+  for (const m of slice) {
+    const lab = labelOf(m);
+    if (!isUsefulMeetingPatternLabel(lab)) continue;
+    freq.set(lab, (freq.get(lab) ?? 0) + 1);
+  }
+  if (freq.size === 0) return null;
+  const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const [label, count] = sorted[0]!;
+  return { label, count, sampled: slice.length };
 }
 
 /**

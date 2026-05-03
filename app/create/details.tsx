@@ -3970,9 +3970,6 @@ export default function CreateDetailsScreen() {
                 onScrollBeginDrag: () => {
                   notifyCreateMeetingAgentBubbleDismiss();
                 },
-                onTouchStart: () => {
-                  notifyCreateMeetingAgentBubbleDismiss();
-                },
                 /**
                  * 손가락 플링(손을 뗀 뒤 관성)에만 적용. 단계 이동용 `scrollTo(..., animated: true)`는
                  * RN Android가 고정 길이(~250ms) 애니메이터로 처리해 이 값과 무관합니다.
@@ -4582,6 +4579,7 @@ export default function CreateDetailsScreen() {
           layoutMode={currentStep === 1 ? 'screenBottom' : 'cardTopRight'}
           cardWindowRect={currentStep === 1 ? null : agentFabWindowRect}
           windowWidth={windowWidth}
+          wizardStep={currentStep}
         />
       ) : null}
       </CreateMeetingAgenticAiProvider>
