@@ -12,6 +12,7 @@ import Animated, {
   useSharedValue,
   withDelay,
   withRepeat,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -49,9 +50,24 @@ import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constant
 import {
   notifyCreateMeetingAgentBubbleDismiss,
   subscribeCreateMeetingAgentBubbleDismiss,
+  subscribeCreateMeetingAgentBubbleDismissFromManualScroll,
+  subscribeCreateMeetingAgentBubbleShow,
 } from '@/src/lib/create-meeting-agent-bubble-dismiss';
+import {
+  getAgentFabMotionMode,
+  registerFabMicroNudge,
+  setAgentFabMotionMode,
+  setAgentStep1InteractionUnlocked,
+  subscribeAgentFabMotionMode,
+} from '@/src/lib/create-meeting-agent-fab-orchestration';
 
 const FAB_MARGIN = 26;
+/** `user` 모드 idle 배율 — 자동 진행 적용 전·직접 입력 구간(둥실·호흡 약화) */
+const FAB_MOTION_USER_IDLE_MUL = 0.58;
+/** 수락 자동 클릭: 변위 도달 후 잠시 유지한 뒤 도크로 복귀(도착 직후 스프링 시 ‘바로 끌려옴’ 완화) */
+const ACCEPT_AUTOPILOT_DWELL_MS = 165;
+/** 더블 탭 방지 — dwell·복귀 스프링이 끝날 때까지(첫 micro nudge는 details 쪽 지연으로 겹침 방지) */
+const ACCEPT_AUTOPILOT_BUSY_CLEAR_MS = 640;
 const BUBBLE_FADE_IN_EASE = { duration: CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS, easing: Easing.out(Easing.quad) } as const;
 const BUBBLE_FADE_OUT_EASE = { duration: CREATE_MEETING_AGENT_BUBBLE_FADE_OUT_MS, easing: Easing.in(Easing.quad) } as const;
 /** `CreateMeetingAgenticAiBootstrap`·컨텍스트 로딩과 동일 */
@@ -60,6 +76,11 @@ const AGENT_THINKING_LINE = '생각 중입니다…';
 const CARD_TOP_RIGHT_INSET = 10;
 /** FAB 스택 상단 → 원형 버튼 상단까지 오프셋(말풍선 top 정렬용) jjg ai 말풍선 높이 설정. */
 const FAB_CIRCLE_TOP_OFFSET_IN_STACK = FAB_STACK_H - FLOOR_SHADOW_SLOT - BTN_SIZE - 26;
+
+/** 도크 래퍼 높이 추정 — 1단계 하단 도크와 동일한 화면 Y에서 카드 우상단으로 스프링 시작 */
+function estimatedAgentDockOuterHeightPx(): number {
+  return FAB_STACK_H + Math.max(0, FAB_CIRCLE_TOP_OFFSET_IN_STACK) + 72;
+}
 
 export type CreateMeetingAgenticAiFabProps = {
   /** 기본: 화면 우하단. `cardTopRight`는 생성 카드 우상단. 말풍선은 FAB 왼쪽(너비는 화면 기준 상한). */
@@ -200,6 +221,31 @@ export function CreateMeetingAgenticAiFab({
   const cardDockTopSv = useSharedValue(0);
   const cardDockRightSv = useSharedValue(0);
   const cardDockMeasuredOnceRef = useRef(false);
+  /** 수락 탭 시 FAB이 스스로 이동해 클릭하는 듯한 연출 */
+  const acceptAutopilotX = useSharedValue(0);
+  const acceptAutopilotY = useSharedValue(0);
+  const acceptAutopilotBusyRef = useRef(false);
+  const acceptAutopilotBusyClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 0 = 사용자 입력 모션(user), 1 = 자동 진행 모션(auto) — idle·그림자 연출만 보간 */
+  const fabMotionProfileSv = useSharedValue(0);
+
+  useEffect(() => {
+    const syncProfile = () => {
+      const auto = getAgentFabMotionMode() === 'auto';
+      fabMotionProfileSv.value = withTiming(auto ? 1 : 0, {
+        duration: auto ? 95 : 280,
+        easing: Easing.out(Easing.quad),
+      });
+    };
+    syncProfile();
+    return subscribeAgentFabMotionMode(syncProfile);
+  }, [fabMotionProfileSv]);
+
+  useEffect(() => {
+    return () => {
+      setAgentFabMotionMode('user');
+    };
+  }, []);
 
   const fullText = mzLine;
   const graphemes = useMemo(() => Array.from(fullText), [fullText]);
@@ -262,8 +308,11 @@ export function CreateMeetingAgenticAiFab({
 
   const invokePostRiseFromUi = useCallback(() => {
     fabEntranceDoneRef.current = true;
+    if (layoutMode === 'screenBottom' && wizardStep === 1) {
+      setAgentStep1InteractionUnlocked(true);
+    }
     onRiseSettledRef.current();
-  }, []);
+  }, [layoutMode, wizardStep]);
 
   const finalizeCardDockSpring = useCallback((finished: boolean) => {
     pendingCardDockSpringRef.current = false;
@@ -278,10 +327,48 @@ export function CreateMeetingAgenticAiFab({
     bubbleDismiss.value = withTiming(1, BUBBLE_FADE_OUT_EASE);
   }, [bubbleDismiss, clearTypingTimers]);
 
+  const reopenAgentBubbleFromUserIntent = useCallback(() => {
+    suppressBubbleUntilUserFabPressRef.current = false;
+    setBubbleHidden(false);
+    bubbleDismiss.value = 0;
+    bubbleProg.value = 0;
+    bubbleProg.value = withTiming(1, BUBBLE_FADE_IN_EASE);
+    clearTypingTimers();
+    if (isThinkingLine) {
+      setTypedLen(graphemes.length);
+      setShowCaret(false);
+    } else {
+      setTypedLen(0);
+      setShowCaret(true);
+      typingKickoffRef.current = setTimeout(() => {
+        startTypingLoop();
+        caretTimerRef.current = setInterval(() => {
+          setShowCaret((c) => !c);
+        }, CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS);
+      }, CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS);
+    }
+  }, [
+    bubbleDismiss,
+    bubbleProg,
+    clearTypingTimers,
+    graphemes.length,
+    isThinkingLine,
+    startTypingLoop,
+  ]);
+
   useEffect(() => {
-    const unsub = subscribeCreateMeetingAgentBubbleDismiss(runBubbleDismiss);
-    return unsub;
-  }, [runBubbleDismiss]);
+    const unsubDismiss = subscribeCreateMeetingAgentBubbleDismiss(runBubbleDismiss);
+    const unsubManualScroll = subscribeCreateMeetingAgentBubbleDismissFromManualScroll(() => {
+      suppressBubbleUntilUserFabPressRef.current = true;
+      runBubbleDismiss();
+    });
+    const unsubShow = subscribeCreateMeetingAgentBubbleShow(reopenAgentBubbleFromUserIntent);
+    return () => {
+      unsubDismiss();
+      unsubManualScroll();
+      unsubShow();
+    };
+  }, [reopenAgentBubbleFromUserIntent, runBubbleDismiss]);
 
   useEffect(() => {
     screenRightSv.value = geo.finalRight;
@@ -303,9 +390,26 @@ export function CreateMeetingAgenticAiFab({
     layoutKindSv.value = 1;
     const { top, right } = cardDockPosition;
     if (!cardDockMeasuredOnceRef.current) {
-      cardDockTopSv.value = top;
-      cardDockRightSv.value = right;
-      cardDockMeasuredOnceRef.current = true;
+      const winH = layoutWindowHeight ?? 0;
+      if (winH > 0) {
+        const dockH = estimatedAgentDockOuterHeightPx();
+        const startTop = Math.max(0, winH - geo.finalBottom - dockH);
+        const startRight = geo.finalRight;
+        layoutKindSv.value = 1;
+        cardDockTopSv.value = startTop;
+        cardDockRightSv.value = startRight;
+        cardDockMeasuredOnceRef.current = true;
+        pendingCardDockSpringRef.current = true;
+        cardDockTopSv.value = withSpring(top, RISE_SPRING, (finished) => {
+          runOnJS(finalizeCardDockSpring)(finished === true);
+        });
+        cardDockRightSv.value = withSpring(right, RISE_SPRING);
+      } else {
+        layoutKindSv.value = 1;
+        cardDockTopSv.value = top;
+        cardDockRightSv.value = right;
+        cardDockMeasuredOnceRef.current = true;
+      }
       return;
     }
     if (
@@ -320,18 +424,31 @@ export function CreateMeetingAgenticAiFab({
     cardDockRightSv.value = withSpring(right, RISE_SPRING, (finished) => {
       runOnJS(finalizeCardDockSpring)(finished === true);
     });
-  }, [layoutMode, cardDockPosition?.top, cardDockPosition?.right, runBubbleDismiss, finalizeCardDockSpring]);
+  }, [
+    layoutMode,
+    cardDockPosition?.top,
+    cardDockPosition?.right,
+    runBubbleDismiss,
+    finalizeCardDockSpring,
+    layoutWindowHeight,
+    geo.finalBottom,
+    geo.finalRight,
+  ]);
 
   const dockCombinedStyle = useAnimatedStyle(() => {
+    const tx = acceptAutopilotX.value;
+    const ty = acceptAutopilotY.value;
     if (layoutKindSv.value === 0) {
       return {
         right: screenRightSv.value,
         bottom: screenBottomSv.value,
+        transform: [{ translateX: tx }, { translateY: ty }],
       };
     }
     return {
       top: cardDockTopSv.value,
       right: cardDockRightSv.value,
+      transform: [{ translateX: tx }, { translateY: ty }],
     };
   });
 
@@ -529,7 +646,14 @@ export function CreateMeetingAgenticAiFab({
       Extrapolation.CLAMP,
     );
     const f = idleFloat.value;
-    const floatPart = MEETING_CREATE_FAB_IDLE_FLOAT_Y_BASE + (f - 0.5) * MEETING_CREATE_FAB_IDLE_FLOAT_Y_PHASE_MUL;
+    const idleMul = interpolate(
+      fabMotionProfileSv.value,
+      [0, 1],
+      [FAB_MOTION_USER_IDLE_MUL, 1],
+      Extrapolation.CLAMP,
+    );
+    const floatPart =
+      (MEETING_CREATE_FAB_IDLE_FLOAT_Y_BASE + (f - 0.5) * MEETING_CREATE_FAB_IDLE_FLOAT_Y_PHASE_MUL) * idleMul;
     const liftY = btnTy.value + floatPart;
     const pulse = interpolate(
       liftY,
@@ -549,8 +673,15 @@ export function CreateMeetingAgenticAiFab({
 
   const btnStyle = useAnimatedStyle(() => {
     const f = idleFloat.value;
-    const floatPart = MEETING_CREATE_FAB_IDLE_FLOAT_Y_BASE + (f - 0.5) * MEETING_CREATE_FAB_IDLE_FLOAT_Y_PHASE_MUL;
-    const scale = btnScale.value * (1 + (f - 0.5) * MEETING_CREATE_FAB_IDLE_BREATHE_MUL);
+    const idleMul = interpolate(
+      fabMotionProfileSv.value,
+      [0, 1],
+      [FAB_MOTION_USER_IDLE_MUL, 1],
+      Extrapolation.CLAMP,
+    );
+    const floatPart =
+      (MEETING_CREATE_FAB_IDLE_FLOAT_Y_BASE + (f - 0.5) * MEETING_CREATE_FAB_IDLE_FLOAT_Y_PHASE_MUL) * idleMul;
+    const scale = btnScale.value * (1 + (f - 0.5) * MEETING_CREATE_FAB_IDLE_BREATHE_MUL * idleMul);
     return {
       transform: [{ translateY: btnTy.value + floatPart }, { scale }],
     };
@@ -567,46 +698,116 @@ export function CreateMeetingAgenticAiFab({
 
   const staticGlass = shouldUseStaticGlassInsteadOfBlur();
 
+  const runApplyAndResetAcceptAutopilot = useCallback(() => {
+    runAcceptSuggestion();
+    acceptAutopilotX.value = withDelay(
+      ACCEPT_AUTOPILOT_DWELL_MS,
+      withSpring(0, RISE_SPRING),
+    );
+    acceptAutopilotY.value = withDelay(
+      ACCEPT_AUTOPILOT_DWELL_MS,
+      withSpring(0, RISE_SPRING),
+    );
+    if (acceptAutopilotBusyClearTimerRef.current != null) {
+      clearTimeout(acceptAutopilotBusyClearTimerRef.current);
+    }
+    acceptAutopilotBusyClearTimerRef.current = setTimeout(() => {
+      acceptAutopilotBusyClearTimerRef.current = null;
+      acceptAutopilotBusyRef.current = false;
+    }, ACCEPT_AUTOPILOT_BUSY_CLEAR_MS);
+  }, [acceptAutopilotX, acceptAutopilotY, runAcceptSuggestion]);
+
+  const playAcceptAutopilotThenApply = useCallback(() => {
+    if (acceptAutopilotBusyRef.current) return;
+    acceptAutopilotBusyRef.current = true;
+    setAgentFabMotionMode('auto');
+    suppressBubbleUntilUserFabPressRef.current = true;
+    runBubbleDismiss();
+    const w = resolvedScreenW;
+    const isCard = layoutMode === 'cardTopRight';
+    const dx = isCard ? -Math.min(96, w * 0.24) : -Math.min(132, w * 0.32);
+    const dy = isCard ? Math.min(56, w * 0.12) : -Math.min(72, w * 0.16);
+
+    btnScale.value = withSequence(
+      withTiming(0.9, { duration: 100, easing: Easing.out(Easing.quad) }),
+      withSpring(1, RISE_SPRING),
+    );
+
+    acceptAutopilotX.value = withTiming(dx, { duration: 300, easing: Easing.out(Easing.cubic) }, (finished) => {
+      if (finished) {
+        runOnJS(runApplyAndResetAcceptAutopilot)();
+      } else {
+        runOnJS(() => {
+          if (acceptAutopilotBusyClearTimerRef.current != null) {
+            clearTimeout(acceptAutopilotBusyClearTimerRef.current);
+            acceptAutopilotBusyClearTimerRef.current = null;
+          }
+          acceptAutopilotBusyRef.current = false;
+          setAgentFabMotionMode('user');
+          acceptAutopilotX.value = 0;
+          acceptAutopilotY.value = 0;
+        })();
+      }
+    });
+    acceptAutopilotY.value = withTiming(dy, { duration: 300, easing: Easing.out(Easing.cubic) });
+  }, [
+    btnScale,
+    acceptAutopilotX,
+    acceptAutopilotY,
+    layoutMode,
+    resolvedScreenW,
+    runApplyAndResetAcceptAutopilot,
+    runBubbleDismiss,
+  ]);
+
+  const runFabMicroNudge = useCallback(() => {
+    suppressBubbleUntilUserFabPressRef.current = true;
+    runBubbleDismiss();
+    const w = resolvedScreenW;
+    const isCard = layoutMode === 'cardTopRight';
+    const dx = isCard ? -Math.min(56, w * 0.14) : -Math.min(72, w * 0.18);
+    const dy = isCard ? Math.min(34, w * 0.08) : -Math.min(40, w * 0.09);
+    acceptAutopilotX.value = withSequence(
+      withTiming(dx, { duration: 170, easing: Easing.out(Easing.cubic) }),
+      withSpring(0, RISE_SPRING),
+    );
+    acceptAutopilotY.value = withSequence(
+      withTiming(dy, { duration: 170, easing: Easing.out(Easing.cubic) }),
+      withSpring(0, RISE_SPRING),
+    );
+    btnScale.value = withSequence(
+      withTiming(0.93, { duration: 85, easing: Easing.out(Easing.quad) }),
+      withSpring(1, RISE_SPRING),
+    );
+  }, [acceptAutopilotX, acceptAutopilotY, btnScale, layoutMode, resolvedScreenW, runBubbleDismiss]);
+
+  useEffect(() => {
+    registerFabMicroNudge(() => {
+      runFabMicroNudge();
+    });
+    return () => registerFabMicroNudge(null);
+  }, [runFabMicroNudge]);
+
+  useEffect(() => {
+    if (wizardStep !== 1) {
+      setAgentStep1InteractionUnlocked(false);
+      return;
+    }
+    if (layoutMode === 'screenBottom' && fabEntranceDoneRef.current) {
+      setAgentStep1InteractionUnlocked(true);
+    }
+  }, [wizardStep, layoutMode]);
+
   const onAiFabPress = useCallback(() => {
     if (bubbleHidden) {
-      suppressBubbleUntilUserFabPressRef.current = false;
-      setBubbleHidden(false);
-      bubbleDismiss.value = 0;
-      bubbleProg.value = 0;
-      bubbleProg.value = withTiming(1, BUBBLE_FADE_IN_EASE);
-      clearTypingTimers();
-      if (isThinkingLine) {
-        setTypedLen(graphemes.length);
-        setShowCaret(false);
-      } else {
-        setTypedLen(0);
-        setShowCaret(true);
-        typingKickoffRef.current = setTimeout(() => {
-          startTypingLoop();
-          caretTimerRef.current = setInterval(() => {
-            setShowCaret((c) => !c);
-          }, CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS);
-        }, CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS + CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS);
-      }
+      reopenAgentBubbleFromUserIntent();
     } else {
       suppressBubbleUntilUserFabPressRef.current = true;
       notifyCreateMeetingAgentBubbleDismiss();
     }
-  }, [
-    bubbleDismiss,
-    bubbleHidden,
-    bubbleProg,
-    clearTypingTimers,
-    graphemes.length,
-    isThinkingLine,
-    startTypingLoop,
-  ]);
+  }, [bubbleHidden, reopenAgentBubbleFromUserIntent]);
 
-  if (layoutMode === 'cardTopRight' && !cardDockPosition) {
-    return null;
-  }
-
-  const isCardTopRight = layoutMode === 'cardTopRight';
+  const hasCardDockForLayout = layoutMode === 'cardTopRight' && cardDockPosition != null;
 
   const bubbleEl = (
     <Animated.View
@@ -643,7 +844,7 @@ export function CreateMeetingAgenticAiFab({
           <View style={styles.bubbleActions} pointerEvents="box-none">
             {showAcceptButton ? (
               <Pressable
-                onPress={() => runAcceptSuggestion()}
+                onPress={() => playAcceptAutopilotThenApply()}
                 style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
                 accessibilityRole="button"
                 accessibilityLabel="수락">
@@ -692,7 +893,7 @@ export function CreateMeetingAgenticAiFab({
       <Animated.View
         style={[
           styles.dock,
-          isCardTopRight && styles.dockCardTopRight,
+          hasCardDockForLayout && styles.dockCardTopRight,
           { width: dockRowW },
           dockCombinedStyle,
         ]}

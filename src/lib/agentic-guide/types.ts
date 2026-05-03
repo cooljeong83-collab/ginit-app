@@ -91,6 +91,8 @@ export type WizardSuggestion = {
   canAutoCompleteThroughStep3: boolean;
   /** Step 5 등 — 집계 기반 장소 검색 힌트 */
   placeSearchHint: string | null;
+  /** 에이전트 수락 시 공개 여부(null이면 UI만 펄스·상태 유지) */
+  suggestedIsPublic?: boolean | null;
 };
 
 export type StepCoachInput = {

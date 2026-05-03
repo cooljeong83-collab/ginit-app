@@ -85,7 +85,19 @@ import {
   resolveSpecialtyKindForCategory,
   specialtyStepBadge,
 } from '@/src/lib/category-specialty';
-import { notifyCreateMeetingAgentBubbleDismiss } from '@/src/lib/create-meeting-agent-bubble-dismiss';
+import {
+  notifyCreateMeetingAgentBubbleDismissFromManualScroll,
+  notifyCreateMeetingAgentBubbleShow,
+} from '@/src/lib/create-meeting-agent-bubble-dismiss';
+import {
+  getAgentFabMotionMode,
+  getAgentStep1InteractionUnlocked,
+  playFabMicroNudge,
+  setAgentFabMotionMode,
+  setAgentStep1InteractionUnlocked,
+  subscribeAgentFabMotionMode,
+  subscribeAgentStep1InteractionUnlocked,
+} from '@/src/lib/create-meeting-agent-fab-orchestration';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -2717,6 +2729,34 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+type AgentWizardApplyCue =
+  | { kind: 'category'; id: string }
+  | { kind: 'public'; side: 'public' | 'private' }
+  | { kind: 'confirm1' }
+  | { kind: 'menu'; label: string }
+  | { kind: 'confirm2' };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function waitAgentStep1FabUnlocked(): Promise<void> {
+  if (getAgentStep1InteractionUnlocked()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const unsub = subscribeAgentStep1InteractionUnlocked(() => {
+      if (getAgentStep1InteractionUnlocked()) {
+        unsub();
+        clearTimeout(tmax);
+        resolve();
+      }
+    });
+    const tmax = setTimeout(() => {
+      unsub();
+      resolve();
+    }, 14000);
+  });
+}
+
 export default function CreateDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -2835,6 +2875,7 @@ export default function CreateDetailsScreen() {
     [categories, selectedCategoryId],
   );
   const [isPublicMeeting, setIsPublicMeeting] = useState(pickParam(isPublicParam) !== '0');
+  const isPublicMeetingRef = useRef(isPublicMeeting);
 
   const [meetingConfig, setMeetingConfig] = useState<PublicMeetingDetailsConfig>(
     () => DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG,
@@ -2984,8 +3025,34 @@ export default function CreateDetailsScreen() {
   const [focusKnowledgePreferences, setFocusKnowledgePreferences] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
+  const [agentWizardApplyCue, setAgentWizardApplyCue] = useState<AgentWizardApplyCue | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   currentStepRef.current = currentStep;
+  isPublicMeetingRef.current = isPublicMeeting;
+
+  /** 1단계·자동 진행(`auto`) 중에는 화면 하단 FAB — 카드 우상단 고정 해제로 이동 연출 여유 */
+  const [aiFabScreenBottomLayout, setAiFabScreenBottomLayout] = useState(true);
+  const recomputeAiFabScreenLayout = useCallback(() => {
+    setAiFabScreenBottomLayout(
+      currentStepRef.current === 1 || getAgentFabMotionMode() === 'auto',
+    );
+  }, []);
+
+  useEffect(() => {
+    recomputeAiFabScreenLayout();
+    return subscribeAgentFabMotionMode(recomputeAiFabScreenLayout);
+  }, [recomputeAiFabScreenLayout]);
+
+  useEffect(() => {
+    recomputeAiFabScreenLayout();
+  }, [currentStep, recomputeAiFabScreenLayout]);
+
+  useEffect(() => {
+    setAgentWizardApplyCue(null);
+    if (currentStep !== 1) {
+      setAgentStep1InteractionUnlocked(false);
+    }
+  }, [currentStep]);
 
   const prevWizardStepForFabScrollRef = useRef(currentStep);
   if (currentStep !== prevWizardStepForFabScrollRef.current) {
@@ -3533,6 +3600,9 @@ export default function CreateDetailsScreen() {
       setWizardError('카테고리를 선택해 주세요.');
       return;
     }
+    if (getAgentFabMotionMode() === 'user') {
+      notifyCreateMeetingAgentBubbleShow();
+    }
     if (needsSpecialty) {
       pendingScrollAfterStepRef.current = 2;
       setCurrentStep(2);
@@ -3564,6 +3634,9 @@ export default function CreateDetailsScreen() {
       setWizardError('모임 성격을 한 가지 선택해 주세요.');
       return;
     }
+    if (getAgentFabMotionMode() === 'user') {
+      notifyCreateMeetingAgentBubbleShow();
+    }
     pendingScrollAfterStepRef.current = 3;
     setCurrentStep(3);
   }, [
@@ -3578,25 +3651,111 @@ export default function CreateDetailsScreen() {
     specialtyKind,
   ]);
 
+  const onStep1NextRef = useRef(onStep1Next);
+  const onStep2SpecialtyNextRef = useRef(onStep2SpecialtyNext);
+  onStep1NextRef.current = onStep1Next;
+  onStep2SpecialtyNextRef.current = onStep2SpecialtyNext;
+
   const applyWizardSuggestion = useCallback(
     (sugg: WizardSuggestion) => {
+      setAgentFabMotionMode('auto');
       layoutAnimateMeetingCreateWizard();
-      setSelectedCategoryId(sugg.categoryId);
-      const cat = categories.find((c) => c.id === sugg.categoryId) ?? null;
-      const sk = resolveSpecialtyKindForCategory(cat);
-      if (sk === 'food' && sugg.menuPreferenceLabel) {
-        setMenuPreferences([sugg.menuPreferenceLabel]);
-      }
-      setTimeout(() => {
-        onStep1Next();
-        if (sugg.canAutoCompleteThroughStep3 && sk === 'food' && sugg.menuPreferenceLabel) {
+
+      void (async () => {
+        const pulseMs = 280;
+        const settleMs = 56;
+
+        const runFallbackImmediate = () => {
+          setSelectedCategoryId(sugg.categoryId);
+          const cat0 = categories.find((c) => c.id === sugg.categoryId) ?? null;
+          const sk0 = resolveSpecialtyKindForCategory(cat0);
+          if (sk0 === 'food' && sugg.menuPreferenceLabel) {
+            setMenuPreferences([sugg.menuPreferenceLabel]);
+          }
+          suppressStepLayoutAnimateFromCategoryRef.current = true;
           setTimeout(() => {
-            onStep2SpecialtyNext();
+            onStep1NextRef.current();
+            if (sugg.canAutoCompleteThroughStep3 && sk0 === 'food' && sugg.menuPreferenceLabel) {
+              setTimeout(() => onStep2SpecialtyNextRef.current(), 80);
+            }
           }, 80);
+        };
+
+        try {
+          if (currentStepRef.current !== 1) {
+            runFallbackImmediate();
+            return;
+          }
+
+          await waitAgentStep1FabUnlocked();
+          await sleep(settleMs);
+          /** FAB 수락 연출(이동→dwell→복귀)과 첫 micro nudge가 같은 축을 두지 않도록 */
+          await sleep(380);
+
+          const catForSk = categories.find((c) => c.id === sugg.categoryId) ?? null;
+          const sk = resolveSpecialtyKindForCategory(catForSk);
+
+          playFabMicroNudge();
+          setAgentWizardApplyCue({ kind: 'category', id: sugg.categoryId });
+          await sleep(pulseMs);
+          setSelectedCategoryId(sugg.categoryId);
+          setAgentWizardApplyCue(null);
+          await sleep(settleMs);
+
+          const pubTarget = sugg.suggestedIsPublic;
+          if (pubTarget != null && pubTarget !== isPublicMeetingRef.current) {
+            playFabMicroNudge();
+            setAgentWizardApplyCue({ kind: 'public', side: pubTarget ? 'public' : 'private' });
+            await sleep(pulseMs);
+            setIsPublicMeeting(pubTarget);
+            setAgentWizardApplyCue(null);
+            await sleep(settleMs);
+          } else {
+            playFabMicroNudge();
+            setAgentWizardApplyCue({
+              kind: 'public',
+              side: isPublicMeetingRef.current ? 'public' : 'private',
+            });
+            await sleep(200);
+            setAgentWizardApplyCue(null);
+            await sleep(settleMs);
+          }
+
+          playFabMicroNudge();
+          setAgentWizardApplyCue({ kind: 'confirm1' });
+          await sleep(pulseMs);
+          setAgentWizardApplyCue(null);
+          await sleep(settleMs);
+
+          suppressStepLayoutAnimateFromCategoryRef.current = true;
+          onStep1NextRef.current();
+
+          if (sugg.canAutoCompleteThroughStep3 && sk === 'food' && sugg.menuPreferenceLabel) {
+            await new Promise<void>((r) => {
+              InteractionManager.runAfterInteractions(() => r());
+            });
+            await sleep(460);
+            playFabMicroNudge();
+            setAgentWizardApplyCue({ kind: 'menu', label: sugg.menuPreferenceLabel });
+            await sleep(pulseMs);
+            setMenuPreferences([sugg.menuPreferenceLabel]);
+            setAgentWizardApplyCue(null);
+            await sleep(settleMs);
+            playFabMicroNudge();
+            setAgentWizardApplyCue({ kind: 'confirm2' });
+            await sleep(pulseMs);
+            setAgentWizardApplyCue(null);
+            await sleep(settleMs);
+            onStep2SpecialtyNextRef.current();
+          }
+        } catch {
+          setAgentWizardApplyCue(null);
+        } finally {
+          setAgentFabMotionMode('user');
         }
-      }, 80);
+      })();
     },
-    [categories, onStep1Next, onStep2SpecialtyNext],
+    [categories],
   );
 
   const onStep3BasicNext = useCallback(() => {
@@ -3632,6 +3791,9 @@ export default function CreateDetailsScreen() {
         return;
       }
     }
+    if (getAgentFabMotionMode() === 'user') {
+      notifyCreateMeetingAgentBubbleShow();
+    }
     pendingScrollAfterStepRef.current = 4;
     setCurrentStep(4);
   }, [
@@ -3660,6 +3822,9 @@ export default function CreateDetailsScreen() {
     setVotePayload(cap.payload);
     setPlaceSearchSeed('');
     scheduleFormRef.current?.resetPlaceSearchSession();
+    if (getAgentFabMotionMode() === 'user') {
+      notifyCreateMeetingAgentBubbleShow();
+    }
     setCurrentStep(placesStep);
   }, [placesStep]);
 
@@ -3671,6 +3836,9 @@ export default function CreateDetailsScreen() {
       return;
     }
     pendingScrollAfterStepRef.current = detailStep;
+    if (getAgentFabMotionMode() === 'user') {
+      notifyCreateMeetingAgentBubbleShow();
+    }
     setCurrentStep(detailStep);
   }, [detailStep]);
 
@@ -3953,11 +4121,11 @@ export default function CreateDetailsScreen() {
                 scrollEventThrottle: 16,
                 onScroll: (e) => {
                   mainScrollYRef.current = e.nativeEvent.contentOffset.y;
-                  if (!programmaticScrollPendingRef.current) {
+                  if (!programmaticScrollPendingRef.current && getAgentFabMotionMode() === 'user') {
                     const now = Date.now();
                     if (now - scrollDismissLastNotifyMsRef.current >= 160) {
                       scrollDismissLastNotifyMsRef.current = now;
-                      notifyCreateMeetingAgentBubbleDismiss();
+                      notifyCreateMeetingAgentBubbleDismissFromManualScroll();
                     }
                   }
                 },
@@ -3968,7 +4136,9 @@ export default function CreateDetailsScreen() {
                   onAgentFabMainScrollSettled();
                 },
                 onScrollBeginDrag: () => {
-                  notifyCreateMeetingAgentBubbleDismiss();
+                  if (getAgentFabMotionMode() === 'user') {
+                    notifyCreateMeetingAgentBubbleDismissFromManualScroll();
+                  }
                 },
                 /**
                  * 손가락 플링(손을 뗀 뒤 관성)에만 적용. 단계 이동용 `scrollTo(..., animated: true)`는
@@ -4008,6 +4178,7 @@ export default function CreateDetailsScreen() {
                 <View style={styles.catGrid}>
                   {categories.map((c) => {
                     const active = c.id === selectedCategoryId;
+                    const agentCatCue = agentWizardApplyCue?.kind === 'category' && agentWizardApplyCue.id === c.id;
                     return (
                       <Pressable
                         key={c.id}
@@ -4015,7 +4186,7 @@ export default function CreateDetailsScreen() {
                         style={({ pressed }) => [
                           styles.catTile,
                           active && styles.catTileActive,
-                          pressed && styles.catTilePressed,
+                          (pressed || agentCatCue) && styles.catTilePressed,
                         ]}
                         accessibilityRole="button"
                         accessibilityState={{ selected: active }}>
@@ -4039,6 +4210,9 @@ export default function CreateDetailsScreen() {
                       style={[
                         styles.segmentHalf,
                         !isPublicMeeting && styles.segmentHalfOn,
+                        agentWizardApplyCue?.kind === 'public' &&
+                          agentWizardApplyCue.side === 'private' &&
+                          styles.segmentHalfAgentCue,
                       ]}
                       accessibilityRole="button">
                       <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
@@ -4049,6 +4223,9 @@ export default function CreateDetailsScreen() {
                       style={[
                         styles.segmentHalf,
                         isPublicMeeting && styles.segmentHalfOn,
+                        agentWizardApplyCue?.kind === 'public' &&
+                          agentWizardApplyCue.side === 'public' &&
+                          styles.segmentHalfAgentCue,
                       ]}
                       accessibilityRole="button">
                       <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
@@ -4064,7 +4241,10 @@ export default function CreateDetailsScreen() {
                     style={({ pressed }) => [
                       styles.wizardPrimaryBtn,
                       (!selectedCategoryId || categories.length === 0) && styles.addCandidateBtnDisabled,
-                      pressed && selectedCategoryId && categories.length > 0 && styles.addCandidateBtnPressed,
+                      (pressed || agentWizardApplyCue?.kind === 'confirm1') &&
+                        selectedCategoryId &&
+                        categories.length > 0 &&
+                        styles.addCandidateBtnPressed,
                     ]}
                     accessibilityRole="button">
                     <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
@@ -4105,7 +4285,14 @@ export default function CreateDetailsScreen() {
                     
                   ) : null}
                   {specialtyKind === 'food' ? (
-                    <MenuPreference value={menuPreferences} onChange={setMenuPreferences} disabled={busy} />
+                    <MenuPreference
+                      value={menuPreferences}
+                      onChange={setMenuPreferences}
+                      disabled={busy}
+                      agentCueLabel={
+                        agentWizardApplyCue?.kind === 'menu' ? agentWizardApplyCue.label : null
+                      }
+                    />
                   ) : null}
                   {specialtyKind === 'sports' && activeLifeMajor ? (
                     <ActivityKindPreference value={activityKinds} onChange={setActivityKinds} disabled={busy} />
@@ -4136,29 +4323,23 @@ export default function CreateDetailsScreen() {
                           gameKinds.length === 0) ||
                         (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0)
                       }
-                      style={({ pressed }) => [
-                        styles.wizardPrimaryBtn,
-                        (specialtyKind === 'movie' && movieCandidates.length === 0) ||
-                        (specialtyKind === 'food' && menuPreferences.length === 0) ||
-                        (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) ||
-                        (specialtyKind === 'sports' &&
-                          (playAndVibeMajor || pcGameMajor) &&
-                          gameKinds.length === 0) ||
-                        (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0)
-                          ? styles.addCandidateBtnDisabled
-                          : undefined,
-                        pressed &&
-                          !(
-                            (specialtyKind === 'movie' && movieCandidates.length === 0) ||
-                            (specialtyKind === 'food' && menuPreferences.length === 0) ||
-                            (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) ||
-                            (specialtyKind === 'sports' &&
-                              (playAndVibeMajor || pcGameMajor) &&
-                              gameKinds.length === 0) ||
-                            (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0)
-                          ) &&
-                          styles.addCandidateBtnPressed,
-                      ]}
+                      style={({ pressed }) => {
+                        const step2Disabled =
+                          (specialtyKind === 'movie' && movieCandidates.length === 0) ||
+                          (specialtyKind === 'food' && menuPreferences.length === 0) ||
+                          (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) ||
+                          (specialtyKind === 'sports' &&
+                            (playAndVibeMajor || pcGameMajor) &&
+                            gameKinds.length === 0) ||
+                          (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0);
+                        return [
+                          styles.wizardPrimaryBtn,
+                          step2Disabled ? styles.addCandidateBtnDisabled : undefined,
+                          (pressed || agentWizardApplyCue?.kind === 'confirm2') &&
+                            !step2Disabled &&
+                            styles.addCandidateBtnPressed,
+                        ];
+                      }}
                       accessibilityRole="button">
                       <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
                         <LinearGradient
@@ -4171,7 +4352,7 @@ export default function CreateDetailsScreen() {
                       <Text style={styles.wizardPrimaryBtnLabel}>
                         {specialtyKind === 'movie'
                           ? '이 후보들로 모임 만들기'
-                          : '확인 · 기본 정보'}
+                          : '확인'}
                       </Text>
                     </Pressable>
                   ) : null}
@@ -4291,7 +4472,7 @@ export default function CreateDetailsScreen() {
                           style={StyleSheet.absoluteFillObject}
                         />
                       </View>
-                      <Text style={styles.wizardPrimaryBtnLabel}>확인 · 일정 설정</Text>
+                      <Text style={styles.wizardPrimaryBtnLabel}>확인</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -4438,7 +4619,7 @@ export default function CreateDetailsScreen() {
                               style={StyleSheet.absoluteFillObject}
                             />
                           </View>
-                          <Text style={styles.wizardPrimaryBtnLabel}>확인 · 상세 조건</Text>
+                          <Text style={styles.wizardPrimaryBtnLabel}>확인</Text>
                         </Pressable>
                       ) : null}
                     </View>
@@ -4576,8 +4757,8 @@ export default function CreateDetailsScreen() {
       </SafeAreaView>
       {!snsDemographicsBlocked ? (
         <CreateMeetingAgenticAiFab
-          layoutMode={currentStep === 1 ? 'screenBottom' : 'cardTopRight'}
-          cardWindowRect={currentStep === 1 ? null : agentFabWindowRect}
+          layoutMode={aiFabScreenBottomLayout ? 'screenBottom' : 'cardTopRight'}
+          cardWindowRect={aiFabScreenBottomLayout ? null : agentFabWindowRect}
           windowWidth={windowWidth}
           wizardStep={currentStep}
         />
@@ -5480,6 +5661,9 @@ const styles = StyleSheet.create({
   },
   segmentHalfOn: {
     backgroundColor: 'rgba(31, 42, 68, 0.06)',
+  },
+  segmentHalfAgentCue: {
+    opacity: 0.88,
   },
   segmentTitle: {
     fontSize: 13,

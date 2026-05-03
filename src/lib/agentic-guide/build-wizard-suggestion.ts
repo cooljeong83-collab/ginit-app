@@ -55,7 +55,7 @@ function pickCategoryFromSnapshot(categories: Category[], s: AgentWelcomeSnapsho
  */
 export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSnapshot): WizardSuggestion | null {
   if (isColdStartForAgentSnapshot(s)) return null;
-  if ((s.recentMeetings?.length ?? 0) === 0) return null;
+  /** 피드가 비어도 `pickCategoryFromSnapshot`이 습관·요약·`categories[0]`로 고를 수 있음 — 여기서 막으면 멘트만 "수락" 유도하고 버튼은 안 뜸 */
   const cat = pickCategoryFromSnapshot(categories, s);
   if (!cat) return null;
   const sk = resolveSpecialtyKindForCategory(cat);
@@ -72,6 +72,7 @@ export function buildWizardSuggestion(categories: Category[], s: AgentWelcomeSna
     menuPreferenceLabel: menu,
     canAutoCompleteThroughStep3: canAuto,
     placeSearchHint: placeSearchHint,
+    suggestedIsPublic: null,
   };
 }
 

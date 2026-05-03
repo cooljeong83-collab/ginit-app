@@ -65,7 +65,8 @@ export function buildDetailsPatternSuggestMessage(s: AgentWelcomeSnapshot): stri
   }
 
   if (typeof profileN === 'number' && profileN > 0) {
-    return `활동 기록은 있는데 목록은 아직 비어 보여${dnaBit} ✨ 수락 누르면 추천 카테고리로 바로 잡아줄게 🙌`;
+    // meeting_count만 있고 피드 목록이 비어 있을 때 — ‘목록 비어’ 멘트는 오해 소지가 있어 피드N>0과 동일 톤
+    return `이미 모임 꽤 돌려왔네${dnaBit} ✨ 이번엔 추천 카테고리로 바로 깔아볼래? 수락 누르면 세팅해 줄게 🙌`;
   }
 
   return `모임 패턴은 아직 수집 중이야${dnaBit} ✨ 수락 누르면 추천으로 세팅해 볼래? 🙌`;
@@ -81,14 +82,14 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
     return `${greet}첫 모임이네요, 반가워요. \n지금 단계에서는 모임 종류만 골라 주세요. \n아래로 단계마다 내용을 짧게 설명해 줄게요. \n부담 없이 본인 취향대로 선택하면 돼요.`;
   }
 
-  const acceptHint = ' 수락 누르면 맞춰 줄게 🙌';
+  const acceptHint = '\n수락 누르면 맞춰 줄게 🙌';
   const now = s.now;
   const meetings = s.recentMeetings ?? [];
   const ongoing = meetings.filter((m) => isOngoingForChat(m, now));
   const completed = meetings.filter((m) => !isOngoingForChat(m, now));
 
   const dna = s.gDnaChips.slice(0, 2).join('·');
-  const dnaBit = dna ? ` 네 성향(${dna})도 같이 보면` : '';
+  const dnaBit = dna ? `${dna}` : '';
 
   if (completed.length > 0) {
     const topDone = topUsefulPatternInMeetings(completed);
@@ -140,7 +141,7 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
   }
 
   if (feedN > 0) {
-    return `참여·지나온 모임을 기준으로 보면 꽤 돌려왔네${dnaBit}. 자주 쓰던 톤으로 새 모임 만들어 줄까?${acceptHint}`;
+    return `당신은 ${dnaBit}성향이네요! \n평소 선호하시던 톤으로 새 모임을 만들어 드릴까요?${acceptHint}`;
   }
 
   const profileN = s.profileMeetingCount;
@@ -151,7 +152,7 @@ export function buildStep1FrequentPatternOfferMessage(s: AgentWelcomeSnapshot): 
   }
 
   if (typeof profileN === 'number' && profileN > 0) {
-    return `참여 기록은 있는데 목록은 아직 비어 보여${dnaBit}. 자주 가던 라인을 짐작해서 잡아볼까?${acceptHint}`;
+    return `당신은 ${dnaBit}. 성향이네요! \n선호하시던 톤으로 모임을 만들어 드릴까요?${acceptHint}`;
   }
 
   return `참여·지나온 모임 신호가 아직 얇아서 패턴은 천천히 쌓을게${dnaBit}. 그래도 오늘은 추천으로 바로 잡아볼래?${acceptHint}`;

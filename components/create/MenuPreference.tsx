@@ -9,9 +9,11 @@ export type MenuPreferenceProps = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  /** FAB 자동 적용 시 해당 칩에 눌림 연출만 표시(상태는 부모가 타이밍에 맞게 갱신). */
+  agentCueLabel?: string | null;
 };
 
-export function MenuPreference({ value, onChange, disabled }: MenuPreferenceProps) {
+export function MenuPreference({ value, onChange, disabled, agentCueLabel = null }: MenuPreferenceProps) {
   /** 한 가지만 선택. 동일 칩을 다시 누르면 해제(다른 항목으로 바꿀 수 있게). */
   const selectOne = useCallback(
     (label: string) => {
@@ -29,6 +31,7 @@ export function MenuPreference({ value, onChange, disabled }: MenuPreferenceProp
       <View style={S.chipWrap}>
         {OPTIONS.map((label) => {
           const active = value.includes(label);
+          const isAgentCue = agentCueLabel != null && label === agentCueLabel;
           return (
             <Pressable
               key={label}
@@ -37,7 +40,7 @@ export function MenuPreference({ value, onChange, disabled }: MenuPreferenceProp
               style={({ pressed }) => [
                 S.glassChip,
                 active && S.glassChipOn,
-                pressed && S.glassChipPressed,
+                (pressed || isAgentCue) && S.glassChipPressed,
               ]}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}>

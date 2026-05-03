@@ -2363,6 +2363,43 @@ export async function hostRemoveParticipant(
   if (after) notifyMeetingParticipantRemovedByHostFireAndForget(after, targetRaw);
 }
 
+function collectAppUserIdsFromFirestoreMeetingDoc(data: Record<string, unknown>): string[] {
+  const set = new Set<string>();
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  if (createdBy) {
+    set.add(normalizeParticipantId(createdBy) ?? createdBy);
+  }
+  const rawList = Array.isArray(data.participantIds)
+    ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  for (const raw of rawList) {
+    const t = raw.trim();
+    if (!t) continue;
+    set.add(normalizeParticipantId(t) ?? t);
+  }
+  return [...set].filter((id) => id.length > 0);
+}
+
+/** Supabase `meetings` 트리거가 없는 Firestore 문서 전용 — 확정/확정 취소 시 `meeting_count` 동기화 */
+async function adjustProfilesMeetingCountForFirestoreMeetingDoc(
+  data: Record<string, unknown>,
+  delta: 1 | -1,
+): Promise<void> {
+  const ids = collectAppUserIdsFromFirestoreMeetingDoc(data);
+  if (ids.length === 0) return;
+  try {
+    const { error } = await supabase.rpc('adjust_profiles_meeting_count_by_app_user_ids', {
+      p_app_user_ids: ids,
+      p_delta: delta,
+    });
+    if (error && __DEV__) {
+      console.warn('[adjust_profiles_meeting_count_by_app_user_ids]', error.message);
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[adjust_profiles_meeting_count_by_app_user_ids]', e);
+  }
+}
+
 /** 모임 주관자가 집계 투표(+동점 시 주관자 선택)로 일정·모집 확정 */
 export async function confirmMeetingSchedule(
   meetingId: string,
@@ -2454,6 +2491,7 @@ export async function confirmMeetingSchedule(
     fsPatch.scheduledAt = schFs.scheduledAt;
   }
   await updateDoc(ref, fsPatch);
+  await adjustProfilesMeetingCountForFirestoreMeetingDoc(data, 1);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
 }
 
@@ -2508,6 +2546,7 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
     confirmedPlaceChipId: null,
     confirmedMovieChipId: null,
   });
+  await adjustProfilesMeetingCountForFirestoreMeetingDoc(data, -1);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'unconfirmed', uid);
 }
 
