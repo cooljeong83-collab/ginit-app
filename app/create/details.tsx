@@ -101,7 +101,6 @@ import {
   getAgentStep1InteractionUnlocked,
   setAgentFabMotionMode,
   setAgentStep1InteractionUnlocked,
-  subscribeAgentFabMotionMode,
   subscribeAgentStep1InteractionUnlocked,
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
 import {
@@ -3036,18 +3035,11 @@ export default function CreateDetailsScreen() {
   currentStepRef.current = currentStep;
   isPublicMeetingRef.current = isPublicMeeting;
 
-  /** 1단계·자동 진행(`auto`) 중에는 화면 하단 FAB — 카드 우상단 고정 해제로 이동 연출 여유 */
+  /** 1단계만 화면 하단 FAB — 2단계 이상은 자동·수동 동일하게 카드 우상단(`cardTopRight`) 도킹 */
   const [aiFabScreenBottomLayout, setAiFabScreenBottomLayout] = useState(true);
   const recomputeAiFabScreenLayout = useCallback(() => {
-    setAiFabScreenBottomLayout(
-      currentStepRef.current === 1 || getAgentFabMotionMode() === 'auto',
-    );
+    setAiFabScreenBottomLayout(currentStepRef.current === 1);
   }, []);
-
-  useEffect(() => {
-    recomputeAiFabScreenLayout();
-    return subscribeAgentFabMotionMode(recomputeAiFabScreenLayout);
-  }, [recomputeAiFabScreenLayout]);
 
   useEffect(() => {
     recomputeAiFabScreenLayout();
