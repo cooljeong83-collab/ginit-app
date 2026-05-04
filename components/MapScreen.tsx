@@ -76,8 +76,11 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
-import { approximateCenterLatLngForFeedRegion } from '@/src/lib/feed-region-map-center';
-import { loadActiveFeedRegion, loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import {
+  approximateCenterLatLngForFeedRegion,
+  approximateCenterLatLngForFeedRegionSync,
+} from '@/src/lib/feed-region-map-center';
+import { loadRegisteredFeedRegions, peekFeedRegionMapSelectionForMapBoot } from '@/src/lib/feed-registered-regions';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
@@ -192,6 +195,31 @@ const NAVER_CLUSTER_MAX_ZOOM = 15;
 
 // 위치 권한 미허용·관심 지역 미설정 시 기본 진입 중심(영등포구)
 const DEFAULT_NO_LOCATION_CENTER: LatLng = { latitude: 37.5263, longitude: 126.8962 };
+
+/** `getPolicyNumeric('meeting','map_radius_km',3)` 기본과 동일 — 초기 state는 정책 훅보다 먼저 잡기 위함 */
+const MAP_BOOT_POLICY_RADIUS_KM = 3;
+
+function mapBootAnchorAndRegionFromInterestMemory(radiusKm: number): {
+  anchor: LatLng;
+  region: Region;
+  exploreActiveNorm: string;
+} {
+  const { regions, activeNorm } = peekFeedRegionMapSelectionForMapBoot();
+  if (regions.length === 0) {
+    const r = regionCenteredOnUserRadius(
+      DEFAULT_NO_LOCATION_CENTER.latitude,
+      DEFAULT_NO_LOCATION_CENTER.longitude,
+      radiusKm,
+    );
+    return { anchor: DEFAULT_NO_LOCATION_CENTER, region: r, exploreActiveNorm: '' };
+  }
+  const setN = new Set(regions.map((x) => normalizeFeedRegionLabel(x)));
+  const exploreActiveNorm =
+    activeNorm && setN.has(activeNorm) ? activeNorm : normalizeFeedRegionLabel(regions[0]!);
+  const center = approximateCenterLatLngForFeedRegionSync(exploreActiveNorm);
+  const r = regionCenteredOnUserRadius(center.latitude, center.longitude, radiusKm);
+  return { anchor: center, region: r, exploreActiveNorm };
+}
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -332,6 +360,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { addCleanup } = useUnmountCleanup();
+  const mapBootInit = useMemo(() => mapBootAnchorAndRegionFromInterestMemory(MAP_BOOT_POLICY_RADIUS_KM), []);
   // `react-native-map-clustering`의 ref 타입은 내부적으로 콜백 ref를 쓰므로 any로 둡니다.
   const mapRef = useRef<any>(null);
   const naverMapRef = useRef<NaverMapViewRef>(null);
@@ -343,8 +372,8 @@ export default function MapScreen() {
   const listScrollRaf = useRef<number | null>(null);
   const scrollAfterInteractionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollAfterInteractionCancelRef = useRef<(() => void) | null>(null);
-  const lastCompleteRegionRef = useRef<Region | null>(null);
-  const lastQueriedRegionRef = useRef<Region | null>(null);
+  const lastCompleteRegionRef = useRef<Region | null>(mapBootInit.region);
+  const lastQueriedRegionRef = useRef<Region | null>(mapBootInit.region);
   const suppressRescanUntilMsRef = useRef(0);
   /** `mapGeoQueryRegion` state와 동기 — `onRegionChangeComplete`에서 최신 조회 박스 참조 */
   const mapGeoQueryRegionRef = useRef<Region | null>(null);
@@ -380,8 +409,8 @@ export default function MapScreen() {
   }, []);
 
   const [mapMovedSinceSearch, setMapMovedSinceSearch] = useState(false);
-  const [pendingRegion, setPendingRegion] = useState<Region | null>(null);
-  const [queriedRegion, setQueriedRegion] = useState<Region | null>(null);
+  const [pendingRegion, setPendingRegion] = useState<Region | null>(() => mapBootInit.region);
+  const [queriedRegion, setQueriedRegion] = useState<Region | null>(() => mapBootInit.region);
 
   const openSheet = useCallback(() => {
     sheetShown.value = withTiming(1, {
@@ -527,15 +556,14 @@ export default function MapScreen() {
   const [meetingsBooted, setMeetingsBooted] = useState(false);
   /** 반경 RPC(fetchMeetingsWithinRadiusFromSupabase) 진행 중 — 하이브리드 부트 후에도 시트 빈 카피 깜빡임 방지 */
   const [mapGeoMeetingsLoading, setMapGeoMeetingsLoading] = useState(false);
-  const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(null);
+  const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(() => mapBootInit.anchor);
   const [driftTooFar, setDriftTooFar] = useState(false);
-  const [listingRegion, setListingRegion] = useState<Region | null>(null);
+  const [listingRegion, setListingRegion] = useState<Region | null>(() => mapBootInit.region);
   /** 마지막으로 조회한 지도 가시 영역(이 지역 재검색·초기 로드·내 위치) — RPC·목록·마커 기준 */
-  const [mapGeoQueryRegion, setMapGeoQueryRegion] = useState<Region | null>(null);
+  const [mapGeoQueryRegion, setMapGeoQueryRegion] = useState<Region | null>(() => mapBootInit.region);
   useEffect(() => {
     mapGeoQueryRegionRef.current = mapGeoQueryRegion;
   }, [mapGeoQueryRegion]);
-  const [mapReady, setMapReady] = useState(false);
   const [zoomDeltaForClustering, setZoomDeltaForClustering] = useState(
     INITIAL_VIEW_NS_SPAN_METERS / 111320,
   );
@@ -547,13 +575,10 @@ export default function MapScreen() {
   const isMapScreenFocused = useIsFocused();
 
   /**
-   * 하이브리드 최초 부트 전, 지도 조회 앵커·영역 미확정(이때는 RPC 이펙트가 로딩을 켜지 않음),
-   * 또는 반경 RPC 진행 중까지 시트 스플래시 — 그 사이 빈 시트 카피가 먼저 깜빡이지 않게 함.
+   * 하이브리드 최초 부트 전, 또는 반경 RPC 진행 중까지 시트 스플래시 — 그 사이 빈 시트 카피가 먼저 깜빡이지 않게 함.
+   * 관심지역 기반 초기 앵커는 동기로 잡히므로 권한·GPS 대기로 시트를 가리지 않습니다.
    */
-  const showSheetSplash =
-    !meetingsBooted ||
-    mapGeoMeetingsLoading ||
-    (searchAnchor == null && mapGeoQueryRegion == null);
+  const showSheetSplash = !meetingsBooted || mapGeoMeetingsLoading;
 
   const { version: appPoliciesVersion } = useAppPolicies();
   const mapRadiusKm = useMemo(() => {
@@ -642,43 +667,17 @@ export default function MapScreen() {
     ],
   );
 
-  /** 지도 탭 진입·재진입: 시트 펼침 + (GPS 허용 시) 내 위치 / (미허용 시) 모임 탭 관심 지역 중심으로 카메라·조회 기준 동기화 */
+  /** 지도 탭 진입·재진입: 시트·레이아웃만 동기화 (카메라·권한은 관심지역 동기 초기값 / «내 위치» 버튼에서만 처리) */
   useFocusEffect(
     useCallback(() => {
-      // 탐색 탭에 들어온 직후에는 지도/시트 초기 레이아웃만으로 "이 지역 재검색"이 뜨지 않게 합니다.
       setMapMovedSinceSearch(false);
       openSheet();
       sheetHeight.value = withSpring(sheetCollapsedPx, SPRING);
       setIsSheetExpanded(false);
-      const t = setTimeout(() => {
-        void (async () => {
-          const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
-          if (perm?.status === 'granted') {
-            const u = userCoordsRef.current;
-            const hasExistingQueryContext = Boolean(lastCompleteRegionRef.current || searchAnchor);
-            if (u && !hasExistingQueryContext) snapMapToUserCoords(u);
-            return;
-          }
-          const regions = await loadRegisteredFeedRegions();
-          const activeRaw = await loadActiveFeedRegion();
-          if (regions.length === 0) {
-            const hasCtx = Boolean(lastCompleteRegionRef.current || searchAnchor);
-            if (!hasCtx) snapMapToUserCoords(DEFAULT_NO_LOCATION_CENTER);
-            return;
-          }
-          const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
-          const exploreActiveNorm =
-            activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
-          const center = await approximateCenterLatLngForFeedRegion(exploreActiveNorm);
-          snapMapToUserCoords(center);
-        })();
-      }, 100);
       return () => {
-        clearTimeout(t);
-        // 스택(모임 상세 등)으로 가려져 blur/freeze 되기 전에 지도를 내리면, 복귀 시 마커가 사라지는 네이티브 이슈를 피합니다.
-        setMapReady(false);
+        /* 스택(모임 상세 등)으로 가려질 때 네이티브 지도 freeze 이슈 완화: 포커스 해제 시 별도 처리 없음 */
       };
-    }, [openSheet, sheetCollapsedPx, sheetHeight, searchAnchor, snapMapToUserCoords, setMapMovedSinceSearch]),
+    }, [openSheet, sheetCollapsedPx, sheetHeight, setMapMovedSinceSearch]),
   );
 
   const driftThresholdM = mapRadiusKm * 1000;
@@ -785,9 +784,10 @@ export default function MapScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       const regions = await loadRegisteredFeedRegions();
-      const activeRaw = await loadActiveFeedRegion();
+      if (cancelled) return;
+      const { activeNorm: activeRaw } = peekFeedRegionMapSelectionForMapBoot();
       let exploreActiveNorm = '';
       if (regions.length > 0) {
         const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
@@ -813,21 +813,23 @@ export default function MapScreen() {
         : normalizeFeedRegionLabel(ctx.labelShort);
       await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: false });
 
-      if (coordsForDistance && !searchAnchor) {
-        const r0 = regionCenteredOnUserRadius(coordsForDistance.latitude, coordsForDistance.longitude, mapRadiusKm);
-        lastCompleteRegionRef.current = r0;
-        setSearchAnchor(coordsForDistance);
-        setListingRegion(r0);
-        setMapGeoQueryRegion(r0);
-        setPendingRegion(r0);
-        lastQueriedRegionRef.current = r0;
-        setMapMovedSinceSearch(false);
-      } else if (!searchAnchor) {
-        const interestCenter = exploreActiveNorm
-          ? await approximateCenterLatLngForFeedRegion(exploreActiveNorm)
-          : DEFAULT_NO_LOCATION_CENTER;
-        if (cancelled) return;
-        const r0 = regionCenteredOnUserRadius(interestCenter.latitude, interestCenter.longitude, mapRadiusKm);
+      const interestCenter = exploreActiveNorm
+        ? await approximateCenterLatLngForFeedRegion(exploreActiveNorm)
+        : DEFAULT_NO_LOCATION_CENTER;
+      if (cancelled) return;
+      const r0 = regionCenteredOnUserRadius(interestCenter.latitude, interestCenter.longitude, mapRadiusKm);
+      const prev = lastCompleteRegionRef.current;
+      const movedM =
+        prev == null
+          ? 99999
+          : haversineDistanceMeters(
+              { latitude: prev.latitude, longitude: prev.longitude },
+              interestCenter,
+            );
+      const zoomChanged =
+        prev == null ||
+        Math.abs((prev.latitudeDelta ?? 0) - (r0.latitudeDelta ?? 0)) > 1e-7;
+      if (movedM > 120 || zoomChanged) {
         lastCompleteRegionRef.current = r0;
         setSearchAnchor(interestCenter);
         setListingRegion(r0);
@@ -840,8 +842,7 @@ export default function MapScreen() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 초기 앵커만
-  }, []);
+  }, [mapRadiusKm]);
 
   useEffect(() => {
     let posSub: Location.LocationSubscription | null = null;
@@ -1195,10 +1196,6 @@ export default function MapScreen() {
     [initialMapRegion, insets.top, mapGeoQueryRegion, sheetPeekHeight, windowHeight],
   );
 
-  // GPS·관심지역 상태가 오기 전까지 false면 지도가 마운트되지 않아 이동·탭이 전부 막힙니다.
-  // `initialMapRegion`은 searchAnchor/userCoords 없을 때도 기본 영역을 제공하므로 항상 지도를 띄웁니다.
-  const initialRegionReady = true;
-
   const sortedMapCategoryMaster = useMemo(
     () =>
       [...categories].sort((a, b) =>
@@ -1394,11 +1391,6 @@ export default function MapScreen() {
     void (async () => {
       if (Platform.OS === 'web') {
         Alert.alert('위치 권한', '웹에서는 내 위치 이동을 지원하지 않습니다.');
-        return;
-      }
-      const existing = userCoordsRef.current;
-      if (existing) {
-        snapMapToUserCoords(existing, MY_LOCATION_BUTTON_VIEW_RADIUS_KM);
         return;
       }
 
@@ -2014,8 +2006,7 @@ export default function MapScreen() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <View style={styles.mapWrap}>
-        {initialRegionReady ? (
-          isMapScreenFocused ? (
+        {isMapScreenFocused ? (
           Platform.OS === 'android' ? (
             <NaverMapView
               ref={naverMapRef}
@@ -2034,7 +2025,6 @@ export default function MapScreen() {
                     }
                   : { isVisible: false }
               }
-              onInitialized={() => setMapReady(true)}
               onCameraChanged={({ zoom, reason }) => {
                 if (typeof zoom === 'number' && Number.isFinite(zoom)) setNaverZoom(zoom);
                 // 마커 탭/프로그램 이동(Developer/Control/Location)까지 제스처로 오인하면
@@ -2165,7 +2155,6 @@ export default function MapScreen() {
               style={StyleSheet.absoluteFillObject}
               provider={undefined}
               initialRegion={lastCompleteRegionRef.current ?? initialMapRegion}
-              onMapLoaded={() => setMapReady(true)}
               onPanDrag={onUserMapGesture}
               onRegionChangeComplete={onRegionChangeComplete}
               onPress={onMapPress}
@@ -2270,14 +2259,8 @@ export default function MapScreen() {
               ) : null}
             </MapView>
           )
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, styles.mapPausedFill]} pointerEvents="none" />
-          )
         ) : (
-          <View style={styles.mapBoot}>
-            <ActivityIndicator />
-            <Text style={styles.mapBootText}>내 주변 불러오는 중…</Text>
-          </View>
+          <View style={[StyleSheet.absoluteFillObject, styles.mapPausedFill]} pointerEvents="none" />
         )}
 
         {mapMovedSinceSearch && (hasPendingRescan || driftTooFar) ? (

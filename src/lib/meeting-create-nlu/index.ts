@@ -1,5 +1,17 @@
-export type { MeetingCreateNluEdgePayload, MeetingCreateNluPlan, MeetingCreateNluEdgeUnknown } from '@/src/lib/meeting-create-nlu/types';
-export { parseMeetingCreateNluPayload } from '@/src/lib/meeting-create-nlu/parse-edge-payload';
+export type {
+  MeetingCreateNluEdgePayload,
+  MeetingCreateNluPlan,
+  MeetingCreateNluEdgeUnknown,
+  MeetingCreateNluInference,
+} from '@/src/lib/meeting-create-nlu/types';
+export {
+  parseMeetingCreateNluPayload,
+  peekMeetingCreateNluMissingSlots,
+  resolveMeetingCreateCategoryId,
+  resolveMeetingCreateHeadcountFromPayload,
+  meetingCreateScheduleFromEdgePayload,
+} from '@/src/lib/meeting-create-nlu/parse-edge-payload';
+export type { MeetingCreateNluMissingSlot } from '@/src/lib/meeting-create-nlu/parse-edge-payload';
 export {
   mergePublicMeetingDetailsFromNluRecord,
   applyPartialPublicMeetingDetails,

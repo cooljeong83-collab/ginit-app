@@ -471,6 +471,12 @@ export function CreateMeetingAgenticAiFab({
     prevMzLineRef.current = fullText;
 
     if (wizardStepIncreased && fabEntranceDoneRef.current) {
+      /** NLU 수락 후 위저드 오토 적용 중에는 단계 전환마다 말풍선이 다시 뜨지 않게 함 */
+      if (getAgentFabMotionMode() === 'auto') {
+        return () => {
+          clearTypingTimers();
+        };
+      }
       suppressBubbleUntilUserFabPressRef.current = false;
       clearTypingTimers();
       if (pendingCardDockSpringRef.current) {

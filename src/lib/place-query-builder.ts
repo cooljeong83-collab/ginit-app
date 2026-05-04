@@ -142,30 +142,45 @@ function venueSearchTokensForGameKind(gameLabel: string): readonly string[] {
 /** 활동 종류 칩 라벨 → 네이버 지역 검색에 맞는 시설·장소 키워드 풀 */
 function venueSearchTokensForActivityKind(activityLabel: string): readonly string[] {
   const k = activityLabel.trim();
-  switch (k) {
-    case '러닝·조깅':
+  /** Step2 칩 `러닝·조깅` 등 복합 라벨 → 단일 키로 매핑 */
+  const g =
+    (
+      {
+        '러닝·조깅': '러닝',
+        '등산·트레킹': '등산',
+        '헬스·근력': '헬스',
+        '요가·필라테스': '요가',
+        '풋살·축구': '축구',
+        '배드민턴·테니스': '배드민턴',
+        '자전거·라이딩': '라이딩',
+        '산책·워킹': '산책',
+        '댄스·에어로빅': '댄스',
+      } as const satisfies Record<string, string>
+    )[k] ?? k;
+  switch (g) {
+    case '러닝':
       return ['공원', '둘레길', '운동장', '트랙', '한강공원'] as const;
-    case '등산·트레킹':
+    case '등산':
       return ['등산로', '둘레길', '국립공원', '산행코스', '지리산 입구', '북한산'] as const;
-    case '산책·워킹':
+    case '산책':
       return ['공원', '산책로', '둘레길', '숲길'] as const;
-    case '자전거·라이딩':
+    case '라이딩':
       return ['자전거도로', '둘레길', '한강공원', '라이딩'] as const;
     case '클라이밍':
       return ['클라이밍장', '암장', '실내클라이밍'] as const;
-    case '풋살·축구':
+    case '축구':
       return ['풋살경기장', '운동장', '축구장'] as const;
-    case '배드민턴·테니스':
+    case '배드민턴':
       return ['배드민턴장', '테니스장', '실내체육관'] as const;
-    case '요가·필라테스':
+    case '요가':
       return ['요가스튜디오', '필라테스', '요가'] as const;
     case '수영':
       return ['수영장', '실내수영장'] as const;
-    case '헬스·근력':
+    case '헬스':
       return ['헬스장', '피트니스'] as const;
     case '크로스핏':
       return ['크로스핏', '헬스장'] as const;
-    case '댄스·에어로빅':
+    case '댄스':
       return ['댄스학원', '스튜디오', '줌바'] as const;
     default:
       return ['공원', '운동장'] as const;

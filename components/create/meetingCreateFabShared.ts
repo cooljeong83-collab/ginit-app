@@ -2,6 +2,8 @@ import { GinitTheme } from '@/constants/ginit-theme';
 
 /** 모임 생성 FAB(에이전트·탭바) 공통 — 버튼 면 크기 */
 export const MEETING_CREATE_FAB_BTN_SIZE = 56;
+/** 시각·레이아웃은 그대로 두고 터치만 넓힘(모임 목록 행 오탭 완화) */
+export const MEETING_CREATE_FAB_HIT_SLOP = { top: 16, bottom: 24, left: 18, right: 18 } as const;
 /** 버튼 아래 타원 그림자 슬롯 높이 */
 export const MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT = 14;
 /** 아래에서 올라오는 거리 */
@@ -50,7 +52,7 @@ export const MEETING_CREATE_FAB_SHADOW_FADE_IN_FROM_TY = 26;
 export const CREATE_MEETING_AGENT_BUBBLE_START_DELAY_MS = 1200;
 /** 말풍선 애니 시작 후 첫 타이핑까지 */
 export const CREATE_MEETING_AGENT_TYPING_LAG_AFTER_BUBBLE_MS = 120;
-export const CREATE_MEETING_AGENT_TYPING_INTERVAL_MS = 34;
+export const CREATE_MEETING_AGENT_TYPING_INTERVAL_MS = 17;
 export const CREATE_MEETING_AGENT_TYPING_CARET_BLINK_MS = 520;
 /** AI 말풍선 등장·퇴장 — opacity 전용(스프링 대신 타이밍) */
 export const CREATE_MEETING_AGENT_BUBBLE_FADE_IN_MS = 260;

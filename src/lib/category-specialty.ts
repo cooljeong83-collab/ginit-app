@@ -2,6 +2,102 @@ import type { Category } from '@/src/lib/categories';
 
 export type SpecialtyKind = 'movie' | 'food' | 'sports' | 'knowledge';
 
+/** `resolveSpecialtyKind` 라벨 정규식과 정합 — 로컬 NLU 발화 키워드 매칭용 */
+const UTTERANCE_HINTS_MOVIE: readonly string[] = [
+  '영화',
+  '무비',
+  '시네마',
+  '시네',
+  '극장',
+  '영화관',
+  'OTT',
+  '넷플',
+  '왓챠',
+  '디즈니',
+  '상영',
+  '관람',
+];
+
+const UTTERANCE_HINTS_FOOD: readonly string[] = [
+  '맛집',
+  '식사',
+  '레스토랑',
+  '밥',
+  '먹거리',
+  '고기',
+  '회식',
+  '식당',
+  '카페',
+  '커피',
+  '디저트',
+  '티타임',
+  '브런치',
+  '술',
+  '맥주',
+  '와인',
+  '점심',
+  '저녁',
+  '야식',
+  '아침',
+];
+
+const UTTERANCE_HINTS_SPORTS: readonly string[] = [
+  '운동',
+  '헬스',
+  '러닝',
+  '런닝',
+  '등산',
+  '요가',
+  '헬창',
+  '짐',
+  '스포츠',
+  '크로스핏',
+  '수영',
+  '헬스장',
+  '게임',
+  '롤',
+  '배그',
+  'PC방',
+  '오락',
+  'e스포츠',
+  '배틀그라운드',
+];
+
+const UTTERANCE_HINTS_KNOWLEDGE: readonly string[] = [
+  '스터디',
+  '북카페',
+  '토론',
+  '강연',
+  '세미나',
+  '워크숍',
+  '자격증',
+  '회화',
+  '북클럽',
+  '독서',
+  '카공',
+  '코딩',
+  '개발',
+  '밋업',
+  '네트워킹',
+  '학습',
+  '공부',
+];
+
+export function getUtteranceKeywordHintsForSpecialty(kind: SpecialtyKind): readonly string[] {
+  switch (kind) {
+    case 'movie':
+      return UTTERANCE_HINTS_MOVIE;
+    case 'food':
+      return UTTERANCE_HINTS_FOOD;
+    case 'sports':
+      return UTTERANCE_HINTS_SPORTS;
+    case 'knowledge':
+      return UTTERANCE_HINTS_KNOWLEDGE;
+    default:
+      return [];
+  }
+}
+
 /**
  * DB `meeting_categories.major_code` → Step 2 특화. 대소문자 무시.
  * 팀에서 쓰는 코드를 여기에 등록 (미등록 시 라벨 정규식 폴백).

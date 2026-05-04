@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT,
   MEETING_CREATE_FAB_GRADIENT_COLORS,
+  MEETING_CREATE_FAB_HIT_SLOP,
   MEETING_CREATE_FAB_IDLE_BOB_DELAY_MS,
   MEETING_CREATE_FAB_IDLE_BOB_DURATION_MS,
   MEETING_CREATE_FAB_IDLE_BREATHE_MUL,
@@ -452,6 +453,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
               accessibilityRole="button"
               accessibilityLabel="모임 만들기"
               onPress={onFabPress}
+              hitSlop={MEETING_CREATE_FAB_HIT_SLOP}
               style={StyleSheet.absoluteFillObject}>
               {({ pressed }) => (
                 <View style={[styles.fabMeetingPressFill, pressed && { opacity: 0.86 }]}>

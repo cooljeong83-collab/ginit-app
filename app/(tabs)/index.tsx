@@ -61,6 +61,7 @@ import {
   loadRegisteredFeedRegions,
   saveActiveFeedRegion,
   saveRegisteredFeedRegions,
+  syncFeedRegionMapBootMemoryFromSelection,
 } from '@/src/lib/feed-registered-regions';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -303,6 +304,11 @@ export default function FeedScreen() {
   useEffect(() => {
     registeredRegionsRef.current = registeredRegions;
   }, [registeredRegions]);
+
+  useEffect(() => {
+    if (!feedLocationReady) return;
+    syncFeedRegionMapBootMemoryFromSelection(registeredRegions, activeRegionNorm);
+  }, [feedLocationReady, registeredRegions, activeRegionNorm]);
 
   useEffect(() => {
     let cancelled = false;

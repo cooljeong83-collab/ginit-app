@@ -111,14 +111,18 @@ import {
   setAgentStep1InteractionUnlocked,
   subscribeAgentStep1InteractionUnlocked,
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
+import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
+import {
+  isMeetingCreateNluPatchSemanticallyEmpty,
+  pickBundledMeetingCreateNudge,
+} from '@/src/lib/meeting-create-agent-chat/meeting-create-slots';
 import {
   appendMeetingCreateAgentChatMessage,
   createEmptyMeetingCreateAgentChatSession,
   fingerprintMeetingCreateParsedPlan,
   isLikelyMeetingCreateGreetingOnly,
-  meetingCreateAgentChatHistoryLines,
+  mergeMeetingCreateNluAccumulated,
 } from '@/src/lib/meeting-create-agent-chat/session';
-import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -138,9 +142,25 @@ import {
 import {
   applyPartialPublicMeetingDetails,
   parseMeetingCreateNluPayload,
+  peekMeetingCreateNluMissingSlots,
   wizardSuggestionFromNluPlan,
 } from '@/src/lib/meeting-create-nlu';
+import { isMeetingCreateNluSummaryRejectionText } from '@/src/lib/meeting-create-agent-chat/nlu-confirm-intent';
+import { inferMeetingCreateHeadcountFromKoreanText } from '@/src/lib/meeting-create-nlu/infer-headcount-from-korean-text';
+import { mergeMeetingCreateNluAccumulatedWithAutoTitle } from '@/src/lib/meeting-create-nlu/inject-auto-title';
+import {
+  buildLocalMeetingCreateNluPatch,
+  shouldSkipGeminiForMeetingCreate,
+} from '@/src/lib/meeting-create-nlu/local-intent-patch';
 import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
+import {
+  appendMovieNudgeBoxOfficeRanks,
+  buildDeferChoiceMeetingCreatePatch,
+  isDeferUserChoiceUtterance,
+  tryPatchMovieTitleFromBoxOfficeRankReply,
+} from '@/src/lib/meeting-create-nlu/defer-user-choice';
+import { isMeetingCreateNaturalLanguageBlocked } from '@/src/lib/meeting-create-nlu/nlu-blocked-text';
+import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
@@ -187,6 +207,9 @@ import { DateCandidateEditorCard, type DatePickerField } from '../../components/
 const INPUT_PLACEHOLDER = '#94a3b8';
 /** Google Places Text Search — 첫 페이지·추가 로드 모두 5건 */
 const PLACE_SEARCH_PAGE_SIZE = 5;
+/** 인라인 장소 검색: 표시·선택 상한(조회 결과가 많아도 카드는 최대 이 개수만) */
+const INLINE_PLACE_PICK_DISPLAY_CAP = 5;
+const INLINE_PLACE_PICK_MAX_SELECTED = 5;
 const DEFAULT_CALENDAR_PICK_TIME = '19:00';
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 /** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
@@ -590,6 +613,15 @@ function buildInitialEditorState(
 
 // (NLP 적용 결과 타입은 `computeNlpApply` 반환 타입을 사용합니다.)
 
+/** NLU 자동 적용 장소 단계 — 확인 버튼·타임아웃용 인라인 검색 스냅샷 */
+export type MeetingCreatePlacesAutoAssistSnapshot = {
+  searchLoading: boolean;
+  searchError: string | null;
+  resultCount: number;
+  hasFilledPlace: boolean;
+  queryTrim: string;
+};
+
 export type VoteCandidatesFormProps = {
   seedPlaceQuery?: string;
   seedScheduleDate: string;
@@ -635,6 +667,8 @@ export type VoteCandidatesFormProps = {
    * 설정 시 장소「상세 정보」는 내부 WebView 모달 대신 상위에서 연다(모임 상세 장소 제안 등 **Modal 중첩** 방지).
    */
   onNaverPlaceWebOpen?: (url: string, title: string) => void;
+  /** AI 자동 등록으로 장소 검색어가 주입된 뒤 — 검색·선택 상태(확인 버튼·3초 타임아웃) */
+  onPlacesAutoAssistSnapshot?: (s: MeetingCreatePlacesAutoAssistSnapshot) => void;
 };
 
 export type VoteCandidatesBuildResult =
@@ -702,6 +736,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     parentScrollYRef,
     scheduleAiReplacesFirstCandidate = false,
     onNaverPlaceWebOpen,
+    onPlacesAutoAssistSnapshot,
   },
   ref,
 ) {
@@ -817,12 +852,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [placeBiasHint, setPlaceBiasHint] = useState<string | null>(null);
   const [placeSearchRows, setPlaceSearchRows] = useState<PlaceSearchRow[]>([]);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
-  const [placeSearchLoadingMore, setPlaceSearchLoadingMore] = useState(false);
   const [placeSearchErr, setPlaceSearchErr] = useState<string | null>(null);
-  const [placeSearchNextPageToken, setPlaceSearchNextPageToken] = useState<string | null>(null);
-  const placeSearchQueryKeyRef = useRef<string>('');
-  /** 가로 스크롤 끝에서 `loadMore`가 연속 호출되는 것 방지 */
-  const placeSearchLoadMoreGuardRef = useRef(false);
   const [placeThumbById, setPlaceThumbById] = useState<Record<string, string | null>>({});
   const [placeSelectedById, setPlaceSelectedById] = useState<Record<string, { placeName: string; address: string }>>(
     {},
@@ -1356,7 +1386,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const rows = placeCandidatesRef.current;
         const filledPlaces = rows.filter(isFilled);
         if (filledPlaces.length === 0) {
-          return { ok: false, error: '장소 후보를 한 곳 이상 장소 선택 화면에서 골라 주세요.' };
+          return { ok: false, error: '장소 후보를 한 곳 이상 검색 결과에서 골라 주세요.' };
+        }
+        if (filledPlaces.length > INLINE_PLACE_PICK_MAX_SELECTED) {
+          return {
+            ok: false,
+            error: `장소 후보는 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 선택할 수 있어요.`,
+          };
         }
         return { ok: true };
       },
@@ -1365,7 +1401,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const dates = dateCandidatesRef.current;
         const filledPlaces = rows.filter(isFilled);
         if (filledPlaces.length === 0) {
-          return { ok: false, error: '장소 후보를 한 곳 이상 장소 선택 화면에서 골라 주세요.' };
+          return { ok: false, error: '장소 후보를 한 곳 이상 검색 결과에서 골라 주세요.' };
+        }
+        if (filledPlaces.length > INLINE_PLACE_PICK_MAX_SELECTED) {
+          return {
+            ok: false,
+            error: `장소 후보는 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 선택할 수 있어요.`,
+          };
         }
         for (let i = 0; i < dates.length; i += 1) {
           const err = validateDateCandidate(dates[i], i);
@@ -1415,6 +1457,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const qt = q.trim();
         if (!qt) return;
         placeQueryUserTouchedRef.current = true;
+        setPlaceCandidates((prev) => {
+          if (prev.length === 0) return [emptyPlaceRow(qt)];
+          return prev.map((r, i) => (i === 0 ? { ...r, query: qt } : r));
+        });
         setPlaceQuery(qt);
       },
       resetPlaceSearchSession: () => {
@@ -1453,7 +1499,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const rows = placeCandidatesRef.current;
         const filledPlaces = rows.filter(isFilled);
         if (filledPlaces.length === 0) {
-          return { ok: false, error: '장소 후보를 한 곳 이상 장소 선택 화면에서 골라 주세요.' };
+          return { ok: false, error: '장소 후보를 한 곳 이상 검색 결과에서 골라 주세요.' };
+        }
+        if (filledPlaces.length > INLINE_PLACE_PICK_MAX_SELECTED) {
+          return {
+            ok: false,
+            error: `장소 후보는 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 선택할 수 있어요.`,
+          };
         }
         const placeCandidatesOut = filledPlaces.map(
           (r) =>
@@ -1750,9 +1802,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       setPlaceSearchRows([]);
       setPlaceSearchErr(null);
       setPlaceSearchLoading(false);
-      setPlaceSearchLoadingMore(false);
-      setPlaceSearchNextPageToken(null);
-      placeSearchQueryKeyRef.current = '';
       setPlaceThumbById({});
       return undefined;
     }
@@ -1764,21 +1813,18 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         try {
           const { bias, coords } = await ensureNearbySearchBias();
           if (!alive) return;
-          const { places: list, nextPageToken } = await searchPlacesText(qTrim, {
+          const { places: list } = await searchPlacesText(qTrim, {
             locationBias: bias,
             userCoords: coords,
             maxResultCount: PLACE_SEARCH_PAGE_SIZE,
           });
           if (!alive) return;
           setPlaceSearchRows(list);
-          setPlaceSearchNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
-          placeSearchQueryKeyRef.current = qTrim;
           setPlaceThumbById({});
         } catch (e) {
           if (!alive) return;
           setPlaceSearchRows([]);
           setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
-          setPlaceSearchNextPageToken(null);
         } finally {
           if (alive) setPlaceSearchLoading(false);
         }
@@ -1791,12 +1837,36 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   }, [placeQuery, placesListOnly, showPlaces]);
 
   useEffect(() => {
+    if (!onPlacesAutoAssistSnapshot) return undefined;
+    if (wizardSegment !== 'places' || placesListOnly || !showPlaces) return undefined;
+    const hasFilledPlace = placeCandidates.some(isFilled);
+    onPlacesAutoAssistSnapshot({
+      searchLoading: placeSearchLoading,
+      searchError: placeSearchErr,
+      resultCount: placeSearchRows.length,
+      hasFilledPlace,
+      queryTrim: placeQuery.trim(),
+    });
+    return undefined;
+  }, [
+    onPlacesAutoAssistSnapshot,
+    wizardSegment,
+    placesListOnly,
+    showPlaces,
+    placeSearchLoading,
+    placeSearchErr,
+    placeSearchRows.length,
+    placeCandidates,
+    placeQuery,
+  ]);
+
+  useEffect(() => {
     if (!showPlaces || placesListOnly) return undefined;
     if (placeSearchLoading) return undefined;
     if (placeSearchErr) return undefined;
     if (placeSearchRows.length === 0) return undefined;
 
-    const visible = placeSearchRows.slice(0, Math.min(30, placeSearchRows.length));
+    const visible = placeSearchRows.slice(0, INLINE_PLACE_PICK_DISPLAY_CAP);
     let alive = true;
     const t = setTimeout(() => {
       void (async () => {
@@ -1842,52 +1912,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     // placeThumbById는 inside에서 undefined 체크로 보호합니다(반복 effect 비용 최소화).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placeSearchErr, placeSearchLoading, placeSearchRows, placesListOnly, showPlaces]);
-
-  const loadMorePlaceSearchRows = useCallback(() => {
-    if (!showPlaces || placesListOnly) return;
-    if (placeSearchLoading || placeSearchLoadingMore) return;
-    if (placeSearchErr) return;
-    const pageToken = placeSearchNextPageToken;
-    if (pageToken == null) return;
-    const qTrim = placeQuery.trim();
-    if (!qTrim) return;
-    if (placeSearchQueryKeyRef.current !== qTrim) return;
-    if (placeSearchLoadMoreGuardRef.current) return;
-    placeSearchLoadMoreGuardRef.current = true;
-
-    setPlaceSearchLoadingMore(true);
-    void (async () => {
-      try {
-        const { bias, coords } = await ensureNearbySearchBias();
-        const { places: list, nextPageToken } = await searchPlacesText(qTrim, {
-          locationBias: bias,
-          userCoords: coords,
-          pageToken,
-          maxResultCount: PLACE_SEARCH_PAGE_SIZE,
-        });
-        setPlaceSearchRows((prev) => {
-          const seen = new Set(prev.map((r) => r.id));
-          const add = list.filter((r) => !seen.has(r.id));
-          return add.length > 0 ? [...prev, ...add] : prev;
-        });
-        setPlaceSearchNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
-      } catch (e) {
-        setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
-        setPlaceSearchNextPageToken(null);
-      } finally {
-        placeSearchLoadMoreGuardRef.current = false;
-        setPlaceSearchLoadingMore(false);
-      }
-    })();
-  }, [
-    placeQuery,
-    placeSearchErr,
-    placeSearchLoading,
-    placeSearchLoadingMore,
-    placeSearchNextPageToken,
-    placesListOnly,
-    showPlaces,
-  ]);
 
   const renderScheduleCalendarMonthGrid = useCallback(
     (monthAnchorYmd: string, pagerPageW: number) => {
@@ -2273,7 +2297,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       <Text style={styles.sectionHint}>
         {placesListOnly
           ? '확정한 장소 후보예요. 필요하면 카드를 탭해 장소를 다시 고를 수 있어요.'
-          : '검색어를 입력하면 AI가 추천하는 장소 후보를 추천해 드려요.'}
+          : '검색어를 입력하면 최대 5곳까지 후보를 보여 드려요. 골랐다면 아래 확인으로 다음 단계로 넘어가 주세요.'}
       </Text>
 
       {!placesListOnly ? (
@@ -2347,7 +2371,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           {(() => {
             const listEmpty = !placeSearchLoading && !placeSearchErr && placeSearchRows.length === 0;
             const centerEmpty = listEmpty || placeSearchLoading;
-            const visible = placeSearchRows;
+            const visible = placeSearchRows.slice(0, INLINE_PLACE_PICK_DISPLAY_CAP);
             return (
               <View style={[styles.placeResultsScrollHost, styles.placeResultsCarouselHost]}>
                 <ScrollView
@@ -2357,13 +2381,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   showsHorizontalScrollIndicator={false}
                   showsVerticalScrollIndicator={false}
                   scrollEventThrottle={16}
-                  onScroll={(e) => {
-                    if (centerEmpty) return;
-                    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-                    if (contentSize.width <= 0) return;
-                    const nearEnd = contentOffset.x + layoutMeasurement.width >= contentSize.width - 120;
-                    if (nearEnd) loadMorePlaceSearchRows();
-                  }}
                   style={styles.placeResultsScrollView}
                   contentContainerStyle={[
                     styles.placeResultsScrollContent,
@@ -2423,6 +2440,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                     (r) => !(r.placeName === picked.placeName && r.address === picked.address),
                                   );
                                 });
+                                return;
+                              }
+
+                              const filledNow = placeCandidatesRef.current.filter(isFilled).length;
+                              if (filledNow >= INLINE_PLACE_PICK_MAX_SELECTED) {
+                                Alert.alert(
+                                  '장소 후보',
+                                  `검색 결과에서 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 담을 수 있어요.`,
+                                );
                                 return;
                               }
 
@@ -2506,15 +2532,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                           ) : null}
                         </View>
                       );
-                    }).concat(
-                      placeSearchLoadingMore
-                        ? [
-                            <View key="place-loading-more" style={styles.placeResultsLoadingMore}>
-                              <ActivityIndicator color={GinitTheme.colors.primary} />
-                            </View>,
-                          ]
-                        : [],
-                    )
+                    })
                   )}
                 </ScrollView>
               </View>
@@ -2914,21 +2932,42 @@ function clampAutoWizardParticipants(
   return { min: nMin, max: nMax };
 }
 
-function waitAgentStep1FabUnlocked(): Promise<void> {
+function waitAgentStep1FabUnlocked(isAlive?: () => boolean): Promise<void> {
   if (getAgentStep1InteractionUnlocked()) return Promise.resolve();
   return new Promise<void>((resolve) => {
-    const unsub = subscribeAgentStep1InteractionUnlocked(() => {
-      if (getAgentStep1InteractionUnlocked()) {
-        unsub();
-        clearTimeout(tmax);
-        resolve();
-      }
-    });
-    const tmax = setTimeout(() => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
       unsub();
+      clearTimeout(tmax);
+      clearInterval(poll);
       resolve();
-    }, 14000);
+    };
+    const poll = setInterval(() => {
+      if (isAlive && !isAlive()) finish();
+    }, 80);
+    const unsub = subscribeAgentStep1InteractionUnlocked(() => {
+      if (getAgentStep1InteractionUnlocked()) finish();
+    });
+    const tmax = setTimeout(finish, 14000);
   });
+}
+
+/** NLU `WizardSuggestion`으로 Step2를 건너뛸 수 있는지 — `resolveSpecialtyKindForCategory` 결과 기준 */
+function meetingCreateWizardShouldAutoStep2(
+  sk: ReturnType<typeof resolveSpecialtyKindForCategory>,
+  sugg: WizardSuggestion,
+  cat: Category | null,
+): boolean {
+  if (!sugg.canAutoCompleteThroughStep3) return false;
+  if (sk === 'food' && sugg.menuPreferenceLabel) return true;
+  if (sk === 'movie' && (sugg.movieTitleHints?.length ?? 0) > 0) return true;
+  if (sk === 'sports' && isActiveLifeMajorCode(cat?.majorCode) && sugg.activityKindLabel) return true;
+  if (sk === 'sports' && isPlayAndVibeMajorCode(cat?.majorCode) && sugg.gameKindLabel) return true;
+  if (sk === 'sports' && isPcGameMajorCode(cat?.majorCode) && sugg.pcGameKindLabel) return true;
+  if (sk === 'knowledge' && sugg.focusKnowledgeLabel) return true;
+  return false;
 }
 
 export default function CreateDetailsScreen() {
@@ -2985,10 +3024,27 @@ export default function CreateDetailsScreen() {
   const agenticSurfaceRef = useRef<MeetingCreateAgenticSurfaceHandles | null>(null);
   /** NLU 멀티턴: Edge와 동기화한 누적 JSON */
   const agentNluAccumulatedRef = useRef<Record<string, unknown>>({});
+  /** 직전 박스오피스 1~3위 안내에 대응하는 제목(순위-only 답변 머지용) */
+  const pendingNluBoxOfficeTopThreeRef = useRef<{ title: string }[] | null>(null);
   const agentNluSessionRef = useRef(createEmptyMeetingCreateAgentChatSession());
   const agentNluLastFingerprintRef = useRef<string | null>(null);
+  /** 요약 수락 시 적용할 위저드 제안(수락 전까지 오토파일럿 미실행) */
+  const pendingNluWizardApplyRef = useRef<{ fp: string; sugg: WizardSuggestion } | null>(null);
+  /** 오류 시 말풍선 요약 문구 복구용 */
+  const pendingNluSummaryConfirmMsgRef = useRef('');
+  /** 최종 요약 이후: `summary` → 부정 시 `which_part`(수정 범위 듣기) → 수락 후 `applying`(오토 적용 중) */
+  type MeetingCreateNluConfirmPhase = 'none' | 'summary' | 'which_part' | 'applying';
+  const meetingCreateNluConfirmPhaseRef = useRef<MeetingCreateNluConfirmPhase>('none');
+  /** 요약·수정 유도 중에는 하단 `지닛 시작하기`로 NLU 수락을 우회하지 못하게 함 */
+  const [meetingCreateNluBlocksFloatingFinal, setMeetingCreateNluBlocksFloatingFinal] = useState(false);
+  const setMeetingCreateNluConfirmPhase = useCallback((next: MeetingCreateNluConfirmPhase) => {
+    meetingCreateNluConfirmPhaseRef.current = next;
+    setMeetingCreateNluBlocksFloatingFinal(next !== 'none');
+  }, []);
   /** NLU 수락 CTA → 최종 등록 (정의 순서 때문에 ref로 최신 콜백 유지) */
-  const onFinalRegisterRef = useRef<() => Promise<void>>(async () => {});
+  const onFinalRegisterRef = useRef<(opts?: { rethrowOnAddMeetingFailure?: boolean }) => Promise<void>>(
+    async () => {},
+  );
   /** 상세 조건 단계: 소개글 입력 포커스 */
   const detailDescriptionInputRef = useRef<TextInput>(null);
   const meetingTitleDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(meetingTitleInputRef), []);
@@ -3247,6 +3303,22 @@ export default function CreateDetailsScreen() {
   const nluDimOpacity = useRef(new Animated.Value(0)).current;
   const [nluDimLayerMounted, setNluDimLayerMounted] = useState(false);
   const [autopilotCoachLocked, setAutopilotCoachLocked] = useState(false);
+  /** NLU 자동 적용이 장소 검색어를 넣은 뒤 — 확인 버튼 게이트·3초 미선택 시 수동 전환에만 사용 */
+  const [placesAiAssistGate, setPlacesAiAssistGate] = useState(false);
+  const [placeAutoSnap, setPlaceAutoSnap] = useState<MeetingCreatePlacesAutoAssistSnapshot>({
+    searchLoading: false,
+    searchError: null,
+    resultCount: 0,
+    hasFilledPlace: false,
+    queryTrim: '',
+  });
+  const placeAutoSnapRef = useRef(placeAutoSnap);
+  placeAutoSnapRef.current = placeAutoSnap;
+  const placesAiAssistGateRef = useRef(placesAiAssistGate);
+  placesAiAssistGateRef.current = placesAiAssistGate;
+  const onPlacesAutoAssistSnapshot = useCallback((s: MeetingCreatePlacesAutoAssistSnapshot) => {
+    setPlaceAutoSnap(s);
+  }, []);
   const [agentWizardApplyCue, setAgentWizardApplyCue] = useState<AgentWizardApplyCue | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   currentStepRef.current = currentStep;
@@ -3345,6 +3417,15 @@ export default function CreateDetailsScreen() {
   const placesStep: WizardStep = 5;
   const detailStep: WizardStep = 6;
 
+  const placesConfirmDisabledByAiAssist = useMemo(() => {
+    if (!placesAiAssistGate || currentStep !== placesStep) return false;
+    return (
+      placeAutoSnap.searchLoading ||
+      placeAutoSnap.queryTrim.length === 0 ||
+      !placeAutoSnap.hasFilledPlace
+    );
+  }, [placesAiAssistGate, currentStep, placesStep, placeAutoSnap]);
+
   const resetWizardState = useCallback(() => {
     setTitle('');
     setMinParticipants(PARTICIPANT_COUNT_MIN);
@@ -3442,16 +3523,29 @@ export default function CreateDetailsScreen() {
   useFocusEffect(
     useCallback(() => {
       return () => {
+        /** 화면 이탈(blur·언마운트) 시 진행 중이던 위저드 자동 적용·NLU 수락 대기 즉시 중단 */
+        agentWizardApplyRunIdRef.current += 1;
+        setAgentFabMotionMode('user');
+        setAutopilotCoachLocked(false);
+        setAgentWizardApplyCue(null);
+        setPlacesAiAssistGate(false);
+        setNluBusy(false);
         agentNluAccumulatedRef.current = {};
+        pendingNluBoxOfficeTopThreeRef.current = null;
         agentNluSessionRef.current = createEmptyMeetingCreateAgentChatSession();
         agentNluLastFingerprintRef.current = null;
+        pendingNluWizardApplyRef.current = null;
+        pendingNluSummaryConfirmMsgRef.current = '';
+        setMeetingCreateNluConfirmPhase('none');
         const surf = agenticSurfaceRef.current;
         surf?.setAgentOwnsWizardBubble(false);
         surf?.setIntelligentSuggestionDirect(null);
         surf?.setShowAcceptButton(false);
         surf?.registerAcceptSuggestion(null);
+        setNluComposerUserDismissed(false);
+        nluComposerDismissOpacity.setValue(1);
       };
-    }, []),
+    }, [nluComposerDismissOpacity, setMeetingCreateNluConfirmPhase]),
   );
 
   const titleSuggestionCtx = useMemo(
@@ -3905,6 +3999,25 @@ export default function CreateDetailsScreen() {
   onStep1NextRef.current = onStep1Next;
   onStep2SpecialtyNextRef.current = onStep2SpecialtyNext;
 
+  /** 자동 모임 생성(오토 적용·장소 오토) 중 오류 시 즉시 수동 모드로 전환하고 NLU 블러·말풍선·하단 채팅 도크를 걷습니다. */
+  const dismissNluAutoChromeForManualRecovery = useCallback(() => {
+    Keyboard.dismiss();
+    setNluKeyboardDimActive(false);
+    nluDimOpacity.stopAnimation();
+    nluDimOpacity.setValue(0);
+    setNluDimLayerMounted(false);
+    notifyCreateMeetingAgentBubbleDismissFromManualScroll();
+    const surf = agenticSurfaceRef.current;
+    surf?.setAgentOwnsWizardBubble(false);
+    surf?.setIntelligentSuggestionDirect(null);
+    surf?.setShowAcceptButton(false);
+    surf?.registerAcceptSuggestion(null);
+    nluComposerDismissOpacity.stopAnimation();
+    nluComposerDismissOpacity.setValue(0);
+    setNluComposerUserDismissed(true);
+    setAgentFabMotionMode('user');
+  }, [nluComposerDismissOpacity, nluDimOpacity]);
+
   const applyWizardSuggestion = useCallback(
     (sugg: WizardSuggestion): Promise<void> => {
       setAgentFabMotionMode('auto');
@@ -3917,6 +4030,32 @@ export default function CreateDetailsScreen() {
         const stepGapMs = AGENT_APPLY_STEP_GAP_MS;
         setAutopilotCoachLocked(true);
 
+        const stopAutopilotToManual = (userMsg: string) => {
+          setWizardError(userMsg);
+          showTransientBottomMessage(userMsg);
+          setAgentWizardApplyCue(null);
+          dismissNluAutoChromeForManualRecovery();
+        };
+
+        const waitUntilWizardStepEquals = async (expected: WizardStep): Promise<boolean> => {
+          const deadline = Date.now() + 4000;
+          while (Date.now() < deadline) {
+            if (!isApplyRunAlive()) return false;
+            if (currentStepRef.current === expected) return true;
+            await sleep(24);
+          }
+          return currentStepRef.current === expected;
+        };
+
+        const assertStepAfterOrStop = async (expected: WizardStep, errMsg: string): Promise<boolean> => {
+          if (!isApplyRunAlive()) return false;
+          const ok = await waitUntilWizardStepEquals(expected);
+          if (ok) return true;
+          if (!isApplyRunAlive()) return false;
+          stopAutopilotToManual(errMsg);
+          return false;
+        };
+
         const runFallbackImmediate = () => {
           setSelectedCategoryId(sugg.categoryId);
           const cat0 = categories.find((c) => c.id === sugg.categoryId) ?? null;
@@ -3924,11 +4063,31 @@ export default function CreateDetailsScreen() {
           if (sk0 === 'food' && sugg.menuPreferenceLabel) {
             setMenuPreferences([sugg.menuPreferenceLabel]);
           }
+          if (sk0 === 'movie' && (sugg.movieTitleHints?.length ?? 0) > 0) {
+            const titles = (sugg.movieTitleHints ?? []).map((t) => String(t).trim()).filter(Boolean);
+            setMovieCandidates(titles.map((title, i) => ({ id: `nlu-m${i}`, title })));
+          }
+          if (sk0 === 'sports' && isActiveLifeMajorCode(cat0?.majorCode) && sugg.activityKindLabel) {
+            setActivityKinds([sugg.activityKindLabel]);
+          }
+          if (sk0 === 'sports' && isPlayAndVibeMajorCode(cat0?.majorCode) && sugg.gameKindLabel) {
+            setGameKinds([sugg.gameKindLabel]);
+          }
+          if (sk0 === 'sports' && isPcGameMajorCode(cat0?.majorCode) && sugg.pcGameKindLabel) {
+            setGameKinds([sugg.pcGameKindLabel]);
+          }
+          if (sk0 === 'knowledge' && sugg.focusKnowledgeLabel) {
+            setFocusKnowledgePreferences([sugg.focusKnowledgeLabel]);
+          }
           suppressStepLayoutAnimateFromCategoryRef.current = true;
           setTimeout(() => {
+            if (!isApplyRunAlive()) return;
             onStep1NextRef.current();
-            if (sugg.canAutoCompleteThroughStep3 && sk0 === 'food' && sugg.menuPreferenceLabel) {
-              setTimeout(() => onStep2SpecialtyNextRef.current(), 80);
+            if (meetingCreateWizardShouldAutoStep2(sk0, sugg, cat0)) {
+              setTimeout(() => {
+                if (!isApplyRunAlive()) return;
+                onStep2SpecialtyNextRef.current();
+              }, 80);
             }
           }, 80);
         };
@@ -3939,7 +4098,8 @@ export default function CreateDetailsScreen() {
             return;
           }
 
-          await waitAgentStep1FabUnlocked();
+          await waitAgentStep1FabUnlocked(isApplyRunAlive);
+          if (!isApplyRunAlive()) return;
           await sleep(stepGapMs);
 
           const catForSk = categories.find((c) => c.id === sugg.categoryId) ?? null;
@@ -3973,10 +4133,19 @@ export default function CreateDetailsScreen() {
           setAgentWizardApplyCue(null);
           await sleep(stepGapMs);
 
+          const needsSpecAfter = catForSk ? categoryNeedsSpecialty(catForSk) : false;
           suppressStepLayoutAnimateFromCategoryRef.current = true;
           onStep1NextRef.current();
+          const expectedAfterStep1Confirm: WizardStep = needsSpecAfter ? 2 : 3;
+          if (
+            !(await assertStepAfterOrStop(
+              expectedAfterStep1Confirm,
+              '1단계 확인 후 다음 단계로 넘어가지 못했습니다. 카테고리·공개 설정을 확인한 뒤 수동으로 진행해 주세요.',
+            ))
+          ) {
+            return;
+          }
 
-          const needsSpecAfter = catForSk ? categoryNeedsSpecialty(catForSk) : false;
           let reachedBasicStep = false;
 
           if (sugg.canAutoCompleteThroughStep3 && sk === 'food' && sugg.menuPreferenceLabel) {
@@ -3994,6 +4163,135 @@ export default function CreateDetailsScreen() {
             setAgentWizardApplyCue(null);
             await sleep(stepGapMs);
             onStep2SpecialtyNextRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                3,
+                '특화 단계 확인 후 기본 정보 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
+            reachedBasicStep = true;
+          } else if (sugg.canAutoCompleteThroughStep3 && sk === 'movie' && (sugg.movieTitleHints?.length ?? 0) > 0) {
+            await new Promise<void>((r) => {
+              InteractionManager.runAfterInteractions(() => r());
+            });
+            await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+            const titles = (sugg.movieTitleHints ?? []).map((t) => String(t).trim()).filter(Boolean);
+            setMovieCandidates(titles.map((title, i) => ({ id: `nlu-m${i}`, title })));
+            await sleep(stepGapMs);
+            setAgentWizardApplyCue({ kind: 'confirm2' });
+            await sleep(tapHoldMs);
+            setAgentWizardApplyCue(null);
+            await sleep(stepGapMs);
+            onStep2SpecialtyNextRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                3,
+                '특화 단계 확인 후 기본 정보 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
+            reachedBasicStep = true;
+          } else if (
+            sugg.canAutoCompleteThroughStep3 &&
+            sk === 'sports' &&
+            isActiveLifeMajorCode(catForSk?.majorCode) &&
+            sugg.activityKindLabel
+          ) {
+            await new Promise<void>((r) => {
+              InteractionManager.runAfterInteractions(() => r());
+            });
+            await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+            setActivityKinds([sugg.activityKindLabel]);
+            await sleep(stepGapMs);
+            setAgentWizardApplyCue({ kind: 'confirm2' });
+            await sleep(tapHoldMs);
+            setAgentWizardApplyCue(null);
+            await sleep(stepGapMs);
+            onStep2SpecialtyNextRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                3,
+                '특화 단계 확인 후 기본 정보 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
+            reachedBasicStep = true;
+          } else if (
+            sugg.canAutoCompleteThroughStep3 &&
+            sk === 'sports' &&
+            isPlayAndVibeMajorCode(catForSk?.majorCode) &&
+            sugg.gameKindLabel
+          ) {
+            await new Promise<void>((r) => {
+              InteractionManager.runAfterInteractions(() => r());
+            });
+            await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+            setGameKinds([sugg.gameKindLabel]);
+            await sleep(stepGapMs);
+            setAgentWizardApplyCue({ kind: 'confirm2' });
+            await sleep(tapHoldMs);
+            setAgentWizardApplyCue(null);
+            await sleep(stepGapMs);
+            onStep2SpecialtyNextRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                3,
+                '특화 단계 확인 후 기본 정보 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
+            reachedBasicStep = true;
+          } else if (
+            sugg.canAutoCompleteThroughStep3 &&
+            sk === 'sports' &&
+            isPcGameMajorCode(catForSk?.majorCode) &&
+            sugg.pcGameKindLabel
+          ) {
+            await new Promise<void>((r) => {
+              InteractionManager.runAfterInteractions(() => r());
+            });
+            await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+            setGameKinds([sugg.pcGameKindLabel]);
+            await sleep(stepGapMs);
+            setAgentWizardApplyCue({ kind: 'confirm2' });
+            await sleep(tapHoldMs);
+            setAgentWizardApplyCue(null);
+            await sleep(stepGapMs);
+            onStep2SpecialtyNextRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                3,
+                '특화 단계 확인 후 기본 정보 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
+            reachedBasicStep = true;
+          } else if (sugg.canAutoCompleteThroughStep3 && sk === 'knowledge' && sugg.focusKnowledgeLabel) {
+            await new Promise<void>((r) => {
+              InteractionManager.runAfterInteractions(() => r());
+            });
+            await sleep(AGENT_APPLY_POST_LAYOUT_MS);
+            setFocusKnowledgePreferences([sugg.focusKnowledgeLabel]);
+            await sleep(stepGapMs);
+            setAgentWizardApplyCue({ kind: 'confirm2' });
+            await sleep(tapHoldMs);
+            setAgentWizardApplyCue(null);
+            await sleep(stepGapMs);
+            onStep2SpecialtyNextRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                3,
+                '특화 단계 확인 후 기본 정보 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
             reachedBasicStep = true;
           } else if (!needsSpecAfter) {
             reachedBasicStep = true;
@@ -4028,6 +4326,14 @@ export default function CreateDetailsScreen() {
           await sleep(64);
           onStep3BasicNextRef.current();
           if (!isApplyRunAlive()) return;
+          if (
+            !(await assertStepAfterOrStop(
+              scheduleStep,
+              '기본 정보 확인 후 일정 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+            ))
+          ) {
+            return;
+          }
 
           await new Promise<void>((r) => {
             InteractionManager.runAfterInteractions(() => r());
@@ -4056,30 +4362,22 @@ export default function CreateDetailsScreen() {
           await sleep(stepGapMs);
           await handleConfirmScheduleRef.current();
           if (!isApplyRunAlive()) return;
+          if (
+            !(await assertStepAfterOrStop(
+              placesStep,
+              '일정 확정 후 장소 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+            ))
+          ) {
+            return;
+          }
 
           const placeQ = (sugg.placeAutoPickQuery ?? sugg.placeSearchHint ?? '').trim();
           if (placeQ) {
-            placesFormRef.current?.openFirstPlaceSearchWithSuggestedQuery(placeQ, { createAutopilot: true });
-            for (let j = 0; j < 120; j += 1) {
-              await sleep(250);
-              if (!isApplyRunAlive()) return;
-              const placeErr = consumeCreateMeetingPlaceAutopilotError();
-              if (placeErr) {
-                setWizardError(placeErr);
-                showTransientBottomMessage(placeErr);
-                return;
-              }
-              const vr = placesFormRef.current?.validatePlacesStep();
-              if (vr?.ok) break;
-            }
-            if (!placesFormRef.current?.validatePlacesStep()?.ok) {
-              const msg = '장소 후보를 자동으로 채우지 못했어요. 장소를 선택해 주세요.';
-              setWizardError(msg);
-              showTransientBottomMessage(msg);
-              return;
-            }
-            await sleep(stepGapMs);
-            onPlacesStepConfirmRef.current();
+            setPlacesAiAssistGate(true);
+            placesFormRef.current?.setPlaceQueryFromAgent(placeQ);
+            showTransientBottomMessage(
+              '검색 결과에서 장소를 골라 주세요(최대 5곳). 선택 후 아래 확인을 눌러 다음 단계로 이동합니다.',
+            );
           }
 
           if (!isApplyRunAlive()) return;
@@ -4088,13 +4386,15 @@ export default function CreateDetailsScreen() {
           }
         } catch {
           setAgentWizardApplyCue(null);
+          setPlacesAiAssistGate(false);
+          dismissNluAutoChromeForManualRecovery();
         } finally {
           setAutopilotCoachLocked(false);
           setAgentFabMotionMode('user');
         }
       })();
     },
-    [categories],
+    [categories, dismissNluAutoChromeForManualRecovery],
   );
 
   const applyWizardSuggestionRef = useRef(applyWizardSuggestion);
@@ -4110,18 +4410,51 @@ export default function CreateDetailsScreen() {
       Alert.alert('잠시만요', '카테고리를 불러오는 중입니다.');
       return;
     }
+    const blockedLocal = isMeetingCreateNaturalLanguageBlocked(raw);
+    if (blockedLocal.blocked) {
+      Alert.alert('모임 생성', blockedLocal.message);
+      return;
+    }
+    /** 하단 채팅 전송 시 말풍선이 접혀 있으면 자동으로 펼쳐 대화가 이어지게 함 */
+    notifyCreateMeetingAgentBubbleShow();
     const surf = agenticSurfaceRef.current;
+    const now = new Date();
     setNluBusy(true);
+    setNaturalLanguageDraft('');
     setWizardError(null);
     surf?.setShowAcceptButton(false);
     surf?.registerAcceptSuggestion(null);
     try {
-      const todayYmd = fmtDate(new Date());
-      const priorUserTurns = agentNluSessionRef.current.messages.filter((m) => m.role === 'user').length;
-      if (isLikelyMeetingCreateGreetingOnly(raw) && priorUserTurns === 0) {
+      const todayYmd = fmtDate(now);
+      pendingNluWizardApplyRef.current = null;
+      const phaseAtStart = meetingCreateNluConfirmPhaseRef.current;
+
+      if (phaseAtStart === 'summary' && isMeetingCreateNluSummaryRejectionText(raw)) {
+        setMeetingCreateNluConfirmPhase('which_part');
         agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'user', raw);
-        const greetReply =
-          '안녕하세요! 어떤 모임을 만들고 싶으신가요? 모임 종류, 날짜·시간, 장소를 알려 주시면 단계별로 도와드릴게요.';
+        const amendMsg =
+          '어떤 부분을 수정해 드릴까요?\n\n일정·장소·인원·공개 여부 등 바꾸고 싶은 점을 말씀해 주세요.';
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
+          agentNluSessionRef.current,
+          'assistant',
+          amendMsg,
+        );
+        surf?.setAgentOwnsWizardBubble(true);
+        surf?.setIntelligentSuggestionDirect(amendMsg);
+        surf?.setShowAcceptButton(false);
+        surf?.registerAcceptSuggestion(null);
+        return;
+      }
+
+      const priorUserTurns = agentNluSessionRef.current.messages.filter((m) => m.role === 'user').length;
+      const beforeAcc = { ...agentNluAccumulatedRef.current };
+      const missBefore = peekMeetingCreateNluMissingSlots(categories, beforeAcc, now).length;
+      const fullMissCount = peekMeetingCreateNluMissingSlots(categories, {}, now).length;
+      const hadPartialAccum = missBefore < fullMissCount;
+
+      if (phaseAtStart === 'none' && isLikelyMeetingCreateGreetingOnly(raw) && priorUserTurns === 0) {
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'user', raw);
+        const greetReply = pickBundledMeetingCreateNudge([], { emptyTurn: true, hadPartialAccum: false });
         agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
           agentNluSessionRef.current,
           'assistant',
@@ -4134,33 +4467,199 @@ export default function CreateDetailsScreen() {
 
       agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'user', raw);
       surf?.setAgentOwnsWizardBubble(true);
+      surf?.setIntelligentSuggestionDirect('생각 중…');
 
-      const history = meetingCreateAgentChatHistoryLines(agentNluSessionRef.current, 6);
-      const inv = await invokeParseMeetingCreateIntent({
+      const localPatch = buildLocalMeetingCreateNluPatch({
         text: raw,
-        categories: categories.map((c) => ({ id: c.id, label: c.label })),
-        todayYmd,
-        mode: 'chat_turn',
-        history,
-        accumulated: agentNluAccumulatedRef.current,
+        categories,
+        now,
       });
+      const inv = shouldSkipGeminiForMeetingCreate(raw, localPatch)
+        ? ({ ok: true as const, result: localPatch })
+        : await invokeParseMeetingCreateIntent({
+            text: raw,
+            categories: categories.map((c) => ({
+              id: c.id,
+              label: c.label,
+              majorCode: c.majorCode ?? undefined,
+              order: c.order,
+            })),
+            todayYmd,
+            accumulated: Object.keys(beforeAcc).length > 0 ? beforeAcc : undefined,
+          });
       if (!inv.ok) {
-        setWizardError(inv.error);
-        showTransientBottomMessage(inv.error);
+        setMeetingCreateNluConfirmPhase('none');
+        surf?.setIntelligentSuggestionDirect(null);
+        if ('blocked' in inv && inv.blocked) {
+          Alert.alert('모임 생성', inv.error);
+        } else {
+          setWizardError(inv.error);
+          showTransientBottomMessage(inv.error);
+        }
         return;
       }
 
-      const nextAcc =
+      let patch =
         typeof inv.result === 'object' && inv.result !== null && !Array.isArray(inv.result)
-          ? ({ ...(inv.result as Record<string, unknown>) } as Record<string, unknown>)
+          ? (inv.result as Record<string, unknown>)
           : {};
-      agentNluAccumulatedRef.current = nextAcc;
+      const inferredHc = inferMeetingCreateHeadcountFromKoreanText(raw);
+      if (inferredHc) {
+        const tmpMerge = mergeMeetingCreateNluAccumulated(beforeAcc, patch);
+        if (peekMeetingCreateNluMissingSlots(categories, tmpMerge, now).includes('headcount')) {
+          patch = { ...patch, ...inferredHc };
+        }
+      }
+      const mergedBase = mergeMeetingCreateNluAccumulated(beforeAcc, patch);
+      let merged = mergeMeetingCreateNluAccumulatedWithAutoTitle({
+        accumulated: mergedBase,
+        now,
+        manualTitle: title,
+        aiTitleSuggestionFirst: (aiTitleSuggestions[0] ?? '').trim(),
+        categoryLabelForTitle: (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임',
+        titleSuggestionCtx,
+      });
 
-      const assist = inv.assistantReply?.trim() ?? '';
-      const parsed = parseMeetingCreateNluPayload(categories, agentNluAccumulatedRef.current, new Date());
+      let rankMerged = false;
+      const missForRankPeek = peekMeetingCreateNluMissingSlots(categories, merged, now);
+      if (missForRankPeek.includes('moviePick')) {
+        const rankPatch = tryPatchMovieTitleFromBoxOfficeRankReply(
+          raw,
+          pendingNluBoxOfficeTopThreeRef.current,
+          missForRankPeek,
+        );
+        if (rankPatch) {
+          merged = mergeMeetingCreateNluAccumulated(merged, rankPatch);
+          merged = mergeMeetingCreateNluAccumulatedWithAutoTitle({
+            accumulated: merged,
+            now,
+            manualTitle: title,
+            aiTitleSuggestionFirst: (aiTitleSuggestions[0] ?? '').trim(),
+            categoryLabelForTitle: (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임',
+            titleSuggestionCtx,
+          });
+          rankMerged = true;
+          pendingNluBoxOfficeTopThreeRef.current = null;
+        }
+      }
+
+      let missingSlots = peekMeetingCreateNluMissingSlots(categories, merged, now);
+      const nudgeCatId = typeof merged.categoryId === 'string' ? merged.categoryId.trim() : '';
+      const nudgeCat = nudgeCatId ? categories.find((c) => c.id.trim() === nudgeCatId) ?? null : null;
+
+      let kobisForMovieNudge: Awaited<ReturnType<typeof fetchDailyBoxOfficeTop10>> | null = null;
+      let deferMerged = false;
+      if (isDeferUserChoiceUtterance(raw)) {
+        const deferPatch = buildDeferChoiceMeetingCreatePatch({
+          raw,
+          missingSlots,
+          categoryId: nudgeCatId,
+        });
+        let extraDefer: Record<string, unknown> = { ...deferPatch };
+        if (missingSlots.includes('moviePick') && resolveSpecialtyKindForCategory(nudgeCat) === 'movie') {
+          kobisForMovieNudge = await fetchDailyBoxOfficeTop10();
+          if (kobisForMovieNudge.ok && kobisForMovieNudge.movies[0]?.title?.trim()) {
+            const t0 = kobisForMovieNudge.movies[0].title.trim();
+            extraDefer = { ...extraDefer, primaryMovieTitle: t0, movieTitleHints: [t0] };
+          }
+        }
+        if (Object.keys(extraDefer).length > 0) {
+          merged = mergeMeetingCreateNluAccumulated(merged, extraDefer);
+          merged = mergeMeetingCreateNluAccumulatedWithAutoTitle({
+            accumulated: merged,
+            now,
+            manualTitle: title,
+            aiTitleSuggestionFirst: (aiTitleSuggestions[0] ?? '').trim(),
+            categoryLabelForTitle: (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임',
+            titleSuggestionCtx,
+          });
+          deferMerged = true;
+          missingSlots = peekMeetingCreateNluMissingSlots(categories, merged, now);
+        }
+      }
+
+      if (!peekMeetingCreateNluMissingSlots(categories, merged, now).includes('moviePick')) {
+        pendingNluBoxOfficeTopThreeRef.current = null;
+      }
+
+      agentNluAccumulatedRef.current = merged;
+
+      const missAfter = peekMeetingCreateNluMissingSlots(categories, merged, now).length;
+      const meaningful =
+        missAfter < missBefore ||
+        !isMeetingCreateNluPatchSemanticallyEmpty(patch) ||
+        deferMerged ||
+        rankMerged;
+      missingSlots = peekMeetingCreateNluMissingSlots(categories, merged, now);
+
+      if (missingSlots.length > 0) {
+        setMeetingCreateNluConfirmPhase('none');
+        const emptyTurn =
+          !meaningful &&
+          isMeetingCreateNluPatchSemanticallyEmpty(patch) &&
+          isLikelyMeetingCreateGreetingOnly(raw);
+        const baseNudge = pickBundledMeetingCreateNudge(missingSlots, {
+          emptyTurn,
+          hadPartialAccum: hadPartialAccum && meaningful,
+          resolvedCategory: nudgeCat,
+        });
+        let nudge = baseNudge;
+        if (typeof merged.nluAskMessage === 'string' && merged.nluAskMessage.trim()) {
+          const a = merged.nluAskMessage.trim();
+          nudge = baseNudge && a !== baseNudge ? `${a}\n\n${baseNudge}` : a;
+        }
+        if (missingSlots.includes('moviePick')) {
+          const kobis = kobisForMovieNudge ?? (await fetchDailyBoxOfficeTop10());
+          kobisForMovieNudge = kobis;
+          if (kobis.ok && kobis.movies.length >= 3) {
+            nudge = appendMovieNudgeBoxOfficeRanks(baseNudge, kobis.movies);
+            const picks = kobis.movies
+              .slice(0, 3)
+              .map((m) => ({ title: String(m.title ?? '').trim() }))
+              .filter((x) => x.title.length > 0);
+            pendingNluBoxOfficeTopThreeRef.current = picks.length >= 3 ? picks : null;
+          } else {
+            pendingNluBoxOfficeTopThreeRef.current = null;
+          }
+        }
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
+          agentNluSessionRef.current,
+          'assistant',
+          nudge,
+        );
+        surf?.setIntelligentSuggestionDirect(nudge);
+        return;
+      }
+
+      const parsed = parseMeetingCreateNluPayload(categories, merged, now);
       if (!parsed.ok) {
-        const bubbleBase = assist || '조금만 더 알려 주세요.';
-        const bubble = `${bubbleBase}\n\n(${parsed.error})`;
+        setMeetingCreateNluConfirmPhase('none');
+        const missParsed = peekMeetingCreateNluMissingSlots(categories, merged, now);
+        const baseNudgeErr = pickBundledMeetingCreateNudge(missParsed, {
+          emptyTurn: false,
+          hadPartialAccum,
+          resolvedCategory: nudgeCat,
+        });
+        let nudgeErr = baseNudgeErr;
+        if (typeof merged.nluAskMessage === 'string' && merged.nluAskMessage.trim()) {
+          const a = merged.nluAskMessage.trim();
+          nudgeErr = baseNudgeErr ? `${a}\n\n${baseNudgeErr}` : a;
+        }
+        if (missParsed.includes('moviePick')) {
+          const kobisE = kobisForMovieNudge ?? (await fetchDailyBoxOfficeTop10());
+          kobisForMovieNudge = kobisE;
+          if (kobisE.ok && kobisE.movies.length >= 3) {
+            nudgeErr = appendMovieNudgeBoxOfficeRanks(baseNudgeErr, kobisE.movies);
+            const picksE = kobisE.movies
+              .slice(0, 3)
+              .map((m) => ({ title: String(m.title ?? '').trim() }))
+              .filter((x) => x.title.length > 0);
+            pendingNluBoxOfficeTopThreeRef.current = picksE.length >= 3 ? picksE : null;
+          } else {
+            pendingNluBoxOfficeTopThreeRef.current = null;
+          }
+        }
+        const bubble = `${nudgeErr}\n\n(${parsed.error})`;
         agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'assistant', bubble);
         surf?.setIntelligentSuggestionDirect(bubble);
         return;
@@ -4168,14 +4667,11 @@ export default function CreateDetailsScreen() {
 
       const fp = fingerprintMeetingCreateParsedPlan(parsed.plan);
       const sugg = wizardSuggestionFromNluPlan(parsed.plan, categories);
-      if (agentNluLastFingerprintRef.current !== fp) {
-        agentNluLastFingerprintRef.current = fp;
-        await applyWizardSuggestionRef.current(sugg);
-      }
+      pendingNluWizardApplyRef.current = { fp, sugg };
 
-      const confirmMsg = assist
-        ? `${assist}\n\n이 설정으로 모임을 생성할까요? 확인을 눌러 주세요.`
-        : '이제 필요한 정보가 모였어요! 모임을 생성할까요? 확인을 눌러 주세요.';
+      setMeetingCreateNluConfirmPhase('summary');
+      const confirmMsg = buildMeetingCreateNluConfirmSummary(parsed.plan, categories);
+      pendingNluSummaryConfirmMsgRef.current = confirmMsg;
       agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
         agentNluSessionRef.current,
         'assistant',
@@ -4183,17 +4679,78 @@ export default function CreateDetailsScreen() {
       );
       surf?.setIntelligentSuggestionDirect(confirmMsg);
       surf?.setShowAcceptButton(true);
-      surf?.registerAcceptSuggestion(() => {
-        void onFinalRegisterRef.current();
-      });
+      function runNluSummaryAccept() {
+        void (async () => {
+          const surfInner = agenticSurfaceRef.current;
+          Keyboard.dismiss();
+          setNaturalLanguageDraft('');
+          setNluKeyboardDimActive(false);
+          nluDimOpacity.stopAnimation();
+          nluDimOpacity.setValue(0);
+          setNluDimLayerMounted(false);
+          notifyCreateMeetingAgentBubbleDismissFromManualScroll();
+          surfInner?.setIntelligentSuggestionDirect(null);
+          surfInner?.setShowAcceptButton(false);
+          surfInner?.registerAcceptSuggestion(null);
+          nluComposerDismissOpacity.stopAnimation();
+          nluComposerDismissOpacity.setValue(0);
+          setNluComposerUserDismissed(true);
+          setNluBusy(true);
+          let registerAttempted = false;
+          try {
+            setMeetingCreateNluConfirmPhase('applying');
+            const pending = pendingNluWizardApplyRef.current;
+            if (pending && agentNluLastFingerprintRef.current !== pending.fp) {
+              await applyWizardSuggestionRef.current(pending.sugg);
+              agentNluLastFingerprintRef.current = pending.fp;
+            }
+            setMeetingCreateNluConfirmPhase('none');
+            registerAttempted = true;
+            await onFinalRegisterRef.current({ rethrowOnAddMeetingFailure: true });
+          } catch (e) {
+            const detail = e instanceof Error ? e.message : '알 수 없는 오류가 났습니다.';
+            dismissNluAutoChromeForManualRecovery();
+            setMeetingCreateNluConfirmPhase('none');
+            pendingNluWizardApplyRef.current = null;
+            pendingNluSummaryConfirmMsgRef.current = '';
+            setWizardError(detail);
+            showTransientBottomMessage(
+              registerAttempted
+                ? `모임 등록에 실패했어요. 위저드를 확인한 뒤 다시 시도해 주세요.\n${detail}`
+                : `자동 입력 중 문제가 생겼어요. 위저드를 직접 조정해 주세요.\n${detail}`,
+            );
+          } finally {
+            setNluBusy(false);
+          }
+        })();
+      }
+      surf?.registerAcceptSuggestion(runNluSummaryAccept);
     } catch (e) {
+      setMeetingCreateNluConfirmPhase('none');
+      agenticSurfaceRef.current?.setIntelligentSuggestionDirect(null);
       const msg = e instanceof Error ? e.message : '분석에 실패했습니다.';
       setWizardError(msg);
       showTransientBottomMessage(msg);
     } finally {
       setNluBusy(false);
     }
-  }, [catLoading, categories, naturalLanguageDraft]);
+  }, [
+    aiTitleSuggestions,
+    catLoading,
+    categories,
+    naturalLanguageDraft,
+    nluComposerDismissOpacity,
+    nluDimOpacity,
+    paramCategoryLabel,
+    selectedCategory?.label,
+    dismissNluAutoChromeForManualRecovery,
+    setMeetingCreateNluConfirmPhase,
+    setNaturalLanguageDraft,
+    setNluDimLayerMounted,
+    setNluKeyboardDimActive,
+    title,
+    titleSuggestionCtx,
+  ]);
 
   const onStep3BasicNext = useCallback(() => {
     setWizardError(null);
@@ -4278,6 +4835,7 @@ export default function CreateDetailsScreen() {
       setWizardError(r?.error ?? '장소 후보를 확인해 주세요.');
       return;
     }
+    setPlacesAiAssistGate(false);
     pendingScrollAfterStepRef.current = detailStep;
     if (getAgentFabMotionMode() === 'user') {
       notifyCreateMeetingAgentBubbleShow();
@@ -4289,12 +4847,47 @@ export default function CreateDetailsScreen() {
     onPlacesStepConfirmRef.current = onPlacesStepConfirm;
   }, [onPlacesStepConfirm]);
 
+  useEffect(() => {
+    if (currentStep !== placesStep) {
+      setPlacesAiAssistGate(false);
+    }
+  }, [currentStep, placesStep]);
+
+  useEffect(() => {
+    if (!placesAiAssistGate || currentStep !== placesStep) return undefined;
+    const s = placeAutoSnap;
+    if (s.searchLoading || !s.queryTrim || s.hasFilledPlace) return undefined;
+    const id = setTimeout(() => {
+      if (!placesAiAssistGateRef.current || currentStepRef.current !== placesStep) return;
+      const snap = placeAutoSnapRef.current;
+      if (snap.searchLoading || snap.hasFilledPlace || !snap.queryTrim) return;
+      setPlacesAiAssistGate(false);
+      dismissNluAutoChromeForManualRecovery();
+      showTransientBottomMessage(
+        '장소 후보를 고르지 않아 수동 모드로 전환했어요. 검색 결과에서 골라 확인을 눌러 주세요.',
+      );
+    }, 3000);
+    return () => clearTimeout(id);
+  }, [
+    placesAiAssistGate,
+    currentStep,
+    placesStep,
+    placeAutoSnap.searchLoading,
+    placeAutoSnap.hasFilledPlace,
+    placeAutoSnap.queryTrim,
+    dismissNluAutoChromeForManualRecovery,
+  ]);
+
   const handleBack = useCallback(() => {
     router.back();
   }, [router]);
 
-  const onFinalRegister = useCallback(async () => {
+  const onFinalRegister = useCallback(async (opts?: { rethrowOnAddMeetingFailure?: boolean }) => {
     setWizardError(null);
+    if (meetingCreateNluConfirmPhaseRef.current !== 'none') {
+      Alert.alert('확인 필요', 'AI 요약을 확인한 뒤 말풍선의 수락을 눌러 주세요.');
+      return;
+    }
     const cid = selectedCategory?.id?.trim() ?? '';
     const clabel = selectedCategory?.label?.trim() ?? '';
     if (!cid || !clabel) {
@@ -4478,7 +5071,12 @@ export default function CreateDetailsScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
       setWizardError(msg);
-      Alert.alert('등록 실패', msg);
+      if (!opts?.rethrowOnAddMeetingFailure) {
+        Alert.alert('등록 실패', msg);
+      }
+      if (opts?.rethrowOnAddMeetingFailure) {
+        throw e instanceof Error ? e : new Error(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -4510,8 +5108,8 @@ export default function CreateDetailsScreen() {
 
   onFinalRegisterRef.current = onFinalRegister;
 
-  /** 등록 버튼: 로딩 중만 비활성화. 소개글 길이는 눌렀을 때 검증(짧으면 안내). */
-  const finalDisabled = busy;
+  /** 등록 버튼: 로딩 중·NLU 요약 대기 중 비활성화. 소개글 길이는 눌렀을 때 검증(짧으면 안내). */
+  const finalDisabled = busy || meetingCreateNluBlocksFloatingFinal;
 
   const onNluKeyboardOpenChange = useCallback((open: boolean) => {
     setNluKeyboardDimActive(open);
@@ -5127,14 +5725,21 @@ export default function CreateDetailsScreen() {
                           scheduleListOnly={true}
                           placesListOnly={false}
                           onPlacesBlockLayout={onPlacesBlockLayout}
+                          onPlacesAutoAssistSnapshot={onPlacesAutoAssistSnapshot}
                         />
                       </View>
 
                       {currentStep === placesStep ? (
                         <Pressable
+                          disabled={placesConfirmDisabledByAiAssist}
                           onPress={onPlacesStepConfirm}
-                          style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
-                          accessibilityRole="button">
+                          style={({ pressed }) => [
+                            styles.wizardPrimaryBtn,
+                            placesConfirmDisabledByAiAssist && styles.addCandidateBtnDisabled,
+                            pressed && !placesConfirmDisabledByAiAssist && styles.addCandidateBtnPressed,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: placesConfirmDisabledByAiAssist }}>
                           <View pointerEvents="none" style={styles.wizardPrimaryBtnBg}>
                             <LinearGradient
                               colors={GinitTheme.colors.ctaGradient}
@@ -5266,7 +5871,9 @@ export default function CreateDetailsScreen() {
 
           {currentStep === detailStep ? (
             <Pressable
-              onPress={onFinalRegister}
+              onPress={() => {
+                void onFinalRegister();
+              }}
               disabled={finalDisabled}
               style={({ pressed }) => [
                 styles.detailFinalFloatingBtn,

@@ -96,6 +96,12 @@ export type WizardSuggestion = {
   categoryLabel: string;
   /** food 전용 — `MenuPreference` OPTIONS 중 하나 */
   menuPreferenceLabel: string | null;
+  /** 영화 NLU 힌트 — `MovieSearch` 사전 채움 */
+  movieTitleHints?: string[] | null;
+  activityKindLabel?: string | null;
+  gameKindLabel?: string | null;
+  pcGameKindLabel?: string | null;
+  focusKnowledgeLabel?: string | null;
   /** 자동 완료 가능 여부(식사·세부 없음) */
   canAutoCompleteThroughStep3: boolean;
   /** Step 5 등 — 집계 기반 장소 검색 힌트 */

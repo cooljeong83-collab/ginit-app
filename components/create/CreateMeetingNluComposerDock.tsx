@@ -150,7 +150,6 @@ export function CreateMeetingNluComposerDock({
     [onDockHeightChange],
   );
 
-  const inputDisabled = busy || nluBusy;
   const sendDisabled = busy || nluBusy || catLoading || !draft.trim();
 
   return (
@@ -181,6 +180,8 @@ export function CreateMeetingNluComposerDock({
                 placeholder="말 한마디로 모임을 완성해 보세요."
                 placeholderTextColor="#94a3b8"
                 style={meetingChatBodyStyles.input}
+                underlineColorAndroid="transparent"
+                spellCheck={false}
                 multiline
                 submitBehavior="submit"
                 blurOnSubmit={false}
@@ -190,12 +191,13 @@ export function CreateMeetingNluComposerDock({
                   void onSend();
                 }}
                 maxLength={4000}
-                editable={!inputDisabled}
+                editable={!busy}
                 keyboardType="default"
                 inputMode="text"
               />
             </View>
             <Pressable
+              focusable={false}
               onPress={() => void onSend()}
               disabled={sendDisabled}
               style={[meetingChatBodyStyles.sendBtn, sendDisabled && meetingChatBodyStyles.sendBtnDisabled]}

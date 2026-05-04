@@ -24,6 +24,11 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
         min_participants_floor: 2,
       },
     },
+    nlu_blocked: {
+      phrases: ['마약', '필로폰', '대마', '코카인', '히로뽕', '엑스터시', '게이모임'],
+      userMessage:
+        '이 내용으로는 모임을 만들 수 없어요. 커뮤니티 가이드에 맞는 모임만 만들 수 있어요.',
+    },
   },
   xp: { meeting_confirm: 50, meeting_vote: 20 },
   agentic_guide: {
