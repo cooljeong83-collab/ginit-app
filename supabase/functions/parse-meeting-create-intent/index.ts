@@ -334,9 +334,9 @@ function applyMenuPreferenceKeywordFallback(out: Record<string, unknown>, userTe
   if (!hay) return;
   const rules: { label: string; keys: string[] }[] = [
     { label: '포차', keys: ['포차'] },
-    { label: '주점·호프', keys: ['술집', '술자리', '맥주', '소주', '호프', '주점', '안주', '술'] },
+    { label: '주점·호프', keys: ['술집', '술자리', '맥주', '소주', '호프', '주점', '안주', '술', '펍'] },
     { label: '카페', keys: ['디저트', '커피', '카페'] },
-    { label: '한식', keys: ['삼겹살', '국밥', '한식', '한우', '갈비'] },
+    { label: '한식', keys: ['삼겹살', '국밥', '한식', '한우', '갈비', '바베큐', 'bbq', 'barbecue'] },
     { label: '일식', keys: ['스시', '초밥', '라멘', '일식', '우동'] },
     { label: '양식', keys: ['피자', '파스타', '양식', '스테이크'] },
   ];
@@ -524,6 +524,11 @@ If the dominant intent shifts (e.g. generic food → drinking), immediately real
 
 [Automatic menuPreferenceLabel hints — Eat & Drink only]
 삼겹살·국밥·한우·갈비 → 한식; 스시·초밥·라멘·우동 → 일식; 피자·파스타·스테이크 → 양식; 커피·디저트·카페 → 카페; 맥주·소주·안주·호프·주점·술집·술자리 → 주점·호프; 포차 → 포차.
+English / informal aliases (Eat & Drink): BBQ·barbecue·바베큐 → 한식; 펍(Pub, avoid bare English "pub" substring false positives — prefer 펍/주점 맥락) → 주점·호프; cafe·coffee shop → 카페.
+
+[Shorthand data.category — 한식|중식|일식|호프|카페|영화관|기타 스타일]
+요약 스키마의 data.category에 위 한글 값을 쓸 때: BBQ류 → 한식; Pub/펍 → 호프 의미면 menuPreferenceLabel은 반드시 앱 칩 "주점·호프"와 일치; Cafe → 카페; Cinema·movie·영화관 → 영화관(해당 카테고리Id)·영화제목 hints 병행; Study·study room·독서실·스터디룸 → Focus&Knowledge면 focusKnowledgeLabel "독서·스터디" 및 장소에 시설 표현 반영, data.category는 스키마에 없으면 기타로 두되 장소·칩은 채운다.
+영화관·독서실·PC방·코인노래방·헬스장 등 어떤 시설 유형이든 사용자 표현을 장소/placeAutoPickQuery 검색어에 담는다(주소는 지어내지 않음).
 
 [Forbidden NLU follow-ups]
 Never use nluAskMessage, response.ask_message, or unknowns to prompt for: gender ratio (성비), age bands (연령대), or settlement / 더치페이. If the user states them voluntarily, reflect only valid JSON enums; otherwise omit genderRatio and settlement from publicMeetingDetails.
@@ -535,6 +540,7 @@ suggestedIsPublic=false ONLY for clearly invite-only private circles (데이트,
 Relative dates (내일, 다음 주 토요일, …) use todayYmd=${todayYmd} as the calendar anchor.
 
 Optional shorthand: you may also return { "intent":"create_meeting", "data":{...}, "needs_more_info":[...] } — the server maps data.title/date/time/location/is_public into the flat APP fields.
+When 장소/place is only a geographic name (역·구·동·상권 별칭 등) without 시설 종류·상호·봐둔 곳, add needs_more_info with "location" (또는 unknowns field "place") and set response.ask_message to exactly: "<지명> 어디에서 모이실 건가요? 봐두신 장소나 종류를 알려주세요." where <지명> is the user's location phrase verbatim (예: 영등포역 → "영등포역 어디에서 모이실 건가요? 봐두신 장소나 종류를 알려주세요.").
 
 Deep inference (social + nuance) — apply before filling fields:
 - Baseline geography: if the user gives no city/district but the place is vague (역 근처, 근처 카페, 동네), assume their usual activity area is Seoul Yeongdeungpo-gu (서울 영등포구) and reflect that inside "장소" / placeAutoPickQuery (e.g. prepend "영등포구" or "영등포역 근처") without inventing a specific store address.
@@ -550,6 +556,7 @@ Deep inference (social + nuance) — apply before filling fields:
   - "점심 번개" → 12:00 same day or next business day if lunch already passed (use judgment from message).
   - "불토" / "이번 주 토요일 밤" → upcoming Saturday after todayYmd, evening from 19:00.
 - Place wording: normalize nicknames in queries — e.g. 스벅→스타벅스, 피방→PC방, 한강 산책→한강공원 or "한강 산책로" style text search phrases (no fake URLs).
+- Area + venue follow-up (multi-turn): If accumulated "장소"/placeAutoPickQuery is ONLY a station/district (e.g. 영등포역, 강남구) and the latest user message names ONLY a venue type (삼겹살집, 카페, 술집, 헬스장), you MUST output "장소"/placeAutoPickQuery as "<prior area> <venue phrase>" — never drop the prior area by overwriting with the venue-only string. In that same follow-up, do NOT set title/이름 to the venue-only reply; keep accumulated.title if present, otherwise derive a short title from the FIRST user message in this thread (topic + scale), not from the venue word alone.
 - Mood / vibe: merge short vibe adjectives from the user (공부하기 좋은, 인스타 감성, 조용한, 왁자지껄한, 가성비 등) into "장소" / placeAutoPickQuery as extra Korean keywords so Places search stays on-theme.
 - Public vs private: suggestedIsPublic false only for clear invite-only private circles (데이트, 가족만, 확정된 소규모 지인 모임, 내부 동료만). Otherwise true; open recruitment / 번개 / 지역 모집 / vague topic-only → true without asking.
 - needs_confirmation: if time + category feel socially odd (e.g. 새벽 2시 + 카페/커피 without context), add an unknowns entry like { "field": "schedule", "reason": "..." } rather than inventing a different time.

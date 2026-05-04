@@ -27,6 +27,8 @@ export type BuildLocalMeetingCreateNluPatchParams = {
   text: string;
   categories: Category[];
   now: Date;
+  /** 직전 턴 누적 — area-only 장소 + 이번 턴 venue 답을 합칠 때 사용 */
+  accumulated?: Record<string, unknown>;
 };
 
 export function normalizeLocalMeetingCreateTextForLength(raw: string): string {
@@ -69,13 +71,72 @@ function firstFoodCategory(categories: Category[]): Category | null {
   return null;
 }
 
+/** 업종·시설 키워드 — 지역 토큰만 있는 검색어와 구분 */
+export const MEETING_CREATE_VENUE_OR_MOOD_RE =
+  /(?:카페|커피숍|식당|맛집|술집|호프|포차|이자카야|와인바|루프탑|브런치|디저트|베이커리|뷔페|돈가스|스시|초밥|라멘|우동|분식|삼겹살|곱창|소갈비|돼지|한우|고기집|돈까스|파스타|피자|중식당|일식당|한식당|양식당|레스토랑|노래방|볼링|보드게임|방탈출|PC\s*방|피시방|피씨방|오락실|인터넷\s*카페|영화관|멀티플렉스|CGV|메가박스|롯데시네마|극장|시네마|공연장|콘서트홀|체육관|헬스장|풋살장|구장|골프장|연습장|스터디카페|코워킹|도서관|북카페|키즈카페|포차|이자카야|바\b|키즈|한강뷰|분위기|조용한|넓은|룸|집\b)/i;
+
+/**
+ * 누적/검색어가 역·동·구·시 등 지역만인지(업종·시설 표현 없음).
+ * `영등포역`, `영등포역 근처`, `영등포구` 등.
+ */
+export function isAreaOnlyPlaceQuery(s: string): boolean {
+  const t = s.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (MEETING_CREATE_VENUE_OR_MOOD_RE.test(t)) return false;
+  return /^(?:[가-힣]{2,12}역(?:\s*(?:근처|앞|뒤|입구))?|[가-힣]{2,12}(?:동|구)|[가-힣]{2,10}(?:시|도)|[가-힣]{2,12}\s+일대|[가-힣]{2,12}\s+거리)$/.test(
+    t,
+  );
+}
+
+/**
+ * 이전 턴 지역만 + 이번 턴 업종/가게 표현 → 하나의 검색어로 합침.
+ * 이전이 지역만이 아니면 이번 값으로 덮어쓴다.
+ */
+export function combineMeetingCreatePlaceQuery(prev: string, next: string): string {
+  const p = prev.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const n = next.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  if (!n) return p;
+  if (!p) return n;
+  if (!isAreaOnlyPlaceQuery(p)) return n;
+  if (isAreaOnlyPlaceQuery(n)) return n;
+  if (n.includes(p)) return n;
+  return `${p} ${n}`.trim();
+}
+
+/**
+ * Edge 패치 수신 직후: 누적에 area-only가 있으면 이번 패치의 장소와 결합.
+ */
+export function mergeMeetingCreatePlacePatchWithAccumulated(
+  acc: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const prev = String(acc.placeAutoPickQuery ?? acc['장소'] ?? '').trim();
+  const next = String(patch.placeAutoPickQuery ?? patch['장소'] ?? '').trim();
+  if (!prev || !next) return patch;
+  const combined = combineMeetingCreatePlaceQuery(prev, next);
+  if (combined === next) return patch;
+  return { ...patch, placeAutoPickQuery: combined, 장소: combined };
+}
+
 function extractPlaceAutoPickQuery(text: string): string | null {
   const t = text.normalize('NFKC').replace(/\s+/g, ' ').trim();
   if (!t) return null;
   const station = /([가-힣]{2,10}역)(?=\s|$|[0-9]|에서|으로|과|와|근처|앞|뒤|입구)/.exec(t);
-  if (station) return station[1]!.trim();
+  if (station) {
+    const rest = t.slice(station.index! + station[1]!.length).trim();
+    if (rest && MEETING_CREATE_VENUE_OR_MOOD_RE.test(rest)) {
+      return `${station[1]!.trim()} ${rest}`.replace(/\s+/g, ' ').trim();
+    }
+    return station[1]!.trim();
+  }
   const dong = /([가-힣]{3,10}(?:동|구))(?=\s|$)/.exec(t);
-  if (dong) return dong[1]!.trim();
+  if (dong) {
+    const rest = t.slice(dong.index! + dong[1]!.length).trim();
+    if (rest && MEETING_CREATE_VENUE_OR_MOOD_RE.test(rest)) {
+      return `${dong[1]!.trim()} ${rest}`.replace(/\s+/g, ' ').trim();
+    }
+    return dong[1]!.trim();
+  }
   if (
     /(?:카페|포차|이자카야|바\b|키즈|브런치|루프탑|한강뷰|분위기|조용한|넓은|룸)/.test(t)
   ) {
@@ -120,6 +181,16 @@ export function buildLocalMeetingCreateNluPatch(params: BuildLocalMeetingCreateN
   const placeQ = extractPlaceAutoPickQuery(raw);
   if (placeQ) {
     acc.placeAutoPickQuery = placeQ;
+  }
+  const accPrev = params.accumulated;
+  if (accPrev && typeof accPrev === 'object' && !Array.isArray(accPrev)) {
+    const prevPlace = String(accPrev.placeAutoPickQuery ?? accPrev['장소'] ?? '').trim();
+    if (prevPlace && isAreaOnlyPlaceQuery(prevPlace)) {
+      const nextCandidate = String(acc.placeAutoPickQuery ?? '').trim() || norm;
+      if (nextCandidate) {
+        acc.placeAutoPickQuery = combineMeetingCreatePlaceQuery(prevPlace, nextCandidate);
+      }
+    }
   }
 
   const fromUtterance =

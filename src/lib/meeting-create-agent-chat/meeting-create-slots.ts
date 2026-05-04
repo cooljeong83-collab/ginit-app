@@ -1,7 +1,7 @@
 import type { Category } from '@/src/lib/categories';
 import {
-    getMeetingCreateNluPlaceNudgeCombined,
-    getMeetingCreateNluPlaceNudgePlaceOnly,
+  getMeetingCreateNluPlaceNudgeCombined,
+  getMeetingCreateNluPlaceNudgePlaceOnly,
 } from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
 import type { MeetingCreateNluMissingSlot } from '@/src/lib/meeting-create-nlu/parse-edge-payload';
 
@@ -12,6 +12,8 @@ export type PickBundledMeetingCreateNudgeOpts = {
   hadPartialAccum: boolean;
   /** 누적 JSON에 카테고리가 있으면 장소·세부 재촉 문구를 맞춤 */
   resolvedCategory?: Pick<Category, 'id' | 'label'> | null;
+  /** `placeVenue` 결손 시 역·동 이름을 문장에 넣기 */
+  areaOnlyHint?: string;
 };
 
 const OPENING_GREET_EMPTY =
@@ -94,6 +96,11 @@ export function pickBundledMeetingCreateNudge(
   }
   if (s.has('headcount')) {
     return `${ack}몇 분이 모이실 건지 알려 주세요.`;
+  }
+  if (s.has('placeVenue')) {
+    const area = opts.areaOnlyHint?.trim();
+    const line = area ? `${area} 어떤 장소를 찾아드릴까요?` : '어떤 장소를 찾아드릴까요?';
+    return `${ack}${line}`;
   }
   if (s.has('category')) {
     return `${ack}어떤 모임을 진행하실 건가요?`;

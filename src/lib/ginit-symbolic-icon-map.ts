@@ -96,6 +96,8 @@ export const GINIT_SYMBOLIC_ICON_MAP = {
   'walk-outline': 'walk',
   'wallet-outline': 'wallet-outline',
   'warning-outline': 'alert-outline',
+  /** 알림음 미리듣기 — 스피커 */
+  'volume-high-outline': 'volume-high',
 } as const satisfies Record<string, string>;
 
 export type SymbolicIconName = keyof typeof GINIT_SYMBOLIC_ICON_MAP;

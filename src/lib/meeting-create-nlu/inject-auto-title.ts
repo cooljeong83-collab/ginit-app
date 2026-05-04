@@ -5,6 +5,8 @@ export type MeetingCreateNluAutoTitleInput = {
   accumulated: Record<string, unknown>;
   now: Date;
   manualTitle: string;
+  /** 첫 NLU 발화에서 유도한 폴백(수동 제목 다음, AI 추천·자동 생성 앞) */
+  openingUtteranceTitleFallback?: string;
   aiTitleSuggestionFirst: string;
   categoryLabelForTitle: string;
   titleSuggestionCtx: MeetingTitleSuggestionContext;
@@ -19,12 +21,17 @@ export function mergeMeetingCreateNluAccumulatedWithAutoTitle(input: MeetingCrea
   if (manual.length > 0) {
     resolved = manual;
   } else {
-    const ai = input.aiTitleSuggestionFirst.trim();
-    if (ai.length > 0) {
-      resolved = ai;
+    const opening = (input.openingUtteranceTitleFallback ?? '').trim();
+    if (opening.length > 0) {
+      resolved = opening;
     } else {
-      const label = input.categoryLabelForTitle.trim() || '모임';
-      resolved = generateSuggestedMeetingTitle(label, input.now, 0, input.titleSuggestionCtx);
+      const ai = input.aiTitleSuggestionFirst.trim();
+      if (ai.length > 0) {
+        resolved = ai;
+      } else {
+        const label = input.categoryLabelForTitle.trim() || '모임';
+        resolved = generateSuggestedMeetingTitle(label, input.now, 0, input.titleSuggestionCtx);
+      }
     }
   }
   return mergeMeetingCreateNluAccumulated(input.accumulated, { title: resolved });

@@ -3,7 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEY = 'ginit_profile_notification_sound_v1';
 
 /** 시스템 기본 + 번들에 포함된 커스텀 ID (확장 시 배열만 추가) */
-export type ProfileBundledNotificationSoundId = 'ginit_ring_w';
+export type ProfileBundledNotificationSoundId = 'ginit_ring_c1' | 'ginit_ring_w';
+
+/** 신규·빈 저장값 기본 번들 알림음 */
+const DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID: ProfileBundledNotificationSoundId = 'ginit_ring_c1';
 
 export type ProfileNotificationSoundId = 'default' | ProfileBundledNotificationSoundId;
 
@@ -17,7 +20,8 @@ export type ProfileNotificationSoundOption = {
 
 export const PROFILE_NOTIFICATION_SOUND_OPTIONS: readonly ProfileNotificationSoundOption[] = [
   { id: 'default', label: '시스템 기본' },
-  { id: 'ginit_ring_w', label: '지닛 벨', expoFilename: 'ginit_ring_w.wav' },
+  { id: 'ginit_ring_c1', label: '지닛 벨 1', expoFilename: 'ginit_ring_c1.wav' },
+  { id: 'ginit_ring_w', label: '지닛 벨 2', expoFilename: 'ginit_ring_w.wav' },
 ] as const;
 
 const BUNDLED_IDS = new Set<string>(PROFILE_NOTIFICATION_SOUND_OPTIONS.filter((o) => o.id !== 'default').map((o) => o.id));
@@ -25,9 +29,9 @@ const BUNDLED_IDS = new Set<string>(PROFILE_NOTIFICATION_SOUND_OPTIONS.filter((o
 function normalizeStored(raw: string | null): ProfileNotificationSoundId {
   const s = (raw ?? '').trim();
   if (s === 'default') return 'default';
-  if (s === '') return 'ginit_ring_w';
+  if (s === '') return DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
   if (BUNDLED_IDS.has(s)) return s as ProfileBundledNotificationSoundId;
-  return 'ginit_ring_w';
+  return DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
 }
 
 export async function loadProfileNotificationSoundId(): Promise<ProfileNotificationSoundId> {
@@ -35,12 +39,12 @@ export async function loadProfileNotificationSoundId(): Promise<ProfileNotificat
     const v = await AsyncStorage.getItem(STORAGE_KEY);
     return normalizeStored(v);
   } catch {
-    return 'ginit_ring_w';
+    return DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
   }
 }
 
 export async function saveProfileNotificationSoundId(id: ProfileNotificationSoundId): Promise<void> {
-  const next = id === 'default' || BUNDLED_IDS.has(id) ? id : 'ginit_ring_w';
+  const next = id === 'default' || BUNDLED_IDS.has(id) ? id : DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
   await AsyncStorage.setItem(STORAGE_KEY, next);
 }
 

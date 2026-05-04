@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildLocalMeetingCreateNluPatch,
+  combineMeetingCreatePlaceQuery,
   fillMeetingCreateNluPatchFromLocalEdge,
+  isAreaOnlyPlaceQuery,
+  mergeMeetingCreatePlacePatchWithAccumulated,
   normalizeLocalMeetingCreateTextForLength,
   shouldSkipEdgeNluForMeetingCreate,
 } from '@/src/lib/meeting-create-nlu/local-intent-patch';
+import { mergeMeetingCreateNluAccumulated } from '@/src/lib/meeting-create-agent-chat/session';
 import { MEETING_CREATE_COFFEE_CATEGORY_ID, MEETING_CREATE_MEAL_CATEGORY_ID } from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
 import type { Category } from '@/src/lib/categories';
 
@@ -112,6 +116,25 @@ describe('buildLocalMeetingCreateNluPatch', () => {
     expect(p.activityKindLabel).toBe('러닝·조깅');
   });
 
+  it('merges accumulated area-only + venue-only reply into one place query', () => {
+    const p = buildLocalMeetingCreateNluPatch({
+      text: '삼겹살집',
+      categories: cats,
+      now,
+      accumulated: { placeAutoPickQuery: '영등포역' },
+    });
+    expect(p.placeAutoPickQuery).toBe('영등포역 삼겹살집');
+  });
+
+  it('single utterance station + venue returns combined place', () => {
+    const p = buildLocalMeetingCreateNluPatch({
+      text: '영등포역 삼겹살집',
+      categories: cats,
+      now,
+    });
+    expect(p.placeAutoPickQuery).toBe('영등포역 삼겹살집');
+  });
+
   it('parses 내일 영등포역3대3 벙개 (역+숫자 붙임, 성비 인원, 카테고리)', () => {
     const bungaeCat: Category = {
       id: 'xYAgS71J2K5t9x4PfTkJ',
@@ -131,6 +154,34 @@ describe('buildLocalMeetingCreateNluPatch', () => {
     expect(p.maxParticipants).toBe(6);
     expect(p.categoryId).toBe('xYAgS71J2K5t9x4PfTkJ');
     expect(p.menuPreferenceLabel).toBe('주점·호프');
+  });
+});
+
+describe('place query combine + area-only', () => {
+  it('isAreaOnlyPlaceQuery is true for station only', () => {
+    expect(isAreaOnlyPlaceQuery('영등포역')).toBe(true);
+    expect(isAreaOnlyPlaceQuery('영등포역 삼겹살집')).toBe(false);
+  });
+
+  it('combineMeetingCreatePlaceQuery joins area + venue', () => {
+    expect(combineMeetingCreatePlaceQuery('영등포역', '삼겹살집')).toBe('영등포역 삼겹살집');
+  });
+
+  it('mergeMeetingCreatePlacePatchWithAccumulated upgrades venue-only edge patch', () => {
+    const out = mergeMeetingCreatePlacePatchWithAccumulated(
+      { placeAutoPickQuery: '영등포역' },
+      { placeAutoPickQuery: '삼겹살집' },
+    );
+    expect(out.placeAutoPickQuery).toBe('영등포역 삼겹살집');
+  });
+
+  it('mergeMeetingCreateNluAccumulated merges place without dropping area', () => {
+    const m = mergeMeetingCreateNluAccumulated(
+      { placeAutoPickQuery: '영등포역', 장소: '영등포역' },
+      { placeAutoPickQuery: '삼겹살집' },
+    );
+    expect(m.placeAutoPickQuery).toBe('영등포역 삼겹살집');
+    expect(m['장소']).toBe('영등포역 삼겹살집');
   });
 });
 

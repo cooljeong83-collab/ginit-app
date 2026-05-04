@@ -212,12 +212,12 @@ export async function searchPlacesText(
         : null,
       sort: coords ? (options?.sort === 'distance' ? 'distance' : 'accuracy') : 'accuracy(default)',
     });
-    // eslint-disable-next-line no-console
-    console.log('[KakaoLocalKeywordSearch] response.meta', JSON.stringify(json.meta ?? {}, null, 2));
-    // eslint-disable-next-line no-console
-    console.log(`[KakaoLocalKeywordSearch] response.documents (${raw.length}건)`, JSON.stringify(raw, null, 2));
-    // eslint-disable-next-line no-console
-    console.log('[KakaoLocalKeywordSearch] mapped PlaceSearchRow[]', JSON.stringify(places, null, 2));
+    // // eslint-disable-next-line no-console
+    // console.log('[KakaoLocalKeywordSearch] response.meta', JSON.stringify(json.meta ?? {}, null, 2));
+    // // eslint-disable-next-line no-console
+    // console.log(`[KakaoLocalKeywordSearch] response.documents (${raw.length}건)`, JSON.stringify(raw, null, 2));
+    // // eslint-disable-next-line no-console
+    // console.log('[KakaoLocalKeywordSearch] mapped PlaceSearchRow[]', JSON.stringify(places, null, 2));
   }
 
   const isEnd = json.meta?.is_end === true;

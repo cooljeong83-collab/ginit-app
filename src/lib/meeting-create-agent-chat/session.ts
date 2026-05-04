@@ -71,17 +71,34 @@ export function isLikelyMeetingCreateGreetingOnly(text: string): boolean {
   return greeting || (thin && !/[모임일정장소인원카테고리]/.test(t));
 }
 
+import {
+  combineMeetingCreatePlaceQuery,
+} from '@/src/lib/meeting-create-nlu/local-intent-patch';
+
 /**
  * Edge/클라이언트 공용: null/undefined 패치 값은 기존 누적을 덮지 않음.
  * `인원`·`publicMeetingDetails`는 얕은 병합.
+ * `placeAutoPickQuery`/`장소`: 누적이 역·동 등 지역만이면 이번 턴 업종만 덮어쓰지 않고 합친다.
  */
 export function mergeMeetingCreateNluAccumulated(
   base: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
+  let placeKeysDone = false;
   for (const [k, v] of Object.entries(patch)) {
     if (v === null || v === undefined) continue;
+    if (k === 'placeAutoPickQuery' || k === '장소') {
+      if (placeKeysDone) continue;
+      placeKeysDone = true;
+      const patchPlace = String(patch.placeAutoPickQuery ?? patch['장소'] ?? v).trim();
+      if (!patchPlace) continue;
+      const prevPlace = String(out.placeAutoPickQuery ?? out['장소'] ?? '').trim();
+      const mergedPlace = combineMeetingCreatePlaceQuery(prevPlace, patchPlace);
+      out.placeAutoPickQuery = mergedPlace;
+      out['장소'] = mergedPlace;
+      continue;
+    }
     if (k === '인원' && typeof v === 'object' && !Array.isArray(v)) {
       const prev =
         typeof out['인원'] === 'object' && out['인원'] !== null && !Array.isArray(out['인원'])

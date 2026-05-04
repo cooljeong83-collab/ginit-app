@@ -60,13 +60,13 @@ import {
   AGENT_APPLY_TITLE_MS_PER_CODEPOINT,
   AgentApplyRippleLayer,
 } from '@/components/create/agent-apply-ripple';
+import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
+import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
+import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
 import {
   CreateMeetingAgenticSurfaceBinder,
   type MeetingCreateAgenticSurfaceHandles,
 } from '@/components/create/CreateMeetingAgenticSurfaceBinder';
-import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
-import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
-import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
 import { CreateMeetingNluComposerDock } from '@/components/create/CreateMeetingNluComposerDock';
 import { CreateMeetingWizardAgentBridge } from '@/components/create/CreateMeetingWizardAgentBridge';
 import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
@@ -114,18 +114,7 @@ import {
   setAgentStep1InteractionUnlocked,
   subscribeAgentStep1InteractionUnlocked,
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
-import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
-import {
-  isMeetingCreateNluPatchSemanticallyEmpty,
-  pickBundledMeetingCreateNudge,
-} from '@/src/lib/meeting-create-agent-chat/meeting-create-slots';
-import {
-  appendMeetingCreateAgentChatMessage,
-  createEmptyMeetingCreateAgentChatSession,
-  fingerprintMeetingCreateParsedPlan,
-  isLikelyMeetingCreateGreetingOnly,
-  mergeMeetingCreateNluAccumulated,
-} from '@/src/lib/meeting-create-agent-chat/session';
+import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   coerceDateCandidate,
   createPointCandidate,
@@ -142,20 +131,26 @@ import {
   searchPlacesText,
   type PlaceSearchRow,
 } from '@/src/lib/google-places-text-search';
+import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
+import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
+import {
+  isMeetingCreateNluPatchSemanticallyEmpty,
+  pickBundledMeetingCreateNudge,
+} from '@/src/lib/meeting-create-agent-chat/meeting-create-slots';
+import { isMeetingCreateNluSummaryRejectionText } from '@/src/lib/meeting-create-agent-chat/nlu-confirm-intent';
+import {
+  appendMeetingCreateAgentChatMessage,
+  createEmptyMeetingCreateAgentChatSession,
+  fingerprintMeetingCreateParsedPlan,
+  isLikelyMeetingCreateGreetingOnly,
+  mergeMeetingCreateNluAccumulated,
+} from '@/src/lib/meeting-create-agent-chat/session';
 import {
   applyPartialPublicMeetingDetails,
   parseMeetingCreateNluPayload,
   peekMeetingCreateNluMissingSlots,
   wizardSuggestionFromNluPlan,
 } from '@/src/lib/meeting-create-nlu';
-import { isMeetingCreateNluSummaryRejectionText } from '@/src/lib/meeting-create-agent-chat/nlu-confirm-intent';
-import { inferMeetingCreateHeadcountFromKoreanText } from '@/src/lib/meeting-create-nlu/infer-headcount-from-korean-text';
-import { mergeMeetingCreateNluAccumulatedWithAutoTitle } from '@/src/lib/meeting-create-nlu/inject-auto-title';
-import {
-  buildLocalMeetingCreateNluPatch,
-  fillMeetingCreateNluPatchFromLocalEdge,
-  shouldSkipEdgeNluForMeetingCreate,
-} from '@/src/lib/meeting-create-nlu/local-intent-patch';
 import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
 import {
   appendMovieNudgeBoxOfficeRanks,
@@ -163,12 +158,22 @@ import {
   isDeferUserChoiceUtterance,
   tryPatchMovieTitleFromBoxOfficeRankReply,
 } from '@/src/lib/meeting-create-nlu/defer-user-choice';
+import { inferMeetingCreateHeadcountFromKoreanText } from '@/src/lib/meeting-create-nlu/infer-headcount-from-korean-text';
+import { mergeMeetingCreateNluAccumulatedWithAutoTitle } from '@/src/lib/meeting-create-nlu/inject-auto-title';
+import {
+  deriveMeetingTitleFromOpeningUtterance,
+  sanitizeMeetingCreateNluPatchForVenueFollowUp,
+} from '@/src/lib/meeting-create-nlu/opening-utterance-meeting-title';
+import {
+  buildLocalMeetingCreateNluPatch,
+  fillMeetingCreateNluPatchFromLocalEdge,
+  mergeMeetingCreatePlacePatchWithAccumulated,
+  shouldSkipEdgeNluForMeetingCreate,
+} from '@/src/lib/meeting-create-nlu/local-intent-patch';
 import { isMeetingCreateNaturalLanguageBlocked } from '@/src/lib/meeting-create-nlu/nlu-blocked-text';
-import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
-import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   consumePendingMeetingPlace,
   consumePendingVotePlaceRow,
@@ -3140,24 +3145,9 @@ function waitAgentStep1FabUnlocked(isAlive?: () => boolean): Promise<void> {
   });
 }
 
-/** NLU `WizardSuggestion`으로 Step2를 건너뛸 수 있는지 — `resolveSpecialtyKindForCategory` 결과 기준 */
-function meetingCreateWizardShouldAutoStep2(
-  sk: ReturnType<typeof resolveSpecialtyKindForCategory>,
-  sugg: WizardSuggestion,
-  cat: Category | null,
-): boolean {
-  if (!sugg.canAutoCompleteThroughStep3) return false;
-  if (sk === 'food' && sugg.menuPreferenceLabel) return true;
-  if (sk === 'movie' && (sugg.movieTitleHints?.length ?? 0) > 0) return true;
-  if (sk === 'sports' && isActiveLifeMajorCode(cat?.majorCode) && sugg.activityKindLabel) return true;
-  if (sk === 'sports' && isPlayAndVibeMajorCode(cat?.majorCode) && sugg.gameKindLabel) return true;
-  if (sk === 'sports' && isPcGameMajorCode(cat?.majorCode) && sugg.pcGameKindLabel) return true;
-  if (sk === 'knowledge' && sugg.focusKnowledgeLabel) return true;
-  return false;
-}
-
 export default function CreateDetailsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { userId } = useUserSession();
@@ -3214,6 +3204,8 @@ export default function CreateDetailsScreen() {
   const pendingNluBoxOfficeTopThreeRef = useRef<{ title: string }[] | null>(null);
   const agentNluSessionRef = useRef(createEmptyMeetingCreateAgentChatSession());
   const agentNluLastFingerprintRef = useRef<string | null>(null);
+  /** NLU 첫 실질 사용자 발화 — 장소 보조 턴이 `title`을 덮지 않게 하고 폴백 제목에 사용 */
+  const meetingCreateNluOpeningUtteranceRef = useRef('');
   /** 요약 수락 시 적용할 위저드 제안(수락 전까지 오토파일럿 미실행) */
   const pendingNluWizardApplyRef = useRef<{ fp: string; sugg: WizardSuggestion } | null>(null);
   /** 오류 시 말풍선 요약 문구 복구용 */
@@ -3227,7 +3219,7 @@ export default function CreateDetailsScreen() {
     meetingCreateNluConfirmPhaseRef.current = next;
     setMeetingCreateNluBlocksFloatingFinal(next !== 'none');
   }, []);
-  /** NLU 수락 CTA → 최종 등록 (정의 순서 때문에 ref로 최신 콜백 유지) */
+  /** 하단 `지닛 시작하기` → 최종 등록 (정의 순서 때문에 ref로 최신 콜백 유지) */
   const onFinalRegisterRef = useRef<(opts?: { rethrowOnAddMeetingFailure?: boolean }) => Promise<void>>(
     async () => {},
   );
@@ -3711,34 +3703,6 @@ export default function CreateDetailsScreen() {
     }, []),
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        /** 화면 이탈(blur·언마운트) 시 진행 중이던 위저드 자동 적용·NLU 수락 대기 즉시 중단 */
-        agentWizardApplyRunIdRef.current += 1;
-        setAgentFabMotionMode('user');
-        setAutopilotCoachLocked(false);
-        setAgentWizardApplyCue(null);
-        setPlacesAiAssistGate(false);
-        setNluBusy(false);
-        agentNluAccumulatedRef.current = {};
-        pendingNluBoxOfficeTopThreeRef.current = null;
-        agentNluSessionRef.current = createEmptyMeetingCreateAgentChatSession();
-        agentNluLastFingerprintRef.current = null;
-        pendingNluWizardApplyRef.current = null;
-        pendingNluSummaryConfirmMsgRef.current = '';
-        setMeetingCreateNluConfirmPhase('none');
-        const surf = agenticSurfaceRef.current;
-        surf?.setAgentOwnsWizardBubble(false);
-        surf?.setIntelligentSuggestionDirect(null);
-        surf?.setShowAcceptButton(false);
-        surf?.registerAcceptSuggestion(null);
-        setNluComposerUserDismissed(false);
-        nluComposerDismissOpacity.setValue(1);
-      };
-    }, [nluComposerDismissOpacity, setMeetingCreateNluConfirmPhase]),
-  );
-
   const titleSuggestionCtx = useMemo(
     (): MeetingTitleSuggestionContext => ({
       regionLabel: titleRegion,
@@ -4209,6 +4173,47 @@ export default function CreateDetailsScreen() {
     setAgentFabMotionMode('user');
   }, [nluComposerDismissOpacity, nluDimOpacity]);
 
+  /** 생성 화면 이탈(blur·스택에서 제거) 시 자동 생성·NLU 수락 루프를 끊고 수동 모드로 복귀 */
+  const abortMeetingCreateWizardOnScreenLeave = useCallback(() => {
+    agentWizardApplyRunIdRef.current += 1;
+    setAgentFabMotionMode('user');
+    setAutopilotCoachLocked(false);
+    setAgentWizardApplyCue(null);
+    setPlacesAiAssistGate(false);
+    setNluBusy(false);
+    agentNluAccumulatedRef.current = {};
+    meetingCreateNluOpeningUtteranceRef.current = '';
+    pendingNluBoxOfficeTopThreeRef.current = null;
+    agentNluSessionRef.current = createEmptyMeetingCreateAgentChatSession();
+    agentNluLastFingerprintRef.current = null;
+    pendingNluWizardApplyRef.current = null;
+    pendingNluSummaryConfirmMsgRef.current = '';
+    setMeetingCreateNluConfirmPhase('none');
+    const surf = agenticSurfaceRef.current;
+    surf?.setAgentOwnsWizardBubble(false);
+    surf?.setIntelligentSuggestionDirect(null);
+    surf?.setShowAcceptButton(false);
+    surf?.registerAcceptSuggestion(null);
+    dismissNluAutoChromeForManualRecovery();
+    setNluComposerUserDismissed(false);
+    nluComposerDismissOpacity.setValue(1);
+  }, [dismissNluAutoChromeForManualRecovery, nluComposerDismissOpacity, setMeetingCreateNluConfirmPhase]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        abortMeetingCreateWizardOnScreenLeave();
+      };
+    }, [abortMeetingCreateWizardOnScreenLeave]),
+  );
+
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', () => {
+      abortMeetingCreateWizardOnScreenLeave();
+    });
+    return () => unsub();
+  }, [abortMeetingCreateWizardOnScreenLeave, navigation]);
+
   useFocusEffect(
     useCallback(() => {
       const msg = consumeCreateMeetingPlaceAutopilotError();
@@ -4232,6 +4237,7 @@ export default function CreateDetailsScreen() {
         setAutopilotCoachLocked(true);
 
         const stopAutopilotToManual = (userMsg: string) => {
+          agentWizardApplyRunIdRef.current += 1;
           setWizardError(userMsg);
           showTransientBottomMessage(userMsg);
           setAgentWizardApplyCue(null);
@@ -4257,45 +4263,9 @@ export default function CreateDetailsScreen() {
           return false;
         };
 
-        const runFallbackImmediate = () => {
-          setSelectedCategoryId(sugg.categoryId);
-          const cat0 = categories.find((c) => c.id === sugg.categoryId) ?? null;
-          const sk0 = resolveSpecialtyKindForCategory(cat0);
-          if (sk0 === 'food' && sugg.menuPreferenceLabel) {
-            setMenuPreferences([sugg.menuPreferenceLabel]);
-          }
-          if (sk0 === 'movie' && (sugg.movieTitleHints?.length ?? 0) > 0) {
-            const titles = (sugg.movieTitleHints ?? []).map((t) => String(t).trim()).filter(Boolean);
-            setMovieCandidates(titles.map((title, i) => ({ id: `nlu-m${i}`, title })));
-          }
-          if (sk0 === 'sports' && isActiveLifeMajorCode(cat0?.majorCode) && sugg.activityKindLabel) {
-            setActivityKinds([sugg.activityKindLabel]);
-          }
-          if (sk0 === 'sports' && isPlayAndVibeMajorCode(cat0?.majorCode) && sugg.gameKindLabel) {
-            setGameKinds([sugg.gameKindLabel]);
-          }
-          if (sk0 === 'sports' && isPcGameMajorCode(cat0?.majorCode) && sugg.pcGameKindLabel) {
-            setGameKinds([sugg.pcGameKindLabel]);
-          }
-          if (sk0 === 'knowledge' && sugg.focusKnowledgeLabel) {
-            setFocusKnowledgePreferences([sugg.focusKnowledgeLabel]);
-          }
-          suppressStepLayoutAnimateFromCategoryRef.current = true;
-          setTimeout(() => {
-            if (!isApplyRunAlive()) return;
-            onStep1NextRef.current();
-            if (meetingCreateWizardShouldAutoStep2(sk0, sugg, cat0)) {
-              setTimeout(() => {
-                if (!isApplyRunAlive()) return;
-                onStep2SpecialtyNextRef.current();
-              }, 80);
-            }
-          }, 80);
-        };
-
         try {
           if (currentStepRef.current !== 1) {
-            runFallbackImmediate();
+            stopAutopilotToManual('모임 만들기가 1단계가 아니어 자동 입력을 중단했습니다. 수동으로 이어가 주세요.');
             return;
           }
 
@@ -4675,9 +4645,8 @@ export default function CreateDetailsScreen() {
             setMeetingConfig((prev) => applyPartialPublicMeetingDetails(prev, sugg.publicMeetingDetailsPartial!));
           }
         } catch {
-          setAgentWizardApplyCue(null);
           setPlacesAiAssistGate(false);
-          dismissNluAutoChromeForManualRecovery();
+          stopAutopilotToManual('자동 입력 중 문제가 생겼습니다. 수동으로 진행해 주세요.');
         } finally {
           setAutopilotCoachLocked(false);
           setAgentFabMotionMode('user');
@@ -4755,7 +4724,11 @@ export default function CreateDetailsScreen() {
         return;
       }
 
+      const wasFirstSubstantiveNluTurn = priorUserTurns === 0;
       agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(agentNluSessionRef.current, 'user', raw);
+      if (wasFirstSubstantiveNluTurn) {
+        meetingCreateNluOpeningUtteranceRef.current = raw.trim();
+      }
       surf?.setAgentOwnsWizardBubble(true);
       surf?.setIntelligentSuggestionDirect('생각 중…');
 
@@ -4763,6 +4736,7 @@ export default function CreateDetailsScreen() {
         text: raw,
         categories,
         now,
+        accumulated: beforeAcc,
       });
       const inv = shouldSkipEdgeNluForMeetingCreate(raw, localPatch)
         ? ({ ok: true as const, result: localPatch })
@@ -4794,6 +4768,17 @@ export default function CreateDetailsScreen() {
           ? (inv.result as Record<string, unknown>)
           : {};
       patch = fillMeetingCreateNluPatchFromLocalEdge(patch, localPatch);
+      patch = mergeMeetingCreatePlacePatchWithAccumulated(beforeAcc, patch);
+      patch = sanitizeMeetingCreateNluPatchForVenueFollowUp(patch, {
+        categories,
+        beforeAcc,
+        raw,
+        now,
+        priorUserTurns,
+      });
+      const openingUtteranceTitleFallback = deriveMeetingTitleFromOpeningUtterance(
+        meetingCreateNluOpeningUtteranceRef.current,
+      );
       const inferredHc = inferMeetingCreateHeadcountFromKoreanText(raw);
       if (inferredHc) {
         const tmpMerge = mergeMeetingCreateNluAccumulated(beforeAcc, patch);
@@ -4806,6 +4791,7 @@ export default function CreateDetailsScreen() {
         accumulated: mergedBase,
         now,
         manualTitle: title,
+        openingUtteranceTitleFallback,
         aiTitleSuggestionFirst: (aiTitleSuggestions[0] ?? '').trim(),
         categoryLabelForTitle: (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임',
         titleSuggestionCtx,
@@ -4825,6 +4811,7 @@ export default function CreateDetailsScreen() {
             accumulated: merged,
             now,
             manualTitle: title,
+            openingUtteranceTitleFallback,
             aiTitleSuggestionFirst: (aiTitleSuggestions[0] ?? '').trim(),
             categoryLabelForTitle: (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임',
             titleSuggestionCtx,
@@ -4860,6 +4847,7 @@ export default function CreateDetailsScreen() {
             accumulated: merged,
             now,
             manualTitle: title,
+            openingUtteranceTitleFallback,
             aiTitleSuggestionFirst: (aiTitleSuggestions[0] ?? '').trim(),
             categoryLabelForTitle: (selectedCategory?.label?.trim() ?? paramCategoryLabel.trim()) || '모임',
             titleSuggestionCtx,
@@ -4889,15 +4877,27 @@ export default function CreateDetailsScreen() {
           !meaningful &&
           isMeetingCreateNluPatchSemanticallyEmpty(patch) &&
           isLikelyMeetingCreateGreetingOnly(raw);
+        const placeHintQ = String(
+          merged.placeAutoPickQuery ?? (merged as Record<string, unknown>)['장소'] ?? '',
+        ).trim();
+        const areaOnlyHint = missingSlots.includes('placeVenue') && placeHintQ ? placeHintQ : undefined;
         const baseNudge = pickBundledMeetingCreateNudge(missingSlots, {
           emptyTurn,
           hadPartialAccum: hadPartialAccum && meaningful,
           resolvedCategory: nudgeCat,
+          areaOnlyHint,
         });
         let nudge = baseNudge;
         if (typeof merged.nluAskMessage === 'string' && merged.nluAskMessage.trim()) {
           const a = merged.nluAskMessage.trim();
-          nudge = baseNudge && a !== baseNudge ? `${a}\n\n${baseNudge}` : a;
+          const placeVenueOnly =
+            missingSlots.length === 1 && missingSlots[0] === 'placeVenue';
+          nudge =
+            placeVenueOnly && baseNudge
+              ? baseNudge
+              : baseNudge && a !== baseNudge
+                ? `${a}\n\n${baseNudge}`
+                : a;
         }
         if (missingSlots.includes('moviePick')) {
           const kobis = kobisForMovieNudge ?? (await fetchDailyBoxOfficeTop10());
@@ -4926,10 +4926,16 @@ export default function CreateDetailsScreen() {
       if (!parsed.ok) {
         setMeetingCreateNluConfirmPhase('none');
         const missParsed = peekMeetingCreateNluMissingSlots(categories, merged, now);
+        const placeHintErr = String(
+          merged.placeAutoPickQuery ?? (merged as Record<string, unknown>)['장소'] ?? '',
+        ).trim();
+        const areaOnlyHintErr =
+          missParsed.includes('placeVenue') && placeHintErr ? placeHintErr : undefined;
         const baseNudgeErr = pickBundledMeetingCreateNudge(missParsed, {
           emptyTurn: false,
           hadPartialAccum,
           resolvedCategory: nudgeCat,
+          areaOnlyHint: areaOnlyHintErr,
         });
         let nudgeErr = baseNudgeErr;
         if (typeof merged.nluAskMessage === 'string' && merged.nluAskMessage.trim()) {
@@ -4987,17 +4993,21 @@ export default function CreateDetailsScreen() {
           nluComposerDismissOpacity.setValue(0);
           setNluComposerUserDismissed(true);
           setNluBusy(true);
-          let registerAttempted = false;
           try {
             setMeetingCreateNluConfirmPhase('applying');
             const pending = pendingNluWizardApplyRef.current;
+            let didAutoFill = false;
             if (pending && agentNluLastFingerprintRef.current !== pending.fp) {
               await applyWizardSuggestionRef.current(pending.sugg);
               agentNluLastFingerprintRef.current = pending.fp;
+              didAutoFill = true;
             }
             setMeetingCreateNluConfirmPhase('none');
-            registerAttempted = true;
-            await onFinalRegisterRef.current({ rethrowOnAddMeetingFailure: true });
+            if (didAutoFill) {
+              showTransientBottomMessage(
+                '생성된 일정을 확인·수정한 뒤 지닛 시작하기를 눌러 모임을 등록해 주세요.',
+              );
+            }
           } catch (e) {
             const detail = e instanceof Error ? e.message : '알 수 없는 오류가 났습니다.';
             dismissNluAutoChromeForManualRecovery();
@@ -5006,9 +5016,7 @@ export default function CreateDetailsScreen() {
             pendingNluSummaryConfirmMsgRef.current = '';
             setWizardError(detail);
             showTransientBottomMessage(
-              registerAttempted
-                ? `모임 등록에 실패했어요. 위저드를 확인한 뒤 다시 시도해 주세요.\n${detail}`
-                : `자동 입력 중 문제가 생겼어요. 위저드를 직접 조정해 주세요.\n${detail}`,
+              `자동 입력 중 문제가 생겼어요. 위저드를 직접 조정해 주세요.\n${detail}`,
             );
           } finally {
             setNluBusy(false);
@@ -6069,7 +6077,7 @@ export default function CreateDetailsScreen() {
                         agentStepShellRefs.current[detailStep] = n;
                       }}
                       collapsable={false}
-                      style={styles.wizardStepShell}
+                      style={styles.wizardStepShellBottom}
                       onLayout={(e) => onWizardStepShellLayout(detailStep, e)}>
                       <Text style={[styles.wizardStepBadge, { marginTop: 2 }]}>상세 조건 (선택)</Text>
                       <Text style={styles.wizardLockedHint}>
@@ -7078,6 +7086,15 @@ const styles = StyleSheet.create({
   },
   wizardScrollPad: {
     paddingBottom: 120,
+  },
+  wizardStepShellBottom: {
+    marginBottom: 100,
+    borderRadius: GinitTheme.radius.card,
+    padding: 12,
+    backgroundColor: GinitTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    ...GinitTheme.shadow.card,
   },
   wizardStepShell: {
     marginBottom: 12,

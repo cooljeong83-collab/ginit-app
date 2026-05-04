@@ -49,6 +49,10 @@ import {
   type ProfileNotificationSoundId,
 } from '@/src/lib/profile-notification-sound-preference';
 import {
+  playProfileNotificationSoundPreview,
+  stopProfileNotificationSoundPreview,
+} from '@/src/lib/preview-profile-notification-sound';
+import {
   DND_QUIET_HOURS_DEFAULT_END_MIN,
   DND_QUIET_HOURS_DEFAULT_START_MIN,
   loadProfileDndQuietHoursEnabled,
@@ -151,7 +155,7 @@ export default function ProfileAppSettingsScreen() {
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
   const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
   const [meetingNotifyEffectiveOn, setMeetingNotifyEffectiveOn] = useState(false);
-  const [soundId, setSoundId] = useState<ProfileNotificationSoundId>('ginit_ring_w');
+  const [soundId, setSoundId] = useState<ProfileNotificationSoundId>('ginit_ring_c1');
   const [soundLoaded, setSoundLoaded] = useState(false);
   const [soundPickOpen, setSoundPickOpen] = useState(false);
 
@@ -246,7 +250,7 @@ export default function ProfileAppSettingsScreen() {
       const id = await loadProfileNotificationSoundId();
       setSoundId(id);
     } catch {
-      setSoundId('ginit_ring_w');
+      setSoundId('ginit_ring_c1');
     } finally {
       setSoundLoaded(true);
     }
@@ -255,6 +259,7 @@ export default function ProfileAppSettingsScreen() {
   const onPickNotificationSound = useCallback(async (id: ProfileNotificationSoundId) => {
     if (Platform.OS === 'web') return;
     try {
+      await stopProfileNotificationSoundPreview();
       await saveProfileNotificationSoundId(id);
       setSoundId(id);
       await ensureGinitFcmNotifeeChannel();
@@ -265,6 +270,23 @@ export default function ProfileAppSettingsScreen() {
       /* noop */
     }
   }, []);
+
+  const onPreviewNotificationSound = useCallback(async (id: ProfileNotificationSoundId) => {
+    if (Platform.OS === 'web') return;
+    if (id === 'default') return;
+    try {
+      await playProfileNotificationSoundPreview(id);
+      void Haptics.selectionAsync();
+    } catch {
+      Alert.alert('알림음', '재생할 수 없어요.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!soundPickOpen && Platform.OS !== 'web') {
+      void stopProfileNotificationSoundPreview();
+    }
+  }, [soundPickOpen]);
 
   useFocusEffect(
     useCallback(() => {
@@ -778,19 +800,33 @@ export default function ProfileAppSettingsScreen() {
                       renderItem={({ item }) => {
                         const selected = soundId === item.id;
                         return (
-                          <Pressable
-                            onPress={() => void onPickNotificationSound(item.id)}
-                            style={({ pressed }) => [styles.soundPickRow, pressed && styles.soundSheetPressed]}
-                            accessibilityRole="button"
-                            accessibilityState={{ selected }}
-                            accessibilityLabel={item.label}>
-                            <Text style={styles.soundPickLabel}>{item.label}</Text>
+                          <View style={styles.soundPickRow}>
+                            <Pressable
+                              onPress={() => void onPickNotificationSound(item.id)}
+                              style={({ pressed }) => [styles.soundPickRowMain, pressed && styles.soundSheetPressed]}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
+                              accessibilityLabel={item.label}>
+                              <Text style={styles.soundPickLabel}>{item.label}</Text>
+                            </Pressable>
+                            {item.id === 'default' ? (
+                              <View style={styles.soundPickPreviewPlaceholder} pointerEvents="none" />
+                            ) : (
+                              <Pressable
+                                onPress={() => void onPreviewNotificationSound(item.id)}
+                                style={({ pressed }) => [styles.soundPickPreviewBtn, pressed && { opacity: 0.86 }]}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel={`${item.label} 미리듣기`}>
+                                <GinitSymbolicIcon name="volume-high-outline" size={20} color="#0f172a" />
+                              </Pressable>
+                            )}
                             {selected ? (
                               <Text style={styles.soundPickCheck}>✓</Text>
                             ) : (
                               <View style={styles.soundPickSpacer} />
                             )}
-                          </Pressable>
+                          </View>
                         );
                       }}
                     />
@@ -982,8 +1018,23 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 4,
   },
-  soundPickLabel: {
+  soundPickRowMain: {
     flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  soundPickPreviewBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  /** 시스템 기본 행 — 미리듣기 버튼 자리만 유지(체크 정렬) */
+  soundPickPreviewPlaceholder: {
+    width: 28,
+    height: 28,
+  },
+  soundPickLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#0f172a',

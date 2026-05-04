@@ -23,6 +23,7 @@ import {
   coerceWizardPcGameKindLabel,
   resolveWizardActivityKindLabel,
 } from '@/src/lib/meeting-create-nlu/wizard-specialty-chip-options';
+import { isAreaOnlyPlaceQuery } from '@/src/lib/meeting-create-nlu/local-intent-patch';
 
 function isPublicMeetingAgeLimitToken(x: unknown): x is PublicMeetingAgeLimit {
   return x === 'TWENTIES' || x === 'THIRTIES' || x === 'FORTY_PLUS' || x === 'NONE';
@@ -298,6 +299,8 @@ export type MeetingCreateNluMissingSlot =
   | 'schedule'
   | 'headcount'
   | 'place'
+  /** 역·동·구 등 지역만 있고 업종·시설 구체화가 필요할 때 */
+  | 'placeVenue'
   | 'publicMeetingMeta';
 
 /**
@@ -365,6 +368,7 @@ export function peekMeetingCreateNluMissingSlots(
       ? String((p as Record<string, unknown>)['장소']).trim()
       : '');
   if (!placeQ) missing.push('place');
+  else if (isAreaOnlyPlaceQuery(placeQ)) missing.push('placeVenue');
 
   return missing;
 }
