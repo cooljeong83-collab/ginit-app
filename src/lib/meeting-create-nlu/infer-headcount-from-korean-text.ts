@@ -41,5 +41,16 @@ export function inferMeetingCreateHeadcountFromKoreanText(text: string): {
     return { minParticipants: 4, maxParticipants: 4 };
   }
 
+  // 성비 모집 "3대3" "4 대 4" "2:2" → 총원 n+m (남 n + 여 m)
+  const ndn = /(\d{1,2})\s*[대:]\s*(\d{1,2})(?!\s*명)/.exec(t);
+  if (ndn) {
+    let a = parseInt(ndn[1]!, 10);
+    let b = parseInt(ndn[2]!, 10);
+    if (Number.isFinite(a) && Number.isFinite(b) && a >= 1 && a <= 30 && b >= 1 && b <= 30) {
+      const total = Math.min(99, a + b);
+      if (total >= 2) return { minParticipants: total, maxParticipants: total };
+    }
+  }
+
   return null;
 }

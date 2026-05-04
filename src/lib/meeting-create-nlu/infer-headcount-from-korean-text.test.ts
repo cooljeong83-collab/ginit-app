@@ -14,4 +14,13 @@ describe('inferMeetingCreateHeadcountFromKoreanText numeric', () => {
   it('orders range low-high', () => {
     expect(inferMeetingCreateHeadcountFromKoreanText('8~3명')).toEqual({ minParticipants: 3, maxParticipants: 8 });
   });
+
+  it('parses N대N 성비 모집 as total headcount', () => {
+    expect(inferMeetingCreateHeadcountFromKoreanText('내일 영등포역 3대3 벙개')).toEqual({
+      minParticipants: 6,
+      maxParticipants: 6,
+    });
+    expect(inferMeetingCreateHeadcountFromKoreanText('4 대 4')).toEqual({ minParticipants: 8, maxParticipants: 8 });
+    expect(inferMeetingCreateHeadcountFromKoreanText('2:2')).toEqual({ minParticipants: 4, maxParticipants: 4 });
+  });
 });

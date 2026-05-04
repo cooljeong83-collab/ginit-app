@@ -22,7 +22,7 @@ export type MeetingCreateNluRegistryRow = {
 export const MEETING_CREATE_NLU_REGISTRY: readonly MeetingCreateNluRegistryRow[] = [
   {
     categoryIds: ['xYAgS71J2K5t9x4PfTkJ'],
-    labelIncludes: ['벙개'],
+    labelIncludes: ['벙개', '번개'],
     utteranceKeywords: ['벙개', '번개', '술번개', '첫만남', '소개팅', '미팅'],
     tieBreakOrder: 80,
     placeNudgeCombined: '몇 분이 언제 모이실 건지, 그리고 어느 동네·역 근처에서 만나실지 알려 주세요.',

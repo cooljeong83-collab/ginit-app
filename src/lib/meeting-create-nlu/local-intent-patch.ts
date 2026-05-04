@@ -4,8 +4,10 @@ import {
   isActiveLifeMajorCode,
   resolveSpecialtyKindForCategory,
 } from '@/src/lib/category-specialty';
-import { isMeetingCreateNluPatchSemanticallyEmpty } from '@/src/lib/meeting-create-agent-chat/meeting-create-slots';
-import { inferMeetingCreateCategoryFromUtterance } from '@/src/lib/meeting-create-nlu/category-from-utterance';
+import {
+  fallbackMeetingCreateCategoryFromRegistryKeywords,
+  inferMeetingCreateCategoryFromUtterance,
+} from '@/src/lib/meeting-create-nlu/category-from-utterance';
 import {
   MEETING_CREATE_COFFEE_CATEGORY_ID,
 } from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
@@ -18,8 +20,8 @@ import { inferSuggestedIsPublicFromMeetingCreateText } from '@/src/lib/meeting-c
 import { parseSmartNaturalSchedule } from '@/src/lib/natural-language-schedule';
 
 export const LOCAL_MEETING_CREATE_NLU_MAX_CHARS = 80;
-/** 이 길이 이상이면 Edge(Gemini) 의도 분석을 호출한다(짧은 발화는 로컬 패치만으로 스킵 가능). */
-export const LOCAL_MEETING_CREATE_NLU_MIN_CHARS_FOR_GEMINI = 10;
+/** 과거 스킵 임계값(호환용 export). */
+export const LOCAL_MEETING_CREATE_NLU_MIN_CHARS_FOR_EDGE = 10;
 
 export type BuildLocalMeetingCreateNluPatchParams = {
   text: string;
@@ -70,7 +72,7 @@ function firstFoodCategory(categories: Category[]): Category | null {
 function extractPlaceAutoPickQuery(text: string): string | null {
   const t = text.normalize('NFKC').replace(/\s+/g, ' ').trim();
   if (!t) return null;
-  const station = /([가-힣]{2,10}역)(?=\s|$)/.exec(t);
+  const station = /([가-힣]{2,10}역)(?=\s|$|[0-9]|에서|으로|과|와|근처|앞|뒤|입구)/.exec(t);
   if (station) return station[1]!.trim();
   const dong = /([가-힣]{3,10}(?:동|구))(?=\s|$)/.exec(t);
   if (dong) return dong[1]!.trim();
@@ -120,10 +122,23 @@ export function buildLocalMeetingCreateNluPatch(params: BuildLocalMeetingCreateN
     acc.placeAutoPickQuery = placeQ;
   }
 
-  const fromUtterance = inferMeetingCreateCategoryFromUtterance(raw, categories);
+  const fromUtterance =
+    inferMeetingCreateCategoryFromUtterance(raw, categories) ??
+    fallbackMeetingCreateCategoryFromRegistryKeywords(raw, categories);
   if (fromUtterance) {
     acc.categoryId = fromUtterance.id.trim();
     acc.categoryLabel = fromUtterance.label.trim();
+  }
+
+  const bungaeLike = /(?:번개|벙개|술번개|소개팅|미팅|첫\s*만남)/.test(norm);
+  const ratioLike = /\d\s*[대:]\s*\d/.test(norm);
+  if (bungaeLike && ratioLike) {
+    const curId = typeof acc.categoryId === 'string' ? acc.categoryId.trim() : '';
+    const curCat = curId ? categories.find((c) => c.id.trim() === curId) ?? null : null;
+    const curFood = curCat != null && resolveSpecialtyKindForCategory(curCat) === 'food';
+    if (curFood && (acc.menuPreferenceLabel == null || String(acc.menuPreferenceLabel).trim() === '')) {
+      acc.menuPreferenceLabel = '주점·호프';
+    }
   }
 
   const coffeeCat = categories.find((c) => c.id.trim() === MEETING_CREATE_COFFEE_CATEGORY_ID) ?? null;
@@ -190,13 +205,30 @@ export function buildLocalMeetingCreateNluPatch(params: BuildLocalMeetingCreateN
   return acc;
 }
 
-export function shouldSkipGeminiForMeetingCreate(rawText: string, patch: Record<string, unknown>): boolean {
-  const len = normalizeLocalMeetingCreateTextForLength(rawText).length;
-  if (len >= LOCAL_MEETING_CREATE_NLU_MIN_CHARS_FOR_GEMINI) {
-    return false;
+function isEmptyNluMergeValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (typeof v === 'string' && v.trim() === '') return true;
+  if (typeof v === 'number' && !Number.isFinite(v)) return true;
+  return false;
+}
+
+/**
+ * Edge 응답을 우선하되, 값이 비어 있으면 로컬 휴리스틱(`buildLocalMeetingCreateNluPatch`)으로 보강.
+ * Edge만 쓰면 "내일 영등포역 …" 같은 로컬 추출이 버려져 결손 안내가 잘못 뜨는 문제를 막는다.
+ */
+export function fillMeetingCreateNluPatchFromLocalEdge(
+  edge: Record<string, unknown>,
+  local: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...edge };
+  for (const [k, v] of Object.entries(local)) {
+    if (isEmptyNluMergeValue(v)) continue;
+    if (isEmptyNluMergeValue(out[k])) out[k] = v;
   }
-  if (len > LOCAL_MEETING_CREATE_NLU_MAX_CHARS) {
-    return false;
-  }
-  return !isMeetingCreateNluPatchSemanticallyEmpty(patch);
+  return out;
+}
+
+/** 항상 Edge(Groq Llama) 의도 분석을 호출한다(문자·숫자·짧은 발화와 무관). */
+export function shouldSkipEdgeNluForMeetingCreate(_rawText: string, _patch: Record<string, unknown>): boolean {
+  return false;
 }

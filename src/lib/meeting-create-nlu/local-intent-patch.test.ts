@@ -2,10 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildLocalMeetingCreateNluPatch,
-  LOCAL_MEETING_CREATE_NLU_MAX_CHARS,
-  LOCAL_MEETING_CREATE_NLU_MIN_CHARS_FOR_GEMINI,
+  fillMeetingCreateNluPatchFromLocalEdge,
   normalizeLocalMeetingCreateTextForLength,
-  shouldSkipGeminiForMeetingCreate,
+  shouldSkipEdgeNluForMeetingCreate,
 } from '@/src/lib/meeting-create-nlu/local-intent-patch';
 import { MEETING_CREATE_COFFEE_CATEGORY_ID, MEETING_CREATE_MEAL_CATEGORY_ID } from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
 import type { Category } from '@/src/lib/categories';
@@ -112,25 +111,49 @@ describe('buildLocalMeetingCreateNluPatch', () => {
     expect(p.categoryId).toBe('cat-active');
     expect(p.activityKindLabel).toBe('러닝·조깅');
   });
+
+  it('parses 내일 영등포역3대3 벙개 (역+숫자 붙임, 성비 인원, 카테고리)', () => {
+    const bungaeCat: Category = {
+      id: 'xYAgS71J2K5t9x4PfTkJ',
+      label: '벙개·미팅',
+      emoji: '',
+      order: 0,
+      majorCode: 'Eat & Drink',
+    };
+    const p = buildLocalMeetingCreateNluPatch({
+      text: '내일 영등포역3대3 벙개 모임',
+      categories: [movieCat, bungaeCat, foodCat],
+      now: new Date('2026-05-03T12:00:00'),
+    });
+    expect(p.placeAutoPickQuery).toBe('영등포역');
+    expect(p.scheduleYmd).toBe('2026-05-04');
+    expect(p.minParticipants).toBe(6);
+    expect(p.maxParticipants).toBe(6);
+    expect(p.categoryId).toBe('xYAgS71J2K5t9x4PfTkJ');
+    expect(p.menuPreferenceLabel).toBe('주점·호프');
+  });
 });
 
-describe('shouldSkipGeminiForMeetingCreate', () => {
-  it('is false when text exceeds max length even with patch', () => {
-    const pad = 'x'.repeat(LOCAL_MEETING_CREATE_NLU_MAX_CHARS + 1);
-    expect(shouldSkipGeminiForMeetingCreate(`${pad}한식`, { menuPreferenceLabel: '한식' })).toBe(false);
+describe('fillMeetingCreateNluPatchFromLocalEdge', () => {
+  it('fills empty Edge fields from local patch', () => {
+    const merged = fillMeetingCreateNluPatchFromLocalEdge(
+      { title: '번개', categoryId: null },
+      { categoryId: 'x1', scheduleYmd: '2026-05-04', minParticipants: 6, maxParticipants: 6 },
+    );
+    expect(merged.title).toBe('번개');
+    expect(merged.categoryId).toBe('x1');
+    expect(merged.scheduleYmd).toBe('2026-05-04');
+    expect(merged.minParticipants).toBe(6);
   });
+});
 
-  it('is false for empty patch', () => {
-    expect(shouldSkipGeminiForMeetingCreate('안녕', {})).toBe(false);
-  });
-
-  it('is true for short text with non-empty patch', () => {
-    expect(shouldSkipGeminiForMeetingCreate('한식', { menuPreferenceLabel: '한식' })).toBe(true);
-  });
-
-  it('is false when normalized length reaches min for Gemini even with local patch', () => {
-    const pad = 'x'.repeat(Math.max(0, LOCAL_MEETING_CREATE_NLU_MIN_CHARS_FOR_GEMINI - 2));
-    expect(shouldSkipGeminiForMeetingCreate(`${pad}한식`, { menuPreferenceLabel: '한식' })).toBe(false);
+describe('shouldSkipEdgeNluForMeetingCreate', () => {
+  it('is always false so Edge(Groq Llama) is invoked regardless of length or local patch', () => {
+    expect(shouldSkipEdgeNluForMeetingCreate('한식', { menuPreferenceLabel: '한식' })).toBe(false);
+    expect(shouldSkipEdgeNluForMeetingCreate('안녕', {})).toBe(false);
+    expect(shouldSkipEdgeNluForMeetingCreate('123', {})).toBe(false);
+    const pad = 'x'.repeat(100);
+    expect(shouldSkipEdgeNluForMeetingCreate(`${pad}한식`, { menuPreferenceLabel: '한식' })).toBe(false);
   });
 });
 

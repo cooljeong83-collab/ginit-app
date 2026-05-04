@@ -1,7 +1,11 @@
 import type { Category } from '@/src/lib/categories';
 import { getUtteranceKeywordHintsForSpecialty, resolveSpecialtyKindForCategory } from '@/src/lib/category-specialty';
 
-import { findMeetingCreateNluRegistryRow, registryUtteranceKeywordBonus } from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
+import {
+  findMeetingCreateNluRegistryRow,
+  MEETING_CREATE_NLU_REGISTRY,
+  registryUtteranceKeywordBonus,
+} from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
 
 function normalizeUtteranceForMatch(raw: string): string {
   return raw.normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -87,4 +91,27 @@ export function inferMeetingCreateCategoryFromUtterance(text: string, categories
   });
 
   return rows[0]!.category;
+}
+
+/** 점수가 안 나와도 레지스트리 키워드(번개·소개팅 등)로 id가 있으면 해당 카테고리를 고른다 */
+export function fallbackMeetingCreateCategoryFromRegistryKeywords(
+  text: string,
+  categories: Category[],
+): Category | null {
+  const textNorm = normalizeUtteranceForMatch(text);
+  if (!textNorm) return null;
+  for (const row of MEETING_CREATE_NLU_REGISTRY) {
+    const hit = row.utteranceKeywords.some((kw) => {
+      const k = kw.normalize('NFKC').trim();
+      return k.length >= 2 && textNorm.includes(k);
+    });
+    if (!hit) continue;
+    for (const id of row.categoryIds) {
+      const idt = id.trim();
+      if (!idt) continue;
+      const c = categories.find((x) => x.id.trim() === idt);
+      if (c) return c;
+    }
+  }
+  return null;
 }

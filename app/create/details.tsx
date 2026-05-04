@@ -150,7 +150,8 @@ import { inferMeetingCreateHeadcountFromKoreanText } from '@/src/lib/meeting-cre
 import { mergeMeetingCreateNluAccumulatedWithAutoTitle } from '@/src/lib/meeting-create-nlu/inject-auto-title';
 import {
   buildLocalMeetingCreateNluPatch,
-  shouldSkipGeminiForMeetingCreate,
+  fillMeetingCreateNluPatchFromLocalEdge,
+  shouldSkipEdgeNluForMeetingCreate,
 } from '@/src/lib/meeting-create-nlu/local-intent-patch';
 import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
 import {
@@ -164,6 +165,7 @@ import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
   consumePendingMeetingPlace,
   consumePendingVotePlaceRow,
@@ -620,6 +622,10 @@ export type MeetingCreatePlacesAutoAssistSnapshot = {
   resultCount: number;
   hasFilledPlace: boolean;
   queryTrim: string;
+  /** 좌표 보강(`resolvePlaceSearchRowCoordinates`) 진행 중인 행이 하나라도 있으면 true */
+  anyPlaceResolving: boolean;
+  /** 마지막으로 인라인 Google 검색이 끝난 쿼리(로딩 종료 시점); 진행 중이거나 미검색이면 null */
+  lastSettledQueryTrim: string | null;
 };
 
 export type VoteCandidatesFormProps = {
@@ -708,6 +714,11 @@ export type VoteCandidatesFormHandle = {
     hm: string;
     isAlive: () => boolean;
   }) => Promise<void>;
+  /** 자동 모임 생성: 검색 완료 후 상위 1~N개 후보를 좌표 확정까지 담는다 */
+  playAgentPlaceInlinePick: (opts: {
+    maxPicks: number;
+    isAlive: () => boolean;
+  }) => Promise<'ok' | 'empty' | 'error' | 'aborted'>;
 };
 
 export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandidatesFormProps>(function VoteCandidatesForm(
@@ -858,7 +869,20 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     {},
   );
   const [placeResolvingById, setPlaceResolvingById] = useState<Record<string, boolean>>({});
+  /** 인라인 검색 한 사이클이 끝난 뒤의 쿼리(로딩 false 직후) — 자동 모드가 결과를 기다릴 때 사용 */
+  const [placeSearchLastSettledQueryTrim, setPlaceSearchLastSettledQueryTrim] = useState<string | null>(null);
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+
+  const placeQueryRef = useRef(placeQuery);
+  placeQueryRef.current = placeQuery;
+  const placeSearchRowsRef = useRef(placeSearchRows);
+  placeSearchRowsRef.current = placeSearchRows;
+  const placeSearchErrRef = useRef(placeSearchErr);
+  placeSearchErrRef.current = placeSearchErr;
+  const placeSearchLoadingRef = useRef(placeSearchLoading);
+  placeSearchLoadingRef.current = placeSearchLoading;
+  const placeSearchLastSettledQueryTrimRef = useRef(placeSearchLastSettledQueryTrim);
+  placeSearchLastSettledQueryTrimRef.current = placeSearchLastSettledQueryTrim;
 
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
@@ -1357,6 +1381,79 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     [commitPointCandidate, openTimePickerForDate],
   );
 
+  const commitPlaceSearchRowAsAgentCandidate = useCallback(async (item: PlaceSearchRow): Promise<boolean> => {
+    const title = item.title;
+    const addr = (item.roadAddress || item.address || '').trim() || item.category;
+    try {
+      setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
+      const resolved = await resolvePlaceSearchRowCoordinates(item);
+      const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
+      if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
+      const placeName = resolved.title.trim() || title.trim();
+      const linkFromApi =
+        sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
+      const p: PlaceCandidate = {
+        id: newId('place'),
+        placeName,
+        address,
+        latitude: resolved.latitude,
+        longitude: resolved.longitude,
+        ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
+      };
+      setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
+      setPlaceCandidates((prev) => {
+        const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
+        if (hit) return prev;
+        return [...prev, placeRowFromCandidate(p)];
+      });
+      return true;
+    } catch (e) {
+      setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+      return false;
+    } finally {
+      setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
+    }
+  }, []);
+
+  const playAgentPlaceInlinePick = useCallback(
+    async (opts: { maxPicks: number; isAlive: () => boolean }): Promise<'ok' | 'empty' | 'error' | 'aborted'> => {
+      const sleepPick = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+      const waitDeadline = Date.now() + 22000;
+      while (Date.now() < waitDeadline) {
+        if (!opts.isAlive()) return 'aborted';
+        const q = placeQueryRef.current.trim();
+        if (
+          q.length > 0 &&
+          !placeSearchLoadingRef.current &&
+          placeSearchLastSettledQueryTrimRef.current === q
+        ) {
+          break;
+        }
+        await sleepPick(40);
+      }
+      if (!opts.isAlive()) return 'aborted';
+      const qNow = placeQueryRef.current.trim();
+      if (
+        qNow.length === 0 ||
+        placeSearchLoadingRef.current ||
+        placeSearchLastSettledQueryTrimRef.current !== qNow
+      ) {
+        return 'error';
+      }
+      if (placeSearchErrRef.current) return 'error';
+      const cap = Math.min(INLINE_PLACE_PICK_MAX_SELECTED, Math.max(1, Math.trunc(opts.maxPicks)));
+      const rows = placeSearchRowsRef.current.slice(0, Math.min(cap, INLINE_PLACE_PICK_DISPLAY_CAP));
+      if (rows.length === 0) return 'empty';
+      for (const item of rows) {
+        if (!opts.isAlive()) return 'aborted';
+        const ok = await commitPlaceSearchRowAsAgentCandidate(item);
+        if (!ok) return 'error';
+      }
+      return 'ok';
+    },
+    [commitPlaceSearchRowAsAgentCandidate],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -1525,9 +1622,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         setPlaceCandidates(next.placeCandidates);
         setDateCandidates(next.dateCandidates);
       },
+      playAgentPlaceInlinePick,
       playAgentSchedulePickAnimation,
     }),
-    [router, seedQ, seedDate, seedTime, sessionUserId, playAgentSchedulePickAnimation],
+    [router, seedQ, seedDate, seedTime, sessionUserId, playAgentPlaceInlinePick, playAgentSchedulePickAnimation],
   );
 
   useFocusEffect(
@@ -1802,11 +1900,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       setPlaceSearchRows([]);
       setPlaceSearchErr(null);
       setPlaceSearchLoading(false);
+      setPlaceSearchLastSettledQueryTrim(null);
       setPlaceThumbById({});
       return undefined;
     }
     let alive = true;
     setPlaceSearchLoading(true);
+    setPlaceSearchLastSettledQueryTrim(null);
     setPlaceSearchErr(null);
     const t = setTimeout(() => {
       void (async () => {
@@ -1826,7 +1926,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           setPlaceSearchRows([]);
           setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
         } finally {
-          if (alive) setPlaceSearchLoading(false);
+          if (alive) {
+            setPlaceSearchLoading(false);
+            setPlaceSearchLastSettledQueryTrim(qTrim);
+          }
         }
       })();
     }, 360);
@@ -1840,12 +1943,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (!onPlacesAutoAssistSnapshot) return undefined;
     if (wizardSegment !== 'places' || placesListOnly || !showPlaces) return undefined;
     const hasFilledPlace = placeCandidates.some(isFilled);
+    const anyPlaceResolving = Object.values(placeResolvingById).some(Boolean);
     onPlacesAutoAssistSnapshot({
       searchLoading: placeSearchLoading,
       searchError: placeSearchErr,
       resultCount: placeSearchRows.length,
       hasFilledPlace,
       queryTrim: placeQuery.trim(),
+      anyPlaceResolving,
+      lastSettledQueryTrim: placeSearchLastSettledQueryTrim,
     });
     return undefined;
   }, [
@@ -1858,6 +1964,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placeSearchRows.length,
     placeCandidates,
     placeQuery,
+    placeResolvingById,
+    placeSearchLastSettledQueryTrim,
   ]);
 
   useEffect(() => {
@@ -3311,6 +3419,8 @@ export default function CreateDetailsScreen() {
     resultCount: 0,
     hasFilledPlace: false,
     queryTrim: '',
+    anyPlaceResolving: false,
+    lastSettledQueryTrim: null,
   });
   const placeAutoSnapRef = useRef(placeAutoSnap);
   placeAutoSnapRef.current = placeAutoSnap;
@@ -3419,10 +3529,13 @@ export default function CreateDetailsScreen() {
 
   const placesConfirmDisabledByAiAssist = useMemo(() => {
     if (!placesAiAssistGate || currentStep !== placesStep) return false;
+    const s = placeAutoSnap;
     return (
-      placeAutoSnap.searchLoading ||
-      placeAutoSnap.queryTrim.length === 0 ||
-      !placeAutoSnap.hasFilledPlace
+      s.searchLoading ||
+      s.queryTrim.length === 0 ||
+      !s.hasFilledPlace ||
+      s.anyPlaceResolving ||
+      (s.queryTrim.length > 0 && s.lastSettledQueryTrim !== s.queryTrim)
     );
   }, [placesAiAssistGate, currentStep, placesStep, placeAutoSnap]);
 
@@ -4018,6 +4131,16 @@ export default function CreateDetailsScreen() {
     setAgentFabMotionMode('user');
   }, [nluComposerDismissOpacity, nluDimOpacity]);
 
+  useFocusEffect(
+    useCallback(() => {
+      const msg = consumeCreateMeetingPlaceAutopilotError();
+      if (!msg) return;
+      setPlacesAiAssistGate(false);
+      dismissNluAutoChromeForManualRecovery();
+      showTransientBottomMessage(msg);
+    }, [dismissNluAutoChromeForManualRecovery]),
+  );
+
   const applyWizardSuggestion = useCallback(
     (sugg: WizardSuggestion): Promise<void> => {
       setAgentFabMotionMode('auto');
@@ -4376,8 +4499,97 @@ export default function CreateDetailsScreen() {
             setPlacesAiAssistGate(true);
             placesFormRef.current?.setPlaceQueryFromAgent(placeQ);
             showTransientBottomMessage(
-              '검색 결과에서 장소를 골라 주세요(최대 5곳). 선택 후 아래 확인을 눌러 다음 단계로 이동합니다.',
+              '검색이 끝나면 상위 결과를 자동으로 담은 뒤 확인을 눌러 다음 단계로 이동합니다.',
             );
+            await sleep(stepGapMs);
+            const qExpect = placeQ;
+            const settleSearchDeadline = Date.now() + 24000;
+            while (Date.now() < settleSearchDeadline) {
+              if (!isApplyRunAlive()) return;
+              const snap = placeAutoSnapRef.current;
+              if (
+                !snap.searchLoading &&
+                snap.queryTrim === qExpect &&
+                snap.lastSettledQueryTrim === qExpect
+              ) {
+                break;
+              }
+              await sleep(40);
+            }
+            if (!isApplyRunAlive()) return;
+            const snap0 = placeAutoSnapRef.current;
+            if (
+              snap0.searchLoading ||
+              snap0.queryTrim !== qExpect ||
+              snap0.lastSettledQueryTrim !== qExpect
+            ) {
+              setPlacesAiAssistGate(false);
+              stopAutopilotToManual(
+                '장소 검색 결과를 불러오지 못했습니다. 검색어를 바꿔 수동으로 진행해 주세요.',
+              );
+              return;
+            }
+            if (snap0.searchError) {
+              setPlacesAiAssistGate(false);
+              stopAutopilotToManual(snap0.searchError);
+              return;
+            }
+            if (snap0.resultCount === 0) {
+              setPlacesAiAssistGate(false);
+              stopAutopilotToManual('검색 결과가 없어요. 장소를 수동으로 검색·선택해 주세요.');
+              return;
+            }
+            const maxPick = Math.min(INLINE_PLACE_PICK_MAX_SELECTED, Math.max(1, snap0.resultCount));
+            let placesReady: VoteCandidatesFormHandle | null = null;
+            for (let i = 0; i < 60; i += 1) {
+              placesReady = placesFormRef.current;
+              if (placesReady?.playAgentPlaceInlinePick) break;
+              await sleep(55);
+              if (!isApplyRunAlive()) return;
+            }
+            if (!placesReady?.playAgentPlaceInlinePick) {
+              setPlacesAiAssistGate(false);
+              stopAutopilotToManual('장소 자동 선택을 시작하지 못했습니다. 수동으로 진행해 주세요.');
+              return;
+            }
+            const pickRes = await placesReady.playAgentPlaceInlinePick({
+              maxPicks: maxPick,
+              isAlive: isApplyRunAlive,
+            });
+            if (!isApplyRunAlive()) return;
+            if (pickRes === 'aborted') return;
+            if (pickRes === 'empty' || pickRes === 'error') {
+              setPlacesAiAssistGate(false);
+              stopAutopilotToManual(
+                pickRes === 'empty'
+                  ? '검색 결과가 없어요. 장소를 수동으로 검색·선택해 주세요.'
+                  : '장소 좌표를 가져오지 못했습니다. 수동으로 선택해 주세요.',
+              );
+              return;
+            }
+            const coordsSettleDeadline = Date.now() + 60000;
+            while (Date.now() < coordsSettleDeadline) {
+              if (!isApplyRunAlive()) return;
+              const sn = placeAutoSnapRef.current;
+              if (!sn.anyPlaceResolving && sn.hasFilledPlace) break;
+              await sleep(48);
+            }
+            if (!isApplyRunAlive()) return;
+            if (!placeAutoSnapRef.current.hasFilledPlace) {
+              setPlacesAiAssistGate(false);
+              stopAutopilotToManual('장소 후보를 채우지 못했습니다. 수동으로 선택해 주세요.');
+              return;
+            }
+            await sleep(stepGapMs);
+            onPlacesStepConfirmRef.current();
+            if (
+              !(await assertStepAfterOrStop(
+                detailStep,
+                '장소 확인 후 상세 단계로 넘어가지 못했습니다. 수동으로 진행해 주세요.',
+              ))
+            ) {
+              return;
+            }
           }
 
           if (!isApplyRunAlive()) return;
@@ -4474,7 +4686,7 @@ export default function CreateDetailsScreen() {
         categories,
         now,
       });
-      const inv = shouldSkipGeminiForMeetingCreate(raw, localPatch)
+      const inv = shouldSkipEdgeNluForMeetingCreate(raw, localPatch)
         ? ({ ok: true as const, result: localPatch })
         : await invokeParseMeetingCreateIntent({
             text: raw,
@@ -4503,6 +4715,7 @@ export default function CreateDetailsScreen() {
         typeof inv.result === 'object' && inv.result !== null && !Array.isArray(inv.result)
           ? (inv.result as Record<string, unknown>)
           : {};
+      patch = fillMeetingCreateNluPatchFromLocalEdge(patch, localPatch);
       const inferredHc = inferMeetingCreateHeadcountFromKoreanText(raw);
       if (inferredHc) {
         const tmpMerge = mergeMeetingCreateNluAccumulated(beforeAcc, patch);
@@ -4856,11 +5069,27 @@ export default function CreateDetailsScreen() {
   useEffect(() => {
     if (!placesAiAssistGate || currentStep !== placesStep) return undefined;
     const s = placeAutoSnap;
-    if (s.searchLoading || !s.queryTrim || s.hasFilledPlace) return undefined;
+    if (
+      s.searchLoading ||
+      !s.queryTrim ||
+      s.hasFilledPlace ||
+      s.anyPlaceResolving ||
+      (s.queryTrim.length > 0 && s.lastSettledQueryTrim !== s.queryTrim)
+    ) {
+      return undefined;
+    }
     const id = setTimeout(() => {
       if (!placesAiAssistGateRef.current || currentStepRef.current !== placesStep) return;
       const snap = placeAutoSnapRef.current;
-      if (snap.searchLoading || snap.hasFilledPlace || !snap.queryTrim) return;
+      if (
+        snap.searchLoading ||
+        snap.hasFilledPlace ||
+        !snap.queryTrim ||
+        snap.anyPlaceResolving ||
+        (snap.queryTrim.length > 0 && snap.lastSettledQueryTrim !== snap.queryTrim)
+      ) {
+        return;
+      }
       setPlacesAiAssistGate(false);
       dismissNluAutoChromeForManualRecovery();
       showTransientBottomMessage(
@@ -4875,6 +5104,8 @@ export default function CreateDetailsScreen() {
     placeAutoSnap.searchLoading,
     placeAutoSnap.hasFilledPlace,
     placeAutoSnap.queryTrim,
+    placeAutoSnap.anyPlaceResolving,
+    placeAutoSnap.lastSettledQueryTrim,
     dismissNluAutoChromeForManualRecovery,
   ]);
 
