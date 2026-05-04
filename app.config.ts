@@ -83,7 +83,7 @@ function pickExtra(): Record<string, string> {
   set('tmdbApiKey', process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY);
   set('expoAccessToken', process.env.EXPO_PUBLIC_EXPO_ACCESS_TOKEN ?? process.env.EXPO_ACCESS_TOKEN);
   set('easProjectId', process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? process.env.EAS_PROJECT_ID);
-  /** Places API(New) 전용 권장 — 없으면 아래 Android Maps 키로 Text Search 시도(키 제한에 따라 실패할 수 있음) */
+  /** Places(New) 레거시 키 — 지도 SDK 등. 장소 텍스트 검색은 Kakao `kakaoRestApiKey` 사용 */
   set(
     'googlePlacesApiKey',
     process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY ?? process.env.GOOGLE_PLACES_API_KEY,
@@ -93,6 +93,7 @@ function pickExtra(): Record<string, string> {
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ??
       process.env.GOOGLE_MAPS_ANDROID_API_KEY,
   );
+  set('kakaoRestApiKey', process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY ?? process.env.KAKAO_REST_API_KEY);
 
   return out;
 }

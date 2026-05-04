@@ -10,6 +10,8 @@ export type MeetingPlaceSelection = {
   longitude: number;
   /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
   naverPlaceLink?: string | null;
+  /** 검색 행·OG 등에서 온 대표 사진(https) — 모임 목록 첫 장소 썸네일용 */
+  preferredPhotoMediaUrl?: string | null;
 };
 
 let pending: MeetingPlaceSelection | null = null;
@@ -48,6 +50,7 @@ export type PlaceCandidate = {
   longitude: number;
   /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
   naverPlaceLink?: string | null;
+  preferredPhotoMediaUrl?: string | null;
 };
 
 export type DateCandidateType =

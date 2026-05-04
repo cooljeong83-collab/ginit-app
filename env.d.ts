@@ -28,6 +28,9 @@ declare namespace NodeJS {
     /** Places API(New) Text Search·사진 — 웹 서비스용 키 권장 */
     EXPO_PUBLIC_GOOGLE_PLACES_API_KEY?: string;
     GOOGLE_PLACES_API_KEY?: string;
+    /** Kakao 로컬 API — 키워드 장소 검색(REST API 키) */
+    EXPO_PUBLIC_KAKAO_REST_API_KEY?: string;
+    KAKAO_REST_API_KEY?: string;
     EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY?: string;
     GOOGLE_MAPS_ANDROID_API_KEY?: string;
     /** KOBIS 오픈API (kobis.or.kr 발급) */

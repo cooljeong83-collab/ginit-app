@@ -150,6 +150,8 @@ export type Meeting = {
     latitude: number;
     longitude: number;
     naverPlaceLink?: string | null;
+    /** 네이버 이미지 검색·인라인 썸네일 등 목록/칩용 대표 사진(https) */
+    preferredPhotoMediaUrl?: string | null;
   }> | null;
   /** 참여 확정 사용자 전화 PK(정규화). 주선자는 모임 생성 시 포함하는 것을 권장 */
   participantIds?: string[] | null;
@@ -435,6 +437,7 @@ type PlaceCandidateLike = {
   latitude: number;
   longitude: number;
   naverPlaceLink?: string | null;
+  preferredPhotoMediaUrl?: string | null;
 };
 
 export type CreateMeetingInput = {

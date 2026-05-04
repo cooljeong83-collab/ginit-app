@@ -1,6 +1,7 @@
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
+import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
@@ -101,11 +102,7 @@ import {
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
-import {
-  resolveNaverMovieSearchWebUrl,
-  resolveNaverPlaceDetailWebUrlLikeVoteChip,
-  sanitizeNaverLocalPlaceLink,
-} from '@/src/lib/naver-local-search';
+import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -555,22 +552,6 @@ export default function MeetingDetailScreen() {
   const closeParticipantProfile = useCallback(() => {
     setProfilePopupUserId(null);
     setFriendRelation({ status: 'none', friendship_id: null });
-  }, []);
-
-  const openPlaceVoteDetailWeb = useCallback((chip: PlaceChip) => {
-    const url = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-      naverPlaceLink: chip.naverPlaceLink,
-      title: chip.title,
-      addressLine: chip.sub,
-    });
-    if (!url) {
-      Alert.alert('안내', '표시할 상세 정보를 불러올 수 없어요.');
-      return;
-    }
-    setNaverPlaceWebModal({
-      url,
-      title: chip.title.trim() || '장소 상세',
-    });
   }, []);
 
   useEffect(() => {
@@ -2147,6 +2128,7 @@ export default function MeetingDetailScreen() {
             const thumb = await searchNaverPlaceImageThumbnail({
               title: chip.title,
               addressLine: chip.sub,
+              kakaoPlaceDetailPageUrl: chip.naverPlaceLink ?? undefined,
             });
             if (!alive) return;
             setPlaceThumbByChipId((prev) => {
@@ -2183,6 +2165,7 @@ export default function MeetingDetailScreen() {
           const thumb = await searchNaverPlaceImageThumbnail({
             title: chip.title,
             addressLine: chip.sub,
+            kakaoPlaceDetailPageUrl: chip.naverPlaceLink ?? undefined,
           });
           if (!alive) return;
           setPlaceThumbByChipId((prev) => {
@@ -3246,11 +3229,6 @@ export default function MeetingDetailScreen() {
                   <>
                     {(() => {
                       const thumb = placeThumbByChipId[confirmedPlaceChipResolved.id] ?? null;
-                      const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-                        naverPlaceLink: confirmedPlaceChipResolved.naverPlaceLink,
-                        title: confirmedPlaceChipResolved.title,
-                        addressLine: confirmedPlaceChipResolved.sub,
-                      });
                       return (
                         <View style={styles.placeDetailBlock}>
                           <View style={styles.placeDetailHeroRow}>
@@ -3272,25 +3250,13 @@ export default function MeetingDetailScreen() {
                                   </Text>
                                 ) : null}
                               </View>
-                              {detailUrl ? (
-                                <Pressable
-                                  onPress={() =>
-                                    setNaverPlaceWebModal({
-                                      url: detailUrl,
-                                      title: confirmedPlaceChipResolved.title.trim() || '상세 정보',
-                                    })
-                                  }
-                                  style={({ pressed }) => [
-                                    styles.placeNaverDetailBtn,
-                                    styles.placeNaverDetailBtnInline,
-                                    styles.placeDetailRightColBtn,
-                                    pressed && { opacity: 0.88 },
-                                  ]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel="상세 정보">
-                                  <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
-                                </Pressable>
-                              ) : null}
+                              <PlaceCandidateDetailLinkRow
+                                title={confirmedPlaceChipResolved.title}
+                                link={confirmedPlaceChipResolved.naverPlaceLink}
+                                addressLine={confirmedPlaceChipResolved.sub}
+                                containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
+                                onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+                              />
                             </View>
                           </View>
                         </View>
@@ -3823,18 +3789,13 @@ export default function MeetingDetailScreen() {
                               </Text>
                             ) : null}
                           </View>
-                          <Pressable
-                            onPress={() => openPlaceVoteDetailWeb(chip)}
-                            style={({ pressed }) => [
-                              styles.placeNaverDetailBtn,
-                              styles.placeNaverDetailBtnInline,
-                              styles.placeDetailRightColBtn,
-                              pressed && { opacity: 0.88 },
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="상세 정보">
-                            <Text style={styles.placeNaverDetailBtnText}>상세 정보</Text>
-                          </Pressable>
+                          <PlaceCandidateDetailLinkRow
+                            title={chip.title}
+                            link={chip.naverPlaceLink}
+                            addressLine={chip.sub}
+                            containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
+                            onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+                          />
                         </View>
                       </View>
                     </View>
@@ -3925,13 +3886,13 @@ export default function MeetingDetailScreen() {
                             ) : null}
                           </View>
                         </Pressable>
-                        <Pressable
-                          onPress={() => openPlaceVoteDetailWeb(chip)}
-                          style={({ pressed }) => [styles.placeVoteDetailLink, pressed && { opacity: 0.88 }]}
-                          accessibilityRole="button"
-                          accessibilityLabel="상세 정보">
-                          <Text style={styles.placeVoteDetailLinkText}>상세 정보</Text>
-                        </Pressable>
+                        <PlaceCandidateDetailLinkRow
+                          title={chip.title}
+                          link={chip.naverPlaceLink}
+                          addressLine={chip.sub}
+                          containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
+                          onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+                        />
                       </View>
                     );
                   })}
@@ -5514,7 +5475,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
-  /** `details.tsx` `placeResultProposalCardWrap` — 본문이 늘어나도「상세 정보」는 카드 하단에 고정 */
+  /** `details.tsx` `placeResultProposalCardWrap` — 본문이 늘어나도 카카오·네이버 버튼 행은 카드 하단에 고정 */
   placeVoteCardPressFill: { flex: 1, minHeight: 0 },
   placeVoteCardPressInner: { flexGrow: 1 },
   placeVoteCardSelected: {
@@ -5589,40 +5550,6 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   placeDetailRightColTop: { flexShrink: 1 },
-  placeDetailRightColBtn: { alignSelf: 'flex-start' },
-  placeVoteDetailLink: {
-    marginTop: 8,
-    flexShrink: 0,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    borderRadius: GinitTheme.radius.button,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.deepPurple,
-    backgroundColor: GinitTheme.colors.deepPurple,
-  },
-  placeVoteDetailLinkText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  placeNaverDetailBtn: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: GinitTheme.radius.button,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.deepPurple,
-    backgroundColor: GinitTheme.colors.deepPurple,
-  },
-  placeNaverDetailBtnInline: { marginTop: 0 },
-  placeNaverDetailBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
   candidateListV: { gap: 10, paddingBottom: 6 },
   candidateChipV: {
     alignSelf: 'stretch',

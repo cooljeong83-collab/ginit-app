@@ -27,6 +27,7 @@ import {
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
@@ -38,10 +39,7 @@ import {
   searchPlacesText,
   type PlaceSearchRow,
 } from '@/src/lib/google-places-text-search';
-import {
-  resolveNaverPlaceDetailWebUrlLikeVoteChip,
-  sanitizeNaverLocalPlaceLink,
-} from '@/src/lib/naver-local-search';
+import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
 import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
@@ -111,7 +109,7 @@ const WEB_SCROLLBAR_STYLE_ID = 'ginit-early-place-nested-scroll-style';
 const CINEMA_SCROLL_MAX = 168;
 /** details 플로팅「n개의 장소로 일정 정하기」+ 여백(대략) */
 const FLOATING_CTA_RESERVE = 100;
-/** Google Places Text Search — 첫 페이지·추가 로드 모두 5건 */
+/** Kakao 로컬 키워드 검색 — 페이지당 최대 5건 요청 */
 const PLACE_PAGE = 5;
 
 /** 영화 카테고리: 상단 시드(서울 일대 예시 좌표) */
@@ -630,11 +628,6 @@ export function EarlyPlaceSearch({
           <>
             {rows.map((item) => {
               const addr = (item.roadAddress || item.address || '').trim() || item.category;
-              const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-                naverPlaceLink: item.link,
-                title: item.title,
-                addressLine: typeof addr === 'string' && addr.trim() ? addr.trim() : undefined,
-              });
               return (
                 <Animated.View
                   key={item.id}
@@ -654,18 +647,14 @@ export function EarlyPlaceSearch({
                         {addr}
                       </Text>
                     </Pressable>
-                    {detailUrl ? (
-                      <Pressable
-                        onPress={() =>
-                          setNaverPlaceWebModal({ url: detailUrl, title: item.title.trim() || '상세 정보' })
-                        }
-                        disabled={disabled || loading}
-                        style={({ pressed }) => [styles.naverDetailBtn, pressed && { opacity: 0.88 }]}
-                        accessibilityRole="button"
-                        accessibilityLabel="상세 정보">
-                        <Text style={styles.naverDetailBtnText}>상세 정보</Text>
-                      </Pressable>
-                    ) : null}
+                    <PlaceCandidateDetailLinkRow
+                      title={item.title}
+                      link={item.link}
+                      addressLine={typeof addr === 'string' && addr.trim() ? addr.trim() : undefined}
+                      disabled={disabled || loading}
+                      containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
+                      onOpenUrl={(url, t) => setNaverPlaceWebModal({ url, title: t })}
+                    />
                   </View>
                 </Animated.View>
               );
@@ -908,22 +897,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GinitTheme.colors.textMuted,
     lineHeight: 15,
-  },
-  naverDetailBtn: {
-    marginTop: 8,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: GinitTheme.radius.button,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  naverDetailBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: GinitTheme.colors.primary,
   },
   pickedStack: {
     flexDirection: 'column',

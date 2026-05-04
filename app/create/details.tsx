@@ -42,6 +42,8 @@ import {
   useWindowDimensions,
   View,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -78,6 +80,7 @@ import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacit
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
+import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
@@ -186,10 +189,7 @@ import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
-import {
-  resolveNaverPlaceDetailWebUrlLikeVoteChip,
-  sanitizeNaverLocalPlaceLink,
-} from '@/src/lib/naver-local-search';
+import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import {
@@ -207,10 +207,9 @@ import { DateCandidateEditorCard, type DatePickerField } from '../../components/
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
-/** Google Places Text Search — 첫 페이지·추가 로드 모두 5건 */
+/** Kakao 로컬 키워드 검색 — 한 페이지 최대 15건 중 앱에서 5건 사용 */
 const PLACE_SEARCH_PAGE_SIZE = 5;
 /** 인라인 장소 검색: 표시·선택 상한(조회 결과가 많아도 카드는 최대 이 개수만) */
-const INLINE_PLACE_PICK_DISPLAY_CAP = 5;
 const INLINE_PLACE_PICK_MAX_SELECTED = 5;
 const DEFAULT_CALENDAR_PICK_TIME = '19:00';
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
@@ -549,6 +548,8 @@ type PlaceRowModel = {
   latitude: number | null;
   longitude: number | null;
   naverPlaceLink?: string;
+  /** https 대표 사진 — 모임 저장 시 `placeCandidates[].preferredPhotoMediaUrl`로 전달 */
+  preferredPhotoMediaUrl?: string;
 };
 
 function emptyPlaceRow(seedQuery = ''): PlaceRowModel {
@@ -568,6 +569,7 @@ function isFilled(p: PlaceRowModel) {
 
 function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
   const link = (p.naverPlaceLink ?? '').trim();
+  const pref = typeof p.preferredPhotoMediaUrl === 'string' ? p.preferredPhotoMediaUrl.trim() : '';
   return {
     id: p.id,
     query: p.placeName,
@@ -576,6 +578,7 @@ function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
     latitude: p.latitude,
     longitude: p.longitude,
     ...(link ? { naverPlaceLink: link } : {}),
+    ...(pref.startsWith('https://') ? { preferredPhotoMediaUrl: pref } : {}),
   };
 }
 
@@ -670,7 +673,7 @@ export type VoteCandidatesFormProps = {
   /** true면 AI 미리보기/주말 미리보기 탭 시 새 행이 아니라 첫 번째 일정 후보만 덮어씀(날짜 제안 모달 등). `+ 일자 후보 등록` 버튼도 숨김 */
   scheduleAiReplacesFirstCandidate?: boolean;
   /**
-   * 설정 시 장소「상세 정보」는 내부 WebView 모달 대신 상위에서 연다(모임 상세 장소 제안 등 **Modal 중첩** 방지).
+   * 설정 시 장소「카카오 / 네이버」상세 링크는 내부 WebView 모달 대신 상위에서 연다(모임 상세 장소 제안 등 **Modal 중첩** 방지).
    */
   onNaverPlaceWebOpen?: (url: string, title: string) => void;
   /** AI 자동 등록으로 장소 검색어가 주입된 뒤 — 검색·선택 상태(확인 버튼·3초 타임아웃) */
@@ -862,7 +865,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [placeQuery, setPlaceQuery] = useState('');
   const [placeBiasHint, setPlaceBiasHint] = useState<string | null>(null);
   const [placeSearchRows, setPlaceSearchRows] = useState<PlaceSearchRow[]>([]);
+  const [placeSearchNextPageToken, setPlaceSearchNextPageToken] = useState<string | null>(null);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
+  const [placeSearchLoadingMore, setPlaceSearchLoadingMore] = useState(false);
   const [placeSearchErr, setPlaceSearchErr] = useState<string | null>(null);
   const [placeThumbById, setPlaceThumbById] = useState<Record<string, string | null>>({});
   const [placeSelectedById, setPlaceSelectedById] = useState<Record<string, { placeName: string; address: string }>>(
@@ -881,6 +886,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   placeSearchErrRef.current = placeSearchErr;
   const placeSearchLoadingRef = useRef(placeSearchLoading);
   placeSearchLoadingRef.current = placeSearchLoading;
+  const placeSearchLoadingMoreRef = useRef(placeSearchLoadingMore);
+  placeSearchLoadingMoreRef.current = placeSearchLoadingMore;
+  const placeSearchNextPageTokenRef = useRef<string | null>(null);
+  placeSearchNextPageTokenRef.current = placeSearchNextPageToken;
+  const placeSearchLoadMoreGuardRef = useRef(false);
   const placeSearchLastSettledQueryTrimRef = useRef(placeSearchLastSettledQueryTrim);
   placeSearchLastSettledQueryTrimRef.current = placeSearchLastSettledQueryTrim;
 
@@ -1442,7 +1452,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       }
       if (placeSearchErrRef.current) return 'error';
       const cap = Math.min(INLINE_PLACE_PICK_MAX_SELECTED, Math.max(1, Math.trunc(opts.maxPicks)));
-      const rows = placeSearchRowsRef.current.slice(0, Math.min(cap, INLINE_PLACE_PICK_DISPLAY_CAP));
+      const rows = placeSearchRowsRef.current.slice(0, cap);
       if (rows.length === 0) return 'empty';
       for (const item of rows) {
         if (!opts.isAlive()) return 'aborted';
@@ -1519,6 +1529,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
+              ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
+                ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
+                : {}),
             }) as PlaceCandidate,
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
@@ -1587,6 +1600,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
+              ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
+                ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
+                : {}),
             }) as PlaceCandidate,
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
@@ -1613,6 +1629,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
+              ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
+                ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
+                : {}),
             }) as PlaceCandidate,
         );
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: [] } };
@@ -1646,6 +1665,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   latitude: sel.latitude,
                   longitude: sel.longitude,
                   ...(sel.naverPlaceLink?.trim() ? { naverPlaceLink: sel.naverPlaceLink.trim() } : {}),
+                  ...(sel.preferredPhotoMediaUrl?.trim().startsWith('https://')
+                    ? { preferredPhotoMediaUrl: sel.preferredPhotoMediaUrl.trim() }
+                    : {}),
                 }
               : r,
           );
@@ -1893,11 +1915,59 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     showPlaces,
   ]);
 
+  const loadMorePlaceSearchRows = useCallback(() => {
+    if (!showPlaces || placesListOnly) return;
+    if (placeSearchLoadingRef.current || placeSearchLoadingMoreRef.current) return;
+    const token = placeSearchNextPageTokenRef.current?.trim() ?? '';
+    if (!token) return;
+    if (placeSearchLoadMoreGuardRef.current) return;
+    const q = placeQueryRef.current.trim();
+    if (!q) return;
+    placeSearchLoadMoreGuardRef.current = true;
+    setPlaceSearchLoadingMore(true);
+    void (async () => {
+      try {
+        const { bias, coords } = await ensureNearbySearchBias();
+        const { places: list, nextPageToken: nxt } = await searchPlacesText(q, {
+          locationBias: bias,
+          userCoords: coords,
+          maxResultCount: PLACE_SEARCH_PAGE_SIZE,
+          pageToken: token,
+        });
+        setPlaceSearchRows((prev) => {
+          const seen = new Set(prev.map((r) => r.id));
+          return [...prev, ...list.filter((r) => !seen.has(r.id))];
+        });
+        setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
+      } catch {
+        /* 다음 페이지 실패 시 토큰 유지 — 스크롤 끝에서 재시도 가능 */
+      } finally {
+        setPlaceSearchLoadingMore(false);
+        placeSearchLoadMoreGuardRef.current = false;
+      }
+    })();
+  }, [placesListOnly, showPlaces]);
+
+  const onPlaceSearchResultsScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!showPlaces || placesListOnly) return;
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      const lw = layoutMeasurement?.width ?? 0;
+      const cw = contentSize?.width ?? 0;
+      if (!lw || !cw || cw <= lw) return;
+      if (lw + contentOffset.x >= cw - 200) {
+        loadMorePlaceSearchRows();
+      }
+    },
+    [loadMorePlaceSearchRows, placesListOnly, showPlaces],
+  );
+
   useEffect(() => {
     if (!showPlaces || placesListOnly) return undefined;
     const qTrim = placeQuery.trim();
     if (qTrim.length === 0) {
       setPlaceSearchRows([]);
+      setPlaceSearchNextPageToken(null);
       setPlaceSearchErr(null);
       setPlaceSearchLoading(false);
       setPlaceSearchLastSettledQueryTrim(null);
@@ -1906,6 +1976,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     }
     let alive = true;
     setPlaceSearchLoading(true);
+    setPlaceSearchNextPageToken(null);
     setPlaceSearchLastSettledQueryTrim(null);
     setPlaceSearchErr(null);
     const t = setTimeout(() => {
@@ -1913,17 +1984,19 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         try {
           const { bias, coords } = await ensureNearbySearchBias();
           if (!alive) return;
-          const { places: list } = await searchPlacesText(qTrim, {
+          const { places: list, nextPageToken: nxt } = await searchPlacesText(qTrim, {
             locationBias: bias,
             userCoords: coords,
             maxResultCount: PLACE_SEARCH_PAGE_SIZE,
           });
           if (!alive) return;
           setPlaceSearchRows(list);
+          setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
           setPlaceThumbById({});
         } catch (e) {
           if (!alive) return;
           setPlaceSearchRows([]);
+          setPlaceSearchNextPageToken(null);
           setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
         } finally {
           if (alive) {
@@ -1974,7 +2047,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (placeSearchErr) return undefined;
     if (placeSearchRows.length === 0) return undefined;
 
-    const visible = placeSearchRows.slice(0, INLINE_PLACE_PICK_DISPLAY_CAP);
+    const visible = placeSearchRows;
     let alive = true;
     const t = setTimeout(() => {
       void (async () => {
@@ -1996,6 +2069,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: row.address,
               category: row.category,
               preferredPhotoMediaUrl: row.thumbnailUrl ?? undefined,
+              kakaoPlaceDetailPageUrl: row.link ?? undefined,
             });
             if (!alive) return;
             setPlaceThumbById((prev) => {
@@ -2479,7 +2553,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           {(() => {
             const listEmpty = !placeSearchLoading && !placeSearchErr && placeSearchRows.length === 0;
             const centerEmpty = listEmpty || placeSearchLoading;
-            const visible = placeSearchRows.slice(0, INLINE_PLACE_PICK_DISPLAY_CAP);
             return (
               <View style={[styles.placeResultsScrollHost, styles.placeResultsCarouselHost]}>
                 <ScrollView
@@ -2489,6 +2562,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   showsHorizontalScrollIndicator={false}
                   showsVerticalScrollIndicator={false}
                   scrollEventThrottle={16}
+                  onScroll={onPlaceSearchResultsScroll}
                   style={styles.placeResultsScrollView}
                   contentContainerStyle={[
                     styles.placeResultsScrollContent,
@@ -2505,18 +2579,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   ) : listEmpty ? (
                     <Text style={styles.placeResultsStatusText}>검색 결과가 없어요.</Text>
                   ) : (
-                    visible.map((item) => {
+                    <>
+                      {placeSearchRows.map((item) => {
                       const title = item.title;
                       const addr = (item.roadAddress || item.address || '').trim() || item.category;
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
                       const thumb = placeThumbById[item.id] ?? null;
-                      /** 모임 상세 장소투표「상세 정보」와 동일: 한 줄 주소 + 제목으로 통합검색 URL */
-                      const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-                        naverPlaceLink: item.link,
-                        title: item.title,
-                        addressLine: typeof addr === 'string' && addr.trim() ? addr.trim() : undefined,
-                      });
                       return (
                         <View
                           key={item.id}
@@ -2569,6 +2638,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                   const placeName = resolved.title.trim() || title.trim();
                                   const linkFromApi =
                                     sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
+                                  const resolvedPhoto = (placeThumbById[item.id] ?? item.thumbnailUrl ?? '').trim();
+                                  const preferredPhotoMediaUrl = resolvedPhoto.startsWith('https://')
+                                    ? resolvedPhoto
+                                    : undefined;
                                   const p: PlaceCandidate = {
                                     id: newId('place'),
                                     placeName,
@@ -2576,6 +2649,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                     latitude: resolved.latitude,
                                     longitude: resolved.longitude,
                                     ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
+                                    ...(preferredPhotoMediaUrl ? { preferredPhotoMediaUrl } : {}),
                                   };
 
                                   setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
@@ -2622,25 +2696,29 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                               </Text>
                             </View>
                           </Pressable>
-                          {detailUrl ? (
-                            <Pressable
-                              onPress={() => {
-                                const t = title.trim() || '장소 상세';
-                                if (onNaverPlaceWebOpen) {
-                                  onNaverPlaceWebOpen(detailUrl, t);
-                                } else {
-                                  setNaverPlaceWebModal({ url: detailUrl, title: t });
-                                }
-                              }}
-                              style={({ pressed }) => [styles.placeResultDetailBtn, pressed && { opacity: 0.88 }]}
-                              accessibilityRole="button"
-                              accessibilityLabel="상세 정보">
-                              <Text style={styles.placeResultDetailBtnText}>상세 정보</Text>
-                            </Pressable>
-                          ) : null}
+                          <PlaceCandidateDetailLinkRow
+                            title={item.title}
+                            link={item.link}
+                            addressLine={typeof addr === 'string' && addr.trim() ? addr.trim() : undefined}
+                            disabled={resolving}
+                            containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
+                            onOpenUrl={(url, t) => {
+                              if (onNaverPlaceWebOpen) {
+                                onNaverPlaceWebOpen(url, t);
+                              } else {
+                                setNaverPlaceWebModal({ url, title: t });
+                              }
+                            }}
+                          />
                         </View>
                       );
-                    })
+                    })}
+                      {placeSearchLoadingMore ? (
+                        <View style={styles.placeResultsLoadingMore}>
+                          <ActivityIndicator color={GinitTheme.colors.primary} />
+                        </View>
+                      ) : null}
+                    </>
                   )}
                 </ScrollView>
               </View>
@@ -6788,7 +6866,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     paddingHorizontal: 4,
   },
-  /** 제목·주소 각 2줄 + 상세 정보 버튼까지 포함(이미지 112 + 여백) — `overflow: hidden` 호스트에 맞춤 */
+  /** 제목·주소 각 2줄 + 카카오·네이버 버튼까지 포함(이미지 112 + 여백) — `overflow: hidden` 호스트에 맞춤 */
   placeResultsCarouselHost: {
     height: 274,
   },
@@ -6834,7 +6912,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
-  /** 가로 캐러셀(`placeResultsCarouselHost` 274) − 세로 패딩 20 기준 — 상세 정보 버튼을 카드 하단에 고정 */
+  /** 가로 캐러셀(`placeResultsCarouselHost` 274) − 세로 패딩 20 기준 — 카카오·네이버 버튼을 카드 하단에 고정 */
   placeResultProposalCardWrap: {
     minHeight: 254,
     flexDirection: 'column',
@@ -6894,23 +6972,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GinitTheme.colors.textMuted,
     lineHeight: 15,
-  },
-  placeResultDetailBtn: {
-    marginTop: 8,
-    flexShrink: 0,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: GinitTheme.radius.button,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.deepPurple,
-    backgroundColor: GinitTheme.colors.deepPurple,
-  },
-  placeResultDetailBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
   placePickedRow: {
     flexDirection: 'row',

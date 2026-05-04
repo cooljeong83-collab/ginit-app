@@ -1,5 +1,6 @@
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
+import { isKakaoMapPlacePageUrl } from '@/src/lib/kakao-place-page-image';
 import { meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import type { MeetingExtraData } from '@/src/lib/meeting-extra-data';
 import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
@@ -234,15 +235,10 @@ export function sortMeetingsForFeed(
   return list;
 }
 
-/** 홈 리스트 심볼 박스: 영화 포스터(+호스트 배지) / 첫 장소 썸네일+호스트 / 호스트만 */
+/** 홈 리스트 심볼 박스: 영화(+카테고리 배지) / 장소 모임(프로필 메인+카테고리 배지) / 호스트만 */
 export type FeedMeetingSymbolBox =
   | { source: 'movie_poster'; url: string; hostPhotoUrl: string | null }
-  | {
-      source: 'place_with_host';
-      placeQuery: string;
-      placeImageFields: NaverPlaceImageSearchFields;
-      hostPhotoUrl: string | null;
-    }
+  | { source: 'place_with_host'; hostPhotoUrl: string | null }
   | { source: 'host_profile'; url: string };
 
 /**
@@ -262,7 +258,19 @@ export function firstPlaceThumbnailQuery(m: Meeting): string {
   return `${name} ${addr}`.trim();
 }
 
-/** `searchNaverPlaceImageThumbnail`용 — `firstPlaceThumbnailQuery`와 동일 출처, 필드 분리 */
+/** 장소 메타가 있는지(홈 리스트 심볼 분기) — `firstPlaceThumbnailQuery`와 동일 출처, 필드 분리 */
+/**
+ * **첫 번째** `placeCandidates[0]`의 `naverPlaceLink`만 사용합니다(목록 썸네일 = 첫 후보 장소와 일치).
+ * 카카오맵 장소 URL(`place_url` 저장분)이 아니면 null.
+ */
+export function firstKakaoPlaceDetailPageUrlFromMeeting(m: Meeting): string | null {
+  const p0 = m.placeCandidates?.[0];
+  if (!p0) return null;
+  const link = typeof p0.naverPlaceLink === 'string' ? p0.naverPlaceLink.trim() : '';
+  if (link && isKakaoMapPlacePageUrl(link)) return link;
+  return null;
+}
+
 export function firstPlaceImageSearchFields(m: Meeting): NaverPlaceImageSearchFields | null {
   const list = m.placeCandidates ?? [];
   if (list.length > 0) {
@@ -319,11 +327,9 @@ export function feedMeetingSymbolBox(
     }
   }
 
-  const placeQuery = firstPlaceThumbnailQuery(m);
   const placeImageFields = firstPlaceImageSearchFields(m);
-
-  if (placeQuery.length > 0 && placeImageFields) {
-    return { source: 'place_with_host', placeQuery, placeImageFields, hostPhotoUrl };
+  if (placeImageFields) {
+    return { source: 'place_with_host', hostPhotoUrl };
   }
   if (hostPhotoUrl) return { source: 'host_profile', url: hostPhotoUrl };
   return null;

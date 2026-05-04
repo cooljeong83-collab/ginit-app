@@ -48,6 +48,8 @@ type Extra = {
   googlePlacesApiKey?: string;
   /** Google Maps 플랫폼 API 키(예: Android SDK용) — Places 전용 키가 없을 때 사진 조회 폴백 */
   googleMapsPlatformApiKey?: string;
+  /** Kakao 로컬 API(키워드 장소 검색) — REST API 키 */
+  kakaoRestApiKey?: string;
   /** KOBIS(영화진흥위원회) 오픈API 키 — 일별 박스오피스 등 */
   kobisKey?: string;
   /** TMDB v3 API 키 — 제목 검색으로 포스터 URL */
@@ -90,6 +92,7 @@ export const publicEnv: {
   googleWebClientId: string;
   googlePlacesApiKey: string;
   googleMapsPlatformApiKey: string;
+  kakaoRestApiKey: string;
   kobisKey: string;
   tmdbApiKey: string;
   expoAccessToken: string;
@@ -143,6 +146,7 @@ export const publicEnv: {
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY ??
     process.env.GOOGLE_MAPS_ANDROID_API_KEY ??
     '',
+  kakaoRestApiKey: e.kakaoRestApiKey ?? process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY ?? process.env.KAKAO_REST_API_KEY ?? '',
   kobisKey: e.kobisKey ?? process.env.EXPO_PUBLIC_KOBIS_KEY ?? process.env.KOBIS_KEY ?? '',
   tmdbApiKey: e.tmdbApiKey ?? process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY ?? '',
   expoAccessToken: e.expoAccessToken ?? process.env.EXPO_PUBLIC_EXPO_ACCESS_TOKEN ?? '',

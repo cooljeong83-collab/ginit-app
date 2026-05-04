@@ -1,11 +1,10 @@
 import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
-import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 
@@ -18,7 +17,6 @@ type Props = {
  */
 export function JoinedMeetingDashboardCard({ meeting }: Props) {
   const router = useRouter();
-  const uri = resolveMeetingListThumbnailUri(meeting);
   const phase = getMeetingRecruitmentPhase(meeting);
   const phaseLabel =
     phase === 'confirmed' ? '확정' : phase === 'full' ? '모집 완료' : '모집중';
@@ -34,13 +32,7 @@ export function JoinedMeetingDashboardCard({ meeting }: Props) {
       style={({ pressed }) => [HomeGlassStyles.dashboardCard, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel={`${meeting.title} 상세`}>
-      <Image
-        source={{ uri }}
-        style={HomeGlassStyles.dashboardImage}
-        contentFit="cover"
-        cachePolicy="disk"
-        recyclingKey={meeting.id}
-      />
+      <MeetingListThumbnailImage meeting={meeting} style={HomeGlassStyles.dashboardImage} recyclingKey={meeting.id} />
       {shouldUseStaticGlassInsteadOfBlur() ? (
         <View style={[StyleSheet.absoluteFillObject, styles.staticGlass]} />
       ) : (

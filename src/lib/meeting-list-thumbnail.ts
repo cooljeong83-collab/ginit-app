@@ -36,6 +36,19 @@ function posterFromExtra(extra: unknown): string | null {
   return null;
 }
 
+/** 목록 썸네일이 영화 포스터 URL을 쓰는지 — 카카오 장소 썸네일과 우선순위 충돌 시 사용 */
+export function meetingHasMovieListPoster(m: Meeting): boolean {
+  return Boolean(posterFromExtra(m.extraData));
+}
+
+/** 첫 장소 후보에 저장된 대표 사진(https) — 있으면 목록 썸네일 최우선 */
+export function firstPlaceCandidatePreferredPhotoUri(m: Meeting): string | undefined {
+  const p0 = m.placeCandidates?.[0];
+  const u = typeof p0?.preferredPhotoMediaUrl === 'string' ? p0.preferredPhotoMediaUrl.trim() : '';
+  if (u && isHttpsImageUrl(u)) return u;
+  return undefined;
+}
+
 function specialtyFromMeeting(m: Meeting): 'movie' | 'food' | 'sports' | 'knowledge' | null {
   const raw = m.extraData;
   if (raw && typeof raw === 'object' && 'specialtyKind' in raw) {

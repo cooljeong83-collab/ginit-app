@@ -91,7 +91,7 @@ import {
   groupMeetingsByCoordinateOverlap,
   meetingCoordinateKey,
 } from '@/src/lib/map-people-markers';
-import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
+import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { setPendingMeetingPlace } from '@/src/lib/meeting-place-bridge';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
 import {
@@ -1750,7 +1750,7 @@ export default function MapScreen() {
           }}
           style={[styles.carouselCard, selected && styles.carouselCardSelected]}
           accessibilityRole="button">
-          <Image source={{ uri: resolveMeetingListThumbnailUri(m) }} style={styles.listThumb} contentFit="cover" />
+          <MeetingListThumbnailImage meeting={m} style={styles.listThumb} recyclingKey={m.id} />
           <View style={styles.listCardBody}>
             <View style={styles.listTitleRow}>
               <Text style={styles.listTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -1967,7 +1967,7 @@ export default function MapScreen() {
           }}
           style={[styles.listCard, selected && styles.listCardSelected]}
           accessibilityRole="button">
-          <Image source={{ uri: resolveMeetingListThumbnailUri(m) }} style={styles.listThumb} contentFit="cover" />
+          <MeetingListThumbnailImage meeting={m} style={styles.listThumb} recyclingKey={m.id} />
           <View style={styles.listCardBody}>
             <View style={styles.listTitleRow}>
               <Text style={styles.listTitle} numberOfLines={1} ellipsizeMode="tail">

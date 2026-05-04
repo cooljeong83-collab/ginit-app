@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 import { publicEnv } from '@/src/config/public-env';
-import { fetchGooglePlacePhotoMediaUrlFromTextQuery } from '@/src/lib/google-place-photo';
+import { fetchKakaoPlacePageThumbnailUrl, isKakaoMapPlacePageUrl } from '@/src/lib/kakao-place-page-image';
 import { withCorsProxyForWeb } from '@/src/lib/naver-ncp-maps';
 import { withNaverOpenApiClientRateLimit } from '@/src/lib/naver-openapi-rate-limit';
 
@@ -42,8 +42,10 @@ export type NaverPlaceImageSearchFields = {
   /** 한 줄 주소(도로명·지번 혼합) — 투표 칩 `sub` 등 */
   addressLine?: string | null;
   category?: string | null;
-  /** Places API(New) 등에서 이미 구한 사진 URL이 있으면 추가 검색을 하지 않습니다. */
+  /** Kakao/기타에서 이미 구한 사진 URL이 있으면 추가 검색을 하지 않습니다. */
   preferredPhotoMediaUrl?: string | null;
+  /** Kakao 키워드 검색 `place_url` 등 — HTML `og:image`로 썸네일 시도 후 네이버 이미지 폴백 */
+  kakaoPlaceDetailPageUrl?: string | null;
 };
 
 /**
@@ -94,6 +96,7 @@ export function placeImageSearchCacheKey(f: NaverPlaceImageSearchFields): string
     cacheKeyForQuery(typeof f.addressLine === 'string' ? f.addressLine : ''),
     cacheKeyForQuery(typeof f.category === 'string' ? f.category : ''),
     cacheKeyForQuery(typeof f.preferredPhotoMediaUrl === 'string' ? f.preferredPhotoMediaUrl : ''),
+    cacheKeyForQuery(typeof f.kakaoPlaceDetailPageUrl === 'string' ? f.kakaoPlaceDetailPageUrl : ''),
   ].join('\x1e');
 }
 
@@ -196,14 +199,17 @@ export async function searchNaverImageThumbnail(query: string): Promise<string |
 }
 
 /**
- * 장소 행·투표 칩용: **Google Places 사진 미디어 URL**을 우선 시도하고,
- * 키가 없거나 결과가 없으면 네이버 이미지 검색(`display` 10건 + 제목 정합도)으로 폴백합니다.
+ * 장소 행·투표 칩용: `preferredPhotoMediaUrl`이 있으면 사용하고,
+ * Kakao `place_url`이 있으면 해당 페이지 HTML의 `og:image`를 시도한 뒤,
+ * 없으면 네이버 이미지 검색(`display` 10건 + 제목 정합도)으로 썸네일을 찾습니다.
  */
 export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFields): Promise<string | null> {
   const q = buildNaverPlaceImageSearchQuery(f);
-  if (!q) return null;
+  const kakaoPage = typeof f.kakaoPlaceDetailPageUrl === 'string' ? f.kakaoPlaceDetailPageUrl.trim() : '';
+  const canKakaoOg = Boolean(kakaoPage && isKakaoMapPlacePageUrl(kakaoPage));
+  if (!q && !canKakaoOg) return null;
 
-  const cacheKey = `p|${cacheKeyForQuery(q)}`;
+  const cacheKey = `p|${cacheKeyForQuery(q)}|k:${cacheKeyForQuery(kakaoPage)}`;
   if (placeThumbnailCache.has(cacheKey)) return placeThumbnailCache.get(cacheKey) ?? null;
 
   const pref = typeof f.preferredPhotoMediaUrl === 'string' ? f.preferredPhotoMediaUrl.trim() : '';
@@ -212,14 +218,21 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
     return pref;
   }
 
-  try {
-    const googleUri = await fetchGooglePlacePhotoMediaUrlFromTextQuery(q);
-    if (googleUri) {
-      placeThumbnailCache.set(cacheKey, googleUri);
-      return googleUri;
+  if (canKakaoOg) {
+    try {
+      const og = await fetchKakaoPlacePageThumbnailUrl(kakaoPage);
+      if (og?.startsWith('https://')) {
+        placeThumbnailCache.set(cacheKey, og);
+        return og;
+      }
+    } catch {
+      /* 네이버 이미지 검색으로 폴백 */
     }
-  } catch {
-    /* 네이버 이미지 검색으로 폴백 */
+  }
+
+  if (!q) {
+    placeThumbnailCache.set(cacheKey, null);
+    return null;
   }
 
   const placeTitle = stripHtmlTags(typeof f.title === 'string' ? f.title : '');

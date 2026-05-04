@@ -1,16 +1,14 @@
 import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { joinedMeetingAgentLine } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
-import { resolveMeetingListThumbnailUri } from '@/src/lib/meeting-list-thumbnail';
 
 function MiniMeetingGlassCard({ meeting, onPress }: { meeting: Meeting; onPress: () => void }) {
-  const uri = resolveMeetingListThumbnailUri(meeting);
   const phase = getMeetingRecruitmentPhase(meeting);
   const phaseLabel =
     phase === 'confirmed' ? '확정' : phase === 'full' ? '모집 완료' : '모집중';
@@ -22,7 +20,7 @@ function MiniMeetingGlassCard({ meeting, onPress }: { meeting: Meeting; onPress:
       style={({ pressed }) => [HomeGlassStyles.miniCardOuter, pressed && styles.miniPressed]}
       accessibilityRole="button"
       accessibilityLabel={`${meeting.title}, ${phaseLabel}`}>
-      <Image source={{ uri }} style={HomeGlassStyles.miniThumb} contentFit="cover" />
+      <MeetingListThumbnailImage meeting={meeting} style={HomeGlassStyles.miniThumb} recyclingKey={meeting.id} />
       {shouldUseStaticGlassInsteadOfBlur() ? (
         <View style={[HomeGlassStyles.miniCardBlurWrap, styles.staticGlass]} />
       ) : (

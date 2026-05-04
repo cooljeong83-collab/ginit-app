@@ -1,6 +1,5 @@
-
 import { Image } from 'expo-image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -10,10 +9,10 @@ import {
   homeCategoryMarkerIconColor,
   homeMeetingStatusBadgeLabel,
 } from '@/src/lib/feed-home-visual';
-import type { FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
-import { placeImageSearchCacheKey, searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
+import { firstKakaoPlaceDetailPageUrlFromMeeting, type FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
+import { firstPlaceCandidatePreferredPhotoUri } from '@/src/lib/meeting-list-thumbnail';
 import {
   formatPublicMeetingAgeSummary,
   MEETING_CAPACITY_UNLIMITED,
@@ -26,6 +25,7 @@ import {
   type PublicMeetingGenderRatio,
   type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
+import { useKakaoPlaceListThumbnail } from '@/src/lib/use-kakao-place-list-thumbnail';
 
 const THUMB_SIZE = 70;
 const THUMB_RADIUS = 10;
@@ -196,39 +196,32 @@ export function HomeMeetingListItem({
 
   const approvalParts = useMemo(() => (cfg ? approvalChipParts(cfg.approvalType) : null), [cfg]);
 
-  const placeFieldsForThumb = symbolBox?.source === 'place_with_host' ? symbolBox.placeImageFields : null;
-  const placeThumbCacheKey = placeFieldsForThumb ? placeImageSearchCacheKey(placeFieldsForThumb) : '';
-  const placeFieldsForThumbRef = useRef(placeFieldsForThumb);
-  placeFieldsForThumbRef.current = placeFieldsForThumb;
-  const [placeThumbUrl, setPlaceThumbUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!placeThumbCacheKey) {
-      setPlaceThumbUrl(null);
-      return;
-    }
-    const fields = placeFieldsForThumbRef.current;
-    if (!fields) {
-      setPlaceThumbUrl(null);
-      return;
-    }
-    setPlaceThumbUrl(null);
-    let cancelled = false;
-    void searchNaverPlaceImageThumbnail(fields).then((u) => {
-      if (!cancelled) setPlaceThumbUrl(u);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [placeThumbCacheKey]);
+  const kakaoPlacePageForThumb = useMemo(
+    () => (symbolBox?.source === 'place_with_host' ? firstKakaoPlaceDetailPageUrlFromMeeting(m) : null),
+    [m, symbolBox?.source],
+  );
+  const { uri: kakaoPlaceThumbUri } = useKakaoPlaceListThumbnail(kakaoPlacePageForThumb);
+  const preferredPlaceListPhoto = useMemo(
+    () => (symbolBox?.source === 'place_with_host' ? firstPlaceCandidatePreferredPhotoUri(m) : undefined),
+    [m, symbolBox?.source],
+  );
+  const placeListMainUri = preferredPlaceListPhoto ?? kakaoPlaceThumbUri;
 
   const symbolAccessibilityLabel =
     symbolBox?.source === 'movie_poster'
-      ? `영화 포스터${symbolBox.hostPhotoUrl ? ', 주관자 프로필' : ''}`
+      ? symbolBox.hostPhotoUrl
+        ? '영화 포스터, 주관자 프로필'
+        : '영화 포스터, 카테고리'
       : symbolBox?.source === 'host_profile'
         ? '주관자 프로필'
         : symbolBox?.source === 'place_with_host'
-          ? `장소${symbolBox.hostPhotoUrl ? ', 주관자 프로필' : ''}`
+          ? placeListMainUri
+            ? symbolBox.hostPhotoUrl
+              ? '장소 사진, 주관자 프로필'
+              : '장소 사진, 카테고리'
+            : symbolBox.hostPhotoUrl
+              ? '주관자 프로필, 카테고리'
+              : '카테고리'
           : meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() || '모임';
 
   const categoryTitlePrefix = useMemo(
@@ -288,15 +281,22 @@ export function HomeMeetingListItem({
                   accessibilityIgnoresInvertColors
                 />
                 {symbolBox.hostPhotoUrl ? (
-                  <Image
-                    source={{ uri: symbolBox.hostPhotoUrl }}
-                    style={s.symbolHostBadge}
-                    contentFit="cover"
-                    cachePolicy="disk"
-                    recyclingKey={symbolBox.hostPhotoUrl}
-                    accessibilityIgnoresInvertColors
-                  />
-                ) : null}
+                  <View style={s.symbolCategoryBadge} accessibilityLabel="주관자 프로필">
+                    <Image
+                      source={{ uri: symbolBox.hostPhotoUrl }}
+                      style={s.symbolHostPhotoInBadge}
+                      contentFit="cover"
+                      transition={140}
+                      cachePolicy="disk"
+                      recyclingKey={symbolBox.hostPhotoUrl}
+                      accessibilityIgnoresInvertColors
+                    />
+                  </View>
+                ) : (
+                  <View style={s.symbolCategoryBadge} accessibilityLabel="카테고리">
+                    <GinitSymbolicIcon name={visual.icon} size={14} color={iconColor} />
+                  </View>
+                )}
               </>
             ) : symbolBox?.source === 'host_profile' ? (
               <Image
@@ -310,32 +310,39 @@ export function HomeMeetingListItem({
               />
             ) : symbolBox?.source === 'place_with_host' ? (
               <>
-                {!placeThumbUrl ? (
-                  <>
-                    <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} />
-                    <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
-                  </>
-                ) : (
+                {placeListMainUri ? (
                   <Image
-                    source={{ uri: placeThumbUrl }}
+                    source={{ uri: placeListMainUri }}
                     style={s.symbolPhoto}
                     contentFit="cover"
                     transition={140}
                     cachePolicy="disk"
-                    recyclingKey={placeThumbUrl}
+                    recyclingKey={placeListMainUri}
                     accessibilityIgnoresInvertColors
                   />
+                ) : (
+                  <>
+                    <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} />
+                    <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
+                  </>
                 )}
                 {symbolBox.hostPhotoUrl ? (
-                  <Image
-                    source={{ uri: symbolBox.hostPhotoUrl }}
-                    style={s.symbolHostBadge}
-                    contentFit="cover"
-                    cachePolicy="disk"
-                    recyclingKey={symbolBox.hostPhotoUrl}
-                    accessibilityIgnoresInvertColors
-                  />
-                ) : null}
+                  <View style={s.symbolCategoryBadge} accessibilityLabel="주관자 프로필">
+                    <Image
+                      source={{ uri: symbolBox.hostPhotoUrl }}
+                      style={s.symbolHostPhotoInBadge}
+                      contentFit="cover"
+                      transition={140}
+                      cachePolicy="disk"
+                      recyclingKey={symbolBox.hostPhotoUrl}
+                      accessibilityIgnoresInvertColors
+                    />
+                  </View>
+                ) : (
+                  <View style={s.symbolCategoryBadge} accessibilityLabel="카테고리">
+                    <GinitSymbolicIcon name={visual.icon} size={14} color={iconColor} />
+                  </View>
+                )}
               </>
             ) : !symbolBox ? (
               <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
@@ -458,7 +465,7 @@ const s = StyleSheet.create({
     borderRadius: THUMB_RADIUS - 1,
     zIndex: 2,
   },
-  symbolHostBadge: {
+  symbolCategoryBadge: {
     position: 'absolute',
     bottom: 3,
     right: 3,
@@ -469,6 +476,14 @@ const s = StyleSheet.create({
     borderColor: '#FFFFFF',
     zIndex: 4,
     backgroundColor: GinitTheme.colors.bgAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  symbolHostPhotoInBadge: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 11,
   },
   capRow: {
     width: THUMB_SIZE,

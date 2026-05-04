@@ -17,6 +17,7 @@ import {
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
@@ -29,7 +30,7 @@ import {
 } from '@/src/lib/google-places-text-search';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import { setCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
-import { resolveNaverPlaceDetailWebUrlLikeVoteChip, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
 const PLACE_PAGE = 5;
@@ -237,12 +238,14 @@ function PlaceSearchScreenInner({
     }
     const addr = selected.roadAddress?.trim() || selected.address?.trim() || '';
     const linkFromApi = sanitizeNaverLocalPlaceLink(selected.link);
+    const thumb = (selected.thumbnailUrl ?? '').trim();
     const payload = {
       placeName: selected.title,
       address: addr,
       latitude: selected.latitude,
       longitude: selected.longitude,
       ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
+      ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),
     };
     if (voteRowId?.trim()) {
       setPendingVotePlaceRow({ ...payload, rowId: voteRowId.trim() });
@@ -382,8 +385,8 @@ function PlaceSearchScreenInner({
                   <Text style={GinitStyles.mutedText}>검색어를 입력하고 검색을 눌러 주세요.</Text>
                 ) : (
                   <Text style={GinitStyles.mutedText}>
-                    검색 결과가 없어요. EXPO_PUBLIC_GOOGLE_PLACES_API_KEY(또는 Maps 키)와 Places API(New) 사용
-                    설정을 확인하거나, 다른 검색어로 다시 시도해 보세요.
+                    검색 결과가 없어요. EXPO_PUBLIC_KAKAO_REST_API_KEY(카카오 REST API 키)를 확인하거나, 다른
+                    검색어로 다시 시도해 보세요.
                   </Text>
                 )
               }
@@ -406,11 +409,6 @@ function PlaceSearchScreenInner({
 
                 const addrLine =
                   (item.roadAddress || item.address || '').trim() || (item.category?.trim() ?? '');
-                const detailUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-                  naverPlaceLink: item.link,
-                  title: item.title,
-                  addressLine: addrLine || undefined,
-                });
                 return (
                   <View style={GinitStyles.itemWrap}>
                     <View style={GinitStyles.glassListRowWrap}>
@@ -440,17 +438,14 @@ function PlaceSearchScreenInner({
                           </View>
                         </View>
                       </Pressable>
-                      {detailUrl ? (
-                        <Pressable
-                          onPress={() =>
-                            setNaverPlaceWebModal({ url: detailUrl, title: item.title.trim() || '상세 정보' })
-                          }
-                          style={({ pressed }) => [styles.placeSearchDetailBtn, pressed && { opacity: 0.88 }]}
-                          accessibilityRole="button"
-                          accessibilityLabel="상세 정보">
-                          <Text style={styles.placeSearchDetailBtnText}>상세 정보</Text>
-                        </Pressable>
-                      ) : null}
+                      <PlaceCandidateDetailLinkRow
+                        title={item.title}
+                        link={item.link}
+                        addressLine={addrLine || undefined}
+                        disabled={resolving}
+                        containerStyle={{ marginTop: 8, marginHorizontal: 12, marginBottom: 10 }}
+                        onOpenUrl={(url, t) => setNaverPlaceWebModal({ url, title: t })}
+                      />
                     </View>
                     {showInlineMap ? (
                       <View style={GinitStyles.inlineMapSlot}>
@@ -500,23 +495,6 @@ export const PlaceSearchScreen = memo(PlaceSearchScreenInner);
 const styles = StyleSheet.create({
   enteringStaticVeil: {
     backgroundColor: '#E8EEF8',
-  },
-  placeSearchDetailBtn: {
-    marginTop: 8,
-    marginHorizontal: 12,
-    marginBottom: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: GinitTheme.radius.button,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  placeSearchDetailBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: GinitTheme.colors.primary,
   },
 });
 

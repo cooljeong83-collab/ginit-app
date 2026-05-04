@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { publicEnv } from '@/src/config/public-env';
+import { isKakaoMapPlacePageUrl } from '@/src/lib/kakao-place-page-image';
 import {
   geocodeNaverMapsAddress,
   withCorsProxyForWeb,
@@ -35,6 +36,16 @@ export function sanitizeNaverLocalPlaceLink(raw: string | null | undefined): str
   } catch {
     return undefined;
   }
+}
+
+/**
+ * `link`가 카카오맵 **장소 상세**(`place.map.kakao.com`)일 때만 https URL을 반환합니다.
+ * (모임 생성 장소 후보의 노란색「카카오」버튼 전용)
+ */
+export function resolveKakaoPlacePageWebUrl(link?: string | null | undefined): string | undefined {
+  const direct = sanitizeNaverLocalPlaceLink((link ?? '').trim());
+  if (!direct || !isKakaoMapPlacePageUrl(direct)) return undefined;
+  return direct;
 }
 
 /** `map.naver.com` / `m.map.naver.com` 경로에서 플레이스 숫자 ID 추출 */
@@ -189,6 +200,26 @@ export function resolveNaverPlaceDetailWebUrlLikeVoteChip(input: {
     roadAddress: line || undefined,
     address: undefined,
     category: undefined,
+  });
+}
+
+/**
+ * 장소 상세(WebView): API `link` 또는 저장된 `naverPlaceLink`(카카오 `place_url` 등)가 있으면 그 URL을 쓰고,
+ * 없으면 제목·한 줄 주소로 네이버 모바일 통합검색(`resolveNaverPlaceDetailWebUrlLikeVoteChip`)으로 폴백합니다.
+ */
+export function resolvePlaceDetailWebUrlPreferLink(input: {
+  link?: string | null | undefined;
+  naverPlaceLink?: string | null | undefined;
+  title: string;
+  addressLine?: string | null | undefined;
+}): string | undefined {
+  const raw = (input.link ?? input.naverPlaceLink ?? '').trim();
+  const direct = sanitizeNaverLocalPlaceLink(raw);
+  if (direct) return direct;
+  return resolveNaverPlaceDetailWebUrlLikeVoteChip({
+    naverPlaceLink: undefined,
+    title: input.title,
+    addressLine: input.addressLine,
   });
 }
 
