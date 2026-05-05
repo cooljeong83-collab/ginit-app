@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 
+import { DevMemoryDebug } from '@/components/DevMemoryDebug';
 import { BackgroundExecutionBootstrap } from '@/components/BackgroundExecutionBootstrap';
 import { FcmMessagingBootstrap } from '@/components/FcmMessagingBootstrap';
 import { FcmPushRoutingBootstrap } from '@/components/FcmPushRoutingBootstrap';
@@ -53,6 +54,7 @@ export default function RootLayout() {
         <QueryClientPersistProvider>
           <UserSessionProvider>
             <InAppAlarmsProvider>
+              <DevMemoryDebug />
               <BackgroundExecutionBootstrap />
               <FcmMessagingBootstrap />
               <FcmPushRoutingBootstrap />

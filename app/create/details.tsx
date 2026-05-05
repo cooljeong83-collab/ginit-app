@@ -135,6 +135,7 @@ import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
 import {
   isMeetingCreateNluPatchSemanticallyEmpty,
+  MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE,
   pickBundledMeetingCreateNudge,
 } from '@/src/lib/meeting-create-agent-chat/meeting-create-slots';
 import { isMeetingCreateNluSummaryRejectionText } from '@/src/lib/meeting-create-agent-chat/nlu-confirm-intent';
@@ -143,6 +144,7 @@ import {
   createEmptyMeetingCreateAgentChatSession,
   fingerprintMeetingCreateParsedPlan,
   isLikelyMeetingCreateGreetingOnly,
+  meetingCreateAgentChatSlidingHistoryForEdge,
   mergeMeetingCreateNluAccumulated,
 } from '@/src/lib/meeting-create-agent-chat/session';
 import {
@@ -4648,6 +4650,9 @@ export default function CreateDetailsScreen() {
           setPlacesAiAssistGate(false);
           stopAutopilotToManual('자동 입력 중 문제가 생겼습니다. 수동으로 진행해 주세요.');
         } finally {
+          setPlacesAiAssistGate(false);
+          /** NLU 수락 후 자동 진행이 끝나면 말풍선 소유를 풀어 `CreateMeetingWizardAgentBridge`가 현재 단계 코치 문구를 넣게 함(초기 인사 톤 방지). */
+          agenticSurfaceRef.current?.setAgentOwnsWizardBubble(false);
           setAutopilotCoachLocked(false);
           setAgentFabMotionMode('user');
         }
@@ -4742,18 +4747,18 @@ export default function CreateDetailsScreen() {
         ? ({ ok: true as const, result: localPatch })
         : await invokeParseMeetingCreateIntent({
             text: raw,
-            categories: categories.map((c) => ({
-              id: c.id,
-              label: c.label,
-              majorCode: c.majorCode ?? undefined,
-              order: c.order,
-            })),
             todayYmd,
             accumulated: Object.keys(beforeAcc).length > 0 ? beforeAcc : undefined,
+            history: meetingCreateAgentChatSlidingHistoryForEdge(agentNluSessionRef.current, 3),
           });
       if (!inv.ok) {
         setMeetingCreateNluConfirmPhase('none');
-        surf?.setIntelligentSuggestionDirect(null);
+        agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
+          agentNluSessionRef.current,
+          'assistant',
+          MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE,
+        );
+        surf?.setIntelligentSuggestionDirect(MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE);
         if ('blocked' in inv && inv.blocked) {
           Alert.alert('모임 생성', inv.error);
         } else {
@@ -5026,7 +5031,12 @@ export default function CreateDetailsScreen() {
       surf?.registerAcceptSuggestion(runNluSummaryAccept);
     } catch (e) {
       setMeetingCreateNluConfirmPhase('none');
-      agenticSurfaceRef.current?.setIntelligentSuggestionDirect(null);
+      agentNluSessionRef.current = appendMeetingCreateAgentChatMessage(
+        agentNluSessionRef.current,
+        'assistant',
+        MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE,
+      );
+      agenticSurfaceRef.current?.setIntelligentSuggestionDirect(MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE);
       const msg = e instanceof Error ? e.message : '분석에 실패했습니다.';
       setWizardError(msg);
       showTransientBottomMessage(msg);

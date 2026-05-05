@@ -5,8 +5,8 @@ const STORAGE_KEY = 'ginit_profile_notification_sound_v1';
 /** 시스템 기본 + 번들에 포함된 커스텀 ID (확장 시 배열만 추가) */
 export type ProfileBundledNotificationSoundId = 'ginit_ring_c1' | 'ginit_ring_w';
 
-/** 신규·빈 저장값 기본 번들 알림음 */
-const DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID: ProfileBundledNotificationSoundId = 'ginit_ring_c1';
+/** 신규·빈 저장값 기본 번들 알림음 (표시 순서상 `지닛 벨 1`) */
+const DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID: ProfileBundledNotificationSoundId = 'ginit_ring_w';
 
 export type ProfileNotificationSoundId = 'default' | ProfileBundledNotificationSoundId;
 
@@ -20,8 +20,8 @@ export type ProfileNotificationSoundOption = {
 
 export const PROFILE_NOTIFICATION_SOUND_OPTIONS: readonly ProfileNotificationSoundOption[] = [
   { id: 'default', label: '시스템 기본' },
-  { id: 'ginit_ring_c1', label: '지닛 벨 1', expoFilename: 'ginit_ring_c1.wav' },
-  { id: 'ginit_ring_w', label: '지닛 벨 2', expoFilename: 'ginit_ring_w.wav' },
+  { id: 'ginit_ring_w', label: '지닛 벨 1', expoFilename: 'ginit_ring_w.wav' },
+  { id: 'ginit_ring_c1', label: '지닛 벨 2', expoFilename: 'ginit_ring_c1.wav' },
 ] as const;
 
 const BUNDLED_IDS = new Set<string>(PROFILE_NOTIFICATION_SOUND_OPTIONS.filter((o) => o.id !== 'default').map((o) => o.id));

@@ -155,7 +155,7 @@ export default function ProfileAppSettingsScreen() {
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
   const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
   const [meetingNotifyEffectiveOn, setMeetingNotifyEffectiveOn] = useState(false);
-  const [soundId, setSoundId] = useState<ProfileNotificationSoundId>('ginit_ring_c1');
+  const [soundId, setSoundId] = useState<ProfileNotificationSoundId>('ginit_ring_w');
   const [soundLoaded, setSoundLoaded] = useState(false);
   const [soundPickOpen, setSoundPickOpen] = useState(false);
 
@@ -250,7 +250,7 @@ export default function ProfileAppSettingsScreen() {
       const id = await loadProfileNotificationSoundId();
       setSoundId(id);
     } catch {
-      setSoundId('ginit_ring_c1');
+      setSoundId('ginit_ring_w');
     } finally {
       setSoundLoaded(true);
     }

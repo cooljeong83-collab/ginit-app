@@ -25,8 +25,8 @@ export const MEETING_CREATE_NLU_REGISTRY: readonly MeetingCreateNluRegistryRow[]
     labelIncludes: ['벙개', '번개'],
     utteranceKeywords: ['벙개', '번개', '술번개', '첫만남', '소개팅', '미팅'],
     tieBreakOrder: 80,
-    placeNudgeCombined: '몇 분이 언제 모이실 건지, 그리고 어느 동네·역 근처에서 만나실지 알려 주세요.',
-    placeNudgePlaceOnly: '어느 동네나 역 근처에서 모이실 건지 알려 주세요.',
+    placeNudgeCombined: '몇 분이 언제 모이실 건지, 그리고 어느 역 근처에서 만나실지 알려 주세요.',
+    placeNudgePlaceOnly: '어느 역 근처에서 모이실 건지 알려 주세요.',
   },
   {
     categoryIds: ['ymihqIsLyDJnVDbVmgi7'],
@@ -51,7 +51,7 @@ export const MEETING_CREATE_NLU_REGISTRY: readonly MeetingCreateNluRegistryRow[]
     tieBreakOrder: 40,
     placeNudgeCombined:
       '몇 분이 언제 모이실 건지, 그리고 어느 동네·맛집 근처에서 만나실지(한식·일식처럼 성향만 말씀해 주셔도 돼요) 알려 주세요.',
-    placeNudgePlaceOnly: '어느 동네나 맛집 근처에서 모이실 건지 알려 주세요.',
+    placeNudgePlaceOnly: '어느 동네에서 모이실 건지 알려 주세요.',
   },
   {
     categoryIds: ['snMorugrx3Sh3uvBlu2N'],
@@ -59,8 +59,8 @@ export const MEETING_CREATE_NLU_REGISTRY: readonly MeetingCreateNluRegistryRow[]
     utteranceKeywords: ['커피', '라떼', '아메리카노', '카페인', '디저트', '케이크', '티타임', '차 마실'],
     tieBreakOrder: 15,
     placeNudgeCombined:
-      '몇 분이 언제 모이실 건지, 그리고 어느 동네·카페 거리에서 만나실지 알려 주세요.',
-    placeNudgePlaceOnly: '어느 동네나 분위기 좋은 카페·브런치집 근처인지 알려 주세요.',
+      '몇 분이 언제 모이실 건지, 그리고 어느 장소 만나실지 알려 주세요.',
+    placeNudgePlaceOnly: '원하시는 장소를 알려 주세요.',
   },
   {
     categoryIds: ['sRI7BKMxlPfE9MrtuS0G'],

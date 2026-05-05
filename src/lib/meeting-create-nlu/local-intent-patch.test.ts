@@ -9,7 +9,12 @@ import {
   normalizeLocalMeetingCreateTextForLength,
   shouldSkipEdgeNluForMeetingCreate,
 } from '@/src/lib/meeting-create-nlu/local-intent-patch';
-import { mergeMeetingCreateNluAccumulated } from '@/src/lib/meeting-create-agent-chat/session';
+import {
+  appendMeetingCreateAgentChatMessage,
+  createEmptyMeetingCreateAgentChatSession,
+  meetingCreateAgentChatSlidingHistoryForEdge,
+  mergeMeetingCreateNluAccumulated,
+} from '@/src/lib/meeting-create-agent-chat/session';
 import { MEETING_CREATE_COFFEE_CATEGORY_ID, MEETING_CREATE_MEAL_CATEGORY_ID } from '@/src/lib/meeting-create-nlu/meeting-create-category-registry';
 import type { Category } from '@/src/lib/categories';
 
@@ -182,6 +187,42 @@ describe('place query combine + area-only', () => {
     );
     expect(m.placeAutoPickQuery).toBe('영등포역 삼겹살집');
     expect(m['장소']).toBe('영등포역 삼겹살집');
+  });
+});
+
+describe('meetingCreateAgentChatSlidingHistoryForEdge', () => {
+  it('excludes latest user line and keeps at most maxTurns pairs', () => {
+    let s = createEmptyMeetingCreateAgentChatSession();
+    s = appendMeetingCreateAgentChatMessage(s, 'user', 'u1');
+    s = appendMeetingCreateAgentChatMessage(s, 'assistant', 'a1');
+    s = appendMeetingCreateAgentChatMessage(s, 'user', 'u2');
+    s = appendMeetingCreateAgentChatMessage(s, 'assistant', 'a2');
+    s = appendMeetingCreateAgentChatMessage(s, 'user', 'u3-current');
+    const h = meetingCreateAgentChatSlidingHistoryForEdge(s, 3);
+    expect(h).toContain('u1');
+    expect(h).toContain('u2');
+    expect(h).not.toContain('u3-current');
+  });
+});
+
+describe('mergeMeetingCreateNluAccumulated keep prior without new info', () => {
+  it('does not overwrite non-empty title with empty string from patch', () => {
+    const m = mergeMeetingCreateNluAccumulated({ title: '점심 번개' }, { title: '', scheduleYmd: '2026-05-10' });
+    expect(m.title).toBe('점심 번개');
+    expect(m.scheduleYmd).toBe('2026-05-10');
+  });
+
+  it('does not overwrite non-empty array with empty array from patch', () => {
+    const m = mergeMeetingCreateNluAccumulated({ movieTitleHints: ['인셉션'] }, { movieTitleHints: [] });
+    expect(m.movieTitleHints).toEqual(['인셉션']);
+  });
+
+  it('merges 인원 without null patch fields wiping prior subkeys', () => {
+    const m = mergeMeetingCreateNluAccumulated(
+      { 인원: { 최소: 2, 최대: 2 } },
+      { 인원: { 최소: null, 최대: 4 } as Record<string, unknown> },
+    );
+    expect(m['인원']).toEqual({ 최소: 2, 최대: 4 });
   });
 });
 

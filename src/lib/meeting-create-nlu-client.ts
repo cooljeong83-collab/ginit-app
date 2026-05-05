@@ -2,10 +2,11 @@ import { supabase } from '@/src/lib/supabase';
 
 export type ParseMeetingCreateIntentParams = {
   text: string;
-  categories: { id: string; label: string; majorCode?: string | null; order?: number }[];
   todayYmd?: string;
   /** 선택: 멀티턴 누적 JSON(Edge 프롬프트 참고용). 응답은 항상 이번 턴 추출분만 `{ result }`. */
   accumulated?: Record<string, unknown>;
+  /** 선택: 최근 2~3턴 대화만(현재 `text` 제외). 토큰 절약·맥락용. */
+  history?: string;
 };
 
 export type ParseMeetingCreateIntentOk = {
@@ -17,6 +18,7 @@ export type ParseMeetingCreateIntentErr = { ok: false; error: string; blocked?: 
 
 /**
  * Edge `parse-meeting-create-intent` 호출 — `result`는 이번 발화 추출분(클라이언트에서 누적 병합).
+ * 카테고리 목록은 Edge가 DB에서 로드해 시스템 프롬프트에 넣음(요청 본문에 미전송).
  * 정책 차단 시 `{ blocked: true, message }` 본문 → `ok: false`, `blocked: true`.
  */
 export async function invokeParseMeetingCreateIntent(
@@ -26,26 +28,26 @@ export async function invokeParseMeetingCreateIntent(
   if (!text) {
     return { ok: false, error: '입력 내용이 비어 있습니다.' };
   }
-  const categories = params.categories
-    .map((c) => ({
-      id: String(c.id ?? '').trim(),
-      label: String(c.label ?? '').trim(),
-      majorCode: c.majorCode != null && String(c.majorCode).trim() ? String(c.majorCode).trim() : undefined,
-      order: typeof c.order === 'number' && Number.isFinite(c.order) ? c.order : undefined,
-    }))
-    .filter((c) => c.id && c.label);
-
-  if (categories.length === 0) {
-    return { ok: false, error: '카테고리 목록이 없습니다.' };
-  }
 
   const body: Record<string, unknown> = {
     text,
-    categories,
     todayYmd: params.todayYmd?.trim() || undefined,
   };
   if (params.accumulated && typeof params.accumulated === 'object' && !Array.isArray(params.accumulated)) {
     body.accumulated = params.accumulated;
+  }
+  const hist = typeof params.history === 'string' ? params.history.trim() : '';
+  if (hist.length > 0) {
+    body.history = hist;
+  }
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    const line = JSON.stringify(body);
+    const max = 14_000;
+    console.log(
+      '[parse-meeting-create-intent] client_invoke',
+      line.length > max ? `${line.slice(0, max)}…(+${line.length - max} chars)` : line,
+    );
   }
 
   const { data, error } = await supabase.functions.invoke('parse-meeting-create-intent', {

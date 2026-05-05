@@ -47,6 +47,35 @@ export function meetingCreateAgentChatHistoryLines(
   return lines.slice(-maxPairs * 2);
 }
 
+function clipMeetingCreateHistoryText(s: string, maxChars: number): string {
+  const t = s.normalize('NFKC').trim();
+  if (t.length <= maxChars) return t;
+  return `${t.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+/**
+ * NLU Edge `history` — 방금 붙인 **현재 사용자 한 줄은 제외**하고, 최근 `maxTurns`쌍(사용자+어시스턴트)만 슬라이딩.
+ * 턴당 문자 상한으로 토큰 절약.
+ */
+export function meetingCreateAgentChatSlidingHistoryForEdge(
+  session: MeetingCreateAgentChatSession,
+  maxTurns: number = 3,
+  maxCharsPerLine: number = 180,
+): string {
+  let msgs = session.messages;
+  if (msgs.length > 0 && msgs[msgs.length - 1]?.role === 'user') {
+    msgs = msgs.slice(0, -1);
+  }
+  const cap = Math.max(1, Math.min(maxTurns, 5)) * 2;
+  const tail = msgs.slice(-cap);
+  return tail
+    .map((m) => {
+      const label = m.role === 'user' ? '사용자' : '어시스턴트';
+      return `${label}: ${clipMeetingCreateHistoryText(m.text, maxCharsPerLine)}`;
+    })
+    .join('\n');
+}
+
 /** 첫 턴 인사만으로 보일 때(모델 없이 빠른 응답 가능) */
 export function isLikelyMeetingCreateGreetingOnly(text: string): boolean {
   const t = text.normalize('NFKC').trim().toLowerCase();
@@ -77,9 +106,18 @@ import {
 
 /**
  * Edge/클라이언트 공용: null/undefined 패치 값은 기존 누적을 덮지 않음.
- * `인원`·`publicMeetingDetails`는 얕은 병합.
+ * 빈 문자열·빈 배열 패치는 누적에 이미 값이 있으면 무시(새 정보 없음으로 간주).
+ * `인원`·`publicMeetingDetails`·`nluInference`는 null/undefined 하위 키는 병합 시 제외.
  * `placeAutoPickQuery`/`장소`: 누적이 역·동 등 지역만이면 이번 턴 업종만 덮어쓰지 않고 합친다.
  */
+function omitNullishRecordEntries(src: Record<string, unknown>): Record<string, unknown> {
+  const o: Record<string, unknown> = {};
+  for (const [kk, vv] of Object.entries(src)) {
+    if (vv !== null && vv !== undefined) o[kk] = vv;
+  }
+  return o;
+}
+
 export function mergeMeetingCreateNluAccumulated(
   base: Record<string, unknown>,
   patch: Record<string, unknown>,
@@ -104,7 +142,7 @@ export function mergeMeetingCreateNluAccumulated(
         typeof out['인원'] === 'object' && out['인원'] !== null && !Array.isArray(out['인원'])
           ? (out['인원'] as Record<string, unknown>)
           : {};
-      out['인원'] = { ...prev, ...(v as Record<string, unknown>) };
+      out['인원'] = { ...prev, ...omitNullishRecordEntries(v as Record<string, unknown>) };
       continue;
     }
     if (k === 'publicMeetingDetails' && typeof v === 'object' && !Array.isArray(v)) {
@@ -114,7 +152,7 @@ export function mergeMeetingCreateNluAccumulated(
         !Array.isArray(out.publicMeetingDetails)
           ? (out.publicMeetingDetails as Record<string, unknown>)
           : {};
-      out.publicMeetingDetails = { ...prev, ...(v as Record<string, unknown>) };
+      out.publicMeetingDetails = { ...prev, ...omitNullishRecordEntries(v as Record<string, unknown>) };
       continue;
     }
     if (k === 'nluInference' && typeof v === 'object' && v !== null && !Array.isArray(v)) {
@@ -122,7 +160,13 @@ export function mergeMeetingCreateNluAccumulated(
         typeof out.nluInference === 'object' && out.nluInference !== null && !Array.isArray(out.nluInference)
           ? (out.nluInference as Record<string, unknown>)
           : {};
-      out.nluInference = { ...prev, ...(v as Record<string, unknown>) };
+      out.nluInference = { ...prev, ...omitNullishRecordEntries(v as Record<string, unknown>) };
+      continue;
+    }
+    if (typeof v === 'string' && v.trim() === '' && typeof out[k] === 'string' && String(out[k]).trim() !== '') {
+      continue;
+    }
+    if (Array.isArray(v) && v.length === 0 && Array.isArray(out[k]) && (out[k] as unknown[]).length > 0) {
       continue;
     }
     out[k] = v;

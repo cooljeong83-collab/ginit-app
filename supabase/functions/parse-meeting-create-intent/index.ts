@@ -2,8 +2,10 @@
  * 자연어 → 모임 생성 위저드용 구조화 JSON (Groq Llama 하이브리드).
  *
  * Secret: GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (금지어 정책 조회)
+ * Groq 송신 로그: 기본(user+길이 메타)은 항상 출력. `GROQ_DEBUG_MESSAGES=1|true|yes`이면 system 프롬프트 전문 추가.
+ * 끄려면 `GROQ_DEBUG_MESSAGES=0|false|no|off`(또는 `GROQ_DEBUG_SILENT=1`).
  * 모델: llama-3.3-70b-versatile → 실패 시 llama-3.1-8b-instant 폴백.
- * Request JSON: { text, categories: [{ id, label }], todayYmd?, accumulated? }
+ * Request JSON: { text, todayYmd?, accumulated?, history? } — history는 최근 2~3턴 대화(현재 text 제외). 카테고리는 DB 캐시·시스템 프롬프트. 레거시: cats+ids 등.
  * Response JSON: { result } | { blocked: true, message }
  * 후처리: 코드펜스/사족 제거 후 JSON 파싱, 요약 스키마 병합, 메뉴 키워드 폴백, 공개 시 ageLimit 기본.
  */
@@ -27,12 +29,23 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 type CategoryRow = { id: string; label: string; majorCode?: string | null; order?: number };
+type CategoryPair = { id: string; label: string };
 
 type ReqBody = {
   text?: string;
+  /** 권장: `0:라벨,1:라벨2,...`(번호:이름만). 같은 순서의 id는 `ids` CSV로 전달. */
+  cats?: string;
+  /** cats가 라벨만일 때 필수: `id0,id1,...`(cats 항목과 동일 개수·순서). Groq 프롬프트에 포함하지 않음. */
+  ids?: string;
+  /** 레거시: 라벨 CSV + id CSV */
+  categoryLabelsCsv?: string;
+  categoryIdsCsv?: string;
+  categoryPairs?: CategoryPair[];
   categories?: CategoryRow[];
   todayYmd?: string;
   accumulated?: Record<string, unknown>;
+  /** 최근 대화 슬라이딩(현재 `text` 제외) — 맥락용, 짧게 유지 */
+  history?: string;
 };
 
 type NluBlockedPolicy = { phrases?: unknown; userMessage?: unknown };
@@ -68,6 +81,66 @@ async function loadNluBlockedFromDb(): Promise<{ phrases: string[]; userMessage:
   }
 }
 
+type MeetingCategoryDbRow = { id?: string; label?: string; sort_order?: number };
+
+let nluMeetingCategoryPairsCache: CategoryPair[] | null = null;
+let nluMeetingCategoryPairsCacheAt = 0;
+const NLU_MEETING_CAT_CACHE_MS = 10 * 60 * 1000;
+
+/** 앱 `subscribeCategories`(Supabase)와 동일: sort_order → label(ko) */
+async function loadMeetingCategoriesFromDb(): Promise<CategoryPair[] | null> {
+  const url = Deno.env.get('SUPABASE_URL')?.trim();
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  if (!url || !key) return null;
+  try {
+    const u = `${url.replace(/\/$/, '')}/rest/v1/meeting_categories?select=id,label,sort_order&order=sort_order.asc`;
+    const r = await fetch(u, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+    if (!r.ok) return null;
+    const rows = (await r.json()) as MeetingCategoryDbRow[];
+    rows.sort((a, b) => {
+      const ao =
+        typeof a.sort_order === 'number' && Number.isFinite(a.sort_order) ? Math.trunc(a.sort_order) : 999;
+      const bo =
+        typeof b.sort_order === 'number' && Number.isFinite(b.sort_order) ? Math.trunc(b.sort_order) : 999;
+      if (ao !== bo) return ao - bo;
+      return String(a.label ?? '').localeCompare(String(b.label ?? ''), 'ko');
+    });
+    const out: CategoryPair[] = [];
+    for (const row of rows) {
+      const id = String(row?.id ?? '').trim();
+      const label = String(row?.label ?? '').trim();
+      if (id && label) out.push({ id, label });
+    }
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 요청 본문에 카탈로그가 없으면 DB(캐시) 기준. 레거시 본문 cats/ids 등은 우선 적용. */
+async function resolveMeetingNluCategoryPairs(body: ReqBody): Promise<CategoryPair[] | null> {
+  const fromBody = normalizeCategoryPairs(body);
+  if (fromBody?.length) return fromBody;
+
+  const now = Date.now();
+  if (
+    nluMeetingCategoryPairsCache &&
+    nluMeetingCategoryPairsCache.length > 0 &&
+    now - nluMeetingCategoryPairsCacheAt < NLU_MEETING_CAT_CACHE_MS
+  ) {
+    return nluMeetingCategoryPairsCache;
+  }
+
+  const fresh = await loadMeetingCategoriesFromDb();
+  if (fresh?.length) {
+    nluMeetingCategoryPairsCache = fresh;
+    nluMeetingCategoryPairsCacheAt = now;
+    return fresh;
+  }
+
+  return nluMeetingCategoryPairsCache;
+}
+
 function isTextBlockedByPolicy(text: string, policy: { phrases: string[]; userMessage: string }): boolean {
   const norm = normalizeForMatch(text);
   if (!norm) return false;
@@ -76,6 +149,222 @@ function isTextBlockedByPolicy(text: string, policy: { phrases: string[]; userMe
     if (q && norm.includes(q)) return true;
   }
   return false;
+}
+
+/** 라벨 CSV — 쉼표 분리(라벨 내부 쉼표는 미지원). */
+function splitCategoryLabelsCsv(s: string): string[] {
+  return s
+    .split(',')
+    .map((x) => x.normalize('NFKC').trim())
+    .filter((x) => x.length > 0);
+}
+
+function splitCategoryIdsCsv(s: string): string[] {
+  return s
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
+}
+
+/** `0:라벨|id,1:...` — 레거시 단일 문자열(쉼표는 항목 구분만). */
+function parseCatsCatalogPiped(raw: string): CategoryPair[] | null {
+  const t = raw.normalize('NFKC').trim();
+  if (!t) return null;
+  const segments = t.split(',').map((s) => s.trim()).filter(Boolean);
+  const out: CategoryPair[] = [];
+  for (const seg of segments) {
+    const head = /^(\d+):/.exec(seg);
+    if (!head) return null;
+    const idx = parseInt(head[1]!, 10);
+    const rest = seg.slice(head[0].length).trim();
+    const pipeIdx = rest.lastIndexOf('|');
+    if (pipeIdx < 0) return null;
+    const label = rest.slice(0, pipeIdx).trim();
+    const id = rest.slice(pipeIdx + 1).trim();
+    if (!label || !id || idx !== out.length) return null;
+    out.push({ id, label });
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** `0:라벨,1:라벨2,...` — 문자열에 `|` 없음(라벨·이름 내부 `|` 미지원). id는 `body.ids`로 합침. */
+function parseCatsLabelsOnly(raw: string): CategoryPair[] | null {
+  const t = raw.normalize('NFKC').trim();
+  if (!t || t.includes('|')) return null;
+  const segments = t.split(',').map((s) => s.trim()).filter(Boolean);
+  const out: CategoryPair[] = [];
+  for (const seg of segments) {
+    const head = /^(\d+):/.exec(seg);
+    if (!head) return null;
+    const idx = parseInt(head[1]!, 10);
+    const label = seg.slice(head[0].length).trim();
+    if (!label || idx !== out.length) return null;
+    out.push({ id: '', label });
+  }
+  return out.length > 0 ? out : null;
+}
+
+function isNluOmittableAccumValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (typeof v === 'string' && v.trim() === '') return true;
+  if (Array.isArray(v) && v.length === 0) return true;
+  if (typeof v === 'object' && !Array.isArray(v) && v !== null && Object.keys(v as Record<string, unknown>).length === 0) {
+    return true;
+  }
+  return false;
+}
+
+/** NLU user 블록용: 빈 값·기본 ageLimit 등 제거 */
+function slimAccumulatedForNlu(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (
+      k === 'ageLimit' &&
+      Array.isArray(v) &&
+      v.length === 1 &&
+      String(v[0] ?? '') === 'NONE'
+    ) {
+      continue;
+    }
+    if (isNluOmittableAccumValue(v)) continue;
+    if (k === 'publicMeetingDetails' && typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      const pm = { ...(v as Record<string, unknown>) };
+      const al = pm.ageLimit;
+      if (Array.isArray(al) && al.length === 1 && String(al[0]) === 'NONE') {
+        delete pm.ageLimit;
+      }
+      if (Object.keys(pm).length === 0) continue;
+      let allOmit = true;
+      for (const vv of Object.values(pm)) {
+        if (!isNluOmittableAccumValue(vv)) {
+          allOmit = false;
+          break;
+        }
+      }
+      if (allOmit) continue;
+      out[k] = pm;
+      continue;
+    }
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      const slimInner = slimAccumulatedForNlu(v as Record<string, unknown>);
+      if (Object.keys(slimInner).length === 0) continue;
+      out[k] = slimInner;
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+function normalizeCategoryPairs(body: ReqBody): CategoryPair[] | null {
+  const catsRaw = typeof body.cats === 'string' ? body.cats.trim() : '';
+  if (catsRaw.length > 0) {
+    const piped = parseCatsCatalogPiped(catsRaw);
+    if (piped) return piped;
+    const labelOnly = parseCatsLabelsOnly(catsRaw);
+    if (labelOnly) {
+      const idsRaw = typeof body.ids === 'string' ? body.ids.trim() : '';
+      const ids = idsRaw ? splitCategoryIdsCsv(idsRaw) : [];
+      if (ids.length !== labelOnly.length || !labelOnly.every((_, i) => String(ids[i] ?? '').trim())) {
+        return null;
+      }
+      return labelOnly.map((p, i) => ({ id: String(ids[i]).trim(), label: p.label }));
+    }
+  }
+
+  const lc = typeof body.categoryLabelsCsv === 'string' ? body.categoryLabelsCsv.trim() : '';
+  const ic = typeof body.categoryIdsCsv === 'string' ? body.categoryIdsCsv.trim() : '';
+  if (lc.length > 0 && ic.length > 0) {
+    const labels = splitCategoryLabelsCsv(lc);
+    const ids = splitCategoryIdsCsv(ic);
+    if (labels.length === 0 || ids.length === 0 || labels.length !== ids.length) return null;
+    const out: CategoryPair[] = [];
+    for (let i = 0; i < labels.length; i++) {
+      out.push({ id: ids[i]!, label: labels[i]! });
+    }
+    return out;
+  }
+
+  const rawPairs = body.categoryPairs;
+  if (Array.isArray(rawPairs) && rawPairs.length > 0) {
+    const out: CategoryPair[] = [];
+    for (const x of rawPairs) {
+      if (!x || typeof x !== 'object' || Array.isArray(x)) continue;
+      const o = x as Record<string, unknown>;
+      const id = String(o.id ?? '').trim();
+      const label = String(o.label ?? '').trim();
+      if (id && label) out.push({ id, label });
+    }
+    return out.length > 0 ? out : null;
+  }
+  const cats = body.categories;
+  if (Array.isArray(cats) && cats.length > 0) {
+    const out: CategoryPair[] = [];
+    for (const c of cats) {
+      if (!c || typeof c !== 'object') continue;
+      const row = c as CategoryRow;
+      const id = String(row.id ?? '').trim();
+      const label = String(row.label ?? '').trim();
+      if (id && label) out.push({ id, label });
+    }
+    return out.length > 0 ? out : null;
+  }
+  return null;
+}
+
+/** 응답: categoryIndex(우선) 또는 categoryLabel·categoryId → 앱 id/라벨 정규화 */
+function applyCategoryResolution(merged: Record<string, unknown>, pairs: CategoryPair[]): void {
+  const idSet = new Set(pairs.map((p) => p.id));
+  const idxRaw = merged.categoryIndex;
+  let idx: number | null = null;
+  if (typeof idxRaw === 'number' && Number.isInteger(idxRaw)) idx = idxRaw;
+  else if (typeof idxRaw === 'string' && /^\d+$/.test(idxRaw.trim())) idx = parseInt(idxRaw.trim(), 10);
+  if (idx !== null && idx >= 0 && idx < pairs.length) {
+    merged.categoryId = pairs[idx]!.id;
+    merged.categoryLabel = pairs[idx]!.label;
+    delete merged.categoryIndex;
+    return;
+  }
+  delete merged.categoryIndex;
+
+  const byNormLabel = new Map<string, string>();
+  for (const p of pairs) {
+    const k = normalizeForMatch(p.label);
+    if (k) byNormLabel.set(k, p.id);
+  }
+
+  const lab = typeof merged.categoryLabel === 'string' ? merged.categoryLabel.trim() : '';
+  if (lab) {
+    const n = normalizeForMatch(lab);
+    let resolved: string | undefined = byNormLabel.get(n);
+    if (!resolved) {
+      for (const p of pairs) {
+        const pn = normalizeForMatch(p.label);
+        if (!pn) continue;
+        if (pn === n || pn.includes(n) || n.includes(pn)) {
+          resolved = p.id;
+          break;
+        }
+      }
+    }
+    if (resolved) {
+      merged.categoryId = resolved;
+      const hit = pairs.find((p) => p.id === resolved);
+      if (hit) merged.categoryLabel = hit.label;
+      return;
+    }
+  }
+
+  const rawId = merged.categoryId;
+  if (typeof rawId === 'string' && idSet.has(rawId.trim())) {
+    const hit = pairs.find((x) => x.id === rawId.trim());
+    if (hit && (!lab || String(merged.categoryLabel ?? '').trim() === '')) merged.categoryLabel = hit.label;
+    return;
+  }
+
+  if (typeof merged.categoryId === 'string' && !idSet.has(merged.categoryId.trim())) {
+    delete merged.categoryId;
+  }
 }
 
 /** 모델이 한글 키로 내려준 값을 기존 클라이언트(`parseMeetingCreateNluPayload`) 필드로 병합 */
@@ -289,6 +578,14 @@ function normalizeAlternateNluShape(raw: Record<string, unknown>): Record<string
   if (typeof d.category === 'string' && d.category.trim() && (out.categoryLabel == null || String(out.categoryLabel).trim() === '')) {
     out.categoryLabel = d.category.trim();
   }
+  const dCi = d.category_index ?? d.categoryIndex;
+  if (out.categoryIndex == null) {
+    if (typeof dCi === 'number' && Number.isInteger(dCi)) {
+      out.categoryIndex = dCi;
+    } else if (typeof dCi === 'string' && /^\d+$/.test(dCi.trim())) {
+      out.categoryIndex = parseInt(dCi.trim(), 10);
+    }
+  }
   if (typeof d.date === 'string' && d.date.trim() && (out.scheduleYmd == null || String(out.scheduleYmd).trim() === '')) {
     out.scheduleYmd = d.date.trim();
   }
@@ -334,9 +631,9 @@ function applyMenuPreferenceKeywordFallback(out: Record<string, unknown>, userTe
   if (!hay) return;
   const rules: { label: string; keys: string[] }[] = [
     { label: '포차', keys: ['포차'] },
-    { label: '주점·호프', keys: ['술집', '술자리', '맥주', '소주', '호프', '주점', '안주', '술', '펍'] },
+    { label: '주점·호프', keys: ['술집', '술자리', '맥주', '소주', '호프', '주점', '안주', '술'] },
     { label: '카페', keys: ['디저트', '커피', '카페'] },
-    { label: '한식', keys: ['삼겹살', '국밥', '한식', '한우', '갈비', '바베큐', 'bbq', 'barbecue'] },
+    { label: '한식', keys: ['삼겹살', '국밥', '한식', '한우', '갈비'] },
     { label: '일식', keys: ['스시', '초밥', '라멘', '일식', '우동'] },
     { label: '양식', keys: ['피자', '파스타', '양식', '스테이크'] },
   ];
@@ -369,6 +666,57 @@ function ensurePublicMeetingAgeLimitForPublic(out: Record<string, unknown>): voi
   out.publicMeetingDetails = { ...base, ageLimit: ['NONE'] };
 }
 
+function accumScheduleYmdFromSlim(accum: Record<string, unknown>): string {
+  const y = typeof accum.scheduleYmd === 'string' ? accum.scheduleYmd.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(y)) return y;
+  const ko = typeof accum['날짜'] === 'string' ? accum['날짜'].trim() : '';
+  return /^\d{4}-\d{2}-\d{2}$/.test(ko) ? ko : '';
+}
+
+function userExplicitlyRequestsScheduleOrTodayChange(norm: string): boolean {
+  if (!norm) return false;
+  if (
+    /(날짜|일정|약속|만남).{0,14}(바꿔|바꿔줘|변경|미뤄|미루|앞당|뒤로|옮겨|옮기)|당일로|오늘로\s*바꿔|내일\s*말고|모레\s*말고|다른\s*날|다음\s*주로|일정만|언제\s*다시|오늘\s*로|당일\s*로|오늘은|오늘에\s*하자/.test(
+      norm,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 누적 scheduleYmd가 오늘이 아니면, 사용자가 날짜·당일 전환을 분명히 하기 전까지 오늘로 접거나 비우는 출력을 누적값으로 되돌림.
+ */
+function applyStickyScheduleFromAccumulated(
+  merged: Record<string, unknown>,
+  accumSlim: Record<string, unknown>,
+  rawText: string,
+  todayYmd: string,
+): void {
+  const accY = accumScheduleYmdFromSlim(accumSlim);
+  if (!accY || accY === todayYmd) return;
+  const norm = normalizeForMatch(rawText);
+  if (userExplicitlyRequestsScheduleOrTodayChange(norm)) return;
+
+  const mergedY = typeof merged.scheduleYmd === 'string' ? merged.scheduleYmd.trim() : '';
+
+  if (mergedY && mergedY !== accY) {
+    if (mergedY === todayYmd) {
+      // 오늘로만 바뀐 경우는 명시적 요청이 있을 때만 위에서 return됨 — 여기선 누적 유지
+    } else {
+      return;
+    }
+  }
+
+  merged.scheduleYmd = accY;
+  const prevKo = typeof merged['날짜'] === 'string' ? merged['날짜'].trim() : '';
+  if (!prevKo || prevKo === todayYmd) merged['날짜'] = accY;
+  const accHm = typeof accumSlim.scheduleHm === 'string' ? accumSlim.scheduleHm.trim() : '';
+  const mergedHm = typeof merged.scheduleHm === 'string' ? merged.scheduleHm.trim() : '';
+  if (accHm && !mergedHm) merged.scheduleHm = accHm;
+}
+
 function tryParseNluContent(content: string): Record<string, unknown> | null {
   const slice = extractBalancedJsonObject(content);
   if (!slice) return null;
@@ -399,12 +747,49 @@ function extractGroqChatContent(data: unknown): string | null {
 type GroqAttemptFail = { ok: false; tag: string; detail: string };
 type GroqAttemptOk = { ok: true; content: string };
 
+function isGroqOutboundLogSilent(): boolean {
+  const silent = Deno.env.get('GROQ_DEBUG_SILENT')?.trim().toLowerCase();
+  if (silent === '1' || silent === 'true' || silent === 'yes') return true;
+  const v = Deno.env.get('GROQ_DEBUG_MESSAGES')?.trim().toLowerCase();
+  return v === '0' || v === 'false' || v === 'no' || v === 'off';
+}
+
+/** system 프롬프트 전문까지 로그(용량 큼) — 기본은 user만. */
+function isGroqFullPromptLogEnabled(): boolean {
+  const v = Deno.env.get('GROQ_DEBUG_MESSAGES')?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+/**
+ * Groq `fetch` body의 `messages`와 동일 순서(system → user).
+ * Supabase 대시보드·`supabase functions logs`에서 `[parse-meeting-create-intent] groq_outbound`로 검색.
+ */
+function logGroqOutboundMessages(model: string, systemPrompt: string, userText: string): void {
+  if (isGroqOutboundLogSilent()) return;
+  console.log(
+    '[parse-meeting-create-intent] groq_outbound_meta',
+    JSON.stringify({
+      model,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      systemChars: systemPrompt.length,
+      userChars: userText.length,
+      systemLogged: isGroqFullPromptLogEnabled(),
+    }),
+  );
+  console.log('[parse-meeting-create-intent] groq_outbound_user\n', userText);
+  if (isGroqFullPromptLogEnabled()) {
+    console.log('[parse-meeting-create-intent] groq_outbound_system\n', systemPrompt);
+  }
+}
+
 async function callGroqOnce(
   apiKey: string,
   model: string,
   systemPrompt: string,
   userText: string,
 ): Promise<GroqAttemptOk | GroqAttemptFail> {
+  logGroqOutboundMessages(model, systemPrompt, userText);
   let res: Response;
   try {
     res = await fetch(GROQ_CHAT_URL, {
@@ -471,9 +856,15 @@ serve(async (req) => {
   }
 
   const text = String(body.text ?? '').trim();
-  const categories = Array.isArray(body.categories) ? body.categories : [];
-  if (!text || categories.length === 0) {
-    return jsonResponse({ error: 'text and categories required' }, 400);
+  const pairs = await resolveMeetingNluCategoryPairs(body);
+  if (!text || !pairs?.length) {
+    return jsonResponse(
+      {
+        error:
+          'text required; category catalog unavailable (meeting_categories empty or DB error). Legacy: cats+ids or categoryPairs or categories in body.',
+      },
+      400,
+    );
   }
 
   const blockedPolicy = await loadNluBlockedFromDb();
@@ -491,44 +882,55 @@ serve(async (req) => {
       return `${y}-${m}-${day}`;
     })();
 
-  const catLines = categories
-    .map((c) => {
-      const major =
-        c.majorCode != null && String(c.majorCode).trim()
-          ? `  major_code: "${String(c.majorCode).trim()}"`
-          : '';
-      const ord = typeof c.order === 'number' && Number.isFinite(c.order) ? `  sort_order: ${c.order}` : '';
-      return `- id: "${String(c.id).trim()}"  label: "${String(c.label).trim()}"${major ? `\n${major}` : ''}${
-        ord ? `\n${ord}` : ''
-      }`;
-    })
-    .join('\n');
+  const catsForPrompt = pairs.map((p, i) => `${i}:${p.label}`).join(', ');
 
   const accumulated =
     body.accumulated && typeof body.accumulated === 'object' && !Array.isArray(body.accumulated)
       ? (body.accumulated as Record<string, unknown>)
       : {};
 
-  const hasAccum = Object.keys(accumulated).length > 0;
+  const accumSlim = slimAccumulatedForNlu(accumulated);
+  const hasAccum = Object.keys(accumSlim).length > 0;
 
-  const systemPrompt = `You are the Ginit NLU engine — extract structured data for ONE Korean meet-up ("모임") user message.
+  const systemPrompt = `todayYmd=${todayYmd}
+이 한 줄의 todayYmd는 사용자 기기 로컬 기준 오늘(YYYY-MM-DD)이다. 모든 상대 날짜·요일·「오늘/내일/모레/이번 주 ○요일」 계산은 이 날짜만 달력 앵커로 사용한다. 다른 임의의 «오늘»을 상상하지 마라. JSON에는 반드시 계산된 절대 날짜만 넣는다: scheduleYmd·한글 "날짜"는 YYYY-MM-DD만(상대 표현 문자열 금지). 필요 시 scheduleHm(HH:mm)·한글 "시각"에 시각을 반영한다.
+
+You are the Ginit NLU engine — extract structured data for ONE Korean meet-up ("모임") user message.
 Respond with a single JSON object only (no markdown). No assistantReply or natural-language coaching — JSON only.
 
-For EVERY field below: fill from the latest user message with maximum reasonable inference. Use JSON null or omit keys for anything NOT inferable from this message alone (do not invent addresses).
+For EVERY field below: fill from the latest user message with maximum reasonable inference. Use JSON null or omit keys for anything NOT inferable from this message alone (do not invent addresses). Multi-turn exception: if the user message includes prior accumulated JSON, **omit keys** for slots that already have concrete values there unless this latest utterance clearly revises that slot — never set those keys to null just to mean "unchanged".
+
+[누적 유지 — 멀티턴]
+user 블록에 누적 JSON이 있으면: 이미 채워진 필드는 이번 한 마디로 **명확히 바꿀 내용이 아니면** JSON에 **키를 넣지 마라**(null로 지우지 마라). 새로 추론한 필드만 최소 키로 내도 된다.
+
+[Sticky 날짜 — 누적이 오늘이 아닐 때]
+누적 JSON에 scheduleYmd(또는 "날짜")가 **todayYmd(${todayYmd})가 아닌 값**으로 이미 있으면, 사용자가 **날짜·일정·당일 전환을 명시적으로 바꾸겠다고 말하기 전까지** 그 scheduleYmd는 **고정**이다. 이번 메시지가 시간·장소·인원·동의만 다루면 scheduleYmd·"날짜" 키는 **출력에서 생략**해라(오늘로 다시 계산해 덮어쓰지 마라). history 필드에 과거 상대 표현이 있어도 **누적 scheduleYmd가 있으면 그걸 우선**한다.
+
+[부정·교정 — 카테고리 등]
+"A가 아니라 B", "A 말고 B", "A 아니고 B", "A 대신 B", "A 말고 B로" → **B만** 의도에 반영한다. A는 거절된 후보라 **categoryIndex**와 주변 슬롯에 **A를 쓰지 마라**.
+
+[역할 · 날짜 — 한국어; 앵커는 위 첫 줄 todayYmd만]
+너는 모임 생성 도우미(NLU)다. 아래 규칙의 «오늘»은 항상 위의 todayYmd와 동일하다.
+
+1. '오늘' → scheduleYmd는 반드시 **${todayYmd}** (한글 "날짜"·scheduleYmd 동일).
+2. '내일' → **${todayYmd}** 에서 달력으로 정확히 +1일 된 날짜를 scheduleYmd에 넣는다.
+3. '모레' → **${todayYmd}** 에서 달력으로 정확히 +2일 된 날짜를 scheduleYmd에 넣는다.
+4. 날짜 언급 없이 시각만(예: 오후 6시, 18시) 있는 경우 → scheduleYmd는 우선 **${todayYmd}** 로 두고 scheduleHm에 반영한다. 다만 그날 그 시각이 **이미 지난 시각**으로만 해석되면(당일 모임으로는 불가능한 과거) 자동으로 **내일**(위 2번과 같이 ${todayYmd}+1일)을 scheduleYmd로 쓴다.
+
+그 밖의 상대 표현(이번 주 토요일 등)도 반드시 **${todayYmd}** 를 달력 앵커로 삼아 계산한다. scheduleYmd·한글 "날짜"는 **반드시 YYYY-MM-DD** 만 사용한다(다른 형식 금지). 앵커를 무시하고 임의 날짜로 퉁치지 마라.
+
+[카테고리 — 서버 고정 목록]
+너가 선택할 수 있는 카테고리 번호와 이름은 다음과 같아: ${catsForPrompt}
+categoryIndex는 위 번호(정수 0 .. ${pairs.length - 1}) 중 정확히 하나이거나, 불가하면 null.
 
 [Model / hybrid]
 The server calls Llama 3.3 70B first and Llama 3.1 8B Instant on failure (e.g. rate limits). Output the same APP JSON schema in all cases.
 
 [Intent pivoting]
-If the dominant intent shifts (e.g. generic food → drinking), immediately realign categoryId, menuPreferenceLabel (주점·호프·포차 등), title, and 장소/placeAutoPickQuery to the new intent; drop mismatched prior assumptions.
+If the dominant intent shifts (e.g. generic food → drinking), immediately realign categoryIndex (위 [카테고리] 목록의 인덱스), menuPreferenceLabel (주점·호프·포차 등), title, and 장소/placeAutoPickQuery to the new intent; drop mismatched prior assumptions.
 
 [Automatic menuPreferenceLabel hints — Eat & Drink only]
 삼겹살·국밥·한우·갈비 → 한식; 스시·초밥·라멘·우동 → 일식; 피자·파스타·스테이크 → 양식; 커피·디저트·카페 → 카페; 맥주·소주·안주·호프·주점·술집·술자리 → 주점·호프; 포차 → 포차.
-English / informal aliases (Eat & Drink): BBQ·barbecue·바베큐 → 한식; 펍(Pub, avoid bare English "pub" substring false positives — prefer 펍/주점 맥락) → 주점·호프; cafe·coffee shop → 카페.
-
-[Shorthand data.category — 한식|중식|일식|호프|카페|영화관|기타 스타일]
-요약 스키마의 data.category에 위 한글 값을 쓸 때: BBQ류 → 한식; Pub/펍 → 호프 의미면 menuPreferenceLabel은 반드시 앱 칩 "주점·호프"와 일치; Cafe → 카페; Cinema·movie·영화관 → 영화관(해당 카테고리Id)·영화제목 hints 병행; Study·study room·독서실·스터디룸 → Focus&Knowledge면 focusKnowledgeLabel "독서·스터디" 및 장소에 시설 표현 반영, data.category는 스키마에 없으면 기타로 두되 장소·칩은 채운다.
-영화관·독서실·PC방·코인노래방·헬스장 등 어떤 시설 유형이든 사용자 표현을 장소/placeAutoPickQuery 검색어에 담는다(주소는 지어내지 않음).
 
 [Forbidden NLU follow-ups]
 Never use nluAskMessage, response.ask_message, or unknowns to prompt for: gender ratio (성비), age bands (연령대), or settlement / 더치페이. If the user states them voluntarily, reflect only valid JSON enums; otherwise omit genderRatio and settlement from publicMeetingDetails.
@@ -537,10 +939,13 @@ Never use nluAskMessage, response.ask_message, or unknowns to prompt for: gender
 suggestedIsPublic=false ONLY for clearly invite-only private circles (데이트, 가족만, 확정된 지인 소수, 내부 동료만). Otherwise true — do not ask the user to confirm public vs private.
 
 [Temporal reasoning]
-Relative dates (내일, 다음 주 토요일, …) use todayYmd=${todayYmd} as the calendar anchor.
+Relative dates (내일, 모레, 이번 주 토요일, …) MUST be computed strictly from calendar anchor todayYmd=${todayYmd}. Never set scheduleYmd to todayYmd when the user clearly asked for another relative day; output precise YYYY-MM-DD (and HH:mm when inferable).
+
+[Few-shot 날짜 — 고정 예시; 실제 호출에서는 동일 규칙으로 todayYmd=${todayYmd}를 앵커로 쓴다]
+예시 1: 앵커 todayYmd=2026-05-05, 사용자「내일 오후 6시」→ scheduleYmd 2026-05-06, scheduleHm 18:00 (ISO 2026-05-06T18:00:00).
+예시 2: 앵커 todayYmd=2026-05-05, 사용자「이번 주 토요일」(시간 없음) → scheduleYmd 2026-05-09, scheduleHm 19:00 기본 (ISO 2026-05-09T19:00:00).
 
 Optional shorthand: you may also return { "intent":"create_meeting", "data":{...}, "needs_more_info":[...] } — the server maps data.title/date/time/location/is_public into the flat APP fields.
-When 장소/place is only a geographic name (역·구·동·상권 별칭 등) without 시설 종류·상호·봐둔 곳, add needs_more_info with "location" (또는 unknowns field "place") and set response.ask_message to exactly: "<지명> 어디에서 모이실 건가요? 봐두신 장소나 종류를 알려주세요." where <지명> is the user's location phrase verbatim (예: 영등포역 → "영등포역 어디에서 모이실 건가요? 봐두신 장소나 종류를 알려주세요.").
 
 Deep inference (social + nuance) — apply before filling fields:
 - Baseline geography: if the user gives no city/district but the place is vague (역 근처, 근처 카페, 동네), assume their usual activity area is Seoul Yeongdeungpo-gu (서울 영등포구) and reflect that inside "장소" / placeAutoPickQuery (e.g. prepend "영등포구" or "영등포역 근처") without inventing a specific store address.
@@ -556,8 +961,7 @@ Deep inference (social + nuance) — apply before filling fields:
   - "점심 번개" → 12:00 same day or next business day if lunch already passed (use judgment from message).
   - "불토" / "이번 주 토요일 밤" → upcoming Saturday after todayYmd, evening from 19:00.
 - Place wording: normalize nicknames in queries — e.g. 스벅→스타벅스, 피방→PC방, 한강 산책→한강공원 or "한강 산책로" style text search phrases (no fake URLs).
-- Area + venue follow-up (multi-turn): If accumulated "장소"/placeAutoPickQuery is ONLY a station/district (e.g. 영등포역, 강남구) and the latest user message names ONLY a venue type (삼겹살집, 카페, 술집, 헬스장), you MUST output "장소"/placeAutoPickQuery as "<prior area> <venue phrase>" — never drop the prior area by overwriting with the venue-only string. In that same follow-up, do NOT set title/이름 to the venue-only reply; keep accumulated.title if present, otherwise derive a short title from the FIRST user message in this thread (topic + scale), not from the venue word alone.
-- Mood / vibe: merge short vibe adjectives from the user (공부하기 좋은, 인스타 감성, 조용한, 왁자지껄한, 가성비 등) into "장소" / placeAutoPickQuery as extra Korean keywords so Places search stays on-theme.
+- Mood / vibe: merge **short** vibe adjectives (공부하기 좋은, 인스타 감성, 조용한 등) into "장소" / placeAutoPickQuery as **compact** keywords only — never paste the user's whole story sentence.
 - Public vs private: suggestedIsPublic false only for clear invite-only private circles (데이트, 가족만, 확정된 소규모 지인 모임, 내부 동료만). Otherwise true; open recruitment / 번개 / 지역 모집 / vague topic-only → true without asking.
 - needs_confirmation: if time + category feel socially odd (e.g. 새벽 2시 + 카페/커피 without context), add an unknowns entry like { "field": "schedule", "reason": "..." } rather than inventing a different time.
 
@@ -573,15 +977,13 @@ Korean keys (populate when inferable):
   - 세 명, 셋이, 3명 → 3 and 3 (unless a range is clearly stated).
   - "4명만" / "4명" only → both 4.
 - "날짜": YYYY-MM-DD or null. "시각": HH:mm 24h or null.
-- "장소": Korean text suitable as Google Places TEXT search query OR null.
-  IMPORTANT: Even WITHOUT a neighborhood or store name, if the user describes venue mood/type (examples: 분위기 좋은 카페, 넓은 카페, 키즈카페, 분위기 좋은 바, 포차, 조용한 카페), you MUST still output a non-empty "장소" string combining those words for search.
+- "장소": **짧은** Google Places 텍스트 검색용 한국어 구문만(지명·역·동 + 업종·음식·분위기 3~10어절). 사용자 발화 **전체를 길게 복붙하지 마라**. 분위기·업종만 있어도 비어 있지 않게 **핵심 키워드만** 조합해라.
 
 English/camelCase (same inference rules):
-- categoryId: MUST be exactly one of the listed ids, OR null if impossible to map from the message.
-- categoryLabel: optional.
+- categoryIndex: integer index 0..${pairs.length - 1} matching the numbered list in [카테고리 — 서버 고정 목록] above (best-matching 모임 category for this message), OR null if impossible. The server maps this index to categoryId/categoryLabel — do NOT output categoryId (UUID) or categoryLabel in JSON (omit them; index only).
 - scheduleYmd, scheduleHm, scheduleText: use scheduleText for vague relative phrases if needed.
 - minParticipants, maxParticipants: numbers or null (mirror all "인원" rules above).
-- placeAutoPickQuery: same meaning as "장소"; if you set "장소", also mirror to placeAutoPickQuery when possible.
+- placeAutoPickQuery: same intent as "장소" — **compact search keywords only** (no full-sentence dump; strip filler, backstory, repeated 조사). If you set "장소", mirror the same trimmed phrase to placeAutoPickQuery.
 - suggestedIsPublic: boolean; default true unless private-circle cases above. Never add unknowns solely to ask public vs private.
   Rules for suggestedIsPublic:
   - false: strictly invite-only private circles — e.g. 친구와(소수 확정), 회사 동료 내부만, 가족끼리, 여친/남친 데이트 — no stranger recruitment.
@@ -599,21 +1001,26 @@ English/camelCase (same inference rules):
 - unknowns: array of { "field": string, "reason": string } for ambiguity.
 
 Rules:
-- Relative dates (내일, 모레, 이번 주 토요일) use todayYmd=${todayYmd} as reference.
-- categoryId must be one of the allowed ids or null — never invent an id.
+- Relative dates (내일, 모레, 이번 주 토요일) use ONLY todayYmd=${todayYmd} as the calendar reference (same as the first line of this system prompt).
+- categoryIndex must match one row in [카테고리 — 서버 고정 목록] above, or be null.
+- Accumulated JSON in the user message: keep prior filled fields by **omitting** their keys from your output unless this message clearly changes them (do not null-fill unchanged slots).
+- Sticky schedule: if accumulated already has scheduleYmd ≠ todayYmd, do not move it back to today unless the user clearly requests a date/today change (see [Sticky 날짜]).
+- Negation: "A not B" / "A 말고 B" patterns → follow **B only** for categoryIndex and related slots.
+- placeAutoPickQuery / "장소": **keyword-style** queries only — never echo the entire user message.
 
 Optional nested JSON (server flattens into the same fields; you may use in addition to flat keys):
 - "inference": { "intent_strength", "social_context", "reasoning" } — stored as nluInference.
 - "extracted_data": { "title", "major_code", "category_label", "schedule_date", "schedule_time", "place_name", "capacity", "is_public", "meta": { "vibe_tags": string[], "is_location_vague": boolean } } — merged only when flat fields are empty.
 - "missing_fields": string[] — appended to unknowns.
-- "response": { "confirm_message", "ask_message" } — copied to nluConfirmMessage / nluAskMessage for UI. Prefer filling flat keys directly when possible.
+- "response": { "confirm_message", "ask_message" } — copied to nluConfirmMessage / nluAskMessage for UI. Prefer filling flat keys directly when possible.`;
 
-Allowed categories:
-${catLines}`;
-
-  const userText = hasAccum
-    ? `오늘 날짜(로컬): ${todayYmd}\n이미 수집된 JSON(참고만, 이 메시지에서 새로 못 밝힌 필드는 null로 두어도 됨):\n${JSON.stringify(accumulated)}\n\n이번 사용자 메시지:\n${text}`
-    : `오늘 날짜(로컬): ${todayYmd}\n사용자 메시지:\n${text}`;
+  const histRaw = typeof body.history === 'string' ? body.history.trim() : '';
+  const historyBlock = histRaw.length > 0 ? `history:\n${histRaw}\n\n` : '';
+  const userText =
+    historyBlock +
+    (hasAccum
+      ? `누적(JSON, 빈·기본값 제외):\n${JSON.stringify(accumSlim)}\n\n메시지:\n${text}`
+      : `메시지:\n${text}`);
 
   const models = [GROQ_MODEL_PRIMARY, GROQ_MODEL_FALLBACK];
   let parsed: Record<string, unknown> | null = null;
@@ -656,10 +1063,12 @@ ${catLines}`;
 
   const flattened = flattenNestedMeetingCreateIntentResult(parsed);
   const merged = mergeKoreanKeysIntoPayload(flattened);
+  applyCategoryResolution(merged, pairs);
   stripNestedMeetingCreateKeys(merged);
   applyMenuPreferenceKeywordFallback(merged, text);
   defaultSuggestedIsPublicWhenUnset(merged);
   ensurePublicMeetingAgeLimitForPublic(merged);
+  applyStickyScheduleFromAccumulated(merged, accumSlim, text, todayYmd);
 
   return jsonResponse({ result: merged });
 });
