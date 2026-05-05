@@ -90,6 +90,8 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useCreateMeetingAgentFabMeasure } from '@/src/hooks/use-create-meeting-agent-fab-measure';
+import { useCreateMeetingNluSessionRefs } from '@/src/hooks/use-create-meeting-nlu-session-refs';
 import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
 import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
@@ -212,7 +214,12 @@ import {
 } from '@/src/lib/user-profile';
 import { DateCandidateEditorCard } from '../../components/create/DateCandidateEditorCard';
 import { VoteCandidateCard, VoiceWaveform, VoteCandidatesForm } from '@/components/create/VoteCandidatesForm';
-import type { WizardStep } from '@/components/create/meeting-create-wizard-types';
+import {
+  type WizardStep,
+  WIZARD_DETAIL_STEP,
+  WIZARD_PLACES_STEP,
+  WIZARD_SCHEDULE_STEP,
+} from '@/components/create/meeting-create-wizard-types';
 import type {
   MeetingCreatePlacesAutoAssistSnapshot,
   VoteCandidatesBuildResult,
@@ -366,27 +373,18 @@ export default function CreateDetailsScreen() {
   const agentWizardApplyRunIdRef = useRef(0);
   /** Provider 내부 `CreateMeetingAgenticSurfaceBinder`가 채우는 말풍선·수락 핸들 */
   const agenticSurfaceRef = useRef<MeetingCreateAgenticSurfaceHandles | null>(null);
-  /** NLU 멀티턴: Edge와 동기화한 누적 JSON */
-  const agentNluAccumulatedRef = useRef<Record<string, unknown>>({});
-  /** 직전 박스오피스 1~3위 안내에 대응하는 제목(순위-only 답변 머지용) */
-  const pendingNluBoxOfficeTopThreeRef = useRef<{ title: string }[] | null>(null);
-  const agentNluSessionRef = useRef(createEmptyMeetingCreateAgentChatSession());
-  const agentNluLastFingerprintRef = useRef<string | null>(null);
-  /** NLU 첫 실질 사용자 발화 — 장소 보조 턴이 `title`을 덮지 않게 하고 폴백 제목에 사용 */
-  const meetingCreateNluOpeningUtteranceRef = useRef('');
-  /** 요약 수락 시 적용할 위저드 제안(수락 전까지 오토파일럿 미실행) */
-  const pendingNluWizardApplyRef = useRef<{ fp: string; sugg: WizardSuggestion } | null>(null);
-  /** 오류 시 말풍선 요약 문구 복구용 */
-  const pendingNluSummaryConfirmMsgRef = useRef('');
-  /** 최종 요약 이후: `summary` → 부정 시 `which_part`(수정 범위 듣기) → 수락 후 `applying`(오토 적용 중) */
-  type MeetingCreateNluConfirmPhase = 'none' | 'summary' | 'which_part' | 'applying';
-  const meetingCreateNluConfirmPhaseRef = useRef<MeetingCreateNluConfirmPhase>('none');
-  /** 요약·수정 유도 중에는 하단 `지닛 시작하기`로 NLU 수락을 우회하지 못하게 함 */
-  const [meetingCreateNluBlocksFloatingFinal, setMeetingCreateNluBlocksFloatingFinal] = useState(false);
-  const setMeetingCreateNluConfirmPhase = useCallback((next: MeetingCreateNluConfirmPhase) => {
-    meetingCreateNluConfirmPhaseRef.current = next;
-    setMeetingCreateNluBlocksFloatingFinal(next !== 'none');
-  }, []);
+  const {
+    agentNluAccumulatedRef,
+    pendingNluBoxOfficeTopThreeRef,
+    agentNluSessionRef,
+    agentNluLastFingerprintRef,
+    meetingCreateNluOpeningUtteranceRef,
+    pendingNluWizardApplyRef,
+    pendingNluSummaryConfirmMsgRef,
+    meetingCreateNluConfirmPhaseRef,
+    meetingCreateNluBlocksFloatingFinal,
+    setMeetingCreateNluConfirmPhase,
+  } = useCreateMeetingNluSessionRefs();
   /** 하단 `지닛 시작하기` → 최종 등록 (정의 순서 때문에 ref로 최신 콜백 유지) */
   const onFinalRegisterRef = useRef<(opts?: { rethrowOnAddMeetingFailure?: boolean }) => Promise<void>>(
     async () => {},
@@ -406,30 +404,7 @@ export default function CreateDetailsScreen() {
   /** 연속 scrollToStep 호출 시 이전 rAF·타이머 취소 */
   const scrollToStepRafRef = useRef<number | null>(null);
   const scrollToStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 프로그램 스크롤 중 — `onWizardStepShellLayout`이 FAB 앵커를 중간 프레임에 갱신하지 않도록 */
-  const programmaticScrollPendingRef = useRef(false);
-  /** 프로그램 스크롤 종료 후 FAB measure 백업(모멘텀 미발화 대비) */
-  const scrollSettleMeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 사용자 스크롤 중 말풍선 dismiss 알림 스로틀(ms) */
-  const scrollDismissLastNotifyMsRef = useRef(0);
-  const scheduleAgentFabMeasureRef = useRef<() => void>(() => {});
-  const armAgentFabScrollSettleMeasureRef = useRef<() => void>(() => {});
-  /** 세로 스크롤 목표 오프셋으로 FAB 앵커 창 좌표를 예측한 뒤 `runScroll` 실행 */
-  const predictAgentFabWindowRectBeforeVerticalScrollRef = useRef(
-    (_anchorStep: WizardStep, _targetScrollY: number, runScroll: () => void) => {
-      runScroll();
-    },
-  );
-  /** 에이전트 FAB — `measureInWindow`로 현재 단계 `wizardStepShell` 우상단에 맞춤 */
-  const agentStepShellRefs = useRef<Partial<Record<WizardStep, View | null>>>({});
-  const [agentFabWindowRect, setAgentFabWindowRect] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
   const currentStepRef = useRef<WizardStep>(1);
-  const agentFabMeasureRafRef = useRef<number | null>(null);
 
   const {
     initialQuery: initialQueryParam,
@@ -672,6 +647,25 @@ export default function CreateDetailsScreen() {
   currentStepRef.current = currentStep;
   isPublicMeetingRef.current = isPublicMeeting;
 
+  const {
+    programmaticScrollPendingRef,
+    scrollSettleMeasureTimerRef,
+    scrollDismissLastNotifyMsRef,
+    scheduleAgentFabMeasureRef,
+    armAgentFabScrollSettleMeasureRef,
+    predictAgentFabWindowRectBeforeVerticalScrollRef,
+    agentStepShellRefs,
+    agentFabWindowRect,
+    onAgentFabMainScrollSettled,
+    onWizardStepShellLayout,
+    captureStepPosition,
+  } = useCreateMeetingAgentFabMeasure({
+    currentStepRef,
+    mainScrollYRef,
+    currentStep,
+    stepPositions,
+  });
+
   /** 1단계만 화면 하단 FAB — 2단계 이상은 자동·수동 동일하게 카드 우상단(`cardTopRight`) 도킹 */
   const [aiFabScreenBottomLayout, setAiFabScreenBottomLayout] = useState(true);
   const recomputeAiFabScreenLayout = useCallback(() => {
@@ -761,9 +755,9 @@ export default function CreateDetailsScreen() {
     [paramCategoryLabel, selectedCategory?.label, specialtyKind],
   );
   const needsSpecialty = categoryNeedsSpecialty(selectedCategory);
-  const scheduleStep: WizardStep = 4;
-  const placesStep: WizardStep = 5;
-  const detailStep: WizardStep = 6;
+  const scheduleStep = WIZARD_SCHEDULE_STEP;
+  const placesStep = WIZARD_PLACES_STEP;
+  const detailStep = WIZARD_DETAIL_STEP;
 
   const placesConfirmDisabledByAiAssist = useMemo(() => {
     if (!placesAiAssistGate || currentStep !== placesStep) return false;
@@ -1107,117 +1101,6 @@ export default function CreateDetailsScreen() {
       if (scrollToStepTimerRef.current) {
         clearTimeout(scrollToStepTimerRef.current);
         scrollToStepTimerRef.current = null;
-      }
-      if (scrollSettleMeasureTimerRef.current != null) {
-        clearTimeout(scrollSettleMeasureTimerRef.current);
-        scrollSettleMeasureTimerRef.current = null;
-      }
-    },
-    [],
-  );
-
-  const captureStepPosition = useCallback((s: WizardStep, e: LayoutChangeEvent) => {
-    stepPositions.current[s] = e.nativeEvent.layout.y;
-  }, []);
-
-  const measureAgentFabAnchor = useCallback(() => {
-    const cs = currentStepRef.current;
-    if (cs === 1) {
-      setAgentFabWindowRect(null);
-      return;
-    }
-    const node = agentStepShellRefs.current[cs];
-    if (!node) {
-      setAgentFabWindowRect(null);
-      return;
-    }
-    node.measureInWindow((x, y, w, h) => {
-      setAgentFabWindowRect({ x, y, width: w, height: h });
-    });
-  }, []);
-
-  const scheduleAgentFabMeasure = useCallback(() => {
-    if (agentFabMeasureRafRef.current != null) {
-      cancelAnimationFrame(agentFabMeasureRafRef.current);
-    }
-    agentFabMeasureRafRef.current = requestAnimationFrame(() => {
-      agentFabMeasureRafRef.current = null;
-      measureAgentFabAnchor();
-    });
-  }, [measureAgentFabAnchor]);
-
-  scheduleAgentFabMeasureRef.current = scheduleAgentFabMeasure;
-
-  const armAgentFabScrollSettleMeasure = useCallback(() => {
-    programmaticScrollPendingRef.current = true;
-    if (scrollSettleMeasureTimerRef.current != null) {
-      clearTimeout(scrollSettleMeasureTimerRef.current);
-      scrollSettleMeasureTimerRef.current = null;
-    }
-    const settleMs = Platform.OS === 'android' ? 480 : 420;
-    scrollSettleMeasureTimerRef.current = setTimeout(() => {
-      scrollSettleMeasureTimerRef.current = null;
-      programmaticScrollPendingRef.current = false;
-      scheduleAgentFabMeasureRef.current();
-    }, settleMs);
-  }, []);
-
-  armAgentFabScrollSettleMeasureRef.current = armAgentFabScrollSettleMeasure;
-
-  const onAgentFabMainScrollSettled = useCallback(() => {
-    if (scrollSettleMeasureTimerRef.current != null) {
-      clearTimeout(scrollSettleMeasureTimerRef.current);
-      scrollSettleMeasureTimerRef.current = null;
-    }
-    programmaticScrollPendingRef.current = false;
-    scheduleAgentFabMeasureRef.current();
-  }, []);
-
-  const predictAgentFabWindowRectBeforeVerticalScroll = useCallback(
-    (anchorStep: WizardStep, targetScrollY: number, runScroll: () => void) => {
-      if (anchorStep <= 1) {
-        runScroll();
-        return;
-      }
-      const node = agentStepShellRefs.current[anchorStep];
-      if (!node) {
-        runScroll();
-        return;
-      }
-      node.measureInWindow((x, y, w, h) => {
-        const cur = mainScrollYRef.current;
-        const dy = targetScrollY - cur;
-        setAgentFabWindowRect({ x, y: y - dy, width: w, height: h });
-        runScroll();
-      });
-    },
-    [],
-  );
-
-  predictAgentFabWindowRectBeforeVerticalScrollRef.current = predictAgentFabWindowRectBeforeVerticalScroll;
-
-  const onWizardStepShellLayout = useCallback(
-    (step: WizardStep, e: LayoutChangeEvent) => {
-      captureStepPosition(step, e);
-      if (currentStepRef.current === step && !programmaticScrollPendingRef.current) {
-        scheduleAgentFabMeasure();
-      }
-    },
-    [captureStepPosition, scheduleAgentFabMeasure],
-  );
-
-  useEffect(() => {
-    if (currentStep === 1) {
-      programmaticScrollPendingRef.current = false;
-      setAgentFabWindowRect(null);
-    }
-  }, [currentStep]);
-
-  useEffect(
-    () => () => {
-      if (agentFabMeasureRafRef.current != null) {
-        cancelAnimationFrame(agentFabMeasureRafRef.current);
-        agentFabMeasureRafRef.current = null;
       }
     },
     [],

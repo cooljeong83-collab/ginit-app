@@ -7,7 +7,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
   forwardRef,
@@ -20,7 +20,6 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
-  type RefObject,
 } from 'react';
 import {
   ActivityIndicator,
@@ -29,7 +28,6 @@ import {
   Easing,
   Image,
   InteractionManager,
-  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -45,171 +43,10 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
-
-import { ActivityKindPreference } from '@/components/create/ActivityKindPreference';
-import {
-  AGENT_APPLY_POST_LAYOUT_MS,
-  AGENT_APPLY_QUICK_ACK_MS,
-  AGENT_APPLY_STEP_GAP_MS,
-  AGENT_APPLY_TAP_HOLD_MS,
-  AGENT_APPLY_TITLE_MS_PER_CODEPOINT,
-  AgentApplyRippleLayer,
-} from '@/components/create/agent-apply-ripple';
-import { CreateMeetingAgenticAiBootstrap } from '@/components/create/CreateMeetingAgenticAiBootstrap';
-import { CreateMeetingAgenticAiProvider } from '@/components/create/CreateMeetingAgenticAiContext';
-import { CreateMeetingAgenticAiFab } from '@/components/create/CreateMeetingAgenticAiFab';
-import {
-  CreateMeetingAgenticSurfaceBinder,
-  type MeetingCreateAgenticSurfaceHandles,
-} from '@/components/create/CreateMeetingAgenticSurfaceBinder';
-import { CreateMeetingNluComposerDock } from '@/components/create/CreateMeetingNluComposerDock';
-import { CreateMeetingWizardAgentBridge } from '@/components/create/CreateMeetingWizardAgentBridge';
-import { FocusKnowledgePreference } from '@/components/create/FocusKnowledgePreference';
-import { GameKindPreference } from '@/components/create/GameKindPreference';
-import {
-  CAPACITY_UNLIMITED,
-  GlassDualCapacityWheel,
-  PARTICIPANT_COUNT_MIN,
-} from '@/components/create/GlassDualCapacityWheel';
-import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
-import { MenuPreference } from '@/components/create/MenuPreference';
-import { MovieSearch } from '@/components/create/MovieSearch';
-import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
-import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
-import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
-import { KeyboardAwareScreenScroll } from '@/components/ui';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
-import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
-import { GinitTheme } from '@/constants/ginit-theme';
-import { GinitStyles } from '@/constants/GinitStyles';
-import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
-import { useUserSession } from '@/src/context/UserSessionContext';
-import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
-import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
-import type { Category } from '@/src/lib/categories';
-import { subscribeCategories } from '@/src/lib/categories';
-import type { SpecialtyKind } from '@/src/lib/category-specialty';
-import {
-  categoryNeedsSpecialty,
-  isActiveLifeMajorCode,
-  isPcGameMajorCode,
-  isPlayAndVibeMajorCode,
-  resolveSpecialtyKindForCategory,
-  specialtyStepBadge,
-} from '@/src/lib/category-specialty';
-import {
-  notifyCreateMeetingAgentBubbleDismissFromManualScroll,
-  notifyCreateMeetingAgentBubbleShow,
-} from '@/src/lib/create-meeting-agent-bubble-dismiss';
-import {
-  getAgentFabMotionMode,
-  getAgentStep1InteractionUnlocked,
-  setAgentFabMotionMode,
-  setAgentStep1InteractionUnlocked,
-  subscribeAgentStep1InteractionUnlocked,
-} from '@/src/lib/create-meeting-agent-fab-orchestration';
-import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
-import {
-  coerceDateCandidate,
-  createPointCandidate,
-  fmtDateYmd,
-  maxSelectableScheduleDayStartLocal,
-  maxSelectableScheduleYmdLocal,
-  primaryScheduleFromDateCandidate,
-  validateDateCandidate,
-} from '@/src/lib/date-candidate';
-import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
-import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
-import {
-  resolvePlaceSearchRowCoordinates,
-  searchPlacesText,
-  type PlaceSearchRow,
-} from '@/src/lib/google-places-text-search';
-import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
-import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
-import {
-  isMeetingCreateNluPatchSemanticallyEmpty,
-  MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE,
-  pickBundledMeetingCreateNudge,
-} from '@/src/lib/meeting-create-agent-chat/meeting-create-slots';
-import { isMeetingCreateNluSummaryRejectionText } from '@/src/lib/meeting-create-agent-chat/nlu-confirm-intent';
-import {
-  appendMeetingCreateAgentChatMessage,
-  createEmptyMeetingCreateAgentChatSession,
-  fingerprintMeetingCreateParsedPlan,
-  isLikelyMeetingCreateGreetingOnly,
-  meetingCreateAgentChatSlidingHistoryForEdge,
-  mergeMeetingCreateNluAccumulated,
-} from '@/src/lib/meeting-create-agent-chat/session';
-import {
-  applyPartialPublicMeetingDetails,
-  parseMeetingCreateNluPayload,
-  peekMeetingCreateNluMissingSlots,
-  wizardSuggestionFromNluPlan,
-} from '@/src/lib/meeting-create-nlu';
-import { invokeParseMeetingCreateIntent } from '@/src/lib/meeting-create-nlu-client';
-import {
-  appendMovieNudgeBoxOfficeRanks,
-  buildDeferChoiceMeetingCreatePatch,
-  isDeferUserChoiceUtterance,
-  tryPatchMovieTitleFromBoxOfficeRankReply,
-} from '@/src/lib/meeting-create-nlu/defer-user-choice';
-import { inferMeetingCreateHeadcountFromKoreanText } from '@/src/lib/meeting-create-nlu/infer-headcount-from-korean-text';
-import { mergeMeetingCreateNluAccumulatedWithAutoTitle } from '@/src/lib/meeting-create-nlu/inject-auto-title';
-import {
-  deriveMeetingTitleFromOpeningUtterance,
-  sanitizeMeetingCreateNluPatchForVenueFollowUp,
-} from '@/src/lib/meeting-create-nlu/opening-utterance-meeting-title';
-import {
-  buildLocalMeetingCreateNluPatch,
-  fillMeetingCreateNluPatchFromLocalEdge,
-  mergeMeetingCreatePlacePatchWithAccumulated,
-  shouldSkipEdgeNluForMeetingCreate,
-} from '@/src/lib/meeting-create-nlu/local-intent-patch';
-import { isMeetingCreateNaturalLanguageBlocked } from '@/src/lib/meeting-create-nlu/nlu-blocked-text';
-import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
-import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
-import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
-import {
-  consumePendingMeetingPlace,
-  consumePendingVotePlaceRow,
-} from '@/src/lib/meeting-place-bridge';
-import {
-  assertDateCandidatesNoOverlapWithOtherMeetings,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
-} from '@/src/lib/meeting-schedule-overlap';
-import {
-  generateAiMeetingDescription,
-  generateSuggestedMeetingTitle,
-  generateSuggestedMeetingTitles,
-  getFinalDescriptionPlaceholder,
-  type MeetingTitleSuggestionContext,
-} from '@/src/lib/meeting-title-suggestion';
-import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
-import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
-import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
-import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
-import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
-import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
-import {
-  buildDefaultPlaceSearchQuery,
-  buildPlaceSuggestedSearchQueries,
-} from '@/src/lib/place-query-builder';
-import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import {
-  getUserProfile,
-  isMeetingServiceComplianceComplete,
-  meetingDemographicsIncomplete,
-  type UserProfile,
-} from '@/src/lib/user-profile';
 import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
-
+import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { voteCandidatesFormStyles as styles } from '@/components/create/vote-candidates-form-styles';
 import type {
   MeetingCreatePlacesAutoAssistSnapshot,
@@ -218,6 +55,29 @@ import type {
   VoteCandidatesFormProps,
   VoteCandidatesGateResult,
 } from '@/components/create/vote-candidates-form.types';
+import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
+import { GinitTheme } from '@/constants/ginit-theme';
+import { GinitStyles } from '@/constants/GinitStyles';
+import { useUserSession } from '@/src/context/UserSessionContext';
+import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
+import type { SpecialtyKind } from '@/src/lib/category-specialty';
+import {
+  coerceDateCandidate,
+  createPointCandidate,
+  fmtDateYmd,
+  maxSelectableScheduleDayStartLocal,
+  maxSelectableScheduleYmdLocal,
+  validateDateCandidate,
+} from '@/src/lib/date-candidate';
+import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
+import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
+import {
+  resolvePlaceSearchRowCoordinates,
+  searchPlacesText,
+  type PlaceSearchRow,
+} from '@/src/lib/google-places-text-search';
 import {
   buildInitialEditorState,
   clampHm,
@@ -242,6 +102,24 @@ import {
   weekendAnytimeMatches,
   WEEKEND_ANYTIME_PREVIEW_COUNT,
 } from '@/src/lib/meeting-create-vote-candidates-utils';
+import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import { consumePendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
+import {
+  assertDateCandidatesNoOverlapWithOtherMeetings,
+  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+} from '@/src/lib/meeting-schedule-overlap';
+import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
+import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
+import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
+import {
+  buildDefaultPlaceSearchQuery,
+  buildPlaceSuggestedSearchQueries,
+} from '@/src/lib/place-query-builder';
+
+type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
