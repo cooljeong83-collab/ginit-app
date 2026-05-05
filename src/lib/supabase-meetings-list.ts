@@ -7,6 +7,7 @@
 import type { Unsubscribe } from 'firebase/firestore';
 import { Timestamp } from 'firebase/firestore';
 
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { mapFirestoreMeetingDoc, type Meeting } from '@/src/lib/meetings';
 import { supabase } from '@/src/lib/supabase';
 
@@ -37,10 +38,12 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
     const sqlCategoryId = typeof row.category_id === 'string' && row.category_id.trim() ? row.category_id.trim() : null;
     const sqlCategoryLabel =
       typeof row.category_label === 'string' && row.category_label.trim() ? row.category_label.trim() : null;
+    const sqlIsPublic = row.is_public === true ? true : row.is_public === false ? false : null;
     const withSqlCategories = {
       ...merged,
       categoryId: sqlCategoryId ?? merged.categoryId ?? null,
       categoryLabel: sqlCategoryLabel ?? merged.categoryLabel ?? null,
+      isPublic: sqlIsPublic,
     };
     if (!withSqlCategories.createdAt && row.created_at != null) {
       const c = parseCreatedAt(row.created_at);
@@ -108,7 +111,7 @@ export async function fetchPublicMeetingsFromSupabaseOnce(): Promise<
 export async function fetchMyMeetingsForFeedFromSupabase(
   appUserId: string,
 ): Promise<{ ok: true; meetings: Meeting[] } | { ok: false; message: string }> {
-  const uid = appUserId.trim();
+  const uid = normalizeParticipantId(appUserId);
   if (!uid) return { ok: true, meetings: [] };
   const { data, error } = await supabase.rpc('ledger_list_my_meetings_for_feed', {
     p_app_user_id: uid,

@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -64,10 +64,11 @@ import {
   syncFeedRegionMapBootMemoryFromSelection,
 } from '@/src/lib/feed-registered-regions';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
-import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
+import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import {
   collectUserConfirmedScheduleSlots,
   getScheduleOverlapBufferHours,
@@ -76,7 +77,6 @@ import {
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
@@ -95,6 +95,16 @@ function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean 
     .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
     .join(' ');
   return haystackMatchesFeedRegion(hay, regionLabel);
+}
+
+type HomeMeetingTopTab = 'explore' | 'my' | 'private';
+
+const HOME_MEETING_TOP_TABS = ['explore', 'my', 'private'] as const satisfies readonly HomeMeetingTopTab[];
+
+function homeMeetingTopTabIndex(t: HomeMeetingTopTab): number {
+  if (t === 'explore') return 0;
+  if (t === 'my') return 1;
+  return 2;
 }
 
 export default function FeedScreen() {
@@ -135,8 +145,8 @@ export default function FeedScreen() {
   const [feedSearchModalOpen, setFeedSearchModalOpen] = useState(false);
   const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
   const [draftFeedSearch, setDraftFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
-  /** 홈 상단 탭: 공개 모임 탐색 vs 호스트/게스트 */
-  const [homeTab, setHomeTab] = useState<'explore' | 'my'>('explore');
+  /** 홈 상단 탭: 공개 탐색 · 참여중(공개만) · 비공개만 */
+  const [homeTab, setHomeTab] = useState<HomeMeetingTopTab>('explore');
   const tabPagerRef = useRef<ScrollView | null>(null);
   const homeTabRef = useRef(homeTab);
   homeTabRef.current = homeTab;
@@ -479,9 +489,25 @@ export default function FeedScreen() {
     return out;
   }, [meetings, myMeetings]);
 
+  /** Supabase RPC `ledger_list_my_meetings_for_feed` 결과 ID — 서버가 이미 호스트·참여로 거름 */
+  const rpcMyMeetingIdSet = useMemo(() => {
+    if (meetingListSource() !== 'supabase') return null as Set<string> | null;
+    const s = new Set<string>();
+    for (const m of myMeetings) {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (id) s.add(id);
+    }
+    return s;
+  }, [myMeetings]);
+
   const joinedFilteredMeetings = useMemo(() => {
     // 내 모임 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
-    const base = filterJoinedMeetings(myTabsMeetings, userId);
+    const base = myTabsMeetings.filter((m) => {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (!id) return false;
+      if (rpcMyMeetingIdSet?.has(id)) return true;
+      return isUserJoinedMeeting(m, userId);
+    });
     return base.filter((m) => {
       if (!meetingMatchesFeedCategoryBarAndFilter(m, selectedCategoryId, feedBarVisibleCategoryIds, categories))
         return false;
@@ -491,6 +517,7 @@ export default function FeedScreen() {
     });
   }, [
     myTabsMeetings,
+    rpcMyMeetingIdSet,
     userId,
     selectedCategoryId,
     feedBarVisibleCategoryIds,
@@ -499,15 +526,31 @@ export default function FeedScreen() {
     appliedFeedSearch,
   ]);
 
+  /** 참여중 탭: 명시 비공개(`isPublic === false`)는 비공개 탭 전용 */
+  const joinedFilteredMeetingsParticipatingTab = useMemo(
+    () => joinedFilteredMeetings.filter((m) => m.isPublic !== false),
+    [joinedFilteredMeetings],
+  );
+
   const sortedJoinedMeetings = useMemo(
-    () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, feedCoords),
-    [joinedFilteredMeetings, listSortMode, feedCoords],
+    () => sortMeetingsForFeed(joinedFilteredMeetingsParticipatingTab, listSortMode, feedCoords),
+    [joinedFilteredMeetingsParticipatingTab, listSortMode, feedCoords],
+  );
+
+  const privateJoinedFilteredMeetings = useMemo(
+    () => joinedFilteredMeetings.filter((m) => m.isPublic === false),
+    [joinedFilteredMeetings],
+  );
+
+  const sortedPrivateMeetings = useMemo(
+    () => sortMeetingsForFeed(privateJoinedFilteredMeetings, listSortMode, feedCoords),
+    [privateJoinedFilteredMeetings, listSortMode, feedCoords],
   );
 
   const goToHomeTab = useCallback(
-    (t: 'explore' | 'my') => {
+    (t: HomeMeetingTopTab) => {
       setHomeTab(t);
-      const idx = t === 'explore' ? 0 : 1;
+      const idx = homeMeetingTopTabIndex(t);
       requestAnimationFrame(() => {
         tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: true });
       });
@@ -520,14 +563,14 @@ export default function FeedScreen() {
       const x = e.nativeEvent.contentOffset.x;
       const w = Math.max(1, windowWidth);
       const idx = Math.round(x / w);
-      const next: 'explore' | 'my' = idx <= 0 ? 'explore' : 'my';
+      const next: HomeMeetingTopTab = idx <= 0 ? 'explore' : idx === 1 ? 'my' : 'private';
       setHomeTab(next);
     },
     [windowWidth],
   );
 
   const handleEndReachedForTab = useCallback(
-    (tab: 'explore' | 'my') => {
+    (tab: HomeMeetingTopTab) => {
       if (homeTab !== tab) return;
       if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
     },
@@ -930,7 +973,7 @@ export default function FeedScreen() {
   );
 
   const renderHomeItemForList = useCallback(
-    (item: Meeting, tab: 'explore' | 'my') => {
+    (item: Meeting, tab: HomeMeetingTopTab) => {
       const pk = userId?.trim() ?? '';
       const ns = pk ? normalizeParticipantId(pk) : '';
       const isHost = Boolean(ns) && (normalizeParticipantId(item.createdBy?.trim() ?? '') ?? '') === ns;
@@ -1127,10 +1170,29 @@ export default function FeedScreen() {
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: homeTab === 'my' }}
-            accessibilityLabel="내 모임">
+            accessibilityLabel="참여중 모임">
             <Text style={[styles.homeTopChipLabel, homeTab === 'my' && styles.homeTopChipLabelActive]} numberOfLines={1}>
-              내 모임
+              참여중
             </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => goToHomeTab('private')}
+            style={({ pressed }) => [
+              styles.homeTopChip,
+              homeTab === 'private' && styles.homeTopChipActive,
+              pressed && styles.homeTopChipPressed,
+              { maxWidth: tabChipMaxWidth },
+            ]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: homeTab === 'private' }}
+            accessibilityLabel="비공개 모임">
+            <GinitSymbolicIcon
+              name="lock-closed-outline"
+              size={20}
+              color={homeTab === 'private' ? '#fff' : '#475569'}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
           </Pressable>
         </View>
         <Pressable
@@ -1149,7 +1211,7 @@ export default function FeedScreen() {
     </View>
   );
 
-  const tabListAlerts = (tab: 'explore' | 'my'): ReactElement => (
+  const tabListAlerts = (tab: HomeMeetingTopTab): ReactElement => (
     <>
       {listError ? (
         <View style={styles.errorBox}>
@@ -1192,8 +1254,25 @@ export default function FeedScreen() {
       sortedJoinedMeetings.length === 0
         ? feedListEmptyCentered(
             'albums-outline',
-            '조건에 맞는 내 모임이 없어요',
-            '필터를 바꾸거나 탐색에서 모임에 참여해 보세요.',
+            privateJoinedFilteredMeetings.length > 0
+              ? '참여중 탭에는 공개 모임만 보여요'
+              : '조건에 맞는 참여 모임이 없어요',
+            privateJoinedFilteredMeetings.length > 0
+              ? '비공개로 참여·개설한 모임은 「비공개」 탭에서 확인할 수 있어요.'
+              : '필터를 바꾸거나 탐색에서 모임에 참여해 보세요.',
+          )
+        : null}
+
+      {feedLocationReady &&
+      !isInitialListLoading &&
+      !listError &&
+      meetings.length > 0 &&
+      tab === 'private' &&
+      sortedPrivateMeetings.length === 0
+        ? feedListEmptyCentered(
+            'lock-closed-outline',
+            '조건에 맞는 비공개 모임이 없어요',
+            '비공개 모임은 초대·참여로만 보이며, 필터를 바꾸면 목록이 달라질 수 있어요.',
           )
         : null}
 
@@ -1215,7 +1294,7 @@ export default function FeedScreen() {
 
   useEffect(() => {
     const t = homeTabRef.current;
-    const idx = t === 'explore' ? 0 : 1;
+    const idx = homeMeetingTopTabIndex(t);
     tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: false });
   }, [windowWidth]);
 
@@ -1234,8 +1313,13 @@ export default function FeedScreen() {
               showsHorizontalScrollIndicator={false}
               onMomentumScrollEnd={onTabPagerMomentumEnd}
               style={styles.tabPager}>
-              {(['explore', 'my'] as const).map((tab) => {
-              const tabData = tab === 'explore' ? exploreFeedMeetings : sortedJoinedMeetings;
+              {HOME_MEETING_TOP_TABS.map((tab) => {
+              const tabData =
+                tab === 'explore'
+                  ? exploreFeedMeetings
+                  : tab === 'my'
+                    ? sortedJoinedMeetings
+                    : sortedPrivateMeetings;
               return (
                 <View key={tab} style={[styles.tabPage, { width: windowWidth }]}>
                   <FlatList
@@ -1250,6 +1334,7 @@ export default function FeedScreen() {
                       feedBarVisibleCategoryIds,
                       appliedFeedSearch,
                       exploreLen: exploreFeedMeetings.length,
+                      privateLen: sortedPrivateMeetings.length,
                       feedLocationReady,
                       registeredRegionsLen: registeredRegions.length,
                       exploreActiveRegionNorm,
