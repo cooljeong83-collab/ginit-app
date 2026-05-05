@@ -1,10 +1,11 @@
 /**
- * 자연어 → 모임 생성 위저드용 구조화 JSON (Groq Llama 하이브리드).
+ * 자연어 → 모임 생성 위저드용 구조화 JSON (Groq → Mistral AI → Gemini 최종 폴백).
  *
- * Secret: GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (금지어 정책 조회)
+ * Secret: GROQ_API_KEY, MISTRAL_API_KEY(선택·Groq 전부 실패 시), GEMINI_API_KEY(Groq 전원 429일 때만), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (금지어 정책 조회)
  * Groq 송신 로그: 기본(user+길이 메타)은 항상 출력. `GROQ_DEBUG_MESSAGES=1|true|yes`이면 system 프롬프트 전문 추가.
  * 끄려면 `GROQ_DEBUG_MESSAGES=0|false|no|off`(또는 `GROQ_DEBUG_SILENT=1`).
- * 모델: llama-3.3-70b-versatile → 실패 시 llama-3.1-8b-instant 폴백.
+ * 모델 라우팅: 매 요청 끝에 `nlu_model_route` 한 줄(`winner` 또는 `nlu_exhausted`). 단계별 호출 로그는 `NLU_MODEL_DEBUG=1|true|yes`.
+ * Groq: `GROQ_CHAT_MODELS` 순서 시도 → 파싱 실패 시 `MISTRAL_API_KEY`가 있으면 Mistral Chat 한 번 → 그래도 없고 **Groq 전원 HTTP 429**이면 `GEMINI_API_KEY`로 Gemini 1.5 Flash 1회.
  * Request JSON: { text, todayYmd?, accumulated?, history? } — history는 최근 2~3턴 대화(현재 text 제외). 카테고리는 DB 캐시·시스템 프롬프트. 레거시: cats+ids 등.
  * Response JSON: { result } | { blocked: true, message }
  * 후처리: 코드펜스/사족 제거 후 JSON 파싱, 요약 스키마 병합, 메뉴 키워드 폴백, 공개 시 ageLimit 기본.
@@ -12,8 +13,38 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 
 const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL_PRIMARY = 'llama-3.3-70b-versatile';
-const GROQ_MODEL_FALLBACK = 'llama-3.1-8b-instant';
+const MISTRAL_CHAT_URL = 'https://api.mistral.ai/v1/chat/completions';
+/** Mistral 공식 Chat — JSON 모드 지원 모델(필요 시 교체) */
+const MISTRAL_NLU_MODEL = 'mistral-small-latest';
+
+/**
+ * 한 개의 `GROQ_API_KEY`로 순차 폴백. (Groq 콘솔 기준 ID — 미호스팅 시 400 등으로 떨어질 수 있음.)
+ * 전부 HTTP 429(rate limit)로만 실패한 경우에만 Gemini 최종 보루가 호출된다.
+ */
+const GROQ_CHAT_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'gemma2-9b-it',
+  'mixtral-8x7b-32768',
+] as const;
+
+function isGroqHttp429Detail(detail: string): boolean {
+  return /^\s*429(\s|$)/.test(detail);
+}
+
+/** Groq/Gemini **어느 모델이 실제로 호출·성공했는지** 단계 로그 (`supabase functions logs`에서 `nlu_model_route` 검색) */
+function isNluModelDebugVerbose(): boolean {
+  const v = Deno.env.get('NLU_MODEL_DEBUG')?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+function logNluModelRoute(payload: Record<string, unknown>): void {
+  console.log('[parse-meeting-create-intent] nlu_model_route', JSON.stringify(payload));
+}
+
+/** Google AI Studio / Generative Language API — Groq 전원 429·Mistral 이후에도 파싱 없을 때만 호출 */
+const GEMINI_FLASH_MODEL = 'gemini-1.5-flash';
+const GEMINI_GENERATE_CONTENT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_FLASH_MODEL}:generateContent`;
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -828,6 +859,171 @@ async function callGroqOnce(
   return { ok: true, content };
 }
 
+/**
+ * Mistral AI Chat — Groq와 동일 system·user, OpenAI 호환 응답(`extractGroqChatContent` 재사용).
+ * `response_format: json_object` 로 구조화 출력 유도.
+ */
+async function callMistralJsonOnce(
+  apiKey: string,
+  systemPrompt: string,
+  userText: string,
+): Promise<GroqAttemptOk | GroqAttemptFail> {
+  if (isNluModelDebugVerbose()) {
+    logNluModelRoute({ event: 'mistral_request_start', model: MISTRAL_NLU_MODEL });
+  }
+  if (!isGroqOutboundLogSilent()) {
+    console.log(
+      '[parse-meeting-create-intent] mistral_outbound_meta',
+      JSON.stringify({
+        model: MISTRAL_NLU_MODEL,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        systemChars: systemPrompt.length,
+        userChars: userText.length,
+      }),
+    );
+    console.log('[parse-meeting-create-intent] mistral_outbound_user\n', userText);
+    if (isGroqFullPromptLogEnabled()) {
+      console.log('[parse-meeting-create-intent] mistral_outbound_system\n', systemPrompt);
+    }
+  }
+  let res: Response;
+  try {
+    res = await fetch(MISTRAL_CHAT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MISTRAL_NLU_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userText },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      }),
+    });
+  } catch (e) {
+    return { ok: false, tag: 'mistral_fetch_failed', detail: String(e) };
+  }
+  if (!res.ok) {
+    const t = await res.text();
+    return { ok: false, tag: 'mistral_http', detail: `${res.status} ${t.slice(0, 800)}` };
+  }
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch (e) {
+    return { ok: false, tag: 'mistral_json_read_failed', detail: String(e) };
+  }
+  const content = extractGroqChatContent(body);
+  if (!content) {
+    return { ok: false, tag: 'mistral_empty_model_text', detail: JSON.stringify(body).slice(0, 600) };
+  }
+  return { ok: true, content };
+}
+
+function extractGeminiGenerateContent(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as {
+    error?: { code?: number; message?: string; status?: string };
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+    promptFeedback?: { blockReason?: string };
+  };
+  if (d.error?.message) {
+    console.error(
+      '[parse-meeting-create-intent] Ginit_AI_Error',
+      'gemini_error_field',
+      JSON.stringify(d.error),
+    );
+    return null;
+  }
+  if (d.promptFeedback?.blockReason) {
+    console.error(
+      '[parse-meeting-create-intent] Ginit_AI_Error',
+      'gemini_prompt_blocked',
+      d.promptFeedback.blockReason,
+    );
+    return null;
+  }
+  const parts = d.candidates?.[0]?.content?.parts;
+  const raw = parts?.[0]?.text;
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  return t.length > 0 ? t : null;
+}
+
+/** Groq와 동일한 silent 플래그로 메타 로그 통일 */
+function logGeminiOutboundMeta(systemPrompt: string, userText: string): void {
+  if (isGroqOutboundLogSilent()) return;
+  console.log(
+    '[parse-meeting-create-intent] gemini_outbound_meta',
+    JSON.stringify({
+      model: GEMINI_FLASH_MODEL,
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+      systemChars: systemPrompt.length,
+      userChars: userText.length,
+      systemLogged: isGroqFullPromptLogEnabled(),
+    }),
+  );
+  console.log('[parse-meeting-create-intent] gemini_outbound_user\n', userText);
+  if (isGroqFullPromptLogEnabled()) {
+    console.log('[parse-meeting-create-intent] gemini_outbound_system\n', systemPrompt);
+  }
+}
+
+/**
+ * Gemini 1.5 Flash 전용 — JSON 모드(`responseMimeType: application/json`).
+ * system·user는 Groq와 동일 문자열을 그대로 전달해 스키마·톤 일관성 유지.
+ */
+async function callGeminiFlashJsonOnce(
+  apiKey: string,
+  systemPrompt: string,
+  userText: string,
+): Promise<GroqAttemptOk | GroqAttemptFail> {
+  logGeminiOutboundMeta(systemPrompt, userText);
+  if (isNluModelDebugVerbose()) {
+    logNluModelRoute({ event: 'gemini_request_start', model: GEMINI_FLASH_MODEL });
+  }
+  let res: Response;
+  try {
+    res = await fetch(GEMINI_GENERATE_CONTENT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: userText }] }],
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+        },
+      }),
+    });
+  } catch (e) {
+    return { ok: false, tag: 'gemini_fetch_failed', detail: String(e) };
+  }
+  if (!res.ok) {
+    const t = await res.text();
+    return { ok: false, tag: 'gemini_http', detail: `${res.status} ${t.slice(0, 800)}` };
+  }
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch (e) {
+    return { ok: false, tag: 'gemini_json_read_failed', detail: String(e) };
+  }
+  const content = extractGeminiGenerateContent(body);
+  if (!content) {
+    return { ok: false, tag: 'gemini_empty_or_blocked', detail: JSON.stringify(body).slice(0, 600) };
+  }
+  return { ok: true, content };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -924,7 +1120,7 @@ user 블록에 누적 JSON이 있으면: 이미 채워진 필드는 이번 한 �
 categoryIndex는 위 번호(정수 0 .. ${pairs.length - 1}) 중 정확히 하나이거나, 불가하면 null.
 
 [Model / hybrid]
-The server calls Llama 3.3 70B first and Llama 3.1 8B Instant on failure (e.g. rate limits). Output the same APP JSON schema in all cases.
+The server tries Groq in order: Llama 3.3 70B → Llama 3.1 8B Instant → Gemma 2 9B → Mixtral 8x7B; then Mistral AI (Mistral API) if Groq produced no parseable JSON and MISTRAL_API_KEY is set. Google Gemini 1.5 Flash runs **only** when every Groq attempt failed with HTTP 429 (rate limit) and a Gemini API key is configured (after Mistral if that step also failed or was skipped). Output the same APP JSON schema in all cases.
 
 [Intent pivoting]
 If the dominant intent shifts (e.g. generic food → drinking), immediately realign categoryIndex (위 [카테고리] 목록의 인덱스), menuPreferenceLabel (주점·호프·포차 등), title, and 장소/placeAutoPickQuery to the new intent; drop mismatched prior assumptions.
@@ -1022,41 +1218,230 @@ Optional nested JSON (server flattens into the same fields; you may use in addit
       ? `누적(JSON, 빈·기본값 제외):\n${JSON.stringify(accumSlim)}\n\n메시지:\n${text}`
       : `메시지:\n${text}`);
 
-  const models = [GROQ_MODEL_PRIMARY, GROQ_MODEL_FALLBACK];
   let parsed: Record<string, unknown> | null = null;
-  let lastGroqLog: { model: string; tag: string; detail: string } | null = null;
+  /** 마지막으로 관측한 LLM 실패(Groq / Mistral / Gemini) — 최종 502 메시지 분기용 */
+  let lastFailLog: { model: string; tag: string; detail: string } | null = null;
+  /** Groq를 한 번이라도 돌렸고, 매 라운드가 `groq_http` + 429뿐이었을 때만 true (200+비JSON·기타 에러면 false) */
+  let groqEveryRoundWas429 = true;
+  let groqAttemptCount = 0;
 
-  for (const model of models) {
+  if (isNluModelDebugVerbose()) {
+    logNluModelRoute({
+      event: 'groq_chain_start',
+      models: [...GROQ_CHAT_MODELS],
+      mistralAfterGroq: Boolean(Deno.env.get('MISTRAL_API_KEY')?.trim()),
+      geminiOnAllGroq429: true,
+    });
+  }
+
+  for (const model of GROQ_CHAT_MODELS) {
+    groqAttemptCount += 1;
+    if (isNluModelDebugVerbose()) {
+      logNluModelRoute({
+        event: 'groq_request_start',
+        model,
+        attempt: groqAttemptCount,
+        total: GROQ_CHAT_MODELS.length,
+      });
+    }
     const once = await callGroqOnce(apiKey, model, systemPrompt, userText);
+    if (isNluModelDebugVerbose()) {
+      logNluModelRoute({
+        event: 'groq_request_done',
+        model,
+        attempt: groqAttemptCount,
+        ok: once.ok,
+        tag: once.ok ? undefined : once.tag,
+      });
+    }
     if (!once.ok) {
-      lastGroqLog = { model, tag: once.tag, detail: once.detail };
+      lastFailLog = { model, tag: once.tag, detail: once.detail };
+      if (once.tag !== 'groq_http' || !isGroqHttp429Detail(once.detail)) {
+        groqEveryRoundWas429 = false;
+      }
       console.error('[parse-meeting-create-intent] Ginit_AI_Error', once.tag, model, once.detail.slice(0, 400));
       continue;
     }
     const parsedAttempt = tryParseNluContent(once.content);
+    if (isNluModelDebugVerbose()) {
+      logNluModelRoute({
+        event: 'groq_json_parse',
+        model,
+        parsed: Boolean(parsedAttempt),
+      });
+    }
     if (parsedAttempt) {
       parsed = parsedAttempt;
+      logNluModelRoute({ event: 'winner', provider: 'groq', model });
       break;
     }
-    lastGroqLog = { model, tag: 'model_text_not_json', detail: once.content.slice(0, 400) };
+    lastFailLog = { model, tag: 'model_text_not_json', detail: once.content.slice(0, 400) };
+    groqEveryRoundWas429 = false;
     console.error('[parse-meeting-create-intent] Ginit_AI_Error', 'model_text_not_json', model);
   }
 
+  const groqFullyRateLimited =
+    !parsed && groqAttemptCount === GROQ_CHAT_MODELS.length && groqEveryRoundWas429;
+
+  /** Groq에서 유효 JSON이 없을 때 Mistral Chat 1회(동일 system·user) */
   if (!parsed) {
+    const mistralKey = Deno.env.get('MISTRAL_API_KEY')?.trim();
+    if (mistralKey) {
+      if (isNluModelDebugVerbose()) {
+        logNluModelRoute({
+          event: 'mistral_fallback_start',
+          model: MISTRAL_NLU_MODEL,
+          reason: 'groq_no_parseable_json',
+        });
+      }
+      const msOnce = await callMistralJsonOnce(mistralKey, systemPrompt, userText);
+      if (isNluModelDebugVerbose()) {
+        logNluModelRoute({
+          event: 'mistral_request_done',
+          model: MISTRAL_NLU_MODEL,
+          ok: msOnce.ok,
+          tag: msOnce.ok ? undefined : msOnce.tag,
+        });
+      }
+      if (!msOnce.ok) {
+        lastFailLog = { model: MISTRAL_NLU_MODEL, tag: msOnce.tag, detail: msOnce.detail };
+        console.error(
+          '[parse-meeting-create-intent] Ginit_AI_Error',
+          msOnce.tag,
+          MISTRAL_NLU_MODEL,
+          msOnce.detail.slice(0, 400),
+        );
+      } else {
+        const parsedMs = tryParseNluContent(msOnce.content);
+        if (isNluModelDebugVerbose()) {
+          logNluModelRoute({
+            event: 'mistral_json_parse',
+            model: MISTRAL_NLU_MODEL,
+            parsed: Boolean(parsedMs),
+          });
+        }
+        if (parsedMs) {
+          parsed = parsedMs;
+          logNluModelRoute({ event: 'winner', provider: 'mistral', model: MISTRAL_NLU_MODEL });
+        } else {
+          lastFailLog = {
+            model: MISTRAL_NLU_MODEL,
+            tag: 'model_text_not_json',
+            detail: msOnce.content.slice(0, 400),
+          };
+          console.error(
+            '[parse-meeting-create-intent] Ginit_AI_Error',
+            'model_text_not_json',
+            MISTRAL_NLU_MODEL,
+          );
+        }
+      }
+    }
+  }
+
+  /** Groq 네 모델이 모두 429이고 아직 파싱 성공이 없을 때만 Gemini(동일 system·user, JSON 모드) */
+  if (groqFullyRateLimited && !parsed) {
+    const geminiKey = Deno.env.get('GEMINI_API_KEY')?.trim();
+    if (geminiKey) {
+      if (isNluModelDebugVerbose()) {
+        logNluModelRoute({
+          event: 'gemini_fallback_start',
+          model: GEMINI_FLASH_MODEL,
+          reason: 'groq_all_http_429',
+        });
+      }
+      const gemOnce = await callGeminiFlashJsonOnce(geminiKey, systemPrompt, userText);
+      if (isNluModelDebugVerbose()) {
+        logNluModelRoute({
+          event: 'gemini_request_done',
+          model: GEMINI_FLASH_MODEL,
+          ok: gemOnce.ok,
+          tag: gemOnce.ok ? undefined : gemOnce.tag,
+        });
+      }
+      if (!gemOnce.ok) {
+        lastFailLog = { model: GEMINI_FLASH_MODEL, tag: gemOnce.tag, detail: gemOnce.detail };
+        console.error(
+          '[parse-meeting-create-intent] Ginit_AI_Error',
+          gemOnce.tag,
+          GEMINI_FLASH_MODEL,
+          gemOnce.detail.slice(0, 400),
+        );
+      } else {
+        const parsedGem = tryParseNluContent(gemOnce.content);
+        if (isNluModelDebugVerbose()) {
+          logNluModelRoute({
+            event: 'gemini_json_parse',
+            model: GEMINI_FLASH_MODEL,
+            parsed: Boolean(parsedGem),
+          });
+        }
+        if (parsedGem) {
+          parsed = parsedGem;
+          logNluModelRoute({ event: 'winner', provider: 'gemini', model: GEMINI_FLASH_MODEL });
+        } else {
+          lastFailLog = {
+            model: GEMINI_FLASH_MODEL,
+            tag: 'model_text_not_json',
+            detail: gemOnce.content.slice(0, 400),
+          };
+          console.error(
+            '[parse-meeting-create-intent] Ginit_AI_Error',
+            'model_text_not_json',
+            GEMINI_FLASH_MODEL,
+          );
+        }
+      }
+    }
+  }
+
+  if (!parsed) {
+    logNluModelRoute({
+      event: 'nlu_exhausted',
+      lastModel: lastFailLog?.model ?? null,
+      lastTag: lastFailLog?.tag ?? null,
+      groqFullyRateLimited,
+      mistralKeyConfigured: Boolean(Deno.env.get('MISTRAL_API_KEY')?.trim()),
+      geminiKeyConfigured: Boolean(Deno.env.get('GEMINI_API_KEY')?.trim()),
+    });
+    if (groqFullyRateLimited && !Deno.env.get('GEMINI_API_KEY')?.trim()) {
+      return jsonResponse(
+        {
+          error:
+            'All Groq models returned HTTP 429 (rate limit). Set GEMINI_API_KEY for Gemini 1.5 Flash fallback (optional: MISTRAL_API_KEY is tried before Gemini when Groq returns no JSON).',
+        },
+        429,
+      );
+    }
+    const tag = lastFailLog?.tag ?? '';
+    const detail = lastFailLog?.detail ?? '';
     const unreachable =
-      lastGroqLog?.tag === 'groq_fetch_failed' ||
-      (lastGroqLog?.tag === 'groq_http' && /^\s*5\d\d/.test(lastGroqLog.detail));
+      tag === 'groq_fetch_failed' ||
+      tag === 'mistral_fetch_failed' ||
+      tag === 'gemini_fetch_failed' ||
+      (tag === 'groq_http' && /^\s*5\d\d/.test(detail)) ||
+      (tag === 'mistral_http' && /^\s*5\d\d/.test(detail)) ||
+      (tag === 'gemini_http' && /^\s*5\d\d/.test(detail));
     if (unreachable) {
       return jsonResponse({ error: 'Upstream model unreachable' }, 502);
     }
-    if (lastGroqLog?.tag === 'groq_http') {
+    if (tag === 'groq_http' || tag === 'mistral_http' || tag === 'gemini_http') {
       return jsonResponse({ error: 'Upstream model error' }, 502);
     }
-    if (lastGroqLog?.tag === 'groq_json_read_failed') {
+    if (tag === 'groq_json_read_failed' || tag === 'mistral_json_read_failed' || tag === 'gemini_json_read_failed') {
       return jsonResponse({ error: 'Invalid upstream response' }, 502);
     }
-    if (lastGroqLog?.tag === 'empty_model_text') {
+    if (tag === 'empty_model_text' || tag === 'mistral_empty_model_text' || tag === 'gemini_empty_or_blocked') {
       return jsonResponse({ error: 'Empty model response' }, 502);
+    }
+    if (groqFullyRateLimited) {
+      return jsonResponse(
+        {
+          error:
+            'Groq rate limit (429) on all models; Mistral and/or Gemini 1.5 Flash fallback also failed or returned non-JSON.',
+        },
+        502,
+      );
     }
     return jsonResponse({ error: 'Model returned non-JSON' }, 502);
   }
