@@ -936,7 +936,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const commitPlaceSearchRowAsAgentCandidate = useCallback(async (item: PlaceSearchRow): Promise<boolean> => {
     const title = item.title;
-    const addr = (item.roadAddress || item.address || '').trim() || item.category;
+    const addr = (item.roadAddress || item.address || '').trim();
     try {
       setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
       const resolved = await resolvePlaceSearchRowCoordinates(item);
@@ -945,13 +945,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       const placeName = resolved.title.trim() || title.trim();
       const linkFromApi =
         sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
+      const thumb = (resolved.thumbnailUrl ?? '').trim();
+      const cat = (resolved.category ?? item.category ?? '').trim();
       const p: PlaceCandidate = {
         id: newId('place'),
         placeName,
         address,
         latitude: resolved.latitude,
         longitude: resolved.longitude,
+        ...(cat ? { category: cat } : {}),
         ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
+        ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),
       };
       setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
       setPlaceCandidates((prev) => {
@@ -1071,6 +1075,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
               ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
@@ -1142,6 +1147,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
               ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
@@ -1171,6 +1177,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
               ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
@@ -1207,6 +1214,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   address: sel.address,
                   latitude: sel.latitude,
                   longitude: sel.longitude,
+                  ...(sel.category?.trim() ? { category: sel.category.trim() } : {}),
                   ...(sel.naverPlaceLink?.trim() ? { naverPlaceLink: sel.naverPlaceLink.trim() } : {}),
                   ...(sel.preferredPhotoMediaUrl?.trim().startsWith('https://')
                     ? { preferredPhotoMediaUrl: sel.preferredPhotoMediaUrl.trim() }
@@ -2154,7 +2162,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     <>
                       {placeSearchRows.map((item) => {
                       const title = item.title;
-                      const addr = (item.roadAddress || item.address || '').trim() || item.category;
+                      const cat = (item.category ?? '').trim();
+                      const addressOnly = (item.roadAddress || item.address || '').trim();
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
                       const thumb = placeThumbById[item.id] ?? null;
@@ -2182,7 +2191,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                 setPlaceCandidates((prev) => {
                                   if (!picked) {
                                     return prev.filter(
-                                      (r) => !(r.placeName === title.trim() && r.address === addr.trim()),
+                                      (r) =>
+                                        !(
+                                          r.placeName === title.trim() &&
+                                          r.address === (addressOnly || cat)
+                                        ),
                                     );
                                   }
                                   return prev.filter(
@@ -2205,7 +2218,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                               void (async () => {
                                 try {
                                   const resolved = await resolvePlaceSearchRowCoordinates(item);
-                                  const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
+                                  const address =
+                                    resolved.roadAddress?.trim() || resolved.address?.trim() || addressOnly;
                                   if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
                                   const placeName = resolved.title.trim() || title.trim();
                                   const linkFromApi =
@@ -2214,12 +2228,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                   const preferredPhotoMediaUrl = resolvedPhoto.startsWith('https://')
                                     ? resolvedPhoto
                                     : undefined;
+                                  const catPick = (resolved.category ?? item.category ?? '').trim();
                                   const p: PlaceCandidate = {
                                     id: newId('place'),
                                     placeName,
                                     address,
                                     latitude: resolved.latitude,
                                     longitude: resolved.longitude,
+                                    ...(catPick ? { category: catPick } : {}),
                                     ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
                                     ...(preferredPhotoMediaUrl ? { preferredPhotoMediaUrl } : {}),
                                   };
@@ -2263,15 +2279,22 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                               <Text style={styles.placeResultTitle} numberOfLines={2}>
                                 {title}
                               </Text>
-                              <Text style={styles.placeResultAddr} numberOfLines={2}>
-                                {addr}
-                              </Text>
+                              {cat ? (
+                                <Text style={styles.placeResultAddr} numberOfLines={2}>
+                                  {cat}
+                                </Text>
+                              ) : null}
+                              {addressOnly ? (
+                                <Text style={styles.placeResultAddr} numberOfLines={2}>
+                                  {addressOnly}
+                                </Text>
+                              ) : null}
                             </View>
                           </Pressable>
                           <PlaceCandidateDetailLinkRow
                             title={item.title}
                             link={item.link}
-                            addressLine={typeof addr === 'string' && addr.trim() ? addr.trim() : undefined}
+                            addressLine={addressOnly || undefined}
                             disabled={resolving}
                             containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
                             onOpenUrl={(url, t) => {

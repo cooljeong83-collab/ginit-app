@@ -1,12 +1,15 @@
 /**
  * 네이버 Open API **지역 검색(local.json)** 전용 — Google Places API 미사용.
- * 파일명만 레거시일 수 있으니, 장소 텍스트 검색은 본 모듈·`searchNaverLocalKeywordPlacesPaginated`만 사용합니다.
+ * Android 1페이지는 `ScrapingPlaceSearchService`(Jsoup·모바일 웹) 우선, 실패·빈 결과 시 Open API 폴백.
  */
+import { Platform } from 'react-native';
+
 import type { NaverLocalPlace } from '@/src/lib/naver-local-search';
 import {
   resolveNaverPlaceCoordinates,
   searchNaverLocalKeywordPlacesPaginated,
 } from '@/src/lib/naver-local-search';
+import { ScrapingPlaceSearchService } from '@/src/lib/scraping-place-search-service';
 
 export { stableNaverLocalSearchDedupeKey } from '@/src/lib/naver-local-search';
 
@@ -32,7 +35,11 @@ export type SearchPlacesTextOptions = {
   /** 쿼리 끝에 붙는 지역 힌트(구·동 등) */
   locationBias?: string | null;
   userCoords?: { latitude: number; longitude: number } | null;
-  /** 다음 페이지: `"2"`, `"3"` … (1페이지는 comment+start, 이후는 random 가상 페이지) */
+  /**
+   * 다음 페이지 토큰.
+   * - OpenAPI: `"2"`, `"3"` …
+   * - Android 모바일 스크랩 세션: 같은 검색으로 이어 받기 `"s:5"`, `"s:10"` …(내부 버퍼 오프셋)
+   */
   pageToken?: string | null;
   /** `pageToken`이 2 이상일 때 — 이미 목록에 있는 장소 제외(`stableNaverLocalSearchDedupeKey`) */
   excludeStablePlaceKeys?: readonly string[] | null;
@@ -52,6 +59,25 @@ function parseNumericPageToken(pageToken: string | null | undefined): number {
   if (!Number.isFinite(n) || n < 1) return 1;
   /** 가상 페이지 상한 — `searchNaverLocalKeywordPlacesPaginated`의 CAP과 맞춤 */
   return Math.min(200, n);
+}
+
+/** Android 스크랩 1회 결과를 무한 스크롤 청크로 자릅기 위한 세션 버퍼 */
+let scrapeInfiniteBuffer: { norm: string; rows: PlaceSearchRow[] } | null = null;
+
+function scrapeQueryNormForBuffer(q: string): string {
+  return q.trim().replace(/\s+/g, ' ');
+}
+
+/** 다음 청크 요청 토큰 `s:<offset>` (동일 검색어 세션 내에서만 유효) */
+function encodeScrapeVirtualPageToken(offset: number): string {
+  return `s:${offset}`;
+}
+
+function parseScrapeVirtualPageToken(token: string): number | null {
+  const m = /^s:(\d+)$/.exec(token.trim());
+  if (!m) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function naverLocalToPlaceSearchRow(p: NaverLocalPlace): PlaceSearchRow {
@@ -82,9 +108,92 @@ export async function searchPlacesText(
   }
   if (!textQuery) return { places: [], nextPageToken: null };
 
-  const page = parseNumericPageToken(options?.pageToken);
   const pageSize = Math.min(5, Math.max(1, Math.floor(options?.maxResultCount ?? 5)));
+  const rawTok = (options?.pageToken ?? '').trim();
 
+  if (Platform.OS === 'android' && ScrapingPlaceSearchService.isAvailable()) {
+    const qNorm = scrapeQueryNormForBuffer(textQuery);
+    const virtOff = parseScrapeVirtualPageToken(rawTok);
+
+    if (virtOff != null) {
+      const buf = scrapeInfiniteBuffer;
+      if (!buf || buf.norm !== qNorm) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[NaverMobilePlaceScrape]', {
+            source: 'scrape_buffer_miss',
+            query: textQuery,
+            token: rawTok,
+          });
+        }
+        return { places: [], nextPageToken: null };
+      }
+      const slice = buf.rows.slice(virtOff, virtOff + pageSize);
+      await ScrapingPlaceSearchService.enrichRowsNeedingDetail(slice);
+      const nextOff = virtOff + slice.length;
+      const nextTok = nextOff < buf.rows.length ? encodeScrapeVirtualPageToken(nextOff) : null;
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log('[NaverMobilePlaceScrape]', {
+          source: 'scrape_chunk',
+          query: textQuery,
+          offset: virtOff,
+          chunkCount: slice.length,
+          totalParsed: buf.rows.length,
+          nextPageToken: nextTok,
+          locationBias: bias ?? null,
+          userCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
+        });
+      }
+      return { places: slice, nextPageToken: nextTok };
+    }
+
+    if (rawTok === '' || rawTok === '1') {
+      const scrapeT0 = Date.now();
+      try {
+        const scraped = await ScrapingPlaceSearchService.fetchMappedMobilePlacesNoDetail(textQuery);
+        if (scraped && scraped.length > 0) {
+          scrapeInfiniteBuffer = { norm: qNorm, rows: scraped };
+          const slice = scraped.slice(0, pageSize);
+          await ScrapingPlaceSearchService.enrichRowsNeedingDetail(slice);
+          const nextTok =
+            scraped.length > pageSize ? encodeScrapeVirtualPageToken(pageSize) : null;
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log('[NaverMobilePlaceScrape]', {
+              source: 'scrape',
+              query: textQuery,
+              locationBias: bias ?? null,
+              userCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
+              chunkCount: slice.length,
+              totalParsed: scraped.length,
+              nextPageToken: nextTok,
+              totalMs: Date.now() - scrapeT0,
+            });
+          }
+          return { places: slice, nextPageToken: nextTok };
+        }
+        scrapeInfiniteBuffer = null;
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[NaverMobilePlaceScrape]', {
+            source: 'scrape_empty',
+            query: textQuery,
+            scrapedLength: scraped?.length ?? 0,
+            fallback: 'openapi',
+          });
+        }
+      } catch (e) {
+        scrapeInfiniteBuffer = null;
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[NaverMobilePlaceScrape]', { source: 'scrape_error', fallback: 'openapi', err: e });
+        }
+      }
+    }
+  }
+
+  const page = parseNumericPageToken(options?.pageToken);
   const { places: naverPlaces, nextPageToken } = await searchNaverLocalKeywordPlacesPaginated(textQuery, {
     locationBias: options?.locationBias,
     page,
@@ -112,22 +221,59 @@ export async function searchPlacesText(
 
 /** 목록에 좌표가 없으면 NCP 지오코딩으로 보강(네이버 지역 검색 응답). */
 export async function resolvePlaceSearchRowCoordinates(row: PlaceSearchRow): Promise<PlaceSearchRow> {
-  if (row.latitude != null && row.longitude != null) return row;
+  let base: PlaceSearchRow = { ...row };
+  let detailAddressLine: string | null = null;
+
+  if (Platform.OS === 'android' && (row.link ?? '').trim().length > 0 && ScrapingPlaceSearchService.isAvailable()) {
+    try {
+      const patch = await ScrapingPlaceSearchService.enrichPlaceSearchRowFromDetailPage(row);
+      if (patch && Object.keys(patch).length > 0) {
+        base = { ...base, ...patch };
+        const d = (patch.address ?? patch.roadAddress ?? '').trim();
+        if (d) detailAddressLine = d;
+      }
+    } catch {
+      // 상세 스크랩 실패 시 검색 행 기준으로 계속
+    }
+  }
+
+  if (base.latitude != null && base.longitude != null) {
+    if (detailAddressLine) {
+      return {
+        ...base,
+        roadAddress: detailAddressLine,
+        address: detailAddressLine,
+      };
+    }
+    return base;
+  }
+
   const resolved = await resolveNaverPlaceCoordinates({
-    id: row.id,
-    title: row.title,
-    address: row.address,
-    roadAddress: row.roadAddress,
-    category: row.category,
-    link: row.link,
-    latitude: row.latitude,
-    longitude: row.longitude,
+    id: base.id,
+    title: base.title,
+    address: base.address,
+    roadAddress: base.roadAddress,
+    category: base.category,
+    link: base.link,
+    latitude: base.latitude,
+    longitude: base.longitude,
   });
+
+  if (detailAddressLine) {
+    return {
+      ...base,
+      latitude: resolved.latitude,
+      longitude: resolved.longitude,
+      roadAddress: detailAddressLine,
+      address: detailAddressLine,
+    };
+  }
+
   return {
-    ...row,
+    ...base,
     latitude: resolved.latitude,
     longitude: resolved.longitude,
-    roadAddress: resolved.roadAddress || row.roadAddress,
-    address: resolved.address || row.address,
+    roadAddress: resolved.roadAddress || base.roadAddress,
+    address: resolved.address || base.address,
   };
 }

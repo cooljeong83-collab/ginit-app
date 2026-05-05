@@ -455,13 +455,17 @@ export function EarlyPlaceSearch({
         if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
         const linkFromApi =
           sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
+        const thumb = (resolved.thumbnailUrl ?? '').trim();
+        const cat = (resolved.category ?? item.category ?? '').trim();
         onPickCandidate({
           id: resolved.id,
           placeName: resolved.title.trim(),
           address: addr,
           latitude: resolved.latitude,
           longitude: resolved.longitude,
+          ...(cat ? { category: cat } : {}),
           ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
+          ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),
         });
       } catch (e) {
         setErr(e instanceof Error ? e.message : '위치를 불러오지 못했습니다.');
@@ -640,7 +644,9 @@ export function EarlyPlaceSearch({
         ) : (
           <>
             {rows.map((item) => {
-              const addr = (item.roadAddress || item.address || '').trim() || item.category;
+              const cat = (item.category ?? '').trim();
+              const addrOnly = (item.roadAddress || item.address || '').trim();
+              const detailAddrLine = addrOnly || undefined;
               return (
                 <Animated.View
                   key={item.id}
@@ -656,14 +662,21 @@ export function EarlyPlaceSearch({
                       <Text style={styles.resultTitle} numberOfLines={2}>
                         {item.title}
                       </Text>
-                      <Text style={styles.resultAddr} numberOfLines={3}>
-                        {addr}
-                      </Text>
+                      {cat ? (
+                        <Text style={styles.resultAddr} numberOfLines={2}>
+                          {cat}
+                        </Text>
+                      ) : null}
+                      {addrOnly ? (
+                        <Text style={styles.resultAddr} numberOfLines={4}>
+                          {addrOnly}
+                        </Text>
+                      ) : null}
                     </Pressable>
                     <PlaceCandidateDetailLinkRow
                       title={item.title}
                       link={item.link}
-                      addressLine={typeof addr === 'string' && addr.trim() ? addr.trim() : undefined}
+                      addressLine={detailAddrLine}
                       disabled={disabled || loading}
                       containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
                       onOpenUrl={(url, t) => setNaverPlaceWebModal({ url, title: t })}
@@ -754,9 +767,16 @@ export function EarlyPlaceSearch({
                 <Text style={styles.resultTitle} numberOfLines={2}>
                   {item.placeName}
                 </Text>
-                <Text style={styles.resultAddr} numberOfLines={4}>
-                  {item.address}
-                </Text>
+                {(item.category ?? '').trim() ? (
+                  <Text style={styles.resultAddr} numberOfLines={2}>
+                    {(item.category ?? '').trim()}
+                  </Text>
+                ) : null}
+                {(item.address ?? '').trim() ? (
+                  <Text style={styles.resultAddr} numberOfLines={4}>
+                    {(item.address ?? '').trim()}
+                  </Text>
+                ) : null}
               </View>
               <Pressable
                 onPress={() => removeOne(item.id)}

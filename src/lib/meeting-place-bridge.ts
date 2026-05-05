@@ -8,6 +8,8 @@ export type MeetingPlaceSelection = {
   address: string;
   latitude: number;
   longitude: number;
+  /** 네이버 검색·스크랩 업종 라벨(예: 한식, 카페) */
+  category?: string | null;
   /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
   naverPlaceLink?: string | null;
   /** 검색 행·OG 등에서 온 대표 사진(https) — 모임 목록 첫 장소 썸네일용 */
@@ -48,6 +50,8 @@ export type PlaceCandidate = {
   address: string;
   latitude: number;
   longitude: number;
+  /** 네이버 검색·스크랩 업종 라벨 */
+  category?: string | null;
   /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
   naverPlaceLink?: string | null;
   preferredPhotoMediaUrl?: string | null;

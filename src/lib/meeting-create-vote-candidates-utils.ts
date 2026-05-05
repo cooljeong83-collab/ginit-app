@@ -202,6 +202,8 @@ export type PlaceRowModel = {
   address: string;
   latitude: number | null;
   longitude: number | null;
+  /** 네이버 검색·스크랩 업종 라벨 */
+  category?: string;
   naverPlaceLink?: string;
   /** https 대표 사진 — 모임 저장 시 `placeCandidates[].preferredPhotoMediaUrl`로 전달 */
   preferredPhotoMediaUrl?: string;
@@ -225,6 +227,7 @@ export function isFilled(p: PlaceRowModel) {
 export function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
   const link = (p.naverPlaceLink ?? '').trim();
   const pref = typeof p.preferredPhotoMediaUrl === 'string' ? p.preferredPhotoMediaUrl.trim() : '';
+  const cat = typeof p.category === 'string' ? p.category.trim() : '';
   return {
     id: p.id,
     query: p.placeName,
@@ -232,6 +235,7 @@ export function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
     address: p.address,
     latitude: p.latitude,
     longitude: p.longitude,
+    ...(cat ? { category: cat } : {}),
     ...(link ? { naverPlaceLink: link } : {}),
     ...(pref.startsWith('https://') ? { preferredPhotoMediaUrl: pref } : {}),
   };

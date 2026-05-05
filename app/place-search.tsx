@@ -252,11 +252,13 @@ function PlaceSearchScreenInner({
     const addr = selected.roadAddress?.trim() || selected.address?.trim() || '';
     const linkFromApi = sanitizeNaverLocalPlaceLink(selected.link);
     const thumb = (selected.thumbnailUrl ?? '').trim();
+    const cat = (selected.category ?? '').trim();
     const payload = {
       placeName: selected.title,
       address: addr,
       latitude: selected.latitude,
       longitude: selected.longitude,
+      ...(cat ? { category: cat } : {}),
       ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
       ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),
     };
@@ -420,8 +422,7 @@ function PlaceSearchScreenInner({
                 const showInlineMap =
                   useInlineMapPreview && active && lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
 
-                const addrLine =
-                  (item.roadAddress || item.address || '').trim() || (item.category?.trim() ?? '');
+                const addrLine = (item.roadAddress || item.address || '').trim() || undefined;
                 return (
                   <View style={GinitStyles.itemWrap}>
                     <View style={GinitStyles.glassListRowWrap}>
@@ -435,10 +436,12 @@ function PlaceSearchScreenInner({
                             <Text style={GinitStyles.listItemTitle} numberOfLines={2}>
                               {item.title}
                             </Text>
-                            <Text style={GinitStyles.listItemAddress} numberOfLines={2}>
-                              {item.roadAddress || item.address}
+                            {item.category ? (
+                              <Text style={GinitStyles.listItemCategory}>{item.category}</Text>
+                            ) : null}
+                            <Text style={GinitStyles.listItemAddress} numberOfLines={3}>
+                              {item.roadAddress || item.address || ''}
                             </Text>
-                            {item.category ? <Text style={GinitStyles.listItemCategory}>{item.category}</Text> : null}
                           </View>
                           <View style={GinitStyles.listTrailCol}>
                             {active ? (
@@ -454,7 +457,7 @@ function PlaceSearchScreenInner({
                       <PlaceCandidateDetailLinkRow
                         title={item.title}
                         link={item.link}
-                        addressLine={addrLine || undefined}
+                        addressLine={addrLine}
                         disabled={resolving}
                         containerStyle={{ marginTop: 8, marginHorizontal: 12, marginBottom: 10 }}
                         onOpenUrl={(url, t) => setNaverPlaceWebModal({ url, title: t })}

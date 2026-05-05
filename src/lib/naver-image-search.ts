@@ -207,8 +207,6 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
   const q = buildNaverPlaceImageSearchQuery(f);
   const kakaoPage = typeof f.kakaoPlaceDetailPageUrl === 'string' ? f.kakaoPlaceDetailPageUrl.trim() : '';
   const canKakaoOg = Boolean(kakaoPage && isKakaoMapPlacePageUrl(kakaoPage));
-  if (!q && !canKakaoOg) return null;
-
   const cacheKey = `p|${cacheKeyForQuery(q)}|k:${cacheKeyForQuery(kakaoPage)}`;
   if (placeThumbnailCache.has(cacheKey)) return placeThumbnailCache.get(cacheKey) ?? null;
 
@@ -216,6 +214,11 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
   if (pref.startsWith('https://')) {
     placeThumbnailCache.set(cacheKey, pref);
     return pref;
+  }
+
+  if (!q && !canKakaoOg) {
+    placeThumbnailCache.set(cacheKey, null);
+    return null;
   }
 
   if (canKakaoOg) {

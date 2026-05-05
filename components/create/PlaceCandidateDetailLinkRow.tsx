@@ -4,6 +4,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import {
   resolveKakaoPlacePageWebUrl,
   resolveNaverPlaceDetailWebUrlLikeVoteChip,
+  resolveNaverPlacePageUrlFromLinkField,
 } from '@/src/lib/naver-local-search';
 
 export type PlaceCandidateDetailLinkRowProps = {
@@ -15,7 +16,7 @@ export type PlaceCandidateDetailLinkRowProps = {
   containerStyle?: StyleProp<ViewStyle>;
 };
 
-/** 모임 생성·상세 장소 검색 행 하단 — 카카오맵 장소 / 네이버 모바일 통합검색(동일 deepPurple 톤) */
+/** 모임 생성·상세 장소 검색 행 하단 — 카카오맵 장소 / 상세 정보(`link`의 m.place·ader `fu=` 우선·없으면 통합검색) */
 export function PlaceCandidateDetailLinkRow({
   title,
   link,
@@ -25,13 +26,16 @@ export function PlaceCandidateDetailLinkRow({
   containerStyle,
 }: PlaceCandidateDetailLinkRowProps) {
   const kakaoUrl = resolveKakaoPlacePageWebUrl(link);
-  const naverUrl = resolveNaverPlaceDetailWebUrlLikeVoteChip({
-    naverPlaceLink: undefined,
-    title,
-    addressLine: typeof addressLine === 'string' && addressLine.trim() ? addressLine.trim() : undefined,
-  });
+  const line = typeof addressLine === 'string' && addressLine.trim() ? addressLine.trim() : undefined;
+  const detailUrl =
+    resolveNaverPlacePageUrlFromLinkField(link) ??
+    resolveNaverPlaceDetailWebUrlLikeVoteChip({
+      naverPlaceLink: undefined,
+      title,
+      addressLine: line,
+    });
   const pageTitle = title.trim() || '장소';
-  if (!kakaoUrl && !naverUrl) return null;
+  if (!kakaoUrl && !detailUrl) return null;
 
   return (
     <View style={[styles.row, containerStyle]}>
@@ -45,14 +49,14 @@ export function PlaceCandidateDetailLinkRow({
           <Text style={styles.btnText}>카카오</Text>
         </Pressable>
       ) : null}
-      {naverUrl ? (
+      {detailUrl ? (
         <Pressable
-          onPress={() => onOpenUrl(naverUrl, pageTitle)}
+          onPress={() => onOpenUrl(detailUrl, pageTitle)}
           disabled={disabled}
           style={({ pressed }) => [styles.btn, pressed && !disabled && { opacity: 0.88 }]}
           accessibilityRole="button"
-          accessibilityLabel="네이버에서 장소 검색">
-          <Text style={styles.btnText}>네이버</Text>
+          accessibilityLabel="상세 정보 보기">
+          <Text style={styles.btnText}>상세 정보</Text>
         </Pressable>
       ) : null}
     </View>

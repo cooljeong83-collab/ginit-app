@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.navermobileplacescrape'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.navermobileplacescrape"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  buildFeatures {
+    buildConfig true
+  }
+}
+
+dependencies {
+  implementation 'org.jsoup:jsoup:1.18.3'
+}

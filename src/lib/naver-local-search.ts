@@ -38,6 +38,38 @@ export function sanitizeNaverLocalPlaceLink(raw: string | null | undefined): str
   }
 }
 
+function isNaverPlaceHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === 'm.place.naver.com' || h === 'place.naver.com' || h.endsWith('.place.naver.com');
+}
+
+/**
+ * 스크랩·지역검색 `link`: `m.place` 직링크이거나 `ader.naver.com`…`fu=` 안의 목적지가 플레이스면 그 https URL.
+ * (광고 클릭 추적 URL → 실제 플레이스 페이지)
+ */
+export function resolveNaverPlacePageUrlFromLinkField(raw: string | null | undefined): string | undefined {
+  const s = sanitizeNaverLocalPlaceLink(raw);
+  if (!s) return undefined;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return undefined;
+    if (isNaverPlaceHostname(u.hostname)) return s;
+    const h = u.hostname.toLowerCase();
+    if (h === 'ader.naver.com' || h.endsWith('.ader.naver.com')) {
+      const fu = u.searchParams.get('fu')?.trim();
+      if (!fu) return undefined;
+      const inner = sanitizeNaverLocalPlaceLink(fu);
+      if (!inner) return undefined;
+      const u2 = new URL(inner);
+      if (u2.protocol !== 'http:' && u2.protocol !== 'https:') return undefined;
+      if (isNaverPlaceHostname(u2.hostname)) return inner;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 /**
  * `link`가 카카오맵 **장소 상세**(`place.map.kakao.com`)일 때만 https URL을 반환합니다.
  * (모임 생성 장소 후보의 노란색「카카오」버튼 전용)
@@ -84,8 +116,8 @@ function extractNaverPlaceNumericIdFromUrl(urlString: string): string | undefine
 }
 
 /**
- * WebView에 넣기 전 URL 정리: 이미 **모바일 통합검색**이면 그대로 두고,
- * 네이버 지도·플레이스 링크는 플레이스 페이지 대신 **동일 검색어(숫자 ID)** 로 통합검색으로 보냅니다.
+ * WebView에 넣기 전 URL 정리: **모바일 통합검색**·**m.place 플레이스**는 그대로 두고,
+ * 네이버 **지도** 호스트만 숫자 ID가 있으면 통합검색으로 보냅니다(플레이스는 스크랩/API 직링크 유지).
  */
 export function normalizeNaverPlaceDetailWebUrl(url: string): string {
   const raw = url?.trim() ?? '';
@@ -100,11 +132,19 @@ export function normalizeNaverPlaceDetailWebUrl(url: string): string {
       return u.toString();
     }
 
-    const isMapHost = host === 'map.naver.com' || host === 'm.map.naver.com';
+    const fromAderOrPlace = resolveNaverPlacePageUrlFromLinkField(raw);
+    if (fromAderOrPlace) {
+      return fromAderOrPlace;
+    }
+
     const isPlaceHost =
       host === 'm.place.naver.com' || host === 'place.naver.com' || host.endsWith('.place.naver.com');
+    if (isPlaceHost) {
+      return u.toString();
+    }
 
-    if (isMapHost || isPlaceHost) {
+    const isMapHost = host === 'map.naver.com' || host === 'm.map.naver.com';
+    if (isMapHost) {
       const id = extractNaverPlaceNumericIdFromUrl(u.toString());
       if (id) {
         return `https://m.search.naver.com/search.naver?where=m&sm=mtp_hty.top&query=${encodeURIComponent(id)}`;

@@ -149,6 +149,8 @@ export type Meeting = {
     address: string;
     latitude: number;
     longitude: number;
+    /** 네이버 검색·스크랩 업종 라벨 */
+    category?: string | null;
     naverPlaceLink?: string | null;
     /** 네이버 이미지 검색·인라인 썸네일 등 목록/칩용 대표 사진(https) */
     preferredPhotoMediaUrl?: string | null;
@@ -436,6 +438,7 @@ type PlaceCandidateLike = {
   address: string;
   latitude: number;
   longitude: number;
+  category?: string | null;
   naverPlaceLink?: string | null;
   preferredPhotoMediaUrl?: string | null;
 };

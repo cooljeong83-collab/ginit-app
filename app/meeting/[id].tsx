@@ -101,7 +101,7 @@ import {
   updateParticipantVotes,
   upsertParticipantVotes,
 } from '@/src/lib/meetings';
-import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
+import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
@@ -183,7 +183,25 @@ function buildDateChipsFromCandidates(list: DateCandidate[]): DateChip[] {
   ];
 }
 
-type PlaceChip = { id: string; title: string; sub?: string; naverPlaceLink?: string };
+type PlaceChip = {
+  id: string;
+  title: string;
+  sub?: string;
+  category?: string;
+  naverPlaceLink?: string;
+  /** 검색·등록 시 확보한 대표 사진 — 모임 목록·투표 칩과 동일 우선 사용 */
+  preferredPhotoMediaUrl?: string;
+};
+
+function placeChipToNaverImageFields(chip: PlaceChip): NaverPlaceImageSearchFields {
+  return {
+    title: chip.title,
+    addressLine: chip.sub,
+    category: chip.category,
+    preferredPhotoMediaUrl: chip.preferredPhotoMediaUrl,
+    kakaoPlaceDetailPageUrl: chip.naverPlaceLink,
+  };
+}
 
 function getExtraDataSpecialtyKind(meeting: Meeting): SpecialtyKind | null {
   const raw = meeting.extraData;
@@ -269,10 +287,17 @@ function buildPlaceChipsFromMeeting(m: Meeting): PlaceChip[] {
   if (list.length > 0) {
     return list.map((p, i) => {
       const nl = sanitizeNaverLocalPlaceLink(p.naverPlaceLink ?? undefined);
+      const cat =
+        typeof p.category === 'string' && p.category.trim() !== '' ? p.category.trim() : '';
+      const prefRaw =
+        typeof p.preferredPhotoMediaUrl === 'string' ? p.preferredPhotoMediaUrl.trim() : '';
+      const pref = prefRaw.startsWith('https://') ? prefRaw : '';
       return {
         id: placeCandidateChipId(p, i),
         title: p.placeName?.trim() || '장소',
         sub: p.address?.trim() || undefined,
+        ...(cat ? { category: cat } : {}),
+        ...(pref ? { preferredPhotoMediaUrl: pref } : {}),
         ...(nl ? { naverPlaceLink: nl } : {}),
       };
     });
@@ -2125,11 +2150,7 @@ export default function MeetingDetailScreen() {
           if (!alive) return;
           if (placeThumbByChipId[chip.id] !== undefined) continue;
           try {
-            const thumb = await searchNaverPlaceImageThumbnail({
-              title: chip.title,
-              addressLine: chip.sub,
-              kakaoPlaceDetailPageUrl: chip.naverPlaceLink ?? undefined,
-            });
+            const thumb = await searchNaverPlaceImageThumbnail(placeChipToNaverImageFields(chip));
             if (!alive) return;
             setPlaceThumbByChipId((prev) => {
               if (prev[chip.id] !== undefined) return prev;
@@ -2162,11 +2183,7 @@ export default function MeetingDetailScreen() {
     const t = setTimeout(() => {
       void (async () => {
         try {
-          const thumb = await searchNaverPlaceImageThumbnail({
-            title: chip.title,
-            addressLine: chip.sub,
-            kakaoPlaceDetailPageUrl: chip.naverPlaceLink ?? undefined,
-          });
+          const thumb = await searchNaverPlaceImageThumbnail(placeChipToNaverImageFields(chip));
           if (!alive) return;
           setPlaceThumbByChipId((prev) => {
             if (prev[chip.id] !== undefined) return prev;
@@ -3244,6 +3261,11 @@ export default function MeetingDetailScreen() {
                                 <Text style={styles.placeVoteTitle} numberOfLines={3}>
                                   {confirmedPlaceChipResolved.title}
                                 </Text>
+                                {confirmedPlaceChipResolved.category ? (
+                                  <Text style={styles.placeVoteSub} numberOfLines={2}>
+                                    {confirmedPlaceChipResolved.category}
+                                  </Text>
+                                ) : null}
                                 {confirmedPlaceChipResolved.sub ? (
                                   <Text style={styles.placeVoteSub} numberOfLines={6}>
                                     {confirmedPlaceChipResolved.sub}
@@ -3783,6 +3805,11 @@ export default function MeetingDetailScreen() {
                             <Text style={styles.placeVoteTitle} numberOfLines={3}>
                               {chip.title}
                             </Text>
+                            {chip.category ? (
+                              <Text style={styles.placeVoteSub} numberOfLines={2}>
+                                {chip.category}
+                              </Text>
+                            ) : null}
                             {chip.sub ? (
                               <Text style={styles.placeVoteSub} numberOfLines={6}>
                                 {chip.sub}
@@ -3859,7 +3886,9 @@ export default function MeetingDetailScreen() {
                           ]}
                           accessibilityRole={placeHostPickMode ? 'radio' : 'checkbox'}
                           accessibilityState={{ checked: chipSelected, selected: chipSelected }}
-                          accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                          accessibilityLabel={`${chip.title}${
+                            chip.category ? ` ${chip.category}` : ''
+                          }${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
                           <View style={styles.placeVoteCardPressInner}>
                             <View style={styles.placeVoteImageWrap}>
                               {thumb ? (
@@ -3879,6 +3908,11 @@ export default function MeetingDetailScreen() {
                             <Text style={styles.placeVoteTitle} numberOfLines={2}>
                               {chip.title}
                             </Text>
+                            {chip.category ? (
+                              <Text style={styles.placeVoteSub} numberOfLines={2}>
+                                {chip.category}
+                              </Text>
+                            ) : null}
                             {chip.sub ? (
                               <Text style={styles.placeVoteSub} numberOfLines={2}>
                                 {chip.sub}

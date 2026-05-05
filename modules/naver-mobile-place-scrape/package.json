@@ -1,0 +1,13 @@
+{
+  "name": "naver-mobile-place-scrape",
+  "version": "1.0.0",
+  "description": "Android-only Jsoup scraper for Naver mobile search (place candidates skeleton).",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "react-native": "src/index.ts",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}
