@@ -1170,9 +1170,9 @@ export default function FeedScreen() {
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: homeTab === 'my' }}
-            accessibilityLabel="참여중 모임">
+            accessibilityLabel="내 모임">
             <Text style={[styles.homeTopChipLabel, homeTab === 'my' && styles.homeTopChipLabelActive]} numberOfLines={1}>
-              참여중
+              내모임
             </Text>
           </Pressable>
           <Pressable

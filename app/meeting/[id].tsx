@@ -1,7 +1,7 @@
-import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
+import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
 
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
@@ -2952,8 +2952,8 @@ export default function MeetingDetailScreen() {
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionTitle}>참가 신청 ({joinRequestsSorted.length})</Text>
                 </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
-                  {joinRequestsSorted.map((jr) => {
+                <View style={styles.joinRequestList}>
+                  {joinRequestsSorted.map((jr, jrIndex) => {
                     const aid = normalizeParticipantId(jr.userId) ?? jr.userId.trim();
                     const prof = participantProfiles[aid];
                     const withdrawn = isUserProfileWithdrawn(prof);
@@ -2961,67 +2961,86 @@ export default function MeetingDetailScreen() {
                     const g = withdrawn ? null : normalizeGender(prof?.gender);
                     const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
                     const rowBusy = hostJoinRequestBusyId === aid;
+                    const msgRaw = (jr.message ?? '').trim();
+                    const hasMessage = msgRaw.length > 0;
                     return (
-                      <View key={`${aid}-${jr.requestedAt}`} style={styles.avatarCol}>
-                        <Pressable
-                          onPress={() => openParticipantProfile(aid)}
-                          style={({ pressed }) => [pressed && !withdrawn && { opacity: 0.92 }]}
-                          pointerEvents={withdrawn ? 'none' : 'auto'}
-                          accessibilityRole="button"
-                          accessibilityLabel={`${nickname} 프로필 열기`}>
-                          <View
-                            style={[
-                              styles.avatarCircle,
-                              withdrawn ? styles.avatarCircleWithdrawn : null,
-                              !withdrawn && g === 'male' ? styles.avatarCircleMale : null,
-                              !withdrawn && g === 'female' ? styles.avatarCircleFemale : null,
-                            ]}>
-                            {withdrawn ? (
-                              <GinitSymbolicIcon name="person" size={22} color="#94a3b8" />
-                            ) : photo ? (
-                              <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
-                            ) : (
-                              <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
-                            )}
+                      <View key={`${aid}-${jr.requestedAt}`}>
+                        {jrIndex > 0 ? <View style={styles.joinRequestSep} /> : null}
+                        <View style={styles.joinRequestRow}>
+                          <Pressable
+                            onPress={() => openParticipantProfile(aid)}
+                            style={({ pressed }) => [
+                              styles.joinRequestAvatarPress,
+                              pressed && !withdrawn && { opacity: 0.88 },
+                            ]}
+                            pointerEvents={withdrawn ? 'none' : 'auto'}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${nickname} 프로필 열기`}>
+                            <View
+                              style={[
+                                styles.joinRequestAvatarSq,
+                                withdrawn ? styles.joinRequestAvatarSqWithdrawn : null,
+                                !withdrawn && g === 'male' ? styles.joinRequestAvatarSqMale : null,
+                                !withdrawn && g === 'female' ? styles.joinRequestAvatarSqFemale : null,
+                              ]}>
+                              {withdrawn ? (
+                                <GinitSymbolicIcon name="person" size={22} color="#94a3b8" />
+                              ) : photo ? (
+                                <Image source={{ uri: photo }} style={styles.joinRequestAvatarSqImg} contentFit="cover" />
+                              ) : (
+                                <Text style={styles.joinRequestAvatarInitial}>{nicknameInitial(nickname)}</Text>
+                              )}
+                            </View>
+                          </Pressable>
+                          <View style={styles.joinRequestMid}>
+                            <Text style={styles.joinRequestNick} numberOfLines={1}>
+                              {nickname}
+                            </Text>
+                            <View style={styles.joinRequestBubble}>
+                              <Text
+                                style={[
+                                  styles.joinRequestBubbleText,
+                                  !hasMessage && styles.joinRequestBubbleTextPlaceholder,
+                                ]}>
+                                {hasMessage ? msgRaw : '신청 메시지가 없어요.'}
+                              </Text>
+                            </View>
                           </View>
-                          <Text style={styles.avatarLabel} numberOfLines={2}>
-                            {nickname}
-                          </Text>
-                        </Pressable>
-                        <View style={styles.joinRequestIconMenuRow}>
-                          <Pressable
-                            onPress={() => onHostApproveJoin(aid)}
-                            disabled={rowBusy}
-                            style={({ pressed }) => [
-                              styles.joinRequestIconMenuBtn,
-                              rowBusy && { opacity: 0.75 },
-                              pressed && !rowBusy && { opacity: 0.88 },
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="참가 승인">
-                            {rowBusy ? (
-                              <ActivityIndicator color={GinitTheme.colors.primary} size="small" />
-                            ) : (
-                              <GinitSymbolicIcon name="checkmark-done-outline" size={22} color={GinitTheme.colors.primary} />
-                            )}
-                          </Pressable>
-                          <Pressable
-                            onPress={() => onHostRejectJoin(aid)}
-                            disabled={rowBusy}
-                            style={({ pressed }) => [
-                              styles.joinRequestIconMenuBtn,
-                              rowBusy && { opacity: 0.75 },
-                              pressed && !rowBusy && { opacity: 0.88 },
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="참가 거절">
-                            <GinitSymbolicIcon name="close-circle-outline" size={22} color={GinitTheme.colors.danger} />
-                          </Pressable>
+                          <View style={styles.joinRequestActions}>
+                            <Pressable
+                              onPress={() => onHostApproveJoin(aid)}
+                              disabled={rowBusy}
+                              style={({ pressed }) => [
+                                styles.joinRequestBtnPrimary,
+                                rowBusy && { opacity: 0.75 },
+                                pressed && !rowBusy && { opacity: 0.88 },
+                              ]}
+                              accessibilityRole="button"
+                              accessibilityLabel="참가 승인">
+                              {rowBusy ? (
+                                <ActivityIndicator color="#fff" size="small" />
+                              ) : (
+                                <Text style={styles.joinRequestBtnPrimaryText}>승인</Text>
+                              )}
+                            </Pressable>
+                            <Pressable
+                              onPress={() => onHostRejectJoin(aid)}
+                              disabled={rowBusy}
+                              style={({ pressed }) => [
+                                styles.joinRequestBtnGhost,
+                                rowBusy && { opacity: 0.75 },
+                                pressed && !rowBusy && { opacity: 0.88 },
+                              ]}
+                              accessibilityRole="button"
+                              accessibilityLabel="참가 거절">
+                              <Text style={styles.joinRequestBtnGhostText}>거절</Text>
+                            </Pressable>
+                          </View>
                         </View>
                       </View>
                     );
                   })}
-                </ScrollView>
+                </View>
               </View>
             ) : null}
 
@@ -5898,17 +5917,78 @@ const styles = StyleSheet.create({
     marginTop: 0,
     opacity: 0.85,
   },
-  joinRequestIconMenuRow: {
+  joinRequestList: { paddingVertical: 2 },
+  joinRequestSep: { height: StyleSheet.hairlineWidth, backgroundColor: GinitTheme.colors.border },
+  joinRequestRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  joinRequestAvatarPress: { flexShrink: 0 },
+  joinRequestAvatarSq: {
+    width: 65,
+    height: 65,
+    borderRadius: 12,
+    backgroundColor: '#E8F2FF',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    marginTop: 6,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
-  joinRequestIconMenuBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: 6,
+  joinRequestAvatarSqMale: {
+    borderColor: 'rgba(31, 42, 68, 0.55)',
   },
+  joinRequestAvatarSqFemale: {
+    borderColor: 'rgba(255, 140, 198, 0.95)',
+  },
+  joinRequestAvatarSqWithdrawn: {
+    backgroundColor: '#e2e8f0',
+    borderColor: '#cbd5e1',
+  },
+  joinRequestAvatarSqImg: { width:65, height: 65, borderRadius: 10 },
+  joinRequestAvatarInitial: { fontSize: 17, fontWeight: '700', color: GinitTheme.colors.primary },
+  joinRequestMid: { flex: 1, minWidth: 0, gap: 6 },
+  joinRequestNick: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.text },
+  joinRequestBubble: {
+    backgroundColor: GinitTheme.colors.primarySoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  joinRequestBubbleText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.textSub, lineHeight: 18 },
+  joinRequestBubbleTextPlaceholder: { color: GinitTheme.colors.textMuted },
+  joinRequestActions: {
+    flexShrink: 0,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    gap: 5,
+  },
+  joinRequestBtnPrimary: {
+    minWidth: 64,
+    height: 32,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: GinitTheme.colors.primary,
+  },
+  joinRequestBtnPrimaryText: { fontSize: 12, fontWeight: '600', color: '#fff' },
+  joinRequestBtnGhost: {
+    minWidth: 64,
+    height: 32,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgb(220, 38, 38)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.danger,
+  },
+  joinRequestBtnGhostText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.texWhite },
   guestJoinHintWrap: {
     paddingHorizontal: 16,
     paddingTop: 6,
