@@ -1,4 +1,4 @@
-import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
+import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
