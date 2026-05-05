@@ -26,8 +26,9 @@ import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import {
   resolvePlaceSearchRowCoordinates,
   searchPlacesText,
+  stableNaverLocalSearchDedupeKey,
   type PlaceSearchRow,
-} from '@/src/lib/google-places-text-search';
+} from '@/src/lib/naver-local-place-search-text';
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import { setCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
@@ -80,6 +81,8 @@ function PlaceSearchScreenInner({
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<PlaceSearchRow[]>([]);
+  const resultsRef = useRef(results);
+  resultsRef.current = results;
   const [selected, setSelected] = useState<PlaceSearchRow | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -157,19 +160,29 @@ function PlaceSearchScreenInner({
         const { bias, coords } = await ensureNearbySearchBias();
         const key2 = query.trim();
         if (key2 !== lastListSearchKeyRef.current) return;
+        const excludeStablePlaceKeys = resultsRef.current.map((r) => stableNaverLocalSearchDedupeKey(r));
         const { places: list, nextPageToken: nxt } = await searchPlacesText(key2, {
           locationBias: bias,
           userCoords: coords,
           pageToken,
           maxResultCount: PLACE_PAGE,
+          excludeStablePlaceKeys,
         });
         const key3 = query.trim();
         if (key3 !== lastListSearchKeyRef.current) return;
-        setResults((prev) => {
-          const seen = new Set(prev.map((r) => r.id));
-          return [...prev, ...list.filter((p) => !seen.has(p.id))];
-        });
-        setNextPageToken(nxt?.trim() ? nxt.trim() : null);
+        const prevRes = resultsRef.current;
+        const seen0 = new Set(prevRes.map((r) => r.id));
+        const fresh0 = list.filter((p) => !seen0.has(p.id));
+        if (fresh0.length === 0) {
+          setNextPageToken(null);
+        } else {
+          setResults((prev) => {
+            const seen = new Set(prev.map((r) => r.id));
+            const fresh = list.filter((p) => !seen.has(p.id));
+            return fresh.length ? [...prev, ...fresh] : prev;
+          });
+          setNextPageToken(nxt?.trim() ? nxt.trim() : null);
+        }
       } catch {
         // 목록은 유지, 추가 페이지만 생략
         setNextPageToken(null);

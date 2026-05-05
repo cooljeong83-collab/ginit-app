@@ -43,6 +43,8 @@ type Extra = {
   /** Search API 지역 검색용 (openapi `X-Naver-Client-*`) */
   naverSearchClientId?: string;
   naverSearchClientSecret?: string;
+  /** `1|true|yes` 이면 지역 검색 OpenAPI 응답 요약·샘플을 Metro 로그로 출력 */
+  naverLocalSearchDebug?: string;
   googleWebClientId?: string;
   /** Google Places API(New) Text Search·사진 — 웹 서비스용(권장). 비우면 `googleMapsPlatformApiKey` 폴백 */
   googlePlacesApiKey?: string;
@@ -89,6 +91,7 @@ export const publicEnv: {
   naverMapsGeocodePath: string;
   naverSearchClientId: string;
   naverSearchClientSecret: string;
+  naverLocalSearchDebug: string;
   googleWebClientId: string;
   googlePlacesApiKey: string;
   googleMapsPlatformApiKey: string;
@@ -138,6 +141,8 @@ export const publicEnv: {
   naverSearchClientId: e.naverSearchClientId ?? process.env.EXPO_PUBLIC_NAVER_SEARCH_CLIENT_ID ?? '',
   naverSearchClientSecret:
     e.naverSearchClientSecret ?? process.env.EXPO_PUBLIC_NAVER_SEARCH_CLIENT_SECRET ?? '',
+  naverLocalSearchDebug:
+    e.naverLocalSearchDebug ?? process.env.EXPO_PUBLIC_NAVER_LOCAL_SEARCH_DEBUG ?? '',
   googleWebClientId: e.googleWebClientId ?? process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
   googlePlacesApiKey:
     e.googlePlacesApiKey ?? process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY ?? process.env.GOOGLE_PLACES_API_KEY ?? '',

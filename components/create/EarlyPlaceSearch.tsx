@@ -37,8 +37,9 @@ import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import {
   resolvePlaceSearchRowCoordinates,
   searchPlacesText,
+  stableNaverLocalSearchDedupeKey,
   type PlaceSearchRow,
-} from '@/src/lib/google-places-text-search';
+} from '@/src/lib/naver-local-place-search-text';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
@@ -178,6 +179,8 @@ export function EarlyPlaceSearch({
   const [addingMore, setAddingMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<PlaceSearchRow[]>([]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   const [rowsNextPageToken, setRowsNextPageToken] = useState<string | null>(null);
   const [rowsLoadingMore, setRowsLoadingMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -379,19 +382,29 @@ export function EarlyPlaceSearch({
         const { bias, coords } = await ensureNearbySearchBias();
         const qt2 = query.trim();
         if (rowsSearchQueryKeyRef.current !== qt2) return;
+        const excludeStablePlaceKeys = rowsRef.current.map((r) => stableNaverLocalSearchDedupeKey(r));
         const { places: list, nextPageToken } = await searchPlacesText(qt2, {
           locationBias: bias,
           userCoords: coords,
           pageToken,
           maxResultCount: PLACE_PAGE,
+          excludeStablePlaceKeys,
         });
         const qt3 = query.trim();
         if (rowsSearchQueryKeyRef.current !== qt3) return;
-        setRows((prev) => {
-          const seen = new Set(prev.map((r) => r.id));
-          return [...prev, ...list.filter((r) => !seen.has(r.id))];
-        });
-        setRowsNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
+        const prevRows = rowsRef.current;
+        const seen0 = new Set(prevRows.map((r) => r.id));
+        const fresh0 = list.filter((r) => !seen0.has(r.id));
+        if (fresh0.length === 0) {
+          setRowsNextPageToken(null);
+        } else {
+          setRows((prev) => {
+            const seen = new Set(prev.map((r) => r.id));
+            const fresh = list.filter((r) => !seen.has(r.id));
+            return fresh.length ? [...prev, ...fresh] : prev;
+          });
+          setRowsNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
+        }
       } catch (e) {
         if (rowsSearchQueryKeyRef.current === qt) {
           setErr(e instanceof Error ? e.message : '검색에 실패했습니다.');

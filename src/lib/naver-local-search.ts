@@ -319,21 +319,115 @@ function assertGeocodeOk(json: NaverMapsGeocodeResponse) {
 }
 
 type NaverOpenApiLocalJson = {
+  total?: string | number;
+  start?: string | number;
+  display?: string | number;
   items?: {
     title?: string;
+    link?: string;
+    category?: string;
+    description?: string;
+    telephone?: string;
     address?: string;
     roadAddress?: string;
-    category?: string;
     mapx?: string;
     mapy?: string;
-    link?: string;
   }[];
 };
 
 /**
- * 지역 검색 JSON → 목록용 플레이스 (좌표는 선택 후 Geocoding으로만 채움).
+ * OpenAPI 지역 검색 응답 상세 덤프.
+ * - `env/.env`에 `EXPO_PUBLIC_NAVER_LOCAL_SEARCH_DEBUG=1` (또는 true/yes/on/y) 후 **네이티브 재빌드** 권장 (`pickExtra`가 extra에 넣음).
+ * - Metro/Logcat에서 `console.warn`(노란색)으로 출력 — `console.log`만 켜져 있으면 안 보일 때가 있음.
+ */
+function isNaverLocalSearchApiDebug(): boolean {
+  const v = publicEnv.naverLocalSearchDebug?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on' || v === 'y';
+}
+
+function summarizeNaverOpenApiLocalItemsForDev(items: NaverOpenApiLocalJson['items']): Record<string, unknown>[] {
+  const list = items ?? [];
+  return list.map((it, i) => {
+    const title = stripHtml(typeof it.title === 'string' ? it.title : '').slice(0, 200);
+    const description = (typeof it.description === 'string' ? it.description : '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200);
+    const link = typeof it.link === 'string' ? it.link : '';
+    return {
+      i,
+      title,
+      telephone: (typeof it.telephone === 'string' ? it.telephone : '').slice(0, 40),
+      category: (typeof it.category === 'string' ? it.category : '').slice(0, 100),
+      description,
+      address: (typeof it.address === 'string' ? it.address : '').slice(0, 150),
+      roadAddress: (typeof it.roadAddress === 'string' ? it.roadAddress : '').slice(0, 150),
+      mapx: typeof it.mapx === 'string' ? it.mapx : '',
+      mapy: typeof it.mapy === 'string' ? it.mapy : '',
+      linkPreview: link.slice(0, 160),
+    };
+  });
+}
+
+/** 개발 빌드에서 스키마 + **조회된 각 행 요약**(제목·주소·좌표 문자열 등)을 남김 */
+function logNaverOpenApiLocalJsonShapeDev(query: string, json: NaverOpenApiLocalJson): void {
+  if (!__DEV__) return;
+  const items = json.items ?? [];
+  const item0 = items[0];
+  const topLevelKeys = json && typeof json === 'object' ? Object.keys(json as Record<string, unknown>) : [];
+  const firstItemKeys =
+    item0 && typeof item0 === 'object' ? Object.keys(item0 as Record<string, unknown>) : [];
+  const payload = {
+    query: query.slice(0, 120),
+    topLevelKeys,
+    firstItemKeys,
+    total: json.total,
+    start: json.start,
+    display: json.display,
+    itemCount: items.length,
+    items: summarizeNaverOpenApiLocalItemsForDev(items),
+  };
+  // eslint-disable-next-line no-console
+  console.warn('[naver-local-search][dev] openapi/local.json shape + rows\n', JSON.stringify(payload, null, 2));
+}
+
+function logNaverOpenApiLocalResponse(
+  label: string,
+  query: string,
+  req: { display: number; start: number; sort?: string },
+  json: NaverOpenApiLocalJson,
+): void {
+  if (!isNaverLocalSearchApiDebug()) return;
+  const items = json.items ?? [];
+  const itemsPreview = summarizeNaverOpenApiLocalItemsForDev(items).slice(0, 10);
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[naver-local-search] openapi_local_response',
+    label,
+    JSON.stringify({
+      query: query.slice(0, 200),
+      req,
+      total: json.total,
+      start: json.start,
+      display: json.display,
+      itemCount: items.length,
+      itemsPreview,
+      rawJsonHead: JSON.stringify(json).slice(0, 8000),
+    }),
+  );
+}
+
+/**
+ * `local-{mapx}-{mapy}-{idx}` 또는 그 외 id — random 보충 시 제외 집합에 사용.
  * @see https://developers.naver.com/docs/serviceapi/search/local/local.md
  */
+export function stableNaverLocalSearchDedupeKey(row: { id: string }): string {
+  const m = row.id.match(/^local-(\d+)-(\d+)-\d+$/);
+  if (m) return `${m[1]}|${m[2]}`;
+  return row.id;
+}
+
+/** 지역 검색 JSON → 목록용 플레이스 (좌표는 선택 후 Geocoding으로만 채움). */
 function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] {
   const items = json.items ?? [];
   const out: NaverLocalPlace[] = [];
@@ -362,10 +456,11 @@ function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] 
 
 /**
  * openapi 지역 검색 — **X-Naver-Client-Id / X-Naver-Client-Secret 만** (Search API 전용 키).
+ * 응답 덤프: `EXPO_PUBLIC_NAVER_LOCAL_SEARCH_DEBUG=1` (Metro에서 `[naver-local-search] openapi_local_response` 검색).
  */
 async function fetchOpenApiLocalSearch(
   query: string,
-  opts?: { display?: number; start?: number },
+  opts?: { display?: number; start?: number; sort?: 'comment' | 'random' },
 ): Promise<NaverOpenApiLocalJson> {
   const id = publicEnv.naverSearchClientId?.trim();
   const secret = publicEnv.naverSearchClientSecret?.trim();
@@ -376,9 +471,11 @@ async function fetchOpenApiLocalSearch(
   }
 
   const q = query.trim();
-  const display = Math.min(10, Math.max(1, Math.floor(opts?.display ?? 5)));
+  /** 네이버 지역 검색 API 문서상 display 최댓값 5 */
+  const display = Math.min(5, Math.max(1, Math.floor(opts?.display ?? 5)));
   const start = Math.max(1, Math.floor(opts?.start ?? 1));
-  const baseUrl = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=${display}&start=${start}&sort=comment`;
+  const sort = opts?.sort === 'random' ? 'random' : 'comment';
+  const baseUrl = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(q)}&display=${display}&start=${start}&sort=${sort}`;
 
   return withNaverOpenApiClientRateLimit(async () => {
     let url = baseUrl;
@@ -397,7 +494,10 @@ async function fetchOpenApiLocalSearch(
       const t = await res.text();
       throw new Error(`지역 검색 API 오류 (${res.status}): ${t.slice(0, 200)}`);
     }
-    return (await res.json()) as NaverOpenApiLocalJson;
+    const json = (await res.json()) as NaverOpenApiLocalJson;
+    logNaverOpenApiLocalJsonShapeDev(q, json);
+    logNaverOpenApiLocalResponse('fetchOpenApiLocalSearch', q, { display, start, sort }, json);
+    return json;
   });
 }
 
@@ -447,6 +547,17 @@ function applyLocationBiasToQuery(trimmed: string, bias: string | null | undefin
 }
 
 /**
+ * OpenAPI `sort=random`이 동일 풀만 돌 때 — ZWNJ(U+200C)를 소량 붙여 검색 토큰만 미세하게 바꿉니다(표시상 거의 동일).
+ * `page`가 클수록 조금 더 길게(상한 있음).
+ */
+function diversifyLocalSearchQueryForVirtualPage(q: string, page: number): string {
+  const t = q.trim();
+  if (!t || page < 3) return t;
+  const repeats = Math.min(6, Math.max(1, page - 2));
+  return `${t}${'\u200C'.repeat(repeats)}`;
+}
+
+/**
  * 1) Search API 지역 검색 (openapi, X-Naver-*).
  * 2) 결과가 없으면 NCP Geocoding으로 쿼리 자체를 주소처럼 조회.
  */
@@ -482,4 +593,149 @@ export async function searchNaverLocalPlaces(
   const json = await geocodeNaverMapsAddress(q, 10);
   assertGeocodeOk(json);
   return parseGeocodeToPlaces(json.addresses ?? [], q);
+}
+
+export type SearchNaverLocalKeywordPagedOptions = {
+  locationBias?: string | null;
+  /** 1부터. `pageToken` 문자열 페이지와 동일하게 쓰려면 1,2,3… */
+  page?: number;
+  /** 네이버 지역 검색 API 상한 5 */
+  pageSize?: number;
+  /**
+   * `page>=2` random 보충 시 이미 목록에 있는 장소 제외(`stableNaverLocalSearchDedupeKey`와 동일 규칙 문자열).
+   * 누적 행 id에서 키를 만들어 넘기면 이후 페이지가 계속 붙습니다.
+   */
+  excludeStablePlaceKeys?: readonly string[] | null;
+};
+
+/**
+ * OpenAPI 지역 검색만 사용(지오코딩 폴백 없음). 모임 생성·장소 후보 리스트 페이지네이션용.
+ *
+ * 1페이지: `sort=comment`, `start` 오프셋(공식적으로는 start>1이 무시되는 공지가 있어 1페이지만 의미 있음).
+ * 2페이지 이후: OpenAPI가 `start>1`을 1로 돌려 **동일 5건**만 주는 경우가 있어, `start=1` + `sort=random`으로
+ * 다른 후보를 받고(중복은 호출 측에서 제거), 가상 페이지 상한까지 `nextPageToken`을 이어 줍니다.
+ *
+ * @see https://developers.naver.com/docs/serviceapi/search/local/local.md
+ * @see https://developers.naver.com/notice/article/7528
+ */
+async function collectRandomUniqueLocalPlaces(
+  q: string,
+  pageSize: number,
+  exclude: ReadonlySet<string>,
+): Promise<NaverLocalPlace[]> {
+  const out: NaverLocalPlace[] = [];
+  let stagnantRounds = 0;
+  /** 제외 집합이 커질수록 같은 random 5건 반복에 걸리기 쉬워 라운드·정체 허용을 넉넉히 둠 */
+  const MAX_ROUNDS = Math.min(36, 14 + Math.min(22, Math.floor(exclude.size / 2)));
+  const STAGNANT_STOP = exclude.size >= 12 ? 7 : 5;
+
+  for (let round = 0; round < MAX_ROUNDS && out.length < pageSize; round++) {
+    const json = await fetchOpenApiLocalSearch(q, { display: pageSize, start: 1, sort: 'random' });
+    const respStartRaw = json.start;
+    const respStart =
+      typeof respStartRaw === 'string'
+        ? Number.parseInt(String(respStartRaw), 10) || 1
+        : Number(respStartRaw ?? 1) || 1;
+    if (respStart !== 1) break;
+
+    const batch = parseOpenApiLocalItems(json);
+    let addedThisRound = 0;
+    for (const p of batch) {
+      const k = stableNaverLocalSearchDedupeKey(p);
+      if (exclude.has(k)) continue;
+      if (out.some((x) => stableNaverLocalSearchDedupeKey(x) === k)) continue;
+      out.push(p);
+      addedThisRound++;
+      if (out.length >= pageSize) break;
+    }
+    if (addedThisRound === 0) stagnantRounds++;
+    else stagnantRounds = 0;
+    if (stagnantRounds >= STAGNANT_STOP) break;
+    if (batch.length === 0) break;
+  }
+
+  if (out.length === 0 && exclude.size >= pageSize) {
+    for (let br = 0; br < 18 && out.length < pageSize; br++) {
+      const json = await fetchOpenApiLocalSearch(q, { display: pageSize, start: 1, sort: 'random' });
+      const batch = parseOpenApiLocalItems(json);
+      if (batch.length === 0) break;
+      for (const p of batch) {
+        const k = stableNaverLocalSearchDedupeKey(p);
+        if (exclude.has(k)) continue;
+        if (out.some((x) => stableNaverLocalSearchDedupeKey(x) === k)) continue;
+        out.push(p);
+        if (out.length >= pageSize) break;
+      }
+    }
+  }
+
+  return out;
+}
+
+export async function searchNaverLocalKeywordPlacesPaginated(
+  query: string,
+  options?: SearchNaverLocalKeywordPagedOptions,
+): Promise<{ places: NaverLocalPlace[]; nextPageToken: string | null }> {
+  const q0 = query.trim();
+  if (!q0) return { places: [], nextPageToken: null };
+
+  const page = Math.max(1, Math.floor(options?.page ?? 1));
+  const pageSize = Math.min(5, Math.max(1, Math.floor(options?.pageSize ?? 5)));
+  /** random 가상 페이지 — 과호출 방지(5건×40=200행 상한 근처) */
+  const NAVER_LOCAL_VIRTUAL_PAGE_CAP = 60;
+
+  const q = applyLocationBiasToQuery(q0, options?.locationBias);
+
+  if (page === 1) {
+    const requestedStart = 1;
+    const json = await fetchOpenApiLocalSearch(q, { display: pageSize, start: requestedStart, sort: 'comment' });
+    const places = parseOpenApiLocalItems(json);
+
+    const totalRaw = json.total;
+    const totalNum =
+      typeof totalRaw === 'string' ? Number.parseInt(String(totalRaw), 10) || 0 : Number(totalRaw ?? 0) || 0;
+    const respStartRaw = json.start;
+    const respStart =
+      typeof respStartRaw === 'string'
+        ? Number.parseInt(String(respStartRaw), 10) || requestedStart
+        : Number(respStartRaw ?? requestedStart) || requestedStart;
+
+    const fullPage = places.length === pageSize;
+    const nextStart = requestedStart + places.length;
+    /** 검색 API 오류코드 SE03 기준 허용 범위(문서) */
+    const NAVER_LOCAL_SEARCH_MAX_START = 1000;
+
+    const exhaustedByShortPage = places.length > 0 && places.length < pageSize;
+    const startHonored = respStart === requestedStart;
+    const moreByReportedTotal = totalNum > 0 && nextStart <= totalNum;
+    const totalLooksCapped = totalNum > 0 && fullPage && nextStart > totalNum;
+    const moreDespiteCappedTotalReport =
+      totalLooksCapped && nextStart <= NAVER_LOCAL_SEARCH_MAX_START && startHonored;
+    const moreWhenTotalMissing =
+      totalNum === 0 && fullPage && nextStart <= NAVER_LOCAL_SEARCH_MAX_START && startHonored;
+
+    const hasMore =
+      !exhaustedByShortPage &&
+      places.length > 0 &&
+      startHonored &&
+      (moreByReportedTotal || moreDespiteCappedTotalReport || moreWhenTotalMissing);
+
+    return {
+      places,
+      nextPageToken: hasMore ? String(page + 1) : null,
+    };
+  }
+
+  const exclude = new Set(
+    (options?.excludeStablePlaceKeys ?? []).map((k) => String(k).trim()).filter((k) => k.length > 0),
+  );
+  const qRandom = diversifyLocalSearchQueryForVirtualPage(q, page);
+  const places = await collectRandomUniqueLocalPlaces(qRandom, pageSize, exclude);
+
+  const hasMore = places.length > 0 && page < NAVER_LOCAL_VIRTUAL_PAGE_CAP;
+
+  return {
+    places,
+    nextPageToken: hasMore ? String(page + 1) : null,
+  };
 }

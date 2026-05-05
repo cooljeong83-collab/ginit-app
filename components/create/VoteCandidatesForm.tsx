@@ -76,8 +76,9 @@ import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import {
   resolvePlaceSearchRowCoordinates,
   searchPlacesText,
+  stableNaverLocalSearchDedupeKey,
   type PlaceSearchRow,
-} from '@/src/lib/google-places-text-search';
+} from '@/src/lib/naver-local-place-search-text';
 import {
   buildInitialEditorState,
   clampHm,
@@ -433,6 +434,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const placeSearchLoadMoreGuardRef = useRef(false);
   const placeSearchLastSettledQueryTrimRef = useRef(placeSearchLastSettledQueryTrim);
   placeSearchLastSettledQueryTrimRef.current = placeSearchLastSettledQueryTrim;
+  const placeResultsCarouselViewportWRef = useRef(0);
+  const placeResultsCarouselContentWRef = useRef(0);
 
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
@@ -1468,17 +1471,27 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     void (async () => {
       try {
         const { bias, coords } = await ensureNearbySearchBias();
+        const excludeStablePlaceKeys = placeSearchRowsRef.current.map((r) => stableNaverLocalSearchDedupeKey(r));
         const { places: list, nextPageToken: nxt } = await searchPlacesText(q, {
           locationBias: bias,
           userCoords: coords,
           maxResultCount: PLACE_SEARCH_PAGE_SIZE,
           pageToken: token,
+          excludeStablePlaceKeys,
         });
-        setPlaceSearchRows((prev) => {
-          const seen = new Set(prev.map((r) => r.id));
-          return [...prev, ...list.filter((r) => !seen.has(r.id))];
-        });
-        setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
+        const prevRows = placeSearchRowsRef.current;
+        const seen0 = new Set(prevRows.map((r) => r.id));
+        const fresh0 = list.filter((r) => !seen0.has(r.id));
+        if (fresh0.length === 0) {
+          setPlaceSearchNextPageToken(null);
+        } else {
+          setPlaceSearchRows((prev) => {
+            const seen = new Set(prev.map((r) => r.id));
+            const fresh = list.filter((r) => !seen.has(r.id));
+            return fresh.length ? [...prev, ...fresh] : prev;
+          });
+          setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
+        }
       } catch {
         /* 다음 페이지 실패 시 토큰 유지 — 스크롤 끝에서 재시도 가능 */
       } finally {
@@ -1487,6 +1500,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       }
     })();
   }, [placesListOnly, showPlaces]);
+
+  const maybePrefetchPlaceSearchCarousel = useCallback(() => {
+    if (!showPlaces || placesListOnly) return;
+    if (placeSearchLoadingRef.current || placeSearchLoadingMoreRef.current) return;
+    if (!placeSearchNextPageTokenRef.current?.trim()) return;
+    const vw = placeResultsCarouselViewportWRef.current;
+    const cw = placeResultsCarouselContentWRef.current;
+    if (!vw || !cw) return;
+    if (cw > vw + 1) return;
+    loadMorePlaceSearchRows();
+  }, [loadMorePlaceSearchRows, placesListOnly, showPlaces]);
 
   const onPlaceSearchResultsScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -2102,6 +2126,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   showsHorizontalScrollIndicator={false}
                   showsVerticalScrollIndicator={false}
                   scrollEventThrottle={16}
+                  onLayout={(e) => {
+                    placeResultsCarouselViewportWRef.current = e.nativeEvent.layout.width;
+                    requestAnimationFrame(() => maybePrefetchPlaceSearchCarousel());
+                  }}
+                  onContentSizeChange={(w) => {
+                    placeResultsCarouselContentWRef.current = w;
+                    requestAnimationFrame(() => maybePrefetchPlaceSearchCarousel());
+                  }}
                   onScroll={onPlaceSearchResultsScroll}
                   style={styles.placeResultsScrollView}
                   contentContainerStyle={[

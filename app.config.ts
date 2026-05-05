@@ -55,6 +55,10 @@ function pickExtra(): Record<string, string> {
     'naverSearchClientSecret',
     process.env.EXPO_PUBLIC_NAVER_SEARCH_CLIENT_SECRET ?? process.env.NAVER_SEARCH_CLIENT_SECRET,
   );
+  set(
+    'naverLocalSearchDebug',
+    process.env.EXPO_PUBLIC_NAVER_LOCAL_SEARCH_DEBUG ?? process.env.NAVER_LOCAL_SEARCH_DEBUG,
+  );
   /** 웹 CORS 우회: 예) https://cors-anywhere.herokuapp.com (개발 전용, 끝 슬래시 없이도 됨) */
   set(
     'naverLocalSearchCorsProxy',

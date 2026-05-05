@@ -132,7 +132,7 @@ import {
   resolvePlaceSearchRowCoordinates,
   searchPlacesText,
   type PlaceSearchRow,
-} from '@/src/lib/google-places-text-search';
+} from '@/src/lib/naver-local-place-search-text';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
 import {
