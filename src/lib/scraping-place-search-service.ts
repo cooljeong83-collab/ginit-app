@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
-import type { PlaceSearchRow } from '@/src/lib/naver-local-place-search-text';
+import type { PlaceSearchRow } from '@/src/lib/place-search-row';
 import { resolveNaverPlacePageUrlFromLinkField, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 
 export type NativeScrapedPlaceRow = {
@@ -12,6 +12,8 @@ export type NativeScrapedPlaceRow = {
   link?: string | null;
   /** 모바일 검색 목록 행에서 추출한 첫 이미지 URL */
   thumbnailUrl?: string | null;
+  /** 네이버 place numeric id (가능하면 dedupe에 사용) */
+  placeId?: string | null;
 };
 
 type NativePlaceDetailScrapeRow = {
@@ -64,12 +66,40 @@ function normalizeScrapedThumbnailToHttps(raw: string | null | undefined): strin
 
 function mapNativeToPlaceSearchRow(row: NativeScrapedPlaceRow): PlaceSearchRow {
   const title = (row.title ?? '').trim();
+  // 검색 결과의 "더보기" 같은 UI 라벨 행은 업체가 아니므로 제외(상위에서 필터링)
+  if (title === '더보기' || /^이미지\s*수?\s*\d+$/u.test(title) || /^이미지수\d+$/u.test(title)) {
+    return {
+      id: 'scrape-skip-more',
+      title,
+      address: '',
+      roadAddress: '',
+      category: '',
+      latitude: null,
+      longitude: null,
+    };
+  }
   const address = (row.address ?? '').trim();
   const category = (row.category ?? '').trim();
   const roadAddress = '';
-  const link = sanitizeNaverLocalPlaceLink(row.link ?? undefined);
+  const link0 = sanitizeNaverLocalPlaceLink(row.link ?? undefined);
+  const link = (() => {
+    const u = (link0 ?? '').trim();
+    const m = /^https?:\/\/m\.place\.naver\.com\/place\/(\d+)\b/.exec(u);
+    return m?.[1] ? `https://m.place.naver.com/place/${m[1]}` : link0;
+  })();
   const thumbnailUrl = normalizeScrapedThumbnailToHttps(row.thumbnailUrl ?? undefined);
-  const id = stableScrapeId([title, address, category]);
+  const placeIdRaw = (row.placeId ?? '').trim();
+  const placeIdFromLink = (() => {
+    const u = (link ?? '').trim();
+    const m = /\/place\/(\d+)/.exec(u);
+    return m?.[1]?.trim() ?? '';
+  })();
+  const placeId = /^\d+$/.test(placeIdRaw)
+    ? placeIdRaw
+    : /^\d+$/.test(placeIdFromLink)
+      ? placeIdFromLink
+      : '';
+  const id = placeId ? `scrape-place-${placeId}` : stableScrapeId([title, address, category]);
   return {
     id,
     title,
@@ -82,6 +112,30 @@ function mapNativeToPlaceSearchRow(row: NativeScrapedPlaceRow): PlaceSearchRow {
     latitude: null,
     longitude: null,
   };
+}
+
+function normalizeScrapeQueryVariants(query: string): string[] {
+  const q0 = query.replace(/\s+/g, ' ').trim();
+  if (!q0) return [];
+  const variants: string[] = [q0];
+  const add = (q: string) => {
+    const t = q.replace(/\s+/g, ' ').trim();
+    if (!t) return;
+    if (variants.includes(t)) return;
+    variants.push(t);
+  };
+  // 네이버 모바일 검색은 복합 명사를 띄어쓰면 결과 DOM 구조가 달라지거나,
+  // 검색 자체가 약해지는 케이스가 있어 스크래핑에서는 붙여쓰기 변형을 함께 시도합니다.
+  add(q0.replace(/스크린\s*골프/gi, '스크린골프'));
+  add(q0.replace(/보드\s*게임\s*카페/gi, '보드게임카페'));
+  add(q0.replace(/방\s*탈출\s*카페/gi, '방탈출카페'));
+  add(q0.replace(/한강\s*공원/gi, '한강공원'));
+  add(q0.replace(/PC\s*방/gi, 'PC방').replace(/피시\s*방/gi, '피시방').replace(/피씨\s*방/gi, '피씨방'));
+  // 스크린골프는 "장"이 붙는 검색이 더 잘 되는 경우가 있어 폴백을 추가합니다.
+  if (/스크린골프/i.test(q0) && !/스크린골프장/i.test(q0)) {
+    add(q0.replace(/스크린골프/gi, '스크린골프장'));
+  }
+  return variants;
 }
 
 /**
@@ -159,15 +213,21 @@ export const ScrapingPlaceSearchService = {
     const q = query.trim();
     if (!q) return [];
     const t0 = Date.now();
-    let raw: NativeScrapedPlaceRow[];
+    let raw: NativeScrapedPlaceRow[] = [];
+    let usedQuery = q;
     try {
-      raw = await mod.searchMobilePlaces(q);
+      const variants = normalizeScrapeQueryVariants(q);
+      for (const v of variants) {
+        usedQuery = v;
+        raw = await mod.searchMobilePlaces(v);
+        if (Array.isArray(raw) && raw.length > 0) break;
+      }
     } catch (e) {
       if (__DEV__) {
         // eslint-disable-next-line no-console
         console.warn('[ScrapingPlaceSearchService]', {
           phase: 'native_error',
-          query: q,
+          query: usedQuery,
           ms: Date.now() - t0,
           message: e instanceof Error ? e.message : String(e),
         });
@@ -179,7 +239,7 @@ export const ScrapingPlaceSearchService = {
       // eslint-disable-next-line no-console
       console.log('[ScrapingPlaceSearchService]', {
         phase: 'native_ok',
-        query: q,
+        query: usedQuery,
         ms,
         rawCount: Array.isArray(raw) ? raw.length : -1,
         sampleRaw: Array.isArray(raw) ? raw.slice(0, 3) : raw,
@@ -190,19 +250,30 @@ export const ScrapingPlaceSearchService = {
         // eslint-disable-next-line no-console
         console.warn('[ScrapingPlaceSearchService]', {
           phase: 'empty_rows',
-          query: q,
+          query: usedQuery,
           ms,
           hint: 'Android logcat: adb logcat -s NaverMobilePlaceScrape:D',
         });
       }
       return [];
     }
-    const mapped = raw.map(mapNativeToPlaceSearchRow);
+    const mapped0 = raw
+      .map(mapNativeToPlaceSearchRow)
+      .filter((r) => r.id !== 'scrape-skip-more');
+    // 같은 placeId(/place/<id>)에서 파생된 행(사진탭/리뷰탭 등)이 섞여 들어오는 케이스가 있어
+    // UI key 충돌 방지를 위해 id 기준으로 1건만 남깁니다.
+    const seen = new Set<string>();
+    const mapped: PlaceSearchRow[] = [];
+    for (const r of mapped0) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      mapped.push(r);
+    }
     if (__DEV__) {
       // eslint-disable-next-line no-console
       console.log('[ScrapingPlaceSearchService]', {
         phase: 'mapped_no_detail',
-        query: q,
+        query: usedQuery,
         ms,
         placeCount: mapped.length,
         samplePlaces: mapped

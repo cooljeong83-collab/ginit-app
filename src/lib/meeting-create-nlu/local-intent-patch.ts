@@ -121,6 +121,26 @@ export function mergeMeetingCreatePlacePatchWithAccumulated(
 function extractPlaceAutoPickQuery(text: string): string | null {
   const t = text.normalize('NFKC').replace(/\s+/g, ' ').trim();
   if (!t) return null;
+
+  function stripTemporalPrefix(raw: string): string {
+    let s = raw.replace(/\s+/g, ' ').trim();
+    // 앞쪽 날짜/요일/시간 표현 제거(장소 상호 앞에 붙는 케이스 방지)
+    for (let i = 0; i < 6; i += 1) {
+      const prev = s;
+      s = s
+        .replace(
+          /^(?:오늘|내일|모레|이번\s*주|다음\s*주|주말|평일|월요일|화요일|수요일|목요일|금요일|토요일|일요일)\s+/,
+          '',
+        )
+        .replace(/^(?:오전|오후|밤|새벽|아침|점심|저녁)\s+/, '')
+        .replace(/^\d{1,2}\s*:\s*\d{2}\s+/, '')
+        .replace(/^\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?\s+/, '')
+        .replace(/^(?:대략|쯤|정도)\s+/, '')
+        .trim();
+      if (s === prev) break;
+    }
+    return s;
+  }
   const station = /([가-힣]{2,10}역)(?=\s|$|[0-9]|에서|으로|과|와|근처|앞|뒤|입구)/.exec(t);
   if (station) {
     const rest = t.slice(station.index! + station[1]!.length).trim();
@@ -137,18 +157,33 @@ function extractPlaceAutoPickQuery(text: string): string | null {
     }
     return dong[1]!.trim();
   }
-  if (
-    /(?:카페|포차|이자카야|바\b|키즈|브런치|루프탑|한강뷰|분위기|조용한|넓은|룸)/.test(t)
-  ) {
-    return t;
+  const vibeVenue = /(카페|포차|이자카야|바\b|키즈카페|키즈|브런치|루프탑|한강뷰|분위기|조용한|넓은|룸)/i.exec(t);
+  if (vibeVenue) {
+    // 문장 전체를 반환하면 시간 표현까지 같이 들어갈 수 있어, 키워드(또는 키즈카페)만 반환합니다.
+    const k = vibeVenue[1]!.replace(/\s+/g, ' ').trim();
+    return k;
   }
+
+  // 상호 + 생활 시설/업종 키워드(예: "이장네 숯불갈비", "OO CGV", "XX 스크린골프", "YY 헬스장")를 장소로 인식합니다.
+  // 날짜/시간 숫자와의 오탐을 줄이기 위해 "시설/업종 키워드"가 포함된 경우만 허용합니다.
+  const venueLike =
+    /([가-힣0-9]{2,20}(?:\s+[가-힣0-9]{1,20}){0,3}\s*(?:숯불갈비|갈비|고깃집|삼겹살|소고기|돼지고기|치킨|피자|버거|김밥|국밥|분식|횟집|초밥|라멘|파스타|샤브|훠궈|중국집|한식당|일식당|양식당|식당|맛집|술집|호프|주점|영화관|극장|시네마|CGV|cgv|메가박스|롯데시네마|스크린골프|골프연습장|헬스장|피트니스|요가|필라테스|크로스핏|수영장|실내수영장|클라이밍|암장|볼링장|당구장|탁구장|테니스장|배드민턴장|농구장|축구장|풋살장|체육관|운동장|공원|한강공원|둘레길|등산로|산책로|캠핑장|야영장|도서관|스터디카페|독서실|코워킹|PC\s*방|pc\s*방|피시방|피씨방|오락실|노래방|방탈출|보드게임카페|VR|전시|미술관|박물관))/i.exec(
+      t,
+    );
+  if (venueLike) {
+    const hit = stripTemporalPrefix(venueLike[1]!.replace(/\s+/g, ' ').trim());
+    if (hit.length >= 2) return hit;
+  }
+
   const pcBang = /(피시방|피씨방|PC\s*방|pc\s*방|오락실|인터넷\s*카페)/i.exec(t);
   if (pcBang) {
     return pcBang[1]!.replace(/\s+/g, ' ').trim();
   }
-  const cinema = /(영화관|멀티플렉스|CGV|cgv|메가박스|롯데시네마|극장)/i.exec(t);
+  const cinema = /([가-힣0-9]{2,20}(?:\s+[가-힣0-9]{1,20}){0,2}\s*)?(영화관|멀티플렉스|CGV|cgv|메가박스|롯데시네마|극장)/i.exec(t);
   if (cinema) {
-    return cinema[1]!.replace(/\s+/g, ' ').trim();
+    const name = stripTemporalPrefix((cinema[1] ?? '').replace(/\s+/g, ' ').trim());
+    const kind = (cinema[2] ?? '').replace(/\s+/g, ' ').trim();
+    return (name ? `${name} ${kind}` : kind).trim();
   }
   return null;
 }
@@ -258,8 +293,8 @@ export function buildLocalMeetingCreateNluPatch(params: BuildLocalMeetingCreateN
     acc.suggestedIsPublic = pub;
   }
 
-  const catForActivity =
-    typeof acc.categoryId === 'string' ? categories.find((c) => c.id.trim() === acc.categoryId.trim()) : null;
+  const catForActivityId = typeof acc.categoryId === 'string' ? acc.categoryId.trim() : '';
+  const catForActivity = catForActivityId ? categories.find((c) => c.id.trim() === catForActivityId) : null;
   if (
     catForActivity &&
     categoryNeedsSpecialty(catForActivity) &&

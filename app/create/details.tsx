@@ -400,7 +400,7 @@ export default function CreateDetailsScreen() {
 
   const [title, setTitle] = useState('');
   const [minParticipants, setMinParticipants] = useState(PARTICIPANT_COUNT_MIN);
-  const [maxParticipants, setMaxParticipants] = useState(4);
+  const [maxParticipants, setMaxParticipants] = useState(2);
 
   const minParticipantsRef = useRef(minParticipants);
   const maxParticipantsRef = useRef(maxParticipants);
@@ -702,7 +702,7 @@ export default function CreateDetailsScreen() {
   const resetWizardState = useCallback(() => {
     setTitle('');
     setMinParticipants(PARTICIPANT_COUNT_MIN);
-    setMaxParticipants(4);
+    setMaxParticipants(2);
     setDescription('');
     setMovieCandidates([]);
     setMenuPreferences([]);
@@ -1770,8 +1770,19 @@ export default function CreateDetailsScreen() {
       );
       const inferredHc = inferMeetingCreateHeadcountFromKoreanText(raw);
       if (inferredHc) {
+        const patchMaxDirect =
+          typeof (patch as { maxParticipants?: unknown }).maxParticipants === 'number' &&
+          Number.isFinite((patch as { maxParticipants?: number }).maxParticipants)
+            ? Math.trunc((patch as { maxParticipants: number }).maxParticipants)
+            : NaN;
+        const patchCrew = (patch as Record<string, unknown>)['인원'];
+        const patchMaxNested =
+          patchCrew && typeof patchCrew === 'object' && !Array.isArray(patchCrew) && typeof (patchCrew as Record<string, unknown>)['최대'] === 'number'
+            ? Math.trunc((patchCrew as Record<string, unknown>)['최대'] as number)
+            : NaN;
+        const patchMaxMissing = !Number.isFinite(patchMaxDirect) && !Number.isFinite(patchMaxNested);
         const tmpMerge = mergeMeetingCreateNluAccumulated(beforeAcc, patch);
-        if (peekMeetingCreateNluMissingSlots(categories, tmpMerge, now).includes('headcount')) {
+        if (patchMaxMissing || peekMeetingCreateNluMissingSlots(categories, tmpMerge, now).includes('headcount')) {
           patch = { ...patch, ...inferredHc };
         }
       }
@@ -2600,13 +2611,6 @@ export default function CreateDetailsScreen() {
                       }
                       size="md"
                     />
-                    <View
-                      style={[
-                        styles.publicPrivCheckbox,
-                        !isPublicMeeting && styles.publicPrivCheckboxOn,
-                      ]}>
-                      {!isPublicMeeting ? <Text style={styles.publicPrivTick}>✓</Text> : null}
-                    </View>
                     <View style={styles.publicPrivTextCol}>
                       <Text
                         style={[styles.publicPrivTitle, !isPublicMeeting && styles.publicPrivTitleOn]}
@@ -2637,10 +2641,6 @@ export default function CreateDetailsScreen() {
                       }
                       size="md"
                     />
-                    <View
-                      style={[styles.publicPrivCheckbox, isPublicMeeting && styles.publicPrivCheckboxOn]}>
-                      {isPublicMeeting ? <Text style={styles.publicPrivTick}>✓</Text> : null}
-                    </View>
                     <View style={styles.publicPrivTextCol}>
                       <Text
                         style={[styles.publicPrivTitle, isPublicMeeting && styles.publicPrivTitleOn]}
@@ -4177,6 +4177,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   publicPrivHalfOn: {
+    borderWidth: 1,
+    borderRadius: 14,
+    borderColor: GinitTheme.colors.primary,
     backgroundColor: GinitTheme.colors.primarySoft,
   },
   publicPrivHalfAgentCue: {
@@ -4189,25 +4192,6 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
     backgroundColor: GinitTheme.colors.border,
-  },
-  publicPrivCheckbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(31, 42, 68, 0.04)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  publicPrivCheckboxOn: {
-    borderColor: 'rgba(31, 42, 68, 0.45)',
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
-  },
-  publicPrivTick: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: GinitTheme.colors.primary,
   },
   publicPrivTextCol: {
     maxWidth: '100%',

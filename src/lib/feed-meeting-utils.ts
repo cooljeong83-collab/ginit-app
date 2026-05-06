@@ -264,7 +264,12 @@ export function firstPlaceThumbnailQuery(m: Meeting): string {
  * 카카오맵 장소 URL(`place_url` 저장분)이 아니면 null.
  */
 export function firstKakaoPlaceDetailPageUrlFromMeeting(m: Meeting): string | null {
-  const p0 = m.placeCandidates?.[0];
+  const confirmedId = (m.confirmedPlaceChipId ?? '').trim();
+  const list = m.placeCandidates ?? [];
+  const p0 =
+    confirmedId && list.length > 0
+      ? list.find((p) => String(p?.id ?? '').trim() === confirmedId) ?? list[0]
+      : list[0];
   if (!p0) return null;
   const link = typeof p0.naverPlaceLink === 'string' ? p0.naverPlaceLink.trim() : '';
   if (link && isKakaoMapPlacePageUrl(link)) return link;
@@ -274,7 +279,8 @@ export function firstKakaoPlaceDetailPageUrlFromMeeting(m: Meeting): string | nu
 export function firstPlaceImageSearchFields(m: Meeting): NaverPlaceImageSearchFields | null {
   const list = m.placeCandidates ?? [];
   if (list.length > 0) {
-    const p = list[0];
+    const confirmedId = (m.confirmedPlaceChipId ?? '').trim();
+    const p = confirmedId ? list.find((x) => String(x?.id ?? '').trim() === confirmedId) ?? list[0] : list[0];
     const title = typeof p.placeName === 'string' ? p.placeName.trim() : '';
     const addressLine = typeof p.address === 'string' ? p.address.trim() : '';
     const combined = `${title} ${addressLine}`.trim();

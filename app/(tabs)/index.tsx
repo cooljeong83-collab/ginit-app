@@ -1272,9 +1272,7 @@ export default function FeedScreen() {
       sortedJoinedMeetings.length === 0
         ? feedListEmptyCentered(
             'albums-outline',
-            privateJoinedFilteredMeetings.length > 0
-              ? '참여중 탭에는 공개 모임만 보여요'
-              : '조건에 맞는 참여 모임이 없어요',
+            '참여중인 공개 모임이 없습니다.',
             privateJoinedFilteredMeetings.length > 0
               ? '비공개로 참여·개설한 모임은 「비공개」 탭에서 확인할 수 있어요.'
               : '필터를 바꾸거나 탐색에서 모임에 참여해 보세요.',

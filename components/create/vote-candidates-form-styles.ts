@@ -563,7 +563,7 @@ export const voteCandidatesFormStyles = StyleSheet.create({
   },
   /** 가로 캐러셀(`placeResultsCarouselHost` 274) − 세로 패딩 20 기준 — 카카오·네이버 버튼을 카드 하단에 고정 */
   placeResultProposalCardWrap: {
-    minHeight: 254,
+    minHeight: 266,
     flexDirection: 'column',
   },
   placeResultProposalPressFill: {

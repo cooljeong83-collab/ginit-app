@@ -71,6 +71,56 @@ class NaverMobilePlaceScrapeModule : Module() {
     }
 
     /**
+     * 네이버 지도 모바일 검색(`m.map.naver.com/search?query=...`) 기반 스크래핑.
+     * - 일반 업체/시설(스크린골프/헬스장/학원 등)에서 통합검색(m.search)보다 결과 풀을 더 안정적으로 확보하는 용도.
+     * - 반환 스키마는 `searchMobilePlaces`와 동일(`title/category/address/link/thumbnailUrl/placeId`).
+     */
+    AsyncFunction("searchMobileMapPlaces") { query: String ->
+      val q = query.trim()
+      if (q.isEmpty()) {
+        return@AsyncFunction emptyList<Map<String, String?>>()
+      }
+      val encoded = URLEncoder.encode(q, StandardCharsets.UTF_8.toString())
+      val url = "https://m.map.naver.com/search?query=$encoded"
+
+      val doc =
+        try {
+          Jsoup.connect(url)
+            .userAgent(NAVER_SCRAPE_UA)
+            .timeout(7000)
+            .header(
+              "Accept",
+              "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            )
+            .header("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header("Accept-Encoding", "gzip, deflate")
+            .header("Cache-Control", "max-age=0")
+            .header("Pragma", "no-cache")
+            .header("Upgrade-Insecure-Requests", "1")
+            .header("Sec-Fetch-Site", "none")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-User", "?1")
+            .header("Sec-Ch-Ua", "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"")
+            .header("Sec-Ch-Ua-Mobile", "?1")
+            .header("Sec-Ch-Ua-Platform", "\"Android\"")
+            .followRedirects(true)
+            .get()
+        } catch (e: Exception) {
+          if (BuildConfig.DEBUG) {
+            Log.e(TAG, "지도 Jsoup 실패 query=$q url=$url err=${e.javaClass.simpleName}: ${e.message}", e)
+          }
+          throw CodedException(
+            "NAVER_MOBILE_MAP_SCRAPE_FAILED",
+            e.message ?: "네이버 지도 모바일 검색 요청에 실패했습니다.",
+            e,
+          )
+        }
+
+      parseMapSearchRows(doc, q, url)
+    }
+
+    /**
      * `m.place.naver.com` 등 **플레이스 상세** HTML에서 대표 이미지·주소 한 줄 추출.
      * (SSR·인라인 JSON·메타 병행 — SPA 단독 셸이면 빈 값 가능)
      */
@@ -124,11 +174,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       val out = mutableMapOf<String, String?>()
       val thumb = extractPlaceDetailThumbnail(doc, html)
       if (!thumb.isNullOrBlank()) out["thumbnailUrl"] = thumb
-      val addr = extractPlaceDetailAddress(doc, html)
-      if (!addr.isNullOrBlank()) {
-        out["address"] = addr
-        out["roadAddress"] = addr
-      }
+      out.putAll(extractPlaceDetailAddresses(doc, html).filterValues { !it.isNullOrBlank() })
       return@AsyncFunction out
     }
   }
@@ -301,7 +347,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       return t.trimEnd()
     }
 
-    private fun extractPlaceDetailAddress(doc: Document, rawHtml: String): String? {
+    private fun extractPlaceDetailAddresses(doc: Document, rawHtml: String): Map<String, String?> {
       val cands = mutableListOf<String>()
       extractAddressStringsFromEmbeddedJson(rawHtml, cands)
       for (script in doc.select("script[type=application/ld+json]")) {
@@ -323,7 +369,57 @@ class NaverMobilePlaceScrapeModule : Module() {
       if (!ogDesc.isNullOrBlank()) {
         ogDesc.lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach { cands.add(it) }
       }
-      return pickBestKrAddressLine(cands)
+      val road = pickBestKrRoadAddressLine(cands)
+      val jibun = pickBestKrJibunAddressLine(cands)
+      // address=지번, roadAddress=도로명 (둘 다 없으면 빈 맵)
+      val out = mutableMapOf<String, String?>()
+      if (!jibun.isNullOrBlank()) out["address"] = jibun
+      if (!road.isNullOrBlank()) out["roadAddress"] = road
+      // 지번만/도로명만 있는 케이스에서 기존 로직(한 줄 주소)과 호환: 최소 한 쪽은 채운다
+      if (out.isEmpty()) {
+        val any = pickBestKrAddressLine(cands)
+        if (!any.isNullOrBlank()) {
+          out["address"] = any
+          out["roadAddress"] = any
+        }
+      }
+      return out
+    }
+
+    private fun pickBestKrRoadAddressLine(candidates: Iterable<String>): String? {
+      val normalized =
+        candidates
+          .map { normalizeNaverPlaceAddressUiText(it.replace('\u00a0', ' ')) }
+          .filter { it.isNotEmpty() }
+          .distinct()
+      val valid = normalized.filter { looksLikeKrAddressLine(it) }
+      val road = valid.filter { it.contains("로") || it.contains("길") }
+      if (road.isEmpty()) return null
+      return road.maxWithOrNull(
+        compareByDescending<String> { it.length }
+          .thenByDescending { addressDetailScore(it) },
+      )
+    }
+
+    private fun pickBestKrJibunAddressLine(candidates: Iterable<String>): String? {
+      val normalized =
+        candidates
+          .map { normalizeNaverPlaceAddressUiText(it.replace('\u00a0', ' ')) }
+          .filter { it.isNotEmpty() }
+          .distinct()
+      val valid = normalized.filter { looksLikeKrAddressLine(it) }
+      // 지번은 보통 "…동 123-4"처럼 로/길이 없고 숫자 포함
+      val jibun =
+        valid.filter {
+          Regex("""\d""").containsMatchIn(it) &&
+            !(it.contains("로") || it.contains("길")) &&
+            (it.contains("동") || it.contains("리") || it.contains("가") || it.contains("읍") || it.contains("면"))
+        }
+      if (jibun.isEmpty()) return null
+      return jibun.maxWithOrNull(
+        compareByDescending<String> { it.length }
+          .thenByDescending { addressDetailScore(it) },
+      )
     }
 
     private fun collectAddressesFromLdJsonRoot(jsonStr: String, out: MutableList<String>) {
@@ -495,14 +591,14 @@ class NaverMobilePlaceScrapeModule : Module() {
         val row = parseUeZoRow(node) ?: continue
         val idKey = row["placeId"] ?: (row["title"] + "\u0000" + (row["link"] ?: ""))
         if (!seenIds.add(idKey)) continue
-        out.add(row.filterKeys { it != "placeId" })
+        out.add(row)
       }
 
       for (node in doc.select("li.z_rc6[data-nop_res-doc-id]")) {
         val row = parseZRc6Row(node) ?: continue
         val idKey = row["placeId"] ?: (row["title"] + "\u0000" + (row["link"] ?: ""))
         if (!seenIds.add(idKey)) continue
-        out.add(row.filterKeys { it != "placeId" })
+        out.add(row)
       }
 
       if (out.isEmpty()) {
@@ -515,16 +611,88 @@ class NaverMobilePlaceScrapeModule : Module() {
         }
       }
 
+      // 일반 업종/시설 검색(예: 스크린골프/헬스장 등)은 플레이스 블록 DOM이 달라지는 케이스가 있어
+      // `m.place.naver.com/...` 링크를 중심으로 추가 후보를 수집합니다.
+      // - out이 적당히 잡혔더라도(예: 5개) 화면에는 20개+가 보이는 케이스가 있어,
+      //   일정 임계치 미만이면 `#place-main-section-root`를 기준으로 추가 수집합니다.
+      if (out.size < 20) {
+        val anchorScope =
+          doc.selectFirst("#place-main-section-root") ?: doc.body()
+        val anchors =
+          (anchorScope ?: doc).select("a[href*='m.place.naver.com/'][href]")
+        for (a in anchors) {
+          val row = extractGenericMobilePlaceLinkRow(a) ?: continue
+          val idKey = row["title"] + "\u0000" + (row["link"] ?: "")
+          if (!seenIds.add(idKey)) continue
+          out.add(row)
+          // 화면에 20개+가 노출되는 쿼리는 앵커가 충분히 많아 여기서 풀을 넓혀야 합니다.
+          if (out.size >= 40) break
+        }
+      }
+
+      // 일부 쿼리(스터디카페/헬스장 등)는 통합검색 HTML에 5~6개만 있고,
+      // "목록(list)" 페이지로 들어가야 20개+가 노출됩니다.
+      // 통합검색에 노출된 list URL을 1~2개 따라가서 상세 링크를 추가로 수집합니다.
+      if (out.size < 20) {
+        val listUrlsFromAnchors =
+          doc.select("a[href][href*='m.place.naver.com/']")
+            .mapNotNull {
+              it.absUrl("href").trim().takeIf { u ->
+                u.startsWith("http") &&
+                  (u.contains("/list?") || u.contains("/list/") || u.contains("/attraction/list") || u.contains("/restaurant/list"))
+              }
+            }
+            .distinct()
+        val html = try { doc.outerHtml() } catch (_: Exception) { "" }
+        val listUrlsFromHtml =
+          if (html.isBlank()) {
+            emptyList()
+          } else {
+            Regex("""https?://m\.place\.naver\.com/[^"'\s<>]+/(?:list\?|attraction/list\?|restaurant/list\?)[^"'\s<>]+""")
+              .findAll(html)
+              .map { it.value.trim() }
+              .filter { it.startsWith("http") }
+              .distinct()
+              .toList()
+          }
+        val listUrls =
+          (listUrlsFromAnchors + listUrlsFromHtml)
+            .distinct()
+            .take(2)
+        for (u in listUrls) {
+          try {
+            val listDoc = newNaverMobileJsoupConnection(u).timeout(6000).get()
+            val scope =
+              listDoc.selectFirst("#_list_scroll_container")
+                ?: listDoc.selectFirst("#place-main-section-root")
+                ?: listDoc.body()
+            val anchors =
+              (scope ?: listDoc).select("a[href][href*='m.place.naver.com/']")
+            for (a in anchors) {
+              val row = extractGenericMobilePlaceLinkRow(a) ?: continue
+              val idKey = row["title"] + "\u0000" + (row["link"] ?: "")
+              if (!seenIds.add(idKey)) continue
+              out.add(row)
+              if (out.size >= 40) break
+            }
+          } catch (_: Exception) {
+            // list 폴백 실패 시 무시하고 기존 out 유지
+          }
+          if (out.size >= 40) break
+        }
+      }
+
       if (BuildConfig.DEBUG) {
         val nUe = doc.select("li.UEzoS").size
         val nZr = doc.select("li.z_rc6[data-nop_res-doc-id]").size
         val nBlue = doc.select("a.place_bluelink[href]").size
+        val nPlaceHref = doc.select("a[href*='m.place.naver.com/'][href]").size
         val docTitle = doc.title().orEmpty().take(160)
         val htmlLen = doc.outerHtml().length
         val titlesPreview = out.take(5).mapNotNull { it["title"]?.take(40) }
         Log.d(
           TAG,
-          "parsed query=$query out=${out.size} li.UEzoS=$nUe li.z_rc6=$nZr place_bluelink=$nBlue htmlLen=$htmlLen docTitle=$docTitle titles=$titlesPreview",
+          "parsed query=$query out=${out.size} li.UEzoS=$nUe li.z_rc6=$nZr place_bluelink=$nBlue place_href=$nPlaceHref htmlLen=$htmlLen docTitle=$docTitle titles=$titlesPreview",
         )
         if (out.isEmpty()) {
           Log.w(
@@ -537,10 +705,275 @@ class NaverMobilePlaceScrapeModule : Module() {
       return out
     }
 
+    /**
+     * 네이버 지도 모바일 검색 HTML에서 업체 리스트를 최대한 보수적으로 파싱합니다.
+     * - 우선 `m.place.naver.com` 직링크가 있으면 그대로 사용
+     * - 지도 내부 링크(`m.map.naver.com/.../place/<id>` 또는 `.../entry/place/<id>`)는 place 숫자 ID만 뽑아
+     *   `https://m.place.naver.com/place/<id>`로 정규화하여 반환
+     */
+    private fun parseMapSearchRows(doc: Document, query: String, requestUrl: String): List<Map<String, String?>> {
+      val html = try { doc.outerHtml() } catch (_: Exception) { "" }
+      val loginHint = html.isNotBlank() && html.contains("로그인이 필요합니다")
+      val out = mutableListOf<Map<String, String?>>()
+      val seenIds = linkedSetOf<String>()
+
+      // 1) place host 직접 링크 우선
+      for (a in doc.select("a[href*='m.place.naver.com/'][href]")) {
+        val row = extractGenericMobilePlaceLinkRow(a) ?: continue
+        val idKey = row["placeId"] ?: (row["title"] + "\u0000" + (row["link"] ?: ""))
+        if (!seenIds.add(idKey)) continue
+        out.add(row)
+        if (out.size >= 40) break
+      }
+
+      // 2) map host 링크에서 placeId 추출(지도 UI는 내부 라우팅 URL이 많음)
+      if (out.size < 20) {
+        for (a in doc.select("a[href][href*='m.map.naver.com']")) {
+          val row = extractMapHostPlaceLinkRow(a) ?: continue
+          val idKey = row["placeId"] ?: (row["title"] + "\u0000" + (row["link"] ?: ""))
+          if (!seenIds.add(idKey)) continue
+          out.add(row)
+          if (out.size >= 40) break
+        }
+      }
+
+      if (BuildConfig.DEBUG) {
+        val nAPlace = doc.select("a[href*='m.place.naver.com/'][href]").size
+        val nAMap = doc.select("a[href][href*='m.map.naver.com']").size
+        val docTitle = doc.title().orEmpty().take(160)
+        val htmlLen = doc.outerHtml().length
+        val titlesPreview = out.take(5).mapNotNull { it["title"]?.take(40) }
+        Log.d(
+          TAG,
+          "map_parsed query=$query out=${out.size} a_place=$nAPlace a_map=$nAMap htmlLen=$htmlLen docTitle=$docTitle titles=$titlesPreview",
+        )
+        if (loginHint) {
+          Log.w(TAG, "지도 HTML에 로그인 문구가 포함되어 있습니다(헤더/메뉴 오탐 가능). query=$query url=$requestUrl")
+        }
+        if (out.isEmpty()) {
+          Log.w(TAG, "지도 결과 0건 — DOM 변경·로그인 요구·차단 가능. url=$requestUrl htmlLen=$htmlLen")
+        }
+      }
+
+      // 헤더/메뉴에 로그인 문구가 들어가는 경우가 있어, 결과가 정말 0건일 때만 로그인 게이트로 취급합니다.
+      if (out.isEmpty() && loginHint) {
+        if (BuildConfig.DEBUG) {
+          Log.w(TAG, "지도 검색이 로그인 요구 페이지로 보입니다(결과 0건). query=$query url=$requestUrl")
+        }
+        return emptyList()
+      }
+
+      return out
+    }
+
+    private fun isMapActionLikeText(t: String): Boolean {
+      val s = t.trim()
+      if (s.isEmpty()) return true
+      // 지도 결과 행 안의 액션 버튼/라벨(업체명이 아님)
+      return s == "주소보기" ||
+        s == "공유" ||
+        s == "지도" ||
+        s == "길찾기" ||
+        s == "전화" ||
+        s == "가격" ||
+        s == "예약" ||
+        s == "앱 열기" ||
+        s == "앱 열기메뉴" ||
+        s == "메뉴" ||
+        s == "검색결과"
+    }
+
+    private fun looksLikeCategoryLabel(t: String): Boolean {
+      val s = t.trim()
+      if (s.length !in 2..24) return false
+      if (isMapActionLikeText(s)) return false
+      if (Regex("""\d""").containsMatchIn(s)) return false
+      // 주소처럼 보이면 제외
+      if (regionPrefixesForAddressLine.any { s.contains(it) }) return false
+      if (looksLikeKrAddressLine(s)) return false
+      // 너무 일반 상태/메타는 제외
+      if (isStatusLikeTitle(s)) return false
+      return true
+    }
+
+    private fun extractMapHostPlaceIdFromUrl(urlString: String): String? {
+      val s = urlString.trim()
+      if (s.isEmpty()) return null
+      // 흔한 패턴: /p/entry/place/<id> , /place/<id>
+      val m1 = Regex("""/entry/place/(\d{4,})\b""").find(s)
+      if (m1?.groupValues?.getOrNull(1)?.isNotBlank() == true) return m1.groupValues[1]
+      val m2 = Regex("""/place/(\d{4,})\b""").find(s)
+      if (m2?.groupValues?.getOrNull(1)?.isNotBlank() == true) return m2.groupValues[1]
+      // 쿼리 파라미터 pinId/businessId 등으로 붙는 경우도 있으니 전체에서 숫자 ID를 보수적으로 탐색
+      val m3 = Regex("""(?:pinId|businessId|placeId|code)=(\d{4,})\b""").find(s)
+      if (m3?.groupValues?.getOrNull(1)?.isNotBlank() == true) return m3.groupValues[1]
+      return null
+    }
+
+    private fun extractMapHostPlaceLinkRow(a: Element): Map<String, String?>? {
+      val hrefAbs = a.absUrl("href").trim().takeIf { it.startsWith("http") } ?: return null
+      if (!hrefAbs.contains("m.map.naver.com")) return null
+      val placeId = extractMapHostPlaceIdFromUrl(hrefAbs) ?: return null
+      val block = a.closest("li") ?: a.closest("div") ?: a.parent() ?: return null
+
+      var title = cleanText(a).ifEmpty { a.attr("aria-label").trim() }
+      if (title.isEmpty()) {
+        title = block.selectFirst("strong, b, span")?.let { cleanText(it) }?.trim().orEmpty()
+      }
+      title = title.trim()
+      if (title.length !in 2..80) return null
+      if (isMapActionLikeText(title)) return null
+      if (isStatusLikeTitle(title)) return null
+
+      // 카테고리는 짧고 주소/액션이 아닌 라벨만 후보로
+      val category =
+        block.select("span, em, i")
+          .map { cleanText(it).trim() }
+          .firstOrNull { looksLikeCategoryLabel(it) }
+          .orEmpty()
+
+      val address = pickBestListAddressCandidate(
+        linkedSetOf<String>().also { set ->
+          for (el in block.select("span, div")) {
+            val t = cleanText(el)
+            // m.map 행에서는 주소 줄에 액션 라벨(공유/가격 등)이 같이 붙어 후보 필터가 탈락할 수 있어
+            // 먼저 블록 텍스트에서 주소 부분만 잘라 후보로 넣습니다.
+            val addr = extractKrAddressFromBlockText(t)
+            if (addr.isNotEmpty()) {
+              set.add(addr)
+              continue
+            }
+            if (t.length in 8..240 && looksLikeListAddressSnippet(t)) set.add(t)
+          }
+        },
+        title,
+      )
+      val address2 =
+        if (address.isNotEmpty()) {
+          address
+        } else {
+          extractKrAddressFromBlockText(cleanText(block))
+        }
+      val thumb = firstImageUrlInRow(block)
+
+      val out = mutableMapOf<String, String?>(
+        "title" to title,
+        "link" to "https://m.place.naver.com/place/$placeId",
+        "placeId" to placeId,
+      )
+      if (category.isNotEmpty() && category.length <= 40 && !isStatusLikeTitle(category)) out["category"] = category
+      if (address2.isNotEmpty()) out["address"] = address2
+      if (!thumb.isNullOrBlank()) out["thumbnailUrl"] = thumb
+      return out
+    }
+
+    /**
+     * 지도(m.map) 결과 블록 전체 텍스트에서 주소를 폴백 추출합니다.
+     * - "주소보기" 라벨 뒤에 바로 주소가 붙는 케이스가 많아, 가장 이른 지역 접두부터 잡고 액션 라벨 앞에서 자릅니다.
+     */
+    private fun extractKrAddressFromBlockText(rawText: String): String {
+      var t = rawText.replace('\u00a0', ' ').trim()
+      if (t.isEmpty()) return ""
+      t = t.replace("주소보기", " ").replace(Regex("""\s+"""), " ").trim()
+      var best = -1
+      for (p in regionPrefixesForAddressLine) {
+        val i = t.indexOf(p)
+        if (i >= 0 && (best < 0 || i < best)) best = i
+      }
+      if (best < 0) return ""
+      var tail = t.substring(best).trim()
+      // 액션 라벨(공유/지도/길찾기/전화/예약/가격 등) 앞에서 잘라 주소만 남김
+      for (cut in listOf("공유", "지도", "길찾기", "전화", "예약", "가격", "메뉴", "앱 열기", "로그인")) {
+        val i = tail.indexOf(cut)
+        if (i > 0) {
+          tail = tail.substring(0, i).trimEnd()
+        }
+      }
+      // 너무 길면 마지막 방어(주소는 보통 10~80자)
+      if (tail.length > 160) tail = tail.substring(0, 160).trimEnd()
+      return tail.takeIf { looksLikeListAddressSnippet(it) } ?: ""
+    }
+
+    /**
+     * 일반 업체/시설 결과 레이아웃용 폴백 파서.
+     * - `m.place.naver.com/...` 링크를 기준으로, 가장 가까운 블록에서 제목/카테고리/주소/썸네일을 추출합니다.
+     */
+    private fun extractGenericMobilePlaceLinkRow(a: Element): Map<String, String?>? {
+      val href = a.absUrl("href").trim().takeIf { it.startsWith("http") } ?: return null
+      // 쿼리 링크/공유 링크 등 비-상세 링크는 제외
+      if (!href.contains("m.place.naver.com")) return null
+      // 내 페이지/리뷰/홈/목록(list)/필터 전용 링크(운영중/예약 등)는 업체 후보가 아니므로 제외
+      if (href.contains("/home?") || href.contains("/my?") || href.contains("/my/") || href.contains("/review/")) return null
+      if (href.contains("/list?") || href.contains("/list/")) return null
+      // 메뉴/가격/예약 탭 등은 업체 행이 아니라 액션/탭 링크로 섞여 들어오므로 제외
+      if (href.contains("/menu/") || href.contains("/booking/") || href.contains("/tickets/")) return null
+      // 통합검색 "필터/정렬" 칩이 업체로 오탐되는 케이스 방지
+      if (href.contains("filterOpentime") || href.contains("filterBooking") || href.contains("filterCoupon") || href.contains("filterWheelchair")) return null
+
+      // 상세 페이지 형태만 허용:
+      // - /{type}/{id} (예: /restaurant/123..., /attraction/123...)
+      // - /place/{id} 또는 /place/{id}/home 등 (지도 검색에서 흔함)
+      val typedDetailRe = Regex("""https?://m\.place\.naver\.com/([a-zA-Z_-]+)/(\d+)(?:[/?].*)?$""")
+      val placeDetailRe = Regex("""https?://m\.place\.naver\.com/place/(\d+)(?:[/?].*)?$""")
+      if (!typedDetailRe.containsMatchIn(href) && !placeDetailRe.containsMatchIn(href)) return null
+
+      val block = a.closest("li") ?: a.closest("div") ?: a.parent() ?: return null
+
+      // 제목 후보: 링크 내 텍스트가 비면 aria-label, 혹은 블록 내 첫 strong/span
+      var title = cleanText(a).ifEmpty { a.attr("aria-label").trim() }
+      if (title.isEmpty()) {
+        title =
+          block.selectFirst("strong, b, span")?.let { cleanText(it) }?.trim().orEmpty()
+      }
+      title = title.trim()
+      if (title.length !in 2..80) return null
+      // 필터/탭 라벨 오탐 방지
+      if (title == "MY" || title == "운영중" || title == "예약") return null
+      if (isStatusLikeTitle(title)) return null
+
+      // 카테고리 후보: 블록 내 짧은 라벨
+      val category =
+        block.selectFirst("span.KCMnt, span.NOJeK, span.category, em, i")?.let { cleanText(it) }?.trim().orEmpty()
+
+      // 주소 후보: 기존 휴리스틱 재사용(블록 전체 span 훑기)
+      val address = pickBestListAddressCandidate(
+        linkedSetOf<String>().also { set ->
+          for (el in block.select("span")) {
+            val t = cleanText(el)
+            if (t.length in 8..160 && looksLikeListAddressSnippet(t)) set.add(t)
+          }
+        },
+        title,
+      )
+      val address2 =
+        if (address.isNotEmpty()) {
+          address
+        } else {
+          // m.map 결과는 주소 줄에 액션 라벨이 붙거나 span이 잘게 쪼개지지 않는 케이스가 있어 블록 텍스트 폴백
+          extractKrAddressFromBlockText(cleanText(block))
+        }
+
+      val thumb = firstImageUrlInRow(block)
+      val out = mutableMapOf<String, String?>(
+        "title" to title,
+        "link" to href,
+      )
+      // placeId가 링크에서 바로 잡히면 함께 내려 중복 제거(key) 안정화
+      val pid = placeDetailRe.find(href)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+      if (pid.isNotEmpty()) out["placeId"] = pid
+      if (category.isNotEmpty()) out["category"] = category
+      if (address2.isNotEmpty()) out["address"] = address2
+      if (!thumb.isNullOrBlank()) out["thumbnailUrl"] = thumb
+      return out
+    }
+
     /** `li.UEzoS` — 통합검색 플레이스 카드 (광고·자연결과 혼재). */
     private fun parseUeZoRow(node: Element): Map<String, String?>? {
-      val title = node.selectFirst("span.TYaxT")?.let { cleanText(it) }?.takeIf { it.isNotEmpty() } ?: return null
-      val category = node.selectFirst("span.KCMnt")?.let { cleanText(it) } ?: ""
+      val rawTitle = node.selectFirst("span.TYaxT")?.let { cleanText(it) }?.takeIf { it.isNotEmpty() } ?: return null
+      if (isStatusLikeTitle(rawTitle)) return null
+      val (title, gluedCat) = splitGluedTitleCategory(rawTitle)
+      var category = node.selectFirst("span.KCMnt")?.let { cleanText(it) } ?: ""
+      if (category.isEmpty() && !gluedCat.isNullOrBlank()) category = gluedCat
       val placeId = extractNmbPlaceId(node)
       var link = resolvePlaceListLink(node)
       if (link == null && placeId != null) {
@@ -553,9 +986,12 @@ class NaverMobilePlaceScrapeModule : Module() {
 
     /** `li.z_rc6` — 섹션 보조 목록(예: 새로 오픈). */
     private fun parseZRc6Row(node: Element): Map<String, String?>? {
-      val title = node.selectFirst("div.LGJdP span")?.let { cleanText(it) }?.takeIf { it.isNotEmpty() } ?: return null
+      val rawTitle = node.selectFirst("div.LGJdP span")?.let { cleanText(it) }?.takeIf { it.isNotEmpty() } ?: return null
+      if (isStatusLikeTitle(rawTitle)) return null
+      val (title, gluedCat) = splitGluedTitleCategory(rawTitle)
       val nk = node.select("div.qI_q5 span.NOJeK")
-      val category = nk.getOrNull(0)?.let { cleanText(it) } ?: ""
+      var category = nk.getOrNull(0)?.let { cleanText(it) } ?: ""
+      if (category.isEmpty() && !gluedCat.isNullOrBlank()) category = gluedCat
       val address = nk.getOrNull(1)?.let { cleanText(it) } ?: ""
       val placeId = node.attr("data-nop_res-doc-id").trim().takeIf { it.isNotEmpty() }
       val link =
@@ -563,6 +999,61 @@ class NaverMobilePlaceScrapeModule : Module() {
           ?: placeId?.let { "https://m.place.naver.com/restaurant/$it?entry=pll" }
       val thumb = firstImageUrlInRow(node)
       return buildRowMap(title, category, address, link, placeId, thumb)
+    }
+
+    /**
+     * 스크린샷처럼 상호명 오른쪽에 업종 라벨(예: "스크린골프장")이 붙어 표시되는데,
+     * DOM 변화로 인해 텍스트가 붙여쓰기 형태로 들어오는 케이스가 있어 분리합니다.
+     */
+    private fun splitGluedTitleCategory(rawTitle: String): Pair<String, String?> {
+      val t = rawTitle.replace('\u00a0', ' ').trim()
+      if (t.isEmpty()) return Pair(t, null)
+      val suffixes =
+        listOf(
+          "스크린골프장",
+          "스크린골프",
+          "헬스장",
+          "피트니스",
+          "요가",
+          "필라테스",
+          "골프연습장",
+          "골프 연습장",
+          "볼링장",
+          "당구장",
+          "노래방",
+          "영화관",
+          "공원",
+        )
+      for (suf in suffixes) {
+        if (t.length > suf.length + 1 && t.endsWith(suf)) {
+          val base = t.dropLast(suf.length).trimEnd()
+          if (base.isNotEmpty()) return Pair(base, suf)
+        }
+        // 공백으로 분리된 형태
+        val spaced = " $suf"
+        if (t.length > spaced.length + 1 && t.endsWith(spaced)) {
+          val base = t.dropLast(spaced.length).trimEnd()
+          if (base.isNotEmpty()) return Pair(base, suf)
+        }
+      }
+      return Pair(t, null)
+    }
+
+    private fun isStatusLikeTitle(title: String): Boolean {
+      val t = title.replace('\u00a0', ' ').trim()
+      if (t.isEmpty()) return true
+      // 통합검색 카드에서 "리뷰 167..." 같은 보조 텍스트가 제목으로 오탐되는 케이스 방지
+      if (t.startsWith("리뷰")) return true
+      // "이미지수38" 같은 사진 카운트 라벨 오탐 방지
+      if (t.startsWith("이미지수")) return true
+      if (Regex("""^이미지\s*수?\s*\d+""").containsMatchIn(t)) return true
+      // 운영 상태 라벨(업체명이 아님)
+      if (t.startsWith("24시간")) return true
+      if (t.contains("연중무휴")) return true
+      if (t.startsWith("영업")) return true
+      if (t.contains("영업 종료")) return true
+      if (t.contains("영업중")) return true
+      return false
     }
 
     private fun buildRowMap(
@@ -573,13 +1064,33 @@ class NaverMobilePlaceScrapeModule : Module() {
       placeId: String?,
       thumbnailUrl: String? = null,
     ): Map<String, String?> {
+      val normalizedLink = normalizePlaceDetailLink(link)
+      val derivedId = placeId ?: extractPlaceIdFromLink(normalizedLink)
       val m = mutableMapOf<String, String?>("title" to title)
       if (category.isNotEmpty()) m["category"] = category
       if (address.isNotEmpty()) m["address"] = address
-      if (link != null) m["link"] = link
-      if (placeId != null) m["placeId"] = placeId
+      if (normalizedLink != null) m["link"] = normalizedLink
+      if (derivedId != null) m["placeId"] = derivedId
       if (!thumbnailUrl.isNullOrBlank()) m["thumbnailUrl"] = thumbnailUrl
       return m
+    }
+
+    private fun extractPlaceIdFromLink(link: String?): String? {
+      val u = link?.trim().orEmpty()
+      if (u.isEmpty()) return null
+      val m = Regex("""/place/(\d+)""").find(u) ?: return null
+      val id = m.groupValues.getOrNull(1)?.trim().orEmpty()
+      return id.takeIf { it.isNotEmpty() }
+    }
+
+    private fun normalizePlaceDetailLink(link: String?): String? {
+      val u0 = link?.trim().orEmpty()
+      if (u0.isEmpty()) return null
+      val m = Regex("""(https?://m\.place\.naver\.com/place/\d+)""").find(u0)
+      if (m != null) {
+        return m.groupValues[1]
+      }
+      return u0
     }
 
     /**
@@ -587,18 +1098,72 @@ class NaverMobilePlaceScrapeModule : Module() {
      * 네이버 모바일 검색은 `data-src` 지연 로딩과 `src` 혼용.
      */
     private fun firstImageUrlInRow(container: Element): String? {
-      val attrPriority = listOf("data-src", "data-lazy-src", "data-original", "src")
+      // m.map 결과는 img src가 비어 있고 srcset(data-srcset)로만 내려오는 케이스가 있어 함께 파싱합니다.
+      val attrPriority =
+        listOf(
+          "data-src",
+          "data-lazy-src",
+          "data-original",
+          "data-srcset",
+          "data-lazy-srcset",
+          "srcset",
+          "src",
+        )
       for (img in container.select("img")) {
         for (attr in attrPriority) {
           val raw = img.attr(attr).trim()
           if (raw.isEmpty() || raw.startsWith("data:")) continue
-          val abs = img.absUrl(attr).trim()
-          if (abs.isEmpty() || !abs.startsWith("http")) continue
-          if (shouldSkipListImageUrl(abs)) continue
-          return abs
+          val fromSet = if (attr.endsWith("srcset", ignoreCase = true)) extractFirstUrlFromSrcset(raw) else null
+          val picked = (fromSet ?: raw).trim()
+          if (picked.isEmpty() || picked.startsWith("data:")) continue
+          val abs = img.absUrl(attr).trim().ifEmpty { picked }
+          val normalized = normalizeMaybeProtocolRelativeImageUrl(abs)
+          if (normalized.isEmpty() || !normalized.startsWith("http")) continue
+          if (shouldSkipListImageUrl(normalized)) continue
+          return normalized
         }
       }
+      // m.map 결과는 썸네일이 img가 아니라 background-image로 내려오는 경우가 있어 폴백으로 파싱합니다.
+      for (el in container.select("[style*='background']")) {
+        val style = el.attr("style").orEmpty()
+        val url = extractBackgroundImageUrl(style) ?: continue
+        if (!url.startsWith("http")) continue
+        if (shouldSkipListImageUrl(url)) continue
+        return url
+      }
       return null
+    }
+
+    private fun normalizeMaybeProtocolRelativeImageUrl(url: String): String {
+      var u = url.trim()
+      if (u.isEmpty()) return ""
+      u = u.trim('\"', '\'')
+      if (u.startsWith("//")) u = "https:$u"
+      if (u.startsWith("http://")) u = "https://" + u.removePrefix("http://")
+      return u.trim()
+    }
+
+    private fun extractFirstUrlFromSrcset(srcsetRaw: String): String? {
+      val s = srcsetRaw.trim()
+      if (s.isEmpty()) return null
+      // "url1 1x, url2 2x" 형태에서 첫 URL만 사용
+      val first = s.split(',').firstOrNull()?.trim().orEmpty()
+      if (first.isEmpty()) return null
+      val url = first.split(Regex("""\s+""")).firstOrNull()?.trim().orEmpty()
+      return url.takeIf { it.isNotEmpty() }
+    }
+
+    private fun extractBackgroundImageUrl(style: String): String? {
+      val s = style.trim()
+      if (s.isEmpty()) return null
+      val m = Regex("""background-image\s*:\s*url\(([^)]+)\)""", RegexOption.IGNORE_CASE).find(s)
+        ?: Regex("""url\(([^)]+)\)""", RegexOption.IGNORE_CASE).find(s)
+      if (m == null) return null
+      var u = m.groupValues.getOrNull(1)?.trim().orEmpty()
+      u = u.trim('\"', '\'')
+      if (u.startsWith("//")) u = "https:$u"
+      if (u.startsWith("http://")) u = "https://" + u.removePrefix("http://")
+      return u.trim()
     }
 
     private fun shouldSkipListImageUrl(url: String): Boolean {
@@ -664,7 +1229,8 @@ class NaverMobilePlaceScrapeModule : Module() {
     }
 
     private fun looksLikeListAddressSnippet(s: String): Boolean {
-      val t = s.replace('\u00a0', ' ').trim()
+      // 지도(m.map)에서는 "주소보기" 라벨이 주소 앞에 붙어 내려오는 경우가 많아 제거합니다.
+      val t = s.replace('\u00a0', ' ').replace("주소보기", "").trim()
       if (t.length < 8) return false
       val regions =
         listOf(
@@ -709,7 +1275,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       val titleT = title.trim()
       val cleaned =
         cands
-          .map { it.replace('\u00a0', ' ').trim() }
+          .map { it.replace('\u00a0', ' ').replace("주소보기", "").trim() }
           .filter { it.isNotEmpty() && it != titleT && !titleT.equals(it, ignoreCase = true) }
           .filter { !it.startsWith("영업") && !it.startsWith("리뷰") }
           .filter { looksLikeListAddressSnippet(it) }

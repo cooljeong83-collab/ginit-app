@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -17,6 +17,7 @@ import {
   levelBarFillColorForTrust,
 } from '@/src/lib/ginit-trust';
 import { firstPlaceCandidatePreferredPhotoUri } from '@/src/lib/meeting-list-thumbnail';
+import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import {
   formatPublicMeetingAgeSummary,
   MEETING_CAPACITY_UNLIMITED,
@@ -214,7 +215,58 @@ export function HomeMeetingListItem({
     () => (symbolBox?.source === 'place_with_host' ? firstPlaceCandidatePreferredPhotoUri(m) : undefined),
     [m, symbolBox?.source],
   );
-  const placeListMainUri = preferredPlaceListPhoto ?? kakaoPlaceThumbUri;
+  const [naverPlaceThumbUri, setNaverPlaceThumbUri] = useState<string | null>(null);
+  const naverPlaceFields = useMemo((): NaverPlaceImageSearchFields | null => {
+    if (symbolBox?.source !== 'place_with_host') return null;
+    const name = m.placeName?.trim() || m.location?.trim() || '';
+    const addr = m.address?.trim() || '';
+    const combined = `${name} ${addr}`.trim();
+    if (!combined) return null;
+    return {
+      title: name || addr,
+      addressLine: name ? (addr || undefined) : undefined,
+      preferredPhotoMediaUrl: preferredPlaceListPhoto ?? null,
+      kakaoPlaceDetailPageUrl: kakaoPlacePageForThumb,
+    };
+  }, [kakaoPlacePageForThumb, m.address, m.location, m.placeName, preferredPlaceListPhoto, symbolBox?.source]);
+
+  useEffect(() => {
+    let alive = true;
+    if (symbolBox?.source !== 'place_with_host') {
+      setNaverPlaceThumbUri(null);
+      return () => {
+        alive = false;
+      };
+    }
+    // 이미 확보된 대표 사진(또는 카카오 og:image)이 있으면 추가 검색을 하지 않습니다.
+    if (preferredPlaceListPhoto || kakaoPlaceThumbUri) {
+      setNaverPlaceThumbUri(null);
+      return () => {
+        alive = false;
+      };
+    }
+    if (!naverPlaceFields) {
+      setNaverPlaceThumbUri(null);
+      return () => {
+        alive = false;
+      };
+    }
+    setNaverPlaceThumbUri(null);
+    void searchNaverPlaceImageThumbnail(naverPlaceFields)
+      .then((u) => {
+        if (!alive) return;
+        setNaverPlaceThumbUri(u);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setNaverPlaceThumbUri(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [kakaoPlaceThumbUri, naverPlaceFields, preferredPlaceListPhoto, symbolBox?.source]);
+
+  const placeListMainUri = preferredPlaceListPhoto ?? kakaoPlaceThumbUri ?? naverPlaceThumbUri;
 
   const meetingImageThumbUri = useMemo(() => {
     const u = typeof m.imageUrl === 'string' ? m.imageUrl.trim() : '';

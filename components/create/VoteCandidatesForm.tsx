@@ -334,6 +334,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         pendingVoiceScheduleApplyRef.current = true;
         voiceScheduleAutoApplyTranscriptRef.current = t;
       }
+      if (voiceTarget === 'placeQuery' && t) {
+        // 음성 입력 종료 시: 검색 버튼/아웃포커스와 동일하게 자동 검색을 트리거합니다.
+        placeQueryRef.current = t;
+        triggerPlaceSearch();
+      }
       setVoiceRecognizing(false);
       setVoiceTarget(null);
       ExpoSpeechRecognitionModule.stop();
@@ -421,6 +426,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const placeQueryRef = useRef(placeQuery);
   placeQueryRef.current = placeQuery;
+  const [placeSearchTriggerSeq, setPlaceSearchTriggerSeq] = useState(0);
+  const placeSearchActiveQueryTrimRef = useRef<string>('');
   const placeSearchRowsRef = useRef(placeSearchRows);
   placeSearchRowsRef.current = placeSearchRows;
   const placeSearchErrRef = useRef(placeSearchErr);
@@ -1119,7 +1126,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           if (prev.length === 0) return [emptyPlaceRow(qt)];
           return prev.map((r, i) => (i === 0 ? { ...r, query: qt } : r));
         });
+        placeQueryRef.current = qt;
         setPlaceQuery(qt);
+        // AI 자동 생성 플로우: 검색 버튼/아웃포커스와 동일하게 즉시 검색을 트리거합니다.
+        triggerPlaceSearch();
       },
       resetPlaceSearchSession: () => {
         pendingEphemeralPlaceRowIdRef.current = null;
@@ -1398,6 +1408,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const showSchedule = wizardSegment === 'both' || wizardSegment === 'schedule';
   const showPlaces = wizardSegment === 'both' || wizardSegment === 'places';
+  const prevShowPlacesRef = useRef(showPlaces);
+  const prevFocusedRef = useRef(isFocused);
+  const prevPlaceCandidatesLenRef = useRef(placeCandidates.length);
+  const autoSearchOnceOnFirstNonEmptyQueryRef = useRef(true);
 
   const placeSuggestedQueries = useMemo(() => {
     return buildPlaceSuggestedSearchQueries({
@@ -1472,7 +1486,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const token = placeSearchNextPageTokenRef.current?.trim() ?? '';
     if (!token) return;
     if (placeSearchLoadMoreGuardRef.current) return;
-    const q = placeQueryRef.current.trim();
+    const q = placeSearchActiveQueryTrimRef.current.trim();
     if (!q) return;
     placeSearchLoadMoreGuardRef.current = true;
     setPlaceSearchLoadingMore(true);
@@ -1509,6 +1523,68 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     })();
   }, [placesListOnly, showPlaces]);
 
+  const triggerPlaceSearch = useCallback(() => {
+    if (!showPlaces || placesListOnly) return;
+    setPlaceSearchTriggerSeq((n) => n + 1);
+  }, [placesListOnly, showPlaces]);
+
+  useEffect(() => {
+    // 장소 후보 카드(섹션)가 활성화되는 순간: 현재 검색어로 1회 자동 검색
+    // (타이핑 중 자동 검색은 금지 정책 유지)
+    const prev = prevShowPlacesRef.current;
+    prevShowPlacesRef.current = showPlaces;
+    if (prev || !showPlaces || placesListOnly) return;
+    const q = placeQueryRef.current.trim();
+    if (!q) return;
+    if (placeSearchLastSettledQueryTrimRef.current?.trim() === q) return;
+    triggerPlaceSearch();
+  }, [placesListOnly, showPlaces, triggerPlaceSearch]);
+
+  useEffect(() => {
+    // 장소 제안 팝업(Modal)처럼 showPlaces가 처음부터 true인 케이스:
+    // 기본 검색어가 세팅된 뒤(비어있지 않게 된 순간) 1회 자동 검색을 수행합니다.
+    // - wizardSegment='places' (장소 제안)에서는 항상 허용
+    // - 그 외(모임 생성)에서는 장소 후보 카드가 1개라도 생긴 상태에서만 자동 검색
+    if (!autoSearchOnceOnFirstNonEmptyQueryRef.current) return;
+    if (!showPlaces || placesListOnly) return;
+    const q = placeQuery.trim();
+    if (!q) return;
+    if (wizardSegment !== 'places' && placeCandidates.length === 0) return;
+    if (placeSearchLastSettledQueryTrimRef.current?.trim() === q) {
+      autoSearchOnceOnFirstNonEmptyQueryRef.current = false;
+      return;
+    }
+    autoSearchOnceOnFirstNonEmptyQueryRef.current = false;
+    triggerPlaceSearch();
+  }, [placeCandidates.length, placeQuery, placesListOnly, showPlaces, triggerPlaceSearch, wizardSegment]);
+
+  useEffect(() => {
+    // 모임 상세 "장소 제안" 등: 화면 진입(포커스) 시 현재 검색어로 1회 자동 검색
+    // showPlaces가 처음부터 true인 화면에서는 위 활성화 트리거가 동작하지 않을 수 있어 보강합니다.
+    const prevFocused = prevFocusedRef.current;
+    prevFocusedRef.current = isFocused;
+    if (prevFocused || !isFocused) return;
+    if (!showPlaces || placesListOnly) return;
+    const q = placeQueryRef.current.trim();
+    if (!q) return;
+    if (placeSearchLastSettledQueryTrimRef.current?.trim() === q) return;
+    triggerPlaceSearch();
+  }, [isFocused, placesListOnly, showPlaces, triggerPlaceSearch]);
+
+  useEffect(() => {
+    // 모임 생성: `+ 장소 후보 추가` 등으로 첫 장소 후보 카드가 생성되는 순간,
+    // 이미 입력된 검색어가 있다면 1회 자동 검색합니다.
+    const prevLen = prevPlaceCandidatesLenRef.current;
+    const nextLen = placeCandidates.length;
+    prevPlaceCandidatesLenRef.current = nextLen;
+    if (prevLen !== 0 || nextLen === 0) return;
+    if (!showPlaces || placesListOnly) return;
+    const q = placeQueryRef.current.trim();
+    if (!q) return;
+    if (placeSearchLastSettledQueryTrimRef.current?.trim() === q) return;
+    triggerPlaceSearch();
+  }, [placeCandidates.length, placesListOnly, showPlaces, triggerPlaceSearch]);
+
   const maybePrefetchPlaceSearchCarousel = useCallback(() => {
     if (!showPlaces || placesListOnly) return;
     if (placeSearchLoadingRef.current || placeSearchLoadingMoreRef.current) return;
@@ -1536,7 +1612,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   useEffect(() => {
     if (!showPlaces || placesListOnly) return undefined;
-    const qTrim = placeQuery.trim();
+    const qTrim = placeQueryRef.current.trim();
+    placeSearchActiveQueryTrimRef.current = qTrim;
     if (qTrim.length === 0) {
       setPlaceSearchRows([]);
       setPlaceSearchNextPageToken(null);
@@ -1551,38 +1628,35 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     setPlaceSearchNextPageToken(null);
     setPlaceSearchLastSettledQueryTrim(null);
     setPlaceSearchErr(null);
-    const t = setTimeout(() => {
-      void (async () => {
-        try {
-          const { bias, coords } = await ensureNearbySearchBias();
-          if (!alive) return;
-          const { places: list, nextPageToken: nxt } = await searchPlacesText(qTrim, {
-            locationBias: bias,
-            userCoords: coords,
-            maxResultCount: PLACE_SEARCH_PAGE_SIZE,
-          });
-          if (!alive) return;
-          setPlaceSearchRows(list);
-          setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
-          setPlaceThumbById({});
-        } catch (e) {
-          if (!alive) return;
-          setPlaceSearchRows([]);
-          setPlaceSearchNextPageToken(null);
-          setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
-        } finally {
-          if (alive) {
-            setPlaceSearchLoading(false);
-            setPlaceSearchLastSettledQueryTrim(qTrim);
-          }
+    void (async () => {
+      try {
+        const { bias, coords } = await ensureNearbySearchBias();
+        if (!alive) return;
+        const { places: list, nextPageToken: nxt } = await searchPlacesText(qTrim, {
+          locationBias: bias,
+          userCoords: coords,
+          maxResultCount: PLACE_SEARCH_PAGE_SIZE,
+        });
+        if (!alive) return;
+        setPlaceSearchRows(list);
+        setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
+        setPlaceThumbById({});
+      } catch (e) {
+        if (!alive) return;
+        setPlaceSearchRows([]);
+        setPlaceSearchNextPageToken(null);
+        setPlaceSearchErr(e instanceof Error ? e.message : '검색에 실패했습니다.');
+      } finally {
+        if (alive) {
+          setPlaceSearchLoading(false);
+          setPlaceSearchLastSettledQueryTrim(qTrim);
         }
-      })();
-    }, 360);
+      }
+    })();
     return () => {
       alive = false;
-      clearTimeout(t);
     };
-  }, [placeQuery, placesListOnly, showPlaces]);
+  }, [placeSearchTriggerSeq, placesListOnly, showPlaces]);
 
   useEffect(() => {
     if (!onPlacesAutoAssistSnapshot) return undefined;
@@ -2072,6 +2146,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     else placeQueryUserTouchedRef.current = false;
                     setPlaceQuery(t);
                   }}
+                  onBlur={() => triggerPlaceSearch()}
+                  onSubmitEditing={() => triggerPlaceSearch()}
                   placeholder='예: "영등포 맛집", "합정 카페"'
                   placeholderTextColor={INPUT_PLACEHOLDER}
                   style={[styles.aiQuickInitInput, styles.voiceInput, { minHeight: 0 }]}
@@ -2110,7 +2186,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   key={q}
                   onPress={() => {
                     placeQueryUserTouchedRef.current = true;
+                    placeQueryRef.current = q;
                     setPlaceQuery(q);
+                    triggerPlaceSearch();
                   }}
                   style={({ pressed }) => [styles.placeSuggestChip, pressed && styles.placeSuggestChipPressed]}
                   accessibilityRole="button">

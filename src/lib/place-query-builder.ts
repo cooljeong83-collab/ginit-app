@@ -317,6 +317,34 @@ function buildHeadcountHint(input: PlaceQueryBuilderInput): string | null {
   return `${minN}~${maxN}명`;
 }
 
+const PETS_POOL = [
+  '애견동반', 
+  '고양이 카페', 
+  '앵무새 카페',
+  '애견동반 카페', 
+  '애견동반 식당', 
+  '애견카페', 
+  '반려견 놀이터', 
+  '애견운동장', 
+  '실내 애견동반', 
+  '마당 있는 애견카페', 
+  '테라스 애견동반', 
+  '대형견 애견카페', 
+  '노키즈존 애견카페', 
+  '오프리시 애견운동장'
+] as const;
+
+const GOLF_POOL = [
+  '스크린골프',
+  '골프연습장',
+  '골프존',
+  '프렌즈스크린', 
+  'SG골프', 
+  '유니코', 
+  '브라보퍼블릭스크린골프', 
+  '케이골프' 
+] as const;
+
 const MOVIE_POOL = [
   '영화관',
   'CGV',
@@ -440,11 +468,31 @@ function isMovieCategoryLabel(label: string, specialty: SpecialtyKind | null): b
   return /영화|무비|시네마|시네|극장|OTT|넷플/.test(L);
 }
 
+function isGolfCategoryLabel(label: string): boolean {
+  const L = label.trim();
+  if (!L) return false;
+  // 카테고리 라벨이 영어("Golf")로 들어오는 케이스 지원
+  if (/^golf$/i.test(L)) return true;
+  // 한글 라벨/키워드로 들어오는 케이스 지원
+  return /골프|스크린골프|골프존|프렌즈스크린|SG골프/.test(L);
+}
+
+function isPetsCategoryLabel(label: string): boolean {
+  const L = label.trim();
+  if (!L) return false;
+  // 카테고리 라벨이 영어로 들어오는 케이스 지원
+  if (/^(pet|pets|pet friendly|pet-friendly)$/i.test(L)) return true;
+  // 한글 라벨/키워드로 들어오는 케이스 지원
+  return /반려동물|반려견|반려묘|애견|강아지|고양이|펫/.test(L);
+}
+
 function themePoolForLabel(label: string, specialty: SpecialtyKind | null): readonly string[] {
   const L = label.trim();
   const extra = labelExtraKind(L);
 
   if (isMovieCategoryLabel(L, specialty)) return MOVIE_POOL;
+  if (isGolfCategoryLabel(L)) return GOLF_POOL;
+  if (isPetsCategoryLabel(L)) return PETS_POOL;
   if (specialty === 'knowledge' || /스터디|북카페|강연|세미나|토론|학습|카공|코워킹/.test(L)) {
     return KNOWLEDGE_POOL;
   }
