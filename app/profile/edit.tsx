@@ -9,6 +9,7 @@ import {
     Platform,
     Pressable,
     ScrollView,
+    Switch,
     StyleSheet,
     Text,
     TextInput,
@@ -48,12 +49,17 @@ import {
     isMeetingServiceComplianceComplete,
     isUserPhoneVerified,
     meetingDemographicsIncomplete,
+    PROFILE_META_SHARE_ACTIVITY_STATUS,
+    readShareActivityStatusEnabled,
     readGooglePeopleDemographicsLocks,
     updateUserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+
+/** `Switch.trackColor` */
+const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 
 export default function ProfileEditScreen() {
   const router = useRouter();
@@ -78,6 +84,7 @@ export default function ProfileEditScreen() {
   const [photoCover, setPhotoCover] = useState<ProfilePhotoCover | null>(null);
   const [cropSession, setCropSession] = useState<{ uri: string; w?: number; h?: number } | null>(null);
   const [bio, setBio] = useState('');
+  const [shareActivityStatus, setShareActivityStatus] = useState(false);
 
   // 서비스 이용 인증(정보 등록) 모달
   const [genderDemo, setGenderDemo] = useState<'MALE' | 'FEMALE' | null>(null);
@@ -131,6 +138,7 @@ export default function ProfileEditScreen() {
         setPhotoUrl(p.photoUrl ?? '');
         setPhotoCover(parseProfilePhotoCover(p.metadata));
         setBio(p.bio ?? '');
+        setShareActivityStatus(readShareActivityStatusEnabled(p.metadata));
         setIsPhoneVerified(isUserPhoneVerified(p));
         const phone = p.phone?.trim();
         const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
@@ -179,6 +187,7 @@ export default function ProfileEditScreen() {
         setMeetingAuthComplete(false);
         setGoogleDemoGenderLocked(false);
         setGoogleDemoBirthLocked(false);
+        setShareActivityStatus(false);
       }
     })();
     return () => {
@@ -345,6 +354,9 @@ export default function ProfileEditScreen() {
         nickname: nickname.trim(),
         photoUrl: photoUrl.trim() || null,
         bio: bio.trim() || null,
+        metadata: {
+          [PROFILE_META_SHARE_ACTIVITY_STATUS]: shareActivityStatus,
+        },
       };
       /** SNS 가입 보완: 시트에서만 입력한 성별·생일은 별도 ‘인증 저장’ 전에도 닉네임 저장 시 함께 반영해야 뒤로 가도 사라지지 않음 */
       if (isDemographicsIncomplete(pCur)) {
@@ -371,7 +383,18 @@ export default function ProfileEditScreen() {
     } finally {
       setProfileBusy(false);
     }
-  }, [profilePk, nickname, photoUrl, bio, router, genderDemo, birthDemo, googleDemoGenderLocked, googleDemoBirthLocked]);
+  }, [
+    profilePk,
+    nickname,
+    photoUrl,
+    bio,
+    shareActivityStatus,
+    router,
+    genderDemo,
+    birthDemo,
+    googleDemoGenderLocked,
+    googleDemoBirthLocked,
+  ]);
 
   const canSendOtp = useMemo(() => {
     const normalized = normalizePhoneUserId(phoneField);
@@ -750,6 +773,22 @@ export default function ProfileEditScreen() {
               textAlignVertical="top"
             />
 
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleTextCol}>
+                <Text style={styles.toggleLabel}>내 활동상황 공유하기</Text>
+                <Text style={styles.toggleSub}>친구 목록에서 내가 참여 중인 모임/조율 상황을 보여줘요.</Text>
+              </View>
+              <Switch
+                value={shareActivityStatus}
+                onValueChange={setShareActivityStatus}
+                trackColor={meetingCreateSwitchTrack}
+                thumbColor={shareActivityStatus ? '#FFFFFF' : '#f1f5f9'}
+                ios_backgroundColor="#cbd5e1"
+                accessibilityLabel="내 활동상황 공유하기"
+                disabled={profileBusy || deleteBusy}
+              />
+            </View>
+
             <View style={styles.saveBlock}>
               <GinitButton title={profileBusy ? '저장 중…' : '변경 사항 저장'} variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
             </View>
@@ -941,6 +980,29 @@ const styles = StyleSheet.create({
   },
   saveBlock: {
     marginTop: GinitTheme.spacing.lg,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    gap: 12,
+  },
+  toggleTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  toggleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: GinitTheme.colors.textSub,
+  },
+  toggleSub: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    lineHeight: 16,
   },
   complianceHeader: {
     flexDirection: 'row',

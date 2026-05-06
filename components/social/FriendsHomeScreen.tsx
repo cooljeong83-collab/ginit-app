@@ -56,7 +56,7 @@ import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
+import { getUserProfile, getUserProfilesForIds, readShareActivityStatusEnabled } from '@/src/lib/user-profile';
 
 function friendAppUserKey(raw: string | null | undefined): string {
   const t = raw?.trim() ?? '';
@@ -191,6 +191,7 @@ function FriendListRow({
   rowTitleText,
   onPressAvatar,
   onPressOpenChat,
+  onPressOpenMeeting,
   onLongPressFriendMenu,
 }: {
   item: EnrichedFriend;
@@ -198,18 +199,21 @@ function FriendListRow({
   rowTitleText: string;
   onPressAvatar: () => void;
   onPressOpenChat: () => void;
+  onPressOpenMeeting?: () => void;
   onLongPressFriendMenu: () => void;
 }) {
   const { profile, meeting } = item;
   const uri = profile.photoUrl?.trim();
   const initials = profile.nickname?.trim()?.slice(0, 1) || '?';
-  const activity = resolveFriendActivity(meeting, profile, categories);
+  const shareOn = readShareActivityStatusEnabled(profile.metadata);
+  const activity = resolveFriendActivity(shareOn ? meeting : null, profile, categories);
   const distLabel = formatDistanceCompact(item.sort.distanceM);
+  const showOpenMeeting = shareOn && meeting != null && typeof meeting.id === 'string' && meeting.id.trim().length > 0;
   const subtitle = useMemo(() => {
-    const base = activity.secondaryLine?.trim() ?? '';
+    const base = shareOn ? (activity.secondaryLine?.trim() ?? '') : (profile.bio?.trim() ?? '');
     const parts = [base || null, distLabel ? `거리 ${distLabel}` : null].filter(Boolean);
     return parts.join(' · ');
-  }, [activity.secondaryLine, distLabel]);
+  }, [activity.secondaryLine, distLabel, profile.bio, shareOn]);
 
   return (
     <View style={s.friendRow}>
@@ -240,9 +244,21 @@ function FriendListRow({
             <Text style={s.rowTitle} numberOfLines={1}>
               {rowTitleText}
             </Text>
-            <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
-              {subtitle || ' '}
-            </Text>
+            <View style={s.rowSubRow}>
+              <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
+                {subtitle || ' '}
+              </Text>
+              {showOpenMeeting && onPressOpenMeeting ? (
+                <Pressable
+                  onPress={onPressOpenMeeting}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="친구 모임 보기"
+                  style={({ pressed }) => [s.openMeetingBtn, pressed && { opacity: 0.88 }]}>
+                  <Text style={s.openMeetingBtnText}>친구 모임 보기</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </Pressable>
         </View>
       </View>
@@ -404,7 +420,8 @@ export function FriendsHomeScreen() {
       if (!p) continue;
       const pk = friendAppUserKey(row.peer_app_user_id);
       const meeting = pickPrimaryMeetingForPeer(pk, meetings);
-      const sort = computeFriendSortSignals(p, meeting, meProfile);
+      const shareOn = readShareActivityStatusEnabled(p.metadata);
+      const sort = computeFriendSortSignals(p, shareOn ? meeting : null, meProfile);
       out.push({ row, profile: p, meeting, sort });
     }
     out.sort((a, b) => compareFriendsByPresenceDistanceTrust(a.sort, b.sort));
@@ -695,6 +712,11 @@ export function FriendsHomeScreen() {
                         friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? ''),
                       )
                     }
+                    onPressOpenMeeting={() => {
+                      const mid = item.meeting?.id?.trim() ?? '';
+                      if (!mid) return;
+                      router.push(`/meeting/${encodeURIComponent(mid)}`);
+                    }}
                     onLongPressFriendMenu={() => setSheetFriend(item)}
                   />
                 </View>
@@ -881,6 +903,11 @@ export function FriendsHomeScreen() {
                   friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? ''),
                 )
               }
+              onPressOpenMeeting={() => {
+                const mid = item.meeting?.id?.trim() ?? '';
+                if (!mid) return;
+                router.push(`/meeting/${encodeURIComponent(mid)}`);
+              }}
               onLongPressFriendMenu={() => setSheetFriend(item)}
             />
           )}
@@ -1077,6 +1104,22 @@ const s = StyleSheet.create({
     color: GinitTheme.colors.textMuted,
   },
   rowSubMuted: { color: '#94a3b8', fontWeight: '400' },
+  rowSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+  },
+  openMeetingBtn: {
+    flexShrink: 0,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+  },
+  openMeetingBtnText: { fontSize: 11, fontWeight: '700', color: '#0f172a', letterSpacing: -0.1 },
   rowSubtle: { fontSize: 12, fontWeight: '700', color: '#94a3b8' },
   rowActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowActionBtnPrimary: {

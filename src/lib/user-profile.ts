@@ -23,6 +23,8 @@ export const WITHDRAWN_NICKNAME = '(탈퇴한 회원)';
 export const PROFILE_META_GOOGLE_DEMO_GENDER_LOCKED = 'ginit_google_demo_gender_locked' as const;
 /** Google People 동의로 확정된 생년월일 — 동일하게 수정 불가 */
 export const PROFILE_META_GOOGLE_DEMO_BIRTH_LOCKED = 'ginit_google_demo_birth_locked' as const;
+/** 친구 목록 등에서 "내 활동 상황(모임 참석/조율 등)"을 공유할지 */
+export const PROFILE_META_SHARE_ACTIVITY_STATUS = 'ginit_share_activity_status' as const;
 
 export function buildGooglePeopleDemographicsMetadataPatch(opts: {
   genderFromGoogle?: boolean;
@@ -45,6 +47,15 @@ export function readGooglePeopleDemographicsLocks(p: UserProfile | null | undefi
     genderLocked: rec[PROFILE_META_GOOGLE_DEMO_GENDER_LOCKED] === true,
     birthLocked: rec[PROFILE_META_GOOGLE_DEMO_BIRTH_LOCKED] === true,
   };
+}
+
+/** 메타 기반 활동상황 공유 여부(미설정이면 OFF) */
+export function readShareActivityStatusEnabled(metadata: Record<string, unknown> | null | undefined): boolean {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+  const v = (metadata as Record<string, unknown>)[PROFILE_META_SHARE_ACTIVITY_STATUS];
+  if (v === false) return false;
+  if (v === true) return true;
+  return false;
 }
 
 export type UserStatus = 'ACTIVE' | 'BANNED' | 'WITHDRAWN';

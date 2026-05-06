@@ -152,6 +152,8 @@ export default function FeedScreen() {
   homeTabRef.current = homeTab;
   /** Android: 모임 탭 포커스 시 하드웨어 뒤로가기 이중 탭으로만 종료 */
   const homeExitBackPressRef = useRef(0);
+  /** 모임 상세 중복 진입 방지(더블 탭 등) */
+  const meetingOpenLockRef = useRef(false);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -939,9 +941,19 @@ export default function FeedScreen() {
 
   const onPressMeetingFromGrid = useCallback(
     (m: Meeting) => {
+      if (meetingOpenLockRef.current) return;
+      meetingOpenLockRef.current = true;
+      const lockRelease = () => {
+        meetingOpenLockRef.current = false;
+      };
+      // 네비게이션이 끝나기 전 더블탭으로 push가 2번 호출되는 케이스 방지
+      const tRelease = setTimeout(lockRelease, 900);
+
       const pk = userId?.trim() ?? '';
       if (!pk) {
         Alert.alert('로그인이 필요해요', '모임 상세는 로그인 후 볼 수 있어요.');
+        clearTimeout(tRelease);
+        lockRelease();
         return;
       }
       // feedUserProfile은 탭 진입 직후 null일 수 있어(비동기 로드),
@@ -959,6 +971,8 @@ export default function FeedScreen() {
               { text: '닫기', style: 'cancel' },
               { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
             ]);
+            clearTimeout(tRelease);
+            lockRelease();
             return;
           }
           router.push(`/meeting/${m.id}`);
