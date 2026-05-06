@@ -991,6 +991,16 @@ export default function FeedScreen() {
           }
           symbolBox={feedMeetingSymbolBox(item, feedHostProfileMap)}
           categories={categories}
+          cornerViewerPhotoUrl={
+            feedUserProfile?.photoUrl?.trim()
+              ? feedUserProfile.photoUrl.trim()
+              : null
+          }
+          cornerViewerGTrust={
+            typeof feedUserProfile?.gTrust === 'number' && Number.isFinite(feedUserProfile.gTrust)
+              ? Math.trunc(feedUserProfile.gTrust)
+              : null
+          }
         />
       );
     },
@@ -1000,6 +1010,7 @@ export default function FeedScreen() {
       myConfirmedScheduleSlots,
       overlapBufferHours,
       feedHostProfileMap,
+      feedUserProfile,
       categories,
       onPressMeetingFromGrid,
     ],

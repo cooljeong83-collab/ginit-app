@@ -45,11 +45,17 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
       categoryLabel: sqlCategoryLabel ?? merged.categoryLabel ?? null,
       isPublic: sqlIsPublic,
     };
-    if (!withSqlCategories.createdAt && row.created_at != null) {
+    const sqlPlaceKey =
+      typeof row.place_key === 'string' && row.place_key.trim() ? row.place_key.trim() : null;
+    const withPlaceKey =
+      sqlPlaceKey && !withSqlCategories.placeKey?.trim()
+        ? { ...withSqlCategories, placeKey: sqlPlaceKey }
+        : withSqlCategories;
+    if (!withPlaceKey.createdAt && row.created_at != null) {
       const c = parseCreatedAt(row.created_at);
-      if (c) return { ...withSqlCategories, createdAt: c };
+      if (c) return { ...withPlaceKey, createdAt: c };
     }
-    return withSqlCategories;
+    return withPlaceKey;
   }
 
   return {
@@ -89,6 +95,7 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
     confirmedPlaceChipId: typeof row.confirmed_place_chip_id === 'string' ? row.confirmed_place_chip_id : null,
     confirmedMovieChipId: typeof row.confirmed_movie_chip_id === 'string' ? row.confirmed_movie_chip_id : null,
     meetingConfig: null,
+    placeKey: typeof row.place_key === 'string' && row.place_key.trim() ? row.place_key.trim() : null,
   };
 }
 

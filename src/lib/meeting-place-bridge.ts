@@ -8,6 +8,8 @@ export type MeetingPlaceSelection = {
   address: string;
   latitude: number;
   longitude: number;
+  /** Supabase `places.place_key` (예: naver:123) */
+  placeKey?: string | null;
   /** 네이버 검색·스크랩 업종 라벨(예: 한식, 카페) */
   category?: string | null;
   /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */
@@ -50,6 +52,8 @@ export type PlaceCandidate = {
   address: string;
   latitude: number;
   longitude: number;
+  /** Supabase `places.place_key` */
+  placeKey?: string | null;
   /** 네이버 검색·스크랩 업종 라벨 */
   category?: string | null;
   /** 네이버 지역 검색 `link` — 플레이스 상세(WebView) */

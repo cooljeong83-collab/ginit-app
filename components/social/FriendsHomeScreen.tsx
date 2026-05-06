@@ -43,6 +43,7 @@ import {
   fetchFriendsPendingOutbox,
   removeAcceptedFriend,
 } from '@/src/lib/friends';
+import { friendDisplayName, loadFavoritePeerKeys, loadFriendDisplayAliases } from '@/src/lib/friend-device-meta';
 import {
   loadBlockedPeerIds,
   loadHiddenPeerIds,
@@ -187,13 +188,17 @@ type EnrichedFriend = {
 function FriendListRow({
   item,
   categories,
+  rowTitleText,
   onPressAvatar,
-  onPressRow,
+  onPressOpenChat,
+  onLongPressFriendMenu,
 }: {
   item: EnrichedFriend;
   categories: Category[];
+  rowTitleText: string;
   onPressAvatar: () => void;
-  onPressRow: () => void;
+  onPressOpenChat: () => void;
+  onLongPressFriendMenu: () => void;
 }) {
   const { profile, meeting } = item;
   const uri = profile.photoUrl?.trim();
@@ -211,7 +216,7 @@ function FriendListRow({
       <Pressable
         onPress={onPressAvatar}
         accessibilityRole="button"
-        accessibilityLabel={`${profile.nickname ?? '친구'} 프로필`}
+        accessibilityLabel={`${rowTitleText || profile.nickname || '친구'} 프로필`}
         style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
         <View style={s.rowAvatarWrap}>
           {uri ? (
@@ -223,20 +228,24 @@ function FriendListRow({
           )}
         </View>
       </Pressable>
-      <Pressable
-        onPress={onPressRow}
-        accessibilityRole="button"
-        accessibilityLabel={`${profile.nickname ?? '친구'}, 메뉴`}
-        style={({ pressed }) => [s.friendRowMain, pressed && { opacity: 0.88 }]}>
+      <View style={s.friendRowMain}>
         <View style={s.rowCenter}>
-          <Text style={s.rowTitle} numberOfLines={1}>
-            {profile.nickname}
-          </Text>
-          <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
-            {subtitle || ' '}
-          </Text>
+          <Pressable
+            onPress={onPressOpenChat}
+            onLongPress={onLongPressFriendMenu}
+            accessibilityRole="button"
+            accessibilityLabel={`${rowTitleText || profile.nickname || '친구'}, 1대1 채팅`}
+            accessibilityHint="길게 눌러 친구 메뉴"
+            style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+            <Text style={s.rowTitle} numberOfLines={1}>
+              {rowTitleText}
+            </Text>
+            <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
+              {subtitle || ' '}
+            </Text>
+          </Pressable>
         </View>
-      </Pressable>
+      </View>
     </View>
   );
 }
@@ -269,6 +278,8 @@ export function FriendsHomeScreen() {
   const [hiddenPeerIds, setHiddenPeerIds] = useState<Set<string>>(new Set());
   const [blockedPeerIds, setBlockedPeerIds] = useState<Set<string>>(new Set());
   const [sheetFriend, setSheetFriend] = useState<EnrichedFriend | null>(null);
+  const [peerAliases, setPeerAliases] = useState<Record<string, string>>({});
+  const [favoritePeerKeys, setFavoritePeerKeys] = useState<Set<string>>(() => new Set());
 
   const reload = useCallback(async () => {
     if (!me) {
@@ -313,14 +324,22 @@ export function FriendsHomeScreen() {
         setLoading(false);
         setHiddenPeerIds(new Set());
         setBlockedPeerIds(new Set());
+        setFavoritePeerKeys(new Set());
         return;
       }
       void reload();
       void (async () => {
         try {
-          const [h, b] = await Promise.all([loadHiddenPeerIds(me), loadBlockedPeerIds(me)]);
+          const [h, b, al, fav] = await Promise.all([
+            loadHiddenPeerIds(me),
+            loadBlockedPeerIds(me),
+            loadFriendDisplayAliases(me),
+            loadFavoritePeerKeys(me),
+          ]);
           setHiddenPeerIds(h);
           setBlockedPeerIds(b);
+          setPeerAliases(al);
+          setFavoritePeerKeys(fav);
         } catch {
           /* ignore */
         }
@@ -405,6 +424,12 @@ export function FriendsHomeScreen() {
     });
   }, [enrichedFriends, hiddenPeerIds, blockedPeerIds, search]);
 
+  /** 즐겨찾기 친구는 상단 섹션 + 아래 친구 목록에 각각 표시(검색·숨김·차단 필터는 `visibleFriends`와 동일) */
+  const visibleFavoriteFriends = useMemo(() => {
+    const fav = visibleFriends.filter((e) => favoritePeerKeys.has(friendAppUserKey(e.row.peer_app_user_id)));
+    return [...fav].sort((a, b) => compareFriendsByPresenceDistanceTrust(a.sort, b.sort));
+  }, [visibleFriends, favoritePeerKeys]);
+
   const openDm = useCallback(
     (peerAppUserId: string, peerDisplayName?: string) => {
       const uid = me;
@@ -467,7 +492,11 @@ export function FriendsHomeScreen() {
   );
 
   const goAddFriend = useCallback(() => router.push('/social/discovery'), [router]);
-  const goMyProfile = useCallback(() => router.push('/(tabs)/profile'), [router]);
+  const goMyProfile = useCallback(() => {
+    const t = me.trim();
+    if (!t) return;
+    router.push(`/profile/user/${encodeURIComponent(t)}`);
+  }, [me, router]);
   const goFriendManage = useCallback(() => router.push('/social/friends-settings'), [router]);
   const openFriendPublicProfile = useCallback(
     (peerRaw: string) => {
@@ -643,11 +672,43 @@ export function FriendsHomeScreen() {
           </>
         ) : null}
 
+        {visibleFavoriteFriends.length > 0 ? (
+          <>
+            <View style={s.sectionSpacer} />
+            <Text style={s.sectionHeader}>즐겨찾기 {visibleFavoriteFriends.length}</Text>
+            <View>
+              {visibleFavoriteFriends.map((item, index) => (
+                <View key={`fav-${item.row.id}`}>
+                  {index > 0 ? <View style={s.friendSeparator} /> : null}
+                  <FriendListRow
+                    item={item}
+                    categories={categories}
+                    rowTitleText={friendDisplayName(
+                      peerAliases,
+                      item.row.peer_app_user_id,
+                      item.profile.nickname?.trim() ?? '',
+                    )}
+                    onPressAvatar={() => openFriendPublicProfile(item.row.peer_app_user_id)}
+                    onPressOpenChat={() =>
+                      openDm(
+                        item.row.peer_app_user_id,
+                        friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? ''),
+                      )
+                    }
+                    onLongPressFriendMenu={() => setSheetFriend(item)}
+                  />
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
+
         <View style={s.sectionSpacer} />
         <Text style={s.sectionHeader}>친구 {visibleFriends.length}</Text>
       </View>
     );
   }, [
+    categories,
     goMyProfile,
     myInitial,
     myNick,
@@ -655,9 +716,13 @@ export function FriendsHomeScreen() {
     onAcceptPending,
     onCancelOutgoing,
     onDeclinePending,
+    openDm,
+    openFriendPublicProfile,
+    peerAliases,
     pending,
     pendingOut,
     profiles,
+    visibleFavoriteFriends,
     visibleFriends.length,
   ]);
 
@@ -808,8 +873,15 @@ export function FriendsHomeScreen() {
             <FriendListRow
               item={item}
               categories={categories}
+              rowTitleText={friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? '')}
               onPressAvatar={() => openFriendPublicProfile(item.row.peer_app_user_id)}
-              onPressRow={() => setSheetFriend(item)}
+              onPressOpenChat={() =>
+                openDm(
+                  item.row.peer_app_user_id,
+                  friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? ''),
+                )
+              }
+              onLongPressFriendMenu={() => setSheetFriend(item)}
             />
           )}
         />

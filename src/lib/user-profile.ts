@@ -11,7 +11,9 @@ import {
 
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { profilesSource } from '@/src/lib/hybrid-data-source';
+import { avatarsObjectPathFromPublicUrlIfOwned, fetchProfilePhotoHistory } from '@/src/lib/profile-photo-history';
 import { supabase } from '@/src/lib/supabase';
+import { SUPABASE_STORAGE_BUCKET_AVATARS } from '@/src/lib/supabase-storage-upload';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from './meeting-phone-verification-ui';
 
 export const USERS_COLLECTION = 'users';
@@ -825,6 +827,23 @@ async function rpcEnsureProfileMinimalWithRetry(id: string): Promise<void> {
   }
 }
 
+/** `purge_profile_photo_history_for_user` — 탈퇴 시 이력 전부 삭제, PostgREST 스키마 캐시 지연 시 재시도 */
+async function rpcPurgeProfilePhotoHistoryForUserWithRetry(id: string): Promise<void> {
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('purge_profile_photo_history_for_user', { p_app_user_id: id });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'purge_profile_photo_history_for_user failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
+    if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
+}
+
 /**
  * RPC `p_fields`에 빈 `fcm_token` 문자열이 들어가면(직렬화 버그 등) DB에서 기존 토큰이 NULL로 덮일 수 있어 제거합니다.
  * `fcm_token: null`(JSON null)만 탈퇴 등 **명시적 비우기**로 유지합니다.
@@ -1039,6 +1058,41 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
+
+  const uniquePhotoUrls = new Set<string>();
+  try {
+    const mapped = await getUserProfile(id);
+    const u = mapped?.photoUrl?.trim();
+    if (u) uniquePhotoUrls.add(u);
+  } catch {
+    /* best-effort: 탈퇴는 계속 진행 */
+  }
+  try {
+    const historyRows = await fetchProfilePhotoHistory(id, 60);
+    for (const row of historyRows) {
+      const u = row.photoUrl?.trim();
+      if (u) uniquePhotoUrls.add(u);
+    }
+  } catch {
+    /* best-effort */
+  }
+  const photoUrlsForStorage = [...uniquePhotoUrls];
+
+  await rpcPurgeProfilePhotoHistoryForUserWithRetry(id);
+
+  const ownedObjectPaths = new Set<string>();
+  for (const url of photoUrlsForStorage) {
+    const objectPath = avatarsObjectPathFromPublicUrlIfOwned(url, id);
+    if (objectPath) ownedObjectPaths.add(objectPath);
+  }
+  if (ownedObjectPaths.size > 0) {
+    try {
+      await supabase.storage.from(SUPABASE_STORAGE_BUCKET_AVATARS).remove([...ownedObjectPaths]);
+    } catch {
+      /* Storage 제거는 best-effort — DB 이력·프로필 URL은 아래 upsert로 정리 */
+    }
+  }
+
   await rpcUpsertProfilePayloadWithRetry(id, {
     is_withdrawn: true,
     nickname: WITHDRAWN_NICKNAME,

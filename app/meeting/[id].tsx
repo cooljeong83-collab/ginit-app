@@ -1,21 +1,15 @@
+import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/app/create/details';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
-import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
-import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
-
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
-import { useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Easing,
-  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -23,128 +17,41 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
-import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
-import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
-import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
-import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
-import { GinitStyles } from '@/constants/GinitStyles';
+import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
-import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
-import { getPolicy } from '@/src/lib/app-policies-store';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
-import {
-  clampYmdToScheduleProposalWindow,
-  createPointCandidate,
-  fmtDateYmd,
-  normalizeTimeInput,
-} from '@/src/lib/date-candidate';
-import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
-import {
-  acceptGinitRequest,
-  fetchFriendRelationStatus,
-  sendGinitRequest,
-  type FriendRelationStatusRow,
-} from '@/src/lib/friends';
-import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
+import { resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
+import { createPointCandidate, fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
+import type { MeetingExtraData, SelectedMovieExtra, SportIntensityLevel } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
-import {
-  assertDateCandidatesNoOverlapWithOtherMeetings,
-  assertNoConfirmedScheduleOverlapHybrid,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  getScheduleOverlapBufferHours,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
-  isConfirmedScheduleOverlapErrorMessage,
-} from '@/src/lib/meeting-schedule-overlap';
 import type { Meeting } from '@/src/lib/meetings';
 import {
-  applyTrustPenaltyLeaveConfirmedMeeting,
-  approveJoinRequest,
-  cancelJoinRequest,
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
   deleteMeetingByHost,
-  findMeetingJoinRequestForUser,
-  formatPublicMeetingAgeSummary,
-  formatPublicMeetingApprovalSummary,
-  formatPublicMeetingGenderSummary,
-  formatPublicMeetingSettlementSummary,
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
-  hostRemoveParticipant,
-  isUserKickedFromMeeting,
   joinMeeting,
   leaveMeeting,
-  listMeetingJoinRequests,
-  MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
-  meetingPrimaryStartMs,
-  parsePublicMeetingDetailsConfig,
-  rejectJoinRequest,
-  requestJoinMeeting,
   resolveVoteTopTies,
+  subscribeMeetingById,
   unconfirmMeetingSchedule,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
   updateParticipantVotes,
-  upsertParticipantVotes,
 } from '@/src/lib/meetings';
-import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
-import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
-import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
-import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
-import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
-import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
-import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
-import {
-  ensureUserProfile,
-  getUserProfile,
-  getUserProfilesForIds,
-  isMeetingServiceComplianceComplete,
-  isUserProfileWithdrawn,
-  meetingDemographicsIncomplete,
-  WITHDRAWN_NICKNAME,
-  type UserProfile,
-} from '@/src/lib/user-profile';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { ensureUserProfile, getUserProfilesForIds } from '@/src/lib/user-profile';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
-const WEEKDAY_KO = WEEK_KO;
-/** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
-const CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY = 0.76;
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0');
-}
-
-function parseYmd(raw: string): { y: number; m: number; d: number } | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const da = Number(m[3]);
-  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(da)) return null;
-  return { y, m: mo, d: da };
-}
-
-function monthStartYmd(ymd: string): string {
-  const p = parseYmd(ymd);
-  if (!p) return fmtDateYmd(new Date());
-  return `${p.y}-${pad2(p.m)}-01`;
-}
 
 /** 칩 한 줄 — 날짜 + (선택) 시간 (`startDate` 누락·레거시 문서 대비) */
 function formatDateCandidateTitle(dc: DateCandidate): string {
@@ -183,34 +90,28 @@ function buildDateChipsFromCandidates(list: DateCandidate[]): DateChip[] {
   ];
 }
 
-type PlaceChip = {
-  id: string;
-  title: string;
-  sub?: string;
-  category?: string;
-  naverPlaceLink?: string;
-  /** 검색·등록 시 확보한 대표 사진 — 모임 목록·투표 칩과 동일 우선 사용 */
-  preferredPhotoMediaUrl?: string;
-};
-
-function placeChipToNaverImageFields(chip: PlaceChip): NaverPlaceImageSearchFields {
-  return {
-    title: chip.title,
-    addressLine: chip.sub,
-    category: chip.category,
-    preferredPhotoMediaUrl: chip.preferredPhotoMediaUrl,
-    kakaoPlaceDetailPageUrl: chip.naverPlaceLink,
-  };
-}
+type PlaceChip = { id: string; title: string; sub?: string };
 
 function getExtraDataSpecialtyKind(meeting: Meeting): SpecialtyKind | null {
   const raw = meeting.extraData;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const k = (raw as { specialtyKind?: unknown }).specialtyKind;
-    if (k === 'movie' || k === 'food' || k === 'sports' || k === 'knowledge') return k;
+    if (k === 'movie' || k === 'food' || k === 'sports') return k;
   }
   const label = meeting.categoryLabel?.trim() ?? '';
   return label ? resolveSpecialtyKind(label) : null;
+}
+
+function sportIntensityKo(level: SportIntensityLevel | null | undefined): string {
+  switch (level) {
+    case 'easy':
+      return '가볍게';
+    case 'hard':
+      return '강하게';
+    case 'normal':
+    default:
+      return '보통';
+  }
 }
 
 function formatCapacityLine(m: Meeting): string {
@@ -243,31 +144,11 @@ function extractMenuPreferences(extra: Meeting['extraData']): string[] {
   return prefs.map((s) => String(s).trim()).filter(Boolean);
 }
 
-function extractActivityKinds(extra: Meeting['extraData']): string[] {
-  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
-  const kinds = (extra as MeetingExtraData).activityKinds;
-  if (!Array.isArray(kinds)) return [];
-  return kinds.map((s) => String(s).trim()).filter(Boolean);
-}
-
-function extractGameKinds(extra: Meeting['extraData']): string[] {
-  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
-  const kinds = (extra as MeetingExtraData).gameKinds;
-  if (!Array.isArray(kinds)) return [];
-  return kinds.map((s) => String(s).trim()).filter(Boolean);
-}
-
-function extractFocusKnowledgePreferences(extra: Meeting['extraData']): string[] {
-  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return [];
-  const prefs = (extra as MeetingExtraData).focusKnowledgePreferences;
-  if (!Array.isArray(prefs)) return [];
-  return prefs.map((s) => String(s).trim()).filter(Boolean);
-}
-
-function extractCategoryMajorCode(extra: Meeting['extraData']): string | null {
+function extractSportIntensity(extra: Meeting['extraData']): SportIntensityLevel | null {
   if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return null;
-  const mc = (extra as MeetingExtraData).categoryMajorCode;
-  return typeof mc === 'string' && mc.trim() !== '' ? mc.trim() : null;
+  const v = (extra as MeetingExtraData).sportIntensity;
+  if (v === 'easy' || v === 'normal' || v === 'hard') return v;
+  return null;
 }
 
 function placeCandidateChipId(p: { id?: string }, index: number): string {
@@ -285,22 +166,11 @@ function movieCandidateChipId(mv: SelectedMovieExtra, index: number): string {
 function buildPlaceChipsFromMeeting(m: Meeting): PlaceChip[] {
   const list = m.placeCandidates ?? [];
   if (list.length > 0) {
-    return list.map((p, i) => {
-      const nl = sanitizeNaverLocalPlaceLink(p.naverPlaceLink ?? undefined);
-      const cat =
-        typeof p.category === 'string' && p.category.trim() !== '' ? p.category.trim() : '';
-      const prefRaw =
-        typeof p.preferredPhotoMediaUrl === 'string' ? p.preferredPhotoMediaUrl.trim() : '';
-      const pref = prefRaw.startsWith('https://') ? prefRaw : '';
-      return {
-        id: placeCandidateChipId(p, i),
-        title: p.placeName?.trim() || '장소',
-        sub: p.address?.trim() || undefined,
-        ...(cat ? { category: cat } : {}),
-        ...(pref ? { preferredPhotoMediaUrl: pref } : {}),
-        ...(nl ? { naverPlaceLink: nl } : {}),
-      };
-    });
+    return list.map((p, i) => ({
+      id: placeCandidateChipId(p, i),
+      title: p.placeName?.trim() || '장소',
+      sub: p.address?.trim() || undefined,
+    }));
   }
   const name = m.placeName?.trim() || m.location?.trim();
   const addr = m.address?.trim();
@@ -396,6 +266,10 @@ function mergeAppendNewPlaceCandidatesWithoutDup(
   return { merged, additions };
 }
 
+function normalizeParticipantId(raw: string): string {
+  return normalizePhoneUserId(raw) ?? raw.trim();
+}
+
 /** 표시 순서: 주선자 → 나머지 참여자(중복 제거) */
 function orderedParticipantIds(m: Meeting): string[] {
   const hostRaw = m.createdBy?.trim() ?? '';
@@ -423,49 +297,34 @@ function nicknameInitial(nickname: string): string {
   return g ?? '?';
 }
 
-/** 세션 사용자 PK와 모임 `createdBy`가 같으면 주선자 */
-function isMeetingHost(sessionUserId: string | null, createdBy: string | null | undefined): boolean {
-  const s = sessionUserId?.trim() ?? '';
+/** 세션 전화 PK와 모임 `createdBy`(정규화된 전화 PK)가 같으면 주선자 */
+function isMeetingHost(sessionPhone: string | null, createdBy: string | null | undefined): boolean {
+  const s = sessionPhone?.trim() ?? '';
   const c = createdBy?.trim() ?? '';
   if (!s || !c) return false;
-  return normalizeParticipantId(s) === normalizeParticipantId(c);
+  if (s === c) return true;
+  const ns = normalizePhoneUserId(s) ?? s;
+  const nc = normalizePhoneUserId(c) ?? c;
+  return ns === nc;
 }
 
 export default function MeetingDetailScreen() {
   const router = useRouter();
-  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { userId } = useUserSession();
-  const { version: appPoliciesVersion } = useAppPolicies();
+  const { phoneUserId } = useUserSession();
   const { syncMeetingAckFromMeeting } = useInAppAlarms();
   const isFocused = useIsFocused();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
-  const queryClient = useQueryClient();
-  const navigation = useNavigation();
 
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   /** 일시 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
   /** 장소 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedPlaceIds, setSelectedPlaceIds] = useState<string[]>([]);
-  const [placeThumbByChipId, setPlaceThumbByChipId] = useState<Record<string, string | null>>({});
-  const [dateVoteCalendarMonth, setDateVoteCalendarMonth] = useState(() => monthStartYmd(fmtDateYmd(new Date())));
-  const [dateVoteCalendarPagerW, setDateVoteCalendarPagerW] = useState(() => Math.max(280, Math.floor(windowWidth)));
-  /** 확정 일시 카드 안 읽기 전용 달력(투표 달력과 동일 월·그리드) */
-  const [confirmedScheduleCalMonth, setConfirmedScheduleCalMonth] = useState(() =>
-    monthStartYmd(fmtDateYmd(new Date())),
-  );
-  const [confirmedScheduleCalPagerW, setConfirmedScheduleCalPagerW] = useState(() =>
-    Math.max(280, Math.floor(windowWidth)),
-  );
-  const dateVoteCalendarPagerRef = useRef<ScrollView>(null);
-  /** `scrollTo` 가운데 정렬 직후 네이티브가 보내는 가짜 `onMomentumScrollEnd`로 월이 두 칸 넘어가지 않게 함 */
-  const dateVoteCalendarPagerIgnoreMomentumEndRef = useRef(false);
-  const dateVoteCalendarCenterOpacity = useRef(new Animated.Value(1)).current;
-  const dateVoteCalendarSwipeFadeAfterRecenterRef = useRef(false);
-  const dateVoteCalendarFadeAnimRef = useRef<Animated.CompositeAnimation | null>(null);
-  const [dateVoteCalendarYmPick, setDateVoteCalendarYmPick] = useState<{ draft: Date } | null>(null);
-  const [dateVoteTimePick, setDateVoteTimePick] = useState<{ ymd: string } | null>(null);
   /** 영화 투표 — 후보 id 다중 선택 (로컬 UI, 추후 서버 반영) */
   const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -474,10 +333,6 @@ export default function MeetingDetailScreen() {
   const voteFormRef = useRef<VoteCandidatesFormHandle>(null);
   const mainScrollRef = useRef<ScrollView>(null);
   const voteSectionScrollYs = useRef({ date: 0, movie: 0, place: 0 });
-  const scrollToVoteBlock = useCallback((section: 'date' | 'movie' | 'place') => {
-    const y = voteSectionScrollYs.current[section];
-    mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
-  }, []);
 
   const [placeProposeOpen, setPlaceProposeOpen] = useState(false);
   const [placeProposeFormKey, setPlaceProposeFormKey] = useState(0);
@@ -485,58 +340,59 @@ export default function MeetingDetailScreen() {
   const placeVoteFormRef = useRef<VoteCandidatesFormHandle>(null);
 
   const [retryNonce, setRetryNonce] = useState(0);
-  const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, retryNonce);
-  const [participantProfiles, setParticipantProfiles] = useState<Record<string, UserProfile>>({});
+  const [participantProfiles, setParticipantProfiles] = useState<
+    Record<string, { nickname: string; photoUrl: string | null }>
+  >({});
   const [joinBusy, setJoinBusy] = useState(false);
-  const [joinRequestMessageOpen, setJoinRequestMessageOpen] = useState(false);
-  const [joinRequestDraftMessage, setJoinRequestDraftMessage] = useState('');
-  const [hostJoinRequestBusyId, setHostJoinRequestBusyId] = useState<string | null>(null);
-  /** setState 전에도 연타·중복 비동기 호출로 승인/거절 RPC가 여러 번 나가지 않게 함 */
-  const hostJoinRequestActionInFlightRef = useRef(false);
-  const hostKickParticipantInFlightRef = useRef(false);
-  const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
-  const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(3);
   const [participantVoteBusy, setParticipantVoteBusy] = useState(false);
-  /** ref만 갱신해도 `votesDirty` useMemo가 다시 계산되도록 */
-  const [votePersistNonce, setVotePersistNonce] = useState(0);
   const [confirmScheduleBusy, setConfirmScheduleBusy] = useState(false);
   const [deleteMeetingBusy, setDeleteMeetingBusy] = useState(false);
   const [hostTieDateId, setHostTieDateId] = useState<string | null>(null);
   const [hostTiePlaceId, setHostTiePlaceId] = useState<string | null>(null);
   const [hostTieMovieId, setHostTieMovieId] = useState<string | null>(null);
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
-  const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
-
-  const [profilePopupUserId, setProfilePopupUserId] = useState<string | null>(null);
-  const [friendRequestBusy, setFriendRequestBusy] = useState(false);
-  const [friendRelation, setFriendRelation] = useState<FriendRelationStatusRow>({
-    status: 'none',
-    friendship_id: null,
-  });
-  /** 친구 관계 조회 응답이 늦게 도착해 요청 직후 상태를 덮어쓰지 않도록 세대를 맞춥니다. */
-  const friendsRelationFetchGenRef = useRef(0);
-  const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
-  const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
 
   useEffect(() => {
-    if (!isFocused || !meeting || !userId?.trim()) return;
-    if (!isUserJoinedMeeting(meeting, userId)) return;
-    // 호스트는 모임 변동(입장/퇴장 등)을 "새 소식"으로 계속 받아야 해서
-    // 상세 화면에 들어와 있다고 자동으로 확인 처리(sync ack)하지 않습니다.
-    if (isMeetingHost(userId, meeting.createdBy)) return;
+    if (!id.trim()) {
+      setMeeting(null);
+      setLoadError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    let alive = true;
+    const unsub = subscribeMeetingById(
+      id,
+      (m) => {
+        if (!alive) return;
+        setMeeting(m);
+        setLoading(false);
+        setLoadError(null);
+      },
+      (msg) => {
+        if (!alive) return;
+        setLoadError(msg);
+        setLoading(false);
+      },
+    );
+    return () => {
+      alive = false;
+      unsub();
+    };
+  }, [id, retryNonce]);
+
+  useEffect(() => {
+    if (!isFocused || !meeting || !phoneUserId?.trim()) return;
+    if (!isUserJoinedMeeting(meeting, phoneUserId)) return;
     syncMeetingAckFromMeeting(meeting);
-  }, [isFocused, meeting, userId, syncMeetingAckFromMeeting]);
+  }, [isFocused, meeting, phoneUserId, syncMeetingAckFromMeeting]);
 
   useEffect(() => {
     if (!meeting) {
       setParticipantProfiles({});
       return;
     }
-    const base = orderedParticipantIds(meeting);
-    const jrIds = listMeetingJoinRequests(meeting)
-      .map((r) => normalizeParticipantId(r.userId) ?? r.userId.trim())
-      .filter((x) => Boolean(x));
-    const ids = [...new Set([...base, ...jrIds])];
+    const ids = orderedParticipantIds(meeting);
     if (ids.length === 0) {
       setParticipantProfiles({});
       return;
@@ -544,7 +400,7 @@ export default function MeetingDetailScreen() {
     let cancelled = false;
     void getUserProfilesForIds(ids).then((map) => {
       if (cancelled) return;
-      const rec: Record<string, UserProfile> = {};
+      const rec: Record<string, { nickname: string; photoUrl: string | null }> = {};
       map.forEach((v, k) => {
         rec[k] = v;
       });
@@ -555,177 +411,6 @@ export default function MeetingDetailScreen() {
     };
   }, [meeting]);
 
-  const normalizeGender = useCallback((raw: string | null | undefined): 'male' | 'female' | null => {
-    const v = String(raw ?? '').trim().toLowerCase();
-    if (!v) return null;
-    if (v === 'male' || v === 'man' || v === 'm' || v === '남' || v === '남자') return 'male';
-    if (v === 'female' || v === 'woman' || v === 'f' || v === '여' || v === '여자') return 'female';
-    // Google People API가 주는 값(예: "male", "female", "unspecified") 외에도, 한글/약어 혼재 대비
-    if (v.includes('male') || v.includes('man')) return 'male';
-    if (v.includes('female') || v.includes('woman')) return 'female';
-    if (v.includes('남')) return 'male';
-    if (v.includes('여')) return 'female';
-    return null;
-  }, []);
-
-  const openParticipantProfile = useCallback((peerAppUserId: string) => {
-    const pid = peerAppUserId.trim();
-    if (!pid) return;
-    router.push(`/profile/user/${encodeURIComponent(pid)}`);
-  }, [router]);
-
-  const closeParticipantProfile = useCallback(() => {
-    setProfilePopupUserId(null);
-    setFriendRelation({ status: 'none', friendship_id: null });
-  }, []);
-
-  useEffect(() => {
-    const pid = profilePopupUserId?.trim() ?? '';
-    if (!pid) return;
-    if (participantProfiles[pid]) return;
-    let alive = true;
-    void getUserProfile(pid).then((p) => {
-      if (!alive) return;
-      if (!p) return;
-      setParticipantProfiles((prev) => (prev[pid] ? prev : { ...prev, [pid]: p }));
-    });
-    return () => {
-      alive = false;
-    };
-  }, [participantProfiles, profilePopupUserId]);
-
-  useEffect(() => {
-    const me = userId?.trim() ?? '';
-    const peer = profilePopupUserId?.trim() ?? '';
-    if (!me || !peer) {
-      setFriendRelation({ status: 'none', friendship_id: null });
-      return;
-    }
-    if (normalizeParticipantId(me) === normalizeParticipantId(peer)) {
-      setFriendRelation({ status: 'none', friendship_id: null });
-      return;
-    }
-    const snapshot = friendsRelationFetchGenRef.current;
-    let alive = true;
-    void fetchFriendRelationStatus(me, peer)
-      .then((gr) => {
-        if (!alive) return;
-        if (snapshot !== friendsRelationFetchGenRef.current) return;
-        setFriendRelation(gr);
-      })
-      .catch(() => {
-        if (!alive) return;
-        if (snapshot !== friendsRelationFetchGenRef.current) return;
-        setFriendRelation({ status: 'none', friendship_id: null });
-      });
-    return () => {
-      alive = false;
-    };
-  }, [profilePopupUserId, userId]);
-
-  const onSendFriendGinit = useCallback(async () => {
-    const me = userId?.trim() ?? '';
-    const peer = profilePopupUserId?.trim() ?? '';
-    if (!peer) return;
-    if (!me) {
-      Alert.alert('로그인이 필요해요', '친구 요청은 로그인 후 보낼 수 있어요.');
-      return;
-    }
-    if (normalizeParticipantId(me) === normalizeParticipantId(peer)) return;
-    setFriendRequestBusy(true);
-    try {
-      await ensureUserProfile(me);
-      const profGate = await getUserProfile(me);
-      if (meetingDemographicsIncomplete(profGate, me)) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ],
-        );
-        return;
-      }
-      const pre = await fetchFriendRelationStatus(me, peer).catch(() => null);
-      if (pre?.status === 'pending_out' || pre?.status === 'accepted') {
-        friendsRelationFetchGenRef.current += 1;
-        setFriendRelation(pre);
-        showTransientBottomMessage(
-          pre.status === 'accepted' ? '이미 친구로 연결되어 있어요.' : '이미 친구 요청을 보냈어요.',
-        );
-        return;
-      }
-      const returnedId = (await sendGinitRequest(me, peer)).trim();
-      friendsRelationFetchGenRef.current += 1;
-      const next = await fetchFriendRelationStatus(me, peer).catch(() => null);
-      const resolved: FriendRelationStatusRow =
-        next &&
-        (next.status === 'pending_out' || next.status === 'pending_in' || next.status === 'accepted')
-          ? next
-          : returnedId
-            ? {
-                status: 'pending_out',
-                friendship_id: returnedId,
-                requester_app_user_id: me,
-                addressee_app_user_id: peer,
-              }
-            : (next ?? { status: 'none', friendship_id: null });
-      setFriendRelation(resolved);
-      showTransientBottomMessage('친구 요청을 보냈어요.');
-      void getUserProfile(me)
-        .then((p) =>
-          notifyFriendRequestReceivedFireAndForget({
-            addresseeAppUserId: peer,
-            requesterAppUserId: me,
-            requesterDisplayName: p?.nickname ?? undefined,
-          }),
-        )
-        .catch(() =>
-          notifyFriendRequestReceivedFireAndForget({
-            addresseeAppUserId: peer,
-            requesterAppUserId: me,
-          }),
-        );
-    } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
-    } finally {
-      setFriendRequestBusy(false);
-    }
-  }, [profilePopupUserId, router, userId]);
-
-  const onAcceptFriendGinit = useCallback(async () => {
-    const me = userId?.trim() ?? '';
-    const peer = profilePopupUserId?.trim() ?? '';
-    const fid = friendRelation.friendship_id?.trim();
-    if (!me || !peer || !fid) return;
-    setFriendRequestBusy(true);
-    try {
-      await ensureUserProfile(me);
-      await acceptGinitRequest(me, fid);
-      friendsRelationFetchGenRef.current += 1;
-      const next = await fetchFriendRelationStatus(me, peer).catch(() => null);
-      if (next) setFriendRelation(next);
-      const nick =
-        participantProfiles[normalizeParticipantId(peer) ?? peer]?.nickname?.trim() ?? '친구';
-      const rid = socialDmRoomId(me, peer);
-      showTransientBottomMessage('친구 요청을 수락했어요.');
-      closeParticipantProfile();
-      router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
-    } catch (e) {
-      Alert.alert('수락 실패', e instanceof Error ? e.message : String(e));
-    } finally {
-      setFriendRequestBusy(false);
-    }
-  }, [
-    closeParticipantProfile,
-    friendRelation.friendship_id,
-    participantProfiles,
-    profilePopupUserId,
-    router,
-    userId,
-  ]);
-
   useEffect(() => {
     setSelectedDateIds([]);
     setSelectedPlaceIds([]);
@@ -735,34 +420,12 @@ export default function MeetingDetailScreen() {
     setHostTieMovieId(null);
   }, [meeting?.id]);
 
-  /** 확정용 동점 선택 id는 실제 투표 선택에 포함된 칩만 유지(다건 투표와 동기화) */
-  useEffect(() => {
-    const id = hostTieMovieId?.trim();
-    if (!id) return;
-    if (selectedMovieIds.includes(id)) return;
-    setHostTieMovieId(null);
-  }, [selectedMovieIds, hostTieMovieId]);
-
   const storedDateCandidates = meeting?.dateCandidates ?? [];
   const dateChips = useMemo(() => {
     if (!meeting) return [];
     const list = meeting.dateCandidates ?? [];
     return buildDateChipsFromCandidates(list);
   }, [meeting]);
-
-  // 후보가 1개일 때도 달력 UI가 바로 보이도록, 해당 후보의 월로 자동 정렬합니다(초기 1회).
-  const dateVoteMonthAutofitKeyRef = useRef<string>('');
-  useEffect(() => {
-    if (!meeting) return;
-    if (meeting.scheduleConfirmed === true) return;
-    if (storedDateCandidates.length !== 1) return;
-    const ymd = String(storedDateCandidates[0]?.startDate ?? '').trim();
-    if (!ymd) return;
-    const key = `${meeting.id}\u0001${ymd}`;
-    if (dateVoteMonthAutofitKeyRef.current === key) return;
-    dateVoteMonthAutofitKeyRef.current = key;
-    setDateVoteCalendarMonth(monthStartYmd(ymd));
-  }, [meeting, meeting?.id, meeting?.scheduleConfirmed, storedDateCandidates]);
 
   const placeChips = useMemo(() => (meeting ? buildPlaceChipsFromMeeting(meeting) : []), [meeting]);
 
@@ -793,19 +456,6 @@ export default function MeetingDetailScreen() {
   }, [meeting?.voteTallies?.places, placeChips]);
 
   const specialtyKind = useMemo(() => (meeting ? getExtraDataSpecialtyKind(meeting) : null), [meeting]);
-  /** 장소 제안 모달 — `VoteCandidatesForm.placeThemeLabel`로 주변 검색 기본어(영화=영화관 등) 시드 */
-  const placeProposePlaceThemeLabel = useMemo(() => {
-    if (!meeting) return '';
-    const direct = meeting.categoryLabel?.trim();
-    if (direct) return direct;
-    const sk = getExtraDataSpecialtyKind(meeting);
-    if (sk === 'movie') return '영화';
-    if (sk === 'food') return '맛집';
-    if (sk === 'sports') return '운동';
-    if (sk === 'knowledge') return '스터디';
-    if (extractMoviesFromExtra(meeting.extraData).length > 0) return '영화';
-    return '';
-  }, [meeting]);
   const extraMovies = useMemo(() => (meeting ? extractMoviesFromExtra(meeting.extraData) : []), [meeting?.extraData]);
 
   const sortedMovieVoteRows = useMemo(() => {
@@ -865,20 +515,6 @@ export default function MeetingDetailScreen() {
     meeting?.longitude,
   ]);
 
-  const singlePlaceCoords = useMemo(() => {
-    if (!meeting || placeChips.length !== 1) return null;
-    if (meeting.placeCandidates?.length === 1) {
-      const lat = meeting.placeCandidates[0].latitude;
-      const lng = meeting.placeCandidates[0].longitude;
-      if (Number.isFinite(lat) && Number.isFinite(lng)) return { latitude: lat, longitude: lng };
-      return null;
-    }
-    const lat = meeting.latitude;
-    const lng = meeting.longitude;
-    if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) return { latitude: lat, longitude: lng };
-    return null;
-  }, [meeting, meeting?.placeCandidates, meeting?.latitude, meeting?.longitude, placeChips.length]);
-
   const confirmedMovieResolved = useMemo(() => {
     if (!isScheduleConfirmed || !meeting?.confirmedMovieChipId?.trim()) return null;
     const id = meeting.confirmedMovieChipId.trim();
@@ -888,231 +524,8 @@ export default function MeetingDetailScreen() {
     return null;
   }, [isScheduleConfirmed, meeting?.confirmedMovieChipId, extraMovies]);
 
-  const movieMetaRows = useCallback((mv: SelectedMovieExtra): Array<{ key: string; value: string; sortKey: string }> => {
-    // KOBIS 원본 키 + 표시 라벨
-    const label: Record<string, string> = {
-      openDt: '개봉일',
-      rank: '순위',
-      rankInten: '순위변동',
-      rankOldAndNew: '신규진입',
-      salesShare: '매출 점유율',
-      salesAmt: '당일 매출',
-      salesInten: '매출 증감액',
-      salesChange: '매출 증감률',
-      salesAcc: '누적 매출',
-      audiCnt: '일일 관객',
-      audiInten: '관객 증감',
-      audiChange: '관객 증감률',
-      audiAcc: '누적 관객',
-      scrnCnt: '스크린수',
-      showCnt: '상영횟수',
-      // fallback(기존 저장분)
-      rating: '예매율',
-      kobisRank: 'KOBIS 순위',
-    };
-
-    const allow = new Set(['openDt', 'rank', 'audiCnt', 'audiAcc', 'rating']);
-
-    const order = [
-      'openDt',
-      'rank',
-      'kobisRank',
-      'rankInten',
-      'rankOldAndNew',
-      'salesShare',
-      'salesAmt',
-      'salesAcc',
-      'salesInten',
-      'salesChange',
-      'audiCnt',
-      'audiAcc',
-      'audiInten',
-      'audiChange',
-      'scrnCnt',
-      'showCnt',
-      'rating',
-    ];
-
-    const parseNum = (s: string) => {
-      const n = Number.parseFloat(String(s).replace(/,/g, '').replace('%', '').trim());
-      return Number.isFinite(n) ? n : null;
-    };
-    const fmtInt = (s: string) => {
-      const n = Number.parseInt(String(s).replace(/,/g, '').trim(), 10);
-      if (!Number.isFinite(n)) return s.trim();
-      return n.toLocaleString('ko-KR');
-    };
-    const fmtSigned = (s: string) => {
-      const n = parseNum(s);
-      if (n == null) return s.trim();
-      if (n === 0) return '0';
-      return n > 0 ? `+${n}` : `${n}`;
-    };
-    const fmt = (k: string, raw: string) => {
-      const v = String(raw ?? '').trim();
-      if (!v) return '';
-      if (k === 'openDt' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-      if (k === 'rank') return `${fmtInt(v)}위`;
-      if (k === 'kobisRank') return `${fmtInt(v)}위`;
-      if (k === 'rankInten') return fmtSigned(v);
-      if (k === 'rankOldAndNew') return v.toUpperCase() === 'NEW' ? 'NEW' : v;
-      if (k === 'salesShare') return v.endsWith('%') ? v : `${v}%`;
-      if (k === 'salesAmt' || k === 'salesAcc' || k === 'salesInten') return `${fmtInt(v)}원`;
-      if (k === 'salesChange') return v.endsWith('%') ? v : `${v}%`;
-      if (k === 'audiCnt' || k === 'audiAcc' || k === 'audiInten') return `${fmtInt(v)}명`;
-      if (k === 'audiChange') return v.endsWith('%') ? v : `${v}%`;
-      if (k === 'scrnCnt' || k === 'showCnt') return `${fmtInt(v)}`;
-      if (k === 'rating') return v.endsWith('%') ? v : `${v}%`;
-      return v;
-    };
-
-    // 1) 원본 메타(있으면) + 2) 기존 저장분 fallback
-    const meta = new Map<string, string>();
-    if (mv.apiMeta && typeof mv.apiMeta === 'object' && !Array.isArray(mv.apiMeta)) {
-      Object.entries(mv.apiMeta).forEach(([k, v]) => {
-        const key = String(k).trim();
-        const val = String(v ?? '').trim();
-        if (!key || !val) return;
-        meta.set(key, val);
-      });
-    }
-    if (mv.rating?.trim()) meta.set('rating', mv.rating.trim());
-    if (mv.kobisRank?.trim()) meta.set('kobisRank', mv.kobisRank.trim());
-
-    // 제목/본문에서 이미 보여주는 값은 중복으로 또 보여주지 않음
-    meta.delete('movieNm');
-    meta.delete('year');
-    meta.delete('info');
-    meta.delete('movieCd');
-    meta.delete('id');
-
-    const rows = [...meta.entries()]
-      .map(([k, v]) => ({
-        sortKey: k,
-        key: label[k] ?? k,
-        value: fmt(k, v),
-      }))
-      .filter((r) => r.key && r.value && allow.has(r.sortKey))
-      .sort((a, b) => {
-        const ia = order.indexOf(a.sortKey);
-        const ib = order.indexOf(b.sortKey);
-        if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-        return a.sortKey.localeCompare(b.sortKey);
-      });
-
-    return rows;
-  }, []);
-
-  const movieSynopsisText = useCallback((mv: SelectedMovieExtra): string => {
-    const meta = mv.apiMeta;
-    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return '';
-    const keys = ['overview', 'synopsis', 'plot', 'story', 'description', 'summary', 'tagline'];
-    for (const k of keys) {
-      const v = String(meta[k] ?? '').trim();
-      if (v) return v;
-    }
-    return '';
-  }, []);
-
-  const movieInfoMultiline = useCallback((info: string | null | undefined): string => {
-    const s = String(info ?? '').trim();
-    if (!s) return '';
-    // KOBIS 등에서 " · "로 이어붙인 요약을 줄바꿈으로 분리
-    // 단, 메타(관객/스크린/개봉일/순위/예매율 등)는 별도 영역에서만 보여주므로 여기서는 숨깁니다.
-    const lines = s
-      .split(/\s*·\s*/g)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .filter((line) => {
-        // 예: "일일 관객 123,456명", "누적 관객 1,234,567명", "스크린 123개", "개봉일 2026-01-01", "순위 3위", "예매율 12.3%"
-        return !/(일일\s*관객|일일 관객|누적\s*관객|누적관객|누적|스크린\s*수|스크린수|스크린|개봉일|순위|예매율)/.test(line);
-      });
-    return lines.join('\n');
-  }, []);
-
   const extraMenus = useMemo(() => (meeting ? extractMenuPreferences(meeting.extraData) : []), [meeting?.extraData]);
-  const extraActivityKinds = useMemo(
-    () => (meeting ? extractActivityKinds(meeting.extraData) : []),
-    [meeting?.extraData],
-  );
-  const extraGameKinds = useMemo(
-    () => (meeting ? extractGameKinds(meeting.extraData) : []),
-    [meeting?.extraData],
-  );
-  const extraFocusKnowledge = useMemo(
-    () => (meeting ? extractFocusKnowledgePreferences(meeting.extraData) : []),
-    [meeting?.extraData],
-  );
-
-  const placeThemeMajorForProposeForm = useMemo(() => {
-    if (!meeting) return undefined;
-    const snap = extractCategoryMajorCode(meeting.extraData);
-    if (snap) return snap;
-    return extraGameKinds.length > 0 ? 'Play & Vibe' : undefined;
-  }, [meeting, meeting?.extraData, extraGameKinds.length]);
-
-  const placeGameKindLabelsForProposeForm = useMemo(() => {
-    if (placeThemeMajorForProposeForm && isPlayAndVibeMajorCode(placeThemeMajorForProposeForm) && extraGameKinds.length > 0) {
-      return extraGameKinds;
-    }
-    return undefined;
-  }, [placeThemeMajorForProposeForm, extraGameKinds]);
-
-  const publicMeetingDetails = useMemo(() => {
-    if (!meeting || meeting.isPublic === false) return null;
-    return parsePublicMeetingDetailsConfig(meeting.meetingConfig);
-  }, [meeting]);
-
-  type PublicConditionRow = {
-    icon: SymbolicIconName;
-    label: string;
-    value: string;
-    variant?: 'default' | 'trust';
-  };
-
-  const publicConditionRows = useMemo((): PublicConditionRow[] => {
-    if (!publicMeetingDetails) return [];
-    const d = publicMeetingDetails;
-    const highTrust = isHighTrustPublicMeeting(d);
-    const rows: PublicConditionRow[] = [
-      {
-        icon: 'calendar-outline',
-        label: '모집 연령대',
-        value: formatPublicMeetingAgeSummary(d.ageLimit),
-      },
-      {
-        icon: 'male-female-outline',
-        label: '성별 비율',
-        value: formatPublicMeetingGenderSummary(d.genderRatio, d.hostGenderSnapshot),
-      },
-      {
-        icon: 'wallet-outline',
-        label: '정산 방식',
-        value: formatPublicMeetingSettlementSummary(d.settlement, d.membershipFeeWon),
-      },
-      {
-        icon: 'ribbon-outline',
-        label: '참가 레벨',
-        value: `최소 Lv ${d.minGLevel}`,
-      },
-    ];
-    if (typeof d.minGTrust === 'number') {
-      rows.push({
-        icon: 'shield-checkmark-outline',
-        label: highTrust ? '신뢰도 (높은 모임)' : '최소 gTrust',
-        value: highTrust
-          ? `${d.minGTrust}점 이상 · 약속 이행이 검증된 멤버`
-          : `${d.minGTrust}점 이상`,
-        variant: highTrust ? 'trust' : 'default',
-      });
-    }
-    rows.push({
-      icon: 'checkmark-done-outline',
-      label: '승인 방식',
-      value: formatPublicMeetingApprovalSummary(d.approvalType),
-    });
-    return rows;
-  }, [publicMeetingDetails]);
+  const extraSport = useMemo(() => (meeting ? extractSportIntensity(meeting.extraData) : null), [meeting?.extraData]);
 
   const representativeScheduleText = useMemo(() => {
     if (!meeting) return null;
@@ -1128,56 +541,16 @@ export default function MeetingDetailScreen() {
     return { scheduleDate: fmtDateYmd(new Date()), scheduleTime: '15:00' };
   }, [meeting?.scheduleDate, meeting?.scheduleTime]);
 
-  const isHost = useMemo(() => (meeting ? isMeetingHost(userId, meeting.createdBy) : false), [meeting, userId]);
-
-  useEffect(() => {
-    if (isScheduleConfirmed) setBasicInfoEditOpen(false);
-  }, [isScheduleConfirmed]);
-
-  const orderedParticipantIdsList = useMemo(() => (meeting ? orderedParticipantIds(meeting) : []), [meeting]);
-
-  const sessionPk = useMemo(
-    () => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''),
-    [userId],
-  );
-
-  const alreadyJoinedMeeting = useMemo(() => {
-    if (!sessionPk) return false;
-    return orderedParticipantIdsList.includes(sessionPk);
-  }, [sessionPk, orderedParticipantIdsList]);
-
-  const joinRequestsSorted = useMemo(() => {
-    if (!meeting) return [];
-    return [...listMeetingJoinRequests(meeting)].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
-  }, [meeting]);
-
-  const needsHostApprovalJoin = useMemo(
-    () => Boolean(meeting?.isPublic === true && publicMeetingDetails?.approvalType === 'HOST_APPROVAL'),
-    [meeting?.isPublic, publicMeetingDetails?.approvalType],
-  );
-
-  const hasPendingJoinRequest = useMemo(() => {
-    if (!sessionPk || !meeting) return false;
-    return findMeetingJoinRequestForUser(meeting, sessionPk) != null;
-  }, [meeting, sessionPk]);
-
-  const sessionKickedFromMeeting = useMemo(() => {
-    if (!meeting || !sessionPk) return false;
-    return isUserKickedFromMeeting(meeting, sessionPk);
-  }, [meeting, sessionPk]);
-
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
     const dates = [
       createPointCandidate(
         newDateCandidateId(),
-        clampYmdToScheduleProposalWindow(insertModalSchedule.scheduleDate),
+        insertModalSchedule.scheduleDate,
         insertModalSchedule.scheduleTime,
       ),
     ];
-    const places: PlaceCandidate[] = meeting.placeCandidates?.length
-      ? (meeting.placeCandidates.map((p) => ({ ...p })) as PlaceCandidate[])
-      : [];
+    const places = meeting.placeCandidates?.length ? meeting.placeCandidates.map((p) => ({ ...p })) : [];
     return { dateCandidates: dates, placeCandidates: places };
   }, [meeting, insertModalSchedule, proposeOpen, proposeFormKey]);
 
@@ -1193,8 +566,6 @@ export default function MeetingDetailScreen() {
   }, []);
 
   const openPlaceProposeModal = useCallback(() => {
-    // 관심지역(active feed region) 기준으로 최신 바이어스를 쓰도록 캐시를 비웁니다.
-    invalidateNearbySearchBiasCache();
     setPlaceProposeFormKey((k) => k + 1);
     setPlaceProposeOpen(true);
   }, []);
@@ -1216,26 +587,9 @@ export default function MeetingDetailScreen() {
       return;
     }
 
-    const uid = userId?.trim();
-    if (uid) {
-      try {
-        await assertDateCandidatesNoOverlapWithOtherMeetings({
-          appUserId: uid,
-          candidates: additions,
-          bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-          excludeMeetingId: meeting.id,
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
-        return;
-      }
-    }
-
     setProposeSaving(true);
     try {
-      markRecentSelfMeetingChange(meeting.id);
-      await updateMeetingDateCandidates(meeting.id, merged, { priorDateCandidates: existing });
+      await updateMeetingDateCandidates(meeting.id, merged);
       let refreshed: Meeting | null = null;
       try {
         refreshed = await getMeetingById(meeting.id);
@@ -1246,14 +600,13 @@ export default function MeetingDetailScreen() {
         refreshed?.dateCandidates != null && refreshed.dateCandidates.length > 0
           ? refreshed.dateCandidates
           : merged;
-      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
+      setMeeting((prev) => {
         if (!prev) return prev;
         if (refreshed) {
           return { ...refreshed, dateCandidates: dates.map((d) => ({ ...d })) };
         }
         return { ...prev, dateCandidates: dates.map((d) => ({ ...d })) };
       });
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
       setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
       setProposeOpen(false);
     } catch (e) {
@@ -1261,7 +614,7 @@ export default function MeetingDetailScreen() {
     } finally {
       setProposeSaving(false);
     }
-  }, [meeting, queryClient, userId]);
+  }, [meeting]);
 
   const confirmPlaceProposals = useCallback(async () => {
     if (!meeting) return;
@@ -1270,7 +623,7 @@ export default function MeetingDetailScreen() {
       Alert.alert('확인', cap?.error ?? '장소 후보를 확인해 주세요.');
       return;
     }
-    const existing = (meeting.placeCandidates ?? []) as PlaceCandidate[];
+    const existing = meeting.placeCandidates ?? [];
     const fromForm = cap.payload.placeCandidates;
     const { merged, additions } = mergeAppendNewPlaceCandidatesWithoutDup(existing, fromForm);
 
@@ -1282,7 +635,6 @@ export default function MeetingDetailScreen() {
 
     setPlaceProposeSaving(true);
     try {
-      markRecentSelfMeetingChange(meeting.id);
       await updateMeetingPlaceCandidates(meeting.id, merged);
       let refreshed: Meeting | null = null;
       try {
@@ -1294,14 +646,13 @@ export default function MeetingDetailScreen() {
         refreshed?.placeCandidates != null && refreshed.placeCandidates.length > 0
           ? refreshed.placeCandidates
           : merged;
-      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
+      setMeeting((prev) => {
         if (!prev) return prev;
         if (refreshed) {
           return { ...refreshed, placeCandidates: places.map((p) => ({ ...p })) };
         }
         return { ...prev, placeCandidates: places.map((p) => ({ ...p })) };
       });
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
       setSelectedPlaceIds(additions.map((p, j) => placeCandidateChipId(p, existing.length + j)));
       setPlaceProposeOpen(false);
     } catch (e) {
@@ -1309,7 +660,7 @@ export default function MeetingDetailScreen() {
     } finally {
       setPlaceProposeSaving(false);
     }
-  }, [meeting, queryClient]);
+  }, [meeting]);
 
   const toggleDateSelection = useCallback((chipId: string) => {
     setSelectedDateIds((prev) =>
@@ -1329,88 +680,19 @@ export default function MeetingDetailScreen() {
     );
   }, []);
 
-  // 모임 상세 열람 게이트: 모임 이용 인증(약관+전화+성별/생년월일)이 완료되지 않으면 상세를 숨깁니다.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!sessionPk) {
-        setMeetingAuthComplete(false);
-        setMeetingAuthGateReady(true);
-        return;
-      }
-      try {
-        await ensureUserProfile(sessionPk);
-        const p = await getUserProfile(sessionPk);
-        const ok = isMeetingServiceComplianceComplete(p, sessionPk);
-        if (!cancelled) {
-          setMeetingAuthComplete(ok);
-          setMeetingAuthGateReady(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setMeetingAuthComplete(false);
-          setMeetingAuthGateReady(true);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionPk]);
+  const isHost = useMemo(() => (meeting ? isMeetingHost(phoneUserId, meeting.createdBy) : false), [meeting, phoneUserId]);
 
-  useEffect(() => {
-    if (!meeting || !sessionPk) {
-      setJoinScheduleOverlapBlock(false);
-      return;
-    }
-    if (alreadyJoinedMeeting || isHost) {
-      setJoinScheduleOverlapBlock(false);
-      return;
-    }
-    if (meeting.scheduleConfirmed !== true) {
-      setJoinScheduleOverlapBlock(false);
-      return;
-    }
-    const startMs = meetingPrimaryStartMs(meeting);
-    if (startMs == null) {
-      setJoinScheduleOverlapBlock(false);
-      return;
-    }
-    let alive = true;
-    void (async () => {
-      let buf = 3;
-      try {
-        const prof = await getUserProfile(sessionPk);
-        buf = getScheduleOverlapBufferHours(prof);
-        await assertNoConfirmedScheduleOverlapHybrid({
-          appUserId: sessionPk,
-          startMs,
-          bufferHours: buf,
-          excludeMeetingId: meeting.id,
-        });
-        if (alive) {
-          setJoinOverlapBufferHours(buf);
-          setJoinScheduleOverlapBlock(false);
-        }
-      } catch {
-        if (alive) {
-          setJoinOverlapBufferHours(buf);
-          setJoinScheduleOverlapBlock(true);
-        }
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [
-    meeting,
-    sessionPk,
-    alreadyJoinedMeeting,
-    isHost,
-    meeting?.id,
-    meeting?.scheduleConfirmed,
-    appPoliciesVersion,
-  ]);
+  const orderedParticipantIdsList = useMemo(() => (meeting ? orderedParticipantIds(meeting) : []), [meeting]);
+
+  const sessionPk = useMemo(
+    () => (phoneUserId?.trim() ? normalizePhoneUserId(phoneUserId) ?? phoneUserId.trim() : ''),
+    [phoneUserId],
+  );
+
+  const alreadyJoinedMeeting = useMemo(() => {
+    if (!sessionPk) return false;
+    return orderedParticipantIdsList.includes(sessionPk);
+  }, [sessionPk, orderedParticipantIdsList]);
 
   /** 게스트 참여 조건: 화면에 있는 각 투표 구역마다 최소 1개 선택 */
   const needsDatePick = dateChips.length > 0;
@@ -1418,68 +700,17 @@ export default function MeetingDetailScreen() {
   const needsMoviePick =
     (specialtyKind === 'movie' || extraMovies.length > 0) && extraMovies.length > 0;
 
-  // 후보가 1개뿐이면 “투표”가 아니라 확정 내역처럼 고정 표시(자동 선택)합니다.
-  const autoDatePick = needsDatePick && dateChips.length === 1;
-  const autoPlacePick = needsPlacePick && placeChips.length === 1;
-  const autoMoviePick = needsMoviePick && extraMovies.length === 1;
-
   const guestVotesReady = useMemo(() => {
     if (meeting?.scheduleConfirmed === true) return true;
-    if (needsDatePick && !autoDatePick && selectedDateIds.length === 0) return false;
-    if (needsPlacePick && !autoPlacePick && selectedPlaceIds.length === 0) return false;
-    if (needsMoviePick && !autoMoviePick && selectedMovieIds.length === 0) return false;
+    if (needsDatePick && selectedDateIds.length === 0) return false;
+    if (needsPlacePick && selectedPlaceIds.length === 0) return false;
+    if (needsMoviePick && selectedMovieIds.length === 0) return false;
     return true;
   }, [
     meeting?.scheduleConfirmed,
     needsDatePick,
     needsPlacePick,
     needsMoviePick,
-    autoDatePick,
-    autoPlacePick,
-    autoMoviePick,
-    selectedDateIds.length,
-    selectedPlaceIds.length,
-    selectedMovieIds.length,
-  ]);
-
-  // 게스트(미참여)에서 “참여 가능” 상태가 되면, 하단 버튼 영역을 밀지 않도록
-  // 안내 문구는 배너(2초)로만 잠깐 노출합니다.
-  const guestReadyBannerKeyRef = useRef<string>('');
-  useEffect(() => {
-    if (!meeting || !sessionPk || isHost) return;
-    if (alreadyJoinedMeeting) return;
-    if (!guestVotesReady) return;
-    const key = `${meeting.id}\u0001${meeting.scheduleConfirmed === true ? 'confirmed' : 'ready'}`;
-    if (guestReadyBannerKeyRef.current === key) return;
-    guestReadyBannerKeyRef.current = key;
-    showTransientBottomMessage(
-      meeting.scheduleConfirmed === true
-        ? '일정이 확정되었어요. 아래 참여를 눌러 주세요.'
-        : '투표를 모두 골랐어요. 아래 참여를 눌러 주세요.',
-      2000,
-      74,
-    );
-  }, [meeting, sessionPk, isHost, alreadyJoinedMeeting, guestVotesReady]);
-
-  useEffect(() => {
-    if (!meeting || meeting.scheduleConfirmed === true) return;
-    if (autoDatePick && dateChips[0]?.id && selectedDateIds.length === 0) {
-      setSelectedDateIds([dateChips[0].id]);
-    }
-    if (autoPlacePick && placeChips[0]?.id && selectedPlaceIds.length === 0) {
-      setSelectedPlaceIds([placeChips[0].id]);
-    }
-    if (autoMoviePick && extraMovies[0] && selectedMovieIds.length === 0) {
-      setSelectedMovieIds([movieCandidateChipId(extraMovies[0], 0)]);
-    }
-  }, [
-    meeting,
-    autoDatePick,
-    autoPlacePick,
-    autoMoviePick,
-    dateChips,
-    placeChips,
-    extraMovies,
     selectedDateIds.length,
     selectedPlaceIds.length,
     selectedMovieIds.length,
@@ -1487,192 +718,32 @@ export default function MeetingDetailScreen() {
 
   const isParticipantGuest = Boolean(meeting && !isHost && alreadyJoinedMeeting && sessionPk);
 
-  const votesFingerprint = useCallback(
-    (ids: { date: readonly string[]; place: readonly string[]; movie: readonly string[] }) => {
-      const norm = (xs: readonly string[]) => [...xs].filter(Boolean).slice().sort().join('\u0001');
-      return [norm(ids.date), norm(ids.place), norm(ids.movie)].join('\u0002');
-    },
-    [],
-  );
-
   const serverVoteFingerprint = useMemo(() => {
     if (!meeting || !sessionPk || isHost || !alreadyJoinedMeeting) return '';
     const snap = getParticipantVoteSnapshot(meeting, sessionPk);
     if (!snap) return 'legacy';
-    return votesFingerprint({ date: snap.dateChipIds, place: snap.placeChipIds, movie: snap.movieChipIds });
-  }, [meeting, sessionPk, isHost, alreadyJoinedMeeting, votesFingerprint]);
-
-  /** 호스트도 `participantVoteLog`에 저장된 투표가 있으면 로컬 선택과 베이스라인을 맞춥니다. */
-  const hostPersistedVoteFp = useMemo(() => {
-    if (!meeting || !sessionPk || !isHost) return '';
-    const snap = getParticipantVoteSnapshot(meeting, sessionPk);
-    if (!snap) return '';
-    return votesFingerprint({
-      date: snap.dateChipIds,
-      place: snap.placeChipIds,
-      movie: snap.movieChipIds,
-    });
-  }, [meeting, sessionPk, isHost, votesFingerprint]);
+    const norm = (ids: string[]) => [...ids].sort().join('\u0001');
+    return [norm(snap.dateChipIds), norm(snap.placeChipIds), norm(snap.movieChipIds)].join('\u0002');
+  }, [meeting, sessionPk, isHost, alreadyJoinedMeeting]);
 
   useEffect(() => {
-    if (!meeting || !sessionPk) return;
-    if (isHost) {
-      if (!hostPersistedVoteFp) return;
-      const snap = getParticipantVoteSnapshot(meeting, sessionPk);
-      if (!snap) return;
-      setSelectedDateIds([...snap.dateChipIds]);
-      setSelectedPlaceIds([...snap.placeChipIds]);
-      setSelectedMovieIds([...snap.movieChipIds]);
-      return;
-    }
-    if (!alreadyJoinedMeeting) return;
+    if (!meeting || !sessionPk || isHost || !alreadyJoinedMeeting) return;
     if (serverVoteFingerprint === '' || serverVoteFingerprint === 'legacy') return;
     const snap = getParticipantVoteSnapshot(meeting, sessionPk);
     if (!snap) return;
     setSelectedDateIds([...snap.dateChipIds]);
     setSelectedPlaceIds([...snap.placeChipIds]);
     setSelectedMovieIds([...snap.movieChipIds]);
-  }, [meeting, sessionPk, isHost, alreadyJoinedMeeting, hostPersistedVoteFp, serverVoteFingerprint]);
+  }, [meeting?.id, serverVoteFingerprint, sessionPk, isHost, alreadyJoinedMeeting, meeting]);
 
   const participantVoteLogMissing = isParticipantGuest && serverVoteFingerprint === 'legacy';
-
-  const votesBaselineFpRef = useRef<string | null>(null);
-  useEffect(() => {
-    votesBaselineFpRef.current = null;
-    setVotePersistNonce(0);
-  }, [meeting?.id, sessionPk]);
-
-  const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
-  const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
-  const effectiveMovieIds =
-    autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
-
-  const currentVotesFp = useMemo(
-    () => votesFingerprint({ date: effectiveDateIds, place: effectivePlaceIds, movie: effectiveMovieIds }),
-    [effectiveDateIds, effectivePlaceIds, effectiveMovieIds, votesFingerprint],
-  );
-
-  useEffect(() => {
-    if (!meeting || !sessionPk) return;
-    if (!(isHost || alreadyJoinedMeeting)) return;
-    if (votesBaselineFpRef.current != null) return;
-
-    // 게스트(참여중)면 서버 스냅샷(정상 케이스)을 기준으로 삼고,
-    // 호스트/신규 생성 모임(로그 없음)은 현재 선택 상태를 기준으로 둡니다.
-    if (!isHost && alreadyJoinedMeeting && serverVoteFingerprint && serverVoteFingerprint !== 'legacy') {
-      votesBaselineFpRef.current = serverVoteFingerprint;
-    } else {
-      const snap = getParticipantVoteSnapshot(meeting, sessionPk);
-      if (snap) {
-        votesBaselineFpRef.current = votesFingerprint({
-          date: snap.dateChipIds,
-          place: snap.placeChipIds,
-          movie: snap.movieChipIds,
-        });
-      } else {
-        votesBaselineFpRef.current = currentVotesFp;
-      }
-    }
-    // ref만 갱신되면 votesDirty useMemo가 재실행되지 않아, 베이스라인 반영 직후 한 번 올려 둡니다.
-    setVotePersistNonce((n) => n + 1);
-  }, [
-    meeting,
-    sessionPk,
-    isHost,
-    alreadyJoinedMeeting,
-    serverVoteFingerprint,
-    currentVotesFp,
-    votesFingerprint,
-  ]);
-
-  const votesDirty = useMemo(() => {
-    void votePersistNonce;
-    const base = votesBaselineFpRef.current;
-    if (!base) return false;
-    return base !== currentVotesFp;
-  }, [currentVotesFp, votePersistNonce]);
-
-  const proceedScreenBack = useCallback(() => {
-    try {
-      if (typeof (router as any)?.canGoBack === 'function' && (router as any).canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)');
-      }
-    } catch {
-      router.replace('/(tabs)');
-    }
-  }, [router]);
-
-  const safeBack = useCallback(() => {
-    if (votesDirty && alreadyJoinedMeeting && !isHost) {
-      Alert.alert(
-        '투표 미저장',
-        '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
-        [
-          { text: '머무르기', style: 'cancel' },
-          { text: '나가기', style: 'destructive', onPress: proceedScreenBack },
-        ],
-      );
-      return;
-    }
-    proceedScreenBack();
-  }, [votesDirty, isHost, alreadyJoinedMeeting, proceedScreenBack]);
-
-  useEffect(() => {
-    if (!meeting) return undefined;
-    const unsub = navigation.addListener('beforeRemove', (e) => {
-      if (!votesDirty || !alreadyJoinedMeeting || isHost) return;
-      e.preventDefault();
-      Alert.alert(
-        '투표 미저장',
-        '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
-        [
-          { text: '머무르기', style: 'cancel' },
-          {
-            text: '나가기',
-            style: 'destructive',
-            onPress: () => {
-              navigation.dispatch(e.data.action);
-            },
-          },
-        ],
-      );
-    });
-    return unsub;
-  }, [navigation, meeting, votesDirty, isHost, alreadyJoinedMeeting]);
+  const participantSaveDisabled =
+    participantVoteBusy || !guestVotesReady || participantVoteLogMissing;
 
   const hostTiePicks = useMemo(
     () => ({ dateChipId: hostTieDateId, placeChipId: hostTiePlaceId, movieChipId: hostTieMovieId }),
     [hostTieDateId, hostTiePlaceId, hostTieMovieId],
   );
-
-  const participantGenderCounts = useMemo(() => {
-    let male = 0;
-    let female = 0;
-    let unknown = 0;
-    let missingProfile = 0;
-    for (const userId of orderedParticipantIdsList) {
-      const prof = participantProfiles[userId];
-      if (!prof) {
-        missingProfile += 1;
-        continue;
-      }
-      const g = normalizeGender(prof.gender);
-      if (g === 'male') male += 1;
-      else if (g === 'female') female += 1;
-      else unknown += 1;
-    }
-    return { male, female, unknown, missingProfile };
-  }, [orderedParticipantIdsList, participantProfiles, normalizeGender]);
-
-  const genderCountLabel = useMemo(() => {
-    if (orderedParticipantIdsList.length === 0) return '';
-    if (participantGenderCounts.missingProfile > 0) return '성별 집계 중…';
-    // 성별 정보가 없는 참여자는 unknown으로 남기되, 남/여 집계는 실제 값만 표시
-    const base = `남자 ${participantGenderCounts.male}명 · 여자 ${participantGenderCounts.female}명`;
-    return participantGenderCounts.unknown > 0 ? `${base} · 미상 ${participantGenderCounts.unknown}명` : base;
-  }, [orderedParticipantIdsList.length, participantGenderCounts]);
 
   const confirmAnalysis = useMemo(
     () => (meeting ? computeMeetingConfirmAnalysis(meeting, hostTiePicks) : null),
@@ -1702,57 +773,6 @@ export default function MeetingDetailScreen() {
     return sortedDateChips.filter((c) => dateTallyTopIds.includes(c.id));
   }, [dateHostPickMode, dateTallyTopIds, sortedDateChips]);
 
-  const dateVoteByYmd = useMemo(() => {
-    const list = meeting?.dateCandidates ?? [];
-    const shown = new Set(dateChipsShown.map((c) => c.id));
-    const by: Record<string, { chipId: string; hm: string; tally: number }[]> = {};
-    list.forEach((dc, i) => {
-      const ymd = typeof dc.startDate === 'string' ? dc.startDate.trim() : '';
-      if (!ymd) return;
-      const chipId = dateCandidateChipId(dc, i);
-      if (!shown.has(chipId)) return;
-      const hm = normalizeTimeInput(dc.startTime ?? '') || (dc.startTime?.trim() ?? '') || '15:00';
-      const tally = meeting?.voteTallies?.dates?.[chipId] ?? 0;
-      if (!by[ymd]) by[ymd] = [];
-      by[ymd].push({ chipId, hm, tally });
-    });
-    Object.keys(by).forEach((k) => {
-      const uniq = new Map<string, { chipId: string; hm: string; tally: number }>();
-      by[k].forEach((x) => {
-        const key = `${x.hm}|${x.chipId}`;
-        if (!uniq.has(key)) uniq.set(key, x);
-      });
-      const rows = [...uniq.values()];
-      rows.sort((a, b) => a.hm.localeCompare(b.hm));
-      by[k] = rows;
-    });
-    return by;
-  }, [dateChipsShown, meeting?.dateCandidates, meeting?.voteTallies?.dates]);
-
-  /** 확정된 일시 1건을 달력 셀(시간 pill)에 올리기 위한 ymd 맵 */
-  const confirmedScheduleVoteByYmd = useMemo(() => {
-    if (!meeting || meeting.scheduleConfirmed !== true) return null;
-    const cid = meeting.confirmedDateChipId?.trim();
-    if (!cid) return null;
-    const list = meeting.dateCandidates ?? [];
-    for (let i = 0; i < list.length; i += 1) {
-      const dc = list[i];
-      if (dateCandidateChipId(dc, i) !== cid) continue;
-      const ymd = typeof dc.startDate === 'string' ? dc.startDate.trim() : '';
-      if (!ymd) return null;
-      const hm = normalizeTimeInput(dc.startTime ?? '') || (dc.startTime?.trim() ?? '') || '15:00';
-      return { [ymd]: [{ chipId: cid, hm, tally: 0 }] } as Record<string, { chipId: string; hm: string; tally: number }[]>;
-    }
-    return null;
-  }, [meeting?.id, meeting?.scheduleConfirmed, meeting?.confirmedDateChipId, meeting?.dateCandidates]);
-
-  useEffect(() => {
-    const by = confirmedScheduleVoteByYmd;
-    if (!by) return;
-    const ymd = Object.keys(by)[0];
-    if (ymd) setConfirmedScheduleCalMonth(monthStartYmd(ymd));
-  }, [meeting?.id, confirmedScheduleVoteByYmd]);
-
   const placeChipsShown = useMemo(() => {
     if (!placeHostPickMode) return sortedPlaceChips;
     return sortedPlaceChips.filter((c) => placeTallyTopIds.includes(c.id));
@@ -1769,66 +789,34 @@ export default function MeetingDetailScreen() {
       Alert.alert('안내', '로그인 후 참여할 수 있어요.');
       return;
     }
-    const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
-    const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
-    const effectiveMovieIds = autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
     if (!guestVotesReady) {
       const parts: string[] = [];
-      if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
-      if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
-      if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
-      const firstScrollSection: 'date' | 'movie' | 'place' | null =
-        needsDatePick && !autoDatePick && effectiveDateIds.length === 0
-          ? 'date'
-          : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
-            ? 'movie'
-            : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
-              ? 'place'
-              : null;
+      if (needsDatePick && selectedDateIds.length === 0) parts.push('일시');
+      if (needsPlacePick && selectedPlaceIds.length === 0) parts.push('장소');
+      if (needsMoviePick && selectedMovieIds.length === 0) parts.push('영화');
       Alert.alert(
         '투표를 완료해 주세요',
         parts.length > 0
           ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.`
           : '각 투표에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.',
-        firstScrollSection != null
-          ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
-          : [{ text: '확인' }],
       );
       return;
     }
     setJoinBusy(true);
     try {
       await ensureUserProfile(sessionPk);
-      const profGate = await getUserProfile(sessionPk);
-      if (meetingDemographicsIncomplete(profGate, sessionPk)) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ],
-        );
-        return;
-      }
       const joinVotes =
         meeting.scheduleConfirmed === true
           ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }
           : {
-              dateChipIds: effectiveDateIds,
-              placeChipIds: effectivePlaceIds,
-              movieChipIds: effectiveMovieIds,
+              dateChipIds: selectedDateIds,
+              placeChipIds: selectedPlaceIds,
+              movieChipIds: selectedMovieIds,
             };
       await joinMeeting(meeting.id, sessionPk, joinVotes);
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-      // 참여 직후에도 이 모임 상세에 머무름(구독 스냅샷으로 참여자 UI로 전환)
+      router.replace('/(tabs)');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-        showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
-      } else {
-        Alert.alert('참여 실패', msg || '다시 시도해 주세요.');
-      }
+      Alert.alert('참여 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
     } finally {
       setJoinBusy(false);
     }
@@ -1841,570 +829,93 @@ export default function MeetingDetailScreen() {
     needsDatePick,
     needsPlacePick,
     needsMoviePick,
-    autoDatePick,
-    autoPlacePick,
-    autoMoviePick,
-    dateChips,
-    placeChips,
-    extraMovies,
     selectedDateIds,
     selectedPlaceIds,
     selectedMovieIds,
-    queryClient,
-    scrollToVoteBlock,
   ]);
 
-  const proceedJoinRequestSubmit = useCallback(
-    async (messageFromModal: string | null) => {
-      if (!meeting) return;
-      if (!sessionPk) {
-        Alert.alert('안내', '로그인 후 신청할 수 있어요.');
-        return;
-      }
-      if (isUserKickedFromMeeting(meeting, sessionPk)) {
-        Alert.alert('안내', '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
-        return;
-      }
-      const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
-      const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
-      const effectiveMovieIds =
-        autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
-      if (!guestVotesReady) {
-        const parts: string[] = [];
-        if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
-        if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
-        if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
-        const firstScrollSection: 'date' | 'movie' | 'place' | null =
-          needsDatePick && !autoDatePick && effectiveDateIds.length === 0
-            ? 'date'
-            : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
-              ? 'movie'
-              : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
-                ? 'place'
-                : null;
-        Alert.alert(
-          '투표를 완료해 주세요',
-          parts.length > 0
-            ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
-            : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
-          firstScrollSection != null
-            ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
-            : [{ text: '확인' }],
-        );
-        return;
-      }
-      setJoinBusy(true);
-      try {
-        await ensureUserProfile(sessionPk);
-        const profGate = await getUserProfile(sessionPk);
-        if (meetingDemographicsIncomplete(profGate, sessionPk)) {
-          Alert.alert(
-            '프로필을 먼저 완성해 주세요',
-            'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
-            [
-              { text: '닫기', style: 'cancel' },
-              { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-            ],
-          );
-          return;
-        }
-        const joinVotes =
-          meeting.scheduleConfirmed === true
-            ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }
-            : {
-                dateChipIds: effectiveDateIds,
-                placeChipIds: effectivePlaceIds,
-                movieChipIds: effectiveMovieIds,
-              };
-        const msgTrim = (messageFromModal ?? '').trim();
-        const opts =
-          publicMeetingDetails?.requestMessageEnabled === true
-            ? {
-                message: msgTrim ? msgTrim.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null,
-              }
-            : undefined;
-        await requestJoinMeeting(meeting.id, sessionPk, joinVotes, opts);
-        setJoinRequestMessageOpen(false);
-        void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-        showTransientBottomMessage('참가 신청을 보냈어요. 호스트 승인을 기다려 주세요.');
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : '';
-        if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-          showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
-        } else {
-          Alert.alert('신청 실패', msg || '다시 시도해 주세요.');
-        }
-      } finally {
-        setJoinBusy(false);
-      }
-    },
-    [
-      router,
-      meeting,
-      sessionPk,
-      guestVotesReady,
-      meeting?.scheduleConfirmed,
-      needsDatePick,
-      needsPlacePick,
-      needsMoviePick,
-      autoDatePick,
-      autoPlacePick,
-      autoMoviePick,
-      dateChips,
-      placeChips,
-      extraMovies,
-      selectedDateIds,
-      selectedPlaceIds,
-      selectedMovieIds,
-      queryClient,
-      scrollToVoteBlock,
-      publicMeetingDetails?.requestMessageEnabled,
-    ],
-  );
-
-  const onPressRequestJoin = useCallback(() => {
-    if (!meeting || !sessionPk) {
-      Alert.alert('안내', '로그인 후 신청할 수 있어요.');
-      return;
-    }
-    if (isUserKickedFromMeeting(meeting, sessionPk)) {
-      Alert.alert('안내', '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
-      return;
-    }
-    const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
-    const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
-    const effectiveMovieIds =
-      autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
-    if (!guestVotesReady) {
-      const parts: string[] = [];
-      if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
-      if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
-      if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
-      const firstScrollSection: 'date' | 'movie' | 'place' | null =
-        needsDatePick && !autoDatePick && effectiveDateIds.length === 0
-          ? 'date'
-          : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
-            ? 'movie'
-            : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
-              ? 'place'
-              : null;
-      Alert.alert(
-        '투표를 완료해 주세요',
-        parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
-        firstScrollSection != null
-          ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
-          : [{ text: '확인' }],
-      );
-      return;
-    }
-    if (publicMeetingDetails?.requestMessageEnabled === true) {
-      setJoinRequestDraftMessage('');
-      setJoinRequestMessageOpen(true);
-      return;
-    }
-    void proceedJoinRequestSubmit(null);
-  }, [
-    meeting,
-    sessionPk,
-    guestVotesReady,
-    needsDatePick,
-    needsPlacePick,
-    needsMoviePick,
-    autoDatePick,
-    autoPlacePick,
-    autoMoviePick,
-    dateChips,
-    placeChips,
-    extraMovies,
-    selectedDateIds,
-    selectedPlaceIds,
-    selectedMovieIds,
-    scrollToVoteBlock,
-    publicMeetingDetails?.requestMessageEnabled,
-    proceedJoinRequestSubmit,
-  ]);
-
-  const onCancelJoinRequestPress = useCallback(() => {
-    if (!meeting || !sessionPk) return;
-    Alert.alert('신청 취소', '참가 신청을 취소할까요?', [
-      { text: '닫기', style: 'cancel' },
-      {
-        text: '취소하기',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setJoinBusy(true);
-            try {
-              await cancelJoinRequest(meeting.id, sessionPk);
-              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-              showTransientBottomMessage('참가 신청을 취소했어요.');
-            } catch (e) {
-              Alert.alert('안내', e instanceof Error ? e.message : '다시 시도해 주세요.');
-            } finally {
-              setJoinBusy(false);
-            }
-          })();
-        },
-      },
-    ]);
-  }, [meeting, sessionPk, queryClient]);
-
-  const onHostApproveJoin = useCallback(
-    (applicantId: string) => {
-      if (!meeting || !sessionPk) return;
-      const aid = applicantId.trim();
-      if (!aid) return;
-      if (hostJoinRequestActionInFlightRef.current) return;
-      hostJoinRequestActionInFlightRef.current = true;
-      void (async () => {
-        setHostJoinRequestBusyId(aid);
-        try {
-          await approveJoinRequest(meeting.id, sessionPk, aid);
-          void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-          showTransientBottomMessage('참가 신청을 승인했어요.');
-        } catch (e) {
-          Alert.alert('승인 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-        } finally {
-          setHostJoinRequestBusyId(null);
-          hostJoinRequestActionInFlightRef.current = false;
-        }
-      })();
-    },
-    [meeting, sessionPk, queryClient],
-  );
-
-  const onHostRejectJoin = useCallback(
-    (applicantId: string) => {
-      if (!meeting || !sessionPk) return;
-      const aid = applicantId.trim();
-      if (!aid) return;
-      if (hostJoinRequestActionInFlightRef.current) return;
-      hostJoinRequestActionInFlightRef.current = true;
-      void (async () => {
-        setHostJoinRequestBusyId(aid);
-        try {
-          await rejectJoinRequest(meeting.id, sessionPk, aid);
-          void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-          showTransientBottomMessage('참가 신청을 거절했어요.');
-        } catch (e) {
-          Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-        } finally {
-          setHostJoinRequestBusyId(null);
-          hostJoinRequestActionInFlightRef.current = false;
-        }
-      })();
-    },
-    [meeting, sessionPk, queryClient],
-  );
-
-  const handleHostKickParticipant = useCallback(
-    (targetParticipantId: string) => {
-      if (!meeting || !sessionPk) return;
-      const tid = targetParticipantId.trim();
-      if (!tid) return;
-      if (meeting.scheduleConfirmed === true) return;
-      const hostPk = meeting.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy) : '';
-      const targetPk = normalizeParticipantId(tid);
-      if (hostPk && targetPk === hostPk) return;
-      if (hostKickParticipantInFlightRef.current) return;
-      const prof = participantProfiles[tid];
-      const nickname = (prof?.nickname ?? '').trim() || '이 참여자';
-      Alert.alert(
-        '강제 퇴장',
-        `${nickname}님을 이 모임에서 퇴장시킬까요?\n이후에는 이 모임에 다시 들어오거나 신청할 수 없어요.`,
-        [
-          { text: '취소', style: 'cancel' },
-          {
-            text: '퇴장',
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                hostKickParticipantInFlightRef.current = true;
-                try {
-                  await hostRemoveParticipant(meeting.id, sessionPk, tid);
-                  void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-                  showTransientBottomMessage('참여자를 퇴장시켰어요.');
-                } catch (e) {
-                  Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-                } finally {
-                  hostKickParticipantInFlightRef.current = false;
-                }
-              })();
-            },
-          },
-        ],
-      );
-    },
-    [meeting, sessionPk, queryClient, participantProfiles],
-  );
-
-  useEffect(() => {
-    if (placeChipsShown.length === 0) return;
-    let alive = true;
-    const visible = placeChipsShown.slice(0, 24);
-    const t = setTimeout(() => {
-      void (async () => {
-        for (const chip of visible) {
-          if (!alive) return;
-          if (placeThumbByChipId[chip.id] !== undefined) continue;
-          try {
-            const thumb = await searchNaverPlaceImageThumbnail(placeChipToNaverImageFields(chip));
-            if (!alive) return;
-            setPlaceThumbByChipId((prev) => {
-              if (prev[chip.id] !== undefined) return prev;
-              return { ...prev, [chip.id]: thumb };
-            });
-          } catch {
-            if (!alive) return;
-            setPlaceThumbByChipId((prev) => {
-              if (prev[chip.id] !== undefined) return prev;
-              return { ...prev, [chip.id]: null };
-            });
-          }
-        }
-      })();
-    }, 180);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placeChipsShown]);
-
-  useEffect(() => {
-    const chip =
-      confirmedPlaceChipResolved ??
-      (placeChips.length === 1 ? placeChips[0] : null);
-    if (!chip) return;
-    if (placeThumbByChipId[chip.id] !== undefined) return;
-    let alive = true;
-    const t = setTimeout(() => {
-      void (async () => {
-        try {
-          const thumb = await searchNaverPlaceImageThumbnail(placeChipToNaverImageFields(chip));
-          if (!alive) return;
-          setPlaceThumbByChipId((prev) => {
-            if (prev[chip.id] !== undefined) return prev;
-            return { ...prev, [chip.id]: thumb };
-          });
-        } catch {
-          if (!alive) return;
-          setPlaceThumbByChipId((prev) => {
-            if (prev[chip.id] !== undefined) return prev;
-            return { ...prev, [chip.id]: null };
-          });
-        }
-      })();
-    }, 180);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-  }, [confirmedPlaceChipResolved, placeChips, placeThumbByChipId]);
-
-  /** 투표 선택을 서버에 반영(호스트/참여자 공통, 자동 저장에서 호출) */
-  const flushVoteSelectionsToServer = useCallback(async (): Promise<boolean> => {
-    if (!meeting) return false;
+  const handleSaveParticipantVotes = useCallback(async () => {
+    if (!meeting) return;
     if (!sessionPk) {
-      Alert.alert('안내', '로그인 후 투표를 반영할 수 있어요.');
-      return false;
+      Alert.alert('안내', '로그인 후 수정할 수 있어요.');
+      return;
     }
-    const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
-    const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : selectedPlaceIds;
-    const effectiveMovieIds = autoMoviePick && extraMovies[0] ? [movieCandidateChipId(extraMovies[0], 0)] : selectedMovieIds;
-
     if (!guestVotesReady) {
       const parts: string[] = [];
-      if (needsDatePick && effectiveDateIds.length === 0) parts.push('일시');
-      if (needsPlacePick && effectivePlaceIds.length === 0) parts.push('장소');
-      if (needsMoviePick && effectiveMovieIds.length === 0) parts.push('영화');
-      const firstScrollSection: 'date' | 'movie' | 'place' | null =
-        needsDatePick && !autoDatePick && effectiveDateIds.length === 0
-          ? 'date'
-          : needsMoviePick && !autoMoviePick && effectiveMovieIds.length === 0
-            ? 'movie'
-            : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
-              ? 'place'
-              : null;
+      if (needsDatePick && selectedDateIds.length === 0) parts.push('일시');
+      if (needsPlacePick && selectedPlaceIds.length === 0) parts.push('장소');
+      if (needsMoviePick && selectedMovieIds.length === 0) parts.push('영화');
       Alert.alert(
         '투표를 완료해 주세요',
         parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.',
-        firstScrollSection != null
-          ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }]
-          : [{ text: '확인' }],
+          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 저장할 수 있어요.`
+          : '각 투표에서 최소 한 가지 이상 선택한 뒤 저장할 수 있어요.',
       );
-      return false;
+      return;
     }
-    if (!isHost && !getParticipantVoteSnapshot(meeting, sessionPk)) {
+    if (!getParticipantVoteSnapshot(meeting, sessionPk)) {
       Alert.alert(
         '투표 내역을 불러올 수 없어요',
         '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.',
       );
-      return false;
+      return;
     }
-
     setParticipantVoteBusy(true);
     try {
       await ensureUserProfile(sessionPk);
-      markRecentSelfMeetingChange(meeting.id);
-      if (isHost) {
-        await upsertParticipantVotes(meeting.id, sessionPk, {
-          dateChipIds: effectiveDateIds,
-          placeChipIds: effectivePlaceIds,
-          movieChipIds: effectiveMovieIds,
-        });
-      } else {
-        await updateParticipantVotes(meeting.id, sessionPk, {
-          dateChipIds: effectiveDateIds,
-          placeChipIds: effectivePlaceIds,
-          movieChipIds: effectiveMovieIds,
-        });
-      }
-      votesBaselineFpRef.current = votesFingerprint({
-        date: effectiveDateIds,
-        place: effectivePlaceIds,
-        movie: effectiveMovieIds,
+      await updateParticipantVotes(meeting.id, sessionPk, {
+        dateChipIds: selectedDateIds,
+        placeChipIds: selectedPlaceIds,
+        movieChipIds: selectedMovieIds,
       });
-      setVotePersistNonce((n) => n + 1);
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-      // 하단 버튼 영역을 가리지 않도록 오프셋을 둡니다.
-      showTransientBottomMessage('투표가 저장됐어요.', 1600, 74);
-      return true;
+      Alert.alert('저장됨', '투표가 반영되었어요.');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-        showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
-      } else {
-        Alert.alert('저장 실패', msg || '다시 시도해 주세요.');
-      }
-      return false;
+      Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
     } finally {
       setParticipantVoteBusy(false);
     }
   }, [
     meeting,
     sessionPk,
-    isHost,
     guestVotesReady,
     needsDatePick,
     needsPlacePick,
     needsMoviePick,
-    autoDatePick,
-    autoPlacePick,
-    autoMoviePick,
-    dateChips,
-    placeChips,
-    extraMovies,
     selectedDateIds,
     selectedPlaceIds,
     selectedMovieIds,
-    votesFingerprint,
-    queryClient,
-    scrollToVoteBlock,
   ]);
-
-  // 투표는 하단 「저장」 버튼에서만 반영합니다(자동 저장 제거).
-  const onPressSaveVotes = useCallback(() => {
-    if (participantVoteBusy) {
-      Alert.alert('안내', '저장 중이에요. 잠시만 기다려 주세요.');
-      return;
-    }
-    if (participantVoteLogMissing) {
-      Alert.alert(
-        '투표 내역을 불러올 수 없어요',
-        '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.',
-      );
-      return;
-    }
-    if (!votesDirty) {
-      showTransientBottomMessage('변경된 투표가 없어요.', 1400, 74);
-      return;
-    }
-    void flushVoteSelectionsToServer();
-  }, [flushVoteSelectionsToServer, participantVoteBusy, participantVoteLogMissing, votesDirty]);
 
   const handleLeaveParticipant = useCallback(() => {
     if (!meeting || !sessionPk) {
       Alert.alert('안내', '로그인 후 탈퇴할 수 있어요.');
       return;
     }
-    const confirmed = meeting.scheduleConfirmed === true;
-    const penaltyCfg = confirmed
-      ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_leave_confirmed', {
-          xp: -30,
-          trust: -12,
-        })
-      : null;
-    const trustDrop =
-      confirmed && penaltyCfg && typeof penaltyCfg.trust === 'number' && Number.isFinite(penaltyCfg.trust)
-        ? Math.abs(Math.trunc(penaltyCfg.trust))
-        : 12;
-    const xpDrop =
-      confirmed && penaltyCfg && typeof penaltyCfg.xp === 'number' && Number.isFinite(penaltyCfg.xp)
-        ? Math.abs(Math.trunc(penaltyCfg.xp))
-        : 30;
-    const baseMsg =
-      '참여를 취소하면 내가 넣었던 투표는 집계에서 빠져요. 다시 들어오려면 참여 절차가 필요해요.';
-    const penaltyMsg = confirmed
-      ? `\n\n일정이 확정된 모임이에요. 나가면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
-      : '';
-    Alert.alert('모임에서 나가기', baseMsg + penaltyMsg, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '퇴장',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setParticipantVoteBusy(true);
-            try {
-              await leaveMeeting(meeting.id, sessionPk);
-              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-              let penaltyLedgerOk = false;
-              if (confirmed) {
-                try {
-                  await applyTrustPenaltyLeaveConfirmedMeeting(sessionPk, meeting.id);
-                  penaltyLedgerOk = true;
-                } catch {
-                  Alert.alert(
-                    '안내',
-                    '모임에서는 나갔지만 신뢰 점수 반영이 잠시 실패했어요. 프로필을 새로고침한 뒤에도 이상하면 고객 지원에 문의해 주세요.',
-                  );
-                }
+    Alert.alert(
+      '모임에서 나가기',
+      '참여를 취소하면 내가 넣었던 투표는 집계에서 빠져요. 다시 들어오려면 참여 절차가 필요해요.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '나가기',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setParticipantVoteBusy(true);
+              try {
+                await leaveMeeting(meeting.id, sessionPk);
+                router.replace('/(tabs)');
+              } catch (e) {
+                Alert.alert('탈퇴 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+              } finally {
+                setParticipantVoteBusy(false);
               }
-              resetStackToTabsAfterMeetingLeave(router, { tab: 'index' });
-              if (penaltyLedgerOk) {
-                if (Platform.OS === 'web') {
-                  setTimeout(() => {
-                    Alert.alert(
-                      '신뢰 패널티가 반영됐어요',
-                      `gTrust ${trustDrop}점·XP ${xpDrop}가 차감됐고, 누적 패널티가 1회 늘었어요.`,
-                      [
-                        { text: '닫기', style: 'cancel' },
-                        { text: '프로필로', onPress: () => router.push('/(tabs)/profile') },
-                      ],
-                    );
-                  }, 400);
-                } else {
-                  notifyTrustPenaltyAppliedFireAndForget({
-                    trustPoints: trustDrop,
-                    xpPoints: xpDrop,
-                  });
-                }
-              }
-            } catch (e) {
-              Alert.alert('탈퇴 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-            } finally {
-              setParticipantVoteBusy(false);
-            }
-          })();
+            })();
+          },
         },
-      },
-    ]);
-  }, [meeting, sessionPk, router, queryClient]);
+      ],
+    );
+  }, [meeting, sessionPk, router]);
 
   const recruitmentPhase = useMemo(
     () => (meeting ? getMeetingRecruitmentPhase(meeting) : null),
@@ -2423,6 +934,11 @@ export default function MeetingDetailScreen() {
     }
   }, [recruitmentPhase]);
 
+  const scrollToVoteBlock = useCallback((section: 'date' | 'movie' | 'place') => {
+    const y = voteSectionScrollYs.current[section];
+    mainScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  }, []);
+
   const onDateChipPress = useCallback(
     (chipId: string) => {
       if (!meeting) {
@@ -2438,241 +954,6 @@ export default function MeetingDetailScreen() {
     },
     [meeting, isHost, sortedDateChips, toggleDateSelection],
   );
-
-  const confirmDateVoteCalendarYmPick = useCallback(() => {
-    const cur = dateVoteCalendarYmPick;
-    if (!cur) return;
-    setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(cur.draft)));
-    setDateVoteCalendarYmPick(null);
-  }, [dateVoteCalendarYmPick]);
-
-  const renderDateVoteCalendarMonthGrid = useCallback(
-    (monthAnchorYmd: string, pagerPageW: number) => {
-      const p = parseYmd(monthAnchorYmd);
-      const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
-      const year = base.getFullYear();
-      const month = base.getMonth();
-      const firstDow = new Date(year, month, 1).getDay();
-      const gridStart = new Date(year, month, 1 - firstDow);
-      const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
-      for (let i = 0; i < 42; i += 1) {
-        const d = new Date(gridStart);
-        d.setDate(gridStart.getDate() + i);
-        cells.push({
-          ymd: fmtDateYmd(d),
-          day: d.getDate(),
-          inMonth: d.getMonth() === month,
-        });
-      }
-
-      return (
-        <View
-          key={`dv-cal-${monthAnchorYmd}`}
-          style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}>
-          <View style={styles.calendarGrid}>
-            {Array.from({ length: 6 }).map((_, wi) => {
-              const week = cells.slice(wi * 7, wi * 7 + 7);
-              const weekHasAny = week.some((c) => (dateVoteByYmd[c.ymd]?.length ?? 0) > 0);
-              return (
-                <View
-                  key={`week-${monthAnchorYmd}-${wi}`}
-                  style={[styles.calendarWeekRow, !weekHasAny && styles.calendarWeekRowEmpty, wi === 5 ? { marginBottom: 0 } : null]}>
-                  {week.map((c) => {
-                    const opts = dateVoteByYmd[c.ymd] ?? [];
-                    const has = opts.length > 0;
-                    const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
-                    const isSelected = dateHostPickMode ? isHostSelected : opts.some((o) => selectedDateIds.includes(o.chipId));
-                    return (
-                      <Pressable
-                        key={c.ymd}
-                        onPress={() => {
-                          if (!has) return;
-                          if (opts.length === 1) {
-                            onDateChipPress(opts[0].chipId);
-                            return;
-                          }
-                          setDateVoteTimePick({ ymd: c.ymd });
-                        }}
-                        style={({ pressed }) => [
-                          styles.calendarCell,
-                          !weekHasAny && styles.calendarCellRowEmpty,
-                          !c.inMonth && styles.calendarCellOut,
-                          has && styles.calendarCellHas,
-                          isSelected && styles.calendarCellSelected,
-                          pressed && styles.calendarCellPressed,
-                        ]}
-                        accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
-                        accessibilityLabel={`${c.ymd}${has ? ` ${opts.length}개` : ''}`}>
-                        
-                        <Text
-                          style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}
-                          numberOfLines={1}>
-                          {c.day}
-                        </Text>
-                        {has ? (
-                          <View style={styles.calendarTimesWrap} pointerEvents="none">
-                            {opts.map((o) => {
-                              const timeSelected = dateHostPickMode
-                                ? hostTieDateId === o.chipId
-                                : selectedDateIds.includes(o.chipId);
-                              return timeSelected ? (
-                                <View key={o.chipId} style={styles.calendarCellTimePillSelected}>
-                                  <Text style={styles.calendarCellTimeLabelSelected} numberOfLines={1}>
-                                    {o.hm}
-                                  </Text>
-                                </View>
-                              ) : (
-                                <Text key={o.chipId} style={styles.calendarCellMeta} numberOfLines={1}>
-                                  {o.hm}
-                                </Text>
-                              );
-                            })}
-                          </View>
-                        ) : (
-                          <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      );
-    },
-    [dateVoteByYmd, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
-  );
-
-  const renderConfirmedScheduleCalendarMonthGrid = useCallback(
-    (monthAnchorYmd: string, pagerPageW: number) => {
-      const confirmedChipId = meeting?.confirmedDateChipId?.trim() ?? '';
-      const byYmd = confirmedScheduleVoteByYmd;
-      if (!byYmd || !confirmedChipId) {
-        return (
-          <View
-            key={`cf-cal-empty-${monthAnchorYmd}`}
-            style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}
-          />
-        );
-      }
-      const p = parseYmd(monthAnchorYmd);
-      const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
-      const year = base.getFullYear();
-      const month = base.getMonth();
-      const firstDow = new Date(year, month, 1).getDay();
-      const gridStart = new Date(year, month, 1 - firstDow);
-      const cells: { ymd: string; day: number; inMonth: boolean }[] = [];
-      for (let i = 0; i < 42; i += 1) {
-        const d = new Date(gridStart);
-        d.setDate(gridStart.getDate() + i);
-        cells.push({
-          ymd: fmtDateYmd(d),
-          day: d.getDate(),
-          inMonth: d.getMonth() === month,
-        });
-      }
-
-      return (
-        <View
-          key={`cf-cal-${monthAnchorYmd}`}
-          style={pagerPageW > 0 ? { width: pagerPageW } : { flex: 1, minWidth: 0 }}>
-          <View style={styles.calendarGrid}>
-            {Array.from({ length: 6 }).map((_, wi) => {
-              const week = cells.slice(wi * 7, wi * 7 + 7);
-              return (
-                <View key={`cf-week-${monthAnchorYmd}-${wi}`} style={styles.calendarWeekRow}>
-                  {week.map((c) => {
-                    const opts = byYmd[c.ymd] ?? [];
-                    const has = opts.length > 0;
-                    const isSelected = has && opts.some((o) => o.chipId === confirmedChipId);
-                    return (
-                      <View
-                        key={c.ymd}
-                        style={[
-                          styles.calendarCell,
-                          !c.inMonth && styles.calendarCellOut,
-                          has && styles.calendarCellHas,
-                          isSelected && styles.calendarCellSelected,
-                        ]}
-                        accessibilityElementsHidden={!has}
-                        importantForAccessibility={has ? 'yes' : 'no-hide-descendants'}>
-                        <Text
-                          style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}
-                          numberOfLines={1}>
-                          {c.day}
-                        </Text>
-                        {has ? (
-                          <View style={styles.calendarTimesWrap} pointerEvents="none">
-                            {opts.map((o) =>
-                              o.chipId === confirmedChipId ? (
-                                <View key={o.chipId} style={styles.calendarCellTimePillSelected}>
-                                  <Text style={styles.calendarCellTimeLabelSelected} numberOfLines={1}>
-                                    {o.hm}
-                                  </Text>
-                                </View>
-                              ) : (
-                                <Text key={o.chipId} style={styles.calendarCellMeta} numberOfLines={1}>
-                                  {o.hm}
-                                </Text>
-                              ),
-                            )}
-                          </View>
-                        ) : (
-                          <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
-                        )}
-                      </View>
-                    );
-                  })}
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      );
-    },
-    [meeting?.confirmedDateChipId, confirmedScheduleVoteByYmd],
-  );
-
-  useLayoutEffect(() => {
-    if (dateVoteCalendarPagerW <= 0) return undefined;
-    dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
-    dateVoteCalendarPagerRef.current?.scrollTo({
-      x: dateVoteCalendarPagerW,
-      animated: false,
-    });
-    if (dateVoteCalendarSwipeFadeAfterRecenterRef.current) {
-      dateVoteCalendarSwipeFadeAfterRecenterRef.current = false;
-      dateVoteCalendarFadeAnimRef.current?.stop?.();
-      const anim = Animated.timing(dateVoteCalendarCenterOpacity, {
-        toValue: 1,
-        duration: 200,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      });
-      dateVoteCalendarFadeAnimRef.current = anim;
-      anim.start(({ finished }) => {
-        if (finished) dateVoteCalendarFadeAnimRef.current = null;
-      });
-    }
-    let clearRaf1: number | null = null;
-    let clearRaf2: number | null = null;
-    let clearRaf3: number | null = null;
-    clearRaf1 = requestAnimationFrame(() => {
-      clearRaf2 = requestAnimationFrame(() => {
-        clearRaf3 = requestAnimationFrame(() => {
-          dateVoteCalendarPagerIgnoreMomentumEndRef.current = false;
-        });
-      });
-    });
-    return () => {
-      if (clearRaf1 != null) cancelAnimationFrame(clearRaf1);
-      if (clearRaf2 != null) cancelAnimationFrame(clearRaf2);
-      if (clearRaf3 != null) cancelAnimationFrame(clearRaf3);
-      dateVoteCalendarPagerIgnoreMomentumEndRef.current = false;
-      dateVoteCalendarFadeAnimRef.current?.stop?.();
-    };
-  }, [dateVoteCalendarMonth, dateVoteCalendarPagerW]);
 
   const onPlaceChipPress = useCallback(
     (chipId: string) => {
@@ -2692,21 +973,25 @@ export default function MeetingDetailScreen() {
 
   const onMovieChipPress = useCallback(
     (chipId: string) => {
-      toggleMovieSelection(chipId);
-      if (!meeting || !isHost) return;
+      if (!meeting) {
+        toggleMovieSelection(chipId);
+        return;
+      }
       const tops = resolveVoteTopTies(
         sortedMovieVoteRows.map((r) => r.chipId),
         meeting.voteTallies?.movies,
       ).topIds;
-      if (tops.length > 1 && tops.includes(chipId)) {
+      if (isHost && tops.length > 1 && tops.includes(chipId)) {
         setHostTieMovieId(chipId);
+        return;
       }
+      toggleMovieSelection(chipId);
     },
-    [meeting, isHost, sortedMovieVoteRows, meeting?.voteTallies?.movies, toggleMovieSelection],
+    [meeting, isHost, sortedMovieVoteRows, toggleMovieSelection],
   );
 
   const handleUnconfirmMeetingSchedule = useCallback(() => {
-    if (!meeting || !userId?.trim()) {
+    if (!meeting || !phoneUserId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 확정을 취소할 수 있어요.');
       return;
     }
@@ -2723,9 +1008,7 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setConfirmScheduleBusy(true);
               try {
-                markRecentSelfMeetingChange(meeting.id);
-                await unconfirmMeetingSchedule(meeting.id, userId.trim());
-                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+                await unconfirmMeetingSchedule(meeting.id, phoneUserId.trim());
               } catch (e) {
                 Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -2736,10 +1019,10 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, queryClient]);
+  }, [meeting, phoneUserId]);
 
   const handleConfirmSchedule = useCallback(() => {
-    if (!meeting || !userId?.trim()) {
+    if (!meeting || !phoneUserId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 확정할 수 있어요.');
       return;
     }
@@ -2763,16 +1046,9 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setConfirmScheduleBusy(true);
               try {
-                markRecentSelfMeetingChange(meeting.id);
-                await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
-                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+                await confirmMeetingSchedule(meeting.id, phoneUserId.trim(), hostTiePicks);
               } catch (e) {
-                const msg = e instanceof Error ? e.message : '';
-                if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-                  showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
-                } else {
-                  Alert.alert('확정 실패', msg || '다시 시도해 주세요.');
-                }
+                Alert.alert('확정 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
                 setConfirmScheduleBusy(false);
               }
@@ -2781,10 +1057,10 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, hostTiePicks, scrollToVoteBlock, queryClient]);
+  }, [meeting, phoneUserId, hostTiePicks, scrollToVoteBlock]);
 
   const handleDeleteMeeting = useCallback(() => {
-    if (!meeting || !userId?.trim()) {
+    if (!meeting || !phoneUserId?.trim()) {
       Alert.alert('안내', '로그인한 주관자만 삭제할 수 있어요.');
       return;
     }
@@ -2801,10 +1077,8 @@ export default function MeetingDetailScreen() {
             void (async () => {
               setDeleteMeetingBusy(true);
               try {
-                markRecentSelfMeetingChange(meeting.id);
-                await deleteMeetingByHost(meeting.id, userId.trim());
-                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-                resetStackToTabsAfterMeetingLeave(router, { tab: 'index' });
+                await deleteMeetingByHost(meeting.id, phoneUserId.trim());
+                router.back();
               } catch (e) {
                 Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
               } finally {
@@ -2815,7 +1089,7 @@ export default function MeetingDetailScreen() {
         },
       ],
     );
-  }, [meeting, userId, router, queryClient]);
+  }, [meeting, phoneUserId, router]);
 
   const onOpenConfirmedPlaceInNaverMap = useCallback(() => {
     if (!meeting || !confirmedPlaceCoords) return;
@@ -2830,18 +1104,16 @@ export default function MeetingDetailScreen() {
 
   const notFound = !loading && !loadError && meeting === null;
 
-  const viewBlockedByCompliance = meetingAuthGateReady && !meetingAuthComplete;
-
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <View style={styles.topBar}>
           <Pressable
-            onPress={safeBack}
+            onPress={() => router.back()}
             style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
-            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
+            <Ionicons name="chevron-back" size={26} color={GinitTheme.colors.text} />
           </Pressable>
           <Text style={styles.topTitle}>모임 상세</Text>
           {recruitmentBadge ? (
@@ -2864,13 +1136,7 @@ export default function MeetingDetailScreen() {
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>문제가 생겼어요</Text>
             <Text style={styles.muted}>{loadError}</Text>
-            <Pressable
-              onPress={() => {
-                setRetryNonce((n) => n + 1);
-                void refetchMeetingDetail();
-              }}
-              style={styles.retryBtn}
-              accessibilityRole="button">
+            <Pressable onPress={() => setRetryNonce((n) => n + 1)} style={styles.retryBtn} accessibilityRole="button">
               <LinearGradient
                 colors={GinitTheme.colors.ctaGradient}
                 start={{ x: 0, y: 0 }}
@@ -2883,33 +1149,10 @@ export default function MeetingDetailScreen() {
           </View>
         ) : null}
 
-        {viewBlockedByCompliance ? (
-          <View style={styles.centerFill}>
-            <Text style={styles.errorTitle}>프로필 인증이 필요해요</Text>
-            <Text style={styles.muted}>
-              모임 상세를 보려면 모임 이용을 위한 인증 정보 등록을 먼저 완료해 주세요.
-            </Text>
-            <Pressable
-              onPress={() => pushProfileOpenRegisterInfo(router)}
-              style={styles.retryBtn}
-              accessibilityRole="button"
-              accessibilityLabel="정보 등록하기">
-              <LinearGradient
-                colors={GinitTheme.colors.ctaGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.btnGradientBg}
-                pointerEvents="none"
-              />
-              <Text style={styles.retryText}>정보 등록하기</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
         {notFound ? (
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>모임을 찾을 수 없어요</Text>
-            <Pressable onPress={safeBack} style={styles.retryBtn} accessibilityRole="button">
+            <Pressable onPress={() => router.back()} style={styles.retryBtn} accessibilityRole="button">
               <LinearGradient
                 colors={GinitTheme.colors.ctaGradient}
                 start={{ x: 0, y: 0 }}
@@ -2926,171 +1169,39 @@ export default function MeetingDetailScreen() {
           <ScrollView
             ref={mainScrollRef}
             style={styles.scroll}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 96 + insets.bottom }]}
+            contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled">
             <View style={styles.titleCard}>
-              <View style={styles.titleCardRow}>
-                <Text style={styles.titleCardText} numberOfLines={6}>
-                  {meeting.title || '제목 없음'}
-                </Text>
-                {isHost && !isScheduleConfirmed ? (
-                  <Pressable
-                    onPress={() => setBasicInfoEditOpen(true)}
-                    style={({ pressed }) => [styles.titleEditCircleBtn, pressed && { opacity: 0.82 }]}
-                    accessibilityRole="button"
-                    accessibilityLabel="기본 정보 수정"
-                    hitSlop={8}>
-                    <GinitSymbolicIcon name="pencil" size={17} color={GinitTheme.colors.textSub} />
-                  </Pressable>
-                ) : null}
-              </View>
+              <Pressable style={styles.pencilAbs} accessibilityRole="button" accessibilityLabel="제목 수정">
+                <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
+              </Pressable>
+              <Text style={styles.titleCardText}>{meeting.title || '제목 없음'}</Text>
+              <Text style={styles.mascotPeek} accessibilityElementsHidden>
+                🤖
+              </Text>
             </View>
 
-            {isHost && joinRequestsSorted.length > 0 ? (
-              <View style={styles.infoCard}>
-                <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>참가 신청 ({joinRequestsSorted.length})</Text>
-                </View>
-                <View style={styles.joinRequestList}>
-                  {joinRequestsSorted.map((jr, jrIndex) => {
-                    const aid = normalizeParticipantId(jr.userId) ?? jr.userId.trim();
-                    const prof = participantProfiles[aid];
-                    const withdrawn = isUserProfileWithdrawn(prof);
-                    const nickname = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '…');
-                    const g = withdrawn ? null : normalizeGender(prof?.gender);
-                    const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
-                    const rowBusy = hostJoinRequestBusyId === aid;
-                    const msgRaw = (jr.message ?? '').trim();
-                    const hasMessage = msgRaw.length > 0;
-                    return (
-                      <View key={`${aid}-${jr.requestedAt}`}>
-                        {jrIndex > 0 ? <View style={styles.joinRequestSep} /> : null}
-                        <View style={styles.joinRequestRow}>
-                          <Pressable
-                            onPress={() => openParticipantProfile(aid)}
-                            style={({ pressed }) => [
-                              styles.joinRequestAvatarPress,
-                              pressed && !withdrawn && { opacity: 0.88 },
-                            ]}
-                            pointerEvents={withdrawn ? 'none' : 'auto'}
-                            accessibilityRole="button"
-                            accessibilityLabel={`${nickname} 프로필 열기`}>
-                            <View
-                              style={[
-                                styles.joinRequestAvatarSq,
-                                withdrawn ? styles.joinRequestAvatarSqWithdrawn : null,
-                                !withdrawn && g === 'male' ? styles.joinRequestAvatarSqMale : null,
-                                !withdrawn && g === 'female' ? styles.joinRequestAvatarSqFemale : null,
-                              ]}>
-                              {withdrawn ? (
-                                <GinitSymbolicIcon name="person" size={22} color="#94a3b8" />
-                              ) : photo ? (
-                                <Image source={{ uri: photo }} style={styles.joinRequestAvatarSqImg} contentFit="cover" />
-                              ) : (
-                                <Text style={styles.joinRequestAvatarInitial}>{nicknameInitial(nickname)}</Text>
-                              )}
-                            </View>
-                          </Pressable>
-                          <View style={styles.joinRequestMid}>
-                            <Text style={styles.joinRequestNick} numberOfLines={1}>
-                              {nickname}
-                            </Text>
-                            <Text
-                              style={[styles.joinRequestMessage, !hasMessage && styles.joinRequestMessagePlaceholder]}
-                              numberOfLines={1}>
-                              {hasMessage ? msgRaw : '신청 메시지가 없어요.'}
-                            </Text>
-                          </View>
-                          <View style={styles.joinRequestActions}>
-                            <Pressable
-                              onPress={() => onHostApproveJoin(aid)}
-                              disabled={rowBusy}
-                              style={({ pressed }) => [
-                                styles.joinRequestBtnPrimary,
-                                rowBusy && { opacity: 0.75 },
-                                pressed && !rowBusy && { opacity: 0.88 },
-                              ]}
-                              accessibilityRole="button"
-                              accessibilityLabel="참가 승인">
-                              {rowBusy ? (
-                                <ActivityIndicator color="#fff" size="small" />
-                              ) : (
-                                <Text style={styles.joinRequestBtnPrimaryText}>승인</Text>
-                              )}
-                            </Pressable>
-                            <Pressable
-                              onPress={() => onHostRejectJoin(aid)}
-                              disabled={rowBusy}
-                              style={({ pressed }) => [
-                                styles.joinRequestBtnGhost,
-                                rowBusy && { opacity: 0.75 },
-                                pressed && !rowBusy && { opacity: 0.88 },
-                              ]}
-                              accessibilityRole="button"
-                              accessibilityLabel="참가 거절">
-                              <Text style={styles.joinRequestBtnGhostText}>거절</Text>
-                            </Pressable>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
-
             <View style={styles.infoCard}>
-              <View style={styles.infoCardHead}>
-                <LinearGradient
-                  colors={['#4527A0', '#1E3A8A']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.infoCardHeadAccent}
-                />
-                <View style={styles.infoCardHeadText}>
-                  <Text style={styles.infoCardTitle}>모임 등록 정보</Text>
-                  <Text style={styles.infoCardKicker}>호스트가 남긴 모집 조건을 한눈에 확인해요</Text>
-                </View>
-              </View>
-
-              <View style={styles.infoCategoryCard}>
-                <View style={styles.infoCategoryIconWrap}>
-                  <GinitSymbolicIcon name="pricetag-outline" size={20} color={GinitTheme.colors.primary} />
-                </View>
-                <View style={styles.infoCategoryTextCol}>
-                  <Text style={styles.infoMetaLabel}>카테고리</Text>
-                  <Text style={styles.infoMetaValue}>{meeting.categoryLabel?.trim() || '—'}</Text>
-                </View>
-              </View>
-
+              <Text style={styles.infoCardTitle}>모임 등록 정보</Text>
+              <Text style={styles.infoRow}>
+                <Text style={styles.infoLabel}>카테고리 </Text>
+                {meeting.categoryLabel?.trim() || '—'}
+              </Text>
               <View style={styles.publicBadgeRow}>
                 <View style={[styles.miniBadge, meeting.isPublic === false && styles.miniBadgeMuted]}>
-                  <GinitSymbolicIcon
-                    name={meeting.isPublic === false ? 'lock-closed-outline' : 'globe-outline'}
-                    size={14}
-                    color={meeting.isPublic === false ? '#64748B' : GinitTheme.colors.primary}
-                    style={styles.miniBadgeIcon}
-                  />
                   <Text style={[styles.miniBadgeText, meeting.isPublic === false && styles.miniBadgeTextMuted]}>
                     {meeting.isPublic === false ? '비공개' : '공개 모집'}
                   </Text>
                 </View>
                 <View style={styles.miniBadge}>
-                  <GinitSymbolicIcon name="people-outline" size={14} color={GinitTheme.colors.primary} style={styles.miniBadgeIcon} />
                   <Text style={styles.miniBadgeText}>인원 {formatCapacityLine(meeting)}</Text>
                 </View>
               </View>
               {representativeScheduleText ? (
-                <View style={styles.scheduleHintRow}>
-                  <GinitSymbolicIcon name="time-outline" size={16} color="#64748B" />
-                  <Text style={[styles.infoRowMuted, styles.scheduleHintText]}>{representativeScheduleText}</Text>
-                </View>
+                <Text style={styles.infoRowMuted}>{representativeScheduleText}</Text>
               ) : null}
-
-              <View style={styles.infoDivider} />
-
-              <Text style={styles.infoSectionLabelStrong}>소개</Text>
+              <Text style={styles.infoSectionLabel}>소개</Text>
               {meeting.description?.trim() ? (
                 <Text style={styles.infoDescription}>{meeting.description.trim()}</Text>
               ) : (
@@ -3114,70 +1225,11 @@ export default function MeetingDetailScreen() {
                 </>
               )}
 
-              {extraActivityKinds.length > 0 ? (
+              {(specialtyKind === 'sports' || extraSport != null) && (
                 <>
-                  <Text style={styles.infoSectionLabel}>활동 종류</Text>
-                  <View style={styles.menuChipWrap}>
-                    {extraActivityKinds.map((label, ai) => (
-                      <View key={`${label}-${ai}`} style={styles.menuChipRead}>
-                        <Text style={styles.menuChipReadText}>{label}</Text>
-                      </View>
-                    ))}
-                  </View>
+                  <Text style={styles.infoSectionLabel}>운동 강도</Text>
+                  <Text style={styles.infoRow}>{sportIntensityKo(extraSport ?? 'normal')}</Text>
                 </>
-              ) : null}
-
-              {extraGameKinds.length > 0 ? (
-                <>
-                  <Text style={styles.infoSectionLabel}>게임 종류</Text>
-                  <View style={styles.menuChipWrap}>
-                    {extraGameKinds.map((label, gi) => (
-                      <View key={`${label}-${gi}`} style={styles.menuChipRead}>
-                        <Text style={styles.menuChipReadText}>{label}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-
-              {(specialtyKind === 'knowledge' || extraFocusKnowledge.length > 0) && (
-                <>
-                  <Text style={styles.infoSectionLabel}>모임 성격</Text>
-                  {extraFocusKnowledge.length > 0 ? (
-                    <View style={styles.menuChipWrap}>
-                      {extraFocusKnowledge.map((label, ki) => (
-                        <View key={`${label}-${ki}`} style={styles.menuChipRead}>
-                          <Text style={styles.menuChipReadText}>{label}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : (
-                    <Text style={styles.infoRowMuted}>등록된 모임 성격이 없어요.</Text>
-                  )}
-                </>
-              )}
-
-              <Text style={styles.infoSectionLabel}>현재 참여자</Text>
-              {orderedParticipantIdsList.length > 0 ? (
-                <View style={styles.publicBadgeRow}>
-                  <View style={[styles.miniBadge, styles.miniBadgeMale]}>
-                    <Text style={styles.miniBadgeMaleText}>남자 {participantGenderCounts.male}명</Text>
-                  </View>
-                  <View style={[styles.miniBadge, styles.miniBadgeFemale]}>
-                    <Text style={styles.miniBadgeFemaleText}>여자 {participantGenderCounts.female}명</Text>
-                  </View>
-                  {participantGenderCounts.missingProfile > 0 ? (
-                    <View style={[styles.miniBadge, styles.miniBadgeUnknown]}>
-                      <Text style={styles.miniBadgeUnknownText}>미상 …</Text>
-                    </View>
-                  ) : (
-                    <View style={[styles.miniBadge, styles.miniBadgeUnknown]}>
-                      <Text style={styles.miniBadgeUnknownText}>게스트 {participantGenderCounts.unknown}명</Text>
-                    </View>
-                  )}
-                </View>
-              ) : (
-                <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
               )}
             </View>
 
@@ -3189,65 +1241,6 @@ export default function MeetingDetailScreen() {
                   <>
                     <Text style={styles.infoRow}>{confirmedDateChipResolved.title} {confirmedDateChipResolved.sub}</Text>
 
-                    {confirmedScheduleVoteByYmd ? (
-                      (() => {
-                        const p = parseYmd(confirmedScheduleCalMonth);
-                        const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
-                        const year = base.getFullYear();
-                        const month = base.getMonth();
-                        const monthLabel = `${year}.${pad2(month + 1)}`;
-                        const pagerW = confirmedScheduleCalPagerW;
-                        return (
-                          <View
-                            style={styles.voteCalendarWrap}
-                            onLayout={(e) => {
-                              const w = Math.floor(e.nativeEvent.layout.width);
-                              if (w <= 0) return;
-                              setConfirmedScheduleCalPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
-                            }}>
-                            <View style={styles.voteCalendarHeaderRow}>
-                              <Pressable
-                                onPress={() => {
-                                  const prevM = new Date(year, month - 1, 1);
-                                  setConfirmedScheduleCalMonth(monthStartYmd(fmtDateYmd(prevM)));
-                                }}
-                                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
-                                accessibilityRole="button"
-                                accessibilityLabel="이전 달">
-                                <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
-                              </Pressable>
-                              <View
-                                style={styles.voteCalendarTitlePress}
-                                accessible
-                                accessibilityRole="header"
-                                accessibilityLabel={`확정 일시 ${monthLabel}`}>
-                                <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
-                              </View>
-                              <Pressable
-                                onPress={() => {
-                                  const nextM = new Date(year, month + 1, 1);
-                                  setConfirmedScheduleCalMonth(monthStartYmd(fmtDateYmd(nextM)));
-                                }}
-                                style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
-                                accessibilityRole="button"
-                                accessibilityLabel="다음 달">
-                                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
-                              </Pressable>
-                            </View>
-                            <View style={styles.calendarDowRow}>
-                              {WEEKDAY_KO.map((w) => (
-                                <Text key={w} style={styles.calendarDowText}>
-                                  {w}
-                                </Text>
-                              ))}
-                            </View>
-                            <View style={styles.voteCalendarCarouselHost}>
-                              {renderConfirmedScheduleCalendarMonthGrid(confirmedScheduleCalMonth, pagerW)}
-                            </View>
-                          </View>
-                        );
-                      })()
-                    ) : null}
                   </>
                 ) : (
                   <Text style={styles.infoRowMuted}>저장된 확정 일시가 없어요.</Text>
@@ -3259,46 +1252,10 @@ export default function MeetingDetailScreen() {
                 <Text style={styles.infoSectionLabel}>장소</Text>
                 {confirmedPlaceChipResolved ? (
                   <>
-                    {(() => {
-                      const thumb = placeThumbByChipId[confirmedPlaceChipResolved.id] ?? null;
-                      return (
-                        <View style={styles.placeDetailBlock}>
-                          <View style={styles.placeDetailHeroRow}>
-                            <View style={styles.placeDetailSquareThumbWrap}>
-                              {thumb ? (
-                                <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                              ) : (
-                                <View style={styles.placeVoteImageFallback} />
-                              )}
-                            </View>
-                            <View style={styles.placeDetailRightCol}>
-                              <View style={styles.placeDetailRightColTop}>
-                                <Text style={styles.placeVoteTitle} numberOfLines={3}>
-                                  {confirmedPlaceChipResolved.title}
-                                </Text>
-                                {confirmedPlaceChipResolved.category ? (
-                                  <Text style={styles.placeVoteSub} numberOfLines={2}>
-                                    {confirmedPlaceChipResolved.category}
-                                  </Text>
-                                ) : null}
-                                {confirmedPlaceChipResolved.sub ? (
-                                  <Text style={styles.placeVoteSub} numberOfLines={6}>
-                                    {confirmedPlaceChipResolved.sub}
-                                  </Text>
-                                ) : null}
-                              </View>
-                              <PlaceCandidateDetailLinkRow
-                                title={confirmedPlaceChipResolved.title}
-                                link={confirmedPlaceChipResolved.naverPlaceLink}
-                                addressLine={confirmedPlaceChipResolved.sub}
-                                containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
-                                onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
-                              />
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })()}
+                    <Text style={styles.infoRow}>{confirmedPlaceChipResolved.title}</Text>
+                    {confirmedPlaceChipResolved.sub ? (
+                      <Text style={styles.infoRowMuted}>{confirmedPlaceChipResolved.sub}</Text>
+                    ) : null}
                   </>
                 ) : placeChips.length === 0 ? (
                   <Text style={styles.infoRowMuted}>등록된 장소 후보가 없었어요.</Text>
@@ -3325,7 +1282,7 @@ export default function MeetingDetailScreen() {
                         <View style={StyleSheet.absoluteFillObject} collapsable={false} />
                       </Pressable>
                       <View style={styles.confirmedMapBadge} pointerEvents="none">
-                        <GinitSymbolicIcon name="navigate-outline" size={14} color="#fff" />
+                        <Ionicons name="navigate-outline" size={14} color="#fff" />
                         <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
                       </View>
                     </View>
@@ -3344,86 +1301,26 @@ export default function MeetingDetailScreen() {
                   <>
                     <Text style={styles.infoSectionLabel}>영화</Text>
                     {confirmedMovieResolved ? (
-                      <>
-                        <View style={styles.movieDetailRow}>
-                          <View style={styles.movieDetailPosterLeftWrap}>
-                            {confirmedMovieResolved.posterUrl?.trim() ? (
-                              <Image
-                                source={{ uri: confirmedMovieResolved.posterUrl.trim() }}
-                                style={styles.movieDetailPosterLeft}
-                                contentFit="cover"
-                                transition={120}
-                              />
-                            ) : (
-                              <View style={[styles.movieDetailPosterLeft, styles.moviePosterPlaceholder]}>
-                                <GinitSymbolicIcon name="film-outline" size={26} color="#94A3B8" />
-                              </View>
-                            )}
+                      <View style={styles.confirmedMovieRow}>
+                        {confirmedMovieResolved.posterUrl?.trim() ? (
+                          <Image
+                            source={{ uri: confirmedMovieResolved.posterUrl.trim() }}
+                            style={styles.confirmedMoviePoster}
+                            contentFit="cover"
+                            transition={120}
+                          />
+                        ) : (
+                          <View style={[styles.confirmedMoviePoster, styles.moviePosterPlaceholder]}>
+                            <Ionicons name="film-outline" size={28} color="#94A3B8" />
                           </View>
-                          <View style={styles.movieDetailInfoCol}>
-                            <View style={styles.movieDetailInfoTop}>
-                              <Text style={styles.movieDetailTitle} numberOfLines={3}>
-                                {confirmedMovieResolved.title}
-                                {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
-                              </Text>
-                              {(() => {
-                                const rows = movieMetaRows(confirmedMovieResolved);
-                                if (rows.length === 0) return null;
-                                return (
-                                  <View style={styles.movieMetaList}>
-                                    {rows.map((r) => (
-                                      <Text key={r.sortKey} style={styles.movieMetaLine}>
-                                        <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
-                                        <Text style={styles.movieMetaSep}> : </Text>
-                                        <Text style={styles.movieMetaValInline}>{r.value}</Text>
-                                      </Text>
-                                    ))}
-                                  </View>
-                                );
-                              })()}
-                              {(() => {
-                                const infoText = movieInfoMultiline(confirmedMovieResolved.info);
-                                if (!infoText) return null;
-                                return (
-                                  <Text style={styles.movieDetailBody} numberOfLines={5}>
-                                    {infoText}
-                                  </Text>
-                                );
-                              })()}
-                              {(() => {
-                                const s = movieSynopsisText(confirmedMovieResolved);
-                                if (!s) return null;
-                                if (confirmedMovieResolved.info?.trim() && s === confirmedMovieResolved.info.trim()) return null;
-                                return (
-                                  <Text style={styles.movieDetailBody} numberOfLines={8}>
-                                    {s}
-                                  </Text>
-                                );
-                              })()}
-                            </View>
-                            {resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title) ? (
-                              <Pressable
-                                onPress={() => {
-                                  const u = resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title);
-                                  if (!u) return;
-                                  setNaverPlaceWebModal({
-                                    url: u,
-                                    title: confirmedMovieResolved.title.trim() || '영화',
-                                  });
-                                }}
-                                style={({ pressed }) => [
-                                  styles.moviePosterInfoBtn,
-                                  styles.moviePosterInfoBtnInDetailCol,
-                                  pressed && { opacity: 0.88 },
-                                ]}
-                                accessibilityRole="button"
-                                accessibilityLabel="영화 정보 보기">
-                                <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
-                              </Pressable>
-                            ) : null}
-                          </View>
+                        )}
+                        <View style={styles.confirmedMovieTextCol}>
+                          <Text style={styles.infoRow} numberOfLines={3}>
+                            {confirmedMovieResolved.title}
+                            {confirmedMovieResolved.year ? ` (${confirmedMovieResolved.year})` : ''}
+                          </Text>
                         </View>
-                      </>
+                      </View>
                     ) : extraMovies.length > 0 ? (
                       <Text style={styles.infoRowMuted}>저장된 확정 영화가 없어요.</Text>
                     ) : (
@@ -3439,7 +1336,6 @@ export default function MeetingDetailScreen() {
                   onLayout={(e) => {
                     voteSectionScrollYs.current.date = e.nativeEvent.layout.y;
                   }}>
-                  <View style={styles.infoCard}>
                   <View style={styles.dateVoteHeaderBlock}>
                     <Text style={styles.sectionTitle}>
                       일시 투표 ({storedDateCandidates.length > 0 ? storedDateCandidates.length : dateChips.length}건)
@@ -3456,142 +1352,69 @@ export default function MeetingDetailScreen() {
               ) : null}
             </View>
 
-            <>
-              {(() => {
-                  const p = parseYmd(dateVoteCalendarMonth);
-                  const base = p ? new Date(p.y, p.m - 1, 1) : new Date();
-                  const year = base.getFullYear();
-                  const month = base.getMonth();
-                  const monthLabel = `${year}.${pad2(month + 1)}`;
-                  const prevAnchor = monthStartYmd(fmtDateYmd(new Date(year, month - 1, 1)));
-                  const nextAnchor = monthStartYmd(fmtDateYmd(new Date(year, month + 1, 1)));
-                  const pagerW = dateVoteCalendarPagerW;
-
-                  return (
-                    <View
-                      style={styles.voteCalendarWrap}
-                      onLayout={(e) => {
-                        const w = Math.floor(e.nativeEvent.layout.width);
-                        if (w <= 0) return;
-                        setDateVoteCalendarPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
-                      }}>
-                      <View style={styles.voteCalendarHeaderRow}>
-                        <Pressable
-                          onPress={() => {
-                            const prev = new Date(year, month - 1, 1);
-                            setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(prev)));
-                          }}
-                          style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
-                          accessibilityRole="button"
-                          accessibilityLabel="이전 달">
-                          <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
-                        </Pressable>
-                        <Pressable
-                          onPress={() => {
-                            setDateVoteCalendarYmPick({ draft: new Date(year, month, 1) });
-                          }}
-                          style={({ pressed }) => [styles.voteCalendarTitlePress, pressed && { opacity: 0.88 }]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`년·월 선택 ${monthLabel}`}>
-                          <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => {
-                            const next = new Date(year, month + 1, 1);
-                            setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(next)));
-                          }}
-                          style={({ pressed }) => [styles.calendarNavBtn, pressed && styles.calendarNavBtnPressed]}
-                          accessibilityRole="button"
-                          accessibilityLabel="다음 달">
-                          <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
-                        </Pressable>
-                      </View>
-                      <View style={styles.calendarDowRow}>
-                        {WEEKDAY_KO.map((w) => (
-                          <Text key={w} style={styles.calendarDowText}>
-                            {w}
-                          </Text>
-                        ))}
-                      </View>
-                      <View style={styles.voteCalendarCarouselHost}>
-                        <ScrollView
-                          ref={dateVoteCalendarPagerRef}
-                          horizontal
-                          pagingEnabled
-                          bounces={false}
-                          nestedScrollEnabled
-                          keyboardShouldPersistTaps="handled"
-                          showsHorizontalScrollIndicator={false}
-                          decelerationRate="normal"
-                          style={styles.voteCalendarPagerScroll}
-                          contentContainerStyle={styles.voteCalendarPagerContent}
-                          onMomentumScrollEnd={(e) => {
-                            if (pagerW <= 0) return;
-                            if (dateVoteCalendarPagerIgnoreMomentumEndRef.current) return;
-                            const ix = Math.round(e.nativeEvent.contentOffset.x / pagerW);
-                            if (ix === 1) return;
-                            const curP = parseYmd(dateVoteCalendarMonth);
-                            const cur = curP ? new Date(curP.y, curP.m - 1, 1) : new Date();
-                            if (ix === 0) {
-                              dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
-                              dateVoteCalendarFadeAnimRef.current?.stop?.();
-                              dateVoteCalendarSwipeFadeAfterRecenterRef.current = true;
-                              dateVoteCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
-                              setDateVoteCalendarMonth(
-                                monthStartYmd(fmtDateYmd(new Date(cur.getFullYear(), cur.getMonth() - 1, 1))),
-                              );
-                            } else if (ix === 2) {
-                              dateVoteCalendarPagerIgnoreMomentumEndRef.current = true;
-                              dateVoteCalendarFadeAnimRef.current?.stop?.();
-                              dateVoteCalendarSwipeFadeAfterRecenterRef.current = true;
-                              dateVoteCalendarCenterOpacity.setValue(CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY);
-                              setDateVoteCalendarMonth(
-                                monthStartYmd(fmtDateYmd(new Date(cur.getFullYear(), cur.getMonth() + 1, 1))),
-                              );
-                            }
-                          }}>
-                          {renderDateVoteCalendarMonthGrid(prevAnchor, pagerW)}
-                          <Animated.View style={{ opacity: dateVoteCalendarCenterOpacity }} pointerEvents="box-none">
-                            {renderDateVoteCalendarMonthGrid(dateVoteCalendarMonth, pagerW)}
-                          </Animated.View>
-                          {renderDateVoteCalendarMonthGrid(nextAnchor, pagerW)}
-                        </ScrollView>
-                      </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
+              {dateChipsShown.map((chip) => {
+                const chipSelected = dateHostPickMode ? hostTieDateId === chip.id : selectedDateIds.includes(chip.id);
+                const tally = meeting.voteTallies?.dates?.[chip.id] ?? 0;
+                return (
+                  <Pressable
+                    key={chip.id}
+                    onPress={() => onDateChipPress(chip.id)}
+                    style={({ pressed }) => [
+                      styles.dateChip,
+                      chipSelected ? styles.dateChipSelected : null,
+                      pressed ? styles.dateChipPressed : null,
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                    accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                    <View style={styles.voteTallyBadge} pointerEvents="none">
+                      <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                     </View>
-                  );
-                })()}
-                <Text
-                  style={
-                    dateHostPickMode
-                      ? hostTieDateId
-                        ? styles.dateSelectionHint
-                        : styles.dateSelectionHintMuted
-                      : selectedDateIds.length > 0
-                        ? styles.dateSelectionHint
-                        : styles.dateSelectionHintMuted
-                  }>
-                  {dateHostPickMode
-                    ? hostTieDateId
-                      ? '확정용 1곳 선택됨 · 집계 표에는 반영되지 않아요'
-                      : '확정할 일시를 한 곳만 탭해 주세요'
-                    : selectedDateIds.length > 0
-                      ? `${selectedDateIds.length}개 선택됨`
-                      : '아직 선택한 일정이 없어요'}
-                </Text>
-              {dateChips.length === 1 ? (
-                <Text style={styles.dateSelectionHint}>후보가 1개라 자동으로 선택돼요.</Text>
-              ) : null}
-            </>
+                    {chipSelected ? (
+                      <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
+                        <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
+                      </View>
+                    ) : null}
+                    <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                      {chip.title}
+                    </Text>
+                    {chip.sub ? (
+                      <Text style={[styles.dateChipSub, chipSelected && styles.dateChipSubSelected]} numberOfLines={1}>
+                        {chip.sub}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Text
+              style={
+                dateHostPickMode
+                  ? hostTieDateId
+                    ? styles.dateSelectionHint
+                    : styles.dateSelectionHintMuted
+                  : selectedDateIds.length > 0
+                    ? styles.dateSelectionHint
+                    : styles.dateSelectionHintMuted
+              }>
+              {dateHostPickMode
+                ? hostTieDateId
+                  ? '확정용 1곳 선택됨 · 집계 표에는 반영되지 않아요'
+                  : '확정할 일시를 한 곳만 탭해 주세요'
+                : selectedDateIds.length > 0
+                  ? `${selectedDateIds.length}개 선택됨`
+                  : '아직 선택한 일정이 없어요'}
+            </Text>
 
             <Pressable
               style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
               accessibilityRole="button"
               accessibilityLabel="날짜 제안"
               onPress={openDateProposeModal}>
-              <GinitSymbolicIcon name="calendar-outline" size={20} color="#FFFFFF" />
+              <Ionicons name="calendar-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
             </Pressable>
-                  </View>
             </View>
 
             {(specialtyKind === 'movie' || extraMovies.length > 0) && (
@@ -3600,14 +1423,13 @@ export default function MeetingDetailScreen() {
                 onLayout={(e) => {
                   voteSectionScrollYs.current.movie = e.nativeEvent.layout.y;
                 }}>
-                <View style={styles.infoCard}>
                 <View style={styles.dateVoteHeaderBlock}>
                   <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                     영화 투표 ({extraMovies.length}건)
                   </Text>
                   <Text style={styles.dateVoteSub}>
                     {movieHostPickMode
-                      ? '동점 작품만 표시됩니다. 여러 편 투표한 뒤, 동점 후보를 탭하면 확정용 선택이 갱신돼요. (집계 표 숫자에는 반영되지 않아요.)'
+                      ? '동점 작품만 표시됩니다. 한 곳만 탭하세요. (집계 표 숫자에는 반영되지 않아요.)'
                       : '포스터를 눌러 보고 싶은 작품을 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
                   </Text>
                   {movieHostPickMode ? (
@@ -3616,140 +1438,54 @@ export default function MeetingDetailScreen() {
                     </Text>
                   ) : null}
                 </View>
-                {extraMovies.length === 1 ? (
-                  <>
-                    <View style={styles.movieDetailRow}>
-                      <View style={styles.movieDetailPosterLeftWrap}>
-                        {extraMovies[0].posterUrl?.trim() ? (
-                          <Image
-                            source={{ uri: extraMovies[0].posterUrl.trim() }}
-                            style={styles.movieDetailPosterLeft}
-                            contentFit="cover"
-                            transition={120}
-                          />
-                        ) : (
-                          <View style={[styles.movieDetailPosterLeft, styles.moviePosterPlaceholder]}>
-                            <GinitSymbolicIcon name="film-outline" size={26} color="#94A3B8" />
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.movieDetailInfoCol}>
-                        <View style={styles.movieDetailInfoTop}>
-                          <Text style={styles.movieDetailTitle} numberOfLines={3}>
-                            {extraMovies[0].title}
-                            {extraMovies[0].year ? ` (${extraMovies[0].year})` : ''}
-                          </Text>
-                          {(() => {
-                            const rows = movieMetaRows(extraMovies[0]);
-                            if (rows.length === 0) return null;
-                            return (
-                              <View style={styles.movieMetaList}>
-                                {rows.map((r) => (
-                                  <Text key={r.sortKey} style={styles.movieMetaLine}>
-                                    <Text style={styles.movieMetaKeyInline}>{r.key}</Text>
-                                    <Text style={styles.movieMetaSep}> : </Text>
-                                    <Text style={styles.movieMetaValInline}>{r.value}</Text>
-                                  </Text>
-                                ))}
-                              </View>
-                            );
-                          })()}
-                          {(() => {
-                            const infoText = movieInfoMultiline(extraMovies[0].info);
-                            if (!infoText) return null;
-                            return (
-                              <Text style={styles.movieDetailBody} numberOfLines={5}>
-                                {infoText}
-                              </Text>
-                            );
-                          })()}
-                          {(() => {
-                            const s = movieSynopsisText(extraMovies[0]);
-                            if (!s) return null;
-                            if (extraMovies[0].info?.trim() && s === extraMovies[0].info.trim()) return null;
-                            return (
-                              <Text style={styles.movieDetailBody} numberOfLines={8}>
-                                {s}
-                              </Text>
-                            );
-                          })()}
-                        </View>
-                        {resolveNaverMovieSearchWebUrl(extraMovies[0].title) ? (
-                          <Pressable
-                            onPress={() => {
-                              const u = resolveNaverMovieSearchWebUrl(extraMovies[0].title);
-                              if (!u) return;
-                              setNaverPlaceWebModal({ url: u, title: extraMovies[0].title.trim() || '영화' });
-                            }}
-                            style={({ pressed }) => [
-                              styles.moviePosterInfoBtn,
-                              styles.moviePosterInfoBtnInDetailCol,
-                              pressed && { opacity: 0.88 },
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="영화 정보 보기">
-                              
-                            <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
-                          </Pressable>
-                        ) : null}
-                      </View>
-                    </View>
-                  </>
-                ) : extraMovies.length > 0 ? (
+                {extraMovies.length > 0 ? (
                   <>
                     <ScrollView
                       horizontal
                       showsHorizontalScrollIndicator={false}
                       contentContainerStyle={styles.movieScrollContent}>
                       {movieRowsShown.map(({ mv, chipId }) => {
-                        const chipSelected = selectedMovieIds.includes(chipId);
+                        const chipSelected = movieHostPickMode
+                          ? hostTieMovieId === chipId
+                          : selectedMovieIds.includes(chipId);
                         const tally = meeting.voteTallies?.movies?.[chipId] ?? 0;
-                        const movieInfoUrl = resolveNaverMovieSearchWebUrl(mv.title);
                         return (
-                          <View key={chipId} style={styles.movieVotePosterColumn}>
-                            <Pressable
-                              onPress={() => onMovieChipPress(chipId)}
-                              style={({ pressed }) => [
-                                styles.moviePosterThumbWrap,
-                                chipSelected && styles.moviePosterThumbWrapSelected,
-                                pressed && styles.moviePosterThumbWrapPressed,
-                              ]}
-                              accessibilityRole="checkbox"
-                              accessibilityState={{ checked: chipSelected, selected: chipSelected }}
-                              accessibilityLabel={`${mv.title}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
-                              {mv.posterUrl?.trim() ? (
-                                <Image
-                                  source={{ uri: mv.posterUrl.trim() }}
-                                  style={styles.moviePosterThumb}
-                                  contentFit="cover"
-                                  transition={120}
-                                />
-                              ) : (
-                                <View style={[styles.moviePosterThumb, styles.moviePosterPlaceholder]}>
-                                  <GinitSymbolicIcon name="film-outline" size={22} color="#94A3B8" />
-                                </View>
-                              )}
-                              <View style={styles.voteTallyBadgeMoviePoster} pointerEvents="none">
-                                <Text style={styles.voteTallyBadgeText}>{tally}</Text>
+                          <Pressable
+                            key={chipId}
+                            onPress={() => onMovieChipPress(chipId)}
+                            style={({ pressed }) => [
+                              styles.movieVoteCard,
+                              chipSelected ? styles.movieVoteCardSelected : null,
+                              pressed ? styles.dateChipPressed : null,
+                            ]}
+                            accessibilityRole="radio"
+                            accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                            accessibilityLabel={`${mv.title}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                            <View style={[styles.voteTallyBadge, styles.voteTallyBadgeMovie]} pointerEvents="none">
+                              <Text style={styles.voteTallyBadgeText}>{tally}</Text>
+                            </View>
+                            {chipSelected ? (
+                              <View style={styles.movieVoteCheckWrapLeft} pointerEvents="none">
+                                <Ionicons name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                               </View>
-                              {chipSelected ? (
-                                <View style={styles.moviePosterThumbCheckOverlay} pointerEvents="none">
-                                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                                </View>
-                              ) : null}
-                            </Pressable>
-                            {movieInfoUrl ? (
-                              <Pressable
-                                onPress={() =>
-                                  setNaverPlaceWebModal({ url: movieInfoUrl, title: mv.title.trim() || '영화' })
-                                }
-                                style={({ pressed }) => [styles.moviePosterInfoBtn, pressed && { opacity: 0.88 }]}
-                                accessibilityRole="button"
-                                accessibilityLabel="영화 정보">
-                                <Text style={styles.moviePosterInfoBtnText}>영화 정보</Text>
-                              </Pressable>
                             ) : null}
-                          </View>
+                            {mv.posterUrl?.trim() ? (
+                              <Image
+                                source={{ uri: mv.posterUrl.trim() }}
+                                style={styles.moviePoster}
+                                contentFit="cover"
+                                transition={120}
+                              />
+                            ) : (
+                              <View style={[styles.moviePoster, styles.moviePosterPlaceholder]}>
+                                <Ionicons name="film-outline" size={28} color="#94A3B8" />
+                              </View>
+                            )}
+                            <Text style={[styles.moviePosterTitle, chipSelected && styles.moviePosterTitleSelected]} numberOfLines={2}>
+                              {mv.title}
+                              {mv.year ? ` (${mv.year})` : ''}
+                            </Text>
+                          </Pressable>
                         );
                       })}
                     </ScrollView>
@@ -3765,8 +1501,8 @@ export default function MeetingDetailScreen() {
                       }>
                       {movieHostPickMode
                         ? hostTieMovieId
-                          ? '확정용 선택이 반영됐어요 · 집계 표에는 반영되지 않아요'
-                          : '동점 후보 포스터를 탭하면 확정용으로 지정돼요(투표는 여러 편 가능)'
+                          ? '확정용 1편 선택됨 · 집계 표에는 반영되지 않아요'
+                          : '확정할 작품을 한 곳만 탭해 주세요'
                         : selectedMovieIds.length > 0
                           ? `${selectedMovieIds.length}편 선택됨`
                           : '아직 선택한 영화가 없어요'}
@@ -3775,7 +1511,6 @@ export default function MeetingDetailScreen() {
                 ) : (
                   <Text style={styles.infoRowMuted}>등록된 영화 후보가 없어요.</Text>
                 )}
-                </View>
               </View>
             )}
 
@@ -3784,7 +1519,6 @@ export default function MeetingDetailScreen() {
               onLayout={(e) => {
                 voteSectionScrollYs.current.place = e.nativeEvent.layout.y;
               }}>
-              <View style={styles.infoCard}>
             <View style={styles.dateVoteHeaderBlock}>
               <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>
                 장소 투표 ({placeChips.length > 0 ? placeChips.length : 0}건)
@@ -3800,149 +1534,44 @@ export default function MeetingDetailScreen() {
                 </Text>
               ) : null}
             </View>
-            {placeChips.length === 1 ? (
+            {placeChips.length > 0 ? (
               <>
-                {(() => {
-                  const chip = placeChips[0];
-                  const thumb = placeThumbByChipId[chip.id] ?? null;
-                  return (
-                    <View style={styles.placeDetailBlock}>
-                      <View style={styles.placeDetailHeroRow}>
-                        <View style={styles.placeDetailSquareThumbWrap}>
-                          {thumb ? (
-                            <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                          ) : (
-                            <View style={styles.placeVoteImageFallback} />
-                          )}
-                        </View>
-                        <View style={styles.placeDetailRightCol}>
-                          <View style={styles.placeDetailRightColTop}>
-                            <Text style={styles.placeVoteTitle} numberOfLines={3}>
-                              {chip.title}
-                            </Text>
-                            {chip.category ? (
-                              <Text style={styles.placeVoteSub} numberOfLines={2}>
-                                {chip.category}
-                              </Text>
-                            ) : null}
-                            {chip.sub ? (
-                              <Text style={styles.placeVoteSub} numberOfLines={6}>
-                                {chip.sub}
-                              </Text>
-                            ) : null}
-                          </View>
-                          <PlaceCandidateDetailLinkRow
-                            title={chip.title}
-                            link={chip.naverPlaceLink}
-                            addressLine={chip.sub}
-                            containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
-                            onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
-                          />
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })()}
-                
-                {singlePlaceCoords ? (
-                  <View style={styles.confirmedMapPress}>
-                    <View style={styles.confirmedMapPreviewBox}>
-                      <GooglePlacePreviewMap
-                        latitude={singlePlaceCoords.latitude}
-                        longitude={singlePlaceCoords.longitude}
-                        height={200}
-                        borderRadius={12}
-                      />
-                      <Pressable
-                        onPress={() => {
-                          const name = placeChips[0]?.title?.trim();
-                          void openNaverMapAt(singlePlaceCoords.latitude, singlePlaceCoords.longitude, name).then((ok) => {
-                            if (!ok) Alert.alert('안내', '네이버 지도를 열 수 없어요.');
-                          });
-                        }}
-                        style={({ pressed }) => [
-                          styles.confirmedMapTapOverlay,
-                          pressed && styles.confirmedMapTapOverlayPressed,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="네이버 지도에서 이 장소 보기">
-                        <View style={StyleSheet.absoluteFillObject} collapsable={false} />
-                      </Pressable>
-                      <View style={styles.confirmedMapBadge} pointerEvents="none">
-                        <GinitSymbolicIcon name="navigate-outline" size={14} color="#fff" />
-                        <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
-                      </View>
-                    </View>
-                  </View>
-                ) : null}
-              </>
-            ) : placeChips.length > 0 ? (
-              <>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.placeVoteCarouselContent}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipScroll}>
                   {placeChipsShown.map((chip) => {
                     const chipSelected = placeHostPickMode
                       ? hostTiePlaceId === chip.id
                       : selectedPlaceIds.includes(chip.id);
                     const tally = meeting.voteTallies?.places?.[chip.id] ?? 0;
-                    const thumb = placeThumbByChipId[chip.id] ?? null;
                     return (
-                      <View
+                      <Pressable
                         key={chip.id}
-                        style={[styles.placeVoteCard, chipSelected ? styles.placeVoteCardSelected : null]}>
-                        <Pressable
-                          onPress={() => onPlaceChipPress(chip.id)}
-                          style={({ pressed }) => [
-                            styles.placeVoteCardPressFill,
-                            pressed ? styles.dateChipPressed : null,
-                          ]}
-                          accessibilityRole={placeHostPickMode ? 'radio' : 'checkbox'}
-                          accessibilityState={{ checked: chipSelected, selected: chipSelected }}
-                          accessibilityLabel={`${chip.title}${
-                            chip.category ? ` ${chip.category}` : ''
-                          }${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
-                          <View style={styles.placeVoteCardPressInner}>
-                            <View style={styles.placeVoteImageWrap}>
-                              {thumb ? (
-                                <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                              ) : (
-                                <View style={styles.placeVoteImageFallback} />
-                              )}
-                              <View style={styles.placeVoteTallyBadge} pointerEvents="none">
-                                <Text style={styles.voteTallyBadgeText}>{tally}</Text>
-                              </View>
-                              {chipSelected ? (
-                                <View style={styles.placeVoteSelectedOverlay} pointerEvents="none">
-                                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                                </View>
-                              ) : null}
-                            </View>
-                            <Text style={styles.placeVoteTitle} numberOfLines={2}>
-                              {chip.title}
-                            </Text>
-                            {chip.category ? (
-                              <Text style={styles.placeVoteSub} numberOfLines={2}>
-                                {chip.category}
-                              </Text>
-                            ) : null}
-                            {chip.sub ? (
-                              <Text style={styles.placeVoteSub} numberOfLines={2}>
-                                {chip.sub}
-                              </Text>
-                            ) : null}
+                        onPress={() => onPlaceChipPress(chip.id)}
+                        style={({ pressed }) => [
+                          styles.dateChip,
+                          styles.placeVoteChip,
+                          chipSelected ? styles.dateChipSelected : null,
+                          pressed ? styles.dateChipPressed : null,
+                        ]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: chipSelected, selected: chipSelected }}
+                        accessibilityLabel={`${chip.title}${chip.sub ? ` ${chip.sub}` : ''}${chipSelected ? ', 선택됨' : ', 선택 안 됨'}`}>
+                        <View style={styles.voteTallyBadge} pointerEvents="none">
+                          <Text style={styles.voteTallyBadgeText}>{tally}</Text>
+                        </View>
+                        {chipSelected ? (
+                          <View style={styles.dateChipCheckWrapLeft} pointerEvents="none">
+                            <Ionicons name="checkmark-circle" size={20} color={GinitTheme.colors.primary} />
                           </View>
-                        </Pressable>
-                        <PlaceCandidateDetailLinkRow
-                          title={chip.title}
-                          link={chip.naverPlaceLink}
-                          addressLine={chip.sub}
-                          containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
-                          onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
-                        />
-                      </View>
+                        ) : null}
+                        <Text style={[styles.dateChipTitle, chipSelected && styles.dateChipTitleSelected]} numberOfLines={2}>
+                          {chip.title}
+                        </Text>
+                        {chip.sub ? (
+                          <Text style={[styles.dateChipSub, chipSelected && styles.dateChipSubSelected]} numberOfLines={2}>
+                            {chip.sub}
+                          </Text>
+                        ) : null}
+                      </Pressable>
                     );
                   })}
                 </ScrollView>
@@ -3968,471 +1597,276 @@ export default function MeetingDetailScreen() {
             ) : (
               <Text style={styles.infoRowMuted}>등록된 장소 후보가 없어요.</Text>
             )}
-            
+            <Text style={styles.placePayNote}>결제: 💵 1/N 정산 (안내)</Text>
+            <Pressable style={styles.pencilPlaceRow} accessibilityRole="button" accessibilityLabel="장소 수정">
+              <Ionicons name="pencil" size={18} color={GinitTheme.colors.primary} />
+              <Text style={styles.pencilPlaceRowText}>장소 편집</Text>
+            </Pressable>
 
             <Pressable
               style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
               accessibilityRole="button"
               accessibilityLabel="장소 제안"
               onPress={openPlaceProposeModal}>
-              <GinitSymbolicIcon name="location-outline" size={20} color="#FFFFFF" />
+              <Ionicons name="location-outline" size={20} color={GinitTheme.colors.primary} />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
             </Pressable>
-              </View>
                 </View>
               </>
             )}
 
-            {publicMeetingDetails && publicConditionRows.length > 0 ? (
-              <View style={styles.infoCard}>
-                <View style={styles.dateVoteHeaderBlock}>
-                  <Text style={[styles.sectionTitle, styles.sectionSpacedTight]}>상세 조건</Text>
-                  <Text style={styles.dateVoteSub}>참여 전 꼭 확인해 주세요</Text>
-                </View>
-                <View>
-                  {publicConditionRows.map((row, idx) => {
-                    const isTrust = row.variant === 'trust';
-                    const isLast = idx === publicConditionRows.length - 1;
-                    return (
-                      <View
-                        key={`${row.label}-${idx}`}
-                        style={[
-                          styles.condRow,
-                          !isLast && styles.condRowBorder,
-                          isTrust && styles.condRowTrust,
-                        ]}>
-                        <View style={[styles.condIconWrap, isTrust && styles.condIconWrapTrust]}>
-                          <GinitSymbolicIcon name={row.icon} size={19} color={isTrust ? '#9a3412' : '#0f172a'} />
-                        </View>
-                        <View style={styles.condTextCol}>
-                          <Text style={[styles.condLabel, isTrust && styles.condLabelTrust]}>{row.label}</Text>
-                          <Text style={[styles.condValue, isTrust && styles.condValueTrust]}>{row.value}</Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-                {publicMeetingDetails.approvalType === 'HOST_APPROVAL' &&
-                publicMeetingDetails.requestMessageEnabled === true ? (
-                  <View style={styles.condCallout}>
-                    <GinitSymbolicIcon name="chatbubble-ellipses-outline" size={18} color="#0369a1" />
-                    <Text style={styles.condCalloutText}>참가 신청 시 호스트가 한 줄 메시지를 받아요.</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            <View style={styles.infoCard}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>참여자 ({orderedParticipantIdsList.length}명)</Text>
-                {genderCountLabel ? <Text style={styles.genderCountText}>{genderCountLabel}</Text> : null}
-              </View>
-              {isHost && meeting.scheduleConfirmed !== true ? (
-                <Text style={styles.hostKickHintText}>
-                  방장은 참여자를 길게 눌러 퇴장시킬 수 있어요.
-                </Text>
-              ) : null}
-              {orderedParticipantIdsList.length === 0 ? (
-                <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
-              ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
-                  {orderedParticipantIdsList.map((userId) => {
-                    const prof = participantProfiles[userId];
-                    const withdrawn = isUserProfileWithdrawn(prof);
-                    const nickname = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '…');
-                    const g = withdrawn ? null : normalizeGender(prof?.gender);
-                    const hostPk = meeting.createdBy?.trim()
-                      ? normalizeParticipantId(meeting.createdBy)
-                      : '';
-                    const isHostUser = Boolean(hostPk && hostPk === userId);
-                    const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
-                    return (
-                      <Pressable
-                        key={userId}
-                        onPress={() => openParticipantProfile(userId)}
-                        onLongPress={
-                          isHost && meeting.scheduleConfirmed !== true && !isHostUser && !withdrawn
-                            ? () => handleHostKickParticipant(userId)
-                            : undefined
-                        }
-                        style={({ pressed }) => [styles.avatarCol, pressed && !withdrawn && { opacity: 0.92 }]}
-                        pointerEvents={withdrawn ? 'none' : 'auto'}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${nickname} 프로필 열기`}>
-                        <View
-                          style={[
-                            styles.avatarCircle,
-                            withdrawn ? styles.avatarCircleWithdrawn : null,
-                            !withdrawn && g === 'male' ? styles.avatarCircleMale : null,
-                            !withdrawn && g === 'female' ? styles.avatarCircleFemale : null,
-                          ]}>
-                          {withdrawn ? (
-                            <GinitSymbolicIcon name="person" size={22} color="#94a3b8" />
-                          ) : photo ? (
-                            <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
-                          ) : (
-                            <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
-                          )}
-                        </View>
-                        <Text style={styles.avatarLabel} numberOfLines={2}>
-                          {isHostUser ? `${nickname}\n(호스트)` : nickname}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  {recruitmentPhase === 'recruiting' ? (
-                    <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
-                      <GinitSymbolicIcon name="add" size={26} color={GinitTheme.colors.primary} />
-                    </Pressable>
-                  ) : null}
-                </ScrollView>
-              )}
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>참여자 ({orderedParticipantIdsList.length}명)</Text>
             </View>
+            {orderedParticipantIdsList.length === 0 ? (
+              <Text style={styles.infoRowMuted}>아직 참여한 사람이 없어요.</Text>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.avatarRow}>
+                {orderedParticipantIdsList.map((userId) => {
+                  const prof = participantProfiles[userId];
+                  const nickname = prof?.nickname ?? '…';
+                  const hostPk = meeting.createdBy?.trim()
+                    ? normalizeParticipantId(meeting.createdBy)
+                    : '';
+                  const isHostUser = Boolean(hostPk && hostPk === userId);
+                  const photo = prof?.photoUrl?.trim();
+                  return (
+                    <View key={userId} style={styles.avatarCol}>
+                      <View style={styles.avatarCircle}>
+                        {photo ? (
+                          <Image source={{ uri: photo }} style={styles.avatarPhoto} contentFit="cover" />
+                        ) : (
+                          <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
+                        )}
+                      </View>
+                      <Text style={styles.avatarLabel} numberOfLines={2}>
+                        {isHostUser ? `${nickname}\n(호스트)` : nickname}
+                      </Text>
+                    </View>
+                  );
+                })}
+                {recruitmentPhase === 'recruiting' ? (
+                  <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
+                    <Ionicons name="add" size={26} color={GinitTheme.colors.primary} />
+                  </Pressable>
+                ) : null}
+              </ScrollView>
+            )}
+
+            <View style={styles.bottomSpacer} />
           </ScrollView>
         ) : null}
 
-        {/* 게스트 안내 문구는 배너로만 표시(버튼 영역 침범 방지) */}
-
-        {!loading && !loadError && meeting !== null ? (
-          <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
-            {isHost ? (
-              <View style={styles.bottomBarCol}>
-                <View style={styles.bottomBarEqualRow}>
-                  {recruitmentPhase === 'recruiting' ? (
-                    <>
-                      <Pressable
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="초대">
-                        <GinitSymbolicIcon name="mail-outline" size={18} color="#fff" />
-                        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                          초대
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="모임 채팅">
-                        <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
-                        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                          채팅
-                        </Text>
-                      </Pressable>
-                    </>
-                  ) : null}
-                  {meeting.scheduleConfirmed !== true ? (
-                    <Pressable
-                      onPress={handleDeleteMeeting}
-                      disabled={deleteMeetingBusy || confirmScheduleBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.pillDanger,
-                        styles.bottomPillFlex,
-                        (deleteMeetingBusy || confirmScheduleBusy) && { opacity: 0.75 },
-                        pressed && !deleteMeetingBusy && !confirmScheduleBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="모임 삭제">
-                      {deleteMeetingBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="trash-outline" size={18} color="#fff" />
-                      )}
-                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        삭제
-                      </Text>
-                    </Pressable>
-                  ) : null}
-
-                  {orderedParticipantIdsList.length >= 2 ? (
-                    <Pressable
-                      onPress={
-                        meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
-                      }
-                      disabled={confirmScheduleBusy || deleteMeetingBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        meeting.scheduleConfirmed === true ? styles.pillDanger : styles.pillOrange,
-                        styles.bottomPillFlex,
-                        (confirmScheduleBusy || deleteMeetingBusy) && { opacity: 0.75 },
-                        pressed && !confirmScheduleBusy && !deleteMeetingBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={meeting.scheduleConfirmed === true ? '일정 확정 취소' : '모집 일정 확정'}>
-                      {confirmScheduleBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon
-                          name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
-                          size={18}
-                          color={meeting.scheduleConfirmed === true ? '#fff' : GinitTheme.colors.texWhite}
-                        />
-                      )}
-                      <Text
-                        style={[
-                          styles.pillText,
-                          meeting.scheduleConfirmed === true ? null : styles.pillTextOnOrange,
-                          styles.bottomPillLabel,
-                        ]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        {meeting.scheduleConfirmed === true ? '취소' : '확정'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </View>
-            ) : alreadyJoinedMeeting ? (
-              <View style={styles.bottomBarCol}>
-                <View style={styles.bottomBarEqualRow}>
-                  {recruitmentPhase === 'recruiting' ? (
-                    <>
-                      <Pressable
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="초대">
-                        <GinitSymbolicIcon name="mail-outline" size={16} color="#fff" />
-                        <Text
-                          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail">
-                          초대
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="모임 채팅">
-                        <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
-                        <Text
-                          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail">
-                          채팅
-                        </Text>
-                      </Pressable>
-                    </>
-                  ) : null}
-                  {!isScheduleConfirmed ? (
-                    <Pressable
-                      onPress={onPressSaveVotes}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.pillBlue,
-                        styles.bottomPillFlex,
-                        participantVoteBusy && { opacity: 0.75 },
-                        pressed && !participantVoteBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="저장">
-                      {participantVoteBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="save-outline" size={16} color="#fff" />
-                      )}
-                      <Text
-                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        저장
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    onPress={handleLeaveParticipant}
-                    disabled={participantVoteBusy}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillDanger,
-                      styles.bottomPillFlex,
-                      participantVoteBusy && { opacity: 0.75 },
-                      pressed && !participantVoteBusy && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="퇴장">
-                    <GinitSymbolicIcon name="exit-outline" size={16} color="#fff" />
-                    <Text
-                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      퇴장
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : sessionKickedFromMeeting ? (
-              <View style={styles.guestJoinBottomCol}>
-                <Text style={styles.joinOverlapCaption}>
-                  이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.
-                </Text>
-              </View>
-            ) : hasPendingJoinRequest ? (
-              <View style={styles.guestJoinBottomCol}>
-                <Text style={styles.joinOverlapCaption}>호스트 승인을 기다리는 중이에요.</Text>
-                <View style={styles.bottomBarEqualRow}>
-                  <Pressable
-                    onPress={() => {
-                      if (joinBusy) {
-                        Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
-                        return;
-                      }
-                      onCancelJoinRequestPress();
-                    }}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillDanger,
-                      styles.bottomPillFlex,
-                      joinBusy && { opacity: 0.75 },
-                      pressed && !joinBusy && { opacity: 0.88 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="참가 신청 취소">
-                    <GinitSymbolicIcon name="close-circle-outline" size={18} color="#fff" />
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      신청 취소
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
+        {!loading && !loadError && meeting !== null && !isHost ? (
+          <View style={styles.guestJoinHintWrap}>
+            {!alreadyJoinedMeeting ? (
+              <Text style={guestVotesReady ? styles.guestJoinHintDone : styles.guestJoinHintPending}>
+                {meeting.scheduleConfirmed === true
+                  ? '일정이 확정되었어요. 아래 참여를 눌러 주세요.'
+                  : guestVotesReady
+                    ? '투표를 모두 골랐어요. 아래 참여를 눌러 주세요.'
+                    : '참여하려면 일시·장소' +
+                        (needsMoviePick ? '·영화' : '') +
+                        ' 투표에서 각각 최소 한 가지 이상 선택해 주세요.'}
+              </Text>
+            ) : participantVoteLogMissing ? (
+              <Text style={styles.guestJoinHintPending}>
+                이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 탈퇴 후 다시 참여해 주세요.
+              </Text>
+            ) : meeting.scheduleConfirmed === true ? (
+              <Text style={styles.guestJoinHintDone}>일정이 확정된 모임이에요.</Text>
             ) : (
-              <View style={styles.guestJoinBottomCol}>
-                <View style={styles.bottomBarEqualRow}>
-                  <Pressable
-                    onPress={() => {
-                      if (joinBusy) {
-                        Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
-                        return;
-                      }
-                      if (joinScheduleOverlapBlock) {
-                        Alert.alert(
-                          '일정 겹침',
-                          `이미 확정된 다른 모임과 시간이 겹칠 수 있어요. (겹침 방지 ${joinOverlapBufferHours}시간)`,
-                        );
-                        return;
-                      }
-                      if (needsHostApprovalJoin) {
-                        void onPressRequestJoin();
-                        return;
-                      }
-                      void handleJoinMeeting();
-                    }}
-                    style={({ pressed }) => [
-                      styles.joinCtaBtn,
-                      styles.bottomPillFlex,
-                      joinBusy && { opacity: 0.75 },
-                      pressed && !joinBusy && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={needsHostApprovalJoin ? '참가 신청' : '모임 참여'}>
-                    <LinearGradient
-                      colors={GinitTheme.colors.ctaGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.joinCtaBg}
-                      pointerEvents="none"
-                    />
-                    <View style={styles.joinCtaInner} pointerEvents="none">
-                      {joinBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="hand-right-outline" size={18} color="#fff" />
-                      )}
-                      <Text style={styles.joinCtaLabel} numberOfLines={1} ellipsizeMode="tail">
-                        {needsHostApprovalJoin ? '참가 신청' : '참여'}
-                      </Text>
-                    </View>
-                  </Pressable>
-                </View>
-                {joinScheduleOverlapBlock ? (
-                  <Text style={styles.joinOverlapCaption}>
-                    기존 약속과 시간이 겹쳐 참여가 어렵습니다. ({joinOverlapBufferHours}시간 이내)
-                  </Text>
-                ) : null}
-              </View>
+              <Text style={guestVotesReady ? styles.guestJoinHintDone : styles.guestJoinHintPending}>
+                {guestVotesReady
+                  ? '투표를 바꾼 뒤 아래 수정으로 저장해 주세요.'
+                  : '저장하려면 일시·장소' +
+                      (needsMoviePick ? '·영화' : '') +
+                      ' 투표에서 각각 최소 한 가지 이상 선택해 주세요.'}
+              </Text>
             )}
           </View>
         ) : null}
 
-        <Modal
-          visible={joinRequestMessageOpen}
-          animationType="fade"
-          transparent
-          onRequestClose={() => !joinBusy && setJoinRequestMessageOpen(false)}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.proposeModalRoot}>
-            <Pressable
-              style={styles.proposeModalBackdrop}
-              onPress={() => !joinBusy && setJoinRequestMessageOpen(false)}
-              accessibilityRole="button"
-              accessibilityLabel="닫기"
-            />
-            <View style={[styles.proposeModalSheet, { paddingHorizontal: 18, paddingBottom: 16 }]}>
-              <Text style={styles.proposeModalTitle}>호스트에게 메시지</Text>
-              <Text style={styles.dateVoteSub}>
-                {MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN}자 이내로 입력할 수 있어요.
-              </Text>
-              <TextInput
-                value={joinRequestDraftMessage}
-                onChangeText={(t) => setJoinRequestDraftMessage(t.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN))}
-                placeholder="한 줄로 자기소개나 각오를 남겨 보세요."
-                placeholderTextColor={GinitTheme.colors.textMuted}
-                multiline
-                editable={!joinBusy}
-                style={{
-                  marginTop: 12,
-                  minHeight: 88,
-                  borderWidth: StyleSheet.hairlineWidth,
-                  borderColor: GinitTheme.colors.border,
-                  borderRadius: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  fontSize: 15,
-                  color: GinitTheme.colors.text,
-                  textAlignVertical: 'top',
-                }}
-                accessibilityLabel="참가 신청 메시지"
-              />
+        {!loading && !loadError && meeting !== null ? (
+          <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
+            {isHost ? (
               <View style={styles.bottomBarEqualRow}>
+                {recruitmentPhase === 'recruiting' || recruitmentPhase === 'full' ? (
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="모임 수정">
+                    <Ionicons name="construct-outline" size={18} color="#fff" />
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      수정
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {recruitmentPhase === 'recruiting' ? (
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="초대">
+                    <Ionicons name="mail-outline" size={18} color="#fff" />
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      초대
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {meeting.scheduleConfirmed !== true ? (
+                  <Pressable
+                    onPress={handleDeleteMeeting}
+                    disabled={deleteMeetingBusy || confirmScheduleBusy}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillDanger,
+                      styles.bottomPillFlex,
+                      (deleteMeetingBusy || confirmScheduleBusy) && { opacity: 0.75 },
+                      pressed && !deleteMeetingBusy && !confirmScheduleBusy && { opacity: 0.9 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="모임 삭제">
+                    {deleteMeetingBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="trash-outline" size={18} color="#fff" />
+                    )}
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      삭제
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
-                  onPress={() => !joinBusy && setJoinRequestMessageOpen(false)}
+                  onPress={
+                    meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
+                  }
+                  disabled={confirmScheduleBusy || deleteMeetingBusy}
                   style={({ pressed }) => [
                     styles.bottomPill,
-                    styles.pillBlue,
+                    meeting.scheduleConfirmed === true ? styles.pillDanger : styles.pillOrange,
                     styles.bottomPillFlex,
-                    joinBusy && { opacity: 0.75 },
-                    pressed && !joinBusy && { opacity: 0.88 },
+                    (confirmScheduleBusy || deleteMeetingBusy) && { opacity: 0.75 },
+                    pressed && !confirmScheduleBusy && !deleteMeetingBusy && { opacity: 0.9 },
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="닫기">
-                  <Text style={[styles.pillText, styles.bottomPillLabel]}>닫기</Text>
+                  accessibilityLabel={
+                    meeting.scheduleConfirmed === true ? '일정 확정 취소' : '모집 일정 확정'
+                  }>
+                  {confirmScheduleBusy ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Ionicons
+                      name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
+                      size={18}
+                      color="#fff"
+                    />
+                  )}
+                  <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    {meeting.scheduleConfirmed === true ? '취소' : '확정'}
+                  </Text>
                 </Pressable>
+              </View>
+            ) : alreadyJoinedMeeting ? (
+              <View style={styles.bottomBarEqualRow}>
+                {recruitmentPhase === 'recruiting' ? (
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="초대">
+                    <Ionicons name="mail-outline" size={16} color="#fff" />
+                    <Text
+                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
+                      초대
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {meeting.scheduleConfirmed !== true ? (
+                  <Pressable
+                    onPress={() => void handleSaveParticipantVotes()}
+                    disabled={participantSaveDisabled}
+                    style={({ pressed }) => [
+                      styles.bottomPill,
+                      styles.pillBlue,
+                      styles.bottomPillFlex,
+                      participantSaveDisabled && { opacity: 0.75 },
+                      pressed && !participantSaveDisabled && { opacity: 0.9 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="투표 수정 저장">
+                    {participantVoteBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="save-outline" size={16} color="#fff" />
+                    )}
+                    <Text
+                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
+                      수정
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
-                  onPress={() => {
-                    if (joinBusy) return;
-                    void proceedJoinRequestSubmit(joinRequestDraftMessage);
-                  }}
+                  onPress={handleLeaveParticipant}
+                  disabled={participantVoteBusy}
+                  style={({ pressed }) => [
+                    styles.bottomPill,
+                    styles.pillDanger,
+                    styles.bottomPillFlex,
+                    participantVoteBusy && { opacity: 0.75 },
+                    pressed && !participantVoteBusy && { opacity: 0.9 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="모임 탈퇴">
+                  <Ionicons name="exit-outline" size={16} color="#fff" />
+                  <Text
+                    style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail">
+                    탈퇴
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.bottomBarEqualRow}>
+                {recruitmentPhase === 'recruiting' ? (
+                  <Pressable
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="초대">
+                    <Ionicons name="mail-outline" size={18} color="#fff" />
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      초대
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  onPress={() => void handleJoinMeeting()}
+                  disabled={joinBusy || !guestVotesReady}
                   style={({ pressed }) => [
                     styles.bottomPill,
                     styles.pillOrange,
                     styles.bottomPillFlex,
-                    joinBusy && { opacity: 0.75 },
-                    pressed && !joinBusy && { opacity: 0.88 },
+                    (joinBusy || !guestVotesReady) && { opacity: 0.75 },
+                    pressed && !joinBusy && guestVotesReady && { opacity: 0.9 },
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel="참가 신청 보내기">
+                  accessibilityLabel="모임 참여">
                   {joinBusy ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={[styles.pillText, styles.bottomPillLabel]}>보내기</Text>
+                    <Ionicons name="hand-right-outline" size={18} color="#fff" />
                   )}
+                  <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                    참여
+                  </Text>
                 </Pressable>
               </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+            )}
+          </View>
+        ) : null}
 
         <Modal
           visible={proposeOpen}
@@ -4441,49 +1875,25 @@ export default function MeetingDetailScreen() {
           onRequestClose={() => !proposeSaving && setProposeOpen(false)}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.proposeModalRoot}>
+            style={styles.modalRoot}>
             <Pressable
-              style={styles.proposeModalBackdrop}
+              style={styles.modalBackdrop}
               onPress={() => !proposeSaving && setProposeOpen(false)}
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View
-              style={[
-                styles.proposeModalSheet,
-                styles.proposeModalSheetDateCompact,
-                {
-                  maxHeight: Math.round(
-                    Math.min(windowHeight * 0.86, windowHeight - 56),
-                  ),
-                },
-              ]}>
-              <View style={styles.proposeModalHeaderRow}>
-                <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
-                  <GinitSymbolicIcon name="calendar-outline" size={22} color={GinitTheme.colors.primary} />
-                </View>
-                <View style={styles.proposeModalHeaderTextCol}>
-                  <Text style={styles.proposeModalTitle}>날짜 제안</Text>
-                </View>
-              </View>
-              
+            <View style={[styles.modalSheetDark, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+              <Text style={styles.modalTitleLight}>날짜 제안</Text>
+              <Text style={styles.modalSubLight}>
+                기존 일정 목록은 여기서 바꾸지 않아요. 새로 넣을 일시만 추가하면 기존 후보 뒤에 붙습니다.
+              </Text>
               {proposeInitialPayload ? (
-                <KeyboardAwareScreenScroll
-                  style={[
-                    styles.proposeModalFormScroll,
-                    styles.proposeModalFormScrollDate,
-                    { maxHeight: Math.round(windowHeight * 0.62) },
-                  ]}
-                  contentContainerStyle={[
-                    styles.proposeModalFormScrollContent,
-                    styles.proposeModalFormScrollContentDateCompact,
-                  ]}
-                  extraScrollHeight={10}
-                  extraHeight={28}
-                  scrollProps={{
-                    nestedScrollEnabled: true,
-                    showsVerticalScrollIndicator: false,
-                  }}>
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={styles.modalFormScroll}
+                  contentContainerStyle={styles.modalFormScrollContent}>
                   <VoteCandidatesForm
                     key={proposeFormKey}
                     ref={voteFormRef}
@@ -4493,22 +1903,21 @@ export default function MeetingDetailScreen() {
                     initialPayload={proposeInitialPayload}
                     bare
                     wizardSegment="schedule"
-                    scheduleAiReplacesFirstCandidate
                   />
-                </KeyboardAwareScreenScroll>
+                </ScrollView>
               ) : null}
-              <View style={[styles.proposeModalFooter, styles.proposeModalFooterDateCompact]}>
+              <View style={styles.modalActions}>
                 <Pressable
                   onPress={() => !proposeSaving && setProposeOpen(false)}
-                  style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
+                  style={({ pressed }) => [styles.modalBtnGhostDark, pressed && styles.dateChipPressed]}
                   accessibilityRole="button">
-                  <Text style={styles.proposeModalGhostBtnText}>취소</Text>
+                  <Text style={styles.modalBtnGhostTextLight}>취소</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => void confirmDateProposals()}
                   disabled={proposeSaving}
                   style={({ pressed }) => [
-                    styles.proposeModalPrimaryBtn,
+                    styles.modalBtnPrimary,
                     (pressed || proposeSaving) && { opacity: proposeSaving ? 0.7 : 0.9 },
                   ]}
                   accessibilityRole="button">
@@ -4522,7 +1931,7 @@ export default function MeetingDetailScreen() {
                   {proposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.proposeModalPrimaryBtnText}>후보 추가</Text>
+                    <Text style={styles.modalBtnPrimaryText}>후보 저장</Text>
                   )}
                 </Pressable>
               </View>
@@ -4537,67 +1946,49 @@ export default function MeetingDetailScreen() {
           onRequestClose={() => !placeProposeSaving && setPlaceProposeOpen(false)}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.proposeModalRoot}>
+            style={styles.modalRoot}>
             <Pressable
-              style={styles.proposeModalBackdrop}
+              style={styles.modalBackdrop}
               onPress={() => !placeProposeSaving && setPlaceProposeOpen(false)}
               accessibilityRole="button"
               accessibilityLabel="닫기"
             />
-            <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.72) }]}>
-              <View style={styles.proposeModalHeaderRow}>
-                <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
-                  <GinitSymbolicIcon name="location-outline" size={22} color={GinitTheme.colors.primary} />
-                </View>
-                <View style={styles.proposeModalHeaderTextCol}>
-                  <Text style={styles.proposeModalTitle}>장소 제안</Text>
-                </View>
-              </View>
-    
+            <View style={[styles.modalSheetDark, { maxHeight: Math.round(windowHeight * 0.88) }]}>
+              <Text style={styles.modalTitleLight}>장소 제안</Text>
+              <Text style={styles.modalSubLight}>
+                기존 장소 목록은 여기서 바꾸지 않아요. 새로 넣을 장소만 추가하면 기존 후보 뒤에 붙습니다.
+              </Text>
               {placeProposeInitialPayload ? (
-                <KeyboardAwareScreenScroll
-                  style={styles.proposeModalFormScroll}
-                  contentContainerStyle={styles.proposeModalFormScrollContent}
-                  extraScrollHeight={22}
-                  extraHeight={56}
-                  scrollProps={{
-                    nestedScrollEnabled: true,
-                    showsVerticalScrollIndicator: false,
-                  }}>
+                <ScrollView
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={styles.modalFormScroll}
+                  contentContainerStyle={styles.modalFormScrollContent}>
                   <VoteCandidatesForm
                     key={placeProposeFormKey}
                     ref={placeVoteFormRef}
                     seedPlaceQuery=""
                     seedScheduleDate={insertModalSchedule.scheduleDate}
                     seedScheduleTime={insertModalSchedule.scheduleTime}
-                    placeThemeLabel={placeProposePlaceThemeLabel}
-                    placeThemeSpecialtyKind={specialtyKind}
-                    placeThemeMajorCode={placeThemeMajorForProposeForm}
-                    placeGameKindLabels={placeGameKindLabelsForProposeForm}
-                    placeFocusKnowledgePreferenceLabels={
-                      specialtyKind === 'knowledge' && extraFocusKnowledge.length > 0
-                        ? extraFocusKnowledge
-                        : undefined
-                    }
                     initialPayload={placeProposeInitialPayload}
                     bare
                     wizardSegment="places"
-                    onNaverPlaceWebOpen={(url, title) => setNaverPlaceWebModal({ url, title })}
                   />
-                </KeyboardAwareScreenScroll>
+                </ScrollView>
               ) : null}
-              <View style={styles.proposeModalFooter}>
+              <View style={styles.modalActions}>
                 <Pressable
                   onPress={() => !placeProposeSaving && setPlaceProposeOpen(false)}
-                  style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
+                  style={({ pressed }) => [styles.modalBtnGhostDark, pressed && styles.dateChipPressed]}
                   accessibilityRole="button">
-                  <Text style={styles.proposeModalGhostBtnText}>취소</Text>
+                  <Text style={styles.modalBtnGhostTextLight}>취소</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => void confirmPlaceProposals()}
                   disabled={placeProposeSaving}
                   style={({ pressed }) => [
-                    styles.proposeModalPrimaryBtn,
+                    styles.modalBtnPrimary,
                     (pressed || placeProposeSaving) && { opacity: placeProposeSaving ? 0.7 : 0.9 },
                   ]}
                   accessibilityRole="button">
@@ -4611,316 +2002,13 @@ export default function MeetingDetailScreen() {
                   {placeProposeSaving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.proposeModalPrimaryBtnText}>후보 추가</Text>
+                    <Text style={styles.modalBtnPrimaryText}>후보 저장</Text>
                   )}
                 </Pressable>
               </View>
             </View>
           </KeyboardAvoidingView>
         </Modal>
-
-        {dateVoteTimePick ? (
-          <Modal
-            visible
-            animationType="fade"
-            transparent
-            onRequestClose={() => setDateVoteTimePick(null)}>
-            <View style={styles.proposeModalRoot}>
-              <Pressable
-                style={styles.proposeModalBackdrop}
-                onPress={() => setDateVoteTimePick(null)}
-                accessibilityRole="button"
-                accessibilityLabel="닫기"
-              />
-              <View style={[styles.proposeModalSheet, { maxHeight: Math.round(windowHeight * 0.6) }]}>
-                <View style={styles.proposeModalHeaderRow}>
-                  <View style={styles.proposeModalIconWrap} accessibilityElementsHidden>
-                    <GinitSymbolicIcon name="time-outline" size={22} color={GinitTheme.colors.primary} />
-                  </View>
-                  <View style={styles.proposeModalHeaderTextCol}>
-                    <Text style={styles.proposeModalTitle}>시간 선택</Text>
-                    <Text style={styles.proposeModalSubDateCompact}>{dateVoteTimePick.ymd}</Text>
-                  </View>
-                </View>
-                <FlatList
-                  data={dateVoteByYmd[dateVoteTimePick.ymd] ?? []}
-                  keyExtractor={(o) => o.chipId}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={styles.timeVoteListContent}
-                  ItemSeparatorComponent={() => <View style={styles.timeVoteSeparator} />}
-                  renderItem={({ item: o }) => {
-                    const selected = dateHostPickMode ? hostTieDateId === o.chipId : selectedDateIds.includes(o.chipId);
-                    return (
-                      <Pressable
-                        onPress={() => onDateChipPress(o.chipId)}
-                        style={({ pressed }) => [
-                          styles.timeVoteRow,
-                          selected ? styles.timeVoteRowSelected : null,
-                          pressed ? styles.timeVoteRowPressed : null,
-                        ]}
-                        accessibilityRole={dateHostPickMode ? 'radio' : 'checkbox'}
-                        accessibilityState={{ checked: selected, selected }}
-                        accessibilityLabel={`${o.hm}${selected ? ', 선택됨' : ''}`}>
-                        <Text style={styles.timeVoteHm} numberOfLines={1}>
-                          {o.hm}
-                        </Text>
-                        <View style={styles.timeVoteRightMeta} pointerEvents="none">
-                          <View style={[styles.timeVoteTallyPill, selected ? styles.timeVoteTallyPillSelected : null]}>
-                            <Text
-                              style={[styles.timeVoteTallyText, selected ? styles.timeVoteTallyTextSelected : null]}>
-                              {o.tally}
-                            </Text>
-                          </View>
-                          {selected ? (
-                            <GinitSymbolicIcon name="checkmark-circle" size={18} color={GinitTheme.colors.primary} />
-                          ) : (
-                            <View style={styles.timeVoteCheckPlaceholder} />
-                          )}
-                        </View>
-                      </Pressable>
-                    );
-                  }}
-                />
-                <View style={styles.proposeModalFooterDateCompact}>
-                  <Pressable
-                    onPress={() => setDateVoteTimePick(null)}
-                    style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
-                    accessibilityRole="button">
-                    <Text style={styles.proposeModalGhostBtnText}>닫기</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          </Modal>
-        ) : null}
-
-        {dateVoteCalendarYmPick && Platform.OS === 'android' ? (
-          <DateTimePicker
-            value={dateVoteCalendarYmPick.draft}
-            mode="date"
-            display="spinner"
-            onChange={(event, date) => {
-              const t = (event as unknown as { type?: string } | null)?.type ?? '';
-              if (t === 'dismissed') {
-                setDateVoteCalendarYmPick(null);
-                return;
-              }
-              if (t === 'set' && date) {
-                setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(date)));
-                setDateVoteCalendarYmPick(null);
-                return;
-              }
-              if (!date) setDateVoteCalendarYmPick(null);
-            }}
-          />
-        ) : null}
-
-        {dateVoteCalendarYmPick && Platform.OS !== 'android' ? (
-          <Modal visible transparent animationType="fade" onRequestClose={() => setDateVoteCalendarYmPick(null)}>
-            <View style={GinitStyles.modalRoot}>
-              <Pressable
-                style={GinitStyles.modalBackdrop}
-                onPress={() => setDateVoteCalendarYmPick(null)}
-                accessibilityRole="button"
-              />
-              <View
-                pointerEvents="box-none"
-                style={{
-                  position: 'absolute',
-                  top: Math.max(insets.top, 8),
-                  left: 0,
-                  right: 0,
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 16,
-                }}>
-                <Pressable onPress={() => setDateVoteCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
-                  <Text style={GinitStyles.modalCancel}>취소</Text>
-                </Pressable>
-                <Pressable onPress={confirmDateVoteCalendarYmPick} hitSlop={10} accessibilityRole="button">
-                  <Text style={GinitStyles.modalDone}>완료</Text>
-                </Pressable>
-              </View>
-              <View
-                pointerEvents="box-none"
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  paddingBottom: Math.max(insets.bottom, 12),
-                  alignItems: 'center',
-                  backgroundColor: 'transparent',
-                }}>
-                <DateTimePicker
-                  value={dateVoteCalendarYmPick.draft}
-                  mode="date"
-                  display="spinner"
-                  locale="ko-KR"
-                  themeVariant="light"
-                  onChange={(_event: DateTimePickerEvent, date) => {
-                    if (!date) return;
-                    setDateVoteCalendarYmPick((prev) => (prev ? { draft: date } : prev));
-                  }}
-                />
-              </View>
-            </View>
-          </Modal>
-        ) : null}
-
-        <Modal
-          visible={profilePopupUserId != null}
-          animationType="fade"
-          transparent
-          onRequestClose={closeParticipantProfile}>
-          <View style={styles.profileModalRoot}>
-            <Pressable
-              style={StyleSheet.absoluteFillObject}
-              onPress={closeParticipantProfile}
-              accessibilityRole="button"
-              accessibilityLabel="프로필 닫기"
-            />
-            <View style={styles.profileModalCard}>
-              {(() => {
-                const pid = profilePopupUserId?.trim() ?? '';
-                const prof = pid ? participantProfiles[pid] : undefined;
-                const withdrawn = isUserProfileWithdrawn(prof);
-                const isLoading = Boolean(pid) && prof == null;
-                const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname?.trim() ?? '회원');
-                const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
-                const trust = typeof prof?.gTrust === 'number' ? prof.gTrust : null;
-                const dna = withdrawn ? '' : (prof?.gDna?.trim() ?? '');
-                const isMe =
-                  Boolean(userId?.trim() && pid) && normalizeParticipantId(userId ?? '') === normalizeParticipantId(pid);
-                const gender = withdrawn ? '' : (prof?.gender?.trim() ?? '');
-                const ageBand = withdrawn ? '' : (prof?.ageBand?.trim() ?? '');
-                const metaParts = [
-                  trust != null ? `gTrust ${trust}` : 'gTrust —',
-                  dna ? dna : '',
-                  [ageBand, gender].filter(Boolean).join(' · '),
-                ].filter(Boolean);
-                const friendGinitDisabled =
-                  friendRequestBusy ||
-                  withdrawn ||
-                  isMe ||
-                  friendRelation.status === 'accepted' ||
-                  friendRelation.status === 'pending_out';
-                const friendLabel =
-                  friendRelation.status === 'accepted'
-                    ? '친구'
-                    : friendRelation.status === 'pending_out'
-                      ? '신청 중'
-                      : friendRelation.status === 'pending_in'
-                        ? '친구 요청 수락'
-                        : '친구 요청';
-                const friendIconName: SymbolicIconName =
-                  friendRelation.status === 'accepted'
-                    ? 'checkmark-circle'
-                    : friendRelation.status === 'pending_out'
-                      ? 'time'
-                      : friendRelation.status === 'pending_in'
-                        ? 'checkmark-done'
-                        : 'person-add';
-                const friendInMissingId =
-                  friendRelation.status === 'pending_in' && !friendRelation.friendship_id?.trim();
-                return (
-                  <>
-                    <View style={styles.profileModalTop}>
-                      <View style={styles.profileAvatarWrap}>
-                        {photo ? (
-                          <Image source={{ uri: photo }} style={styles.profileAvatarImg} contentFit="cover" />
-                        ) : (
-                          <View style={styles.profileAvatarFallback}>
-                            <Text style={styles.profileAvatarLetter}>{nicknameInitial(nick)}</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.profileModalTopText}>
-                        <Text style={styles.profileModalNick} numberOfLines={1}>
-                          {nick}
-                        </Text>
-                        <Text style={styles.profileModalMeta} numberOfLines={1}>
-                          {isLoading ? '프로필 불러오는 중…' : metaParts.join(' · ')}
-                        </Text>
-                      </View>
-                      <Pressable
-                        onPress={closeParticipantProfile}
-                        style={({ pressed }) => [styles.profileModalCloseBtn, pressed && { opacity: 0.9 }]}
-                        accessibilityRole="button"
-                        accessibilityLabel="닫기">
-                        <GinitSymbolicIcon name="close" size={18} color={GinitTheme.colors.textMuted} />
-                      </Pressable>
-                    </View>
-
-                    <View style={styles.profileModalActions}>
-                      {isMe ? (
-                        <Pressable
-                          disabled
-                          style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
-                          accessibilityRole="button"
-                          accessibilityLabel="내 프로필">
-                          <GinitSymbolicIcon name="person" size={16} color="#fff" />
-                          <Text style={styles.profileActionPrimaryText}>내 프로필</Text>
-                        </Pressable>
-                      ) : (
-                        <Pressable
-                          onPress={
-                            friendRelation.status === 'pending_in' ? onAcceptFriendGinit : onSendFriendGinit
-                          }
-                          disabled={
-                            (friendGinitDisabled && friendRelation.status !== 'pending_in') || friendInMissingId
-                          }
-                          style={({ pressed }) => [
-                            styles.profileActionBtn,
-                            styles.profileActionPrimary,
-                            ((friendGinitDisabled && friendRelation.status !== 'pending_in') || friendInMissingId) && {
-                              opacity: 0.55,
-                            },
-                            pressed &&
-                              !(
-                                (friendGinitDisabled && friendRelation.status !== 'pending_in') ||
-                                friendInMissingId
-                              ) && { opacity: 0.9 },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={friendLabel}>
-                          {friendRequestBusy ? (
-                            <ActivityIndicator color="#fff" size="small" />
-                          ) : (
-                            <GinitSymbolicIcon name={friendIconName} size={16} color="#fff" />
-                          )}
-                          <Text style={styles.profileActionPrimaryText} numberOfLines={1}>
-                            {friendLabel}
-                          </Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  </>
-                );
-              })()}
-            </View>
-          </View>
-        </Modal>
-
-        <MeetingBasicInfoEditModal
-          visible={basicInfoEditOpen && meeting != null && !isScheduleConfirmed}
-          meeting={meeting}
-          hostUserId={userId}
-          onClose={() => setBasicInfoEditOpen(false)}
-          onSaved={() => {
-            if (meeting) {
-              markRecentSelfMeetingChange(meeting.id);
-              void refetchMeetingDetail();
-            }
-          }}
-        />
-
-        <NaverPlaceWebViewModal
-          visible={naverPlaceWebModal != null}
-          url={naverPlaceWebModal?.url}
-          pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
-          onClose={() => setNaverPlaceWebModal(null)}
-        />
       </SafeAreaView>
     </ScreenShell>
   );
@@ -4933,7 +2021,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingTop: 10,
     paddingBottom: 8,
     gap: 4,
   },
@@ -4970,73 +2057,23 @@ const styles = StyleSheet.create({
   retryText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 12 },
-  joinCtaBtn: {
-    borderRadius: 18,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: GinitTheme.glass.borderLight,
-    shadowColor: GinitTheme.glass.shadow,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 1,
-    shadowRadius: 22,
-    elevation: 14,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-  },
-  joinCtaBg: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  joinCtaInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  joinCtaLabel: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    letterSpacing: -0.35,
-  },
   titleCard: {
     backgroundColor: '#fff',
     borderRadius: 18,
     padding: 18,
-    marginBottom: 0,
+    paddingRight: 56,
+    marginBottom: 20,
     shadowColor: 'rgba(15, 23, 42, 0.12)',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,
     shadowRadius: 14,
     elevation: 4,
+    position: 'relative',
     overflow: 'visible',
   },
-  titleCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  /** 원형 라인 + 연필(기본 정보 수정) — 제목 우측 정렬 */
-  titleEditCircleBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    backgroundColor: '#fff',
-  },
-  titleCardText: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    lineHeight: 26,
-  },
+  pencilAbs: { position: 'absolute', top: 14, right: 14, zIndex: 2, padding: 4 },
+  titleCardText: { fontSize: 18, fontWeight: '700', color: '#1A1A1A', lineHeight: 26 },
+  mascotPeek: { position: 'absolute', right: 4, bottom: -4, fontSize: 36 },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -5048,206 +2085,34 @@ const styles = StyleSheet.create({
   sectionSpacedTight: { marginTop: 4, marginBottom: 0 },
   infoCard: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 18,
+    borderRadius: 18,
+    padding: 16,
     marginBottom: 20,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-    shadowColor: 'rgba(15, 23, 42, 0.1)',
-    shadowOffset: { width: 0, height: 8 },
+    gap: 6,
+    shadowColor: 'rgba(15, 23, 42, 0.08)',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 1,
-    shadowRadius: 20,
-    elevation: 4,
+    shadowRadius: 12,
+    elevation: 3,
   },
-  infoCardHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
-  infoCardHeadAccent: { width: 5, height: 44, borderRadius: 3 },
-  infoCardHeadText: { flex: 1, minWidth: 0 },
-  infoCardTitle: { fontSize: 18, fontWeight: '600', color: '#0f172a', letterSpacing: -0.3 },
-  infoCardKicker: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#64748b', lineHeight: 17 },
-  infoCategoryCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 6,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(248, 250, 252, 0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-  },
-  infoCategoryIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoCategoryTextCol: { flex: 1, minWidth: 0 },
-  infoMetaLabel: { fontSize: 11, fontWeight: '600', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.6 },
-  infoMetaValue: { marginTop: 4, fontSize: 16, fontWeight: '600', color: '#0f172a', letterSpacing: -0.2 },
-  scheduleHintRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  infoDivider: {
-    height: StyleSheet.hairlineWidth * 2,
-    backgroundColor: 'rgba(15, 23, 42, 0.08)',
-    marginTop: 14,
-    marginBottom: 4,
-    borderRadius: 2,
-  },
-  infoSectionLabelStrong: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: GinitTheme.colors.text,
-    letterSpacing: 0.8,
-    marginTop: 8,
-    textTransform: 'uppercase',
-  },
+  infoCardTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
   infoLabel: { fontWeight: '700', color: '#64748B' },
   infoRow: { fontSize: 14, color: '#1A1A1A', lineHeight: 21 },
-  infoRowMuted: { fontSize: 13, color: '#64748b', lineHeight: 19 },
-  scheduleHintText: { flex: 1 },
-  infoSectionLabel: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.text, marginTop: 0 },
-  infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22, marginTop: 6 },
-  condRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 0,
-  },
-  condRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: GinitTheme.colors.border,
-  },
-  condRowTrust: {
-    backgroundColor: 'rgba(255, 237, 213, 0.45)',
-    borderRadius: GinitTheme.radius.card,
-    paddingHorizontal: 10,
-    marginVertical: 2,
-  },
-  condIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: GinitTheme.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  condIconWrapTrust: {
-    backgroundColor: 'rgba(255, 247, 237, 0.98)',
-  },
-  condTextCol: { flex: 1, minWidth: 0 },
-  condLabel: { fontSize: 11, fontWeight: '600', color: '#64748b', letterSpacing: 0.4, textTransform: 'uppercase' },
-  condLabelTrust: { color: '#9a3412' },
-  condValue: { marginTop: 4, fontSize: 15, fontWeight: '600', color: '#0f172a', lineHeight: 21, letterSpacing: -0.2 },
-  condValueTrust: { color: '#7c2d12' },
-  condCallout: {
-    marginTop: 10,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    padding: 12,
-    borderRadius: GinitTheme.radius.card,
-    backgroundColor: 'rgba(224, 242, 254, 0.85)',
-  },
-  condCalloutText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#0c4a6e', lineHeight: 19 },
-  publicBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  infoRowMuted: { fontSize: 13, color: '#8B95A1', lineHeight: 19 },
+  infoSectionLabel: { fontSize: 12, fontWeight: '700', color: '#8B95A1', marginTop: 10 },
+  infoDescription: { fontSize: 14, color: '#334155', lineHeight: 22 },
+  publicBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   miniBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 999,
     backgroundColor: 'rgba(0, 82, 204, 0.1)',
   },
-  miniBadgeIcon: { marginTop: 0 },
   miniBadgeMuted: { backgroundColor: '#F1F5F9' },
   miniBadgeText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.primary },
   miniBadgeTextMuted: { color: '#64748B' },
-  miniBadgeMale: { backgroundColor: 'rgba(0, 76, 255, 0.1)' },
-  miniBadgeMaleText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.primary },
-  miniBadgeFemale: { backgroundColor: 'rgba(255, 140, 198, 0.16)' },
-  miniBadgeFemaleText: { fontSize: 12, fontWeight: '600', color: '#BE185D' },
-  miniBadgeUnknown: { backgroundColor: 'rgba(100, 116, 139, 0.14)' },
-  miniBadgeUnknownText: { fontSize: 12, fontWeight: '600', color: '#475569' },
   movieScrollContent: { flexDirection: 'row', gap: 12, paddingVertical: 4, paddingRight: 8 },
-  movieVotePosterColumn: { width: 108 },
-  /** 모임 등록·상세 공통 — `movieResultDetailBtn` / deepPurple 채움 */
-  moviePosterInfoBtn: {
-    marginTop: 8,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: GinitTheme.radius.button,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.deepPurple,
-    backgroundColor: GinitTheme.colors.deepPurple,
-  },
-  moviePosterInfoBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  moviePosterInfoBtnBelowPoster: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-  },
-  /** 영화 후보 등록 `wizard-specialty`의 `movieResultImageCard`와 동일 톤 */
-  moviePosterThumbWrap: {
-    width: 108,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  moviePosterThumbWrapSelected: {
-    borderColor: GinitTheme.colors.deepPurple,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-  },
-  moviePosterThumbWrapPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
-  moviePosterThumb: { width: '100%', height: 148, backgroundColor: '#E2E8F0' },
-  /** `movieResultImageOverlay` — 체크는 우상단, 집계 뱃지는 좌상단 */
-  moviePosterThumbCheckOverlay: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-    borderRadius: 999,
-    padding: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  voteTallyBadgeMoviePoster: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    zIndex: 5,
-    minWidth: 27,
-    height: 25,
-    paddingHorizontal: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopLeftRadius: 12,
-    borderBottomRightRadius: 11,
-    backgroundColor: 'rgba(255, 255, 255, 0.97)',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.12)',
-    shadowColor: 'rgba(15, 23, 42, 0.12)',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
   movieVoteCard: {
     width: 108,
     padding: 4,
@@ -5263,18 +2128,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
-  movieVoteCardV: {
-    width: '100%',
-    padding: 10,
-  },
-  movieRowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    minWidth: 0,
-  },
-  movieRowTextCol: { flex: 1, minWidth: 0 },
-  moviePosterTitleV: { marginTop: 0, fontSize: 13, lineHeight: 18 },
   movieVoteCardSelected: {
     borderColor: GinitTheme.colors.primary,
     backgroundColor: 'rgba(0, 82, 204, 0.07)',
@@ -5297,30 +2150,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2E8F0',
   },
   confirmedMovieTextCol: { flex: 1, minWidth: 0 },
-  movieDetailRow: { marginTop: 2, flexDirection: 'row', alignItems: 'stretch', gap: 12 },
-  movieDetailPosterLeftWrap: {
-    width: 140,
-    height: 208,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  movieDetailPosterLeft: { width: '100%', height: '100%' },
-  movieDetailInfoCol: { flex: 1, minWidth: 0, paddingTop: 2, justifyContent: 'space-between' },
-  movieDetailInfoTop: { flexShrink: 1, minHeight: 0 },
-  movieDetailTitle: { fontSize: 14, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 20 },
-  movieDetailBody: { marginTop: 6, fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 17 },
-  moviePosterInfoBtnInDetailCol: { marginTop: 10 },
-  movieMetaList: { marginTop: 8, gap: 6 },
-  movieMetaRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
-  movieMetaKey: { width: 86, fontSize: 11, fontWeight: '600', color: GinitTheme.colors.textMuted },
-  movieMetaVal: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 11, fontWeight: '600', color: GinitTheme.colors.text },
-  movieMetaLine: { textAlign: 'left', fontSize: 11, fontWeight: '600', color: GinitTheme.colors.text },
-  movieMetaKeyInline: { fontSize: 11, fontWeight: '600', color: GinitTheme.colors.textMuted },
-  movieMetaValInline: { fontSize: 11, fontWeight: '600', color: GinitTheme.colors.text },
-  movieMetaSep: { fontSize: 11, fontWeight: '600', color: GinitTheme.colors.textMuted },
   confirmedPayNoteSpacer: { marginTop: 12 },
   confirmedMapPress: {
     marginTop: 10,
@@ -5378,247 +2207,15 @@ const styles = StyleSheet.create({
   tieHostHintEm: { fontWeight: '600', color: '#b45309' },
   dateChipScroll: { flexDirection: 'row', gap: 10, paddingBottom: 6, paddingRight: 8 },
   placeVoteChip: { minWidth: 148, maxWidth: 220 },
-  voteCalendarWrap: {
-    width: '100%',
-    marginTop: 10,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(255, 255, 255, 0.45)',
-    overflow: 'hidden',
-  },
-  voteCalendarHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: GinitTheme.colors.border,
-  },
-  voteCalendarTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: GinitTheme.colors.text,
-    letterSpacing: -0.2,
-  },
-  voteCalendarTitlePress: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 34,
-  },
-  voteCalendarCarouselHost: {
-    width: '100%',
-    height: 274,
-  },
-  voteCalendarPagerScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  voteCalendarPagerContent: {
-    paddingVertical: 10,
-    paddingHorizontal: 0,
-    gap: 0,
-  },
-  calendarNavBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(31, 42, 68, 0.04)',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-  },
-  calendarNavBtnPressed: { opacity: 0.9 },
-  calendarDowRow: { flexDirection: 'row', paddingHorizontal: 8, paddingTop: 8, paddingBottom: 6 },
-  calendarDowText: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 11,
-    fontWeight: '600',
-    color: GinitTheme.colors.textMuted,
-  },
-  calendarGrid: { paddingHorizontal: 8, paddingBottom: 10 },
-  calendarWeekRow: { flexDirection: 'row', width: '100%', marginBottom: 8 },
-  calendarWeekRowEmpty: { marginBottom: 2 },
-  calendarCell: {
-    flexGrow: 1,
-    flexBasis: 0,
-    paddingHorizontal: 4,
-    paddingVertical: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
-    borderRadius: 12,
-  },
-  calendarCellRowEmpty: { paddingVertical: 2, minHeight: 18 },
-  calendarCellOut: { opacity: 0.42 },
-  calendarCellHas: {
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.45)',
-  },
-  calendarCellSelected: {
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.55)',
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
-  },
-  calendarCellPressed: { opacity: 0.9 },
-  calendarCellDay: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18 },
-  calendarCellDayOut: { color: GinitTheme.colors.textMuted },
-  calendarTimesWrap: {
-    //flexDirection: 'row',
-    flexWrap: 'nowrap',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    marginTop: 0,
-    marginBottom: 0,
-    gap: 2,
-  },
-  calendarCellMeta: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: GinitTheme.colors.primary,
-    marginTop: 0,
-    marginBottom: 0,
-  },
-  calendarCellTimePillSelected: {
-    flexShrink: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 1,
-    borderRadius: 5,
-    backgroundColor: GinitTheme.colors.deepPurple,
-  },
-  calendarCellTimeLabelSelected: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  calendarCellMetaEmpty: { marginTop: 0, marginBottom: 0, fontSize: 10, color: 'transparent' },
-  placeVoteCarouselContent: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 10,
-    paddingBottom: 6,
-    paddingRight: 8,
-  },
-  /** `VoteCandidatesForm` 장소 검색 카드(`placeResultCard` + `placeResultImageCard`)와 동일 톤 — 선택은 `placeResultImageCardSelected`와 동일 */
-  placeVoteCard: {
-    width: 176,
-    minHeight: 254,
-    flexDirection: 'column',
-    borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    position: 'relative',
-    overflow: 'visible',
-    shadowColor: 'rgba(15, 23, 42, 0.06)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  /** `details.tsx` `placeResultProposalCardWrap` — 본문이 늘어나도 카카오·네이버 버튼 행은 카드 하단에 고정 */
-  placeVoteCardPressFill: { flex: 1, minHeight: 0 },
-  placeVoteCardPressInner: { flexGrow: 1 },
-  placeVoteCardSelected: {
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-  },
-  placeVoteImageWrap: {
-    width: '100%',
-    height: 112,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  placeVoteImage: { width: '100%', height: '100%' },
-  placeVoteImageFallback: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.06)' },
-  placeVoteSelectedOverlay: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
-    borderRadius: 999,
-    padding: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  placeVoteTallyBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    zIndex: 6,
-    minWidth: 27,
-    height: 25,
-    paddingHorizontal: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.97)',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 82, 204, 0.12)',
-    shadowColor: 'rgba(15, 23, 42, 0.12)',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  placeVoteTitle: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
-  placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
-  placeDetailBlock: { marginTop: 0 },
-  placeDetailHeroRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 12,
-    marginBottom: 10,
-  },
-  placeDetailSquareThumbWrap: {
-    width: 150,
-    height: 112,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.12)',
-  },
-  placeDetailRightCol: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 112,
-    justifyContent: 'space-between',
-    alignItems: 'stretch',
-  },
-  placeDetailRightColTop: { flexShrink: 1 },
-  candidateListV: { gap: 10, paddingBottom: 6 },
-  candidateChipV: {
-    alignSelf: 'stretch',
-    width: '100%',
-    minWidth: undefined,
-    maxWidth: undefined,
-    paddingRight: 14,
-  },
-  dateChipTitleV: { textAlign: 'left' },
-  dateChipSubV: { textAlign: 'left' },
-  /** 일시 투표 시간 선택 시트 — 장소 제안 후보 카드(`placeResultCard`)와 동일 톤 */
   dateChip: {
     minWidth: 112,
     maxWidth: 140,
     paddingVertical: 14,
     paddingHorizontal: 12,
     borderRadius: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#E4E9EF',
     position: 'relative',
     overflow: 'visible',
     shadowColor: 'rgba(15, 23, 42, 0.06)',
@@ -5628,8 +2225,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   dateChipSelected: {
-    borderColor: 'rgba(31, 42, 68, 0.55)',
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    borderColor: GinitTheme.colors.primary,
+    backgroundColor: 'rgba(0, 82, 204, 0.07)',
   },
   dateChipPressed: { opacity: 0.9 },
   dateChipCheckWrapLeft: { position: 'absolute', top: 5, left: 5, zIndex: 5 },
@@ -5668,7 +2265,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     fontVariant: ['tabular-nums'],
   },
-  dateChipTitle: { fontSize: 14, fontWeight: '700', color: GinitTheme.colors.text, textAlign: 'center' },
+  dateChipTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
+  dateChipTitleSelected: { color: GinitTheme.colors.primary },
   dateChipSub: { fontSize: 13, fontWeight: '600', color: '#5C6570', textAlign: 'center', marginTop: 6 },
   dateChipSubSelected: { color: GinitTheme.colors.primary },
   dateSelectionHint: { fontSize: 13, color: GinitTheme.colors.primary, fontWeight: '600', marginTop: 8 },
@@ -5682,182 +2280,71 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.deepPurple,
-    backgroundColor: GinitTheme.colors.deepPurple,
+    borderColor: '#D0D7E0',
+    backgroundColor: 'rgba(255,255,255,0.65)',
   },
   addOutlineText: { fontSize: 15, fontWeight: '600', color: '#5C6570' },
-  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
-  /** 날짜·장소 제안 모달 — 상세 화면 카드(밝은 서피스)와 동일 톤 */
-  proposeModalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
-  proposeModalBackdrop: {
+  addOutlineTextActive: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.primary },
+  modalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 12 },
+  modalBackdrop: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.38)',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
-  proposeModalSheet: {
+  modalSheetDark: {
     zIndex: 2,
-    backgroundColor: GinitTheme.colors.surfaceStrong,
-    borderRadius: 20,
-    padding: 18,
+    backgroundColor: '#0F172A',
+    borderRadius: 18,
+    padding: 16,
     maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    ...GinitTheme.shadow.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 8,
   },
-  /** 날짜 제안만 — 시트 패딩·전체 높이를 줄여 한 화면에 맞춤 */
-  proposeModalSheetDateCompact: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  proposeModalHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 6,
-  },
-  proposeModalIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0, 82, 204, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  proposeModalHeaderTextCol: { flex: 1, minWidth: 0 },
-  proposeModalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    letterSpacing: -0.3,
-    color: GinitTheme.colors.text,
-  },
-  proposeModalSub: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: GinitTheme.colors.textMuted,
-    lineHeight: 19,
-    marginBottom: 10,
-  },
-  proposeModalSubDateCompact: {
-    marginBottom: 4,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  /** 시간 선택(투표) — 디바이더 기반 리스트(촌스러운 칩 제거) */
-  timeVoteListContent: {
-    paddingTop: 8,
-    paddingBottom: 12,
-  },
-  timeVoteSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: GinitTheme.colors.border,
-  },
-  timeVoteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-  },
-  timeVoteRowSelected: {
-    backgroundColor: 'rgba(31, 42, 68, 0.06)',
-  },
-  timeVoteRowPressed: {
-    opacity: 0.88,
-  },
-  timeVoteHm: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 16,
-    fontWeight: '600',
-    color: GinitTheme.colors.text,
-    letterSpacing: -0.2,
-  },
-  timeVoteRightMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginLeft: 12,
-  },
-  timeVoteTallyPill: {
-    minWidth: 28,
-    height: 24,
-    paddingHorizontal: 9,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.16)',
-  },
-  timeVoteTallyPillSelected: {
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderColor: 'rgba(31, 42, 68, 0.28)',
-  },
-  timeVoteTallyText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: GinitTheme.colors.textSub,
-  },
-  timeVoteTallyTextSelected: {
-    color: GinitTheme.colors.primary,
-  },
-  timeVoteCheckPlaceholder: {
-    width: 18,
-    height: 18,
-  },
-  proposeModalFormScroll: { flexGrow: 0 },
-  /** 날짜 제안: flex는 인라인 maxHeight(화면 비율)로 스크롤 영역 상한만 둠 */
-  proposeModalFormScrollDate: {
-    flexGrow: 0,
-  },
-  proposeModalFormScrollContent: { paddingBottom: 12 },
-  proposeModalFormScrollContentDateCompact: {
-    paddingBottom: 4,
-    flexGrow: 0,
-  },
-  proposeModalFooter: {
+  modalTitleLight: { fontSize: 18, fontWeight: '700', color: '#F8FAFC', marginBottom: 6 },
+  modalSubLight: { fontSize: 13, color: 'rgba(248, 250, 252, 0.72)', lineHeight: 19, marginBottom: 8 },
+  modalFormScroll: { flexGrow: 0 },
+  modalFormScrollContent: { paddingBottom: 12 },
+  modalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    alignItems: 'center',
     gap: 10,
-    marginTop: 5,
-    paddingTop: 14,
-//    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: GinitTheme.colors.border,
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
   },
-  proposeModalFooterDateCompact: {
-    marginTop: 6,
-    paddingTop: 6,
-  },
-  proposeModalGhostBtn: {
+  modalBtnGhostDark: {
     paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: GinitTheme.colors.borderStrong,
-    backgroundColor: GinitTheme.colors.bg,
+    borderColor: 'rgba(255,255,255,0.25)',
   },
-  proposeModalGhostBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.textSub },
-  proposeModalPrimaryBtn: {
+  modalBtnGhostTextLight: { fontSize: 15, fontWeight: '600', color: 'rgba(248, 250, 252, 0.85)' },
+  modalBtnPrimary: {
     paddingVertical: 12,
-    paddingHorizontal: 22,
-    borderRadius: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     backgroundColor: 'transparent',
     overflow: 'hidden',
-    borderWidth: 0,
-    minWidth: 124,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    minWidth: 120,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnGradientBg: {
     ...StyleSheet.absoluteFillObject,
   },
-  proposeModalPrimaryBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   placePayNote: { fontSize: 12, color: '#5C6570', marginTop: 10 },
   pencilPlaceRow: {
     flexDirection: 'row',
@@ -5887,20 +2374,9 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  avatarCircleMale: {
-    borderColor: 'rgba(31, 42, 68, 0.55)',
-  },
-  avatarCircleFemale: {
-    borderColor: 'rgba(255, 140, 198, 0.95)',
-  },
-  avatarCircleWithdrawn: {
-    backgroundColor: '#e2e8f0',
-    borderColor: '#cbd5e1',
-  },
   avatarPhoto: { width: 52, height: 52, borderRadius: 26 },
   avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.colors.primary },
   avatarLabel: { marginTop: 6, fontSize: 11, color: '#333', textAlign: 'center', lineHeight: 14 },
-  genderCountText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted },
   avatarAdd: {
     width: 52,
     height: 52,
@@ -5913,81 +2389,7 @@ const styles = StyleSheet.create({
     marginTop: 0,
     opacity: 0.85,
   },
-  joinRequestList: { paddingVertical: 2 },
-  joinRequestSep: { height: StyleSheet.hairlineWidth, backgroundColor: GinitTheme.colors.border },
-  joinRequestRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-  },
-  joinRequestAvatarPress: { flexShrink: 0 },
-  joinRequestAvatarSq: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: '#E8F2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  joinRequestAvatarSqMale: {
-    borderColor: 'rgba(31, 42, 68, 0.55)',
-  },
-  joinRequestAvatarSqFemale: {
-    borderColor: 'rgba(255, 140, 198, 0.95)',
-  },
-  joinRequestAvatarSqWithdrawn: {
-    backgroundColor: '#e2e8f0',
-    borderColor: '#cbd5e1',
-  },
-  joinRequestAvatarSqImg: { width: 44, height: 44, borderRadius: 14 },
-  joinRequestAvatarInitial: { fontSize: 17, fontWeight: '700', color: GinitTheme.colors.primary },
-  joinRequestMid: { flex: 1, minWidth: 0, justifyContent: 'center', gap: 2 },
-  joinRequestNick: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
-  joinRequestMessage: {
-    fontSize: 13,
-    fontWeight: '400',
-    lineHeight: 17,
-    letterSpacing: -0.1,
-    color: GinitTheme.colors.textMuted,
-  },
-  joinRequestMessagePlaceholder: { color: GinitTheme.colors.textMuted },
-  joinRequestBubble: {
-    backgroundColor: GinitTheme.colors.primarySoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  joinRequestBubbleText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.textSub, lineHeight: 18 },
-  joinRequestBubbleTextPlaceholder: { color: GinitTheme.colors.textMuted },
-  joinRequestActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  joinRequestBtnPrimary: {
-    minWidth: 54,
-    height: 32,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: GinitTheme.colors.primary,
-  },
-  joinRequestBtnPrimaryText: { fontSize: 12, fontWeight: '600', color: '#fff' },
-  joinRequestBtnGhost: {
-    minWidth: 54,
-    height: 32,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgb(220, 38, 38)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.danger,
-  },
-  joinRequestBtnGhostText: { fontSize: 12, fontWeight: '600', color: GinitTheme.colors.texWhite },
+  bottomSpacer: { height: 100 },
   guestJoinHintWrap: {
     paddingHorizontal: 16,
     paddingTop: 6,
@@ -6008,18 +2410,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '600',
   },
-  hostKickHintText: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '600',
-    color: GinitTheme.colors.danger,
-  },
   bottomBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'center',
@@ -6027,20 +2418,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 12,
     backgroundColor: 'transparent',
-  },
-  guestJoinBottomCol: {
-    flex: 1,
-    minWidth: 0,
-    gap: 6,
-    alignItems: 'stretch',
-  },
-  joinOverlapCaption: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#64748b',
-    textAlign: 'center',
-    lineHeight: 14,
-    paddingHorizontal: 4,
   },
   /** 보이는 버튼만큼 동일 비율(flex 1)로 화면 너비 분배 */
   bottomBarEqualRow: {
@@ -6050,14 +2427,9 @@ const styles = StyleSheet.create({
     gap: 10,
     minWidth: 0,
   },
-  bottomBarCol: {
-    width: '100%',
-    gap: 10,
-  },
   bottomPillLabel: {
     flexShrink: 1,
-    // 버튼 폭이 좁을 때(특히 2~3개 버튼 배치) 라벨이 0으로 줄어 "글자가 사라지는" 케이스 방지
-    minWidth: 26,
+    minWidth: 0,
     textAlign: 'center',
   },
   bottomPill: {
@@ -6066,8 +2438,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingHorizontal: 16,
-    paddingVertical: 13,
-    minHeight: 50,
+    paddingVertical: 12,
     borderRadius: 22,
   },
   /** 게스트 2버튼일 때 가로 폭 균등 */
@@ -6075,63 +2446,6 @@ const styles = StyleSheet.create({
   pillBlue: { backgroundColor: GinitTheme.colors.textSub },
   pillOrange: { backgroundColor: GinitTheme.pointOrange },
   pillDanger: { backgroundColor: '#DC2626' },
-  pillText: { color: '#fff', fontWeight: '700', fontSize: 14, lineHeight: 18 },
-  pillTextOnOrange: { color: GinitTheme.colors.texWhite },
-  pillTextCompact: { fontSize: 12, lineHeight: 16 },
-
-  profileModalRoot: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.48)',
-    justifyContent: 'center',
-    paddingHorizontal: 22,
-  },
-  profileModalCard: {
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.6)',
-    padding: 18,
-    ...GinitTheme.shadow.card,
-  },
-  profileModalTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  profileAvatarWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(226, 232, 240, 0.8)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-  },
-  profileAvatarImg: { width: '100%', height: '100%' },
-  profileAvatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  profileAvatarLetter: { fontSize: 20, fontWeight: '600', color: GinitTheme.colors.primary },
-  profileModalTopText: { flex: 1, minWidth: 0, gap: 4 },
-  profileModalNick: { fontSize: 18, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.2 },
-  profileModalMeta: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.textMuted },
-  profileModalCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.04)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  profileModalActions: { marginTop: 14 },
-  profileActionBtn: {
-    height: 44,
-    borderRadius: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  profileActionPrimary: { backgroundColor: GinitTheme.colors.primary },
-  profileActionPrimaryText: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  pillText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pillTextCompact: { fontSize: 12 },
 });

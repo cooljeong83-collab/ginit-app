@@ -113,6 +113,7 @@ import {
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { placeKeyFromNaverLocalSearchId } from '@/src/lib/place-key';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import {
@@ -947,12 +948,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
       const thumb = (resolved.thumbnailUrl ?? '').trim();
       const cat = (resolved.category ?? item.category ?? '').trim();
+      const pk = placeKeyFromNaverLocalSearchId(resolved.id);
       const p: PlaceCandidate = {
         id: newId('place'),
         placeName,
         address,
         latitude: resolved.latitude,
         longitude: resolved.longitude,
+        ...(pk ? { placeKey: pk } : {}),
         ...(cat ? { category: cat } : {}),
         ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
         ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),
@@ -1075,6 +1078,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.placeKey?.trim() ? { placeKey: r.placeKey.trim() } : {}),
               ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
               ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
@@ -1147,6 +1151,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.placeKey?.trim() ? { placeKey: r.placeKey.trim() } : {}),
               ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
               ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
@@ -1177,6 +1182,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               address: r.address.trim(),
               latitude: Number(r.latitude),
               longitude: Number(r.longitude),
+              ...(r.placeKey?.trim() ? { placeKey: r.placeKey.trim() } : {}),
               ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
               ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
@@ -1214,6 +1220,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   address: sel.address,
                   latitude: sel.latitude,
                   longitude: sel.longitude,
+                  ...(sel.placeKey?.trim() ? { placeKey: sel.placeKey.trim() } : {}),
                   ...(sel.category?.trim() ? { category: sel.category.trim() } : {}),
                   ...(sel.naverPlaceLink?.trim() ? { naverPlaceLink: sel.naverPlaceLink.trim() } : {}),
                   ...(sel.preferredPhotoMediaUrl?.trim().startsWith('https://')
@@ -2229,12 +2236,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                     ? resolvedPhoto
                                     : undefined;
                                   const catPick = (resolved.category ?? item.category ?? '').trim();
+                                  const pkInline = placeKeyFromNaverLocalSearchId(resolved.id);
                                   const p: PlaceCandidate = {
                                     id: newId('place'),
                                     placeName,
                                     address,
                                     latitude: resolved.latitude,
                                     longitude: resolved.longitude,
+                                    ...(pkInline ? { placeKey: pkInline } : {}),
                                     ...(catPick ? { category: catPick } : {}),
                                     ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
                                     ...(preferredPhotoMediaUrl ? { preferredPhotoMediaUrl } : {}),

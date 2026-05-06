@@ -3927,7 +3927,7 @@ const styles = StyleSheet.create({
   },
   /** 제목·주소 각 2줄 + 카카오·네이버 버튼까지 포함(이미지 112 + 여백) — `overflow: hidden` 호스트에 맞춤 */
   placeResultsCarouselHost: {
-    height: 274,
+    height: 282,
   },
   placeResultsCarouselContent: {
     paddingVertical: 10,
@@ -3936,7 +3936,7 @@ const styles = StyleSheet.create({
   },
   placeResultsLoadingMore: {
     width: 76,
-    height: 274,
+    height: 282,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3971,9 +3971,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
-  /** 가로 캐러셀(`placeResultsCarouselHost` 274) − 세로 패딩 20 기준 — 카카오·네이버 버튼을 카드 하단에 고정 */
+  /** 가로 캐러셀(`placeResultsCarouselHost` 282) − 세로 패딩 20 기준 — 카카오·네이버 버튼을 카드 하단에 고정 */
   placeResultProposalCardWrap: {
-    minHeight: 254,
+    minHeight: 262,
     flexDirection: 'column',
   },
   placeResultProposalPressFill: {
@@ -4024,7 +4024,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 18,
-    marginBottom: 6,
+    marginBottom: 5,
   },
   placeResultAddr: {
     fontSize: 11,
