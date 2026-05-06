@@ -26,6 +26,7 @@ import {
 } from '@/src/lib/friends';
 import { effectiveGTrust, levelBarFillColorForTrust, trustTierForUser, xpProgressWithinLevel } from '@/src/lib/ginit-trust';
 import {
+  avatarsObjectPathFromPublicUrlIfOwned,
   deleteProfilePhotoHistoryUrl,
   fetchProfilePhotoHistory,
   isProfilePhotoDeleteDebugEnabled,
@@ -44,13 +45,9 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 
-function isExternalPhotoUrl(url: string): boolean {
-  const u = url.trim();
-  if (!u) return false;
-  // Supabase public storage(avatars bucket)면 내부 관리로 간주
-  if (u.includes('/storage/v1/object/public/')) return false;
-  // 그 외는 외부(구글 프로필/포토 등)로 취급
-  return true;
+/** `avatars` 버킷에 앱이 올린 본인 폴더 경로의 공개 URL인지 (가입 시 외부 프로필 사진 URL 제외) */
+function isAvatarsStorageUploadedByUser(photoUrl: string, ownerAppUserId: string): boolean {
+  return avatarsObjectPathFromPublicUrlIfOwned(photoUrl, ownerAppUserId) != null;
 }
 
 function nicknameInitial(nickname: string): string {
@@ -96,6 +93,8 @@ export function UserProfilePublicBody({
   const [profileImageViewer, setProfileImageViewer] = useState<{ index: number } | null>(null);
   const [profilePhotoDeleteBusy, setProfilePhotoDeleteBusy] = useState(false);
   const [friendRelation, setFriendRelation] = useState<FriendRelationStatusRow>({ status: 'none', friendship_id: null });
+  /** `targetNorm`과 같을 때만 관계 기반 CTA(친구 신청 등)를 그린다 — 조회 전 `none`으로 잘못 노출되지 않게 함 */
+  const [friendRelResolvedForPeer, setFriendRelResolvedForPeer] = useState<string | null>(null);
   const [friendBusy, setFriendBusy] = useState(false);
   const friendFetchGenRef = useRef(0);
   const peerRelationCacheRef = useRef<Map<string, FriendRelationStatusRow>>(new Map());
@@ -141,6 +140,7 @@ export function UserProfilePublicBody({
     if (!meNorm) {
       peerRelationCacheRef.current.clear();
       setFriendRelation({ status: 'none', friendship_id: null });
+      setFriendRelResolvedForPeer(null);
     }
   }, [meNorm]);
 
@@ -156,7 +156,15 @@ export function UserProfilePublicBody({
     const cached = peerRelationCacheRef.current.get(peer);
     if (cached?.status === 'pending_out' || cached?.status === 'pending_in' || cached?.status === 'accepted') {
       setFriendRelation(cached);
+      setFriendRelResolvedForPeer(peer);
+    } else {
+      setFriendRelResolvedForPeer(null);
     }
+
+    const markResolved = () => {
+      if (!alive || snapshot !== friendFetchGenRef.current) return;
+      setFriendRelResolvedForPeer(peer);
+    };
 
     void fetchFriendRelationStatus(me, peer)
       .then((gr) => {
@@ -185,7 +193,11 @@ export function UserProfilePublicBody({
                   setFriendRelation(gr2);
                 }
               })
-              .catch(() => {});
+              .catch(() => {})
+              .finally(() => {
+                if (!alive || friendFetchGenRef.current !== genAtRetry) return;
+                setFriendRelResolvedForPeer(peer);
+              });
           }, 900);
           return;
         }
@@ -201,7 +213,8 @@ export function UserProfilePublicBody({
         } else {
           setFriendRelation({ status: 'none', friendship_id: null });
         }
-      });
+      })
+      .finally(markResolved);
 
     return () => {
       alive = false;
@@ -230,6 +243,7 @@ export function UserProfilePublicBody({
       if (hideMyEditCta) return null;
       return { label: '프로필 편집', kind: 'edit' as const, icon: 'account-edit-outline' as SymbolicIconName };
     }
+    if (friendRelResolvedForPeer !== targetNorm) return null;
     if (friendRelation.status === 'accepted')
       return { label: '1:1 채팅 하기', kind: 'chat' as const, icon: 'chatbubbles-outline' as SymbolicIconName };
     if (friendRelation.status === 'pending_in')
@@ -237,14 +251,17 @@ export function UserProfilePublicBody({
     if (friendRelation.status === 'pending_out')
       return { label: '친구 신청 중', kind: 'pending' as const, icon: 'time' as SymbolicIconName };
     return { label: '친구 신청하기', kind: 'request' as const, icon: 'person-add' as SymbolicIconName };
-  }, [friendRelation.status, hideMyEditCta, isMe, showCta]);
+  }, [friendRelResolvedForPeer, friendRelation.status, hideMyEditCta, isMe, showCta, targetNorm]);
 
   const profileImageGallery = useMemo<ImageViewerGalleryItem[]>(() => {
+    const owner = targetNorm.trim();
+    if (!owner) return [];
     const seen = new Set<string>();
     const out: ImageViewerGalleryItem[] = [];
     const push = (id: string, url: string) => {
       const u = url.trim();
       if (!u || seen.has(u)) return;
+      if (!isAvatarsStorageUploadedByUser(u, owner)) return;
       seen.add(u);
       out.push({ id, imageUrl: u });
     };
@@ -253,7 +270,7 @@ export function UserProfilePublicBody({
       push(`h-${i}-${history[i]!.createdAt}`, history[i]!.photoUrl);
     }
     return out;
-  }, [history, photo]);
+  }, [history, photo, targetNorm]);
 
   const openProfileImageAtUrl = useCallback(
     (url: string) => {
@@ -269,28 +286,59 @@ export function UserProfilePublicBody({
     setProfileImageViewer((prev) => (prev ? { index: i } : prev));
   }, []);
 
+  useEffect(() => {
+    if (!profileImageViewer) return;
+    const n = profileImageGallery.length;
+    if (n <= 0) {
+      setProfileImageViewer(null);
+      return;
+    }
+    const clamped = Math.min(n - 1, Math.max(0, profileImageViewer.index));
+    if (clamped !== profileImageViewer.index) {
+      setProfileImageViewer({ index: clamped });
+    }
+  }, [profileImageGallery, profileImageViewer]);
+
+  const profileImageViewerSafeIndex =
+    profileImageViewer != null && profileImageGallery.length > 0
+      ? Math.min(profileImageGallery.length - 1, Math.max(0, profileImageViewer.index))
+      : 0;
+
+  const profileViewerSlideUrl =
+    profileImageViewer != null && profileImageGallery.length > 0
+      ? (profileImageGallery[profileImageViewerSafeIndex]?.imageUrl ?? '').trim()
+      : '';
+
   const showProfileViewerDelete =
     isMe &&
     profileImageViewer != null &&
-    photo.trim().length > 0 &&
-    (profileImageGallery[profileImageViewer.index]?.imageUrl ?? '').trim() === photo.trim();
+    profileViewerSlideUrl.length > 0 &&
+    isAvatarsStorageUploadedByUser(profileViewerSlideUrl, targetNorm);
 
-  const onConfirmDeleteCurrentProfilePhoto = useCallback(() => {
+  const onConfirmDeleteProfilePhotoAtViewer = useCallback(() => {
     const me = targetNorm;
-    if (!isMe || !me.trim()) return;
-    const deletingUrl = photo.trim();
-    Alert.alert('프로필 사진 삭제', '현재 프로필 사진을 삭제할까요?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setProfilePhotoDeleteBusy(true);
-            try {
-              // 1) Storage·히스토리·(동일 URL이면) photo_url 은 RPC에서 먼저 처리. 실패 시 프로필은 그대로 두고 중단 → 삭제 버튼/썸네일 유지
-              if (deletingUrl) {
-                const delRes = await deleteProfilePhotoHistoryUrl(me, deletingUrl);
+    if (!isMe || !me.trim() || !profileImageViewer || profileImageGallery.length <= 0) return;
+    const delIx = Math.min(profileImageGallery.length - 1, Math.max(0, profileImageViewer.index));
+    const viewingUrl = (profileImageGallery[delIx]?.imageUrl ?? '').trim();
+    if (!viewingUrl) return;
+    if (!isAvatarsStorageUploadedByUser(viewingUrl, me)) {
+      Alert.alert('삭제 불가', 'Supabase에 올린 사진만 여기서 삭제할 수 있어요.');
+      return;
+    }
+    const isCurrent = viewingUrl === photo.trim();
+    Alert.alert(
+      isCurrent ? '프로필 사진 삭제' : '과거 사진 삭제',
+      isCurrent ? '현재 프로필 사진을 삭제할까요?' : '목록에서 이 사진을 삭제할까요?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setProfilePhotoDeleteBusy(true);
+              try {
+                const delRes = await deleteProfilePhotoHistoryUrl(me, viewingUrl);
                 if (delRes.ok === false) {
                   if (!('skipped' in delRes && delRes.skipped) && 'message' in delRes) {
                     const detail = [
@@ -310,34 +358,48 @@ export function UserProfilePublicBody({
                   }
                   return;
                 }
+
+                setHistory((prev) => prev.filter((h) => h.photoUrl.trim() !== viewingUrl));
+
+                if (isCurrent) {
+                  await updateUserProfile(me, {
+                    photoUrl: null,
+                    metadata: { [PROFILE_META_PHOTO_COVER]: null },
+                  });
+                  setProfile((prev) =>
+                    prev
+                      ? { ...prev, photoUrl: null, metadata: { ...(prev.metadata ?? {}), [PROFILE_META_PHOTO_COVER]: null } }
+                      : prev,
+                  );
+                  setProfileImageViewer(null);
+                } else {
+                  const newLen = profileImageGallery.length - 1;
+                  if (newLen <= 0) {
+                    setProfileImageViewer(null);
+                  } else {
+                    const nextIx = delIx >= newLen ? Math.max(0, newLen - 1) : delIx;
+                    setProfileImageViewer({ index: Math.min(nextIx, newLen - 1) });
+                  }
+                }
+
+                void fetchProfilePhotoHistory(targetNorm, 30)
+                  .then((rows) => setHistory(rows))
+                  .catch(() => {});
+                void getUserProfile(targetNorm)
+                  .then((p) => setProfile(p ?? null))
+                  .catch(() => {});
+                if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              } catch (e) {
+                Alert.alert('삭제 실패', e instanceof Error ? e.message : '프로필 사진을 삭제하지 못했습니다.');
+              } finally {
+                setProfilePhotoDeleteBusy(false);
               }
-              // 2) 메타(초점) 정리 + DB 프로필과 동기화(RPC가 이미 photo_url 을 비웠을 수 있음)
-              await updateUserProfile(me, {
-                photoUrl: null,
-                metadata: { [PROFILE_META_PHOTO_COVER]: null },
-              });
-              setProfile((prev) => (prev ? { ...prev, photoUrl: null, metadata: { ...(prev.metadata ?? {}), [PROFILE_META_PHOTO_COVER]: null } } : prev));
-              if (deletingUrl) {
-                setHistory((prev) => prev.filter((h) => h.photoUrl.trim() !== deletingUrl));
-              }
-              setProfileImageViewer(null);
-              void fetchProfilePhotoHistory(targetNorm, 30)
-                .then((rows) => setHistory(rows))
-                .catch(() => {});
-              void getUserProfile(targetNorm)
-                .then((p) => setProfile(p ?? null))
-                .catch(() => {});
-              if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (e) {
-              Alert.alert('삭제 실패', e instanceof Error ? e.message : '프로필 사진을 삭제하지 못했습니다.');
-            } finally {
-              setProfilePhotoDeleteBusy(false);
-            }
-          })();
+            })();
+          },
         },
-      },
-    ]);
-  }, [isMe, photo, targetNorm]);
+      ],
+    );
+  }, [isMe, photo, profileImageGallery, profileImageViewer, targetNorm]);
 
   const onPressAvatar = useCallback(() => {
     if (withdrawn) return;
@@ -600,7 +662,7 @@ export function UserProfilePublicBody({
       ) : null}
 
       <View style={styles.grid}>
-        {history.filter((h) => !isExternalPhotoUrl(h.photoUrl)).map((h, i) => {
+        {history.filter((h) => isAvatarsStorageUploadedByUser(h.photoUrl, targetNorm)).map((h, i) => {
           const url = h.photoUrl.trim();
           if (!url) return null;
           const isEndOfRow = (i + 1) % 2 === 0;
@@ -646,8 +708,7 @@ export function UserProfilePublicBody({
                 </Text>
                 {profileImageGallery.length > 1 && profileImageViewer ? (
                   <Text style={meetingChatBodyStyles.viewerMetaTime} numberOfLines={1}>
-                    {Math.min(profileImageGallery.length, Math.max(1, profileImageViewer.index + 1))} /{' '}
-                    {profileImageGallery.length}
+                    {profileImageViewerSafeIndex + 1} / {profileImageGallery.length}
                   </Text>
                 ) : null}
               </View>
@@ -656,7 +717,7 @@ export function UserProfilePublicBody({
                   <Pressable
                     onPress={() => {
                       if (profilePhotoDeleteBusy) return;
-                      onConfirmDeleteCurrentProfilePhoto();
+                      onConfirmDeleteProfilePhotoAtViewer();
                     }}
                     hitSlop={10}
                     disabled={profilePhotoDeleteBusy}
