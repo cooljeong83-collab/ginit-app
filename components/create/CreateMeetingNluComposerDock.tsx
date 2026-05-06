@@ -6,10 +6,12 @@ import {
   Keyboard,
   type KeyboardEvent,
   LayoutChangeEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
   TextInput,
+  type TextInputKeyPressEventData,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -151,6 +153,31 @@ export function CreateMeetingNluComposerDock({
   );
 
   const sendDisabled = busy || nluBusy || catLoading || !draft.trim();
+  const sendInFlightRef = useRef(false);
+
+  const invokeSend = useCallback(() => {
+    if (sendDisabled) return;
+    if (sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
+    void Promise.resolve(onSend()).finally(() => {
+      setTimeout(() => {
+        sendInFlightRef.current = false;
+      }, 450);
+    });
+  }, [onSend, sendDisabled]);
+
+  const onComposerKeyPress = useCallback(
+    (e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+      const ne = e.nativeEvent as TextInputKeyPressEventData & { shiftKey?: boolean };
+      if (ne.shiftKey) return;
+      const key = typeof ne.key === 'string' ? ne.key : '';
+      if (key !== 'Enter' && key !== '\n' && key !== '\r') return;
+      if (sendDisabled) return;
+      (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+      invokeSend();
+    },
+    [invokeSend, sendDisabled],
+  );
 
   return (
     <View
@@ -177,7 +204,7 @@ export function CreateMeetingNluComposerDock({
               <TextInput
                 value={draft}
                 onChangeText={onChangeDraft}
-                placeholder="말 한마디로 모임을 완성해 보세요."
+                placeholder="대화로 모임을 완성해 보세요."
                 placeholderTextColor="#94a3b8"
                 style={meetingChatBodyStyles.input}
                 underlineColorAndroid="transparent"
@@ -186,9 +213,9 @@ export function CreateMeetingNluComposerDock({
                 submitBehavior="submit"
                 blurOnSubmit={false}
                 returnKeyType="send"
+                onKeyPress={onComposerKeyPress}
                 onSubmitEditing={() => {
-                  if (sendDisabled) return;
-                  void onSend();
+                  invokeSend();
                 }}
                 maxLength={4000}
                 editable={!busy}
@@ -198,7 +225,7 @@ export function CreateMeetingNluComposerDock({
             </View>
             <Pressable
               focusable={false}
-              onPress={() => void onSend()}
+              onPress={() => invokeSend()}
               disabled={sendDisabled}
               style={[meetingChatBodyStyles.sendBtn, sendDisabled && meetingChatBodyStyles.sendBtnDisabled]}
               accessibilityRole="button"

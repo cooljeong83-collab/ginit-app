@@ -10,34 +10,24 @@ import type {
   StyleProp,
   ViewStyle,
 } from 'react-native';
-import {
-  ActivityIndicator,
-  Animated,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
-import {
-  MeetingChatQuickActionRow,
-  type MeetingChatQuickActionDef,
-} from '@/components/chat/meeting-chat-quick-action-row';
 import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-chat-ui-helpers';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
+import type { MeetingChatListRow } from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export type MeetingChatMainColumnProps = {
   chatError: string | null;
   searchNavigateLoading: boolean;
   setListRef: (r: unknown) => void;
   setInnerFlatListRef: (r: unknown) => void;
-  messages: MeetingChatMessage[];
-  renderItem: ListRenderItem<MeetingChatMessage>;
+  chatListRows: MeetingChatListRow[];
+  renderItem: ListRenderItem<MeetingChatListRow>;
   chatListContentStyle: StyleProp<ViewStyle>;
   onScrollToIndexFailed: (info: {
     index: number;
@@ -49,13 +39,8 @@ export type MeetingChatMainColumnProps = {
   isFetchingNextPage: boolean;
   onPrefetchOlderMessages?: () => void;
   showJumpToBottomFab: boolean;
-  plusMenuOpen: boolean;
   composerDockBlockHeight: number;
   jumpToLatest: () => void;
-  closePlusMenuThen: (after?: () => void) => void;
-  plusQuickActions: MeetingChatQuickActionDef[];
-  plusRowAnims: Animated.Value[];
-  plusPillMaxWidth: number;
   composerBottomPad: number;
   onComposerDockLayout: (e: LayoutChangeEvent) => void;
   replyTo: MeetingChatMessage['replyTo'];
@@ -65,11 +50,9 @@ export type MeetingChatMainColumnProps = {
   messageInputRef: RefObject<TextInput | null>;
   draft: string;
   setDraft: (t: string) => void;
-  uploadingImage: boolean;
   sending: boolean;
   onSend: () => void;
-  openPlusMenu: () => void;
-  plusIconMorph: Animated.Value;
+  onPressAttach?: () => void;
 };
 
 export function MeetingChatMainColumn({
@@ -77,7 +60,7 @@ export function MeetingChatMainColumn({
   searchNavigateLoading,
   setListRef,
   setInnerFlatListRef,
-  messages,
+  chatListRows,
   renderItem,
   chatListContentStyle,
   onScrollToIndexFailed,
@@ -87,13 +70,8 @@ export function MeetingChatMainColumn({
   isFetchingNextPage,
   onPrefetchOlderMessages,
   showJumpToBottomFab,
-  plusMenuOpen,
   composerDockBlockHeight,
   jumpToLatest,
-  closePlusMenuThen,
-  plusQuickActions,
-  plusRowAnims,
-  plusPillMaxWidth,
   composerBottomPad,
   onComposerDockLayout,
   replyTo,
@@ -103,11 +81,9 @@ export function MeetingChatMainColumn({
   messageInputRef,
   draft,
   setDraft,
-  uploadingImage,
   sending,
   onSend,
-  openPlusMenu,
-  plusIconMorph,
+  onPressAttach,
 }: MeetingChatMainColumnProps) {
   return (
     <View style={styles.chatMainColumn}>
@@ -130,16 +106,23 @@ export function MeetingChatMainColumn({
           <KeyboardAwareFlatList
             ref={setListRef}
             innerRef={setInnerFlatListRef}
-            data={messages}
-            keyExtractor={(item) => item.id}
+            data={chatListRows}
+            keyExtractor={(row) => {
+              if (row.type === 'message') return row.message.id;
+              return `album:${row.batchId}:${row.messages.map((m: MeetingChatMessage) => m.id).join(':')}`;
+            }}
             renderItem={renderItem}
             contentContainerStyle={chatListContentStyle}
             inverted
             onScroll={onChatScroll}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            enableOnAndroid
-            extraScrollHeight={12}
+            /** 입력창은 리스트 밖에서 이미 `paddingBottom: composerBottomPad`로 키보드를 반영함. HOC가 키보드 높이를 또 넣으면 역전 리스트 하단에 이중 여백이 생김 */
+            enableOnAndroid={false}
+            extraScrollHeight={0}
+            enableAutomaticScroll={false}
+            contentInset={{ bottom: 0, top: 0, left: 0, right: 0 }}
+            scrollIndicatorInsets={{ bottom: 0 }}
             onScrollToIndexFailed={onScrollToIndexFailed}
             ListEmptyComponent={<Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>}
             ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
@@ -152,7 +135,7 @@ export function MeetingChatMainColumn({
             removeClippedSubviews={false}
           />
         </View>
-        {showJumpToBottomFab && !plusMenuOpen ? (
+        {showJumpToBottomFab ? (
           <Pressable
             style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
             onPress={jumpToLatest}
@@ -162,28 +145,6 @@ export function MeetingChatMainColumn({
           </Pressable>
         ) : null}
       </View>
-      {plusMenuOpen ? (
-        <Pressable
-          style={[styles.plusListDismissLayer, { bottom: composerDockBlockHeight }]}
-          onPress={() => closePlusMenuThen()}
-          accessibilityRole="button"
-          accessibilityLabel="퀵 메뉴 닫기"
-        />
-      ) : null}
-      {plusMenuOpen ? (
-        <View style={[styles.plusFanFloating, { bottom: composerDockBlockHeight }]} pointerEvents="box-none">
-          <View style={styles.plusFanInner} pointerEvents="box-none">
-            {plusQuickActions.map((action, i) => (
-              <MeetingChatQuickActionRow
-                key={action.key}
-                action={action}
-                progress={plusRowAnims[i]!}
-                pillMaxW={plusPillMaxWidth}
-              />
-            ))}
-          </View>
-        </View>
-      ) : null}
       <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
         {replyTo?.messageId ? (
           <View style={styles.replyPreviewRow}>
@@ -221,74 +182,17 @@ export function MeetingChatMainColumn({
             if (h > 0) setComposerInputBarHeight(h);
           }}>
           <View style={styles.composer}>
-            <Pressable
-              style={styles.plusBtn}
-              onPress={openPlusMenu}
-              disabled={uploadingImage}
-              accessibilityRole="button"
-              accessibilityLabel={plusMenuOpen ? '퀵 액션 닫기' : '퀵 액션 열기'}
-              accessibilityState={{ expanded: plusMenuOpen }}>
-              {uploadingImage ? (
-                <ActivityIndicator size="small" color="#475569" />
-              ) : (
-                <View style={styles.plusBtnIconSlot} pointerEvents="none">
-                  <Animated.View
-                    style={[
-                      styles.plusBtnIconLayer,
-                      {
-                        opacity: plusIconMorph.interpolate({
-                          inputRange: [0, 0.42],
-                          outputRange: [1, 0],
-                          extrapolate: 'clamp',
-                        }),
-                        transform: [
-                          {
-                            scale: plusIconMorph.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [1, 0.45],
-                            }),
-                          },
-                          {
-                            rotate: plusIconMorph.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: ['0deg', '45deg'],
-                            }),
-                          },
-                        ],
-                      },
-                    ]}>
-                    <GinitSymbolicIcon name="add-sharp" size={26} color="#475569" />
-                  </Animated.View>
-                  <Animated.View
-                    style={[
-                      styles.plusBtnIconLayer,
-                      {
-                        opacity: plusIconMorph.interpolate({
-                          inputRange: [0.38, 1],
-                          outputRange: [0, 1],
-                          extrapolate: 'clamp',
-                        }),
-                        transform: [
-                          {
-                            scale: plusIconMorph.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [0.45, 1],
-                            }),
-                          },
-                          {
-                            rotate: plusIconMorph.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: ['-45deg', '0deg'],
-                            }),
-                          },
-                        ],
-                      },
-                    ]}>
-                    <GinitSymbolicIcon name="close-sharp" size={26} color="#475569" />
-                  </Animated.View>
+            {onPressAttach ? (
+              <Pressable
+                onPress={onPressAttach}
+                style={({ pressed }) => [styles.plusBtn, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="사진 첨부">
+                <View style={styles.plusBtnIconSlot}>
+                  <GinitSymbolicIcon name="add" size={26} color="#475569" />
                 </View>
-              )}
-            </Pressable>
+              </Pressable>
+            ) : null}
             <View style={styles.inputShell}>
               <TextInput
                 ref={messageInputRef}
@@ -302,21 +206,20 @@ export function MeetingChatMainColumn({
                 blurOnSubmit={false}
                 returnKeyType="send"
                 onSubmitEditing={() => {
-                  if (sending || uploadingImage) return;
+                  if (sending) return;
                   if (!draft.trim()) return;
                   void onSend();
                 }}
                 maxLength={4000}
-                editable={!uploadingImage}
               />
             </View>
             <Pressable
               onPress={() => void onSend()}
-              style={[styles.sendBtn, (sending || uploadingImage) && styles.sendBtnDisabled]}
-              disabled={sending || uploadingImage || !draft.trim()}
+              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+              disabled={sending || !draft.trim()}
               accessibilityRole="button"
               accessibilityLabel="보내기">
-              {sending || uploadingImage ? (
+              {sending ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <GinitSymbolicIcon name="send" size={20} color="#fff" />

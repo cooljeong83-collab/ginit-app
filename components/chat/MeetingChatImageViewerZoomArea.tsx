@@ -82,6 +82,16 @@ function ZoomableNative({ uri }: Props) {
     });
 
   const pan = Gesture.Pan()
+    // 확대( scale > 1 )일 때만 팬을 켜고, 기본 배율에서는 실패시켜 상위 `FlatList` 가로 페이징이 동작하게 함
+    .manualActivation(true)
+    .onTouchesMove((_e, state) => {
+      'worklet';
+      if (scale.value > MIN_SCALE + 0.02) {
+        state.activate();
+      } else {
+        state.fail();
+      }
+    })
     // 2손가락 제스처(핀치) 중에는 Pan이 개입하지 않도록 제한
     .minPointers(1)
     .maxPointers(1)
@@ -105,24 +115,25 @@ function ZoomableNative({ uri }: Props) {
 
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
+    .maxDelay(400)
     .onEnd(() => {
-      const zoomIn = scale.value <= MIN_SCALE + 0.05;
-      const next = zoomIn ? DOUBLE_TAP_SCALE : MIN_SCALE;
-      scale.value = withTiming(next, { duration: 180 });
-      if (!zoomIn) {
+      const zoomed = scale.value > MIN_SCALE + 0.02;
+      if (zoomed) {
+        scale.value = withTiming(MIN_SCALE, { duration: 180 });
         translateX.value = withTiming(0, { duration: 180 });
         translateY.value = withTiming(0, { duration: 180 });
         return;
       }
+      const next = DOUBLE_TAP_SCALE;
+      scale.value = withTiming(next, { duration: 180 });
       const maxX = maxTranslateForScale(layoutW.value, next);
       const maxY = maxTranslateForScale(layoutH.value, next);
       translateX.value = withTiming(clamp(translateX.value, -maxX, maxX), { duration: 180 });
       translateY.value = withTiming(clamp(translateY.value, -maxY, maxY), { duration: 180 });
     });
 
-  // 핀치/팬이 우선권을 가져야 핀치가 Tap에 막히지 않습니다.
-  // (더블탭은 end 시점에만 발동하므로, 확대 중엔 자연스럽게 무시됨)
-  const composed = Gesture.Exclusive(Gesture.Simultaneous(pinch, pan), doubleTap);
+  // 핀치는 2손가락 전용으로 Exclusive 밖에 두어, doubleTap과 경쟁하지 않게 함
+  const composed = Gesture.Simultaneous(pinch, Gesture.Exclusive(doubleTap, pan));
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { scale: scale.value }],

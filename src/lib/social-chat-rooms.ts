@@ -69,6 +69,7 @@ export type SocialChatMessage = {
   text: string;
   kind?: MeetingChatMessageKind;
   imageUrl?: string | null;
+  imageAlbumBatchId?: string | null;
   replyTo?: SocialChatReplyTo | null;
   createdAt: Timestamp | null;
 };
@@ -103,6 +104,9 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
   const imageUrl =
     typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
+  const albumRaw = data.imageAlbumBatchId;
+  const imageAlbumBatchId =
+    typeof albumRaw === 'string' && albumRaw.trim() ? albumRaw.trim() : null;
   const rt = data.replyTo;
   let replyTo: SocialChatReplyTo | null = null;
   if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
@@ -126,6 +130,7 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
     text,
     kind,
     imageUrl,
+    imageAlbumBatchId,
     replyTo: replyTo?.messageId ? replyTo : null,
     createdAt,
   };
@@ -139,6 +144,7 @@ export function socialMessageToMeetingMessage(m: SocialChatMessage): MeetingChat
     text: m.text,
     kind: (m.kind ?? 'text') as MeetingChatMessageKind,
     imageUrl: m.imageUrl ?? null,
+    imageAlbumBatchId: m.imageAlbumBatchId ?? null,
     replyTo: m.replyTo?.messageId
       ? {
           messageId: m.replyTo.messageId,
@@ -586,7 +592,49 @@ const CHAT_IMAGE_JPEG_QUALITY_HIGH = 0.86;
 export type SendSocialChatImageExtras = {
   caption?: string;
   naturalWidth?: number;
+  imageAlbumBatchId?: string;
+  suppressRemoteNotify?: boolean;
 };
+
+async function notifySocialDmImagePreview(rid: string, senderId: string, preview: string): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
+    const pdata = roomSnap.data() as Record<string, unknown> | undefined;
+    const rawIds = Array.isArray(pdata?.participantIds)
+      ? (pdata!.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+      : [];
+    const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
+    const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
+    if (!peerRaw?.trim()) {
+      ginitNotifyDbg('social-chat', 'dm_image_push_skip_no_peer', { rid, rawIdsLen: rawIds.length });
+      return;
+    }
+    const peerPk =
+      normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
+    const senderPk = normalizeParticipantId(senderId) || senderId;
+    if (!peerPk || peerPk === senderPk) {
+      ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_same_or_empty', { rid });
+      return;
+    }
+    const prof = await getUserProfile(senderPk).catch(() => null);
+    const titleNick = prof?.nickname?.trim() || '친구';
+    const peerNotify = await getSocialChatNotifyEnabledForUser(rid, peerPk).catch(() => true);
+    if (!peerNotify) {
+      ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_notify_off', { rid });
+      return;
+    }
+    ginitNotifyDbg('social-chat', 'dm_push_fire', { rid, kind: 'image' });
+    sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
+      kind: 'social_dm',
+      meetingId: rid,
+      meetingTitle: titleNick,
+      preview,
+    });
+  } catch (e) {
+    ginitNotifyDbg('social-chat', 'dm_image_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
+  }
+}
 
 function supabasePublicObjectPathFromUrl(url: string, bucket: string): string {
   const u = (url ?? '').trim();
@@ -620,6 +668,8 @@ export async function sendSocialChatImageMessage(
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const cap = (extras?.caption ?? '').trim().slice(0, 500);
   const naturalWidth = extras?.naturalWidth;
+  const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
+  const suppressRemote = extras?.suppressRemoteNotify === true;
 
   const quality = await getSocialChatImageUploadQuality(rid).catch(() => 'low' as const);
   const maxWidth = quality === 'high' ? CHAT_IMAGE_MAX_WIDTH_HIGH : CHAT_IMAGE_MAX_WIDTH_LOW;
@@ -656,51 +706,51 @@ export async function sendSocialChatImageMessage(
       text: cap,
       kind: 'image' as const,
       imageUrl,
+      imageAlbumBatchId: albumId || undefined,
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
 
-  if (Platform.OS !== 'web') {
-    void (async () => {
-      try {
-        const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
-        const pdata = roomSnap.data() as Record<string, unknown> | undefined;
-        const rawIds = Array.isArray(pdata?.participantIds)
-          ? (pdata!.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-          : [];
-        const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
-        const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
-        if (!peerRaw?.trim()) {
-          ginitNotifyDbg('social-chat', 'dm_image_push_skip_no_peer', { rid, rawIdsLen: rawIds.length });
-          return;
-        }
-        const peerPk =
-          normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
-        const senderPk = normalizeParticipantId(senderId) || senderId;
-        if (!peerPk || peerPk === senderPk) {
-          ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_same_or_empty', { rid });
-          return;
-        }
-        const prof = await getUserProfile(senderPk).catch(() => null);
-        const titleNick = prof?.nickname?.trim() || '친구';
-        const imgPreview = cap ? `사진 · ${cap}` : '사진';
-        const peerNotify = await getSocialChatNotifyEnabledForUser(rid, peerPk).catch(() => true);
-        if (!peerNotify) {
-          ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_notify_off', { rid });
-          return;
-        }
-        ginitNotifyDbg('social-chat', 'dm_push_fire', { rid, kind: 'image' });
-        sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
-          kind: 'social_dm',
-          meetingId: rid,
-          meetingTitle: titleNick,
-          preview: imgPreview,
-        });
-      } catch (e) {
-        ginitNotifyDbg('social-chat', 'dm_image_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
-        /* ignore */
-      }
-    })();
+  if (!suppressRemote) {
+    const pv = cap ? `사진 · ${cap}` : '사진';
+    void notifySocialDmImagePreview(rid, senderId, pv);
+  }
+}
+
+export type SendSocialChatImageMessagesBatchExtras = {
+  caption?: string;
+  naturalWidths?: (number | undefined)[];
+};
+
+export async function sendSocialChatImageMessagesBatch(
+  roomId: string,
+  senderAppUserId: string,
+  localImageUris: string[],
+  extras?: SendSocialChatImageMessagesBatchExtras,
+): Promise<void> {
+  const rid = roomId.trim();
+  const uid = senderAppUserId.trim();
+  const uris = localImageUris.map((u) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean);
+  if (!rid || !uid || uris.length === 0) return;
+  const batchId =
+    uris.length > 1
+      ? `alb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+      : '';
+  const isMulti = uris.length > 1;
+  const senderId = normalizePhoneUserId(uid) ?? uid;
+  for (let i = 0; i < uris.length; i++) {
+    const nw = extras?.naturalWidths?.[i];
+    await sendSocialChatImageMessage(rid, uid, uris[i]!, {
+      caption: i === 0 ? extras?.caption : undefined,
+      naturalWidth: typeof nw === 'number' && nw > 0 ? nw : undefined,
+      imageAlbumBatchId: batchId || undefined,
+      suppressRemoteNotify: isMulti,
+    });
+  }
+  if (isMulti) {
+    const cap0 = (extras?.caption ?? '').trim();
+    const preview = cap0 ? `사진 ${uris.length}장 · ${cap0.slice(0, 80)}` : `사진 ${uris.length}장`;
+    void notifySocialDmImagePreview(rid, senderId, preview);
   }
 }
 

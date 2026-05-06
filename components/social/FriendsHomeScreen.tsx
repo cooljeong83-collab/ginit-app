@@ -187,11 +187,13 @@ type EnrichedFriend = {
 function FriendListRow({
   item,
   categories,
-  onOpenProfile,
+  onPressAvatar,
+  onPressRow,
 }: {
   item: EnrichedFriend;
   categories: Category[];
-  onOpenProfile: () => void;
+  onPressAvatar: () => void;
+  onPressRow: () => void;
 }) {
   const { profile, meeting } = item;
   const uri = profile.photoUrl?.trim();
@@ -205,25 +207,37 @@ function FriendListRow({
   }, [activity.secondaryLine, distLabel]);
 
   return (
-    <Pressable onPress={onOpenProfile} style={({ pressed }) => [s.friendRow, pressed && { opacity: 0.88 }]}>
-      <View style={s.rowAvatarWrap}>
-        {uri ? (
-          <Image source={{ uri }} style={s.rowAvatarImg} contentFit="cover" />
-        ) : (
-          <View style={s.rowAvatarFallback}>
-            <Text style={s.rowAvatarLetter}>{initials}</Text>
-          </View>
-        )}
-      </View>
-      <View style={s.rowCenter}>
-        <Text style={s.rowTitle} numberOfLines={1}>
-          {profile.nickname}
-        </Text>
-        <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
-          {subtitle || ' '}
-        </Text>
-      </View>
-    </Pressable>
+    <View style={s.friendRow}>
+      <Pressable
+        onPress={onPressAvatar}
+        accessibilityRole="button"
+        accessibilityLabel={`${profile.nickname ?? '친구'} 프로필`}
+        style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+        <View style={s.rowAvatarWrap}>
+          {uri ? (
+            <Image source={{ uri }} style={s.rowAvatarImg} contentFit="cover" />
+          ) : (
+            <View style={s.rowAvatarFallback}>
+              <Text style={s.rowAvatarLetter}>{initials}</Text>
+            </View>
+          )}
+        </View>
+      </Pressable>
+      <Pressable
+        onPress={onPressRow}
+        accessibilityRole="button"
+        accessibilityLabel={`${profile.nickname ?? '친구'}, 메뉴`}
+        style={({ pressed }) => [s.friendRowMain, pressed && { opacity: 0.88 }]}>
+        <View style={s.rowCenter}>
+          <Text style={s.rowTitle} numberOfLines={1}>
+            {profile.nickname}
+          </Text>
+          <Text style={[s.rowSub, activity.kind === 'idle' && s.rowSubMuted]} numberOfLines={1}>
+            {subtitle || ' '}
+          </Text>
+        </View>
+      </Pressable>
+    </View>
   );
 }
 
@@ -455,6 +469,14 @@ export function FriendsHomeScreen() {
   const goAddFriend = useCallback(() => router.push('/social/discovery'), [router]);
   const goMyProfile = useCallback(() => router.push('/(tabs)/profile'), [router]);
   const goFriendManage = useCallback(() => router.push('/social/friends-settings'), [router]);
+  const openFriendPublicProfile = useCallback(
+    (peerRaw: string) => {
+      const t = friendAppUserKey(peerRaw) || peerRaw.trim();
+      if (!t) return;
+      router.push(`/profile/user/${encodeURIComponent(t)}`);
+    },
+    [router],
+  );
 
   const onRemoveAcceptedFriend = useCallback(() => {
     if (!sheetFriend || !me) return;
@@ -786,7 +808,8 @@ export function FriendsHomeScreen() {
             <FriendListRow
               item={item}
               categories={categories}
-              onOpenProfile={() => setSheetFriend(item)}
+              onPressAvatar={() => openFriendPublicProfile(item.row.peer_app_user_id)}
+              onPressRow={() => setSheetFriend(item)}
             />
           )}
         />
@@ -945,6 +968,11 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     gap: 10,
+  },
+  friendRowMain: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   requestRow: {
     flexDirection: 'row',

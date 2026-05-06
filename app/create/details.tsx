@@ -6,33 +6,26 @@
  */
 
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
-  forwardRef,
   useCallback,
   useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
-  type ReactNode,
-  type RefObject,
+  type ComponentProps
 } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
-  Image,
   InteractionManager,
   Keyboard,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -42,10 +35,7 @@ import {
   useWindowDimensions,
   View,
   type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type StyleProp,
-  type ViewStyle,
+  type ViewStyle
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -77,12 +67,21 @@ import {
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
+import {
+  WIZARD_DETAIL_STEP,
+  WIZARD_PLACES_STEP,
+  WIZARD_SCHEDULE_STEP,
+  type WizardStep,
+} from '@/components/create/meeting-create-wizard-types';
 import { MenuPreference } from '@/components/create/MenuPreference';
 import { MovieSearch } from '@/components/create/MovieSearch';
 import { PcGameKindPreference } from '@/components/create/PcGameKindPreference';
-import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import type {
+  MeetingCreatePlacesAutoAssistSnapshot,
+  VoteCandidatesFormHandle
+} from '@/components/create/vote-candidates-form.types';
+import { VoiceWaveform, VoteCandidateCard, VoteCandidatesForm } from '@/components/create/VoteCandidatesForm';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
@@ -96,7 +95,6 @@ import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
 import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
 import { subscribeCategories } from '@/src/lib/categories';
-import type { SpecialtyKind } from '@/src/lib/category-specialty';
 import {
   categoryNeedsSpecialty,
   isActiveLifeMajorCode,
@@ -118,21 +116,10 @@ import {
 } from '@/src/lib/create-meeting-agent-fab-orchestration';
 import { consumeCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import {
-  coerceDateCandidate,
-  createPointCandidate,
-  fmtDateYmd,
-  maxSelectableScheduleDayStartLocal,
-  maxSelectableScheduleYmdLocal,
-  primaryScheduleFromDateCandidate,
-  validateDateCandidate,
+  primaryScheduleFromDateCandidate
 } from '@/src/lib/date-candidate';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
-import { stripUndefinedDeep, toFiniteInt } from '@/src/lib/firestore-utils';
-import {
-  resolvePlaceSearchRowCoordinates,
-  searchPlacesText,
-  type PlaceSearchRow,
-} from '@/src/lib/naver-local-place-search-text';
+import { toFiniteInt } from '@/src/lib/firestore-utils';
 import { fetchDailyBoxOfficeTop10 } from '@/src/lib/kobis-daily-box-office';
 import { buildMeetingCreateNluConfirmSummary } from '@/src/lib/meeting-create-agent-chat/confirm-summary';
 import {
@@ -165,28 +152,23 @@ import {
 import { inferMeetingCreateHeadcountFromKoreanText } from '@/src/lib/meeting-create-nlu/infer-headcount-from-korean-text';
 import { mergeMeetingCreateNluAccumulatedWithAutoTitle } from '@/src/lib/meeting-create-nlu/inject-auto-title';
 import {
-  deriveMeetingTitleFromOpeningUtterance,
-  sanitizeMeetingCreateNluPatchForVenueFollowUp,
-} from '@/src/lib/meeting-create-nlu/opening-utterance-meeting-title';
-import {
   buildLocalMeetingCreateNluPatch,
   fillMeetingCreateNluPatchFromLocalEdge,
   mergeMeetingCreatePlacePatchWithAccumulated,
   shouldSkipEdgeNluForMeetingCreate,
 } from '@/src/lib/meeting-create-nlu/local-intent-patch';
 import { isMeetingCreateNaturalLanguageBlocked } from '@/src/lib/meeting-create-nlu/nlu-blocked-text';
+import {
+  deriveMeetingTitleFromOpeningUtterance,
+  sanitizeMeetingCreateNluPatchForVenueFollowUp,
+} from '@/src/lib/meeting-create-nlu/opening-utterance-meeting-title';
 import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
+import { fmtDate, humanizeSpeechRecognitionError, pickParam } from '@/src/lib/meeting-create-vote-candidates-utils';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
-import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import type { VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
-  consumePendingMeetingPlace,
-  consumePendingVotePlaceRow,
+  consumePendingMeetingPlace
 } from '@/src/lib/meeting-place-bridge';
-import {
-  assertDateCandidatesNoOverlapWithOtherMeetings,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
-} from '@/src/lib/meeting-schedule-overlap';
 import {
   generateAiMeetingDescription,
   generateSuggestedMeetingTitle,
@@ -196,15 +178,7 @@ import {
 } from '@/src/lib/meeting-title-suggestion';
 import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
-import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
-import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
-import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
-import {
-  buildDefaultPlaceSearchQuery,
-  buildPlaceSuggestedSearchQueries,
-} from '@/src/lib/place-query-builder';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
   getUserProfile,
@@ -212,30 +186,12 @@ import {
   meetingDemographicsIncomplete,
   type UserProfile,
 } from '@/src/lib/user-profile';
-import { DateCandidateEditorCard } from '../../components/create/DateCandidateEditorCard';
-import { VoteCandidateCard, VoiceWaveform, VoteCandidatesForm } from '@/components/create/VoteCandidatesForm';
-import {
-  type WizardStep,
-  WIZARD_DETAIL_STEP,
-  WIZARD_PLACES_STEP,
-  WIZARD_SCHEDULE_STEP,
-} from '@/components/create/meeting-create-wizard-types';
-import type {
-  MeetingCreatePlacesAutoAssistSnapshot,
-  VoteCandidatesBuildResult,
-  VoteCandidatesFormProps,
-  VoteCandidatesGateResult,
-  VoteCandidatesFormHandle,
-} from '@/components/create/vote-candidates-form.types';
 
 export type {
   MeetingCreatePlacesAutoAssistSnapshot,
-  VoteCandidatesBuildResult,
-  VoteCandidatesFormProps,
-  VoteCandidatesGateResult,
-  VoteCandidatesFormHandle,
+  VoteCandidatesBuildResult, VoteCandidatesFormHandle, VoteCandidatesFormProps,
+  VoteCandidatesGateResult
 } from '@/components/create/vote-candidates-form.types';
-import { fmtDate, humanizeSpeechRecognitionError, pickParam } from '@/src/lib/meeting-create-vote-candidates-utils';
 
 /** 레거시 스펙 상수(점진 제거) — 시안 톤 토큰으로 치환 */
 const INPUT_PLACEHOLDER = '#94a3b8';
@@ -824,15 +780,25 @@ export default function CreateDetailsScreen() {
     [currentStep, resetWizardState, selectedCategoryId],
   );
 
-  const screenTitle = useMemo(
-    () => (selectedCategory?.label ? `${selectedCategory.label}  모임 생성` : '모임 생성'),
-    [selectedCategory?.label],
-  );
+  const screenTitle = useMemo(() => {
+    const region = titleRegion?.trim() ?? '';
+    const cat = selectedCategory?.label?.trim() ?? paramCategoryLabel.trim();
+    const head = [region, cat].filter((s) => s.length > 0).join(' ');
+    return head.length > 0 ? `${head} 모임 생성` : '모임 생성';
+  }, [titleRegion, selectedCategory?.label, paramCategoryLabel]);
 
   const nluDockReservePx = useMemo(
     () => (!snsDemographicsBlocked && !nluComposerUserDismissed ? nluDockHeightPx : 0),
     [snsDemographicsBlocked, nluComposerUserDismissed, nluDockHeightPx],
   );
+
+  /** 붉은 경고: NLU 도크가 있으면 도크 높이만큼, 없으면 하단 safe area(OS 내비·홈 인디케이터 등)만큼 위로 */
+  const wizardFloatingErrorBottomPx = useMemo(() => {
+    const pad = 24;
+    const docked = !snsDemographicsBlocked && !nluComposerUserDismissed;
+    if (docked) return pad + nluDockReservePx;
+    return pad + insets.bottom;
+  }, [snsDemographicsBlocked, nluComposerUserDismissed, nluDockReservePx, insets.bottom]);
 
   useEffect(() => {
     setCatLoading(true);
@@ -2669,52 +2635,82 @@ export default function CreateDetailsScreen() {
                   })}
                 </View>
 
-                <Text style={[styles.wizardFieldLabel, { marginTop: 18 }]}>공개 / 비공개</Text>
-                <VoteCandidateCard
-                  reduceHeavyEffects={reduceHeavyEffectsUI}
-                  outerStyle={styles.wizardGlassCard}
-                  wrapStyleOverride={styles.flatWrapNoShadow}>
-                  <View style={styles.segmentRow}>
-                    <Pressable
-                      onPress={() => setIsPublicMeeting(false)}
+                <View
+                  style={styles.publicPrivStack}
+                  accessibilityRole="radiogroup"
+                  accessibilityLabel="모임 공개 여부">
+                  <Pressable
+                    onPress={() => setIsPublicMeeting(false)}
+                    style={({ pressed }) => [
+                      styles.publicPrivHalf,
+                      !isPublicMeeting && styles.publicPrivHalfOn,
+                      agentWizardApplyCue?.kind === 'public' &&
+                        agentWizardApplyCue.side === 'private' &&
+                        styles.publicPrivHalfAgentCue,
+                      pressed && styles.publicPrivHalfPressed,
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: !isPublicMeeting }}>
+                    <AgentApplyRippleLayer
+                      active={
+                        agentWizardApplyCue?.kind === 'public' && agentWizardApplyCue.side === 'private'
+                      }
+                      size="md"
+                    />
+                    <View
                       style={[
-                        styles.segmentHalf,
-                        !isPublicMeeting && styles.segmentHalfOn,
-                        agentWizardApplyCue?.kind === 'public' &&
-                          agentWizardApplyCue.side === 'private' &&
-                          styles.segmentHalfAgentCue,
-                      ]}
-                      accessibilityRole="button">
-                      <AgentApplyRippleLayer
-                        active={
-                          agentWizardApplyCue?.kind === 'public' && agentWizardApplyCue.side === 'private'
-                        }
-                        size="md"
-                      />
-                      <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
-                      <Text style={styles.segmentSub}>(초대만)</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setIsPublicMeeting(true)}
-                      style={[
-                        styles.segmentHalf,
-                        isPublicMeeting && styles.segmentHalfOn,
-                        agentWizardApplyCue?.kind === 'public' &&
-                          agentWizardApplyCue.side === 'public' &&
-                          styles.segmentHalfAgentCue,
-                      ]}
-                      accessibilityRole="button">
-                      <AgentApplyRippleLayer
-                        active={
-                          agentWizardApplyCue?.kind === 'public' && agentWizardApplyCue.side === 'public'
-                        }
-                        size="md"
-                      />
-                      <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
-                      <Text style={styles.segmentSub}>(지역 검색)</Text>
-                    </Pressable>
-                  </View>
-                </VoteCandidateCard>
+                        styles.publicPrivCheckbox,
+                        !isPublicMeeting && styles.publicPrivCheckboxOn,
+                      ]}>
+                      {!isPublicMeeting ? <Text style={styles.publicPrivTick}>✓</Text> : null}
+                    </View>
+                    <View style={styles.publicPrivTextCol}>
+                      <Text
+                        style={[styles.publicPrivTitle, !isPublicMeeting && styles.publicPrivTitleOn]}
+                        numberOfLines={1}>
+                        🔒 비공개
+                      </Text>
+                      <Text style={styles.publicPrivSub} numberOfLines={1}>
+                        (초대만)
+                      </Text>
+                    </View>
+                  </Pressable>
+                  <View style={styles.publicPrivSepVert} />
+                  <Pressable
+                    onPress={() => setIsPublicMeeting(true)}
+                    style={({ pressed }) => [
+                      styles.publicPrivHalf,
+                      isPublicMeeting && styles.publicPrivHalfOn,
+                      agentWizardApplyCue?.kind === 'public' &&
+                        agentWizardApplyCue.side === 'public' &&
+                        styles.publicPrivHalfAgentCue,
+                      pressed && styles.publicPrivHalfPressed,
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: isPublicMeeting }}>
+                    <AgentApplyRippleLayer
+                      active={
+                        agentWizardApplyCue?.kind === 'public' && agentWizardApplyCue.side === 'public'
+                      }
+                      size="md"
+                    />
+                    <View
+                      style={[styles.publicPrivCheckbox, isPublicMeeting && styles.publicPrivCheckboxOn]}>
+                      {isPublicMeeting ? <Text style={styles.publicPrivTick}>✓</Text> : null}
+                    </View>
+                    <View style={styles.publicPrivTextCol}>
+                      <Text
+                        style={[styles.publicPrivTitle, isPublicMeeting && styles.publicPrivTitleOn]}
+                        numberOfLines={1}>
+                        🌐 공개
+                      </Text>
+                      <Text style={styles.publicPrivSub} numberOfLines={1}>
+                        (지역 검색)
+                      </Text>
+                    </View>
+                  </Pressable>
+                </View>
+
 
                 {currentStep === 1 ? (
                   <Pressable
@@ -3284,12 +3280,7 @@ export default function CreateDetailsScreen() {
           ) : null}
 
           {wizardError ? (
-            <Text
-              pointerEvents="none"
-              style={[
-                styles.wizardFloatingError,
-                !snsDemographicsBlocked && { bottom: 24 + nluDockReservePx },
-              ]}>
+            <Text pointerEvents="none" style={[styles.wizardFloatingError, { bottom: wizardFloatingErrorBottomPx }]}>
               {wizardError}
             </Text>
           ) : null}
@@ -3297,7 +3288,7 @@ export default function CreateDetailsScreen() {
           {nluDimLayerMounted && !snsDemographicsBlocked ? (
             <Pressable
               onPress={() => Keyboard.dismiss()}
-              style={[styles.nluKeyboardDimFullScreen, { bottom: nluDockReservePx }]}
+              style={styles.nluKeyboardDimFullScreen}
               accessibilityRole="button"
               accessibilityLabel="키보드 내리기">
               <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: nluDimOpacity }]} pointerEvents="none">
@@ -3340,12 +3331,13 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.colors.bg,
     paddingHorizontal: GinitTheme.spacing.md,
   },
-  /** NLU 키보드 시 SafeArea 전역 흐림 — 하단 NLU 도크·(Provider 밖) AI FAB 제외 */
+  /** NLU 키보드 시 SafeArea 전역 흐림(전체 높이). NLU 도크는 zIndex 120으로 위에 표시, AI FAB는 SafeArea 밖 */
   nluKeyboardDimFullScreen: {
     position: 'absolute',
     left: -GinitTheme.spacing.md,
     right: -GinitTheme.spacing.md,
     top: 0,
+    bottom: 0,
     zIndex: 105,
     overflow: 'hidden',
   },
@@ -4228,41 +4220,82 @@ const styles = StyleSheet.create({
   catLabelActive: {
     color: GinitTheme.colors.primary,
   },
-  segmentRow: {
+  publicPrivStack: {
     flexDirection: 'row',
+    alignItems: 'stretch',
+    alignSelf: 'center',
+    width: '100%',
+    marginTop: 15,
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: GinitTheme.colors.border,
     backgroundColor: '#FFFFFF',
   },
-  segmentHalf: {
+  publicPrivHalf: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    minWidth: 0,
     backgroundColor: '#FFFFFF',
     overflow: 'hidden',
   },
-  segmentHalfOn: {
-    backgroundColor: 'rgba(31, 42, 68, 0.06)',
+  publicPrivHalfOn: {
+    backgroundColor: GinitTheme.colors.primarySoft,
   },
-  segmentHalfAgentCue: {
+  publicPrivHalfAgentCue: {
     opacity: 0.88,
   },
-  segmentTitle: {
+  publicPrivHalfPressed: {
+    opacity: 0.82,
+  },
+  publicPrivSepVert: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: GinitTheme.colors.border,
+  },
+  publicPrivCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(31, 42, 68, 0.04)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  publicPrivCheckboxOn: {
+    borderColor: 'rgba(31, 42, 68, 0.45)',
+    backgroundColor: 'rgba(31, 42, 68, 0.10)',
+  },
+  publicPrivTick: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GinitTheme.colors.primary,
+  },
+  publicPrivTextCol: {
+    maxWidth: '100%',
+    alignItems: 'center',
+  },
+  publicPrivTitle: {
     fontSize: 13,
     fontWeight: '600',
     color: GinitTheme.colors.textSub,
+    textAlign: 'center',
   },
-  segmentTitleOn: {
+  publicPrivTitleOn: {
     color: GinitTheme.colors.primary,
   },
-  segmentSub: {
+  publicPrivSub: {
     marginTop: 2,
     fontSize: 10,
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
+    textAlign: 'center',
   },
   centerRow: {
     flexDirection: 'row',
@@ -4528,7 +4561,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 20,
     right: 20,
-    bottom: 24,
+    bottom: 0,
     zIndex: 35,
     padding: 12,
     borderRadius: 12,

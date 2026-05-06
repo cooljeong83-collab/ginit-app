@@ -64,6 +64,8 @@ export type MeetingChatMessage = {
   kind: MeetingChatMessageKind;
   /** `kind === 'image'`일 때 다운로드 URL */
   imageUrl: string | null;
+  /** 한 번에 여러 장 전송 시 같은 값으로 묶어 앨범 UI에 표시 */
+  imageAlbumBatchId?: string | null;
   /** 답장(인용) */
   replyTo?: {
     messageId: string;
@@ -129,6 +131,9 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
   const imageUrl =
     typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
+  const albumRaw = data.imageAlbumBatchId;
+  const imageAlbumBatchId =
+    typeof albumRaw === 'string' && albumRaw.trim() ? albumRaw.trim() : null;
   const rt = data.replyTo;
   let replyTo: MeetingChatMessage['replyTo'] = null;
   if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
@@ -146,7 +151,16 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
       text: typeof r.text === 'string' ? String(r.text) : '',
     };
   }
-  return { id, senderId, text, kind, imageUrl, replyTo: replyTo?.messageId ? replyTo : null, createdAt };
+  return {
+    id,
+    senderId,
+    text,
+    kind,
+    imageUrl,
+    imageAlbumBatchId,
+    replyTo: replyTo?.messageId ? replyTo : null,
+    createdAt,
+  };
 }
 
 /** 대화 검색·미리보기용 텍스트(소문자 비교는 호출 측에서) */
@@ -817,6 +831,10 @@ export type SendMeetingChatImageExtras = {
   caption?: string;
   /** 피커가 알려 주면, 가로가 이 값보다 클 때만 너비를 줄여 업스케일을 피합니다. */
   naturalWidth?: number;
+  /** 여러 장을 한 앨범으로 묶을 때 동일한 문자열을 넣습니다. */
+  imageAlbumBatchId?: string;
+  /** true면 참가자 푸시 알림을 보내지 않습니다(다중 전송 시 마지막 장에서만 false). */
+  suppressParticipantNotify?: boolean;
 };
 
 /**
@@ -838,6 +856,8 @@ export async function sendMeetingChatImageMessage(
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const cap = (extras?.caption ?? '').trim().slice(0, 500);
   const naturalWidth = extras?.naturalWidth;
+  const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
+  const suppressNotify = extras?.suppressParticipantNotify === true;
 
   const actions: ImageManipulator.Action[] = [];
   if (typeof naturalWidth === 'number' && naturalWidth > CHAT_IMAGE_MAX_WIDTH) {
@@ -874,13 +894,61 @@ export async function sendMeetingChatImageMessage(
       text: cap,
       kind: 'image' as const,
       imageUrl,
+      imageAlbumBatchId: albumId || undefined,
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
-  const imgPreview = cap ? `사진 · ${cap}` : '사진';
-  notifyMeetingChatParticipantsRemoteFireAndForget({
-    meetingId: mid,
-    senderId,
-    preview: imgPreview,
-  });
+  if (!suppressNotify) {
+    const imgPreview = cap ? `사진 · ${cap}` : '사진';
+    notifyMeetingChatParticipantsRemoteFireAndForget({
+      meetingId: mid,
+      senderId,
+      preview: imgPreview,
+    });
+  }
+}
+
+/**
+ * 여러 장을 순서대로 올리고, 2장 이상이면 동일 `imageAlbumBatchId`로 묶습니다.
+ * 푸시 미리보기는 한 번만(`사진 N장` 또는 캡션이 있으면 첫 장 기준) 보냅니다.
+ */
+export type SendMeetingChatImageMessagesBatchExtras = {
+  caption?: string;
+  naturalWidths?: (number | undefined)[];
+};
+
+export async function sendMeetingChatImageMessagesBatch(
+  meetingId: string,
+  senderPhoneUserId: string,
+  localImageUris: string[],
+  extras?: SendMeetingChatImageMessagesBatchExtras,
+): Promise<void> {
+  const uris = localImageUris.map((u) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean);
+  if (uris.length === 0) return;
+  const batchId =
+    uris.length > 1
+      ? `alb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+      : '';
+  const isMulti = uris.length > 1;
+  for (let i = 0; i < uris.length; i++) {
+    const nw = extras?.naturalWidths?.[i];
+    await sendMeetingChatImageMessage(meetingId, senderPhoneUserId, uris[i]!, {
+      caption: i === 0 ? extras?.caption : undefined,
+      naturalWidth: typeof nw === 'number' && nw > 0 ? nw : undefined,
+      imageAlbumBatchId: batchId || undefined,
+      suppressParticipantNotify: isMulti,
+    });
+  }
+  if (isMulti) {
+    const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+    const uid = typeof senderPhoneUserId === 'string' ? senderPhoneUserId.trim() : String(senderPhoneUserId ?? '').trim();
+    const senderId = normalizePhoneUserId(uid) ?? uid;
+    const cap0 = (extras?.caption ?? '').trim();
+    const preview = cap0 ? `사진 ${uris.length}장 · ${cap0.slice(0, 80)}` : `사진 ${uris.length}장`;
+    notifyMeetingChatParticipantsRemoteFireAndForget({
+      meetingId: mid,
+      senderId,
+      preview,
+    });
+  }
 }

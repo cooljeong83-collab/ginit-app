@@ -33,6 +33,7 @@ import {
   trustTierForUser,
   xpProgressWithinLevel,
 } from '@/src/lib/ginit-trust';
+import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { ensureUserProfile, updateUserProfile, type UserProfile } from '@/src/lib/user-profile';
 
@@ -163,7 +164,7 @@ export default function ProfileTab() {
         Alert.alert('권한 필요', '사진을 선택하려면 사진 보관함 권한이 필요합니다.');
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await launchImageLibraryAsyncSafe({
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],

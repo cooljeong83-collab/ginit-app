@@ -27,6 +27,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
+import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -249,7 +250,7 @@ export default function ProfileEditScreen() {
         Alert.alert('권한 필요', '사진을 선택하려면 사진 보관함 권한이 필요합니다.');
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await launchImageLibraryAsyncSafe({
         mediaTypes: ['images'],
         // 선택 후 크롭(영역 지정) → 확인 버튼으로 진행
         allowsEditing: true,

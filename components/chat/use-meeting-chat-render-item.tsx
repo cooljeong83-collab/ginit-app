@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { type RefObject, useCallback } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { MeetingChatKakaoImageCluster } from '@/components/chat/MeetingChatKakaoImageCluster';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { MeetingChatSwipeToReply } from '@/components/chat/meeting-chat-swipe-to-reply';
 import {
@@ -13,13 +14,45 @@ import {
   replyTargetLabel,
 } from '@/components/chat/meeting-chat-ui-helpers';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import {
+  meetingChatAlbumAnchorMessage,
+  type MeetingChatListRow,
+} from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
+function rowIsSystemRow(row: MeetingChatListRow): boolean {
+  return row.type === 'message' && row.message.kind === 'system';
+}
+
+function rowSenderNorm(row: MeetingChatListRow): string {
+  if (row.type === 'message') {
+    const s = row.message.senderId?.trim();
+    return s ? normalizeParticipantId(s) : '';
+  }
+  const f = row.messages[0]?.senderId?.trim();
+  return f ? normalizeParticipantId(f) : '';
+}
+
+function rowAnchorDate(row: MeetingChatListRow): Date | null {
+  if (row.type === 'message') return row.message.createdAt?.toDate?.() ?? null;
+  return meetingChatAlbumAnchorMessage(row).createdAt?.toDate?.() ?? null;
+}
+
+function flatUnreadIndex(messageIndexById: Map<string, number>, album: MeetingChatMessage[]): number {
+  let min = Infinity;
+  for (const m of album) {
+    const ix = messageIndexById.get(m.id);
+    if (ix != null && ix < min) min = ix;
+  }
+  return min === Infinity ? 0 : min;
+}
+
 export type MeetingChatRenderItemDeps = {
-  messages: MeetingChatMessage[];
+  listRows: MeetingChatListRow[];
+  messageIndexById: Map<string, number>;
   myId: string;
   hostNorm: string;
   profiles: Map<string, UserProfile>;
@@ -32,7 +65,8 @@ export type MeetingChatRenderItemDeps = {
 };
 
 export function useMeetingChatRenderItem({
-  messages,
+  listRows,
+  messageIndexById,
   myId,
   hostNorm,
   profiles,
@@ -44,11 +78,11 @@ export function useMeetingChatRenderItem({
   listRef,
 }: MeetingChatRenderItemDeps) {
   return useCallback(
-    ({ item, index }: { item: MeetingChatMessage; index: number }) => {
-      const prev = index > 0 ? messages[index - 1]! : null;
-      const next = index + 1 < messages.length ? messages[index + 1]! : null;
-      const currDate = item.createdAt?.toDate?.() ?? null;
-      const nextDate = next?.createdAt?.toDate?.() ?? null;
+    ({ item, index }: { item: MeetingChatListRow; index: number }) => {
+      const prev = index > 0 ? listRows[index - 1]! : null;
+      const next = index + 1 < listRows.length ? listRows[index + 1]! : null;
+      const currDate = rowAnchorDate(item);
+      const nextDate = next ? rowAnchorDate(next) : null;
       const dateLabel =
         currDate &&
         (!nextDate ||
@@ -58,7 +92,8 @@ export function useMeetingChatRenderItem({
           ? currDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
           : '';
 
-      if (item.kind === 'system') {
+      if (item.type === 'message' && item.message.kind === 'system') {
+        const sys = item.message;
         return (
           <View>
             {dateLabel ? (
@@ -69,17 +104,25 @@ export function useMeetingChatRenderItem({
               </View>
             ) : null}
             <View style={styles.systemRow}>
-              <Text style={styles.systemText}>{item.text}</Text>
+              <Text style={styles.systemText}>{sys.text}</Text>
             </View>
           </View>
         );
       }
-      const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
+
+      const isAlbum = item.type === 'imageAlbum';
+      const anchorMsg: MeetingChatMessage = isAlbum
+        ? meetingChatAlbumAnchorMessage(item)
+        : (item as Extract<MeetingChatListRow, { type: 'message' }>).message;
+      const itemForReply: MeetingChatMessage = isAlbum
+        ? meetingChatAlbumAnchorMessage(item)
+        : (item as { type: 'message'; message: MeetingChatMessage }).message;
+
+      const sid = rowSenderNorm(item);
       const isMine = Boolean(myId && sid && sid === myId);
-      const prevSid =
-        prev && prev.kind !== 'system' ? normalizeParticipantId(String(prev.senderId ?? '').trim()) : '';
+      const prevSid = prev ? rowSenderNorm(prev) : '';
       const sameSenderAsPrev = Boolean(sid && prevSid && prevSid === sid);
-      const showAvatar = !isMine && sid && (index === 0 || !prev || prev.kind === 'system' || !sameSenderAsPrev);
+      const showAvatar = !isMine && sid && (index === 0 || !prev || rowIsSystemRow(prev) || !sameSenderAsPrev);
 
       const prof = sid ? profileForSender(profiles, sid) : undefined;
       const withdrawn = isUserProfileWithdrawn(prof);
@@ -87,11 +130,63 @@ export function useMeetingChatRenderItem({
       const isHost = Boolean(hostNorm && sid && sid === hostNorm);
       const canOpenPeerProfile = Boolean(sid && !withdrawn && sid !== 'ginit_ai');
 
-      const isImage = item.kind === 'image';
-      const caption = item.text?.trim();
+      const singleMsg = item.type === 'message' ? item.message : null;
+      const isImage = Boolean(singleMsg && singleMsg.kind === 'image');
+      const caption = singleMsg?.text?.trim();
+
+      const albumChrono = isAlbum ? item.messages : [];
+      const albumCaption = isAlbum ? albumChrono[albumChrono.length - 1]?.text?.trim() : '';
+
+      const showKakaoPlain = isAlbum || isImage;
+
+      const renderReply = (which: 'mine' | 'other') => {
+        if (!anchorMsg.replyTo?.messageId) return null;
+        const box = which === 'mine' ? styles.replyQuoteMine : styles.replyQuoteOther;
+        const lab = which === 'mine' ? styles.replyQuoteLabelMine : styles.replyQuoteLabelOther;
+        const txt = which === 'mine' ? styles.replyQuoteTextMine : styles.replyQuoteTextOther;
+        return (
+          <View style={box}>
+            <Pressable
+              onPress={() => void jumpToRepliedMessage(anchorMsg.replyTo?.messageId ?? '')}
+              style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="원글로 이동">
+              <View style={styles.replyQuoteTopRow}>
+                <View style={styles.replyQuoteTextCol}>
+                  <Text style={lab}>{replyTargetLabel(anchorMsg.replyTo, profiles)}에게 답장</Text>
+                  <Text style={txt} numberOfLines={2}>
+                    {replyPreviewText(anchorMsg.replyTo)}
+                  </Text>
+                </View>
+                {anchorMsg.replyTo.kind === 'image' && anchorMsg.replyTo.imageUrl?.trim() ? (
+                  <Image
+                    source={{ uri: anchorMsg.replyTo.imageUrl.trim() }}
+                    style={styles.replyQuoteThumb}
+                    contentFit="cover"
+                  />
+                ) : null}
+              </View>
+            </Pressable>
+          </View>
+        );
+      };
 
       if (isMine) {
-        const unread = unreadCountForMessage(item, index);
+        const unreadIdx = isAlbum
+          ? flatUnreadIndex(messageIndexById, item.messages)
+          : singleMsg
+            ? (messageIndexById.get(singleMsg.id) ?? index)
+            : index;
+        const unreadMsg = isAlbum ? meetingChatAlbumAnchorMessage(item) : singleMsg!;
+        const unread = unreadCountForMessage(unreadMsg, unreadIdx);
+        const timeSource = anchorMsg.createdAt;
+        const kakaoClusterMine = isAlbum ? (
+          <MeetingChatKakaoImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} alignEnd />
+        ) : isImage && singleMsg?.imageUrl ? (
+          <MeetingChatKakaoImageCluster messages={[singleMsg]} onPressImage={openMeetingChatImageViewer} alignEnd />
+        ) : isImage ? (
+          <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
+        ) : null;
         const bubble = (
           <View style={styles.rowMine}>
             <View style={styles.timeMineCol}>
@@ -100,56 +195,26 @@ export function useMeetingChatRenderItem({
                   {unread}
                 </Text>
               ) : null}
-              <Text style={styles.timeMine}>{formatChatTime(item.createdAt)}</Text>
+              <Text style={styles.timeMine}>{formatChatTime(timeSource)}</Text>
             </View>
-            <View style={[styles.bubbleMineWrap, isImage && styles.bubbleMineMedia]}>
-              <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
-                {item.replyTo?.messageId ? (
-                  <View style={styles.replyQuoteMine}>
-                    <Pressable
-                      onPress={() => void jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
-                      style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
-                      accessibilityRole="button"
-                      accessibilityLabel="원글로 이동">
-                      <View style={styles.replyQuoteTopRow}>
-                        <View style={styles.replyQuoteTextCol}>
-                          <Text style={styles.replyQuoteLabelMine}>
-                            {replyTargetLabel(item.replyTo, profiles)}에게 답장
-                          </Text>
-                          <Text style={styles.replyQuoteTextMine} numberOfLines={2}>
-                            {replyPreviewText(item.replyTo)}
-                          </Text>
-                        </View>
-                        {item.replyTo.kind === 'image' && item.replyTo.imageUrl?.trim() ? (
-                          <Image
-                            source={{ uri: item.replyTo.imageUrl.trim() }}
-                            style={styles.replyQuoteThumb}
-                            contentFit="cover"
-                          />
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  </View>
+            {showKakaoPlain ? (
+              <View style={[styles.bubbleMineWrap, styles.kakaoPlainMineWrap]}>
+                {renderReply('mine')}
+                {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+                {kakaoClusterMine}
+                {(isImage && caption) || (isAlbum && albumCaption) ? (
+                  <Text style={styles.imageCaptionMine}>{isAlbum ? albumCaption : caption}</Text>
                 ) : null}
-                {item.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                {isImage ? (
-                  item.imageUrl ? (
-                    <Pressable
-                      onPress={() => openMeetingChatImageViewer(item)}
-                      style={({ pressed }) => [pressed && styles.pressed]}
-                      accessibilityRole="button"
-                      accessibilityLabel="사진 크게 보기">
-                      <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
-                    </Pressable>
-                  ) : (
-                    <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
-                  )
-                ) : (
-                  <Text style={styles.bubbleMineText}>{item.text}</Text>
-                )}
-                {isImage && caption ? <Text style={styles.imageCaptionMine}>{caption}</Text> : null}
-              </BlurView>
-            </View>
+              </View>
+            ) : (
+              <View style={styles.bubbleMineWrap}>
+                <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
+                  {renderReply('mine')}
+                  {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+                  <Text style={styles.bubbleMineText}>{singleMsg?.text}</Text>
+                </BlurView>
+              </View>
+            )}
           </View>
         );
         return (
@@ -165,19 +230,26 @@ export function useMeetingChatRenderItem({
               simultaneousHandlers={listRef}
               onTriggerReply={() =>
                 setReplyTo({
-                  messageId: item.id,
-                  senderId: item.senderId ?? null,
-                  kind: item.kind,
-                  imageUrl: item.imageUrl ?? null,
-                  text: item.text,
+                  messageId: itemForReply.id,
+                  senderId: itemForReply.senderId ?? null,
+                  kind: itemForReply.kind,
+                  imageUrl: itemForReply.imageUrl ?? null,
+                  text: itemForReply.text,
                 })
-              }
-            >
+              }>
               {bubble}
             </MeetingChatSwipeToReply>
           </View>
         );
       }
+
+      const kakaoClusterOther = isAlbum ? (
+        <MeetingChatKakaoImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} />
+      ) : isImage && singleMsg?.imageUrl ? (
+        <MeetingChatKakaoImageCluster messages={[singleMsg]} onPressImage={openMeetingChatImageViewer} />
+      ) : isImage ? (
+        <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
+      ) : null;
 
       const otherBubble = (
         <View style={styles.rowOther}>
@@ -218,56 +290,27 @@ export function useMeetingChatRenderItem({
               </Pressable>
             ) : null}
             <View style={styles.bubbleOtherWrap}>
-              <View style={[styles.bubbleOtherOuter, isImage && styles.bubbleOtherMedia]}>
-                <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
-                  {item.replyTo?.messageId ? (
-                    <View style={styles.replyQuoteOther}>
-                      <Pressable
-                        onPress={() => void jumpToRepliedMessage(item.replyTo?.messageId ?? '')}
-                        style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
-                        accessibilityRole="button"
-                        accessibilityLabel="원글로 이동">
-                        <View style={styles.replyQuoteTopRow}>
-                          <View style={styles.replyQuoteTextCol}>
-                            <Text style={styles.replyQuoteLabelOther}>
-                              {replyTargetLabel(item.replyTo, profiles)}에게 답장
-                            </Text>
-                            <Text style={styles.replyQuoteTextOther} numberOfLines={2}>
-                              {replyPreviewText(item.replyTo)}
-                            </Text>
-                          </View>
-                          {item.replyTo.kind === 'image' && item.replyTo.imageUrl?.trim() ? (
-                            <Image
-                              source={{ uri: item.replyTo.imageUrl.trim() }}
-                              style={styles.replyQuoteThumb}
-                              contentFit="cover"
-                            />
-                          ) : null}
-                        </View>
-                      </Pressable>
-                    </View>
+              {showKakaoPlain ? (
+                <View style={[styles.bubbleOtherOuter, styles.kakaoPlainOtherOuter]}>
+                  {renderReply('other')}
+                  {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+                  {kakaoClusterOther}
+                  {(isImage && caption) || (isAlbum && albumCaption) ? (
+                    <Text style={styles.imageCaptionOther}>{isAlbum ? albumCaption : caption}</Text>
                   ) : null}
-                  {item.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                  {isImage ? (
-                    item.imageUrl ? (
-                      <Pressable
-                        onPress={() => openMeetingChatImageViewer(item)}
-                        style={({ pressed }) => [pressed && styles.pressed]}
-                        accessibilityRole="button"
-                        accessibilityLabel="사진 크게 보기">
-                        <Image source={{ uri: item.imageUrl }} style={styles.chatImage} contentFit="cover" />
-                      </Pressable>
-                    ) : (
-                      <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
-                    )
-                  ) : (
-                    <Text style={styles.bubbleOtherText}>{item.text}</Text>
-                  )}
-                  {isImage && caption ? <Text style={styles.imageCaptionOther}>{caption}</Text> : null}
-                </BlurView>
-                {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
-              </View>
-              <Text style={styles.timeOther}>{formatChatTime(item.createdAt)}</Text>
+                  {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
+                </View>
+              ) : (
+                <View style={styles.bubbleOtherOuter}>
+                  <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
+                    {renderReply('other')}
+                    {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+                    <Text style={styles.bubbleOtherText}>{singleMsg?.text}</Text>
+                  </BlurView>
+                  {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
+                </View>
+              )}
+              <Text style={styles.timeOther}>{formatChatTime(anchorMsg.createdAt)}</Text>
             </View>
           </View>
         </View>
@@ -285,21 +328,21 @@ export function useMeetingChatRenderItem({
             simultaneousHandlers={listRef}
             onTriggerReply={() =>
               setReplyTo({
-                messageId: item.id,
-                senderId: item.senderId ?? null,
-                kind: item.kind,
-                imageUrl: item.imageUrl ?? null,
-                text: item.text,
+                messageId: itemForReply.id,
+                senderId: itemForReply.senderId ?? null,
+                kind: itemForReply.kind,
+                imageUrl: itemForReply.imageUrl ?? null,
+                text: itemForReply.text,
               })
-            }
-          >
+            }>
             {otherBubble}
           </MeetingChatSwipeToReply>
         </View>
       );
     },
     [
-      messages,
+      listRows,
+      messageIndexById,
       myId,
       hostNorm,
       profiles,

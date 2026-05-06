@@ -1,11 +1,8 @@
 
-import * as ImagePicker from 'expo-image-picker';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Animated,
   Dimensions,
-  Easing,
   InteractionManager,
   type KeyboardEvent,
   type LayoutChangeEvent,
@@ -21,18 +18,19 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
+import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
+import { MeetingChatImageViewerGallery } from '@/components/chat/MeetingChatImageViewerGallery';
 import { MeetingChatMainColumn } from '@/components/chat/MeetingChatMainColumn';
 import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
-import type { MeetingChatQuickActionDef } from '@/components/chat/meeting-chat-quick-action-row';
 import { meetingImageViewerMeta } from '@/components/chat/meeting-chat-ui-helpers';
 import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
   deleteSocialChatImageMessageBestEffort,
-  sendSocialChatImageMessage,
+  sendSocialChatImageMessagesBatch,
   sendSocialChatTextMessage,
   socialMessagesToMeetingNewestFirst,
   type SocialChatMessage,
@@ -65,23 +63,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<MeetingChatMessage['replyTo']>(null);
-  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
-  const plusRowAnims = useRef([
-    new Animated.Value(0),
-    new Animated.Value(0),
-    new Animated.Value(0),
-    new Animated.Value(0),
-  ]).current;
-  const plusIconMorph = useRef(new Animated.Value(0)).current;
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const [imageViewer, setImageViewer] = useState<{
-    messageId: string;
-    url: string;
-    senderLabel: string;
-    sentAtLabel: string;
-    canDelete: boolean;
+    gallery: MeetingChatMessage[];
+    index: number;
   } | null>(null);
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
@@ -102,6 +89,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const hostNorm = '';
 
   const messages = useMemo(() => socialMessagesToMeetingNewestFirst(rawMessages), [rawMessages]);
+  const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
+
+  const chatImageGalleryChrono = useMemo(() => {
+    const imgs = messages.filter((m) => m.kind === 'image' && m.imageUrl?.trim());
+    return [...imgs].reverse();
+  }, [messages]);
 
   const resolveListScroller = useCallback(() => {
     const r = innerFlatListRef.current ?? listRef.current;
@@ -172,13 +165,14 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       scrollToMessageId: (messageId: string) => {
         const mid = String(messageId ?? '').trim();
         if (!mid) return false;
-        const idx = messages.findIndex((m) => m.id === mid);
+        const rowIdx = findMeetingChatListRowIndexByMessageId(chatListRows, mid);
+        const idx = rowIdx >= 0 ? rowIdx : messages.findIndex((m) => m.id === mid);
         if (idx < 0) return false;
         scrollToMessageIndexBestEffort(idx);
         return true;
       },
     }),
-    [messages, scrollToMessageIndexBestEffort],
+    [messages, chatListRows, scrollToMessageIndexBestEffort],
   );
 
   useEffect(() => {
@@ -188,7 +182,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   }, [myUserId, peerId]);
 
   useEffect(() => {
-    const slack = Platform.select({ ios: 8, android: 10, default: 8 });
+    const slack = Platform.select({ ios: 3, android: 3, default: 3 });
     const apply = (e: KeyboardEvent) => {
       const { height, screenY } = e.endCoordinates;
       const h = typeof height === 'number' ? height : 0;
@@ -210,6 +204,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       subHide.remove();
     };
   }, []);
+
+  const composerBottomPad = useMemo(
+    () =>
+      keyboardBottomInset > 0 ? Math.ceil(keyboardBottomInset) : Math.max(insets.bottom, 8),
+    [keyboardBottomInset, insets.bottom],
+  );
 
   const onChatScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
@@ -287,24 +287,30 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     async (replyMessageId: string) => {
       const rid = String(replyMessageId ?? '').trim();
       if (!rid) return;
-      const idx = messages.findIndex((m) => m.id === rid);
+      const rowIdx = findMeetingChatListRowIndexByMessageId(chatListRows, rid);
+      const idx = rowIdx >= 0 ? rowIdx : messages.findIndex((m) => m.id === rid);
       if (idx >= 0) scrollToMessageIndexBestEffort(idx);
       else Alert.alert('원글 위치', '해당 메시지를 찾지 못했어요.');
     },
-    [messages, scrollToMessageIndexBestEffort],
+    [messages, chatListRows, scrollToMessageIndexBestEffort],
   );
 
   const openMeetingChatImageViewer = useCallback(
     (item: MeetingChatMessage) => {
       const url = item.imageUrl?.trim();
       if (!url || item.kind !== 'image') return;
-      const { senderLabel, sentAtLabel } = meetingImageViewerMeta(item, profiles);
-      const sid = item.senderId?.trim() ? normalizeParticipantId(item.senderId.trim()) : '';
-      const canDelete = Boolean(myId && sid && sid === myId);
-      setImageViewer({ messageId: item.id, url, senderLabel, sentAtLabel, canDelete });
+      const ix = chatImageGalleryChrono.findIndex((m) => m.id === item.id);
+      setImageViewer({
+        gallery: chatImageGalleryChrono,
+        index: ix >= 0 ? ix : 0,
+      });
     },
-    [profiles, myId],
+    [chatImageGalleryChrono],
   );
+
+  const onChatImageGalleryIndexChange = useCallback((i: number) => {
+    setImageViewer((prev) => (prev && prev.gallery.length > 0 ? { ...prev, index: i } : prev));
+  }, []);
 
   const setPeerProfileUserIdBridge = useCallback(
     (id: string) => {
@@ -315,7 +321,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   );
 
   const renderItem = useMeetingChatRenderItem({
-    messages,
+    listRows: chatListRows,
+    messageIndexById,
     myId,
     hostNorm,
     profiles,
@@ -327,10 +334,37 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     listRef,
   });
 
+  const onPressAttach = useCallback(() => {
+    if (Platform.OS === 'web') {
+      Alert.alert('안내', '웹에서는 사진을 보낼 수 없어요.');
+      return;
+    }
+    setMediaPickerOpen(true);
+  }, []);
+
+  const handleMediaPickerConfirmDm = useCallback(
+    async ({ uris, widths }: { uris: string[]; widths: (number | undefined)[] }) => {
+      const uid = myUserId.trim();
+      if (!uid || !roomId || uris.length === 0 || sending) return;
+      setSending(true);
+      try {
+        await sendSocialChatImageMessagesBatch(roomId, uid, uris, {
+          naturalWidths: widths,
+        });
+        setMediaPickerOpen(false);
+      } catch (e) {
+        Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
+      } finally {
+        setSending(false);
+      }
+    },
+    [roomId, myUserId, sending],
+  );
+
   const onSend = useCallback(async () => {
     const uid = myUserId.trim();
     const body = draft.trim();
-    if (!uid || !roomId || !body || sending || uploadingImage) return;
+    if (!uid || !roomId || !body || sending) return;
     setSending(true);
     try {
       await sendSocialChatTextMessage(roomId, uid, body, replyTo?.messageId ? replyTo : null);
@@ -341,165 +375,37 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     } finally {
       setSending(false);
     }
-  }, [roomId, myUserId, draft, sending, uploadingImage, replyTo]);
+  }, [roomId, myUserId, draft, sending, replyTo]);
 
-  const onPickImage = useCallback(async () => {
-    const uid = myUserId.trim();
-    if (!uid || !roomId) return;
-    if (uploadingImage) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('권한 필요', '사진을내려면 사진 라이브러리 접근을 허용해 주세요.');
-      return;
-    }
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: false,
-      quality: 1,
-    });
-    if (picked.canceled) return;
-    const asset = picked.assets[0];
-    if (!asset?.uri) return;
-    setUploadingImage(true);
-    try {
-      const caption = draft.trim();
-      await sendSocialChatImageMessage(roomId, uid, asset.uri, {
-        caption: caption || undefined,
-        naturalWidth: typeof asset.width === 'number' && asset.width > 0 ? asset.width : undefined,
-      });
-      if (caption) setDraft('');
-    } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-    } finally {
-      setUploadingImage(false);
-    }
-  }, [roomId, myUserId, draft, uploadingImage]);
-
-  const plusPillMaxWidth = useMemo(
-    () => Math.max(200, Math.floor(Dimensions.get('window').width - 40)),
-    [],
-  );
   const chatListContentStyle = useMemo(
     () => [
       meetingChatBodyStyles.listContent,
       {
-        paddingTop: keyboardBottomInset > 0 ? composerInputBarHeight : 4,
+        paddingTop:
+          keyboardBottomInset > 0
+            ? Math.max(4, composerDockBlockHeight - composerBottomPad)
+            : 4,
       },
     ],
-    [keyboardBottomInset, composerInputBarHeight],
+    [keyboardBottomInset, composerDockBlockHeight, composerBottomPad],
   );
-
-  const closePlusMenuThen = useCallback(
-    (after?: () => void) => {
-      if (!plusMenuOpen) {
-        after?.();
-        return;
-      }
-      plusRowAnims.forEach((v) => {
-        v.stopAnimation();
-      });
-      const duration = 680;
-      const timings = plusRowAnims.map((v) =>
-        Animated.timing(v, {
-          toValue: 0,
-          duration,
-          easing: Easing.bezier(0.4, 0, 0.58, 1),
-          useNativeDriver: true,
-        }),
-      );
-      Animated.stagger(44, [timings[0]!, timings[1]!, timings[2]!, timings[3]!]).start(({ finished }) => {
-        setPlusMenuOpen(false);
-        if (finished) after?.();
-      });
-    },
-    [plusMenuOpen, plusRowAnims],
-  );
-
-  const openPlusMenu = useCallback(() => {
-    if (uploadingImage || sending) return;
-    if (plusMenuOpen) {
-      closePlusMenuThen();
-    } else {
-      setPlusMenuOpen(true);
-    }
-  }, [uploadingImage, sending, plusMenuOpen, closePlusMenuThen]);
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
     if (h > 0) setComposerDockBlockHeight(h);
   }, []);
 
-  const plusQuickActions: MeetingChatQuickActionDef[] = useMemo(
-    () => [
-      {
-        key: 'photo',
-        label: '사진',
-        icon: 'image-outline',
-        onPress: () => closePlusMenuThen(() => void onPickImage()),
-      },
-      {
-        key: 'place',
-        label: '장소',
-        icon: 'sparkles-outline',
-        onPress: () =>
-          closePlusMenuThen(() => {
-            Alert.alert('AI 장소추천', '곧 채팅에서 바로 추천을 띄워드릴게요.');
-          }),
-      },
-      {
-        key: 'poll',
-        label: '투표',
-        icon: 'bar-chart-outline',
-        onPress: () =>
-          closePlusMenuThen(() => {
-            Alert.alert('투표 생성', '곧 제공됩니다. (다음 단계: 채팅에서 투표 카드 생성)');
-          }),
-      },
-      {
-        key: 'settle',
-        label: '정산',
-        icon: 'card-outline',
-        onPress: () =>
-          closePlusMenuThen(() => {
-            setDraft((v) => (v.trim() ? v : '정산 요청합니다. 각자 확인 부탁드려요!'));
-          }),
-      },
-    ],
-    [onPickImage, closePlusMenuThen],
+  const imageViewerEntry =
+    imageViewer && imageViewer.gallery.length > 0
+      ? imageViewer.gallery[Math.min(imageViewer.gallery.length - 1, Math.max(0, imageViewer.index))]
+      : null;
+  const imageViewerMetaResolved = imageViewerEntry ? meetingImageViewerMeta(imageViewerEntry, profiles) : { senderLabel: '', sentAtLabel: '' };
+  const imageViewerCanDelete = Boolean(
+    imageViewerEntry &&
+      myId &&
+      imageViewerEntry.senderId?.trim() &&
+      normalizeParticipantId(imageViewerEntry.senderId.trim()) === myId,
   );
-
-  useEffect(() => {
-    if (!plusMenuOpen) {
-      plusRowAnims.forEach((v) => v.setValue(0));
-      return;
-    }
-    plusRowAnims.forEach((v) => {
-      v.stopAnimation();
-      v.setValue(0);
-    });
-    const duration = 900;
-    const timings = plusRowAnims.map((v) =>
-      Animated.timing(v, {
-        toValue: 1,
-        duration,
-        easing: Easing.bezier(0.22, 0.99, 0.26, 0.99),
-        useNativeDriver: true,
-      }),
-    );
-    Animated.stagger(56, [timings[3]!, timings[2]!, timings[1]!, timings[0]!]).start();
-  }, [plusMenuOpen, plusRowAnims]);
-
-  useEffect(() => {
-    plusIconMorph.stopAnimation();
-    Animated.spring(plusIconMorph, {
-      toValue: plusMenuOpen ? 1 : 0,
-      friction: 9,
-      tension: 168,
-      useNativeDriver: true,
-    }).start();
-  }, [plusMenuOpen, plusIconMorph]);
-
-  const composerBottomPad = keyboardBottomInset > 0 ? keyboardBottomInset : Math.max(insets.bottom, 8);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -509,7 +415,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           searchNavigateLoading={searchNavigateLoading}
           setListRef={setListRef}
           setInnerFlatListRef={setInnerFlatListRef}
-          messages={messages}
+          chatListRows={chatListRows}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
           onScrollToIndexFailed={(info) => {
@@ -527,13 +433,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           isFetchingNextPage={false}
           onPrefetchOlderMessages={undefined}
           showJumpToBottomFab={showJumpToBottomFab}
-          plusMenuOpen={plusMenuOpen}
           composerDockBlockHeight={composerDockBlockHeight}
           jumpToLatest={jumpToLatest}
-          closePlusMenuThen={closePlusMenuThen}
-          plusQuickActions={plusQuickActions}
-          plusRowAnims={plusRowAnims}
-          plusPillMaxWidth={plusPillMaxWidth}
           composerBottomPad={composerBottomPad}
           onComposerDockLayout={onComposerDockLayout}
           replyTo={replyTo}
@@ -543,11 +444,16 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           messageInputRef={messageInputRef}
           draft={draft}
           setDraft={setDraft}
-          uploadingImage={uploadingImage}
           sending={sending}
           onSend={onSend}
-          openPlusMenu={openPlusMenu}
-          plusIconMorph={plusIconMorph}
+          onPressAttach={onPressAttach}
+        />
+
+        <MeetingChatMediaPickerModal
+          visible={mediaPickerOpen}
+          onClose={() => setMediaPickerOpen(false)}
+          sendBusy={sending}
+          onConfirmSend={handleMediaPickerConfirmDm}
         />
 
         <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
@@ -571,18 +477,18 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                 </Pressable>
                 <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
                   <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
-                    {imageViewer?.senderLabel ?? ''}
+                    {imageViewerMetaResolved.senderLabel}
                   </Text>
-                  {imageViewer?.sentAtLabel ? (
+                  {imageViewerMetaResolved.sentAtLabel ? (
                     <Text style={meetingChatBodyStyles.viewerMetaTime} numberOfLines={1}>
-                      {imageViewer.sentAtLabel}
+                      {imageViewerMetaResolved.sentAtLabel}
                     </Text>
                   ) : null}
                 </View>
                 <View style={meetingChatBodyStyles.viewerActions}>
                   <Pressable
                     onPress={() => {
-                      const u = imageViewer?.url.trim() ?? '';
+                      const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                       if (!u) return;
                       void (async () => {
                         setImageViewerBusy(true);
@@ -603,7 +509,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                   </Pressable>
                   <Pressable
                     onPress={() => {
-                      const u = imageViewer?.url.trim() ?? '';
+                      const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                       if (!u) return;
                       void (async () => {
                         setImageViewerBusy(true);
@@ -622,12 +528,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                     accessibilityLabel="저장">
                     <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
                   </Pressable>
-                  {imageViewer?.canDelete ? (
+                  {imageViewerCanDelete ? (
                     <Pressable
                       onPress={() => {
-                        const u = imageViewer?.url.trim() ?? '';
+                        const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                         const rid = roomId.trim();
-                        const msgId = imageViewer?.messageId.trim() ?? '';
+                        const msgId = imageViewerEntry?.id.trim() ?? '';
                         if (!u || !rid || !msgId) return;
                         if (imageViewerBusy) return;
                         Alert.alert('사진 삭제', '이 사진을 채팅방에서 삭제할까요?', [
@@ -660,9 +566,13 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                   ) : null}
                 </View>
               </View>
-              {imageViewer?.url ? (
+              {imageViewer && imageViewer.gallery.length > 0 ? (
                 <View style={meetingChatBodyStyles.viewerImageWrap}>
-                  <MeetingChatImageViewerZoomArea uri={imageViewer.url} />
+                  <MeetingChatImageViewerGallery
+                    gallery={imageViewer.gallery}
+                    initialIndex={imageViewer.index}
+                    onIndexChange={onChatImageGalleryIndexChange}
+                  />
                 </View>
               ) : null}
             </View>

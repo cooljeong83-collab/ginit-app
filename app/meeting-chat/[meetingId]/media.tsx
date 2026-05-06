@@ -19,7 +19,8 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
+import { MeetingChatImageViewerGallery } from '@/components/chat/MeetingChatImageViewerGallery';
+import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -92,7 +93,7 @@ export default function MeetingChatMediaScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [viewer, setViewer] = useState<MeetingChatMessage | null>(null);
+  const [imageViewer, setImageViewer] = useState<{ index: number } | null>(null);
   const [viewerBusy, setViewerBusy] = useState(false);
 
   const cursorRef = useRef<DocumentSnapshot | null>(null);
@@ -193,6 +194,12 @@ export default function MeetingChatMediaScreen() {
     router.back();
   }, [router]);
 
+  const viewer = useMemo(() => {
+    if (!imageViewer || rows.length === 0) return null;
+    const i = Math.min(rows.length - 1, Math.max(0, imageViewer.index));
+    return rows[i] ?? null;
+  }, [imageViewer, rows]);
+
   const viewerMeta = useMemo(() => {
     if (!viewer) return { when: '', who: '' };
     const sid = viewer.senderId?.trim() ? normalizeParticipantId(viewer.senderId.trim()) : '';
@@ -212,6 +219,10 @@ export default function MeetingChatMediaScreen() {
     const sid = viewer.senderId?.trim() ? normalizeParticipantId(viewer.senderId.trim()) : '';
     return Boolean(myId && sid && sid === myId);
   }, [viewer, myId]);
+
+  const onMediaViewerIndexChange = useCallback((i: number) => {
+    setImageViewer((prev) => (prev ? { index: i } : prev));
+  }, []);
 
   if (!meetingId) {
     return (
@@ -241,6 +252,7 @@ export default function MeetingChatMediaScreen() {
   }
 
   const uri = viewer?.imageUrl?.trim() ?? '';
+  const imageViewerIndex = imageViewer ? Math.min(rows.length - 1, Math.max(0, imageViewer.index)) : 0;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -303,7 +315,10 @@ export default function MeetingChatMediaScreen() {
             if (!u) return <View style={{ width: cell, height: 0 }} />;
             return (
               <Pressable
-                onPress={() => setViewer(item)}
+                onPress={() => {
+                  const ix = rows.findIndex((r) => r.id === item.id);
+                  setImageViewer({ index: ix >= 0 ? ix : 0 });
+                }}
                 style={[styles.thumbCell, { width: cell, height: cell }]}
                 accessibilityRole="button"
                 accessibilityLabel="사진 크게 보기">
@@ -314,11 +329,11 @@ export default function MeetingChatMediaScreen() {
         />
       )}
 
-      <Modal visible={viewer !== null} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
+      <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
         <GestureHandlerRootView style={styles.viewerRoot}>
           <Pressable
             style={StyleSheet.absoluteFill}
-            onPress={() => !viewerBusy && setViewer(null)}
+            onPress={() => !viewerBusy && setImageViewer(null)}
             pointerEvents="none"
             accessibilityRole="button"
             accessibilityLabel="닫기"
@@ -326,7 +341,7 @@ export default function MeetingChatMediaScreen() {
           <View style={styles.viewerSheet} pointerEvents="box-none">
             <View style={[styles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
               <Pressable
-                onPress={() => setViewer(null)}
+                onPress={() => setImageViewer(null)}
                 hitSlop={10}
                 disabled={viewerBusy}
                 accessibilityRole="button"
@@ -404,7 +419,8 @@ export default function MeetingChatMediaScreen() {
                               setViewerBusy(true);
                               try {
                                 await deleteMeetingChatImageMessageBestEffort(mid, msgId, u);
-                                setViewer(null);
+                                setRows((prev) => prev.filter((m) => m.id !== msgId));
+                                setImageViewer(null);
                               } catch (e) {
                                 Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
                               } finally {
@@ -424,9 +440,13 @@ export default function MeetingChatMediaScreen() {
                 ) : null}
               </View>
             </View>
-            {uri ? (
-              <View style={styles.viewerImageWrap}>
-                <MeetingChatImageViewerZoomArea uri={uri} />
+            {uri && rows.length > 0 ? (
+              <View style={meetingChatBodyStyles.viewerImageWrap}>
+                <MeetingChatImageViewerGallery
+                  gallery={rows}
+                  initialIndex={imageViewerIndex}
+                  onIndexChange={onMediaViewerIndexChange}
+                />
               </View>
             ) : null}
           </View>
@@ -541,10 +561,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-  },
-  viewerImageWrap: {
-    flex: 1,
-    minHeight: 0,
-    width: '100%',
   },
 });
