@@ -564,6 +564,7 @@ function supabaseProfileJsonToFirestoreShape(row: Record<string, unknown>): Reco
     phoneVerifiedAt: row.phone_verified_at ?? null,
     email: row.email,
     displayName: row.display_name,
+    bio: row.bio,
     termsAgreedAt: row.terms_agreed_at ?? null,
     gender: row.gender,
     ageBand: row.age_band,
@@ -616,6 +617,7 @@ function profilePatchToSupabaseJsonb(patch: {
   rankingPoints?: number | null;
   email?: string | null;
   displayName?: string | null;
+  bio?: string | null;
   /** 디바이스별 최신 FCM 토큰 */
   fcmToken?: string | null;
   fcmPlatform?: 'ios' | 'android' | null;
@@ -634,6 +636,14 @@ function profilePatchToSupabaseJsonb(patch: {
   if (patch.photoUrl !== undefined) {
     fields.photo_url =
       patch.photoUrl === null || String(patch.photoUrl).trim() === '' ? null : String(patch.photoUrl).trim();
+  }
+  if (patch.bio !== undefined) {
+    if (patch.bio === null) {
+      fields.bio = null;
+    } else {
+      const t = String(patch.bio).trim();
+      fields.bio = t ? t : null;
+    }
   }
   if (patch.gender !== undefined) {
     fields.gender = patch.gender && String(patch.gender).trim() ? String(patch.gender).trim() : null;
@@ -1036,6 +1046,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
 
     // 개인정보/인증/동의/프로필성 정보는 모두 null 처리합니다.
     photo_url: null,
+    bio: null,
     phone: null,
     phone_verified_at: null,
     email: null,

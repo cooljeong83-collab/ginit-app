@@ -11,7 +11,11 @@ import {
 } from '@/src/lib/feed-home-visual';
 import { firstKakaoPlaceDetailPageUrlFromMeeting, type FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { GINIT_HIGH_TRUST_HOST_MIN, isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
+import {
+  GINIT_HIGH_TRUST_HOST_MIN,
+  isHighTrustPublicMeeting,
+  levelBarFillColorForTrust,
+} from '@/src/lib/ginit-trust';
 import { firstPlaceCandidatePreferredPhotoUri } from '@/src/lib/meeting-list-thumbnail';
 import {
   formatPublicMeetingAgeSummary,
@@ -281,7 +285,14 @@ export function HomeMeetingListItem({
                   accessibilityIgnoresInvertColors
                 />
                 {symbolBox.hostPhotoUrl ? (
-                  <View style={s.symbolCategoryBadge} accessibilityLabel="주관자 프로필">
+                  <View
+                    style={[
+                      s.symbolCategoryBadge,
+                      typeof symbolBox.hostGTrust === 'number'
+                        ? { borderColor: levelBarFillColorForTrust(symbolBox.hostGTrust) }
+                        : null,
+                    ]}
+                    accessibilityLabel="주관자 프로필">
                     <Image
                       source={{ uri: symbolBox.hostPhotoUrl }}
                       style={s.symbolHostPhotoInBadge}
@@ -327,7 +338,14 @@ export function HomeMeetingListItem({
                   </>
                 )}
                 {symbolBox.hostPhotoUrl ? (
-                  <View style={s.symbolCategoryBadge} accessibilityLabel="주관자 프로필">
+                  <View
+                    style={[
+                      s.symbolCategoryBadge,
+                      typeof symbolBox.hostGTrust === 'number'
+                        ? { borderColor: levelBarFillColorForTrust(symbolBox.hostGTrust) }
+                        : null,
+                    ]}
+                    accessibilityLabel="주관자 프로필">
                     <Image
                       source={{ uri: symbolBox.hostPhotoUrl }}
                       style={s.symbolHostPhotoInBadge}

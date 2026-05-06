@@ -36,7 +36,6 @@ import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-style
 import type { MeetingChatQuickActionDef } from '@/components/chat/meeting-chat-quick-action-row';
 import { meetingImageViewerMeta, profileForSender } from '@/components/chat/meeting-chat-ui-helpers';
 import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
-import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -148,7 +147,14 @@ export default function MeetingChatRoomScreen() {
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [meetingError, setMeetingError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
+  const openUserProfile = useCallback(
+    (id: string) => {
+      const t = id.trim();
+      if (!t) return;
+      router.push(`/profile/user/${encodeURIComponent(t)}`);
+    },
+    [router],
+  );
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -985,7 +991,7 @@ export default function MeetingChatRoomScreen() {
     unreadCountForMessage,
     jumpToRepliedMessage,
     setReplyTo,
-    setPeerProfileUserId,
+    onOpenUserProfile: openUserProfile,
     openMeetingChatImageViewer,
     listRef,
   });
@@ -1321,11 +1327,7 @@ export default function MeetingChatRoomScreen() {
         </Modal>
         </View>
       </SafeAreaView>
-      <MeetingPeerProfileModal
-        visible={peerProfileUserId != null}
-        peerAppUserId={peerProfileUserId}
-        onClose={() => setPeerProfileUserId(null)}
-      />
+      {/* 프로필 팝업 대신 전체 화면 프로필로 이동합니다. */}
     </GestureHandlerRootView>
   );
 }

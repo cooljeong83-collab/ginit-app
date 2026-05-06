@@ -68,6 +68,7 @@ export default function ProfileEditScreen() {
 
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
+  const [bio, setBio] = useState('');
 
   // 서비스 이용 인증(정보 등록) 모달
   const [genderDemo, setGenderDemo] = useState<'MALE' | 'FEMALE' | null>(null);
@@ -119,6 +120,7 @@ export default function ProfileEditScreen() {
         if (!alive) return;
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
+        setBio(p.bio ?? '');
         setIsPhoneVerified(isUserPhoneVerified(p));
         const phone = p.phone?.trim();
         const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
@@ -288,6 +290,7 @@ export default function ProfileEditScreen() {
       const patch: Parameters<typeof updateUserProfile>[1] = {
         nickname: nickname.trim(),
         photoUrl: photoUrl.trim() || null,
+        bio: bio.trim() || null,
       };
       /** SNS 가입 보완: 시트에서만 입력한 성별·생일은 별도 ‘인증 저장’ 전에도 닉네임 저장 시 함께 반영해야 뒤로 가도 사라지지 않음 */
       if (isDemographicsIncomplete(pCur)) {
@@ -314,7 +317,7 @@ export default function ProfileEditScreen() {
     } finally {
       setProfileBusy(false);
     }
-  }, [profilePk, nickname, photoUrl, router, genderDemo, birthDemo, googleDemoGenderLocked, googleDemoBirthLocked]);
+  }, [profilePk, nickname, photoUrl, bio, router, genderDemo, birthDemo, googleDemoGenderLocked, googleDemoBirthLocked]);
 
   const canSendOtp = useMemo(() => {
     const normalized = normalizePhoneUserId(phoneField);
@@ -605,19 +608,24 @@ export default function ProfileEditScreen() {
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => safeRouterBack(router)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="뒤로"
+            style={styles.backBtn}>
+            <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
+          </Pressable>
+          <Text style={styles.topTitle} numberOfLines={1}>
+            프로필 편집
+          </Text>
+          <View style={styles.topBarSpacer} />
+        </View>
+
         <ScrollView contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]} showsVerticalScrollIndicator={false}>
           <View style={styles.heroWrap}>
             <View style={styles.heroInner}>
-              <View style={styles.heroTopRow}>
-                <Pressable
-                  onPress={() => safeRouterBack(router)}
-                  style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="뒤로">
-                  <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-                </Pressable>
-              </View>
-              <Text style={styles.heroTitle}>프로필 편집</Text>
               <Text style={styles.heroSubtitle}>모임에서 보이는 이름과 사진을 바꿀 수 있어요.</Text>
 
               <Pressable
@@ -668,6 +676,26 @@ export default function ProfileEditScreen() {
               editable={!profileBusy && !deleteBusy}
             />
 
+            <View style={[styles.nicknameHeader, { marginTop: 14 }]}>
+              <Text style={styles.labelInline}>소개</Text>
+              <Text style={styles.charCount}>{bio.length}/80</Text>
+            </View>
+            <TextInput
+              value={bio}
+              onChangeText={setBio}
+              placeholder="한 줄로 자기소개를 남겨 보세요"
+              placeholderTextColor={GinitTheme.colors.textMuted}
+              style={[styles.input, styles.bioInput]}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={80}
+              keyboardType="default"
+              inputMode="text"
+              editable={!profileBusy && !deleteBusy}
+              multiline
+              textAlignVertical="top"
+            />
+
             <View style={styles.saveBlock}>
               <GinitButton title={profileBusy ? '저장 중…' : '변경 사항 저장'} variant="primary" onPress={() => void onSaveProfile()} disabled={profileBusy} />
             </View>
@@ -684,6 +712,17 @@ const styles = StyleSheet.create({
   scrollBottom: { paddingTop: 0, paddingBottom: 36 },
   pressed: { opacity: 0.88 },
 
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+  },
+  backBtn: { padding: 4 },
+  topTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: '#0f172a' },
+  topBarSpacer: { width: 30 },
+
   heroWrap: {
     marginHorizontal: -20,
     marginBottom: 6,
@@ -696,27 +735,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 26,
     backgroundColor: GinitTheme.colors.surfaceStrong,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.95)',
-  },
-  heroTitle: {
-    fontSize: 26,
-    fontWeight: '600',
-    letterSpacing: -0.75,
-    color: GinitTheme.colors.text,
   },
   heroSubtitle: {
     marginTop: 6,
@@ -854,6 +872,10 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     fontSize: 16,
     fontWeight: '600',
+  },
+  bioInput: {
+    height: 92,
+    paddingTop: 12,
   },
   saveBlock: {
     marginTop: GinitTheme.spacing.lg,

@@ -1,0 +1,7 @@
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-pngs-0 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/build/generated/res/pngs/release
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-resValues-1 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/build/generated/res/resValues/release
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-mergeReleaseResources-2 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-mergeReleaseResources-3 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-release-4 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/build/intermediates/merged_res/release/mergeReleaseResources
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-main-5 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/src/main/res
+expo.modules.navermobileplacescrape.naver-mobile-place-scrape-release-6 /Users/clawagent/ginit-app/modules/naver-mobile-place-scrape/android/src/release/res

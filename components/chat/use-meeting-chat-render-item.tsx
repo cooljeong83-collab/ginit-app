@@ -26,7 +26,7 @@ export type MeetingChatRenderItemDeps = {
   unreadCountForMessage: (message: MeetingChatMessage, messageIndex: number) => number;
   jumpToRepliedMessage: (replyMessageId: string) => void | Promise<void>;
   setReplyTo: (v: MeetingChatMessage['replyTo']) => void;
-  setPeerProfileUserId: (id: string) => void;
+  onOpenUserProfile: (id: string) => void;
   openMeetingChatImageViewer: (item: MeetingChatMessage) => void;
   listRef: RefObject<unknown>;
 };
@@ -39,7 +39,7 @@ export function useMeetingChatRenderItem({
   unreadCountForMessage,
   jumpToRepliedMessage,
   setReplyTo,
-  setPeerProfileUserId,
+  onOpenUserProfile,
   openMeetingChatImageViewer,
   listRef,
 }: MeetingChatRenderItemDeps) {
@@ -184,7 +184,7 @@ export function useMeetingChatRenderItem({
           <Pressable
             style={styles.avatarCol}
             disabled={!canOpenPeerProfile}
-            onPress={() => canOpenPeerProfile && setPeerProfileUserId(sid)}
+            onPress={() => canOpenPeerProfile && onOpenUserProfile(sid)}
             accessibilityRole={canOpenPeerProfile ? 'button' : undefined}
             accessibilityLabel={canOpenPeerProfile ? '프로필 보기' : undefined}>
             {showAvatar ? (
@@ -207,7 +207,7 @@ export function useMeetingChatRenderItem({
             {showAvatar ? (
               <Pressable
                 disabled={!canOpenPeerProfile}
-                onPress={() => canOpenPeerProfile && setPeerProfileUserId(sid)}
+                onPress={() => canOpenPeerProfile && onOpenUserProfile(sid)}
                 style={({ pressed }) => [styles.nameRow, canOpenPeerProfile && pressed && styles.pressed]}
                 accessibilityRole={canOpenPeerProfile ? 'button' : undefined}
                 accessibilityLabel={canOpenPeerProfile ? '프로필 보기' : undefined}>
@@ -306,7 +306,7 @@ export function useMeetingChatRenderItem({
       unreadCountForMessage,
       jumpToRepliedMessage,
       setReplyTo,
-      setPeerProfileUserId,
+      onOpenUserProfile,
       openMeetingChatImageViewer,
       listRef,
     ],

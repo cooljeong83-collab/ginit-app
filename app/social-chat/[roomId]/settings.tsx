@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -96,7 +95,6 @@ export default function SocialChatSettingsScreen() {
   const [notifyLoaded, setNotifyLoaded] = useState(false);
   const [imageHighQuality, setImageHighQuality] = useState(false);
   const [imageQualityLoaded, setImageQualityLoaded] = useState(false);
-  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
 
   const myNorm = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
   const peerId = useMemo(() => {
@@ -184,7 +182,7 @@ export default function SocialChatSettingsScreen() {
       Alert.alert('프로필', '상대 프로필을 불러올 수 없어요.');
       return;
     }
-    setPeerProfileUserId(pid);
+    router.push(`/profile/user/${encodeURIComponent(pid)}`);
   }, [peerId]);
 
   const openLeaveInfo = useCallback(() => {
@@ -242,7 +240,7 @@ export default function SocialChatSettingsScreen() {
             <Pressable
               style={styles.avatarItem}
               disabled={!peerId.trim() || isUserProfileWithdrawn(peerProfile)}
-              onPress={() => peerId.trim() && setPeerProfileUserId(peerId.trim())}
+              onPress={() => peerId.trim() && router.push(`/profile/user/${encodeURIComponent(peerId.trim())}`)}
               accessibilityRole={peerId.trim() ? 'button' : 'text'}
               accessibilityLabel={peerNick}>
               <View style={styles.avatarRing}>
@@ -313,11 +311,6 @@ export default function SocialChatSettingsScreen() {
           />
         </View>
       </ScrollView>
-      <MeetingPeerProfileModal
-        visible={peerProfileUserId != null}
-        peerAppUserId={peerProfileUserId}
-        onClose={() => setPeerProfileUserId(null)}
-      />
     </SafeAreaView>
   );
 }

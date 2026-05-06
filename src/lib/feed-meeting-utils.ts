@@ -237,9 +237,9 @@ export function sortMeetingsForFeed(
 
 /** 홈 리스트 심볼 박스: 영화(+카테고리 배지) / 장소 모임(프로필 메인+카테고리 배지) / 호스트만 */
 export type FeedMeetingSymbolBox =
-  | { source: 'movie_poster'; url: string; hostPhotoUrl: string | null }
-  | { source: 'place_with_host'; hostPhotoUrl: string | null }
-  | { source: 'host_profile'; url: string };
+  | { source: 'movie_poster'; url: string; hostPhotoUrl: string | null; hostGTrust: number | null }
+  | { source: 'place_with_host'; hostPhotoUrl: string | null; hostGTrust: number | null }
+  | { source: 'host_profile'; url: string; hostGTrust: number | null };
 
 /**
  * 모임 상세 `buildPlaceChipsFromMeeting`과 동일한 검색어 규칙: 첫 `placeCandidates` 행의 장소명+주소,
@@ -312,25 +312,38 @@ function resolveCreatorPhotoUrl(
   return u && u.length > 0 ? u : null;
 }
 
+function resolveCreatorGTrust(
+  m: Meeting,
+  hostProfiles: ReadonlyMap<string, UserProfile>,
+): number | null {
+  const hostRaw = m.createdBy?.trim();
+  if (!hostRaw) return null;
+  const hostKey = normalizeParticipantId(hostRaw) ?? hostRaw;
+  const prof = hostProfiles.get(hostKey) ?? hostProfiles.get(hostRaw);
+  const t = prof?.gTrust;
+  return typeof t === 'number' && Number.isFinite(t) ? Math.trunc(t) : null;
+}
+
 export function feedMeetingSymbolBox(
   m: Meeting,
   hostProfiles: ReadonlyMap<string, UserProfile>,
 ): FeedMeetingSymbolBox | null {
   const hostPhotoUrl = resolveCreatorPhotoUrl(m, hostProfiles);
+  const hostGTrust = resolveCreatorGTrust(m, hostProfiles);
 
   const raw = m.extraData;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const extra = raw as MeetingExtraData;
     if (extra.specialtyKind === 'movie') {
       const poster = firstMoviePosterUrl(extra);
-      if (poster) return { source: 'movie_poster', url: poster, hostPhotoUrl };
+      if (poster) return { source: 'movie_poster', url: poster, hostPhotoUrl, hostGTrust };
     }
   }
 
   const placeImageFields = firstPlaceImageSearchFields(m);
   if (placeImageFields) {
-    return { source: 'place_with_host', hostPhotoUrl };
+    return { source: 'place_with_host', hostPhotoUrl, hostGTrust };
   }
-  if (hostPhotoUrl) return { source: 'host_profile', url: hostPhotoUrl };
+  if (hostPhotoUrl) return { source: 'host_profile', url: hostPhotoUrl, hostGTrust };
   return null;
 }

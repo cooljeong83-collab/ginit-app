@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -48,7 +47,14 @@ export default function MeetingChatMembersScreen() {
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
+  const openUserProfile = useCallback(
+    (id: string) => {
+      const t = id.trim();
+      if (!t) return;
+      router.push(`/profile/user/${encodeURIComponent(t)}`);
+    },
+    [router],
+  );
 
   useEffect(() => {
     if (!meetingId) {
@@ -147,7 +153,7 @@ export default function MeetingChatMembersScreen() {
               <View key={pid}>
                 {i > 0 ? <RowSep /> : null}
                 <Pressable
-                  onPress={() => canOpen && setPeerProfileUserId(pid)}
+                  onPress={() => canOpen && openUserProfile(pid)}
                   disabled={!canOpen}
                   style={({ pressed }) => [styles.row, canOpen && pressed && styles.rowPressed]}
                   accessibilityRole={canOpen ? 'button' : 'text'}
@@ -182,11 +188,6 @@ export default function MeetingChatMembersScreen() {
           })}
         </View>
       </ScrollView>
-      <MeetingPeerProfileModal
-        visible={peerProfileUserId != null}
-        peerAppUserId={peerProfileUserId}
-        onClose={() => setPeerProfileUserId(null)}
-      />
     </SafeAreaView>
   );
 }

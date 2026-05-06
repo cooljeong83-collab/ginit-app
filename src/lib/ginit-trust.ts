@@ -8,8 +8,24 @@ import type { UserProfile } from '@/src/lib/user-profile';
 /** 호스트가 '신뢰도 높은 모임'으로 설정할 때 사용하는 최소 gTrust 하한 */
 export const GINIT_HIGH_TRUST_HOST_MIN = 70;
 
-const ORANGE = { r: 255, g: 138, b: 0 }; // #FF8A00
-const RED = { r: 255, g: 59, b: 48 }; // #FF3B30
+// Blue → Indigo → Violet (premium tone)
+// - blue-600:   #2563EB
+// - indigo-600: #4F46E5
+// - violet-600: #7C3AED
+const TRUST_BLUE = { r: 37, g: 99, b: 235 };
+const TRUST_INDIGO = { r: 79, g: 70, b: 229 };
+const TRUST_VIOLET = { r: 124, g: 58, b: 237 };
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function lerpRgb(from: { r: number; g: number; b: number }, to: { r: number; g: number; b: number }, t: number): string {
+  const r = Math.round(lerp(from.r, to.r, t));
+  const g = Math.round(lerp(from.g, to.g, t));
+  const b = Math.round(lerp(from.b, to.b, t));
+  return `rgb(${r},${g},${b})`;
+}
 
 export type GinitTrustTierKey = 'excellent' | 'normal' | 'caution' | 'restricted';
 
@@ -42,13 +58,13 @@ export function isHighTrustPublicMeeting(cfg: { minGTrust?: number | null } | nu
   return typeof m === 'number' && Number.isFinite(m) && m >= GINIT_HIGH_TRUST_HOST_MIN;
 }
 
-/** 레벨 진행 바 채움색: 신뢰가 높을수록 오렌지, 낮을수록 레드로 보간 */
+/** 레벨 진행 바 채움색: 신뢰 0→100을 blue→indigo→violet로 보간 */
 export function levelBarFillColorForTrust(trust: number): string {
   const t = clampTrust(trust) / 100;
-  const r = Math.round(ORANGE.r + (RED.r - ORANGE.r) * (1 - t));
-  const g = Math.round(ORANGE.g + (RED.g - ORANGE.g) * (1 - t));
-  const b = Math.round(ORANGE.b + (RED.b - ORANGE.b) * (1 - t));
-  return `rgb(${r},${g},${b})`;
+  if (t <= 0.5) {
+    return lerpRgb(TRUST_BLUE, TRUST_INDIGO, t / 0.5);
+  }
+  return lerpRgb(TRUST_INDIGO, TRUST_VIOLET, (t - 0.5) / 0.5);
 }
 
 export function trustTierForUser(profile: UserProfile | null | undefined): {

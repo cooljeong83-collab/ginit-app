@@ -56,7 +56,6 @@ export default function SocialChatRoomScreen() {
   const dmBodyRef = useRef<SocialDmChatRoomBodyHandle | null>(null);
   const lastMarkedReadMessageIdRef = useRef<string>('');
 
-  const [profileModalUserId, setProfileModalUserId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SocialChatMessage[]>([]);
@@ -266,7 +265,9 @@ export default function SocialChatRoomScreen() {
             onPress={() => {
               const p = peerId.trim();
               if (!p) return;
-              setProfileModalUserId(p);
+              const t = p?.trim() ?? '';
+              if (!t) return;
+              router.push(`/profile/user/${encodeURIComponent(t)}`);
             }}
             disabled={!peerId.trim()}
             style={({ pressed }) => [s.titlePress, !peerId.trim() && { opacity: 0.6 }, pressed && peerId.trim() && { opacity: 0.85 }]}
@@ -314,7 +315,11 @@ export default function SocialChatRoomScreen() {
             return typeof v === 'string' && v.trim() ? v.trim() : null;
           })()}
           peerReadAt={pickPeerReadValue<unknown>(roomDoc?.readAtBy, peerId)}
-          onPeerProfileOpen={(id) => setProfileModalUserId(id.trim() || null)}
+          onPeerProfileOpen={(id) => {
+            const t = id.trim();
+            if (!t) return;
+            router.push(`/profile/user/${encodeURIComponent(t)}`);
+          }}
         />
       )}
 
@@ -373,11 +378,7 @@ export default function SocialChatRoomScreen() {
           ) : null}
         </SafeAreaView>
       </Modal>
-      <MeetingPeerProfileModal
-        visible={Boolean(profileModalUserId?.trim())}
-        peerAppUserId={profileModalUserId?.trim() || null}
-        onClose={() => setProfileModalUserId(null)}
-      />
+      {/* 프로필 팝업 대신 전체 화면 프로필로 이동합니다. */}
     </View>
   );
 }

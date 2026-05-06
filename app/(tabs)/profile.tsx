@@ -24,6 +24,7 @@ import { GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
+import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import {
@@ -236,90 +237,14 @@ export default function ProfileTab() {
           contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.headerWrap}>
-            <View style={styles.headerRow}>
-              <Pressable
-                onPress={() => void onPickHeaderProfilePhoto()}
-                disabled={photoUploadBusy}
-                style={({ pressed }) => [styles.avatarWrap, pressed && !photoUploadBusy && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="프로필 사진 바꾸기"
-                accessibilityHint="갤러리에서 고르고 확인하면 바로 저장돼요">
-                {photoUrl.trim() ? (
-                  <Image source={{ uri: photoUrl.trim() }} style={styles.avatar} contentFit="cover" />
-                ) : (
-                  <View style={styles.avatarFallback}>
-                    <Text style={styles.avatarFallbackText}>{(nickname?.trim() || 'G').slice(0, 1)}</Text>
-                  </View>
-                )}
-                {photoUploadBusy ? (
-                  <View style={styles.avatarUploadOverlay} pointerEvents="none">
-                    <ActivityIndicator color="#fff" />
-                  </View>
-                ) : null}
-              </Pressable>
-              <View style={styles.headerTextCol}>
-                <Text style={styles.headerName} numberOfLines={1}>
-                  {nickname?.trim() || '사용자'}
-                </Text>
-                <Text style={styles.headerSub} numberOfLines={1}>
-                  {userId?.trim()
-                    ? userId
-                    : authProfile?.email?.trim()
-                      ? authProfile.email
-                      : authProfile?.firebaseUid?.trim()
-                        ? authProfile.firebaseUid
-                        : '(세션 없음)'}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <GinitCard
-            appearance="light"
-            style={styles.profileCard}
-            onLayout={(e: LayoutChangeEvent) => setTrustSectionY(e.nativeEvent.layout.y)}>
-            <Text style={styles.sectionTitle}>나의 신뢰도</Text>
-            <View style={styles.trustInlineSection}>
-              {trustDropFx ? (
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    styles.trustDropFx,
-                    { opacity: trustDropOpacity, transform: [{ translateY: trustDropTranslate }] },
-                  ]}>
-                  <Text style={styles.trustDropFxText}>−{trustDropFx.delta}</Text>
-                </Animated.View>
-              ) : null}
-              <View style={styles.trustCardTop}>
-                <Text style={styles.trustCardTitle}>현재 점수</Text>
-                <View style={styles.trustTierPill}>
-                  <Text style={styles.trustTierPillText}>{trustTier.label}</Text>
-                </View>
-              </View>
-              <Text style={styles.trustScoreBig}>{gTrust}</Text>
-              <Text style={styles.trustScoreUnit}>gTrust 점수</Text>
-              {penaltyCount > 0 ? (
-                <Text style={styles.trustPenaltyHint}>누적 패널티 {penaltyCount}회 · 체크인 완료로 신뢰를 회복할 수 있어요</Text>
-              ) : (
-                <Text style={styles.trustPenaltyHint}>약속을 지키면 신뢰 점수가 유지돼요</Text>
-              )}
-              {isRestricted ? <Text style={styles.trustRestricted}>현재 모임 참여가 제한된 상태예요.</Text> : null}
-
-              <Text style={[styles.label, { marginTop: 14, marginBottom: 6, color: '#475569' }]}>레벨 진행</Text>
-              <Text style={styles.levelLine}>
-                Lv {gLevel} · XP {gXp} / {xpBar.nextAt}
-              </Text>
-              <View style={styles.levelTrack}>
-                <View
-                  style={[
-                    styles.levelFill,
-                    { width: `${Math.round(xpBar.ratio * 100)}%`, backgroundColor: levelBarColor },
-                  ]}
-                />
-              </View>
-            </View>
-          </GinitCard>
+          {profilePk ? (
+            <UserProfilePublicBody
+              targetUserId={profilePk}
+              layout="tab"
+              onPressMyAvatar={() => void onPickHeaderProfilePhoto()}
+              hideMyEditCta
+            />
+          ) : null}
 
           {!isSignedIn ? (
             <View style={styles.menuListWrap}>

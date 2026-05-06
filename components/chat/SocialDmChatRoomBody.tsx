@@ -322,7 +322,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     unreadCountForMessage,
     jumpToRepliedMessage,
     setReplyTo,
-    setPeerProfileUserId: setPeerProfileUserIdBridge,
+    onOpenUserProfile: setPeerProfileUserIdBridge,
     openMeetingChatImageViewer,
     listRef,
   });

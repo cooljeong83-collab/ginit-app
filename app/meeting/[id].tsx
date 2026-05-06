@@ -571,8 +571,8 @@ export default function MeetingDetailScreen() {
   const openParticipantProfile = useCallback((peerAppUserId: string) => {
     const pid = peerAppUserId.trim();
     if (!pid) return;
-    setProfilePopupUserId(pid);
-  }, []);
+    router.push(`/profile/user/${encodeURIComponent(pid)}`);
+  }, [router]);
 
   const closeParticipantProfile = useCallback(() => {
     setProfilePopupUserId(null);
@@ -2996,15 +2996,11 @@ export default function MeetingDetailScreen() {
                             <Text style={styles.joinRequestNick} numberOfLines={1}>
                               {nickname}
                             </Text>
-                            <View style={styles.joinRequestBubble}>
-                              <Text
-                                style={[
-                                  styles.joinRequestBubbleText,
-                                  !hasMessage && styles.joinRequestBubbleTextPlaceholder,
-                                ]}>
-                                {hasMessage ? msgRaw : '신청 메시지가 없어요.'}
-                              </Text>
-                            </View>
+                            <Text
+                              style={[styles.joinRequestMessage, !hasMessage && styles.joinRequestMessagePlaceholder]}
+                              numberOfLines={1}>
+                              {hasMessage ? msgRaw : '신청 메시지가 없어요.'}
+                            </Text>
                           </View>
                           <View style={styles.joinRequestActions}>
                             <Pressable
@@ -5921,15 +5917,15 @@ const styles = StyleSheet.create({
   joinRequestSep: { height: StyleSheet.hairlineWidth, backgroundColor: GinitTheme.colors.border },
   joinRequestRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 12,
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
   },
   joinRequestAvatarPress: { flexShrink: 0 },
   joinRequestAvatarSq: {
-    width: 65,
-    height: 65,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 16,
     backgroundColor: '#E8F2FF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -5947,10 +5943,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#e2e8f0',
     borderColor: '#cbd5e1',
   },
-  joinRequestAvatarSqImg: { width:65, height: 65, borderRadius: 10 },
+  joinRequestAvatarSqImg: { width: 44, height: 44, borderRadius: 14 },
   joinRequestAvatarInitial: { fontSize: 17, fontWeight: '700', color: GinitTheme.colors.primary },
-  joinRequestMid: { flex: 1, minWidth: 0, gap: 6 },
-  joinRequestNick: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.text },
+  joinRequestMid: { flex: 1, minWidth: 0, justifyContent: 'center', gap: 2 },
+  joinRequestNick: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
+  joinRequestMessage: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 17,
+    letterSpacing: -0.1,
+    color: GinitTheme.colors.textMuted,
+  },
+  joinRequestMessagePlaceholder: { color: GinitTheme.colors.textMuted },
   joinRequestBubble: {
     backgroundColor: GinitTheme.colors.primarySoft,
     borderWidth: StyleSheet.hairlineWidth,
@@ -5961,16 +5965,11 @@ const styles = StyleSheet.create({
   },
   joinRequestBubbleText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.textSub, lineHeight: 18 },
   joinRequestBubbleTextPlaceholder: { color: GinitTheme.colors.textMuted },
-  joinRequestActions: {
-    flexShrink: 0,
-    alignItems: 'flex-end',
-    justifyContent: 'flex-start',
-    gap: 5,
-  },
+  joinRequestActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   joinRequestBtnPrimary: {
-    minWidth: 64,
+    minWidth: 54,
     height: 32,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -5978,9 +5977,9 @@ const styles = StyleSheet.create({
   },
   joinRequestBtnPrimaryText: { fontSize: 12, fontWeight: '600', color: '#fff' },
   joinRequestBtnGhost: {
-    minWidth: 64,
+    minWidth: 54,
     height: 32,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',

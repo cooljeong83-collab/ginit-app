@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -100,7 +99,14 @@ export default function MeetingChatSettingsScreen() {
   const [notifyLoaded, setNotifyLoaded] = useState(false);
   const [imageHighQuality, setImageHighQuality] = useState(false);
   const [imageQualityLoaded, setImageQualityLoaded] = useState(false);
-  const [peerProfileUserId, setPeerProfileUserId] = useState<string | null>(null);
+  const openUserProfile = useCallback(
+    (id: string) => {
+      const t = id.trim();
+      if (!t) return;
+      router.push(`/profile/user/${encodeURIComponent(t)}`);
+    },
+    [router],
+  );
 
   useEffect(() => {
     if (!meetingId) {
@@ -278,7 +284,7 @@ export default function MeetingChatSettingsScreen() {
                   key={pid}
                   style={styles.avatarItem}
                   disabled={!canOpen}
-                  onPress={() => canOpen && setPeerProfileUserId(pid)}
+                  onPress={() => canOpen && openUserProfile(pid)}
                   accessibilityRole={canOpen ? 'button' : 'text'}
                   accessibilityLabel={canOpen ? `${nick} 프로필` : nick}>
                   <View style={styles.avatarRing}>
@@ -352,11 +358,6 @@ export default function MeetingChatSettingsScreen() {
           />
         </View>
       </ScrollView>
-      <MeetingPeerProfileModal
-        visible={peerProfileUserId != null}
-        peerAppUserId={peerProfileUserId}
-        onClose={() => setPeerProfileUserId(null)}
-      />
     </SafeAreaView>
   );
 }
