@@ -35,7 +35,6 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { feedRegionNormFromAddressHaystack } from './feed-display-location';
 import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
-import { upsertPlaceSnapshotOnServer } from './place-snapshot-supabase';
 import { getFirebaseFirestore } from './firebase';
 import { ginitNotifyDbg } from './ginit-notify-debug';
 import { ledgerWritesToSupabase } from './hybrid-data-source';
@@ -140,8 +139,6 @@ export type Meeting = {
   address?: string | null;
   latitude?: number | null;
   longitude?: number | null;
-  /** 확정 장소 Supabase `places.place_key` (Firestore/ledger fs 문서) */
-  placeKey?: string | null;
   /** 카테고리 특화 폼(영화·메뉴·운동 강도 등) */
   extraData?: MeetingExtraData | Record<string, unknown> | null;
   /** 등록 시 저장된 일정·장소 후보(상세·투표 UI용) */
@@ -152,7 +149,6 @@ export type Meeting = {
     address: string;
     latitude: number;
     longitude: number;
-    placeKey?: string | null;
     /** 네이버 검색·스크랩 업종 라벨 */
     category?: string | null;
     naverPlaceLink?: string | null;
@@ -861,7 +857,6 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
     address: typeof data.address === 'string' ? data.address : null,
     latitude: typeof data.latitude === 'number' && Number.isFinite(data.latitude) ? data.latitude : null,
     longitude: typeof data.longitude === 'number' && Number.isFinite(data.longitude) ? data.longitude : null,
-    placeKey: typeof data.placeKey === 'string' && data.placeKey.trim() ? data.placeKey.trim() : null,
     extraData: (data.extraData as Meeting['extraData']) ?? null,
     meetingConfig: (data.meetingConfig as Meeting['meetingConfig']) ?? null,
     dateCandidates: Array.isArray(data.dateCandidates) ? (data.dateCandidates as DateCandidate[]) : null,
@@ -894,78 +889,6 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
       return xs.length ? xs : null;
     })(),
   };
-}
-
-/** 장소 투표 칩 id — `app/meeting/[id].tsx`의 `placeCandidateChipId`와 동일 규칙 */
-export function meetingPlaceCandidateChipId(p: { id?: string }, index: number): string {
-  const pid = typeof p.id === 'string' ? p.id.trim() : '';
-  return pid || `pc-${index}`;
-}
-
-export type ResolvedPlaceLedgerPatch = {
-  placeName: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-  placeKey?: string;
-  category?: string | null;
-  naverPlaceLink?: string | null;
-  preferredPhotoMediaUrl?: string | null;
-};
-
-/** 호스트 일정 확정 시 ledger/Firestore 상단 장소 필드·placeKey·스냅샷용 메타 */
-export function resolveConfirmedPlaceLedgerPatch(
-  m: Meeting,
-  placeChipId: string | null,
-): ResolvedPlaceLedgerPatch | null {
-  if (!placeChipId?.trim()) return null;
-  const id = placeChipId.trim();
-  const cands = m.placeCandidates ?? [];
-  for (let i = 0; i < cands.length; i++) {
-    const cand = cands[i];
-    if (meetingPlaceCandidateChipId(cand, i) !== id) continue;
-    const placeName = (cand.placeName ?? '').trim();
-    const address = (cand.address ?? '').trim();
-    const lat = cand.latitude;
-    const lng = cand.longitude;
-    if (!placeName || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    const pk = typeof cand.placeKey === 'string' && cand.placeKey.trim() ? cand.placeKey.trim() : undefined;
-    const cat = typeof cand.category === 'string' && cand.category.trim() ? cand.category.trim() : null;
-    const nl = typeof cand.naverPlaceLink === 'string' && cand.naverPlaceLink.trim() ? cand.naverPlaceLink.trim() : null;
-    const pref =
-      typeof cand.preferredPhotoMediaUrl === 'string' && cand.preferredPhotoMediaUrl.trim().startsWith('https://')
-        ? cand.preferredPhotoMediaUrl.trim()
-        : null;
-    return {
-      placeName,
-      address,
-      latitude: Number(lat),
-      longitude: Number(lng),
-      ...(pk ? { placeKey: pk } : {}),
-      category: cat,
-      naverPlaceLink: nl,
-      preferredPhotoMediaUrl: pref,
-    };
-  }
-  if (id === 'legacy-place') {
-    const placeName = (m.placeName ?? m.location ?? '').trim();
-    const address = (m.address ?? '').trim();
-    const lat = m.latitude;
-    const lng = m.longitude;
-    if (!placeName || lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    const pk = typeof m.placeKey === 'string' && m.placeKey.trim() ? m.placeKey.trim() : undefined;
-    return {
-      placeName,
-      address,
-      latitude: Number(lat),
-      longitude: Number(lng),
-      ...(pk ? { placeKey: pk } : {}),
-      category: null,
-      naverPlaceLink: null,
-      preferredPhotoMediaUrl: null,
-    };
-  }
-  return null;
 }
 
 export async function getMeetingById(meetingId: string): Promise<Meeting | null> {
@@ -2507,7 +2430,6 @@ export async function confirmMeetingSchedule(
       throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
     }
     const rp = analysis.resolvedPicks;
-    const placePatchLedger = resolveConfirmedPlaceLedgerPatch(m, rp.placeChipId);
     const sch = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
     if (sch) {
       const hostProf = await getUserProfile(uid);
@@ -2531,29 +2453,7 @@ export async function confirmMeetingSchedule(
       nextLedgerDoc.scheduleTime = sch.scheduleTime;
       nextLedgerDoc.scheduledAt = sch.scheduledAt;
     }
-    if (placePatchLedger) {
-      nextLedgerDoc.placeName = placePatchLedger.placeName;
-      nextLedgerDoc.address = placePatchLedger.address;
-      nextLedgerDoc.latitude = placePatchLedger.latitude;
-      nextLedgerDoc.longitude = placePatchLedger.longitude;
-      if (placePatchLedger.placeKey) nextLedgerDoc.placeKey = placePatchLedger.placeKey;
-    }
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextLedgerDoc) as Record<string, unknown>);
-    if (placePatchLedger?.placeKey) {
-      const snapRes = await upsertPlaceSnapshotOnServer({
-        placeKey: placePatchLedger.placeKey,
-        placeName: placePatchLedger.placeName,
-        address: placePatchLedger.address,
-        latitude: placePatchLedger.latitude,
-        longitude: placePatchLedger.longitude,
-        category: placePatchLedger.category,
-        naverPlaceLink: placePatchLedger.naverPlaceLink,
-        preferredPhotoMediaUrl: placePatchLedger.preferredPhotoMediaUrl,
-      });
-      if (!snapRes.ok && __DEV__) {
-        console.warn('[upsertPlaceSnapshotOnServer]', snapRes.message);
-      }
-    }
     notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
     await grantMeetingConfirmXpIfLedger(uid, mid);
     return;
@@ -2574,7 +2474,6 @@ export async function confirmMeetingSchedule(
     throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
   }
   const rp = analysis.resolvedPicks;
-  const placePatchFs = resolveConfirmedPlaceLedgerPatch(m, rp.placeChipId);
   const schFs = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
   if (schFs) {
     const hostProf = await getUserProfile(uid);
@@ -2597,29 +2496,7 @@ export async function confirmMeetingSchedule(
     fsPatch.scheduleTime = schFs.scheduleTime;
     fsPatch.scheduledAt = schFs.scheduledAt;
   }
-  if (placePatchFs) {
-    fsPatch.placeName = placePatchFs.placeName;
-    fsPatch.address = placePatchFs.address;
-    fsPatch.latitude = placePatchFs.latitude;
-    fsPatch.longitude = placePatchFs.longitude;
-    if (placePatchFs.placeKey) fsPatch.placeKey = placePatchFs.placeKey;
-  }
   await updateDoc(ref, fsPatch);
-  if (placePatchFs?.placeKey) {
-    const snapRes = await upsertPlaceSnapshotOnServer({
-      placeKey: placePatchFs.placeKey,
-      placeName: placePatchFs.placeName,
-      address: placePatchFs.address,
-      latitude: placePatchFs.latitude,
-      longitude: placePatchFs.longitude,
-      category: placePatchFs.category,
-      naverPlaceLink: placePatchFs.naverPlaceLink,
-      preferredPhotoMediaUrl: placePatchFs.preferredPhotoMediaUrl,
-    });
-    if (!snapRes.ok && __DEV__) {
-      console.warn('[upsertPlaceSnapshotOnServer]', snapRes.message);
-    }
-  }
   await adjustProfilesMeetingCountForFirestoreMeetingDoc(data, 1);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
 }
@@ -2650,7 +2527,6 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
         confirmedDateChipId: null,
         confirmedPlaceChipId: null,
         confirmedMovieChipId: null,
-        placeKey: null,
       }) as Record<string, unknown>,
     );
     notifyMeetingParticipantsOfHostActionFireAndForget(m, 'unconfirmed', uid);
@@ -2675,7 +2551,6 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
     confirmedDateChipId: null,
     confirmedPlaceChipId: null,
     confirmedMovieChipId: null,
-    placeKey: null,
   });
   await adjustProfilesMeetingCountForFirestoreMeetingDoc(data, -1);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'unconfirmed', uid);

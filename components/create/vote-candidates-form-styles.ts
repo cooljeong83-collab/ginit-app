@@ -517,7 +517,7 @@ export const voteCandidatesFormStyles = StyleSheet.create({
   },
   /** 제목·주소 각 2줄 + 카카오·네이버 버튼까지 포함(이미지 112 + 여백) — `overflow: hidden` 호스트에 맞춤 */
   placeResultsCarouselHost: {
-    height: 282,
+    height: 274,
   },
   placeResultsCarouselContent: {
     paddingVertical: 10,
@@ -526,7 +526,7 @@ export const voteCandidatesFormStyles = StyleSheet.create({
   },
   placeResultsLoadingMore: {
     width: 76,
-    height: 282,
+    height: 274,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -561,9 +561,9 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
-  /** 가로 캐러셀(`placeResultsCarouselHost` 282) − 세로 패딩 20 기준 — 카카오·네이버 버튼을 카드 하단에 고정 */
+  /** 가로 캐러셀(`placeResultsCarouselHost` 274) − 세로 패딩 20 기준 — 카카오·네이버 버튼을 카드 하단에 고정 */
   placeResultProposalCardWrap: {
-    minHeight: 262,
+    minHeight: 254,
     flexDirection: 'column',
   },
   placeResultProposalPressFill: {
@@ -614,7 +614,7 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     fontWeight: '600',
     color: GinitTheme.colors.text,
     lineHeight: 18,
-    marginBottom: 5,
+    marginBottom: 6,
   },
   placeResultAddr: {
     fontSize: 11,

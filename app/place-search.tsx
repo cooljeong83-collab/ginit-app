@@ -32,7 +32,6 @@ import {
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import { setCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
-import { placeKeyFromNaverLocalSearchId } from '@/src/lib/place-key';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 
 const PLACE_PAGE = 5;
@@ -254,13 +253,11 @@ function PlaceSearchScreenInner({
     const linkFromApi = sanitizeNaverLocalPlaceLink(selected.link);
     const thumb = (selected.thumbnailUrl ?? '').trim();
     const cat = (selected.category ?? '').trim();
-    const pk = placeKeyFromNaverLocalSearchId(selected.id);
     const payload = {
       placeName: selected.title,
       address: addr,
       latitude: selected.latitude,
       longitude: selected.longitude,
-      ...(pk ? { placeKey: pk } : {}),
       ...(cat ? { category: cat } : {}),
       ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
       ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),

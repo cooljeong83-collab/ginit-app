@@ -127,7 +127,6 @@ export function PublicMeetingDetailsCard({
     (v: PublicMeetingApprovalType) => {
       const next: PublicMeetingDetailsConfig = { ...value, approvalType: v };
       if (v !== 'HOST_APPROVAL') next.requestMessageEnabled = null;
-      else next.requestMessageEnabled = true;
       onChange(next);
     },
     [onChange, value],

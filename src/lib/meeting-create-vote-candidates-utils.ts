@@ -202,8 +202,6 @@ export type PlaceRowModel = {
   address: string;
   latitude: number | null;
   longitude: number | null;
-  /** Supabase `places.place_key` */
-  placeKey?: string;
   /** 네이버 검색·스크랩 업종 라벨 */
   category?: string;
   naverPlaceLink?: string;
@@ -230,7 +228,6 @@ export function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
   const link = (p.naverPlaceLink ?? '').trim();
   const pref = typeof p.preferredPhotoMediaUrl === 'string' ? p.preferredPhotoMediaUrl.trim() : '';
   const cat = typeof p.category === 'string' ? p.category.trim() : '';
-  const pk = typeof p.placeKey === 'string' ? p.placeKey.trim() : '';
   return {
     id: p.id,
     query: p.placeName,
@@ -238,7 +235,6 @@ export function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
     address: p.address,
     latitude: p.latitude,
     longitude: p.longitude,
-    ...(pk ? { placeKey: pk } : {}),
     ...(cat ? { category: cat } : {}),
     ...(link ? { naverPlaceLink: link } : {}),
     ...(pref.startsWith('https://') ? { preferredPhotoMediaUrl: pref } : {}),

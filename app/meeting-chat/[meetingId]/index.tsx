@@ -59,7 +59,6 @@ import {
     sendMeetingChatTextMessage,
     writeMeetingChatReadReceipt,
 } from '@/src/lib/meeting-chat';
-import { replaceWithPlaceReviewScreen, subscribeMemberReviewComplete } from '@/src/lib/member-review-complete';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -141,15 +140,6 @@ export default function MeetingChatRoomScreen() {
       ? params.meetingId.trim()
       : '';
   const { userId } = useUserSession();
-
-  useEffect(() => {
-    const mid = meetingId.trim();
-    if (!mid) return undefined;
-    return subscribeMemberReviewComplete((p) => {
-      if (p.meetingId !== mid) return;
-      replaceWithPlaceReviewScreen(router, p);
-    });
-  }, [meetingId, router]);
   const queryClient = useQueryClient();
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
