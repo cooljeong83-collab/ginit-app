@@ -28,6 +28,7 @@ import {
   type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 export default function SocialChatRoomScreen() {
   const router = useRouter();
@@ -95,6 +96,12 @@ export default function SocialChatRoomScreen() {
     let cancelled = false;
     void (async () => {
       try {
+        const blockedByMe = await isPeerBlockedByMe(userId.trim(), peerId).catch(() => false);
+        if (blockedByMe) {
+          Alert.alert('차단된 사용자', '차단된 사용자와는 메시지를 주고받을 수 없어요.');
+          if (!cancelled) router.back();
+          return;
+        }
         await ensureSocialChatRoomDoc(roomId, userId.trim(), peerId);
         if (!cancelled) setReady(true);
       } catch (e) {

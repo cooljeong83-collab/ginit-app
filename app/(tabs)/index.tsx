@@ -286,13 +286,17 @@ export default function FeedScreen() {
 
   const feedHostIds = useMemo(() => {
     const set = new Set<string>();
-    for (const m of meetings) {
-      const r = m.createdBy?.trim();
-      if (!r) continue;
-      set.add(normalizeParticipantId(r) ?? r);
+    const collect = (list: readonly Meeting[]) => {
+      for (const m of list) {
+        const r = m.createdBy?.trim();
+        if (!r) continue;
+        set.add(normalizeParticipantId(r) ?? r);
+      }
     }
+    collect(meetings);
+    collect(myMeetings);
     return [...set];
-  }, [meetings]);
+  }, [meetings, myMeetings]);
 
   const [feedHostProfileMap, setFeedHostProfileMap] = useState<Map<string, UserProfile>>(() => new Map());
 
@@ -1220,7 +1224,7 @@ export default function FeedScreen() {
         </View>
       ) : null}
 
-      {feedLocationReady && !isInitialListLoading && !listError && meetings.length === 0 ? (
+      {tab === 'explore' && feedLocationReady && !isInitialListLoading && !listError && meetings.length === 0 ? (
         <View style={[styles.feedGlobalEmptyFill, { minHeight: globalEmptyMinHeight }]}>
           <View style={styles.feedGlobalEmptyInner}>
             <View style={styles.feedGlobalEmptyIconCircle}>

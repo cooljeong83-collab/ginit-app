@@ -8,6 +8,7 @@ import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { CHAT_ROOMS_COLLECTION, type SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import { supabase } from '@/src/lib/supabase';
+import { fetchBlockedPeerIds } from '@/src/lib/user-blocks';
 
 export const CHAT_ROOMS_LIST_PAGE_SIZE = 20;
 
@@ -106,16 +107,28 @@ export async function fetchChatRoomsListPageHybrid(
   userId: string,
   pageParam: number,
 ): Promise<{ rooms: SocialChatRoomSummary[]; hasMore: boolean }> {
-  try {
-    const res = await fetchChatRoomsListPageFromSupabase(userId, pageParam);
-    if (pageParam === 0 && res.rooms.length === 0) {
-      const fb = await fetchChatRoomsListPageFirestoreFallback(userId, pageParam);
-      if (fb.rooms.length > 0) return fb;
-    }
-    return res;
-  } catch {
-    return fetchChatRoomsListPageFirestoreFallback(userId, pageParam);
-  }
+  const me = userId.trim();
+  if (!me) return { rooms: [], hasMore: false };
+
+  const [blocked, res] = await Promise.all([
+    fetchBlockedPeerIds(me).catch(() => new Set<string>()),
+    (async () => {
+      try {
+        const r = await fetchChatRoomsListPageFromSupabase(me, pageParam);
+        if (pageParam === 0 && r.rooms.length === 0) {
+          const fb = await fetchChatRoomsListPageFirestoreFallback(me, pageParam);
+          if (fb.rooms.length > 0) return fb;
+        }
+        return r;
+      } catch {
+        return fetchChatRoomsListPageFirestoreFallback(me, pageParam);
+      }
+    })(),
+  ]);
+
+  if (blocked.size === 0) return res;
+  const rooms = res.rooms.filter((r) => !blocked.has(r.peerAppUserId.trim()));
+  return { rooms, hasMore: res.hasMore };
 }
 
 export function subscribeChatRoomsListInvalidate(

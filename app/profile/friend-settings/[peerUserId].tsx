@@ -42,6 +42,7 @@ import {
   saveBlockedPeerIds,
   saveHiddenPeerIds,
 } from '@/src/lib/friends-privacy-local';
+import { blockPeerServerSynced } from '@/src/lib/user-blocks';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { getUserProfile, isUserProfileWithdrawn, WITHDRAWN_NICKNAME, type UserProfile } from '@/src/lib/user-profile';
 
@@ -301,6 +302,11 @@ export default function FriendSettingsScreen() {
                 const blockedSet = await loadBlockedPeerIds(me);
                 blockedSet.add(pk);
                 await saveBlockedPeerIds(me, blockedSet);
+                try {
+                  await blockPeerServerSynced(me, pk);
+                } catch {
+                  // 서버 동기화 실패 시에도 로컬은 유지(기존 UX 호환)
+                }
                 const hiddenSet = await loadHiddenPeerIds(me);
                 hiddenSet.delete(pk);
                 await saveHiddenPeerIds(me, hiddenSet);
@@ -496,10 +502,10 @@ export default function FriendSettingsScreen() {
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed, busy && styles.rowDisabled]}
                 accessibilityRole="button"
                 accessibilityLabel="신고">
-                <SettingsRowLeadIcon name="flag-outline" />
+                <SettingsRowLeadIcon name="shield-checkmark-outline" destructive />
                 <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>신고</Text>
-                  <Text style={styles.rowSub}>부적절한 이용 등을 운영에 알려요.</Text>
+                  <Text style={[styles.rowLabel, styles.rowLabelDanger]}>신고</Text>
+                  <Text style={[styles.rowSub, styles.rowSubDanger]}>부적절한 이용 등을 운영에 알려요.</Text>
                 </View>
                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
               </Pressable>

@@ -41,6 +41,7 @@ import {
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
 import { getUserProfile } from '@/src/lib/user-profile';
+import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 export const CHAT_ROOMS_COLLECTION = 'chat_rooms';
 export const SOCIAL_CHAT_MESSAGES_SUBCOLLECTION = 'messages';
@@ -520,6 +521,16 @@ export async function sendSocialChatTextMessage(
   const text = rawText.trim().slice(0, 4000);
   if (!text) throw new Error('메시지를 입력해 주세요.');
   const senderId = normalizePhoneUserId(uid) ?? uid;
+  const senderPk = normalizeParticipantId(senderId) || senderId;
+
+  // 내가 차단한 사용자에게는(내 관점) 전송을 막습니다. (상대가 나를 차단했는지는 알 수 없어야 함)
+  const peerFromRid = parsePeerFromSocialRoomId(rid, senderPk);
+  if (peerFromRid) {
+    const blockedByMe = await isPeerBlockedByMe(senderPk, peerFromRid).catch(() => false);
+    if (blockedByMe) {
+      throw new Error('차단한 사용자에게는 메시지를 보낼 수 없어요.');
+    }
+  }
   const ref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
   await addDoc(
     ref,
@@ -557,9 +568,13 @@ export async function sendSocialChatTextMessage(
         }
         const peerPk =
           normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
-        const senderPk = normalizeParticipantId(senderId) || senderId;
         if (!peerPk || peerPk === senderPk) {
           ginitNotifyDbg('social-chat', 'dm_push_skip_peer_same_or_empty', { rid, hasPeerPk: Boolean(peerPk) });
+          return;
+        }
+        const blockedByMe = await isPeerBlockedByMe(senderPk, peerPk).catch(() => false);
+        if (blockedByMe) {
+          ginitNotifyDbg('social-chat', 'dm_push_skip_blocked_by_me', { rid });
           return;
         }
         const prof = await getUserProfile(senderPk).catch(() => null);
@@ -575,6 +590,7 @@ export async function sendSocialChatTextMessage(
           meetingId: rid,
           meetingTitle: titleNick,
           preview: text.slice(0, 500),
+          fromUserId: senderPk,
         });
       } catch (e) {
         ginitNotifyDbg('social-chat', 'dm_push_error', { rid, message: e instanceof Error ? e.message : String(e) });

@@ -148,6 +148,7 @@ serve(async (req) => {
     const data = dataToStringRecord(payload.data);
     const action = String(data.action ?? '').trim();
     const roomId = String(data.meetingId ?? '').trim();
+    const fromUserId = String(data.fromUserId ?? '').trim();
 
     if ((action === 'in_app_chat' || action === 'in_app_social_dm') && roomId) {
       const { data: prefRows, error: prefErr } = await supabase
@@ -167,6 +168,36 @@ serve(async (req) => {
       }
       if (toUserIds.length === 0) {
         return jsonResponse({ ok: true, attempted: 0, sent: 0, reason: 'all_recipients_muted' });
+      }
+    }
+
+    // Block filter: if sender <-> recipient has a block relation (either direction), exclude the recipient.
+    if (fromUserId && toUserIds.length > 0) {
+      const ids = [...new Set([fromUserId, ...toUserIds])];
+      const { data: blockRows, error: blockErr } = await supabase
+        .from('user_blocks')
+        .select('blocker_app_user_id, blocked_app_user_id')
+        .in('blocker_app_user_id', ids)
+        .in('blocked_app_user_id', ids);
+      if (blockErr) return jsonResponse({ ok: false, error: blockErr.message }, 500);
+
+      const blockedPairs = new Set<string>();
+      for (const r of blockRows ?? []) {
+        const a = String((r as any)?.blocker_app_user_id ?? '').trim();
+        const b = String((r as any)?.blocked_app_user_id ?? '').trim();
+        if (a && b) blockedPairs.add(`${a}__${b}`);
+      }
+      if (blockedPairs.size > 0) {
+        toUserIds = toUserIds.filter((to) => {
+          const t = String(to ?? '').trim();
+          if (!t) return false;
+          const ab = `${fromUserId}__${t}`;
+          const ba = `${t}__${fromUserId}`;
+          return !(blockedPairs.has(ab) || blockedPairs.has(ba));
+        });
+      }
+      if (toUserIds.length === 0) {
+        return jsonResponse({ ok: true, attempted: 0, sent: 0, reason: 'all_recipients_blocked' });
       }
     }
 

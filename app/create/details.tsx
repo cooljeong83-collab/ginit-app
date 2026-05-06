@@ -66,7 +66,6 @@ import {
   GlassDualCapacityWheel,
   PARTICIPANT_COUNT_MIN,
 } from '@/components/create/GlassDualCapacityWheel';
-import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import {
   WIZARD_DETAIL_STEP,
   WIZARD_PLACES_STEP,
@@ -242,13 +241,11 @@ function clampAutoWizardParticipants(
 ): { min: number; max: number } {
   const capMax = rules.capacityMax;
   const minFloor = Math.max(PARTICIPANT_COUNT_MIN, rules.minParticipantsFloor);
-  let nMin = Math.round(avgMin);
-  let nMax = Math.round(avgMax);
-  if (!isPublic) {
-    const mid = Math.round((nMin + nMax) / 2);
-    const n = Math.min(capMax, Math.max(minFloor, mid));
-    return { min: n, max: n };
-  }
+  // avg 값이 비어있거나 비정상(예: undefined → NaN)인 경우가 있어 안전 폴백을 둡니다.
+  const safeAvgMin = Number.isFinite(avgMin) ? avgMin : minFloor;
+  const safeAvgMax = Number.isFinite(avgMax) ? avgMax : safeAvgMin;
+  let nMin = Math.round(safeAvgMin);
+  let nMax = Math.round(safeAvgMax);
   nMin = Math.min(capMax, Math.max(minFloor, nMin));
   nMax = Math.min(capMax, Math.max(nMin, nMax));
   return { min: nMin, max: nMax };
@@ -416,32 +413,7 @@ export default function CreateDetailsScreen() {
     prevIsPublicForCapacityRef.current = isPublicMeeting;
     if (prev === null) return;
     layoutAnimateMeetingCreateWizard();
-    if (prev === true && isPublicMeeting === false) {
-      const min = minParticipantsRef.current;
-      const max = maxParticipantsRef.current;
-      const capMax = meetingCreateRules.capacityMax;
-      const n =
-        max === CAPACITY_UNLIMITED || max > capMax
-          ? Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, min))
-          : Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, max));
-      setMinParticipants(n);
-      setMaxParticipants(n);
-    }
-  }, [isPublicMeeting, meetingCreateRules.capacityMax]);
-
-  useEffect(() => {
-    if (!isPublicMeeting && (minParticipants !== maxParticipants || maxParticipants === CAPACITY_UNLIMITED)) {
-      const min = minParticipants;
-      const max = maxParticipants;
-      const capMax = meetingCreateRules.capacityMax;
-      const n =
-        max === CAPACITY_UNLIMITED || max > capMax
-          ? Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, min))
-          : Math.min(capMax, Math.max(PARTICIPANT_COUNT_MIN, max));
-      setMinParticipants(n);
-      setMaxParticipants(n);
-    }
-  }, [isPublicMeeting, maxParticipants, minParticipants, meetingCreateRules.capacityMax]);
+  }, [isPublicMeeting]);
 
   const [description, setDescription] = useState('');
   const [descFocused, setDescFocused] = useState(false);
@@ -1092,10 +1064,7 @@ export default function CreateDetailsScreen() {
     setMaxParticipants(n);
   }, []);
 
-  const onPrivateAttendeesChange = useCallback((n: number) => {
-    setMinParticipants(n);
-    setMaxParticipants(n);
-  }, []);
+  // 비공개도 공개와 동일하게 최소/최대 인원을 사용합니다.
 
   const onStep1Next = useCallback((opts?: { fromUserPress?: boolean }) => {
     setWizardError(null);
@@ -2083,31 +2052,18 @@ export default function CreateDetailsScreen() {
     }
     const capMax = meetingCreateRules.capacityMax;
     const minFloor = Math.max(PARTICIPANT_COUNT_MIN, meetingCreateRules.minParticipantsFloor);
-    if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
-        setWizardError('최소 인원을 선택해 주세요.');
-        return;
-      }
-      if (
-        !Number.isFinite(maxParticipants) ||
-        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < minFloor) ||
-        maxParticipants < minParticipants ||
-        (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
-      ) {
-        setWizardError('최대 인원을 선택해 주세요.');
-        return;
-      }
-    } else {
-      if (
-        !Number.isFinite(minParticipants) ||
-        minParticipants < minFloor ||
-        minParticipants > capMax ||
-        minParticipants !== maxParticipants ||
-        maxParticipants === CAPACITY_UNLIMITED
-      ) {
-        setWizardError('참석 인원을 선택해 주세요.');
-        return;
-      }
+    if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
+      setWizardError('최소 인원을 선택해 주세요.');
+      return;
+    }
+    if (
+      !Number.isFinite(maxParticipants) ||
+      (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < minFloor) ||
+      maxParticipants < minParticipants ||
+      (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
+    ) {
+      setWizardError('최대 인원을 선택해 주세요.');
+      return;
     }
     if (getAgentFabMotionMode() === 'user') {
       notifyCreateMeetingAgentBubbleShow();
@@ -2239,50 +2195,37 @@ export default function CreateDetailsScreen() {
     const capMax = meetingCreateRules.capacityMax;
     const minFloor = Math.max(PARTICIPANT_COUNT_MIN, meetingCreateRules.minParticipantsFloor);
     const feeMax = meetingCreateRules.membershipFeeWonMax;
-    if (isPublicMeeting) {
-      if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
-        setWizardError('최소 인원을 선택해 주세요.');
-        Alert.alert('입력 확인', '최소 인원을 선택해 주세요.');
-        return;
-      }
-      if (
-        !Number.isFinite(maxParticipants) ||
-        (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < minFloor) ||
-        maxParticipants < minParticipants ||
-        (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
-      ) {
-        setWizardError('최대 인원을 선택해 주세요.');
-        Alert.alert('입력 확인', '최대 인원을 선택해 주세요.');
-        return;
-      }
-      if (
-        meetingConfig.settlement === 'MEMBERSHIP_FEE' &&
-        (typeof meetingConfig.membershipFeeWon !== 'number' ||
-          !Number.isFinite(meetingConfig.membershipFeeWon) ||
-          meetingConfig.membershipFeeWon < 1)
-      ) {
-        setWizardError('회비 금액을 입력해 주세요.');
-        Alert.alert('입력 확인', '회비를 선택한 경우 1원 이상의 금액을 입력해 주세요.');
-        return;
-      }
-      if (meetingConfig.settlement === 'MEMBERSHIP_FEE' && typeof meetingConfig.membershipFeeWon === 'number') {
-        if (meetingConfig.membershipFeeWon > feeMax) {
-          const wonLabel = `${feeMax.toLocaleString('ko-KR')}원`;
-          setWizardError(`회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
-          Alert.alert('입력 확인', `회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
-          return;
-        }
-      }
-    } else {
-      if (
-        !Number.isFinite(minParticipants) ||
-        minParticipants < minFloor ||
-        minParticipants > capMax ||
-        minParticipants !== maxParticipants ||
-        maxParticipants === CAPACITY_UNLIMITED
-      ) {
-        setWizardError('참석 인원을 선택해 주세요.');
-        Alert.alert('입력 확인', '참석 인원을 선택해 주세요.');
+    if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
+      setWizardError('최소 인원을 선택해 주세요.');
+      Alert.alert('입력 확인', '최소 인원을 선택해 주세요.');
+      return;
+    }
+    if (
+      !Number.isFinite(maxParticipants) ||
+      (maxParticipants !== CAPACITY_UNLIMITED && maxParticipants < minFloor) ||
+      maxParticipants < minParticipants ||
+      (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
+    ) {
+      setWizardError('최대 인원을 선택해 주세요.');
+      Alert.alert('입력 확인', '최대 인원을 선택해 주세요.');
+      return;
+    }
+    if (
+      isPublicMeeting &&
+      meetingConfig.settlement === 'MEMBERSHIP_FEE' &&
+      (typeof meetingConfig.membershipFeeWon !== 'number' ||
+        !Number.isFinite(meetingConfig.membershipFeeWon) ||
+        meetingConfig.membershipFeeWon < 1)
+    ) {
+      setWizardError('회비 금액을 입력해 주세요.');
+      Alert.alert('입력 확인', '회비를 선택한 경우 1원 이상의 금액을 입력해 주세요.');
+      return;
+    }
+    if (isPublicMeeting && meetingConfig.settlement === 'MEMBERSHIP_FEE' && typeof meetingConfig.membershipFeeWon === 'number') {
+      if (meetingConfig.membershipFeeWon > feeMax) {
+        const wonLabel = `${feeMax.toLocaleString('ko-KR')}원`;
+        setWizardError(`회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
+        Alert.alert('입력 확인', `회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
         return;
       }
     }
@@ -2923,27 +2866,16 @@ export default function CreateDetailsScreen() {
                         </ScrollView>
                       </View>
                     ) : null}
-                    {isPublicMeeting ? (
-                      <>
-                        <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>참가 인원</Text>
-                        <GlassDualCapacityWheel
-                          minValue={minParticipants}
-                          maxValue={maxParticipants}
-                          onMinChange={onMinParticipantsChange}
-                          onMaxChange={onMaxParticipantsChange}
-                          disabled={busy}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>참석 인원</Text>
-                        <GlassSingleCapacityWheel
-                          value={minParticipants}
-                          onChange={onPrivateAttendeesChange}
-                          disabled={busy}
-                        />
-                      </>
-                    )}
+                    <>
+                      <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>참가 인원</Text>
+                      <GlassDualCapacityWheel
+                        minValue={minParticipants}
+                        maxValue={maxParticipants}
+                        onMinChange={onMinParticipantsChange}
+                        onMaxChange={onMaxParticipantsChange}
+                        disabled={busy}
+                      />
+                    </>
                   
                   {currentStep === 3 ? (
                     <Pressable

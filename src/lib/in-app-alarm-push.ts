@@ -58,6 +58,11 @@ export type SendInAppAlarmPushParams = {
   meetingTitle: string;
   /** 채팅 본문 미리보기 또는 모임 변경 상세 문구 */
   preview?: string;
+  /**
+   * 채팅(DM 등) 알림에서 발신자 식별자.
+   * 차단/스팸 방지 등 서버/클라이언트 필터에 사용됩니다.
+   */
+  fromUserId?: string;
 };
 
 function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
@@ -191,6 +196,7 @@ export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Prom
       url: c.url,
       title: c.title,
       body: c.body,
+      ...(params.fromUserId?.trim() ? { fromUserId: params.fromUserId.trim() } : {}),
     },
   });
   return true;

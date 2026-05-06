@@ -8,6 +8,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { friendPeerStorageKey, loadBlockedPeerIds, saveBlockedPeerIds } from '@/src/lib/friends-privacy-local';
+import { fetchBlockedPeerIds, unblockPeerServerSynced } from '@/src/lib/user-blocks';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
 
@@ -28,7 +29,7 @@ export default function BlockedFriendsScreen() {
     }
     setLoading(true);
     try {
-      const blocked = await loadBlockedPeerIds(me);
+      const blocked = await fetchBlockedPeerIds(me).catch(() => loadBlockedPeerIds(me));
       const ids = [...blocked];
       const profiles = ids.length ? await getUserProfilesForIds(ids) : new Map<string, UserProfile>();
       const next: Row[] = ids.map((id) => ({
@@ -59,6 +60,11 @@ export default function BlockedFriendsScreen() {
           onPress: () => {
             void (async () => {
               const pk = friendPeerStorageKey(peerId);
+              try {
+                await unblockPeerServerSynced(me, pk);
+              } catch {
+                // 서버 동기화 실패 시에도 로컬은 유지(기존 UX 호환)
+              }
               const next = await loadBlockedPeerIds(me);
               next.delete(pk);
               await saveBlockedPeerIds(me, next);

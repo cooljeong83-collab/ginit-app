@@ -23,6 +23,7 @@ import {
   consumeForegroundOnMessageOnceGlobalSync,
   fcmForegroundDedupeKey,
 } from '@/src/lib/fcm-foreground-message-dedupe';
+import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } {
   const n = message.notification;
@@ -118,6 +119,14 @@ export function FcmMessagingBootstrap() {
           if (!notifyOn) {
             ginitNotifyDbg('FcmMessaging', 'foreground_skip_social_notify_off', { meetingId });
             return;
+          }
+          const fromUserId = String(rm?.data?.fromUserId ?? '').trim();
+          if (fromUserId) {
+            const blocked = await isPeerBlockedByMe(uid, fromUserId).catch(() => false);
+            if (blocked) {
+              ginitNotifyDbg('FcmMessaging', 'foreground_skip_social_blocked', { meetingId });
+              return;
+            }
           }
         }
         if (Platform.OS === 'android') {
