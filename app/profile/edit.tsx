@@ -1,6 +1,5 @@
 
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +19,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
+import { ProfilePhotoCropModal } from '@/components/profile/ProfilePhotoCropModal';
+import { ProfileSquareAvatar } from '@/components/profile/ProfileSquareAvatar';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
@@ -31,6 +32,11 @@ import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-la
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import {
+  PROFILE_META_PHOTO_COVER,
+  parseProfilePhotoCover,
+  type ProfilePhotoCover,
+} from '@/src/lib/profile-photo-cover';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
@@ -69,6 +75,8 @@ export default function ProfileEditScreen() {
 
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
+  const [photoCover, setPhotoCover] = useState<ProfilePhotoCover | null>(null);
+  const [cropSession, setCropSession] = useState<{ uri: string; w?: number; h?: number } | null>(null);
   const [bio, setBio] = useState('');
 
   // 서비스 이용 인증(정보 등록) 모달
@@ -121,6 +129,7 @@ export default function ProfileEditScreen() {
         if (!alive) return;
         setNickname(p.nickname);
         setPhotoUrl(p.photoUrl ?? '');
+        setPhotoCover(parseProfilePhotoCover(p.metadata));
         setBio(p.bio ?? '');
         setIsPhoneVerified(isUserPhoneVerified(p));
         const phone = p.phone?.trim();
@@ -159,6 +168,7 @@ export default function ProfileEditScreen() {
         if (!alive) return;
         setNickname('');
         setPhotoUrl('');
+        setPhotoCover(null);
         setIsPhoneVerified(false);
         setVerifiedPhoneLabel(null);
         setPhoneField('');
@@ -238,12 +248,43 @@ export default function ProfileEditScreen() {
     };
   }, [authSheetVisible, profilePk]);
 
+  const onCropConfirm = useCallback((cover: ProfilePhotoCover) => {
+    setCropSession((prev) => {
+      if (!prev?.uri || !profilePk) return null;
+      const session = prev;
+      void (async () => {
+        setPhotoUploadBusy(true);
+        try {
+          const url = await uploadProfilePhoto({
+            userId: profilePk,
+            localImageUri: session.uri,
+            naturalWidth: session.w,
+            naturalHeight: session.h,
+          });
+          setPhotoUrl(url);
+          setPhotoCover(cover);
+          await updateUserProfile(profilePk, {
+            photoUrl: url,
+            metadata: { [PROFILE_META_PHOTO_COVER]: cover },
+          });
+          if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
+          Alert.alert('업로드 실패', msg);
+        } finally {
+          setPhotoUploadBusy(false);
+        }
+      })();
+      return null;
+    });
+  }, [profilePk]);
+
   const onPickAndUploadPhoto = useCallback(async () => {
     if (!profilePk) {
       Alert.alert('안내', '로그인 후 업로드할 수 있어요.');
       return;
     }
-    setPhotoUploadBusy(true);
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
@@ -252,9 +293,7 @@ export default function ProfileEditScreen() {
       }
       const result = await launchImageLibraryAsyncSafe({
         mediaTypes: ['images'],
-        // 선택 후 크롭(영역 지정) → 확인 버튼으로 진행
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 1,
       });
       if (result.canceled) return;
@@ -262,21 +301,35 @@ export default function ProfileEditScreen() {
       const uri = asset?.uri?.trim() ?? '';
       if (!uri) throw new Error('이미지 정보를 가져오지 못했습니다.');
 
-      const url = await uploadProfilePhoto({
-        userId: profilePk,
-        localImageUri: uri,
-        naturalWidth: asset?.width,
-        naturalHeight: asset?.height,
-      });
-      setPhotoUrl(url);
-      await updateUserProfile(profilePk, { photoUrl: url });
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
+      if (Platform.OS === 'web') {
+        setPhotoUploadBusy(true);
+        try {
+          const defaultCover: ProfilePhotoCover = { ax: 0.5, ay: 0.5, z: 1 };
+          const url = await uploadProfilePhoto({
+            userId: profilePk,
+            localImageUri: uri,
+            naturalWidth: asset?.width,
+            naturalHeight: asset?.height,
+          });
+          setPhotoUrl(url);
+          setPhotoCover(defaultCover);
+          await updateUserProfile(profilePk, {
+            photoUrl: url,
+            metadata: { [PROFILE_META_PHOTO_COVER]: defaultCover },
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
+          Alert.alert('업로드 실패', msg);
+        } finally {
+          setPhotoUploadBusy(false);
+        }
+        return;
+      }
+
+      setCropSession({ uri, w: asset?.width, h: asset?.height });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
       Alert.alert('업로드 실패', msg);
-    } finally {
-      setPhotoUploadBusy(false);
     }
   }, [profilePk]);
 
@@ -638,7 +691,7 @@ export default function ProfileEditScreen() {
                 accessibilityHint="갤러리에서 사진을 선택합니다">
                 <View style={styles.avatarRing}>
                   {photoUrl.trim() ? (
-                    <Image source={{ uri: photoUrl.trim() }} style={styles.avatarImg} contentFit="cover" />
+                    <ProfileSquareAvatar uri={photoUrl.trim()} size={104} borderRadius={52} cover={photoCover} />
                   ) : (
                     <View style={styles.avatarFallback}>
                       <Text style={styles.avatarFallbackText}>{avatarInitial}</Text>
@@ -703,6 +756,14 @@ export default function ProfileEditScreen() {
           </GinitCard>
         </ScrollView>
       </SafeAreaView>
+      <ProfilePhotoCropModal
+        visible={cropSession !== null}
+        uri={cropSession?.uri ?? ''}
+        imageWidth={cropSession?.w}
+        imageHeight={cropSession?.h}
+        onRequestClose={() => setCropSession(null)}
+        onConfirm={onCropConfirm}
+      />
     </ScreenShell>
   );
 }

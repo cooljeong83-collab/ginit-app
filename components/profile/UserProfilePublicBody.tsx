@@ -4,8 +4,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
+import {
+  MeetingChatImageViewerGallery,
+  type ImageViewerGalleryItem,
+} from '@/components/chat/MeetingChatImageViewerGallery';
+import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
+import { ProfileSquareAvatar } from '@/components/profile/ProfileSquareAvatar';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -18,7 +25,13 @@ import {
   type FriendRelationStatusRow,
 } from '@/src/lib/friends';
 import { effectiveGTrust, levelBarFillColorForTrust, trustTierForUser, xpProgressWithinLevel } from '@/src/lib/ginit-trust';
-import { fetchProfilePhotoHistory, type ProfilePhotoHistoryItem } from '@/src/lib/profile-photo-history';
+import {
+  deleteProfilePhotoHistoryUrl,
+  fetchProfilePhotoHistory,
+  isProfilePhotoDeleteDebugEnabled,
+  type ProfilePhotoHistoryItem,
+} from '@/src/lib/profile-photo-history';
+import { PROFILE_META_PHOTO_COVER, parseProfilePhotoCover } from '@/src/lib/profile-photo-cover';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
@@ -26,9 +39,19 @@ import {
   getUserProfile,
   isUserProfileWithdrawn,
   meetingDemographicsIncomplete,
+  updateUserProfile,
   WITHDRAWN_NICKNAME,
   type UserProfile,
 } from '@/src/lib/user-profile';
+
+function isExternalPhotoUrl(url: string): boolean {
+  const u = url.trim();
+  if (!u) return false;
+  // Supabase public storage(avatars bucket)면 내부 관리로 간주
+  if (u.includes('/storage/v1/object/public/')) return false;
+  // 그 외는 외부(구글 프로필/포토 등)로 취급
+  return true;
+}
 
 function nicknameInitial(nickname: string): string {
   const t = nickname.trim();
@@ -57,9 +80,11 @@ export function UserProfilePublicBody({
   hideMyEditCta?: boolean;
 }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
 
-  const meNorm = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
+  const meRaw = userId?.trim() ?? '';
+  const meNorm = meRaw ? normalizeParticipantId(meRaw) : '';
   const targetNorm = targetUserId.trim() ? normalizeParticipantId(targetUserId.trim()) : '';
   const isMe = Boolean(meNorm && targetNorm && meNorm === targetNorm);
   const isAi = targetNorm === 'ginit_ai';
@@ -68,7 +93,8 @@ export function UserProfilePublicBody({
   const [history, setHistory] = useState<ProfilePhotoHistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
-  const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
+  const [profileImageViewer, setProfileImageViewer] = useState<{ index: number } | null>(null);
+  const [profilePhotoDeleteBusy, setProfilePhotoDeleteBusy] = useState(false);
   const [friendRelation, setFriendRelation] = useState<FriendRelationStatusRow>({ status: 'none', friendship_id: null });
   const [friendBusy, setFriendBusy] = useState(false);
   const friendFetchGenRef = useRef(0);
@@ -186,6 +212,7 @@ export function UserProfilePublicBody({
   const withdrawn = isUserProfileWithdrawn(profile ?? undefined);
   const nick = withdrawn ? WITHDRAWN_NICKNAME : (profile?.nickname?.trim() ?? '회원');
   const photo = withdrawn ? '' : (profile?.photoUrl?.trim() ?? '');
+  const photoCover = useMemo(() => parseProfilePhotoCover(profile?.metadata), [profile?.metadata]);
   const bio = withdrawn ? '' : (profile?.bio?.trim() ?? '');
   const trust = effectiveGTrust(profile);
   const ringBase = useMemo(() => levelBarFillColorForTrust(trust), [trust]);
@@ -212,14 +239,118 @@ export function UserProfilePublicBody({
     return { label: '친구 신청하기', kind: 'request' as const, icon: 'person-add' as SymbolicIconName };
   }, [friendRelation.status, hideMyEditCta, isMe, showCta]);
 
+  const profileImageGallery = useMemo<ImageViewerGalleryItem[]>(() => {
+    const seen = new Set<string>();
+    const out: ImageViewerGalleryItem[] = [];
+    const push = (id: string, url: string) => {
+      const u = url.trim();
+      if (!u || seen.has(u)) return;
+      seen.add(u);
+      out.push({ id, imageUrl: u });
+    };
+    if (photo) push('current', photo);
+    for (let i = 0; i < history.length; i++) {
+      push(`h-${i}-${history[i]!.createdAt}`, history[i]!.photoUrl);
+    }
+    return out;
+  }, [history, photo]);
+
+  const openProfileImageAtUrl = useCallback(
+    (url: string) => {
+      const u = url.trim();
+      if (!u) return;
+      const ix = profileImageGallery.findIndex((g) => (g.imageUrl ?? '').trim() === u);
+      setProfileImageViewer({ index: ix >= 0 ? ix : 0 });
+    },
+    [profileImageGallery],
+  );
+
+  const onProfileViewerIndexChange = useCallback((i: number) => {
+    setProfileImageViewer((prev) => (prev ? { index: i } : prev));
+  }, []);
+
+  const showProfileViewerDelete =
+    isMe &&
+    profileImageViewer != null &&
+    photo.trim().length > 0 &&
+    (profileImageGallery[profileImageViewer.index]?.imageUrl ?? '').trim() === photo.trim();
+
+  const onConfirmDeleteCurrentProfilePhoto = useCallback(() => {
+    const me = targetNorm;
+    if (!isMe || !me.trim()) return;
+    const deletingUrl = photo.trim();
+    Alert.alert('프로필 사진 삭제', '현재 프로필 사진을 삭제할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setProfilePhotoDeleteBusy(true);
+            try {
+              // 1) Storage·히스토리·(동일 URL이면) photo_url 은 RPC에서 먼저 처리. 실패 시 프로필은 그대로 두고 중단 → 삭제 버튼/썸네일 유지
+              if (deletingUrl) {
+                const delRes = await deleteProfilePhotoHistoryUrl(me, deletingUrl);
+                if (delRes.ok === false) {
+                  if (!('skipped' in delRes && delRes.skipped) && 'message' in delRes) {
+                    const detail = [
+                      delRes.message,
+                      delRes.code ? `code: ${delRes.code}` : '',
+                      delRes.details ? `details: ${delRes.details}` : '',
+                      delRes.hint ? `hint: ${delRes.hint}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join('\n');
+                    Alert.alert(
+                      '삭제 실패',
+                      isProfilePhotoDeleteDebugEnabled()
+                        ? detail
+                        : '사진 파일 또는 이력 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+                    );
+                  }
+                  return;
+                }
+              }
+              // 2) 메타(초점) 정리 + DB 프로필과 동기화(RPC가 이미 photo_url 을 비웠을 수 있음)
+              await updateUserProfile(me, {
+                photoUrl: null,
+                metadata: { [PROFILE_META_PHOTO_COVER]: null },
+              });
+              setProfile((prev) => (prev ? { ...prev, photoUrl: null, metadata: { ...(prev.metadata ?? {}), [PROFILE_META_PHOTO_COVER]: null } } : prev));
+              if (deletingUrl) {
+                setHistory((prev) => prev.filter((h) => h.photoUrl.trim() !== deletingUrl));
+              }
+              setProfileImageViewer(null);
+              void fetchProfilePhotoHistory(targetNorm, 30)
+                .then((rows) => setHistory(rows))
+                .catch(() => {});
+              void getUserProfile(targetNorm)
+                .then((p) => setProfile(p ?? null))
+                .catch(() => {});
+              if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (e) {
+              Alert.alert('삭제 실패', e instanceof Error ? e.message : '프로필 사진을 삭제하지 못했습니다.');
+            } finally {
+              setProfilePhotoDeleteBusy(false);
+            }
+          })();
+        },
+      },
+    ]);
+  }, [isMe, photo, targetNorm]);
+
   const onPressAvatar = useCallback(() => {
     if (withdrawn) return;
     if (isMe) {
-      onPressMyAvatar?.();
+      if (onPressMyAvatar) {
+        onPressMyAvatar();
+        return;
+      }
+      if (photo) openProfileImageAtUrl(photo);
       return;
     }
-    if (photo) setPhotoViewerUrl(photo);
-  }, [isMe, onPressMyAvatar, photo, withdrawn]);
+    if (photo) openProfileImageAtUrl(photo);
+  }, [isMe, onPressMyAvatar, openProfileImageAtUrl, photo, withdrawn]);
 
   const onPressCta = useCallback(async () => {
     if (!cta) return;
@@ -372,11 +503,11 @@ export function UserProfilePublicBody({
   
 
   return (
-    <View style={[styles.root, { paddingTop: padTop, paddingHorizontal: padH }]}>
+    <View style={{ paddingTop: padTop, paddingHorizontal: padH, paddingBottom: padH }}>
       <View style={styles.hero}>
         <Pressable
           onPress={onPressAvatar}
-          disabled={withdrawn || (isMe && !onPressMyAvatar) || (!isMe && !photo)}
+          disabled={withdrawn || (isMe && !onPressMyAvatar && !photo) || (!isMe && !photo)}
           style={({ pressed }) => [styles.heroAvatarPress, pressed && { opacity: 0.9 }]}
           accessibilityRole="button"
           accessibilityLabel={isMe ? '내 프로필 사진' : '프로필 사진'}>
@@ -399,7 +530,7 @@ export function UserProfilePublicBody({
             )}
             <View style={styles.heroAvatarWrap}>
               {photo ? (
-                <Image source={{ uri: photo }} style={styles.heroAvatar} contentFit="cover" />
+                <ProfileSquareAvatar uri={photo} size={96} borderRadius={48} cover={photoCover} />
               ) : (
                 <View style={styles.heroFallback}>
                   <Text style={styles.heroFallbackText}>{nicknameInitial(nick)}</Text>
@@ -469,14 +600,14 @@ export function UserProfilePublicBody({
       ) : null}
 
       <View style={styles.grid}>
-        {history.map((h, i) => {
+        {history.filter((h) => !isExternalPhotoUrl(h.photoUrl)).map((h, i) => {
           const url = h.photoUrl.trim();
           if (!url) return null;
           const isEndOfRow = (i + 1) % 2 === 0;
           return (
             <Pressable
               key={`${url}-${h.createdAt}-${i}`}
-              onPress={() => setPhotoViewerUrl(url)}
+              onPress={() => openProfileImageAtUrl(url)}
               style={({ pressed }) => [styles.gridCell, pressed && { opacity: 0.9 }, isEndOfRow && { marginRight: 0 }]}
               accessibilityRole="button"
               accessibilityLabel="프로필 사진 크게 보기">
@@ -486,29 +617,82 @@ export function UserProfilePublicBody({
         })}
       </View>
 
-      <Modal visible={photoViewerUrl != null} transparent animationType="fade" onRequestClose={() => setPhotoViewerUrl(null)}>
-        <View style={styles.viewerRoot}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setPhotoViewerUrl(null)} accessibilityRole="button" accessibilityLabel="닫기" />
-          <View style={styles.viewerCard}>
-            <Pressable
-              onPress={() => setPhotoViewerUrl(null)}
-              style={({ pressed }) => [styles.viewerCloseBtn, pressed && { opacity: 0.9 }]}
-              accessibilityRole="button"
-              accessibilityLabel="닫기">
-              <GinitSymbolicIcon name="close" size={20} color="#fff" />
-            </Pressable>
-            {photoViewerUrl ? <MeetingChatImageViewerZoomArea uri={photoViewerUrl} /> : null}
+      <Modal
+        visible={profileImageViewer !== null && profileImageGallery.length > 0}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setProfileImageViewer(null)}>
+        <GestureHandlerRootView style={meetingChatBodyStyles.viewerRoot}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => !profilePhotoDeleteBusy && setProfileImageViewer(null)}
+            pointerEvents="none"
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+          />
+          <View style={meetingChatBodyStyles.viewerSheet} pointerEvents="box-none">
+            <View style={[meetingChatBodyStyles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
+              <Pressable
+                onPress={() => setProfileImageViewer(null)}
+                hitSlop={10}
+                disabled={profilePhotoDeleteBusy}
+                accessibilityRole="button"
+                accessibilityLabel="닫기">
+                <GinitSymbolicIcon name="close" size={26} color="#fff" />
+              </Pressable>
+              <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
+                <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
+                  프로필 사진
+                </Text>
+                {profileImageGallery.length > 1 && profileImageViewer ? (
+                  <Text style={meetingChatBodyStyles.viewerMetaTime} numberOfLines={1}>
+                    {Math.min(profileImageGallery.length, Math.max(1, profileImageViewer.index + 1))} /{' '}
+                    {profileImageGallery.length}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={meetingChatBodyStyles.viewerActions}>
+                {showProfileViewerDelete ? (
+                  <Pressable
+                    onPress={() => {
+                      if (profilePhotoDeleteBusy) return;
+                      onConfirmDeleteCurrentProfilePhoto();
+                    }}
+                    hitSlop={10}
+                    disabled={profilePhotoDeleteBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel="프로필 사진 삭제">
+                    {profilePhotoDeleteBusy ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
+                    )}
+                  </Pressable>
+                ) : (
+                  <View style={{ width: 26 }} />
+                )}
+              </View>
+            </View>
+            {profileImageViewer ? (
+              <View style={meetingChatBodyStyles.viewerImageWrap}>
+                <MeetingChatImageViewerGallery
+                  gallery={profileImageGallery}
+                  initialIndex={Math.min(
+                    profileImageGallery.length - 1,
+                    Math.max(0, profileImageViewer.index),
+                  )}
+                  onIndexChange={onProfileViewerIndexChange}
+                />
+              </View>
+            ) : null}
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    paddingBottom: 28,
-  },
   hero: {
     alignItems: 'center',
     paddingTop: 6,
@@ -545,7 +729,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.10)',
   },
-  heroAvatar: { width: '100%', height: '100%' },
   heroFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   heroFallbackText: { fontSize: 34, fontWeight: '700', color: '#0f172a' },
   heroLoadingOverlay: {
@@ -594,37 +777,16 @@ const styles = StyleSheet.create({
 
   grid: { marginTop: 18, flexDirection: 'row', flexWrap: 'wrap' },
   gridCell: {
-    width: '49.4%',
-    aspectRatio: 1.5,
-    marginRight: '1.2%',
-    marginBottom: '1.2%',
-    borderRadius: 12,
+    width: '50%',
+    aspectRatio: 1,
+    marginRight: 0,
+    marginBottom: 0,
+    borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: 'rgba(15, 23, 42, 0.06)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
   },
   gridThumb: { width: '100%', height: '100%' },
-
-  viewerRoot: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.8)', padding: 14, justifyContent: 'center' },
-  viewerCard: {
-    width: '100%',
-    height: '80%',
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-  },
-  viewerCloseBtn: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    zIndex: 5,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
-  },
 });
 

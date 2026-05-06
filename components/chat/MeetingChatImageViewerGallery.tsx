@@ -3,17 +3,22 @@ import { FlatList, type ListRenderItem, type NativeScrollEvent, type NativeSynth
 
 import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatImageViewerZoomArea';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
-import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
+
+/** 채팅 메시지·프로필 사진 등 이미지 URL + 안정 id만 있으면 페이징 뷰어에 사용 */
+export type ImageViewerGalleryItem = {
+  id: string;
+  imageUrl?: string | null;
+};
 
 type Props = {
-  gallery: MeetingChatMessage[];
+  gallery: ImageViewerGalleryItem[];
   initialIndex: number;
   onIndexChange: (index: number) => void;
 };
 
 export function MeetingChatImageViewerGallery({ gallery, initialIndex, onIndexChange }: Props) {
   const { width: pageW } = useWindowDimensions();
-  const listRef = useRef<FlatList<MeetingChatMessage>>(null);
+  const listRef = useRef<FlatList<ImageViewerGalleryItem>>(null);
 
   const scrollToIdx = useCallback(
     (idx: number, animated: boolean) => {
@@ -45,7 +50,7 @@ export function MeetingChatImageViewerGallery({ gallery, initialIndex, onIndexCh
     [gallery.length, onIndexChange, pageW],
   );
 
-  const renderItem: ListRenderItem<MeetingChatMessage> = useCallback(
+  const renderItem: ListRenderItem<ImageViewerGalleryItem> = useCallback(
     ({ item }) => {
       const u = item.imageUrl?.trim() ?? '';
       if (!u) return <View style={[styles.viewerPagerPage, { width: pageW }]} />;

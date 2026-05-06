@@ -1,6 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,6 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitCard } from '@/components/ginit';
+import { ProfilePhotoCropModal } from '@/components/profile/ProfilePhotoCropModal';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
@@ -34,6 +34,7 @@ import {
   xpProgressWithinLevel,
 } from '@/src/lib/ginit-trust';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
+import { PROFILE_META_PHOTO_COVER, type ProfilePhotoCover } from '@/src/lib/profile-photo-cover';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { ensureUserProfile, updateUserProfile, type UserProfile } from '@/src/lib/user-profile';
 
@@ -52,6 +53,7 @@ export default function ProfileTab() {
   }, [userId, authProfile?.email]);
 
   const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
+  const [cropSession, setCropSession] = useState<{ uri: string; w?: number; h?: number } | null>(null);
   const [nickname, setNickname] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [gTrust, setGTrust] = useState(100);
@@ -152,12 +154,46 @@ export default function ProfileTab() {
     router.push('/profile/settings');
   }, [router]);
 
+  const onCropConfirmHeader = useCallback(
+    (cover: ProfilePhotoCover) => {
+      setCropSession((prev) => {
+        if (!prev?.uri || !profilePk) return null;
+        const session = prev;
+        void (async () => {
+          setPhotoUploadBusy(true);
+          try {
+            const url = await uploadProfilePhoto({
+              userId: profilePk,
+              localImageUri: session.uri,
+              naturalWidth: session.w,
+              naturalHeight: session.h,
+            });
+            await updateUserProfile(profilePk, {
+              photoUrl: url,
+              metadata: { [PROFILE_META_PHOTO_COVER]: cover },
+            });
+            setPhotoUrl(url);
+            if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
+            await refreshProfile();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
+            Alert.alert('업로드 실패', msg);
+          } finally {
+            setPhotoUploadBusy(false);
+          }
+        })();
+        return null;
+      });
+    },
+    [profilePk, refreshProfile],
+  );
+
   const onPickHeaderProfilePhoto = useCallback(async () => {
     if (!profilePk) {
       Alert.alert('안내', '로그인 후 사진을 바꿀 수 있어요.');
       return;
     }
-    setPhotoUploadBusy(true);
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
@@ -166,8 +202,7 @@ export default function ProfileTab() {
       }
       const result = await launchImageLibraryAsyncSafe({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 1,
       });
       if (result.canceled) return;
@@ -175,22 +210,35 @@ export default function ProfileTab() {
       const uri = asset?.uri?.trim() ?? '';
       if (!uri) throw new Error('이미지 정보를 가져오지 못했습니다.');
 
-      const url = await uploadProfilePhoto({
-        userId: profilePk,
-        localImageUri: uri,
-        naturalWidth: asset?.width,
-        naturalHeight: asset?.height,
-      });
-      await updateUserProfile(profilePk, { photoUrl: url });
-      setPhotoUrl(url);
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
-      await refreshProfile();
+      if (Platform.OS === 'web') {
+        setPhotoUploadBusy(true);
+        try {
+          const defaultCover: ProfilePhotoCover = { ax: 0.5, ay: 0.5, z: 1 };
+          const url = await uploadProfilePhoto({
+            userId: profilePk,
+            localImageUri: uri,
+            naturalWidth: asset?.width,
+            naturalHeight: asset?.height,
+          });
+          await updateUserProfile(profilePk, {
+            photoUrl: url,
+            metadata: { [PROFILE_META_PHOTO_COVER]: defaultCover },
+          });
+          setPhotoUrl(url);
+          await refreshProfile();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
+          Alert.alert('업로드 실패', msg);
+        } finally {
+          setPhotoUploadBusy(false);
+        }
+        return;
+      }
+
+      setCropSession({ uri, w: asset?.width, h: asset?.height });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
       Alert.alert('업로드 실패', msg);
-    } finally {
-      setPhotoUploadBusy(false);
     }
   }, [profilePk, refreshProfile]);
 
@@ -240,6 +288,7 @@ export default function ProfileTab() {
           showsVerticalScrollIndicator={false}>
           {profilePk ? (
             <UserProfilePublicBody
+              key={photoUrl || 'no-photo'}
               targetUserId={profilePk}
               layout="tab"
               onPressMyAvatar={() => void onPickHeaderProfilePhoto()}
@@ -268,6 +317,14 @@ export default function ProfileTab() {
           ) : null}
         </ScrollView>
       </SafeAreaView>
+      <ProfilePhotoCropModal
+        visible={cropSession !== null}
+        uri={cropSession?.uri ?? ''}
+        imageWidth={cropSession?.w}
+        imageHeight={cropSession?.h}
+        onRequestClose={() => setCropSession(null)}
+        onConfirm={onCropConfirmHeader}
+      />
     </ScreenShell>
   );
 }

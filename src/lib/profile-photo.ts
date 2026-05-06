@@ -14,7 +14,6 @@ export async function uploadProfilePhoto(params: {
   userId: string;
   localImageUri: string;
   naturalWidth?: number;
-  /** 있으면 가로·세로가 다를 때 중앙 정사각형 크롭 후 업로드(네이티브 크롭 UI 없이 동일 효과) */
   naturalHeight?: number;
 }): Promise<string> {
   const uid = params.userId.trim();
@@ -23,27 +22,9 @@ export async function uploadProfilePhoto(params: {
   if (!uri) throw new Error('이미지를 선택해 주세요.');
 
   const nw = params.naturalWidth;
-  const nh = params.naturalHeight;
   const actions: ImageManipulator.Action[] = [];
-  if (typeof nw === 'number' && typeof nh === 'number' && nw > 0 && nh > 0 && nw !== nh) {
-    const side = Math.min(nw, nh);
-    const originX = Math.max(0, Math.floor((nw - side) / 2));
-    const originY = Math.max(0, Math.floor((nh - side) / 2));
-    actions.push({ crop: { originX, originY, width: side, height: side } });
-  }
-  const widthAfterCrop =
-    typeof nw === 'number' && typeof nh === 'number' && nw > 0 && nh > 0
-      ? Math.min(nw, nh)
-      : typeof nw === 'number' && nw > 0
-        ? nw
-        : undefined;
-  if (typeof widthAfterCrop === 'number' && widthAfterCrop > PROFILE_PHOTO_MAX_WIDTH) {
-    actions.push({ resize: { width: PROFILE_PHOTO_MAX_WIDTH } });
-  } else if (
-    widthAfterCrop === undefined &&
-    typeof params.naturalWidth === 'number' &&
-    params.naturalWidth > PROFILE_PHOTO_MAX_WIDTH
-  ) {
+  /** 원본 비율 유지: 가로만 상한(세로는 비율에 맞게 자동) */
+  if (typeof nw === 'number' && nw > 0 && nw > PROFILE_PHOTO_MAX_WIDTH) {
     actions.push({ resize: { width: PROFILE_PHOTO_MAX_WIDTH } });
   }
   const manipulated = await ImageManipulator.manipulateAsync(uri, actions, {
