@@ -19,7 +19,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  FlatList,
   LayoutAnimation,
   Modal,
   Platform,
@@ -47,6 +46,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -364,8 +364,8 @@ export default function MapScreen() {
   // `react-native-map-clustering`의 ref 타입은 내부적으로 콜백 ref를 쓰므로 any로 둡니다.
   const mapRef = useRef<any>(null);
   const naverMapRef = useRef<NaverMapViewRef>(null);
-  const meetingListRef = useRef<FlatList<Meeting>>(null);
-  const carouselRef = useRef<FlatList<Meeting>>(null);
+  const meetingListRef = useRef<FlashListRef<Meeting>>(null);
+  const carouselRef = useRef<FlashListRef<Meeting>>(null);
   const listScrollY = useRef(0);
   const listContentH = useRef(0);
   const listLayoutH = useRef(0);
@@ -2384,7 +2384,7 @@ export default function MapScreen() {
 
         {sheetMeetings.length > 0 ? (
           <Animated.View style={sheetContentStyle}>
-            <FlatList
+            <FlashList
               key="selected-carousel"
               ref={carouselRef}
               data={sheetMeetings}
@@ -2398,11 +2398,6 @@ export default function MapScreen() {
               contentContainerStyle={{ paddingRight: 0 }}
               // 상세 텍스트가 길어도 충분히 보이도록 카드 표시 높이 상한을 확대합니다(피크에서 CTA 분리만큼 상한 축소).
               style={{ maxHeight: LIST_CARD_HEIGHT + 220 - SHEET_CTA_BLOCK_HEIGHT_PX }}
-              getItemLayout={(_, index) => ({
-                length: carouselWidth,
-                offset: carouselWidth * index,
-                index,
-              })}
               onViewableItemsChanged={onSelectedViewable}
               onScrollBeginDrag={onSheetCarouselBeginDrag}
               onMomentumScrollEnd={onSheetCarouselMomentumEnd}

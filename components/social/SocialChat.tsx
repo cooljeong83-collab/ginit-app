@@ -1,5 +1,5 @@
+import { type FlashListRef } from '@shopify/flash-list';
 import type { RefObject } from 'react';
-import { FlatList } from 'react-native';
 
 import { UnifiedChatBody } from '@/components/chat/UnifiedChatBody';
 import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
@@ -16,7 +16,7 @@ export type SocialChatProps = {
   sending?: boolean;
   onPressNotice?: () => void;
   /** 검색 결과 탭 시 특정 메시지로 스크롤하기 위한 외부 ref(선택) */
-  listRef?: RefObject<FlatList<SocialChatMessage> | null>;
+  listRef?: RefObject<FlashListRef<SocialChatMessage> | null>;
 };
 
 export function SocialChat({

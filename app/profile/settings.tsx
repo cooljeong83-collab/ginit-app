@@ -5,10 +5,10 @@ import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlashList } from '@shopify/flash-list';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -790,7 +790,7 @@ export default function ProfileAppSettingsScreen() {
                     ]}>
                     <Text style={styles.soundSheetTitle}>알림음</Text>
                     <Text style={styles.soundSheetLead}>푸시·로컬 알림에 사용할 소리를 골라요.</Text>
-                    <FlatList
+                    <FlashList
                       data={[...PROFILE_NOTIFICATION_SOUND_OPTIONS]}
                       keyExtractor={(item) => item.id}
                       style={{ maxHeight: soundSheetLayout.scrollMax }}

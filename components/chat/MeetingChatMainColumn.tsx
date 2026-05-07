@@ -2,16 +2,9 @@
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import type { RefObject } from 'react';
-import type {
-  LayoutChangeEvent,
-  ListRenderItem,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  StyleProp,
-  ViewStyle,
-} from 'react-native';
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
-import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-chat-ui-helpers';
@@ -29,10 +22,6 @@ export type MeetingChatMainColumnProps = {
   chatListRows: MeetingChatListRow[];
   renderItem: ListRenderItem<MeetingChatListRow>;
   chatListContentStyle: StyleProp<ViewStyle>;
-  onScrollToIndexFailed: (info: {
-    index: number;
-    averageItemLength?: number;
-  }) => void;
   onChatScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
   listFooterLoading: React.ReactElement | null;
   hasNextPage: boolean;
@@ -63,7 +52,6 @@ export function MeetingChatMainColumn({
   chatListRows,
   renderItem,
   chatListContentStyle,
-  onScrollToIndexFailed,
   onChatScroll,
   listFooterLoading,
   hasNextPage,
@@ -85,6 +73,11 @@ export function MeetingChatMainColumn({
   onSend,
   onPressAttach,
 }: MeetingChatMainColumnProps) {
+  const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
+    setListRef(r);
+    setInnerFlatListRef(r);
+  };
+
   return (
     <View style={styles.chatMainColumn}>
       <View style={styles.listWrap}>
@@ -103,9 +96,8 @@ export function MeetingChatMainColumn({
           </View>
         ) : null}
         <View style={{ flex: 1 }}>
-          <KeyboardAwareFlatList
-            ref={setListRef}
-            innerRef={setInnerFlatListRef}
+          <FlashList
+            ref={setBothRefs as any}
             data={chatListRows}
             keyExtractor={(row) => {
               if (row.type === 'message') return row.message.id;
@@ -117,22 +109,10 @@ export function MeetingChatMainColumn({
             onScroll={onChatScroll}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
-            /** 입력창은 리스트 밖에서 이미 `paddingBottom: composerBottomPad`로 키보드를 반영함. HOC가 키보드 높이를 또 넣으면 역전 리스트 하단에 이중 여백이 생김 */
-            enableOnAndroid={false}
-            extraScrollHeight={0}
-            enableAutomaticScroll={false}
-            contentInset={{ bottom: 0, top: 0, left: 0, right: 0 }}
-            scrollIndicatorInsets={{ bottom: 0 }}
-            onScrollToIndexFailed={onScrollToIndexFailed}
             ListEmptyComponent={<Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>}
             ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
             onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
             onEndReachedThreshold={0.55}
-            initialNumToRender={14}
-            maxToRenderPerBatch={10}
-            windowSize={11}
-            updateCellsBatchingPeriod={50}
-            removeClippedSubviews={false}
           />
         </View>
         {showJumpToBottomFab ? (

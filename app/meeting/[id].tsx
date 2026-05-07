@@ -10,12 +10,12 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { FlashList } from '@shopify/flash-list';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
-  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -4099,27 +4099,27 @@ export default function MeetingDetailScreen() {
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
                   {recruitmentPhase === 'recruiting' ? (
-                    <>
-                      <Pressable
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="초대">
-                        <GinitSymbolicIcon name="mail-outline" size={18} color="#fff" />
-                        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                          초대
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="모임 채팅">
-                        <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
-                        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                          채팅
-                        </Text>
-                      </Pressable>
-                    </>
+                    <Pressable
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="초대">
+                      <GinitSymbolicIcon name="mail-outline" size={18} color="#fff" />
+                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                        초대
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {recruitmentPhase === 'recruiting' || meeting.scheduleConfirmed === true ? (
+                    <Pressable
+                      onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="모임 채팅">
+                      <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
+                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                        채팅
+                      </Text>
+                    </Pressable>
                   ) : null}
                   {meeting.scheduleConfirmed !== true ? (
                     <Pressable
@@ -4187,33 +4187,33 @@ export default function MeetingDetailScreen() {
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
                   {recruitmentPhase === 'recruiting' ? (
-                    <>
-                      <Pressable
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="초대">
-                        <GinitSymbolicIcon name="mail-outline" size={16} color="#fff" />
-                        <Text
-                          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail">
-                          초대
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                        style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                        accessibilityRole="button"
-                        accessibilityLabel="모임 채팅">
-                        <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
-                        <Text
-                          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail">
-                          채팅
-                        </Text>
-                      </Pressable>
-                    </>
+                    <Pressable
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="초대">
+                      <GinitSymbolicIcon name="mail-outline" size={16} color="#fff" />
+                      <Text
+                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
+                        초대
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {recruitmentPhase === 'recruiting' || meeting.scheduleConfirmed === true ? (
+                    <Pressable
+                      onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
+                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      accessibilityRole="button"
+                      accessibilityLabel="모임 채팅">
+                      <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
+                      <Text
+                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
+                        채팅
+                      </Text>
+                    </Pressable>
                   ) : null}
                   {!isScheduleConfirmed ? (
                     <Pressable
@@ -4642,7 +4642,7 @@ export default function MeetingDetailScreen() {
                     <Text style={styles.proposeModalSubDateCompact}>{dateVoteTimePick.ymd}</Text>
                   </View>
                 </View>
-                <FlatList
+                <FlashList
                   data={dateVoteByYmd[dateVoteTimePick.ymd] ?? []}
                   keyExtractor={(o) => o.chipId}
                   showsVerticalScrollIndicator={false}

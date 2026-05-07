@@ -2,7 +2,8 @@
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
-import { ActivityIndicator, Alert, FlatList, Keyboard, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -354,7 +355,7 @@ export default function SocialChatRoomScreen() {
               returnKeyType="search"
             />
           </View>
-          <FlatList
+          <FlashList
             data={searchResults}
             keyExtractor={(it) => it.id}
             keyboardShouldPersistTaps="handled"

@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -17,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
@@ -880,7 +880,7 @@ export function FriendsHomeScreen() {
           ) : null}
         </View>
 
-        <FlatList
+        <FlashList
           data={visibleFriends}
           keyExtractor={(item) => item.row.id}
           ListHeaderComponent={showListHeader ? listHeader : null}

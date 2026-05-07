@@ -418,15 +418,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           chatListRows={chatListRows}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
-          onScrollToIndexFailed={(info) => {
-            const target = info.index;
-            setTimeout(() => {
-              scrollToIndexSafe(target, 0.35, false);
-            }, 100);
-            setTimeout(() => {
-              scrollToIndexSafe(target, 0.35, false);
-            }, 350);
-          }}
           onChatScroll={onChatScroll}
           listFooterLoading={null}
           hasNextPage={false}

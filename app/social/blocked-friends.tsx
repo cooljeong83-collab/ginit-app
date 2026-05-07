@@ -1,7 +1,8 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -107,7 +108,7 @@ export default function BlockedFriendsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <FlatList
+      <FlashList
         data={rows}
         keyExtractor={(item) => item.peerId}
         ListEmptyComponent={listEmpty}

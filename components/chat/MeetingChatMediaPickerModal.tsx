@@ -1,11 +1,11 @@
 import * as MediaLibrary from 'expo-media-library';
+import { FlashList } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Platform,
   Pressable,
@@ -461,11 +461,12 @@ export function MeetingChatMediaPickerModal({
                       accessibilityLabel="앨범 목록 닫기"
                     />
                     <View style={[styles.albumPickerMenu, { maxHeight: albumMenuMaxH }]}>
-                      <FlatList
+                      <FlashList
                         data={albumPickerRows}
                         style={{ maxHeight: albumMenuMaxH }}
                         keyboardShouldPersistTaps="handled"
                         keyExtractor={(item) => (item.type === 'all' ? 'all' : item.album.id)}
+                        getItemType={(item) => item.type}
                         ItemSeparatorComponent={() => <View style={styles.albumRowSep} />}
                         renderItem={({ item }) => {
                           if (item.type === 'all') {
@@ -521,13 +522,12 @@ export function MeetingChatMediaPickerModal({
                 <Text style={styles.muted}>표시할 사진이 없어요.</Text>
               </View>
             ) : (
-              <FlatList
+              <FlashList
                 style={styles.gridList}
                 data={assets}
                 keyExtractor={(item) => item.id}
                 numColumns={cols}
-                columnWrapperStyle={{ gap, paddingHorizontal: pad, marginBottom: gap }}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={[styles.listContent, { paddingHorizontal: pad }]}
                 onEndReached={() => void loadMore()}
                 onEndReachedThreshold={0.35}
                 ListFooterComponent={
@@ -537,14 +537,17 @@ export function MeetingChatMediaPickerModal({
                     </View>
                   ) : null
                 }
-                renderItem={({ item }) => {
+                renderItem={({ item, index }) => {
                   const selected = selectedOrder.includes(item.id);
+                  const col = index % cols;
                   return (
                     <Pressable
                       onPress={() => toggleSelect(item.id)}
                       style={({ pressed }) => [
                         styles.cell,
                         { width: cell, height: cell },
+                        col < cols - 1 ? { marginRight: gap } : null,
+                        { marginBottom: gap },
                         pressed && meetingChatBodyStyles.pressed,
                       ]}
                       accessibilityRole="button"

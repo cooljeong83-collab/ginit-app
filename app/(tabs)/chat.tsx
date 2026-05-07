@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -16,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 
 import { Image } from 'expo-image';
 
@@ -903,7 +903,7 @@ export default function ChatTab() {
             onMomentumScrollEnd={onTabPagerMomentumEnd}
             style={styles.tabPager}>
             <View style={[styles.tabPage, { width: windowWidth }]}>
-              <FlatList<Meeting>
+              <FlashList<Meeting>
                 data={displayedGatherMeetings}
                 extraData={{
                   chatKind,
@@ -949,7 +949,7 @@ export default function ChatTab() {
               />
             </View>
             <View style={[styles.tabPage, { width: windowWidth }]}>
-              <FlatList<SocialChatRoomSummary>
+              <FlashList<SocialChatRoomSummary>
                 data={displayedSocialRooms}
                 extraData={{
                   chatKind,

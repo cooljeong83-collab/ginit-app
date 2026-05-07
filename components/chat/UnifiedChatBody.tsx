@@ -1,9 +1,9 @@
 
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FlatList,
   Keyboard,
   type LayoutChangeEvent,
   Platform,
@@ -46,7 +46,7 @@ export type UnifiedChatBodyProps<TMessage extends UnifiedChatMessage> = {
   onSend: () => void;
   sending?: boolean;
   onPressNotice?: () => void;
-  listRef?: RefObject<FlatList<TMessage> | null>;
+  listRef?: RefObject<FlashListRef<TMessage> | null>;
 };
 
 export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
@@ -62,7 +62,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
   listRef: externalListRef,
 }: UnifiedChatBodyProps<TMessage>) {
   const insets = useSafeAreaInsets();
-  const innerListRef = useRef<FlatList<TMessage>>(null);
+  const innerListRef = useRef<FlashListRef<TMessage>>(null);
   const listRef = externalListRef ?? innerListRef;
   const myNorm = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) ?? myUserId.trim() : ''), [myUserId]);
   const didInitialAutoScrollRef = useRef(false);
@@ -85,6 +85,15 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
     setShowJumpToBottomFab(false);
     listRef.current?.scrollToEnd({ animated: false });
   }, [listRef]);
+
+  const getItemType = useCallback(
+    (item: TMessage) => {
+      const sid = item.senderId?.trim() ?? '';
+      const mine = Boolean(sid && (normalizeParticipantId(sid) ?? sid) === myNorm);
+      return mine ? 'mine' : 'other';
+    },
+    [myNorm],
+  );
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
@@ -132,10 +141,11 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
           </Pressable>
         ) : null}
 
-        <FlatList
+        <FlashList
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
+          getItemType={getItemType}
           contentContainerStyle={listContentStyle}
           onScroll={(e) => {
             const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
@@ -147,13 +157,6 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
             if (didInitialAutoScrollRef.current) return;
             didInitialAutoScrollRef.current = true;
             listRef.current?.scrollToEnd({ animated: false });
-          }}
-          onScrollToIndexFailed={(info) => {
-            const h = Math.max(100, info.averageItemLength || 120);
-            listRef.current?.scrollToOffset?.({ offset: Math.max(0, h * info.index), animated: false });
-            requestAnimationFrame(() => {
-              listRef.current?.scrollToIndex?.({ index: info.index, viewPosition: 0.35, animated: false });
-            });
           }}
           renderItem={({ item }) => {
             const sid = item.senderId?.trim() ?? '';

@@ -87,7 +87,8 @@
           }
         }
       ],
-      "./plugins/withAndroidGmsResourceFix.js"
+      "./plugins/withAndroidGmsResourceFix.js",
+      "./plugins/withAndroidWindowSoftInputAdjustResize.js"
     ],
     "experiments": {
       "typedRoutes": true,

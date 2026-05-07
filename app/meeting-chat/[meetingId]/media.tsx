@@ -3,10 +3,10 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlashList } from '@shopify/flash-list';
 import {
     ActivityIndicator,
     Alert,
-    FlatList,
     Modal,
     Platform,
     Pressable,
@@ -279,12 +279,11 @@ export default function MeetingChatMediaScreen() {
           <Text style={styles.muted}>불러오는 중…</Text>
         </View>
       ) : (
-        <FlatList
+        <FlashList
           data={rows}
           keyExtractor={(item) => item.id}
           numColumns={3}
           style={styles.listBg}
-          columnWrapperStyle={styles.gridRow}
           contentContainerStyle={[styles.gridContent, rows.length === 0 && styles.gridContentEmpty]}
           refreshControl={
             <RefreshControl
@@ -310,16 +309,22 @@ export default function MeetingChatMediaScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
             const u = item.imageUrl?.trim() ?? '';
             if (!u) return <View style={{ width: cell, height: 0 }} />;
+            const col = index % 3;
             return (
               <Pressable
                 onPress={() => {
                   const ix = rows.findIndex((r) => r.id === item.id);
                   setImageViewer({ index: ix >= 0 ? ix : 0 });
                 }}
-                style={[styles.thumbCell, { width: cell, height: cell }]}
+                style={[
+                  styles.thumbCell,
+                  { width: cell, height: cell },
+                  col < 2 ? { marginRight: GRID_GAP } : null,
+                  { marginBottom: GRID_GAP },
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel="사진 크게 보기">
                 <Image source={{ uri: u }} style={styles.thumbImg} contentFit="cover" />

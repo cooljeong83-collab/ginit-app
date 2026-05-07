@@ -1,6 +1,7 @@
 
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
+import { FlashList } from '@shopify/flash-list';
 import {
   createContext,
   type ReactNode,
@@ -14,7 +15,6 @@ import {
 import {
   AppState,
   type AppStateStatus,
-  FlatList,
   Modal,
   Platform,
   Pressable,
@@ -1301,7 +1301,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                 <Text style={styles.emptyText}>확인하지 않은 새 소식이 없어요.</Text>
               </View>
             ) : (
-              <FlatList
+              <FlashList
                 data={alarms}
                 keyExtractor={(item) => item.id}
                 style={{ maxHeight: alarmPanelLayout.listMaxHeight, flexGrow: 0 }}

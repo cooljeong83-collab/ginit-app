@@ -5,11 +5,11 @@ import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlashList } from '@shopify/flash-list';
 import {
     ActivityIndicator,
     Alert,
     Dimensions,
-    FlatList,
     InteractionManager,
     Keyboard,
     type KeyboardEvent,
@@ -1033,15 +1033,6 @@ export default function MeetingChatRoomScreen() {
           chatListRows={chatListRows}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
-          onScrollToIndexFailed={(info) => {
-            const target = info.index;
-            setTimeout(() => {
-              scrollToIndexSafe(target, 0.35, false);
-            }, 100);
-            setTimeout(() => {
-              scrollToIndexSafe(target, 0.35, false);
-            }, 350);
-          }}
           onChatScroll={onChatScroll}
           listFooterLoading={listFooterLoading}
           hasNextPage={hasNextPage}
@@ -1110,7 +1101,7 @@ export default function MeetingChatRoomScreen() {
                 <Text style={styles.chatSearchBusyText}>검색 중…</Text>
               </View>
             ) : null}
-            <FlatList
+            <FlashList
               data={chatSearchResults}
               keyExtractor={(it) => it.id}
               renderItem={renderChatSearchRow}

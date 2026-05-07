@@ -517,7 +517,7 @@ export const voteCandidatesFormStyles = StyleSheet.create({
   },
   /** 제목·주소 각 2줄 + 카카오·네이버 버튼까지 포함(이미지 112 + 여백) — `overflow: hidden` 호스트에 맞춤 */
   placeResultsCarouselHost: {
-    height: 274,
+    height: 292,
   },
   placeResultsCarouselContent: {
     paddingVertical: 10,

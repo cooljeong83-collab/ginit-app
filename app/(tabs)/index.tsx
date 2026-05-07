@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  FlatList,
   Keyboard,
   Modal,
   Platform,
@@ -24,6 +23,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
@@ -1334,7 +1334,7 @@ export default function FeedScreen() {
                     : sortedPrivateMeetings;
               return (
                 <View key={tab} style={[styles.tabPage, { width: windowWidth }]}>
-                  <FlatList
+                  <FlashList
                     data={tabData}
                     keyExtractor={(m) => m.id}
                     extraData={{
@@ -1360,10 +1360,6 @@ export default function FeedScreen() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                     nestedScrollEnabled
-                    removeClippedSubviews={false}
-                    initialNumToRender={8}
-                    maxToRenderPerBatch={8}
-                    windowSize={9}
                     onScroll={onMainScroll}
                     scrollEventThrottle={16}
                     onEndReached={() => handleEndReachedForTab(tab)}

@@ -3,10 +3,10 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlashList } from '@shopify/flash-list';
 import {
     ActivityIndicator,
     Alert,
-    FlatList,
     Modal,
     Pressable,
     RefreshControl,
@@ -191,11 +191,10 @@ export default function SocialChatMediaScreen() {
           <Text style={styles.muted}>불러오는 중…</Text>
         </View>
       ) : (
-        <FlatList
+        <FlashList
           data={rows}
           keyExtractor={(it) => it.id}
           numColumns={3}
-          columnWrapperStyle={{ gap: GRID_GAP }}
           contentContainerStyle={{
             paddingHorizontal: H_PAD,
             paddingTop: 10,
@@ -203,12 +202,19 @@ export default function SocialChatMediaScreen() {
             gap: GRID_GAP,
           }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={triggerRefresh} />}
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
             const u = item.imageUrl?.trim() ?? '';
+            const col = index % 3;
             return (
               <Pressable
                 onPress={() => u && setViewer(item)}
-                style={({ pressed }) => [styles.cell, { width: cell, height: cell }, pressed && { opacity: 0.88 }]}
+                style={({ pressed }) => [
+                  styles.cell,
+                  { width: cell, height: cell },
+                  col < 2 ? { marginRight: GRID_GAP } : null,
+                  { marginBottom: GRID_GAP },
+                  pressed && { opacity: 0.88 },
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel="사진 보기"
               >
