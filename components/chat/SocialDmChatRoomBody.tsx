@@ -76,12 +76,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const listRef = useRef<unknown>(null);
-  const innerFlatListRef = useRef<unknown>(null);
+  const innerFlashListRef = useRef<unknown>(null);
   const setListRef = useCallback((r: unknown) => {
     if (r) listRef.current = r;
   }, []);
-  const setInnerFlatListRef = useCallback((r: unknown) => {
-    if (r) innerFlatListRef.current = r;
+  const setInnerFlashListRef = useCallback((r: unknown) => {
+    if (r) innerFlashListRef.current = r;
   }, []);
   const messageInputRef = useRef<TextInput>(null);
 
@@ -97,7 +97,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   }, [messages]);
 
   const resolveListScroller = useCallback(() => {
-    const r = innerFlatListRef.current ?? listRef.current;
+    const r = innerFlashListRef.current ?? listRef.current;
     if (!r) return null;
     const candidates = [
       r,
@@ -414,7 +414,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           chatError={chatError}
           searchNavigateLoading={searchNavigateLoading}
           setListRef={setListRef}
-          setInnerFlatListRef={setInnerFlatListRef}
+          setInnerFlashListRef={setInnerFlashListRef}
           chatListRows={chatListRows}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}

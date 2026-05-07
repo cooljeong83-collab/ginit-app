@@ -18,7 +18,7 @@ export type MeetingChatMainColumnProps = {
   chatError: string | null;
   searchNavigateLoading: boolean;
   setListRef: (r: unknown) => void;
-  setInnerFlatListRef: (r: unknown) => void;
+  setInnerFlashListRef: (r: unknown) => void;
   chatListRows: MeetingChatListRow[];
   renderItem: ListRenderItem<MeetingChatListRow>;
   chatListContentStyle: StyleProp<ViewStyle>;
@@ -48,7 +48,7 @@ export function MeetingChatMainColumn({
   chatError,
   searchNavigateLoading,
   setListRef,
-  setInnerFlatListRef,
+  setInnerFlashListRef,
   chatListRows,
   renderItem,
   chatListContentStyle,
@@ -75,7 +75,7 @@ export function MeetingChatMainColumn({
 }: MeetingChatMainColumnProps) {
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
     setListRef(r);
-    setInnerFlatListRef(r);
+    setInnerFlashListRef(r);
   };
 
   return (

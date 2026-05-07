@@ -179,12 +179,12 @@ export default function MeetingChatRoomScreen() {
   const chatSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatSearchInputRef = useRef<TextInput>(null);
   const listRef = useRef<any>(null);
-  const innerFlatListRef = useRef<any>(null);
+  const innerFlashListRef = useRef<any>(null);
   const setListRef = useCallback((r: any) => {
     if (r) listRef.current = r;
   }, []);
-  const setInnerFlatListRef = useCallback((r: any) => {
-    if (r) innerFlatListRef.current = r;
+  const setInnerFlashListRef = useCallback((r: any) => {
+    if (r) innerFlashListRef.current = r;
   }, []);
   const messageInputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MeetingChatMessage[]>([]);
@@ -196,7 +196,7 @@ export default function MeetingChatRoomScreen() {
 
   const resolveListScroller = useCallback(() => {
     // KeyboardAwareFlatList는 outer ref로는 스크롤 메서드가 없는 경우가 있어 inner ref를 최우선합니다.
-    const r = innerFlatListRef.current ?? listRef.current;
+    const r = innerFlashListRef.current ?? listRef.current;
     if (!r) return null;
     // KeyboardAwareFlatList / FlatList / AnimatedFlatList 등 다양한 래퍼 케이스를 모두 커버
     const candidates = [
@@ -1029,7 +1029,7 @@ export default function MeetingChatRoomScreen() {
           chatError={chatError}
           searchNavigateLoading={searchNavigateLoading}
           setListRef={setListRef}
-          setInnerFlatListRef={setInnerFlatListRef}
+          setInnerFlashListRef={setInnerFlashListRef}
           chatListRows={chatListRows}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
