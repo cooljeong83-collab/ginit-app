@@ -399,8 +399,15 @@ export default function MeetingChatRoomScreen() {
     // 내가 보낸 메시지나, 현재 최신 영역에 머무르고 있는 상태라면 최신을 유지
     lastAutoScrolledMessageIdRef.current = latest.id;
     pendingAutoScrollToLatestRef.current = false;
+    // 레이아웃(콘텐츠 높이/입력 독 패딩) 반영 타이밍에 따라 1프레임만으로는 가려질 수 있어 2~3회 재시도합니다.
     requestAnimationFrame(() => {
       scrollToOffsetSafe(0, false);
+      requestAnimationFrame(() => {
+        scrollToOffsetSafe(0, false);
+      });
+      setTimeout(() => {
+        scrollToOffsetSafe(0, false);
+      }, 60);
     });
   }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
@@ -684,10 +691,13 @@ export default function MeetingChatRoomScreen() {
       meetingChatBodyStyles.listContent,
       {
         // inverted: 입력 독이 absolute+sticky이므로 리스트 시각 하단에 독 높이만큼 여백
-        paddingTop: Math.max(4, composerDockBlockHeight + Math.max(0, keyboardHeight)),
+        paddingTop: Math.max(
+          4,
+          Math.max(composerDockBlockHeight, composerInputBarHeight + composerBottomPad) + Math.max(0, keyboardHeight),
+        ),
       },
     ],
-    [composerDockBlockHeight, keyboardHeight],
+    [composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight],
   );
 
   useGenericKeyboardHandler(
@@ -708,6 +718,15 @@ export default function MeetingChatRoomScreen() {
     const h = e.nativeEvent.layout.height;
     if (h > 0) setComposerDockBlockHeight(h);
   }, []);
+
+  // 입력 독/키보드 높이 변화로 리스트 패딩이 바뀌는 순간,
+  // 최신 영역에 머무는 중이면(offset=0) 한 번 더 최신으로 붙여 가려짐을 방지합니다.
+  useEffect(() => {
+    if (showJumpToBottomFab) return;
+    requestAnimationFrame(() => {
+      scrollToOffsetSafe(0, false);
+    });
+  }, [showJumpToBottomFab, composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight, scrollToOffsetSafe]);
 
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
 

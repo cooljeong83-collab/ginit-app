@@ -94,6 +94,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const lastAutoScrolledMessageIdRef = useRef<string>('');
+  const pendingAutoScrollToLatestRef = useRef(false);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
   const setListRef = useCallback((r: unknown) => {
@@ -231,10 +232,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     if (lastAutoScrolledMessageIdRef.current === latest.id) return;
 
     // 키보드가 열려 있거나(입력 중) 현재 최신 영역에 머무는 경우엔 새 메시지 도착 시 최신 유지
-    const shouldAutoScroll = keyboardHeight > 0 || !showJumpToBottomFab;
+    const shouldAutoScroll = keyboardHeight > 0 || pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
     if (!shouldAutoScroll) return;
 
     lastAutoScrolledMessageIdRef.current = latest.id;
+    pendingAutoScrollToLatestRef.current = false;
     requestAnimationFrame(() => {
       scrollToOffsetSafe(0, false);
     });
@@ -353,6 +355,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       const uid = myUserId.trim();
       if (!uid || !roomId || uris.length === 0 || sending) return;
       setSending(true);
+      pendingAutoScrollToLatestRef.current = true;
       try {
         await sendSocialChatImageMessagesBatch(roomId, uid, uris, {
           naturalWidths: widths,
@@ -372,6 +375,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     const body = draft.trim();
     if (!uid || !roomId || !body || sending) return;
     setSending(true);
+    pendingAutoScrollToLatestRef.current = true;
     try {
       await sendSocialChatTextMessage(roomId, uid, body, replyTo?.messageId ? replyTo : null);
       setDraft('');
@@ -387,10 +391,13 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     () => [
       meetingChatBodyStyles.listContent,
       {
-        paddingTop: Math.max(4, composerDockBlockHeight + Math.max(0, keyboardHeight)),
+        paddingTop: Math.max(
+          4,
+          Math.max(composerDockBlockHeight, composerInputBarHeight + composerBottomPad) + Math.max(0, keyboardHeight),
+        ),
       },
     ],
-    [composerDockBlockHeight, keyboardHeight],
+    [composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight],
   );
 
   useGenericKeyboardHandler(
@@ -411,6 +418,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     const h = e.nativeEvent.layout.height;
     if (h > 0) setComposerDockBlockHeight(h);
   }, []);
+
+  // 입력 독/키보드 높이 변화로 리스트 패딩이 바뀌는 순간,
+  // 최신 영역에 머무는 중이면(offset=0) 한 번 더 최신으로 붙여 가려짐을 방지합니다.
+  useEffect(() => {
+    if (showJumpToBottomFab) return;
+    requestAnimationFrame(() => {
+      scrollToOffsetSafe(0, false);
+    });
+  }, [showJumpToBottomFab, composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight, scrollToOffsetSafe]);
 
   const listFooterLoading = useMemo(
     () => (

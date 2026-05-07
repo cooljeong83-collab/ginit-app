@@ -324,17 +324,10 @@ export default function SocialChatRoomScreen() {
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
           <Pressable
-            onPress={() => {
-              const p = peerId.trim();
-              if (!p) return;
-              const t = p?.trim() ?? '';
-              if (!t) return;
-              router.push(`/profile/user/${encodeURIComponent(t)}`);
-            }}
-            disabled={!peerId.trim()}
-            style={({ pressed }) => [s.titlePress, !peerId.trim() && { opacity: 0.6 }, pressed && peerId.trim() && { opacity: 0.85 }]}
-            accessibilityRole="button"
-            accessibilityLabel="상대 프로필">
+            disabled
+            style={s.titlePress}
+            accessibilityRole="header"
+            accessibilityLabel="대화 상대">
             <Text style={s.topTitle} numberOfLines={1}>
               {peerName}
             </Text>
