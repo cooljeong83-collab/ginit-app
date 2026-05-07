@@ -93,6 +93,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const lastAutoScrolledMessageIdRef = useRef<string>('');
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
   const setListRef = useCallback((r: unknown) => {
@@ -223,6 +224,21 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   useEffect(() => {
     if (messages.length === 0) setShowJumpToBottomFab(false);
   }, [messages.length]);
+
+  useEffect(() => {
+    const latest = messages[0];
+    if (!latest?.id) return;
+    if (lastAutoScrolledMessageIdRef.current === latest.id) return;
+
+    // 키보드가 열려 있거나(입력 중) 현재 최신 영역에 머무는 경우엔 새 메시지 도착 시 최신 유지
+    const shouldAutoScroll = keyboardHeight > 0 || !showJumpToBottomFab;
+    if (!shouldAutoScroll) return;
+
+    lastAutoScrolledMessageIdRef.current = latest.id;
+    requestAnimationFrame(() => {
+      scrollToOffsetSafe(0, false);
+    });
+  }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
   const messageIndexById = useMemo(() => {
     const m = new Map<string, number>();

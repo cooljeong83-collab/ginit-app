@@ -393,7 +393,7 @@ export default function MeetingChatRoomScreen() {
     if (!latest?.id) return;
     if (lastAutoScrolledMessageIdRef.current === latest.id) return;
 
-    const shouldAutoScroll = pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
+    const shouldAutoScroll = keyboardHeight > 0 || pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
     if (!shouldAutoScroll) return;
 
     // 내가 보낸 메시지나, 현재 최신 영역에 머무르고 있는 상태라면 최신을 유지
@@ -402,7 +402,7 @@ export default function MeetingChatRoomScreen() {
     requestAnimationFrame(() => {
       scrollToOffsetSafe(0, false);
     });
-  }, [messages, showJumpToBottomFab, scrollToOffsetSafe]);
+  }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
   useEffect(() => {
     let cancelled = false;
