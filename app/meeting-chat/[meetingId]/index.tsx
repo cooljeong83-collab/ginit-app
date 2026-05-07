@@ -23,6 +23,8 @@ import {
     View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
@@ -172,6 +174,7 @@ export default function MeetingChatRoomScreen() {
   /** 퀵 메뉴·닫기 레이어를 입력창(composerDock) 바로 위에 붙이기 위한 높이 */
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const chatSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatSearchInputRef = useRef<TextInput>(null);
   const listRef = useRef<any>(null);
@@ -681,10 +684,24 @@ export default function MeetingChatRoomScreen() {
       meetingChatBodyStyles.listContent,
       {
         // inverted: 입력 독이 absolute+sticky이므로 리스트 시각 하단에 독 높이만큼 여백
-        paddingTop: Math.max(4, composerDockBlockHeight),
+        paddingTop: Math.max(4, composerDockBlockHeight + Math.max(0, keyboardHeight)),
       },
     ],
-    [composerDockBlockHeight],
+    [composerDockBlockHeight, keyboardHeight],
+  );
+
+  useGenericKeyboardHandler(
+    {
+      onMove: (e) => {
+        'worklet';
+        runOnJS(setKeyboardHeight)(Math.max(0, e.height));
+      },
+      onEnd: (e) => {
+        'worklet';
+        runOnJS(setKeyboardHeight)(Math.max(0, e.height));
+      },
+    },
+    [],
   );
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
@@ -994,6 +1011,7 @@ export default function MeetingChatRoomScreen() {
           onPrefetchOlderMessages={hasNextPage ? onPrefetchOlderMessages : undefined}
           showJumpToBottomFab={showJumpToBottomFab}
           composerDockBlockHeight={composerDockBlockHeight}
+          keyboardHeight={keyboardHeight}
           jumpToLatest={jumpToLatest}
           composerBottomPad={composerBottomPad}
           onComposerDockLayout={onComposerDockLayout}

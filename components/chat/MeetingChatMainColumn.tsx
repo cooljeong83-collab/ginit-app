@@ -30,6 +30,8 @@ export type MeetingChatMainColumnProps = {
   onPrefetchOlderMessages?: () => void;
   showJumpToBottomFab: boolean;
   composerDockBlockHeight: number;
+  /** 키보드가 올라온 높이(px). 리스트/FAB 위치 보정용 */
+  keyboardHeight?: number;
   jumpToLatest: () => void;
   composerBottomPad: number;
   onComposerDockLayout: (e: LayoutChangeEvent) => void;
@@ -60,6 +62,7 @@ export function MeetingChatMainColumn({
   onPrefetchOlderMessages,
   showJumpToBottomFab,
   composerDockBlockHeight,
+  keyboardHeight,
   jumpToLatest,
   composerBottomPad,
   onComposerDockLayout,
@@ -118,7 +121,7 @@ export function MeetingChatMainColumn({
         </View>
         {showJumpToBottomFab ? (
           <Pressable
-            style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
+            style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight + Math.max(0, keyboardHeight ?? 0) }]}
             onPress={jumpToLatest}
             accessibilityRole="button"
             accessibilityLabel="최신 메시지로">

@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
@@ -90,6 +92,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
   const setListRef = useCallback((r: unknown) => {
@@ -368,10 +371,24 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     () => [
       meetingChatBodyStyles.listContent,
       {
-        paddingTop: Math.max(4, composerDockBlockHeight),
+        paddingTop: Math.max(4, composerDockBlockHeight + Math.max(0, keyboardHeight)),
       },
     ],
-    [composerDockBlockHeight],
+    [composerDockBlockHeight, keyboardHeight],
+  );
+
+  useGenericKeyboardHandler(
+    {
+      onMove: (e) => {
+        'worklet';
+        runOnJS(setKeyboardHeight)(Math.max(0, e.height));
+      },
+      onEnd: (e) => {
+        'worklet';
+        runOnJS(setKeyboardHeight)(Math.max(0, e.height));
+      },
+    },
+    [],
   );
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
@@ -418,6 +435,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           onPrefetchOlderMessages={hasNextPage ? onPrefetchOlderMessages : undefined}
           showJumpToBottomFab={showJumpToBottomFab}
           composerDockBlockHeight={composerDockBlockHeight}
+          keyboardHeight={keyboardHeight}
           jumpToLatest={jumpToLatest}
           composerBottomPad={composerBottomPad}
           onComposerDockLayout={onComposerDockLayout}
