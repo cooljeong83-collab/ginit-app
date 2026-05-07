@@ -75,6 +75,9 @@ export type SocialChatMessage = {
   createdAt: Timestamp | null;
 };
 
+/** 모임 채팅(`MEETING_CHAT_PAGE_SIZE`)과 동일하게 소셜 DM도 최신 N개만 tail 구독 + 과거 페이징 */
+export const SOCIAL_CHAT_PAGE_SIZE = 20;
+
 const SOCIAL_LATEST_PREVIEW_LIMIT = 1;
 
 export function socialMessageTimeMs(m: SocialChatMessage | null | undefined): number {
@@ -369,7 +372,8 @@ export function subscribeSocialChatMessages(
     return () => {};
   }
   const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'));
+  // NOTE: 전체 구독은 메시지 수가 커질수록 성능/비용이 급증합니다. 모임 채팅과 동일하게 tail 20개만 구독합니다.
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_CHAT_PAGE_SIZE));
   return onSnapshot(
     q,
     (snap) => {
@@ -381,6 +385,158 @@ export function subscribeSocialChatMessages(
       onError?.(err.message ?? '채팅을 불러오지 못했어요.');
     },
   );
+}
+
+export type SocialChatLiveTailEvent = {
+  /** 최신순(가장 최신이 index 0). 최대 SOCIAL_CHAT_PAGE_SIZE건 */
+  tailDesc: SocialChatMessage[];
+  /** tail 구간에서 가장 과거(정렬상 마지막) 문서 */
+  tailOldestDoc: DocumentSnapshot | null;
+  /** tail 밖으로 밀려난 메시지(실시간 tail 갱신 시). */
+  evictedFromTailDesc: SocialChatMessage[];
+};
+
+/**
+ * 소셜 DM: 최신 `SOCIAL_CHAT_PAGE_SIZE`건만 `onSnapshot`으로 구독합니다.
+ * 모임 채팅 `subscribeMeetingChatLiveTail`과 같은 패턴(단, message shape은 SocialChatMessage).
+ */
+export function subscribeSocialChatLiveTail(
+  roomId: string,
+  onEvent: (event: SocialChatLiveTailEvent) => void,
+  onError?: (message: string) => void,
+): Unsubscribe {
+  const rid = roomId.trim();
+  if (!rid) {
+    onEvent({ tailDesc: [], tailOldestDoc: null, evictedFromTailDesc: [] });
+    return () => {};
+  }
+  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_CHAT_PAGE_SIZE));
+
+  let prevDocs: DocumentSnapshot[] = [];
+  return onSnapshot(
+    q,
+    (snap) => {
+      const currDocs = snap.docs;
+      const currIds = new Set(currDocs.map((d) => d.id));
+      const evictedSnaps: DocumentSnapshot[] = [];
+      for (const d of prevDocs) {
+        if (!currIds.has(d.id)) evictedSnaps.push(d);
+      }
+      prevDocs = currDocs;
+
+      const evictedFromTailDesc = evictedSnaps.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
+      const tailDesc = currDocs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
+      const tailOldestDoc = currDocs.length ? currDocs[currDocs.length - 1]! : null;
+      onEvent({ tailDesc, tailOldestDoc, evictedFromTailDesc });
+    },
+    (err) => {
+      onError?.(err.message ?? '채팅을 불러오지 못했어요.');
+    },
+  );
+}
+
+export type SocialChatFetchedMessagesPage = {
+  /**
+   * UI 편의를 위해 **오래된→최신(chrono)** 순서로 담습니다.
+   * (모임 채팅 infinite 페이지는 최신→과거 desc이지만, 소셜 DM UI는 기존 형태(chrono)를 유지합니다.)
+   */
+  messages: SocialChatMessage[];
+  /** 이 페이지에서 가장 과거(chrono 기준 첫 번째) 메시지 id — 다음 페이지 `startAfter` 앵커 */
+  oldestMessageId: string | null;
+  hasMore: boolean;
+};
+
+/** 소셜 DM: 최신 `SOCIAL_CHAT_PAGE_SIZE`건을 한 번 `getDocs`로 가져옵니다. */
+export async function fetchSocialChatLatestPage(roomId: string): Promise<SocialChatFetchedMessagesPage> {
+  const rid = roomId.trim();
+  if (!rid) return { messages: [], oldestMessageId: null, hasMore: false };
+  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_CHAT_PAGE_SIZE));
+  const snap = await getDocs(q);
+  if (snap.empty) return { messages: [], oldestMessageId: null, hasMore: false };
+  const desc = snap.docs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
+  desc.reverse(); // chrono
+  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
+  return {
+    messages: desc,
+    oldestMessageId,
+    hasMore: snap.size >= SOCIAL_CHAT_PAGE_SIZE,
+  };
+}
+
+/**
+ * `afterMessageId` 문서 직후(더 과거)부터 `pageSize`건(기본 SOCIAL_CHAT_PAGE_SIZE).
+ * 반환 메시지는 chrono(오래된→최신) 순서입니다.
+ */
+export async function fetchSocialChatOlderPageAfterMessageId(
+  roomId: string,
+  afterMessageId: string,
+  pageSize: number = SOCIAL_CHAT_PAGE_SIZE,
+): Promise<SocialChatFetchedMessagesPage> {
+  const rid = roomId.trim();
+  const aid = afterMessageId.trim();
+  if (!rid || !aid) return { messages: [], oldestMessageId: null, hasMore: false };
+  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const anchorRef = doc(cref, aid);
+  const anchorSnap = await getDoc(anchorRef);
+  if (!anchorSnap.exists()) return { messages: [], oldestMessageId: null, hasMore: false };
+  const q = query(cref, orderBy('createdAt', 'desc'), startAfter(anchorSnap), limit(pageSize));
+  const snap = await getDocs(q);
+  if (snap.empty) return { messages: [], oldestMessageId: null, hasMore: false };
+  const desc = snap.docs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
+  desc.reverse(); // chrono
+  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
+  return {
+    messages: desc,
+    oldestMessageId,
+    hasMore: snap.size >= pageSize,
+  };
+}
+
+const PREFETCH_OLDER_SOCIAL_DEFAULT_PAGE = 100;
+const PREFETCH_OLDER_SOCIAL_MAX_PAGES = 200;
+
+export type SocialChatOlderPrefetchUntilTargetResult = {
+  /** 기존 infinite 캐시의 마지막 페이지 **이후**(더 과거) 구간만 담은 페이지 배열 */
+  newPages: SocialChatFetchedMessagesPage[];
+  /** `newPages` 안에 `targetMessageId`가 포함되었는지 */
+  found: boolean;
+};
+
+/**
+ * 검색 점프 등으로 특정 메시지로 이동할 때, 현재 캐시보다 과거에만 있는 경우
+ * `anchorOldestMessageId`(이미 로드된 구간 중 가장 과거 메시지 id) 다음부터
+ * `targetMessageId`가 나올 때까지(또는 더 불러올 문서 없음) 과거 페이지를 이어 받습니다.
+ */
+export async function fetchOlderSocialChatPagesUntilTargetMessageId(
+  roomId: string,
+  anchorOldestMessageId: string,
+  targetMessageId: string,
+  opts?: { pageSize?: number; maxPages?: number },
+): Promise<SocialChatOlderPrefetchUntilTargetResult> {
+  const rid = roomId.trim();
+  const anchor = anchorOldestMessageId.trim();
+  const tid = targetMessageId.trim();
+  if (!rid || !anchor || !tid) return { newPages: [], found: false };
+
+  const pageSize = Math.min(
+    Math.max(opts?.pageSize ?? PREFETCH_OLDER_SOCIAL_DEFAULT_PAGE, SOCIAL_CHAT_PAGE_SIZE),
+    200,
+  );
+  const maxPages = Math.min(Math.max(opts?.maxPages ?? PREFETCH_OLDER_SOCIAL_MAX_PAGES, 1), 400);
+
+  const newPages: SocialChatFetchedMessagesPage[] = [];
+  let cursor = anchor;
+  for (let i = 0; i < maxPages; i++) {
+    const page = await fetchSocialChatOlderPageAfterMessageId(rid, cursor, pageSize);
+    if (!page.messages.length) return { newPages, found: false };
+    newPages.push(page);
+    if (page.messages.some((m) => m.id === tid)) return { newPages, found: true };
+    if (!page.hasMore || !page.oldestMessageId?.trim()) return { newPages, found: false };
+    cursor = page.oldestMessageId.trim();
+  }
+  return { newPages, found: false };
 }
 
 function coalesceFirestoreTimeMs(v: unknown): number {

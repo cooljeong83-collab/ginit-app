@@ -1,6 +1,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   InteractionManager,
   type LayoutChangeEvent,
@@ -36,6 +37,7 @@ import {
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { GinitTheme } from '@/constants/ginit-theme';
 
 export type SocialDmChatRoomBodyHandle = {
   /** 모임 채팅과 동일하게 `data`는 최신이 index 0(inverted 기준). */
@@ -50,11 +52,28 @@ export type SocialDmChatRoomBodyProps = {
   chatError: string | null;
   peerReadMessageId: string | null;
   peerReadAt: unknown | null;
+  searchNavigateLoading?: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  onPrefetchOlderMessages?: () => void;
   onPeerProfileOpen: (peerAppUserId: string) => void;
 };
 
 export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, SocialDmChatRoomBodyProps>(function SocialDmChatRoomBody(
-  { roomId, peerId, myUserId, messages: rawMessages, chatError, peerReadMessageId, peerReadAt, onPeerProfileOpen },
+  {
+    roomId,
+    peerId,
+    myUserId,
+    messages: rawMessages,
+    chatError,
+    peerReadMessageId,
+    peerReadAt,
+    searchNavigateLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    onPrefetchOlderMessages,
+    onPeerProfileOpen,
+  },
   ref,
 ) {
   const insets = useSafeAreaInsets();
@@ -69,7 +88,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   } | null>(null);
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
-  const searchNavigateLoading = false;
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const listRef = useRef<unknown>(null);
@@ -361,6 +379,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     if (h > 0) setComposerDockBlockHeight(h);
   }, []);
 
+  const listFooterLoading = useMemo(
+    () => (
+      <View style={meetingChatBodyStyles.chatListFooterSpinner} accessibilityLabel="이전 메시지 로딩">
+        <ActivityIndicator color={GinitTheme.colors.primary} />
+      </View>
+    ),
+    [],
+  );
+
   const imageViewerEntry =
     imageViewer && imageViewer.gallery.length > 0
       ? imageViewer.gallery[Math.min(imageViewer.gallery.length - 1, Math.max(0, imageViewer.index))]
@@ -378,17 +405,17 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       <View style={{ flex: 1 }}>
         <MeetingChatMainColumn
           chatError={chatError}
-          searchNavigateLoading={searchNavigateLoading}
+          searchNavigateLoading={searchNavigateLoading === true}
           setListRef={setListRef}
           setInnerFlashListRef={setInnerFlashListRef}
           chatListRows={chatListRows}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
           onChatScroll={onChatScroll}
-          listFooterLoading={null}
-          hasNextPage={false}
-          isFetchingNextPage={false}
-          onPrefetchOlderMessages={undefined}
+          listFooterLoading={listFooterLoading}
+          hasNextPage={Boolean(hasNextPage)}
+          isFetchingNextPage={Boolean(isFetchingNextPage)}
+          onPrefetchOlderMessages={hasNextPage ? onPrefetchOlderMessages : undefined}
           showJumpToBottomFab={showJumpToBottomFab}
           composerDockBlockHeight={composerDockBlockHeight}
           jumpToLatest={jumpToLatest}

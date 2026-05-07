@@ -202,6 +202,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           },
           android: {
             extraMavenRepos: ['https://repository.map.naver.com/archive/maven'],
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
             /**
              * Android 16KB page size 호환:
              * - NDK r28+ : 16KB ELF alignment 기본
@@ -234,6 +236,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       './plugins/withAndroidNotifeeMaven.js',
       './plugins/withAndroidWindowSoftInputAdjustResize.js',
       './plugins/withAndroidMainActivityEdgeToEdge.js',
+      './plugins/withAndroidAbiSplits.js',
       /** Android 스플래시 아이콘을 Adaptive 전경(`ic_launcher_foreground`)과 동일하게 */
       './plugins/withAndroidSplashLauncherForeground.js',
       /** Google Maps SDK API key (`com.google.android.geo.API_KEY`) */

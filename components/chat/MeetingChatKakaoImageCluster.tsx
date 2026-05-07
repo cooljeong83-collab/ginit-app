@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Image } from 'expo-image';
 import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -19,6 +19,7 @@ function Cell({
   style,
   overlay,
   imageContentFit,
+  onNaturalSize,
 }: {
   msg: MeetingChatMessage;
   onPress: (m: MeetingChatMessage) => void;
@@ -26,6 +27,7 @@ function Cell({
   overlay?: ReactNode;
   /** 묶음(콜라주)은 말풍선 영역을 가득 채우도록 cover, 단일 장은 비율 유지 contain */
   imageContentFit: 'contain' | 'cover';
+  onNaturalSize?: (w: number, h: number) => void;
 }) {
   const u = msg.imageUrl?.trim() ?? '';
   return (
@@ -34,7 +36,19 @@ function Cell({
       style={({ pressed }) => [styles.kakaoCellInner, style, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel="사진 크게 보기">
-      {u ? <Image source={{ uri: u }} style={styles.kakaoCellImage} contentFit={imageContentFit} /> : null}
+      {u ? (
+        <Image
+          source={{ uri: u }}
+          style={styles.kakaoCellImage}
+          contentFit={imageContentFit}
+          onLoad={(e) => {
+            const src = (e as any)?.source;
+            const w = typeof src?.width === 'number' ? src.width : 0;
+            const h = typeof src?.height === 'number' ? src.height : 0;
+            if (w > 0 && h > 0) onNaturalSize?.(w, h);
+          }}
+        />
+      ) : null}
       {overlay}
     </Pressable>
   );
@@ -56,6 +70,8 @@ export function MeetingChatKakaoImageCluster({
   const n = imgs.length;
   if (n === 0) return null;
 
+  const [singleRatioById, setSingleRatioById] = useState<Record<string, number>>({});
+
   const fitSingle: 'contain' | 'cover' = 'contain';
   const fitCollage: 'contain' | 'cover' = 'cover';
 
@@ -66,9 +82,27 @@ export function MeetingChatKakaoImageCluster({
 
   if (n === 1) {
     const m = imgs[0]!;
+    const ratio = singleRatioById[m.id];
+    const computedHeight = typeof ratio === 'number' && ratio > 0 ? CLUSTER_W / ratio : null;
+    const singleCellStyle: StyleProp<ViewStyle> = useMemo(() => {
+      if (typeof computedHeight === 'number' && Number.isFinite(computedHeight) && computedHeight > 0) {
+        // contain 유지 + 컨테이너를 사진 비율로 맞춰 레터박스(위아래 공백) 제거
+        return { width: CLUSTER_W, height: computedHeight };
+      }
+      return styles.kakaoSingleCell;
+    }, [computedHeight]);
+
+    const onNaturalSize = useCallback(
+      (w: number, h: number) => {
+        const r = w > 0 && h > 0 ? w / h : 0;
+        if (!Number.isFinite(r) || r <= 0) return;
+        setSingleRatioById((prev) => (prev[m.id] === r ? prev : { ...prev, [m.id]: r }));
+      },
+      [m.id],
+    );
     return (
       <View style={outer}>
-        <Cell msg={m} onPress={onPressImage} style={styles.kakaoSingleCell} imageContentFit={fitSingle} />
+        <Cell msg={m} onPress={onPressImage} style={singleCellStyle} imageContentFit={fitSingle} onNaturalSize={onNaturalSize} />
       </View>
     );
   }
