@@ -2,16 +2,10 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Keyboard,
-  type LayoutChangeEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { type RefObject, useCallback, useMemo, useRef, useState } from 'react';
+import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { runOnJS } from 'react-native-reanimated';
+import { KeyboardStickyView, useGenericKeyboardHandler } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassInput } from '@/components/social/GlassInput';
@@ -67,19 +61,17 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
   const myNorm = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) ?? myUserId.trim() : ''), [myUserId]);
   const didInitialAutoScrollRef = useRef(false);
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
-  const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const composerBottomPad = Math.max(insets.bottom, 8);
   const listContentStyle = useMemo(
     () => [
       styles.listContent,
       {
-        paddingBottom: keyboardVisible ? composerInputBarHeight : 4,
+        paddingBottom: Math.max(4, composerDockBlockHeight),
       },
     ],
-    [keyboardVisible, composerInputBarHeight],
+    [composerDockBlockHeight],
   );
   const jumpToLatest = useCallback(() => {
     setShowJumpToBottomFab(false);
@@ -100,31 +92,28 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
     if (h > 0) setComposerDockBlockHeight(h);
   }, []);
 
-  useEffect(() => {
-    const onKeyboardDidShow = () => {
-      setKeyboardVisible(true);
-      requestAnimationFrame(() => {
-        setShowJumpToBottomFab(false);
-        listRef.current?.scrollToEnd({ animated: true });
-      });
-    };
-    const onKeyboardHide = () => {
-      setKeyboardVisible(false);
-    };
-    const subs: { remove: () => void }[] = [];
-    if (Platform.OS === 'ios') {
-      subs.push(Keyboard.addListener('keyboardDidShow', onKeyboardDidShow));
-      subs.push(Keyboard.addListener('keyboardWillHide', onKeyboardHide));
-    } else {
-      subs.push(Keyboard.addListener('keyboardDidShow', onKeyboardDidShow));
-      subs.push(Keyboard.addListener('keyboardDidHide', onKeyboardHide));
-    }
-    return () => subs.forEach((s) => s.remove());
+  const scrollToEndOnKeyboardOpen = useCallback(() => {
+    setShowJumpToBottomFab(false);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
   }, [listRef]);
+
+  useGenericKeyboardHandler(
+    {
+      onEnd: (e) => {
+        'worklet';
+        if (e.height > 0) {
+          runOnJS(scrollToEndOnKeyboardOpen)();
+        }
+      },
+    },
+    [scrollToEndOnKeyboardOpen],
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <View style={styles.flex}>
+      <View style={styles.flexHost}>
         {noticeLine.trim() ? (
           <Pressable
             onPress={onPressNotice}
@@ -142,6 +131,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
         ) : null}
 
         <FlashList
+          style={{ flex: 1, minHeight: 0 }}
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
@@ -203,16 +193,12 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
           </Pressable>
         ) : null}
 
+        <KeyboardStickyView style={styles.composerStickyWrap}>
         <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
           <View style={styles.composerMeta} accessibilityElementsHidden>
             <NeonBadge label="Social · 1:1" pulse={false} />
           </View>
-          <View
-            style={styles.composer}
-            onLayout={(e) => {
-              const h = e.nativeEvent.layout.height;
-              if (h > 0) setComposerInputBarHeight(h);
-            }}>
+          <View style={styles.composer}>
             <GlassInput
               value={draft}
               onChangeText={onChangeDraft}
@@ -238,6 +224,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
             </Pressable>
           </View>
         </View>
+        </KeyboardStickyView>
       </View>
     </SafeAreaView>
   );
@@ -246,6 +233,14 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#ECEFF1' },
   flex: { flex: 1 },
+  flexHost: { flex: 1, minHeight: 0, position: 'relative' },
+  composerStickyWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+  },
   threadTitle: {
     fontSize: 13,
     fontWeight: '600',

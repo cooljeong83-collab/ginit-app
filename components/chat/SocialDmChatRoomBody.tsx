@@ -2,9 +2,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Dimensions,
   InteractionManager,
-  type KeyboardEvent,
   type LayoutChangeEvent,
   Keyboard,
   Modal,
@@ -65,7 +63,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [sending, setSending] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<MeetingChatMessage['replyTo']>(null);
-  const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const [imageViewer, setImageViewer] = useState<{
     gallery: MeetingChatMessage[];
     index: number;
@@ -181,35 +178,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     void getUserProfilesForIds(ids).then(setProfiles);
   }, [myUserId, peerId]);
 
-  useEffect(() => {
-    const slack = Platform.select({ ios: 3, android: 3, default: 3 });
-    const apply = (e: KeyboardEvent) => {
-      const { height, screenY } = e.endCoordinates;
-      const h = typeof height === 'number' ? height : 0;
-      if (h < 32) return;
-      const winH = Dimensions.get('window').height;
-      const fromBottom = Number.isFinite(screenY) ? Math.max(0, winH - screenY) : 0;
-      let pad = h + slack;
-      if (fromBottom > pad + 8) pad = fromBottom;
-      setKeyboardBottomInset(pad);
-    };
-    const subShow =
-      Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillShow', apply) : Keyboard.addListener('keyboardDidShow', apply);
-    const subHide =
-      Platform.OS === 'ios'
-        ? Keyboard.addListener('keyboardWillHide', () => setKeyboardBottomInset(0))
-        : Keyboard.addListener('keyboardDidHide', () => setKeyboardBottomInset(0));
-    return () => {
-      subShow.remove();
-      subHide.remove();
-    };
-  }, []);
-
-  const composerBottomPad = useMemo(
-    () =>
-      keyboardBottomInset > 0 ? Math.ceil(keyboardBottomInset) : Math.max(insets.bottom, 8),
-    [keyboardBottomInset, insets.bottom],
-  );
+  const composerBottomPad = useMemo(() => Math.max(insets.bottom, 8), [insets.bottom]);
 
   const onChatScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
@@ -381,13 +350,10 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     () => [
       meetingChatBodyStyles.listContent,
       {
-        paddingTop:
-          keyboardBottomInset > 0
-            ? Math.max(4, composerDockBlockHeight - composerBottomPad)
-            : 4,
+        paddingTop: Math.max(4, composerDockBlockHeight),
       },
     ],
-    [keyboardBottomInset, composerDockBlockHeight, composerBottomPad],
+    [composerDockBlockHeight],
   );
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {

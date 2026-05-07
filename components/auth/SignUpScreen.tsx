@@ -2,7 +2,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     AccessibilityInfo,
     ActivityIndicator,
@@ -18,9 +18,10 @@ import {
     Text,
     TextInput,
     type TextInput as TextInputRefType,
+    UIManager,
     View,
 } from 'react-native';
-import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
@@ -56,7 +57,7 @@ export default function SignUpScreen() {
   }, [params.consented]);
   const { isHydrated } = useUserSession();
   const fade = useRef(new Animated.Value(1)).current;
-  const scrollRef = useRef<KeyboardAwareScrollView>(null);
+  const scrollRef = useRef<ElementRef<typeof KeyboardAwareScrollView>>(null);
   const displayNameInputRef = useRef<TextInputRefType>(null);
   const emailInputRef = useRef<TextInputRefType>(null);
   const phoneInputRef = useRef<TextInputRefType>(null);
@@ -92,27 +93,27 @@ export default function SignUpScreen() {
 
   const scrollToDisplayNameBlock = useCallback(() => {
     if (displayNameBlockY == null) return;
-    scrollRef.current?.scrollToPosition(0, Math.max(0, displayNameBlockY - 14), true);
+    scrollRef.current?.scrollTo({ x: 0, y: Math.max(0, displayNameBlockY - 14), animated: true });
   }, [displayNameBlockY]);
 
   const scrollToPhoneBlock = useCallback(() => {
     if (phoneBlockY == null) return;
-    scrollRef.current?.scrollToPosition(0, Math.max(0, phoneBlockY - 14), true);
+    scrollRef.current?.scrollTo({ x: 0, y: Math.max(0, phoneBlockY - 14), animated: true });
   }, [phoneBlockY]);
 
   const scrollToGender = useCallback(() => {
     if (genderY == null) return;
-    scrollRef.current?.scrollToPosition(0, Math.max(0, genderY - 14), true);
+    scrollRef.current?.scrollTo({ x: 0, y: Math.max(0, genderY - 14), animated: true });
   }, [genderY]);
 
   const scrollToAgeBand = useCallback(() => {
     if (ageBandY == null) return;
-    scrollRef.current?.scrollToPosition(0, Math.max(0, ageBandY - 14), true);
+    scrollRef.current?.scrollTo({ x: 0, y: Math.max(0, ageBandY - 14), animated: true });
   }, [ageBandY]);
 
   const scrollToSubmit = useCallback(() => {
     if (submitY == null) return;
-    scrollRef.current?.scrollToPosition(0, Math.max(0, submitY - 14), true);
+    scrollRef.current?.scrollTo({ x: 0, y: Math.max(0, submitY - 14), animated: true });
   }, [submitY]);
 
   const formatPhoneKrDisplay = useCallback((digitsOnly: string) => {
@@ -123,10 +124,20 @@ export default function SignUpScreen() {
   }, []);
 
   const scrollToFocused = useCallback((r: React.RefObject<TextInputRefType | null>) => {
-    const node = r.current ? findNodeHandle(r.current) : null;
-    if (!node) return;
-    // KeyboardAwareScrollView 내부 로직을 그대로 활용해 "키보드 위로" 올립니다.
-    scrollRef.current?.scrollToFocusedInput?.(node);
+    const input = r.current;
+    const sv = scrollRef.current;
+    if (!input || !sv) return;
+    const scrollHandle = findNodeHandle(sv);
+    const inputHandle = findNodeHandle(input);
+    if (scrollHandle == null || inputHandle == null) return;
+    UIManager.measureLayout(
+      inputHandle,
+      scrollHandle,
+      () => {},
+      (_x, y, _w, _h) => {
+        sv.scrollTo({ x: 0, y: Math.max(0, y - 24), animated: true });
+      },
+    );
   }, []);
 
   useFocusEffect(
@@ -225,7 +236,7 @@ export default function SignUpScreen() {
       // Firebase verifyPhoneNumber와 SMS User Consent 이중 구독 시 Android에서 프로세스 종료가 날 수 있어 start 생략.
       InteractionManager.runAfterInteractions(() => {
         requestAnimationFrame(() => {
-          scrollRef.current?.scrollToEnd?.(true);
+          scrollRef.current?.scrollToEnd({ animated: true });
         });
       });
     } catch (e) {

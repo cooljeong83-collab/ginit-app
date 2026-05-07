@@ -88,7 +88,8 @@
         }
       ],
       "./plugins/withAndroidGmsResourceFix.js",
-      "./plugins/withAndroidWindowSoftInputAdjustResize.js"
+      "./plugins/withAndroidWindowSoftInputAdjustResize.js",
+      "./plugins/withAndroidMainActivityEdgeToEdge.js"
     ],
     "experiments": {
       "typedRoutes": true,

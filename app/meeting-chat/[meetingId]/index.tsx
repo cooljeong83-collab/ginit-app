@@ -9,10 +9,8 @@ import { FlashList } from '@shopify/flash-list';
 import {
     ActivityIndicator,
     Alert,
-    Dimensions,
     InteractionManager,
     Keyboard,
-    type KeyboardEvent,
     type LayoutChangeEvent,
     Modal,
     type NativeScrollEvent,
@@ -157,8 +155,6 @@ export default function MeetingChatRoomScreen() {
   const [sending, setSending] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<MeetingChatMessage['replyTo']>(null);
-  /** 키보드 본체 + IME 상단(이모지/툴바 등)까지 포함해 입력창을 올리기 위한 하단 여백 */
-  const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [imageViewer, setImageViewer] = useState<{
     gallery: MeetingChatMessage[];
@@ -195,10 +191,9 @@ export default function MeetingChatRoomScreen() {
   const lastAutoScrolledMessageIdRef = useRef<string>('');
 
   const resolveListScroller = useCallback(() => {
-    // KeyboardAwareFlatList는 outer ref로는 스크롤 메서드가 없는 경우가 있어 inner ref를 최우선합니다.
     const r = innerFlashListRef.current ?? listRef.current;
     if (!r) return null;
-    // KeyboardAwareFlatList / FlatList / AnimatedFlatList 등 다양한 래퍼 케이스를 모두 커버
+    // FlashList / 레거시 래퍼 케이스
     const candidates = [
       r,
       typeof (r as any).getNode === 'function' ? (r as any).getNode() : null,
@@ -418,46 +413,8 @@ export default function MeetingChatRoomScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    /** 키보드 바로 위 여백: 기존 slack 대비 약 1/3 수준으로 유지 */
-    const slack = Platform.select({ ios: 3, android: 3, default: 3 });
-    const apply = (e: KeyboardEvent) => {
-      const { height, screenY } = e.endCoordinates;
-      const h = typeof height === 'number' ? height : 0;
-      if (h < 32) return;
-      const winH = Dimensions.get('window').height;
-      const fromBottom = Number.isFinite(screenY) ? Math.max(0, winH - screenY) : 0;
-      let pad = h + slack;
-      if (fromBottom > h + 28) {
-        pad = fromBottom + Math.max(2, Math.round(Math.min(slack + 4, 12) / 3));
-      }
-      setKeyboardBottomInset(Math.ceil(pad));
-      requestAnimationFrame(() => {
-        scrollToOffsetSafe(Math.max(0, composerInputBarHeight), false);
-      });
-    };
-    const clear = () => {
-      setKeyboardBottomInset(0);
-    };
-
-    const subs: { remove: () => void }[] = [];
-    if (Platform.OS === 'ios') {
-      subs.push(Keyboard.addListener('keyboardWillShow', apply));
-      subs.push(Keyboard.addListener('keyboardWillChangeFrame', apply));
-      subs.push(Keyboard.addListener('keyboardWillHide', clear));
-    } else {
-      subs.push(Keyboard.addListener('keyboardDidShow', apply));
-      subs.push(Keyboard.addListener('keyboardDidHide', clear));
-    }
-    return () => subs.forEach((s) => s.remove());
-  }, [scrollToOffsetSafe, composerInputBarHeight]);
-
-  /** 입력창: 키보드 높이만 반영. 말풍선 여백의 내비/세이프 보정은 `chatListContentStyle`에서만 합산 */
-  const composerBottomPad = useMemo(
-    () =>
-      keyboardBottomInset > 0 ? Math.ceil(keyboardBottomInset) : Math.max(insets.bottom, 8),
-    [keyboardBottomInset, insets.bottom],
-  );
+  /** 입력 독 하단: 세이프만(`KeyboardStickyView`가 키보드 동기화). */
+  const composerBottomPad = useMemo(() => Math.max(insets.bottom, 8), [insets.bottom]);
 
   const goMeetingDetail = useCallback(() => {
     if (!meetingId) return;
@@ -723,14 +680,11 @@ export default function MeetingChatRoomScreen() {
     () => [
       meetingChatBodyStyles.listContent,
       {
-        // inverted: paddingTop = 시각적 하단 = 메시지 입력 독의 실제 높이(패딩 제외). KeyboardAware HOC 이중 inset 없이 맞춤
-        paddingTop:
-          keyboardBottomInset > 0
-            ? Math.max(4, composerDockBlockHeight - composerBottomPad)
-            : 4,
+        // inverted: 입력 독이 absolute+sticky이므로 리스트 시각 하단에 독 높이만큼 여백
+        paddingTop: Math.max(4, composerDockBlockHeight),
       },
     ],
-    [keyboardBottomInset, composerDockBlockHeight, composerBottomPad],
+    [composerDockBlockHeight],
   );
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {

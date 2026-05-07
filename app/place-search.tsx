@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -14,7 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
@@ -329,6 +330,7 @@ function PlaceSearchScreenInner({
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.enteringStaticVeil]} />
       )}
       <SafeAreaView style={GinitStyles.safeAreaPadded} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <View style={GinitStyles.topBarRow}>
             <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
               <Text style={GinitStyles.backLink}>← 닫기</Text>
@@ -384,16 +386,15 @@ function PlaceSearchScreenInner({
           ) : null}
 
           <View style={GinitStyles.listWrap}>
-            <KeyboardAwareFlatList
+            <FlashList
+              style={{ flex: 1, minHeight: 0 }}
               data={results}
               keyExtractor={(item) => item.id}
               extraData={`${selected?.id ?? ''}:${String(selected?.latitude)}:${String(selected?.longitude)}:${resolving ? '1' : '0'}`}
               keyboardShouldPersistTaps="handled"
-              enableOnAndroid
-              initialNumToRender={8}
-              maxToRenderPerBatch={10}
-              windowSize={7}
+              drawDistance={Platform.OS === 'android' ? 720 : 560}
               removeClippedSubviews={Platform.OS === 'android'}
+              overrideProps={{ initialDrawBatchSize: 8 }}
               contentContainerStyle={GinitStyles.listContent}
               ListEmptyComponent={
                 loading || error ? null : !hasSearched ? (
@@ -501,6 +502,7 @@ function PlaceSearchScreenInner({
             pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
             onClose={() => setNaverPlaceWebModal(null)}
           />
+        </KeyboardAvoidingView>
         </SafeAreaView>
     </View>
   );

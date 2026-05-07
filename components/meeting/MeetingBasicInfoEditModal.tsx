@@ -21,7 +21,7 @@ import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-pr
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { type ElementRef, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -35,11 +35,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
   useWindowDimensions,
   View,
   type KeyboardEvent,
 } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const INPUT_PLACEHOLDER = '#94a3b8';
@@ -184,7 +185,7 @@ export function MeetingBasicInfoEditModal({
   ]);
   const titleInputRef = useRef<TextInput>(null);
   const descInputRef = useRef<TextInput>(null);
-  const scrollRef = useRef<KeyboardAwareScrollView | null>(null);
+  const scrollRef = useRef<ElementRef<typeof KeyboardAwareScrollView> | null>(null);
   const descFieldFocusedRef = useRef(false);
   /** 소개 입력 포커스 + 키보드 시 시트를 키보드 높이만큼 위로 이동(px) */
   const [sheetKeyboardLiftPx, setSheetKeyboardLiftPx] = useState(0);
@@ -206,12 +207,19 @@ export function MeetingBasicInfoEditModal({
 
   const scrollDescIntoView = useCallback(() => {
     const input = descInputRef.current;
-    const kasv = scrollRef.current;
-    if (!input || !kasv) return;
-    const node = findNodeHandle(input);
-    if (node == null) return;
-    /** 입력 하단·음성 버튼·푸터까지 키보드 위로 올리기 위한 추가 여백(px) */
-    kasv.scrollToFocusedInput(node, 160, 60);
+    const sv = scrollRef.current;
+    if (!input || !sv) return;
+    const scrollHandle = findNodeHandle(sv);
+    const inputHandle = findNodeHandle(input);
+    if (scrollHandle == null || inputHandle == null) return;
+    UIManager.measureLayout(
+      inputHandle,
+      scrollHandle,
+      () => {},
+      (_x, y, _w, _h) => {
+        sv.scrollTo({ x: 0, y: Math.max(0, y - 60), animated: true });
+      },
+    );
   }, []);
 
   const descDeferKb = useMemo(
@@ -703,8 +711,6 @@ export function MeetingBasicInfoEditModal({
               nestedScrollEnabled: true,
               keyboardShouldPersistTaps: 'handled',
               showsVerticalScrollIndicator: false,
-              /** 모임 이름 포커스 시 하단 소개로 잘못 스크롤·겹침 방지 — 소개는 onFocus에서만 scrollTo */
-              enableAutomaticScroll: false,
             }}
           >
             <View

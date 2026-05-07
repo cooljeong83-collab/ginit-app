@@ -5,6 +5,7 @@ import type { RefObject } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-chat-ui-helpers';
@@ -125,7 +126,8 @@ export function MeetingChatMainColumn({
           </Pressable>
         ) : null}
       </View>
-      <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
+      <KeyboardStickyView style={styles.composerStickyWrap}>
+        <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
         {replyTo?.messageId ? (
           <View style={styles.replyPreviewRow}>
             <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
@@ -207,7 +209,8 @@ export function MeetingChatMainColumn({
             </Pressable>
           </View>
         </View>
-      </View>
+        </View>
+      </KeyboardStickyView>
     </View>
   );
 }

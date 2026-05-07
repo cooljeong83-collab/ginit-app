@@ -2,7 +2,7 @@ import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -19,7 +19,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import type { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authScreenStyles as styles } from '@/components/auth/authScreenStyles';
@@ -128,7 +128,7 @@ export default function LoginScreen() {
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
   const otpInputRef = useRef<TextInput | null>(null);
-  const loginScrollRef = useRef<KeyboardAwareScrollView | null>(null);
+  const loginScrollRef = useRef<ElementRef<typeof KeyboardAwareScrollView> | null>(null);
   const fade = useRef(new Animated.Value(1)).current;
   const intro = useRef(new Animated.Value(0)).current;
   /** -1…1 → 좌우 갸우뚱(인사) */
@@ -217,7 +217,7 @@ export default function LoginScreen() {
       setOtpVerificationId(verificationId);
       InteractionManager.runAfterInteractions(() => {
         requestAnimationFrame(() => {
-          loginScrollRef.current?.scrollToEnd?.(true);
+          loginScrollRef.current?.scrollToEnd({ animated: true });
         });
       });
     } catch (e) {

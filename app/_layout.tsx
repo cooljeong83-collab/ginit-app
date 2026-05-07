@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { StatusBar } from 'expo-status-bar';
 
 import { DevMemoryDebug } from '@/components/DevMemoryDebug';
@@ -47,8 +48,8 @@ if (Platform.OS !== 'web' && !didScheduleSplashPrevent) {
  * 스플래시: `preventAutoHideAsync` + `SplashBootstrapScreen` 첫 레이아웃에서 `hideAsync` (이중 전환 방지).
  */
 export default function RootLayout() {
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+  const appTree = (
+    <>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
         <QueryClientPersistProvider>
@@ -75,6 +76,18 @@ export default function RootLayout() {
           </UserSessionProvider>
         </QueryClientPersistProvider>
       </AppPoliciesProvider>
+    </>
+  );
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      {Platform.OS === 'web' ? (
+        appTree
+      ) : (
+        <KeyboardProvider statusBarTranslucent navigationBarTranslucent preserveEdgeToEdge>
+          {appTree}
+        </KeyboardProvider>
+      )}
     </GestureHandlerRootView>
   );
 }
