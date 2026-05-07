@@ -126,7 +126,8 @@ export function PublicMeetingDetailsCard({
   const setApproval = useCallback(
     (v: PublicMeetingApprovalType) => {
       const next: PublicMeetingDetailsConfig = { ...value, approvalType: v };
-      if (v !== 'HOST_APPROVAL') next.requestMessageEnabled = null;
+      if (v === 'HOST_APPROVAL') next.requestMessageEnabled = true;
+      else next.requestMessageEnabled = null;
       onChange(next);
     },
     [onChange, value],

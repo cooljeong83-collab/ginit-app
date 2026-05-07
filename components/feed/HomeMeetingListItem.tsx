@@ -17,7 +17,6 @@ import {
   levelBarFillColorForTrust,
 } from '@/src/lib/ginit-trust';
 import { firstPlaceCandidatePreferredPhotoUri } from '@/src/lib/meeting-list-thumbnail';
-import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import {
   formatPublicMeetingAgeSummary,
   MEETING_CAPACITY_UNLIMITED,
@@ -30,6 +29,7 @@ import {
   type PublicMeetingGenderRatio,
   type PublicMeetingHostGenderSnapshot,
 } from '@/src/lib/meetings';
+import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import { useKakaoPlaceListThumbnail } from '@/src/lib/use-kakao-place-list-thumbnail';
 
 const THUMB_SIZE = 70;
@@ -156,7 +156,7 @@ type Props = {
   onPress: () => void;
   scheduleOverlapWarning?: boolean;
   symbolBox?: FeedMeetingSymbolBox | null;
-  categories?: readonly { id: string; label: string }[] | null;
+  categories?: readonly { id: string; label: string; emoji?: string }[] | null;
   /** (레거시) 썸네일 우측 하단 작은 배지: 내 프로필 사진 */
   cornerViewerPhotoUrl?: string | null;
   cornerViewerGTrust?: number | null;
@@ -292,21 +292,25 @@ export function HomeMeetingListItem({
     return typeof t === 'number' && Number.isFinite(t) ? Math.trunc(t) : null;
   }, [symbolBox]);
 
+  const categoryEmoji = useMemo(() => {
+    const id = (m.categoryId ?? '').trim();
+    if (id && categories && categories.length > 0) {
+      const hit = categories.find((c) => (c.id ?? '').trim() === id);
+      const e = (hit?.emoji ?? '').trim();
+      if (e) return e;
+    }
+    return '📌';
+  }, [m.categoryId, categories]);
+
   const symbolAccessibilityLabel =
     symbolBox?.source === 'movie_poster'
-      ? creatorBadgePhotoUrl
-        ? '영화 포스터, 생성자 프로필'
-        : '영화 포스터, 카테고리'
+      ? '영화 포스터, 카테고리'
       : symbolBox?.source === 'host_profile'
-        ? '주관자 프로필'
+        ? '주관자 프로필, 카테고리'
         : symbolBox?.source === 'place_with_host'
           ? placeListMainUri
-            ? creatorBadgePhotoUrl
-              ? '장소 사진, 생성자 프로필'
-              : '장소 사진, 카테고리'
-            : creatorBadgePhotoUrl
-              ? '생성자 프로필, 카테고리'
-              : '카테고리'
+            ? '장소 사진, 카테고리'
+            : '카테고리'
           : meetingCategoryDisplayLabel(m, categories ?? undefined)?.trim() || '모임';
 
   const categoryTitlePrefix = useMemo(
@@ -365,41 +369,43 @@ export function HomeMeetingListItem({
                   recyclingKey={symbolBox.url}
                   accessibilityIgnoresInvertColors
                 />
-                {creatorBadgePhotoUrl ? (
-                  <View
-                    style={[
-                      s.symbolHostCornerBadge,
-                      typeof creatorBadgeGTrust === 'number'
-                        ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
-                        : { borderColor: GinitTheme.colors.border },
-                    ]}
-                    accessibilityLabel="모임 생성자 프로필">
-                    <Image
-                      source={{ uri: creatorBadgePhotoUrl }}
-                      style={s.symbolHostPhotoInBadge}
-                      contentFit="cover"
-                      transition={140}
-                      cachePolicy="disk"
-                      recyclingKey={creatorBadgePhotoUrl}
-                      accessibilityIgnoresInvertColors
-                    />
-                  </View>
-                ) : (
-                  <View style={s.symbolCategoryBadge} accessibilityLabel="카테고리">
-                    <GinitSymbolicIcon name={visual.icon} size={14} color={iconColor} />
-                  </View>
-                )}
+                <View
+                  style={[
+                    s.symbolCornerEmojiBadge,
+                    typeof creatorBadgeGTrust === 'number'
+                      ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
+                      : { borderColor: GinitTheme.colors.border },
+                  ]}
+                  accessibilityLabel="카테고리">
+                  <Text style={s.symbolCornerEmojiText} allowFontScaling={false}>
+                    {categoryEmoji}
+                  </Text>
+                </View>
               </>
             ) : symbolBox?.source === 'host_profile' ? (
-              <Image
-                source={{ uri: symbolBox.url }}
-                style={s.symbolPhoto}
-                contentFit="cover"
-                transition={140}
-                cachePolicy="disk"
-                recyclingKey={symbolBox.url}
-                accessibilityIgnoresInvertColors
-              />
+              <>
+                <Image
+                  source={{ uri: symbolBox.url }}
+                  style={s.symbolPhoto}
+                  contentFit="cover"
+                  transition={140}
+                  cachePolicy="disk"
+                  recyclingKey={symbolBox.url}
+                  accessibilityIgnoresInvertColors
+                />
+                <View
+                  style={[
+                    s.symbolCornerEmojiBadge,
+                    typeof creatorBadgeGTrust === 'number'
+                      ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
+                      : { borderColor: GinitTheme.colors.border },
+                  ]}
+                  accessibilityLabel="카테고리">
+                  <Text style={s.symbolCornerEmojiText} allowFontScaling={false}>
+                    {categoryEmoji}
+                  </Text>
+                </View>
+              </>
             ) : symbolBox?.source === 'place_with_host' ? (
               <>
                 {placeListMainUri ? (
@@ -418,30 +424,18 @@ export function HomeMeetingListItem({
                     <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
                   </>
                 )}
-                {creatorBadgePhotoUrl ? (
-                  <View
-                    style={[
-                      s.symbolHostCornerBadge,
-                      typeof creatorBadgeGTrust === 'number'
-                        ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
-                        : { borderColor: GinitTheme.colors.border },
-                    ]}
-                    accessibilityLabel="모임 생성자 프로필">
-                    <Image
-                      source={{ uri: creatorBadgePhotoUrl }}
-                      style={s.symbolHostPhotoInBadge}
-                      contentFit="cover"
-                      transition={140}
-                      cachePolicy="disk"
-                      recyclingKey={creatorBadgePhotoUrl}
-                      accessibilityIgnoresInvertColors
-                    />
-                  </View>
-                ) : (
-                  <View style={s.symbolCategoryBadge} accessibilityLabel="카테고리">
-                    <GinitSymbolicIcon name={visual.icon} size={14} color={iconColor} />
-                  </View>
-                )}
+                <View
+                  style={[
+                    s.symbolCornerEmojiBadge,
+                    typeof creatorBadgeGTrust === 'number'
+                      ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
+                      : { borderColor: GinitTheme.colors.border },
+                  ]}
+                  accessibilityLabel="카테고리">
+                  <Text style={s.symbolCornerEmojiText} allowFontScaling={false}>
+                    {categoryEmoji}
+                  </Text>
+                </View>
               </>
             ) : !symbolBox && meetingImageThumbUri ? (
               <>
@@ -454,26 +448,18 @@ export function HomeMeetingListItem({
                   recyclingKey={meetingImageThumbUri}
                   accessibilityIgnoresInvertColors
                 />
-                {creatorBadgePhotoUrl ? (
-                  <View
-                    style={[
-                      s.symbolHostCornerBadge,
-                      typeof creatorBadgeGTrust === 'number'
-                        ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
-                        : { borderColor: GinitTheme.colors.border },
-                    ]}
-                    accessibilityLabel="모임 생성자 프로필">
-                    <Image
-                      source={{ uri: creatorBadgePhotoUrl }}
-                      style={s.symbolHostPhotoInBadge}
-                      contentFit="cover"
-                      transition={140}
-                      cachePolicy="disk"
-                      recyclingKey={creatorBadgePhotoUrl}
-                      accessibilityIgnoresInvertColors
-                    />
-                  </View>
-                ) : null}
+                <View
+                  style={[
+                    s.symbolCornerEmojiBadge,
+                    typeof creatorBadgeGTrust === 'number'
+                      ? { borderColor: levelBarFillColorForTrust(creatorBadgeGTrust) }
+                      : { borderColor: GinitTheme.colors.border },
+                  ]}
+                  accessibilityLabel="카테고리">
+                  <Text style={s.symbolCornerEmojiText} allowFontScaling={false}>
+                    {categoryEmoji}
+                  </Text>
+                </View>
               </>
             ) : !symbolBox ? (
               <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
@@ -596,40 +582,26 @@ const s = StyleSheet.create({
     borderRadius: THUMB_RADIUS - 1,
     zIndex: 2,
   },
-  symbolCategoryBadge: {
-    position: 'absolute',
-    bottom: 3,
-    right: 3,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#FFFFFF',
-    zIndex: 4,
-    backgroundColor: GinitTheme.colors.bgAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  /** 우측 하단 내 프로필: 트러스트 구간색 테두리가 잘 보이도록 두께 확대 */
-  symbolHostCornerBadge: {
+  //jjg 썸네일 우측하단 심볼
+  symbolCornerEmojiBadge: {
     position: 'absolute',
     bottom: 2,
     right: 2,
     width: 26,
     height: 26,
     borderRadius: 13,
-    borderWidth: 2,
+    borderWidth: 0,
     zIndex: 4,
-    backgroundColor: GinitTheme.colors.bgAlt,
+    backgroundColor: '#FFFFFF',
+
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  symbolHostPhotoInBadge: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 999,
+  symbolCornerEmojiText: {
+    fontSize: 14,
+    lineHeight: 16,
+    fontWeight: '700',
   },
   capRow: {
     width: THUMB_SIZE,

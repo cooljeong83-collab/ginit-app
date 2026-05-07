@@ -1267,28 +1267,24 @@ export default function FeedScreen() {
       {feedLocationReady &&
       !isInitialListLoading &&
       !listError &&
-      meetings.length > 0 &&
       tab === 'my' &&
       sortedJoinedMeetings.length === 0
         ? feedListEmptyCentered(
             'albums-outline',
             '참여중인 공개 모임이 없습니다.',
-            privateJoinedFilteredMeetings.length > 0
-              ? '비공개로 참여·개설한 모임은 「비공개」 탭에서 확인할 수 있어요.'
-              : '필터를 바꾸거나 탐색에서 모임에 참여해 보세요.',
+            '+ 버튼으로 첫 모임을 만들어 보세요.',
           )
         : null}
 
       {feedLocationReady &&
       !isInitialListLoading &&
       !listError &&
-      meetings.length > 0 &&
       tab === 'private' &&
       sortedPrivateMeetings.length === 0
         ? feedListEmptyCentered(
             'lock-closed-outline',
-            '조건에 맞는 비공개 모임이 없어요',
-            '비공개 모임은 초대·참여로만 보이며, 필터를 바꾸면 목록이 달라질 수 있어요.',
+            '참여중인 비공개 모임이 없습니다.',
+            '+ 버튼으로 첫 모임을 만들어 보세요.',
           )
         : null}
 
