@@ -27,11 +27,17 @@ import {
   ensureSocialChatRoomDoc,
   fetchOlderSocialChatPagesUntilTargetMessageId,
   parsePeerFromSocialRoomId,
-  searchSocialChatMessages,
   subscribeSocialChatRoom,
   updateSocialChatReadReceipt,
   type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
+import {
+  createChatSearchSession,
+  resetChatSearchSession,
+  stepNextChatMatch,
+  stepPrevChatMatch,
+  type ChatSearchSession,
+} from '@/src/lib/chat-search-navigator';
 import {
   flattenSocialChatInfinitePages,
   mergeSocialChatInfiniteAppendPages,
@@ -73,12 +79,17 @@ export default function SocialChatRoomScreen() {
 
   const mergedChatError = chatError ?? listError;
 
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchActivated, setSearchActivated] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SocialChatMessage[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [searchSession, setSearchSession] = useState<ChatSearchSession>(() => createChatSearchSession(''));
   const searchInputRef = useRef<TextInput>(null);
+  const messagesNewestFirstRef = useRef<SocialChatMessage[]>([]);
+
+  useEffect(() => {
+    messagesNewestFirstRef.current = [...messages].reverse();
+  }, [messages]);
 
   const SocialDmChatRoomBodyTyped = SocialDmChatRoomBody as unknown as ForwardRefExoticComponent<
     SocialDmChatRoomBodyProps & RefAttributes<SocialDmChatRoomBodyHandle>
@@ -162,71 +173,73 @@ export default function SocialChatRoomScreen() {
   }, [ready, roomId]);
 
   const closeSearch = useCallback(() => {
-    setSearchOpen(false);
+    setSearchMode(false);
+    setSearchActivated(false);
     setSearchQuery('');
-    setSearchResults([]);
-    if (searchDebounceRef.current) {
-      clearTimeout(searchDebounceRef.current);
-      searchDebounceRef.current = null;
-    }
+    setSearchSession(createChatSearchSession(''));
+    setSearchBusy(false);
   }, []);
 
   const openSearch = useCallback(() => {
     Keyboard.dismiss();
-    setSearchOpen(true);
+    setSearchMode(true);
+    setSearchActivated(false);
     setSearchQuery('');
-    setSearchResults([]);
+    setSearchSession(createChatSearchSession(''));
   }, []);
 
   const openSettings = useCallback(() => {
     router.push(`/social-chat/${encodeURIComponent(roomId)}/settings?peerName=${encodeURIComponent(peerName)}`);
   }, [router, roomId, peerName]);
 
-  const runSearch = useCallback(
-    async (q: string) => {
-      const needle = q.trim();
-      if (!roomId) {
-        setSearchResults([]);
-        return;
+  const searchStatusLabel = useMemo(() => {
+    const total = searchSession.matchIds.length;
+    if (!searchSession.query.trim()) return '';
+    if (total === 0) return searchBusy ? '찾는 중…' : '결과 없음';
+    const cur = Math.min(total, Math.max(1, searchSession.cursorIndex + 1));
+    return `${cur}/${total}`;
+  }, [searchBusy, searchSession]);
+
+  const goPrevMatch = useCallback(() => {
+    const { session, foundId } = stepPrevChatMatch(searchSession);
+    setSearchSession(session);
+    if (!foundId) return;
+    dmBodyRef.current?.scrollToMessageId(foundId);
+  }, [searchSession]);
+
+  const goNextMatch = useCallback(async () => {
+    const q = searchQuery.trim();
+    if (!q || !roomId) return;
+    setSearchActivated(true);
+    setSearchBusy(true);
+    try {
+      const base = resetChatSearchSession(searchSession, q);
+      const res = await stepNextChatMatch<SocialChatMessage>({
+        session: base,
+        getMessagesNewestFirst: () => messagesNewestFirstRef.current,
+        getId: (m) => m.id,
+        isMatch: (m, queryLower) => String(m.text ?? '').toLowerCase().includes(queryLower),
+        fetchNextPage: hasNextPage ? fetchNextPage : undefined,
+        hasNextPage: Boolean(hasNextPage),
+        maxAdditionalPages: 3,
+        maxMessagesScanned: 800,
+      });
+      setSearchSession(res.session);
+      if (res.foundId) {
+        dmBodyRef.current?.scrollToMessageId(res.foundId);
+      } else if (!res.exhausted) {
+        Alert.alert('더 오래된 대화', '더 오래된 대화는 아직 불러오지 못했어요.\n검색어를 더 구체적으로 입력해 보세요.');
       }
-      if (!needle) {
-        setSearchResults([]);
-        setSearchBusy(false);
-        return;
-      }
-      setSearchBusy(true);
-      try {
-        const rows = await searchSocialChatMessages(roomId, needle, { maxDocsScanned: 3000 });
-        setSearchResults(rows);
-      } catch {
-        setSearchResults([]);
-        Alert.alert('검색 실패', '네트워크 상태를 확인한 뒤 다시 시도해 주세요.');
-      } finally {
-        setSearchBusy(false);
-      }
-    },
-    [roomId],
-  );
+    } finally {
+      setSearchBusy(false);
+    }
+  }, [searchQuery, roomId, searchSession, hasNextPage, fetchNextPage]);
 
   useEffect(() => {
-    if (!searchOpen) return;
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      void runSearch(searchQuery);
-    }, 280);
-    return () => {
-      if (searchDebounceRef.current) {
-        clearTimeout(searchDebounceRef.current);
-        searchDebounceRef.current = null;
-      }
-    };
-  }, [searchOpen, searchQuery, runSearch]);
-
-  useEffect(() => {
-    if (!searchOpen) return;
-    const t = setTimeout(() => searchInputRef.current?.focus(), 240);
+    if (!searchMode) return;
+    const t = setTimeout(() => searchInputRef.current?.focus(), 60);
     return () => clearTimeout(t);
-  }, [searchOpen]);
+  }, [searchMode]);
 
   const jumpToResult = useCallback(
     async (msg: SocialChatMessage) => {
@@ -320,36 +333,67 @@ export default function SocialChatRoomScreen() {
     <View style={s.root}>
       <SafeAreaView edges={['top']} style={s.topSafe}>
         <View style={s.topBar}>
-          <Pressable onPress={exitSocialChat} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
+          <Pressable
+            onPress={searchMode ? closeSearch : exitSocialChat}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={searchMode ? '검색 닫기' : '뒤로'}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </Pressable>
-          <Pressable
-            disabled
-            style={s.titlePress}
-            accessibilityRole="header"
-            accessibilityLabel="대화 상대">
-            <Text style={s.topTitle} numberOfLines={1}>
-              {peerName}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={openSearch}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="대화 검색"
-            style={s.searchBtn}
-          >
-            <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
-          </Pressable>
-          <Pressable
-            onPress={openSettings}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="채팅방 설정"
-            style={s.settingsBtn}
-          >
-            <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
-          </Pressable>
+          {searchMode ? (
+            <View style={s.searchTitleBlock} accessibilityLabel="검색 입력">
+              <TextInput
+                ref={searchInputRef}
+                style={s.searchTitleInput}
+                placeholder="검색어 입력"
+                placeholderTextColor="#94a3b8"
+                value={searchQuery}
+                onChangeText={(t) => {
+                  setSearchQuery(t);
+                  setSearchActivated(false);
+                  setSearchSession((prev) => resetChatSearchSession(prev, t));
+                }}
+                autoCorrect={false}
+                autoCapitalize="none"
+                clearButtonMode="while-editing"
+                returnKeyType="search"
+                onSubmitEditing={() => void goNextMatch()}
+              />
+              {searchActivated && searchStatusLabel ? (
+                <Text style={s.searchTitleStatus} numberOfLines={1}>
+                  {searchStatusLabel}
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <Pressable disabled style={s.titlePress} accessibilityRole="header" accessibilityLabel="대화 상대">
+              <Text style={s.topTitle} numberOfLines={1}>
+                {peerName}
+              </Text>
+            </Pressable>
+          )}
+          {!searchMode ? (
+            <>
+              <Pressable
+                onPress={openSearch}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="대화 검색"
+                style={s.searchBtn}
+              >
+                <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
+              </Pressable>
+              <Pressable
+                onPress={openSettings}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="채팅방 설정"
+                style={s.settingsBtn}
+              >
+                <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
+              </Pressable>
+            </>
+          ) : null}
         </View>
       </SafeAreaView>
 
@@ -369,6 +413,14 @@ export default function SocialChatRoomScreen() {
           hasNextPage={hasNextPage}
           isFetchingNextPage={isFetchingNextPage}
           onPrefetchOlderMessages={() => void fetchNextPage()}
+          searchMode={searchMode}
+          searchActivated={searchActivated}
+          searchQuery={searchQuery}
+          searchBusy={searchBusy}
+          searchStatusLabel={searchStatusLabel}
+          searchSession={searchSession}
+          onSearchPrev={goPrevMatch}
+          onSearchNext={goNextMatch}
           peerReadMessageId={(() => {
             const v = pickPeerReadValue<unknown>(roomDoc?.readMessageIdBy as unknown as Record<string, unknown> | undefined, peerId);
             return typeof v === 'string' && v.trim() ? v.trim() : null;
@@ -382,61 +434,7 @@ export default function SocialChatRoomScreen() {
         />
       )}
 
-      <Modal visible={searchOpen} animationType="slide" onRequestClose={closeSearch}>
-        <SafeAreaView style={s.searchSafe} edges={['top', 'bottom']}>
-          <View style={s.searchHeader}>
-            <Pressable onPress={closeSearch} hitSlop={12} accessibilityRole="button" accessibilityLabel="닫기">
-              <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-            </Pressable>
-            <Text style={s.searchTitle}>대화 검색</Text>
-            <View style={s.searchHeaderSpacer} />
-          </View>
-          <View style={s.searchFieldWrap}>
-            <GinitSymbolicIcon name="search-outline" size={20} color="#94a3b8" style={s.searchFieldIcon} />
-            <TextInput
-              ref={searchInputRef}
-              style={s.searchInput}
-              placeholder="대화 내용을 입력하세요"
-              placeholderTextColor="#94a3b8"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCorrect={false}
-              autoCapitalize="none"
-              clearButtonMode="while-editing"
-              returnKeyType="search"
-            />
-          </View>
-          <FlashList
-            data={searchResults}
-            keyExtractor={(it) => it.id}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={s.searchListContent}
-            renderItem={({ item }) => (
-              <Pressable
-                style={({ pressed }) => [s.searchRow, pressed && s.searchRowPressed]}
-                onPress={() => jumpToResult(item)}
-                accessibilityRole="button"
-                accessibilityLabel="검색 결과"
-              >
-                <Text style={s.searchRowText} numberOfLines={2}>
-                  {item.text}
-                </Text>
-              </Pressable>
-            )}
-            ListEmptyComponent={
-              <Text style={s.searchEmpty}>
-                {searchQuery.trim() ? '검색 결과가 없어요.\n다른 단어로 검색해 보세요.' : '검색할 단어를 입력해 주세요.'}
-              </Text>
-            }
-          />
-          {searchBusy ? (
-            <View style={s.searchBusyRow}>
-              <ActivityIndicator color={GinitTheme.colors.primary} />
-              <Text style={s.searchBusyText}>검색 중…</Text>
-            </View>
-          ) : null}
-        </SafeAreaView>
-      </Modal>
+      {/* 헤더 인라인 검색으로 전환(모달 검색 제거) */}
       {/* 프로필 팝업 대신 전체 화면 프로필로 이동합니다. */}
     </View>
   );
@@ -457,6 +455,21 @@ const s = StyleSheet.create({
   },
   titlePress: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: 4 },
   topTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a', textAlign: 'center' },
+  searchTitleBlock: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  searchTitleInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 34,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    backgroundColor: '#f1f5f9',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.10)',
+    fontSize: 15,
+    color: '#0f172a',
+    paddingVertical: 8,
+  },
+  searchTitleStatus: { fontSize: 12, fontWeight: '700', color: '#64748b' },
   searchBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   settingsBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   loading: { padding: 24, alignItems: 'center' },
@@ -464,33 +477,7 @@ const s = StyleSheet.create({
   muted: { fontSize: 15, color: '#64748b' },
   backLink: { marginTop: 12, padding: 10 },
   backLinkText: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.primary },
-  searchSafe: { flex: 1, backgroundColor: '#fff' },
-  searchHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  searchTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600', color: '#0f172a' },
-  searchHeaderSpacer: { width: 34 },
-  searchFieldWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 14,
-    marginTop: 12,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    minHeight: 44,
-    borderRadius: 12,
-    backgroundColor: '#f1f5f9',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  searchFieldIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 16, color: '#0f172a', paddingVertical: 10 },
-  searchListContent: { paddingHorizontal: 14, paddingBottom: 24, flexGrow: 1 },
+  // (헤더 인라인 검색으로 이동: 모달 내 네비 버튼 스타일은 미사용)
   searchBusyRow: {
     position: 'absolute',
     right: 16,
@@ -514,7 +501,5 @@ const s = StyleSheet.create({
     lineHeight: 22,
     fontWeight: '600',
   },
-  searchRow: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(15, 23, 42, 0.06)' },
-  searchRowPressed: { backgroundColor: 'rgba(15, 23, 42, 0.04)' },
-  searchRowText: { fontSize: 14, lineHeight: 20, color: '#0f172a', fontWeight: '600' },
+  // (모달 검색 UI 제거로 미사용)
 });

@@ -19,6 +19,13 @@ export const meetingChatBodyStyles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(15, 23, 42, 0.08)',
   },
+  bottomSearchNavigatorWrap: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
+  },
   /** `KeyboardStickyView`: 리스트와 겹치지 않게 하단 고정(레이아웃 플로우 밖). */
   composerStickyWrap: {
     position: 'absolute',

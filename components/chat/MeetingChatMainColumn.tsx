@@ -1,7 +1,7 @@
 
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
@@ -45,6 +45,12 @@ export type MeetingChatMainColumnProps = {
   sending: boolean;
   onSend: () => void;
   onPressAttach?: () => void;
+  /** 기본: multiline. 소셜 DM처럼 엔터 즉시 전송이 필요하면 false */
+  inputMultiline?: boolean;
+  /** 카카오처럼 검색 결과 탐색 UI를 하단 입력 영역에 붙일 때 사용 */
+  bottomSearchNavigator?: ReactNode;
+  /** 검색 모드에서는 입력 컴포저를 숨깁니다 */
+  hideComposer?: boolean;
 };
 
 export function MeetingChatMainColumn({
@@ -76,6 +82,9 @@ export function MeetingChatMainColumn({
   sending,
   onSend,
   onPressAttach,
+  inputMultiline = true,
+  bottomSearchNavigator,
+  hideComposer = false,
 }: MeetingChatMainColumnProps) {
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
     setListRef(r);
@@ -131,6 +140,7 @@ export function MeetingChatMainColumn({
       </View>
       <KeyboardStickyView style={styles.composerStickyWrap}>
         <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
+        {bottomSearchNavigator ? <View style={styles.bottomSearchNavigatorWrap}>{bottomSearchNavigator}</View> : null}
         {replyTo?.messageId ? (
           <View style={styles.replyPreviewRow}>
             <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
@@ -160,58 +170,60 @@ export function MeetingChatMainColumn({
             </BlurView>
           </View>
         ) : null}
-        <View
-          style={styles.composerCluster}
-          onLayout={(e) => {
-            const h = e.nativeEvent.layout.height;
-            if (h > 0) setComposerInputBarHeight(h);
-          }}>
-          <View style={styles.composer}>
-            {onPressAttach ? (
+        {!hideComposer ? (
+          <View
+            style={styles.composerCluster}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              if (h > 0) setComposerInputBarHeight(h);
+            }}>
+            <View style={styles.composer}>
+              {onPressAttach ? (
+                <Pressable
+                  onPress={onPressAttach}
+                  style={({ pressed }) => [styles.plusBtn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="사진 첨부">
+                  <View style={styles.plusBtnIconSlot}>
+                    <GinitSymbolicIcon name="add" size={26} color="#475569" />
+                  </View>
+                </Pressable>
+              ) : null}
+              <View style={styles.inputShell}>
+                <TextInput
+                  ref={messageInputRef}
+                  style={styles.input}
+                  placeholder="메시지 보내기"
+                  placeholderTextColor="#94a3b8"
+                  value={draft}
+                  onChangeText={setDraft}
+                  multiline={inputMultiline}
+                  submitBehavior={inputMultiline ? 'submit' : undefined}
+                  blurOnSubmit={false}
+                  returnKeyType="send"
+                  onSubmitEditing={() => {
+                    if (sending) return;
+                    if (!draft.trim()) return;
+                    void onSend();
+                  }}
+                  maxLength={4000}
+                />
+              </View>
               <Pressable
-                onPress={onPressAttach}
-                style={({ pressed }) => [styles.plusBtn, pressed && styles.pressed]}
+                onPress={() => void onSend()}
+                style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
+                disabled={sending || !draft.trim()}
                 accessibilityRole="button"
-                accessibilityLabel="사진 첨부">
-                <View style={styles.plusBtnIconSlot}>
-                  <GinitSymbolicIcon name="add" size={26} color="#475569" />
-                </View>
+                accessibilityLabel="보내기">
+                {sending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <GinitSymbolicIcon name="send" size={20} color="#fff" />
+                )}
               </Pressable>
-            ) : null}
-            <View style={styles.inputShell}>
-              <TextInput
-                ref={messageInputRef}
-                style={styles.input}
-                placeholder="메시지 보내기"
-                placeholderTextColor="#94a3b8"
-                value={draft}
-                onChangeText={setDraft}
-                multiline
-                submitBehavior="submit"
-                blurOnSubmit={false}
-                returnKeyType="send"
-                onSubmitEditing={() => {
-                  if (sending) return;
-                  if (!draft.trim()) return;
-                  void onSend();
-                }}
-                maxLength={4000}
-              />
             </View>
-            <Pressable
-              onPress={() => void onSend()}
-              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-              disabled={sending || !draft.trim()}
-              accessibilityRole="button"
-              accessibilityLabel="보내기">
-              {sending ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <GinitSymbolicIcon name="send" size={20} color="#fff" />
-              )}
-            </Pressable>
           </View>
-        </View>
+        ) : null}
         </View>
       </KeyboardStickyView>
     </View>

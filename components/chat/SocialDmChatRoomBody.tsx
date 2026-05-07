@@ -59,6 +59,16 @@ export type SocialDmChatRoomBodyProps = {
   isFetchingNextPage?: boolean;
   onPrefetchOlderMessages?: () => void;
   onPeerProfileOpen: (peerAppUserId: string) => void;
+
+  /** 카카오식: 검색 결과 탐색 UI를 하단 컴포저 영역에 표시하기 위한 상태/핸들러 */
+  searchMode?: boolean;
+  searchActivated?: boolean;
+  searchQuery?: string;
+  searchBusy?: boolean;
+  searchStatusLabel?: string;
+  searchSession?: { matchIds: string[]; cursorIndex: number };
+  onSearchPrev?: () => void;
+  onSearchNext?: () => void;
 };
 
 export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, SocialDmChatRoomBodyProps>(function SocialDmChatRoomBody(
@@ -75,6 +85,14 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     isFetchingNextPage,
     onPrefetchOlderMessages,
     onPeerProfileOpen,
+    searchMode,
+    searchActivated,
+    searchQuery,
+    searchBusy,
+    searchStatusLabel,
+    searchSession,
+    onSearchPrev,
+    onSearchNext,
   },
   ref,
 ) {
@@ -449,6 +467,65 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       normalizeParticipantId(imageViewerEntry.senderId.trim()) === myId,
   );
 
+  const bottomSearchNavigator = useMemo(() => {
+    if (!searchMode || !searchActivated || !(searchQuery ?? '').trim()) return null;
+    const total = searchSession?.matchIds?.length ?? 0;
+    const cursor = searchSession?.cursorIndex ?? -1;
+    const disablePrev = Boolean(searchBusy) || total === 0 || cursor <= 0;
+    const disableNext = Boolean(searchBusy) || !(searchQuery ?? '').trim();
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <Text style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: '700', color: '#475569' }} numberOfLines={1}>
+          {searchStatusLabel?.trim() ? searchStatusLabel : ' '}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <Pressable
+            onPress={onSearchPrev}
+            disabled={disablePrev || !onSearchPrev}
+            style={({ pressed }) => [
+              {
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: 'rgba(15, 23, 42, 0.10)',
+                opacity: disablePrev || !onSearchPrev ? 0.45 : pressed ? 0.86 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="이전 결과">
+            <View style={{ transform: [{ rotate: '180deg' }] }}>
+              <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={onSearchNext}
+            disabled={disableNext || !onSearchNext}
+            style={({ pressed }) => [
+              {
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: 'rgba(15, 23, 42, 0.10)',
+                opacity: disableNext || !onSearchNext ? 0.45 : pressed ? 0.86 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="다음 결과">
+            <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }, [onSearchNext, onSearchPrev, searchActivated, searchBusy, searchMode, searchQuery, searchSession, searchStatusLabel]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
@@ -481,6 +558,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           sending={sending}
           onSend={onSend}
           onPressAttach={onPressAttach}
+          inputMultiline={false}
+          bottomSearchNavigator={bottomSearchNavigator}
+          hideComposer={Boolean(searchMode)}
         />
 
         <MeetingChatMediaPickerModal
