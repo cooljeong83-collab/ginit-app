@@ -22,6 +22,7 @@ import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { HighlightedText } from '@/components/ui/HighlightedText';
 
 function rowIsSystemRow(row: MeetingChatListRow): boolean {
   return row.type === 'message' && row.message.kind === 'system';
@@ -62,6 +63,8 @@ export type MeetingChatRenderItemDeps = {
   onOpenUserProfile: (id: string) => void;
   openMeetingChatImageViewer: (item: MeetingChatMessage) => void;
   listRef: RefObject<unknown>;
+  /** 검색 확정어: 텍스트 말풍선(및 이미지 캡션) 내 일치 구간 하이라이트 */
+  messageSearchHighlightQuery?: string;
 };
 
 export function useMeetingChatRenderItem({
@@ -76,9 +79,24 @@ export function useMeetingChatRenderItem({
   onOpenUserProfile,
   openMeetingChatImageViewer,
   listRef,
+  messageSearchHighlightQuery = '',
 }: MeetingChatRenderItemDeps) {
   return useCallback(
     ({ item, index }: { item: MeetingChatListRow; index: number }) => {
+      const highlightQ = String(messageSearchHighlightQuery ?? '').trim();
+      const bubbleText = (raw: string | null | undefined, textStyle: (typeof styles)['bubbleMineText']) => {
+        const t = String(raw ?? '');
+        if (!highlightQ) return <Text style={textStyle}>{t}</Text>;
+        return (
+          <HighlightedText
+            text={t}
+            query={highlightQ}
+            style={textStyle}
+            highlightBackgroundColor="#4527A0"
+            highlightTextColor="#FFFFFF"
+          />
+        );
+      };
       const prev = index > 0 ? listRows[index - 1]! : null;
       const next = index + 1 < listRows.length ? listRows[index + 1]! : null;
       const currDate = rowAnchorDate(item);
@@ -203,7 +221,7 @@ export function useMeetingChatRenderItem({
                 {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                 {imageClusterMine}
                 {(isImage && caption) || (isAlbum && albumCaption) ? (
-                  <Text style={styles.imageCaptionMine}>{isAlbum ? albumCaption : caption}</Text>
+                  bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionMine)
                 ) : null}
               </View>
             ) : (
@@ -211,7 +229,7 @@ export function useMeetingChatRenderItem({
                 <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
                   {renderReply('mine')}
                   {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                  <Text style={styles.bubbleMineText}>{singleMsg?.text}</Text>
+                  {bubbleText(singleMsg?.text, styles.bubbleMineText)}
                 </BlurView>
               </View>
             )}
@@ -296,7 +314,7 @@ export function useMeetingChatRenderItem({
                   {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                   {imageClusterOther}
                   {(isImage && caption) || (isAlbum && albumCaption) ? (
-                    <Text style={styles.imageCaptionOther}>{isAlbum ? albumCaption : caption}</Text>
+                    bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionOther)
                   ) : null}
                   {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
                 </View>
@@ -305,7 +323,7 @@ export function useMeetingChatRenderItem({
                   <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
                     {renderReply('other')}
                     {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                    <Text style={styles.bubbleOtherText}>{singleMsg?.text}</Text>
+                    {bubbleText(singleMsg?.text, styles.bubbleOtherText)}
                   </BlurView>
                   {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
                 </View>
@@ -352,6 +370,7 @@ export function useMeetingChatRenderItem({
       onOpenUserProfile,
       openMeetingChatImageViewer,
       listRef,
+      messageSearchHighlightQuery,
     ],
   );
 }

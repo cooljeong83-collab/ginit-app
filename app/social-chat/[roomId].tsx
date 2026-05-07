@@ -19,6 +19,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useSocialChatMessagesInfiniteQuery } from '@/src/hooks/use-social-chat-messages-infinite-query';
+import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -31,13 +32,7 @@ import {
   updateSocialChatReadReceipt,
   type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
-import {
-  createChatSearchSession,
-  resetChatSearchSession,
-  stepNextChatMatch,
-  stepPrevChatMatch,
-  type ChatSearchSession,
-} from '@/src/lib/chat-search-navigator';
+import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-search-navigator';
 import {
   flattenSocialChatInfinitePages,
   mergeSocialChatInfiniteAppendPages,
@@ -45,6 +40,8 @@ import {
 } from '@/src/hooks/use-social-chat-messages-infinite-query';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
+import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
+import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 
 export default function SocialChatRoomScreen() {
   const router = useRouter();
@@ -77,11 +74,13 @@ export default function SocialChatRoomScreen() {
   const { messages, listError, fetchNextPage, hasNextPage, isFetchingNextPage, isInitialLoading, refetch } =
     useSocialChatMessagesInfiniteQuery({ roomId, enabled: ready });
 
+  useOfflineChatRoomSync({ roomType: 'social_dm', roomId }, ready);
+
   const mergedChatError = chatError ?? listError;
 
   const [searchMode, setSearchMode] = useState(false);
-  const [searchActivated, setSearchActivated] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchCommittedQuery, setSearchCommittedQuery] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchSession, setSearchSession] = useState<ChatSearchSession>(() => createChatSearchSession(''));
   const searchInputRef = useRef<TextInput>(null);
@@ -174,8 +173,8 @@ export default function SocialChatRoomScreen() {
 
   const closeSearch = useCallback(() => {
     setSearchMode(false);
-    setSearchActivated(false);
     setSearchQuery('');
+    setSearchCommittedQuery('');
     setSearchSession(createChatSearchSession(''));
     setSearchBusy(false);
   }, []);
@@ -183,8 +182,8 @@ export default function SocialChatRoomScreen() {
   const openSearch = useCallback(() => {
     Keyboard.dismiss();
     setSearchMode(true);
-    setSearchActivated(false);
     setSearchQuery('');
+    setSearchCommittedQuery('');
     setSearchSession(createChatSearchSession(''));
   }, []);
 
@@ -200,40 +199,75 @@ export default function SocialChatRoomScreen() {
     return `${cur}/${total}`;
   }, [searchBusy, searchSession]);
 
-  const goPrevMatch = useCallback(() => {
-    const { session, foundId } = stepPrevChatMatch(searchSession);
-    setSearchSession(session);
-    if (!foundId) return;
-    dmBodyRef.current?.scrollToMessageId(foundId);
-  }, [searchSession]);
+  const scrollSocialToMessageIdBestEffort = useCallback(
+    async (messageId: string) => {
+      const mid = String(messageId ?? '').trim();
+      if (!mid) return;
+      if (dmBodyRef.current?.scrollToMessageId(mid, { animated: true })) return;
+      for (let i = 0; i < 3; i += 1) {
+        if (!hasNextPage) break;
+        await fetchNextPage();
+        if (dmBodyRef.current?.scrollToMessageId(mid, { animated: true })) return;
+      }
+      Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
+    },
+    [fetchNextPage, hasNextPage],
+  );
 
-  const goNextMatch = useCallback(async () => {
+  const runSocialLocalSearch = useCallback(async () => {
     const q = searchQuery.trim();
     if (!q || !roomId) return;
-    setSearchActivated(true);
+    setSearchCommittedQuery(q);
     setSearchBusy(true);
     try {
-      const base = resetChatSearchSession(searchSession, q);
-      const res = await stepNextChatMatch<SocialChatMessage>({
-        session: base,
-        getMessagesNewestFirst: () => messagesNewestFirstRef.current,
-        getId: (m) => m.id,
-        isMatch: (m, queryLower) => String(m.text ?? '').toLowerCase().includes(queryLower),
-        fetchNextPage: hasNextPage ? fetchNextPage : undefined,
-        hasNextPage: Boolean(hasNextPage),
-        maxAdditionalPages: 3,
-        maxMessagesScanned: 800,
+      const matchIds = await listLocalSearchMessageIdsNewestFirst({
+        key: { roomType: 'social_dm', roomId },
+        query: q,
+        limit: 200,
       });
-      setSearchSession(res.session);
-      if (res.foundId) {
-        dmBodyRef.current?.scrollToMessageId(res.foundId);
-      } else if (!res.exhausted) {
-        Alert.alert('더 오래된 대화', '더 오래된 대화는 아직 불러오지 못했어요.\n검색어를 더 구체적으로 입력해 보세요.');
-      }
+      setSearchSession({
+        query: q,
+        matchIds,
+        cursorIndex: matchIds.length > 0 ? 0 : -1,
+        scanCursor: 0,
+      });
+      await recordRecentSearch({ scope: 'room', roomId, query: q });
+      const first = matchIds[0]?.trim();
+      if (first) await scrollSocialToMessageIdBestEffort(first);
     } finally {
       setSearchBusy(false);
     }
-  }, [searchQuery, roomId, searchSession, hasNextPage, fetchNextPage]);
+  }, [roomId, scrollSocialToMessageIdBestEffort, searchQuery]);
+
+  const goNewerMatch = useCallback(() => {
+    const total = searchSession.matchIds.length;
+    const cur = searchSession.cursorIndex;
+    if (total <= 0) return;
+    if (cur < 0) {
+      const id0 = searchSession.matchIds[0]?.trim() ?? '';
+      if (!id0) return;
+      setSearchSession((prev) => ({ ...prev, cursorIndex: 0 }));
+      if (!dmBodyRef.current?.scrollToMessageId(id0, { animated: true })) void scrollSocialToMessageIdBestEffort(id0);
+      return;
+    }
+    if (cur <= 0) return;
+    const id = searchSession.matchIds[cur - 1]?.trim() ?? '';
+    if (!id) return;
+    setSearchSession((prev) => ({ ...prev, cursorIndex: Math.max(0, cur - 1) }));
+    if (!dmBodyRef.current?.scrollToMessageId(id, { animated: true })) void scrollSocialToMessageIdBestEffort(id);
+  }, [scrollSocialToMessageIdBestEffort, searchSession.cursorIndex, searchSession.matchIds]);
+
+  const goOlderMatchOrScan = useCallback(async () => {
+    const total = searchSession.matchIds.length;
+    const cur = searchSession.cursorIndex;
+    if (total > 0 && cur >= 0 && cur + 1 < total) {
+      const id = searchSession.matchIds[cur + 1]?.trim() ?? '';
+      if (!id) return;
+      setSearchSession((prev) => ({ ...prev, cursorIndex: Math.min(prev.matchIds.length - 1, cur + 1) }));
+      if (!dmBodyRef.current?.scrollToMessageId(id, { animated: true })) await scrollSocialToMessageIdBestEffort(id);
+      return;
+    }
+  }, [scrollSocialToMessageIdBestEffort, searchSession.cursorIndex, searchSession.matchIds]);
 
   useEffect(() => {
     if (!searchMode) return;
@@ -350,20 +384,15 @@ export default function SocialChatRoomScreen() {
                 value={searchQuery}
                 onChangeText={(t) => {
                   setSearchQuery(t);
-                  setSearchActivated(false);
-                  setSearchSession((prev) => resetChatSearchSession(prev, t));
+                  setSearchCommittedQuery('');
+                  setSearchSession(createChatSearchSession(''));
                 }}
                 autoCorrect={false}
                 autoCapitalize="none"
                 clearButtonMode="while-editing"
                 returnKeyType="search"
-                onSubmitEditing={() => void goNextMatch()}
+                onSubmitEditing={() => void runSocialLocalSearch()}
               />
-              {searchActivated && searchStatusLabel ? (
-                <Text style={s.searchTitleStatus} numberOfLines={1}>
-                  {searchStatusLabel}
-                </Text>
-              ) : null}
             </View>
           ) : (
             <Pressable disabled style={s.titlePress} accessibilityRole="header" accessibilityLabel="대화 상대">
@@ -402,36 +431,44 @@ export default function SocialChatRoomScreen() {
           <ActivityIndicator color={GinitTheme.colors.primary} />
         </View>
       ) : (
-        <SocialDmChatRoomBodyTyped
-          ref={dmBodyRef}
-          roomId={roomId}
-          peerId={peerId}
-          myUserId={userId.trim()}
-          messages={messages}
-          chatError={mergedChatError}
-          searchNavigateLoading={isInitialLoading || searchNavigateLoading}
-          hasNextPage={hasNextPage}
-          isFetchingNextPage={isFetchingNextPage}
-          onPrefetchOlderMessages={() => void fetchNextPage()}
-          searchMode={searchMode}
-          searchActivated={searchActivated}
-          searchQuery={searchQuery}
-          searchBusy={searchBusy}
-          searchStatusLabel={searchStatusLabel}
-          searchSession={searchSession}
-          onSearchPrev={goPrevMatch}
-          onSearchNext={goNextMatch}
-          peerReadMessageId={(() => {
-            const v = pickPeerReadValue<unknown>(roomDoc?.readMessageIdBy as unknown as Record<string, unknown> | undefined, peerId);
-            return typeof v === 'string' && v.trim() ? v.trim() : null;
-          })()}
-          peerReadAt={pickPeerReadValue<unknown>(roomDoc?.readAtBy, peerId)}
-          onPeerProfileOpen={(id) => {
-            const t = id.trim();
-            if (!t) return;
-            router.push(`/profile/user/${encodeURIComponent(t)}`);
-          }}
-        />
+        <>
+          <SocialDmChatRoomBodyTyped
+            ref={dmBodyRef}
+            roomId={roomId}
+            peerId={peerId}
+            myUserId={userId.trim()}
+            messages={messages}
+            chatError={mergedChatError}
+            searchNavigateLoading={isInitialLoading || searchNavigateLoading}
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            onPrefetchOlderMessages={() => void fetchNextPage()}
+            searchMode={searchMode}
+            searchQuery={searchQuery}
+            searchCommittedQuery={searchCommittedQuery}
+            messageSearchHighlightQuery={
+              searchMode && searchCommittedQuery.trim() ? searchCommittedQuery : ''
+            }
+            searchBusy={searchBusy}
+            searchStatusLabel={searchStatusLabel}
+            searchSession={searchSession}
+            onSearchPrev={goOlderMatchOrScan}
+            onSearchNext={goNewerMatch}
+            peerReadMessageId={(() => {
+              const v = pickPeerReadValue<unknown>(
+                roomDoc?.readMessageIdBy as unknown as Record<string, unknown> | undefined,
+                peerId,
+              );
+              return typeof v === 'string' && v.trim() ? v.trim() : null;
+            })()}
+            peerReadAt={pickPeerReadValue<unknown>(roomDoc?.readAtBy, peerId)}
+            onPeerProfileOpen={(id) => {
+              const t = id.trim();
+              if (!t) return;
+              router.push(`/profile/user/${encodeURIComponent(t)}`);
+            }}
+          />
+        </>
       )}
 
       {/* 헤더 인라인 검색으로 전환(모달 검색 제거) */}
@@ -461,7 +498,9 @@ const s = StyleSheet.create({
     minWidth: 0,
     minHeight: 34,
     borderRadius: 10,
+    marginRight: 10,
     paddingHorizontal: 10,
+    paddingRight: 14,
     backgroundColor: '#f1f5f9',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.10)',
@@ -469,7 +508,6 @@ const s = StyleSheet.create({
     color: '#0f172a',
     paddingVertical: 8,
   },
-  searchTitleStatus: { fontSize: 12, fontWeight: '700', color: '#64748b' },
   searchBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   settingsBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   loading: { padding: 24, alignItems: 'center' },

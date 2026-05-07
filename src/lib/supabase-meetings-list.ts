@@ -99,7 +99,7 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
   };
 }
 
-export const PUBLIC_MEETINGS_PAGE_SIZE = 20;
+export const PUBLIC_MEETINGS_PAGE_SIZE = 10;
 
 export async function fetchPublicMeetingsFromSupabaseOnce(): Promise<
   { ok: true; meetings: Meeting[] } | { ok: false; message: string }
@@ -132,7 +132,7 @@ export async function fetchMyMeetingsForFeedFromSupabase(
   return { ok: true, meetings };
 }
 
-/** 공개 모임 20건 페이지 — `.range(pageParam * 20, (pageParam + 1) * 20 - 1)` */
+/** 공개 모임 10건 페이지 — `.range(pageParam * size, (pageParam + 1) * size - 1)` */
 export async function fetchPublicMeetingsPageFromSupabase(
   pageParam: number,
 ): Promise<{ ok: true; meetings: Meeting[]; hasMore: boolean } | { ok: false; message: string }> {

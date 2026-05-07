@@ -36,6 +36,7 @@ import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-ren
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
 import {
     flattenMeetingChatInfinitePages,
     meetingChatMessagesQueryKey,
@@ -43,16 +44,12 @@ import {
     useMeetingChatMessagesInfiniteQuery,
 } from '@/src/hooks/use-meeting-chat-messages-infinite-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import {
-  createChatSearchSession,
-  resetChatSearchSession,
-  stepNextChatMatch,
-  stepPrevChatMatch,
-  type ChatSearchSession,
-} from '@/src/lib/chat-search-navigator';
+import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-search-navigator';
 import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
+import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -60,7 +57,6 @@ import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/l
 import {
     deleteMeetingChatImageMessageBestEffort,
     fetchOlderMeetingChatPagesUntilTargetMessageId,
-    meetingChatMessageSearchHaystack,
     searchMeetingChatMessages,
     sendMeetingChatImageMessagesBatch,
     sendMeetingChatTextMessage,
@@ -173,8 +169,9 @@ export default function MeetingChatRoomScreen() {
   /** 맨 아래에서 조금이라도 위로 올라왔을 때만「최신으로」FAB 표시 */
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const [chatSearchMode, setChatSearchMode] = useState(false);
-  const [chatSearchActivated, setChatSearchActivated] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  /** 엔터로 확정된 검색어(로컬 DB·▲/▼ 탐색 기준) */
+  const [chatSearchCommittedQuery, setChatSearchCommittedQuery] = useState('');
   const [chatSearchSession, setChatSearchSession] = useState<ChatSearchSession>(() => createChatSearchSession(''));
   const [chatSearchBusy, setChatSearchBusy] = useState(false);
   /** 검색 결과 점프 시 과거 메시지를 한꺼번에 불러오는 동안 */
@@ -248,15 +245,15 @@ export default function MeetingChatRoomScreen() {
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
-  const scrollToMessageIndexBestEffort = useCallback((idx: number) => {
+  const scrollToMessageIndexBestEffort = useCallback((idx: number, animated = false) => {
     const index = Math.max(0, Math.floor(idx));
     // inverted + 가변 높이: index*고정px 오프셋 추정은 클램프 버그가 있어 scrollToIndex만 사용.
-    // 답장/검색 이동은 애니메이션 없이 즉시 점프(animated: false).
+    // 검색 이동은 animated=true로 "스크롤되는 느낌"을 줍니다.
     InteractionManager.runAfterInteractions(() => {
       setTimeout(() => {
-        scrollToIndexSafe(index, 0.35, false);
+        scrollToIndexSafe(index, 0.35, animated);
         requestAnimationFrame(() => {
-          scrollToIndexSafe(index, 0.35, false);
+          scrollToIndexSafe(index, 0.35, animated);
         });
       }, 60);
     });
@@ -290,6 +287,8 @@ export default function MeetingChatRoomScreen() {
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
   }, [meeting, userId]);
+
+  useOfflineChatRoomSync({ roomType: 'meeting', roomId: meetingId }, allowed === true);
 
   const {
     messages,
@@ -455,15 +454,15 @@ export default function MeetingChatRoomScreen() {
   const openChatSearch = useCallback(() => {
     Keyboard.dismiss();
     setChatSearchMode(true);
-    setChatSearchActivated(false);
     setChatSearchQuery('');
+    setChatSearchCommittedQuery('');
     setChatSearchSession(createChatSearchSession(''));
   }, []);
 
   const closeChatSearch = useCallback(() => {
     setChatSearchMode(false);
-    setChatSearchActivated(false);
     setChatSearchQuery('');
+    setChatSearchCommittedQuery('');
     setChatSearchSession(createChatSearchSession(''));
     setChatSearchBusy(false);
   }, []);
@@ -476,78 +475,159 @@ export default function MeetingChatRoomScreen() {
     return `${cur}/${total}`;
   }, [chatSearchBusy, chatSearchSession]);
 
-  const goPrevMatch = useCallback(() => {
-    const { session, foundId } = stepPrevChatMatch(chatSearchSession);
-    setChatSearchSession(session);
-    if (!foundId) return;
-    const idx = messagesRef.current.findIndex((m) => m.id === foundId);
-    if (idx >= 0) scrollToMessageIndexBestEffort(idx);
-  }, [chatSearchSession, scrollToMessageIndexBestEffort]);
+  const scrollMeetingToMessageIdBestEffort = useCallback(
+    async (messageId: string) => {
+      const mid = String(messageId ?? '').trim();
+      if (!mid) return;
+      const tryScroll = (): boolean => {
+        const idx = messagesRef.current.findIndex((m) => m.id === mid);
+        if (idx < 0) return false;
+        scrollToMessageIndexBestEffort(idx, true);
+        return true;
+      };
+      if (tryScroll()) return;
+      for (let i = 0; i < 3; i += 1) {
+        if (!hasNextPage) break;
+        await fetchNextPage();
+        if (tryScroll()) return;
+      }
+      Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
+    },
+    [fetchNextPage, hasNextPage, scrollToMessageIndexBestEffort],
+  );
 
-  const goNextMatch = useCallback(async () => {
+  const runMeetingLocalSearch = useCallback(async () => {
     const q = chatSearchQuery.trim();
     if (!q || !meetingId) return;
-    setChatSearchActivated(true);
+    setChatSearchCommittedQuery(q);
     setChatSearchBusy(true);
     try {
-      const base = resetChatSearchSession(chatSearchSession, q);
-      const res = await stepNextChatMatch<MeetingChatMessage>({
-        session: base,
-        getMessagesNewestFirst: () => messagesRef.current,
-        getId: (m) => m.id,
-        isMatch: (m, queryLower) => meetingChatMessageSearchHaystack(m).toLowerCase().includes(queryLower),
-        fetchNextPage: hasNextPage ? fetchNextPage : undefined,
-        hasNextPage: Boolean(hasNextPage),
-        maxAdditionalPages: 3,
-        maxMessagesScanned: 800,
+      const matchIds = await listLocalSearchMessageIdsNewestFirst({
+        key: { roomType: 'meeting', roomId: meetingId },
+        query: q,
+        limit: 200,
       });
-      setChatSearchSession(res.session);
-      if (res.foundId) {
-        const idx = messagesRef.current.findIndex((m) => m.id === res.foundId);
-        if (idx >= 0) scrollToMessageIndexBestEffort(idx);
-      } else if (!res.exhausted) {
-        Alert.alert('더 오래된 대화', '더 오래된 대화는 아직 불러오지 못했어요.\n검색어를 더 구체적으로 입력해 보세요.');
-      }
+      setChatSearchSession({
+        query: q,
+        matchIds,
+        cursorIndex: matchIds.length > 0 ? 0 : -1,
+        scanCursor: 0,
+      });
+      await recordRecentSearch({ scope: 'room', roomId: meetingId, query: q });
+      const first = matchIds[0]?.trim();
+      if (first) await scrollMeetingToMessageIdBestEffort(first);
     } finally {
       setChatSearchBusy(false);
     }
-  }, [chatSearchQuery, meetingId, chatSearchSession, hasNextPage, fetchNextPage, scrollToMessageIndexBestEffort]);
+  }, [chatSearchQuery, meetingId, scrollMeetingToMessageIdBestEffort]);
+
+  const goNewerMatch = useCallback(() => {
+    const total = chatSearchSession.matchIds.length;
+    const cur = chatSearchSession.cursorIndex;
+    if (total <= 0) return;
+    if (cur < 0) {
+      const id0 = chatSearchSession.matchIds[0]?.trim() ?? '';
+      if (!id0) return;
+      setChatSearchSession((prev) => ({ ...prev, cursorIndex: 0 }));
+      const idx0 = messagesRef.current.findIndex((m) => m.id === id0);
+      if (idx0 >= 0) scrollToMessageIndexBestEffort(idx0, true);
+      else void scrollMeetingToMessageIdBestEffort(id0);
+      return;
+    }
+    if (cur <= 0) return;
+    const id = chatSearchSession.matchIds[cur - 1]?.trim() ?? '';
+    if (!id) return;
+    setChatSearchSession((prev) => ({ ...prev, cursorIndex: Math.max(0, cur - 1) }));
+    const idx = messagesRef.current.findIndex((m) => m.id === id);
+    if (idx >= 0) scrollToMessageIndexBestEffort(idx, true);
+    else void scrollMeetingToMessageIdBestEffort(id);
+  }, [
+    chatSearchSession.cursorIndex,
+    chatSearchSession.matchIds,
+    scrollMeetingToMessageIdBestEffort,
+    scrollToMessageIndexBestEffort,
+  ]);
+
+  const goOlderMatchOrScan = useCallback(async () => {
+    const total = chatSearchSession.matchIds.length;
+    const cur = chatSearchSession.cursorIndex;
+    if (total > 0 && cur >= 0 && cur + 1 < total) {
+      const id = chatSearchSession.matchIds[cur + 1]?.trim() ?? '';
+      if (!id) return;
+      setChatSearchSession((prev) => ({ ...prev, cursorIndex: Math.min(prev.matchIds.length - 1, cur + 1) }));
+      const idx = messagesRef.current.findIndex((m) => m.id === id);
+      if (idx >= 0) scrollToMessageIndexBestEffort(idx, true);
+      else await scrollMeetingToMessageIdBestEffort(id);
+      return;
+    }
+  }, [chatSearchSession.cursorIndex, chatSearchSession.matchIds, scrollMeetingToMessageIdBestEffort, scrollToMessageIndexBestEffort]);
 
   const bottomSearchNavigator = useMemo(() => {
-    if (!chatSearchMode || !chatSearchActivated || !chatSearchQuery.trim()) return null;
+    if (!chatSearchMode) return null;
+    const raw = chatSearchQuery.trim();
+    const committed = chatSearchCommittedQuery.trim();
+    const navEnabled = Boolean(committed);
+    const showCenterHint = !raw || (raw && !committed);
+    const total = chatSearchSession.matchIds.length;
+    const cur = chatSearchSession.cursorIndex;
+    const atOldestMatch = total === 0 || (total > 0 && cur >= 0 && cur >= total - 1);
     return (
-      <View style={styles.bottomSearchNavRow} accessibilityLabel="검색 결과 탐색">
-        <Text style={styles.bottomSearchNavStatus} numberOfLines={1}>
-          {searchStatusLabel || ' '}
+      <View
+        style={[styles.bottomSearchNavRow, showCenterHint && styles.bottomSearchNavRowCenter]}
+        accessibilityLabel="검색 결과 탐색">
+        {showCenterHint ? (
+          <View style={styles.bottomSearchNavCenterOverlay} pointerEvents="none">
+            <Text style={styles.bottomSearchNavCenterText} numberOfLines={1}>
+              {!raw ? '검색어가 없습니다' : '엔터로 검색하세요'}
+            </Text>
+          </View>
+        ) : null}
+        <Text
+          style={[styles.bottomSearchNavStatus, showCenterHint && styles.bottomSearchNavStatusCenter]}
+          numberOfLines={1}>
+          {navEnabled ? searchStatusLabel || ' ' : ' '}
         </Text>
         <View style={styles.bottomSearchNavBtns}>
           <Pressable
-            onPress={goPrevMatch}
-            disabled={chatSearchBusy || chatSearchSession.matchIds.length === 0 || chatSearchSession.cursorIndex <= 0}
+            onPress={() => void goOlderMatchOrScan()}
+            disabled={chatSearchBusy || !navEnabled || atOldestMatch}
             style={({ pressed }) => [
               styles.bottomSearchNavBtn,
-              (chatSearchBusy || chatSearchSession.matchIds.length === 0 || chatSearchSession.cursorIndex <= 0) &&
-                styles.bottomSearchNavBtnDisabled,
-              pressed &&
-                !(chatSearchBusy || chatSearchSession.matchIds.length === 0 || chatSearchSession.cursorIndex <= 0) &&
-                styles.bottomSearchNavBtnPressed,
+              (chatSearchBusy || !navEnabled || atOldestMatch) && styles.bottomSearchNavBtnDisabled,
+              pressed && !(chatSearchBusy || !navEnabled || atOldestMatch) && styles.bottomSearchNavBtnPressed,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="이전 결과">
+            accessibilityLabel="더 과거 결과">
             <View style={{ transform: [{ rotate: '180deg' }] }}>
               <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
             </View>
           </Pressable>
           <Pressable
-            onPress={() => void goNextMatch()}
-            disabled={chatSearchBusy || !chatSearchQuery.trim()}
+            onPress={goNewerMatch}
+            disabled={
+              chatSearchBusy ||
+              !navEnabled ||
+              chatSearchSession.cursorIndex <= 0 ||
+              chatSearchSession.matchIds.length === 0
+            }
             style={({ pressed }) => [
               styles.bottomSearchNavBtn,
-              (chatSearchBusy || !chatSearchQuery.trim()) && styles.bottomSearchNavBtnDisabled,
-              pressed && !(chatSearchBusy || !chatSearchQuery.trim()) && styles.bottomSearchNavBtnPressed,
+              (chatSearchBusy ||
+                !navEnabled ||
+                chatSearchSession.cursorIndex <= 0 ||
+                chatSearchSession.matchIds.length === 0) &&
+                styles.bottomSearchNavBtnDisabled,
+              pressed &&
+                !(
+                  chatSearchBusy ||
+                  !navEnabled ||
+                  chatSearchSession.cursorIndex <= 0 ||
+                  chatSearchSession.matchIds.length === 0
+                ) &&
+                styles.bottomSearchNavBtnPressed,
             ]}
             accessibilityRole="button"
-            accessibilityLabel="다음 결과">
+            accessibilityLabel="더 최신 결과">
             <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
           </Pressable>
         </View>
@@ -555,16 +635,14 @@ export default function MeetingChatRoomScreen() {
     );
   }, [
     chatSearchMode,
-    chatSearchActivated,
     chatSearchQuery,
+    chatSearchCommittedQuery,
     chatSearchBusy,
     chatSearchSession,
     searchStatusLabel,
-    goPrevMatch,
-    goNextMatch,
+    goOlderMatchOrScan,
+    goNewerMatch,
   ]);
-
-  // NOTE: 텔레그램식 검색(▲/▼ 탐색)으로 전환하여, 결과 목록 렌더는 제거합니다.
 
   const onPressAttach = useCallback(() => {
     if (Platform.OS === 'web') {
@@ -828,6 +906,8 @@ export default function MeetingChatRoomScreen() {
     onOpenUserProfile: openUserProfile,
     openMeetingChatImageViewer,
     listRef,
+    messageSearchHighlightQuery:
+      chatSearchMode && chatSearchCommittedQuery.trim() ? chatSearchCommittedQuery : '',
   });
 
   if (!meetingId) {
@@ -909,22 +989,17 @@ export default function MeetingChatRoomScreen() {
                 value={chatSearchQuery}
                 onChangeText={(t) => {
                   setChatSearchQuery(t);
-                  setChatSearchActivated(false);
-                  setChatSearchSession((prev) => resetChatSearchSession(prev, t));
+                  setChatSearchCommittedQuery('');
+                  setChatSearchSession(createChatSearchSession(''));
                 }}
                 autoCorrect={false}
                 autoCapitalize="none"
                 clearButtonMode="while-editing"
                 returnKeyType="search"
                 onSubmitEditing={() => {
-                  void goNextMatch();
+                  void runMeetingLocalSearch();
                 }}
               />
-              {chatSearchActivated && searchStatusLabel ? (
-                <Text style={styles.searchTitleStatus} numberOfLines={1}>
-                  {searchStatusLabel}
-                </Text>
-              ) : null}
             </View>
           ) : (
             <View style={styles.titleBlock}>
@@ -963,10 +1038,10 @@ export default function MeetingChatRoomScreen() {
 
         {announcementText ? (
           <Pressable
-            onPress={() => Alert.alert('확정된 정보', announcementText)}
+            onPress={goMeetingDetail}
             style={styles.announcementBar}
-            accessibilityRole="button"
-            accessibilityLabel="공지">
+            accessibilityRole="link"
+            accessibilityLabel="모임 상세">
             <BlurView tint="light" intensity={60} style={styles.announcementInner}>
               <GinitSymbolicIcon name="megaphone-outline" size={16} color="#0052CC" />
               <Text style={styles.announcementText} numberOfLines={1}>
@@ -1214,7 +1289,9 @@ const styles = StyleSheet.create({
     minWidth: 0,
     minHeight: 34,
     borderRadius: 10,
+    marginRight: 10,
     paddingHorizontal: 10,
+    paddingRight: 14,
     backgroundColor: '#f1f5f9',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.10)',
@@ -1222,16 +1299,26 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     paddingVertical: Platform.OS === 'ios' ? 8 : 6,
   },
-  searchTitleStatus: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748b',
-  },
   bottomSearchNavRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
+  },
+  bottomSearchNavRowCenter: {
+    position: 'relative',
+  },
+  bottomSearchNavCenterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  bottomSearchNavCenterText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#475569',
+    textAlign: 'center',
   },
   bottomSearchNavStatus: {
     flex: 1,
@@ -1239,6 +1326,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#475569',
+  },
+  bottomSearchNavStatusCenter: {
+    textAlign: 'center',
   },
   bottomSearchNavBtns: {
     flexDirection: 'row',

@@ -43,7 +43,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 
 export type SocialDmChatRoomBodyHandle = {
   /** 모임 채팅과 동일하게 `data`는 최신이 index 0(inverted 기준). */
-  scrollToMessageId: (messageId: string) => boolean;
+  scrollToMessageId: (messageId: string, opts?: { animated?: boolean }) => boolean;
 };
 
 export type SocialDmChatRoomBodyProps = {
@@ -62,12 +62,17 @@ export type SocialDmChatRoomBodyProps = {
 
   /** 카카오식: 검색 결과 탐색 UI를 하단 컴포저 영역에 표시하기 위한 상태/핸들러 */
   searchMode?: boolean;
-  searchActivated?: boolean;
   searchQuery?: string;
+  /** 엔터로 확정된 검색어 — ▲/▼은 이 값이 있을 때만 동작 */
+  searchCommittedQuery?: string;
+  /** 확정 검색어: 채팅 말풍선 본문 하이라이트 */
+  messageSearchHighlightQuery?: string;
   searchBusy?: boolean;
   searchStatusLabel?: string;
   searchSession?: { matchIds: string[]; cursorIndex: number };
+  /** ▲(위): 더 과거 결과로 */
   onSearchPrev?: () => void;
+  /** ▼(아래): 더 최신 결과로 */
   onSearchNext?: () => void;
 };
 
@@ -86,8 +91,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     onPrefetchOlderMessages,
     onPeerProfileOpen,
     searchMode,
-    searchActivated,
     searchQuery,
+    searchCommittedQuery,
+    messageSearchHighlightQuery,
     searchBusy,
     searchStatusLabel,
     searchSession,
@@ -183,13 +189,13 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   }, [scrollToOffsetSafe]);
 
   const scrollToMessageIndexBestEffort = useCallback(
-    (idx: number) => {
+    (idx: number, animated = false) => {
       const index = Math.max(0, Math.floor(idx));
       InteractionManager.runAfterInteractions(() => {
         setTimeout(() => {
-          scrollToIndexSafe(index, 0.35, false);
+          scrollToIndexSafe(index, 0.35, animated);
           requestAnimationFrame(() => {
-            scrollToIndexSafe(index, 0.35, false);
+            scrollToIndexSafe(index, 0.35, animated);
           });
         }, 60);
       });
@@ -200,13 +206,13 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   useImperativeHandle(
     ref,
     () => ({
-      scrollToMessageId: (messageId: string) => {
+      scrollToMessageId: (messageId: string, opts?: { animated?: boolean }) => {
         const mid = String(messageId ?? '').trim();
         if (!mid) return false;
         const rowIdx = findMeetingChatListRowIndexByMessageId(chatListRows, mid);
         const idx = rowIdx >= 0 ? rowIdx : messages.findIndex((m) => m.id === mid);
         if (idx < 0) return false;
-        scrollToMessageIndexBestEffort(idx);
+        scrollToMessageIndexBestEffort(idx, Boolean(opts?.animated));
         return true;
       },
     }),
@@ -255,8 +261,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
 
     lastAutoScrolledMessageIdRef.current = latest.id;
     pendingAutoScrollToLatestRef.current = false;
+    // 모임 채팅과 동일: inverted 리스트에서 패딩/키보드 레이아웃이 한 프레임에 안 잡히면 최신 말풍선이 가려질 수 있어 2~3회 재시도합니다.
     requestAnimationFrame(() => {
       scrollToOffsetSafe(0, false);
+      requestAnimationFrame(() => {
+        scrollToOffsetSafe(0, false);
+      });
+      setTimeout(() => {
+        scrollToOffsetSafe(0, false);
+      }, 60);
     });
   }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
@@ -358,6 +371,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     onOpenUserProfile: setPeerProfileUserIdBridge,
     openMeetingChatImageViewer,
     listRef,
+    messageSearchHighlightQuery,
   });
 
   const onPressAttach = useCallback(() => {
@@ -383,9 +397,18 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
         Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
       } finally {
         setSending(false);
+        pendingAutoScrollToLatestRef.current = true;
+        InteractionManager.runAfterInteractions(() => {
+          requestAnimationFrame(() => {
+            scrollToOffsetSafe(0, false);
+            setTimeout(() => {
+              scrollToOffsetSafe(0, false);
+            }, 120);
+          });
+        });
       }
     },
-    [roomId, myUserId, sending],
+    [roomId, myUserId, sending, scrollToOffsetSafe],
   );
 
   const onSend = useCallback(async () => {
@@ -402,8 +425,18 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
+      // Firestore tail 반영이 한 틱 늦을 때 shouldAutoScroll이 잠깐 false로 떨어져 첫 메시지가 가려지는 경우 방지
+      pendingAutoScrollToLatestRef.current = true;
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => {
+          scrollToOffsetSafe(0, false);
+          setTimeout(() => {
+            scrollToOffsetSafe(0, false);
+          }, 120);
+        });
+      });
     }
-  }, [roomId, myUserId, draft, sending, replyTo]);
+  }, [roomId, myUserId, draft, sending, replyTo, scrollToOffsetSafe]);
 
   const chatListContentStyle = useMemo(
     () => [
@@ -443,6 +476,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     if (showJumpToBottomFab) return;
     requestAnimationFrame(() => {
       scrollToOffsetSafe(0, false);
+      requestAnimationFrame(() => {
+        scrollToOffsetSafe(0, false);
+      });
+      setTimeout(() => {
+        scrollToOffsetSafe(0, false);
+      }, 60);
     });
   }, [showJumpToBottomFab, composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight, scrollToOffsetSafe]);
 
@@ -468,15 +507,43 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   );
 
   const bottomSearchNavigator = useMemo(() => {
-    if (!searchMode || !searchActivated || !(searchQuery ?? '').trim()) return null;
+    if (!searchMode) return null;
+    const raw = (searchQuery ?? '').trim();
+    const committed = (searchCommittedQuery ?? '').trim();
+    const navEnabled = Boolean(committed);
     const total = searchSession?.matchIds?.length ?? 0;
     const cursor = searchSession?.cursorIndex ?? -1;
-    const disablePrev = Boolean(searchBusy) || total === 0 || cursor <= 0;
-    const disableNext = Boolean(searchBusy) || !(searchQuery ?? '').trim();
+    const atOldestMatch = total === 0 || (total > 0 && cursor >= 0 && cursor >= total - 1);
+    const disablePrev = Boolean(searchBusy) || !navEnabled || atOldestMatch;
+    const disableNext = Boolean(searchBusy) || !navEnabled || total === 0 || cursor <= 0;
+    const showCenterHint = !raw || (raw && !committed);
     return (
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <Text style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: '700', color: '#475569' }} numberOfLines={1}>
-          {searchStatusLabel?.trim() ? searchStatusLabel : ' '}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, position: 'relative' }}>
+        {showCenterHint ? (
+          <View
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: 10,
+            }}
+            pointerEvents="none">
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', textAlign: 'center' }} numberOfLines={1}>
+              {!raw ? '검색어가 없습니다' : '엔터로 검색하세요'}
+            </Text>
+          </View>
+        ) : null}
+        <Text
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 13,
+            fontWeight: '700',
+            color: '#475569',
+            textAlign: navEnabled ? 'left' : 'left',
+          }}
+          numberOfLines={1}>
+          {navEnabled ? (searchStatusLabel?.trim() ? searchStatusLabel : ' ') : ' '}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <Pressable
@@ -496,7 +563,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="이전 결과">
+            accessibilityLabel="더 과거 결과">
             <View style={{ transform: [{ rotate: '180deg' }] }}>
               <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
             </View>
@@ -518,13 +585,22 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="다음 결과">
+            accessibilityLabel="더 최신 결과">
             <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
           </Pressable>
         </View>
       </View>
     );
-  }, [onSearchNext, onSearchPrev, searchActivated, searchBusy, searchMode, searchQuery, searchSession, searchStatusLabel]);
+  }, [
+    onSearchNext,
+    onSearchPrev,
+    searchBusy,
+    searchCommittedQuery,
+    searchMode,
+    searchQuery,
+    searchSession,
+    searchStatusLabel,
+  ]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

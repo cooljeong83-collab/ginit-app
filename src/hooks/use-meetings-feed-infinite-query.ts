@@ -35,7 +35,7 @@ async function fetchMeetingsFeedPage(pageParam: number): Promise<Page> {
   }
 
   // eslint-disable-next-line no-console
-  console.log('📡 모임 목록: 서버 데이터 20개 가져오기 (Page: ' + pageParam + ')');
+  console.log('📡 모임 목록: 서버 데이터 10개 가져오기 (Page: ' + pageParam + ')');
   const res = await fetchPublicMeetingsPageFromSupabase(pageParam);
   if (!res.ok) throw new Error(res.message);
   return { meetings: res.meetings, hasMore: res.hasMore };

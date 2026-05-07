@@ -688,20 +688,22 @@ export async function sendSocialChatTextMessage(
   if (!text) throw new Error('메시지를 입력해 주세요.');
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const senderPk = normalizeParticipantId(senderId) || senderId;
-
-  // 내가 차단한 사용자에게는(내 관점) 전송을 막습니다. (상대가 나를 차단했는지는 알 수 없어야 함)
-  const peerFromRid = parsePeerFromSocialRoomId(rid, senderPk);
-  if (peerFromRid) {
-    const blockedByMe = await isPeerBlockedByMe(senderPk, peerFromRid).catch(() => false);
-    if (blockedByMe) {
-      throw new Error('차단한 사용자에게는 메시지를 보낼 수 없어요.');
-    }
+  const peerPk = parsePeerFromSocialRoomId(rid, senderPk);
+  // Denormalization + 차단 확인: 모임 텍스트 전송과 같이 선행 네트워크는 병렬로 묶습니다.
+  const [senderProfile, blockedByMe] = await Promise.all([
+    getUserProfile(senderId).catch(() => null),
+    peerPk ? isPeerBlockedByMe(senderPk, peerPk).catch(() => false) : Promise.resolve(false),
+  ]);
+  if (blockedByMe) {
+    throw new Error('차단한 사용자에게는 메시지를 보낼 수 없어요.');
   }
   const ref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
   await addDoc(
     ref,
     stripUndefinedDeep({
       senderId,
+      senderName: senderProfile?.nickname ?? null,
+      senderAvatarUrl: senderProfile?.profile_photo_url ?? null,
       text,
       kind: 'text' as const,
       replyTo:
@@ -718,9 +720,7 @@ export async function sendSocialChatTextMessage(
     }) as Record<string, unknown>,
   );
 
-  // 목록 배지(unreadCountBy)는 룸 문서에 요약값으로 유지합니다.
-  // 1:1 DM 룸이므로 peer는 roomId에서 결정적으로 추출 가능합니다.
-  const peerPk = parsePeerFromSocialRoomId(rid, senderPk);
+  // 목록 배지(unreadCountBy): 모임 `bumpMeetingChatRoomSummaryOnSend`와 같이 전송 완료를 막지 않고 백그라운드로 갱신합니다.
   if (peerPk) {
     const pairs: unknown[] = [];
     const pushKey = (k: string) => {
@@ -734,11 +734,7 @@ export async function sendSocialChatTextMessage(
     if (peerPhone !== peerPk) pushKey(peerPhone);
     if (peerNormPk !== peerPk && peerNormPk !== peerPhone) pushKey(peerNormPk);
     pairs.push('updatedAt', serverTimestamp());
-    try {
-      await updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any));
-    } catch {
-      /* ignore */
-    }
+    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any)).catch(() => {});
   }
 
   if (Platform.OS !== 'web') {
@@ -917,26 +913,22 @@ export async function sendSocialChatImageMessage(
     }) as Record<string, unknown>,
   );
 
-  // 이미지도 unread 요약은 텍스트와 동일하게 peer +1
-  const peerPk = parsePeerFromSocialRoomId(rid, senderPk);
-  if (peerPk) {
+  // 이미지도 unread 요약: 텍스트 전송과 동일하게 전송 완료를 막지 않음
+  const peerPkImg = parsePeerFromSocialRoomId(rid, senderPk);
+  if (peerPkImg) {
     const pairs: unknown[] = [];
     const pushKey = (k: string) => {
       const key = k.trim();
       if (!key) return;
       pairs.push(new FieldPath('unreadCountBy', key), increment(1));
     };
-    const peerPhone = normalizePhoneUserId(peerPk) ?? peerPk;
+    const peerPhone = normalizePhoneUserId(peerPkImg) ?? peerPkImg;
     const peerNormPk = normalizeParticipantId(peerPhone) || peerPhone;
-    pushKey(peerPk);
-    if (peerPhone !== peerPk) pushKey(peerPhone);
-    if (peerNormPk !== peerPk && peerNormPk !== peerPhone) pushKey(peerNormPk);
+    pushKey(peerPkImg);
+    if (peerPhone !== peerPkImg) pushKey(peerPhone);
+    if (peerNormPk !== peerPkImg && peerNormPk !== peerPhone) pushKey(peerNormPk);
     pairs.push('updatedAt', serverTimestamp());
-    try {
-      await updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any));
-    } catch {
-      /* ignore */
-    }
+    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any)).catch(() => {});
   }
 
   if (!suppressRemote) {

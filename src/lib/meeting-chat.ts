@@ -53,6 +53,7 @@ import { getFirestoreDb, getMeetingById, MEETINGS_COLLECTION } from '@/src/lib/m
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { bumpMeetingChatRoomSummaryOnSend } from '@/src/lib/meeting-chat-rooms-summary';
+import { getUserProfile } from '@/src/lib/user-profile';
 
 export const MEETING_MESSAGES_SUBCOLLECTION = 'messages';
 
@@ -792,6 +793,8 @@ export async function sendMeetingChatTextMessage(
   if (!text) throw new Error('메시지를 입력해 주세요.');
 
   const senderId = normalizePhoneUserId(uid) ?? uid;
+  // Denormalization: 검색/리스트 렌더에서 Firestore 추가 Read를 막기 위해 sender meta를 메시지에 포함합니다.
+  const senderProfile = await getUserProfile(senderId).catch(() => null);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
   const msgRef = doc(ref);
   const batch = writeBatch(getFirestoreDb());
@@ -799,6 +802,8 @@ export async function sendMeetingChatTextMessage(
     msgRef,
     stripUndefinedDeep({
       senderId,
+      senderName: senderProfile?.nickname ?? null,
+      senderAvatarUrl: senderProfile?.profile_photo_url ?? null,
       text,
       replyTo:
         replyTo && replyTo.messageId?.trim()

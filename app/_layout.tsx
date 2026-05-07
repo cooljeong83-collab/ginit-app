@@ -17,6 +17,7 @@ import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
+import { ensureChatMessageFtsReady } from '@/src/watermelon/fts';
 
 /**
  * 릴리스(프로덕션)에서는 과도한 console.* 호출이 JS 스레드를 점유해
@@ -42,6 +43,9 @@ if (Platform.OS !== 'web' && !didScheduleSplashPrevent) {
   didScheduleSplashPrevent = true;
   void SplashScreen.preventAutoHideAsync().catch(() => {});
 }
+
+// Offline-first 검색 성능: 앱 부팅 시 FTS 테이블/트리거를 1회 준비합니다.
+void ensureChatMessageFtsReady().catch(() => {});
 
 /**
  * 전역 유저는 `UserSessionContext`(전화 PK, 구글 프로필 스냅샷)로 제공됩니다.

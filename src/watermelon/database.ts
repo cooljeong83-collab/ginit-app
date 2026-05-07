@@ -2,6 +2,11 @@ import { Platform } from 'react-native';
 import { Database } from '@nozbe/watermelondb';
 
 import { schema } from './schema';
+import { migrations } from './migrations';
+import { ChatMessage } from './models/ChatMessage';
+import { ChatRoom } from './models/ChatRoom';
+import { ChatSearchIndexChunk } from './models/ChatSearchIndexChunk';
+import { RecentSearch } from './models/RecentSearch';
 
 function createNativeDatabase(): Database {
   // 웹 번들에서 네이티브 SQLite를 끌어오지 않도록 require는 이 함수 안에만 둡니다.
@@ -9,12 +14,13 @@ function createNativeDatabase(): Database {
   const SQLiteAdapter = require('@nozbe/watermelondb/adapters/sqlite').default;
   const adapter = new SQLiteAdapter({
     schema,
+    migrations,
     dbName: 'ginit',
     jsi: true,
   });
   return new Database({
     adapter,
-    modelClasses: [],
+    modelClasses: [ChatRoom, ChatMessage, RecentSearch, ChatSearchIndexChunk],
   });
 }
 
