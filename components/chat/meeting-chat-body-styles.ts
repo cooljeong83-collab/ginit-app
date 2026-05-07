@@ -183,28 +183,28 @@ export const meetingChatBodyStyles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  /** 카카오식 묶음 사진(말풍선 없음). 둥근 모서리 밖으로 이미지가 나가지 않도록 외곽에서 클립 */
-  kakaoClusterOuter: {
+  /** 지닛 묶음 사진(말풍선 없음). 둥근 모서리 밖으로 이미지가 나가지 않도록 외곽에서 클립 */
+  ginitClusterOuter: {
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: '#e2e8f0',
     maxWidth: '100%',
   },
-  kakaoRow: {
+  ginitRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
     gap: 0,
     columnGap: 0,
     rowGap: 0,
   },
-  kakaoCol: {
+  ginitCol: {
     flexDirection: 'column',
     alignItems: 'stretch',
     gap: 0,
     columnGap: 0,
     rowGap: 0,
   },
-  kakaoGrid4: {
+  ginitGrid4: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignContent: 'flex-start',
@@ -212,35 +212,35 @@ export const meetingChatBodyStyles = StyleSheet.create({
     columnGap: 0,
     rowGap: 0,
   },
-  kakaoCellInner: {
+  ginitCellInner: {
     overflow: 'hidden',
     backgroundColor: '#e2e8f0',
   },
-  kakaoCellImage: {
+  ginitCellImage: {
     width: '100%',
     height: '100%',
   },
-  kakaoSingleCell: {
+  ginitSingleCell: {
     width: '100%',
     minHeight: 160,
     maxHeight: 320,
   },
-  kakaoMoreOverlay: {
+  ginitMoreOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.48)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  kakaoMoreText: {
+  ginitMoreText: {
     fontSize: 22,
     fontWeight: '800',
     color: '#fff',
   },
-  kakaoPlainMineWrap: {
+  ginitPlainMineWrap: {
     maxWidth: '78%',
     alignItems: 'flex-end',
   },
-  kakaoPlainOtherOuter: {
+  ginitPlainOtherOuter: {
     maxWidth: '78%',
     alignSelf: 'flex-start',
   },

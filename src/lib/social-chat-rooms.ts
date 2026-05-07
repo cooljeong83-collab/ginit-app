@@ -9,6 +9,7 @@ import {
   collection,
   doc,
   FieldPath,
+  increment,
   getDoc,
   getDocs,
   limit,
@@ -54,6 +55,8 @@ export type SocialChatRoomDoc = {
   readMessageIdBy?: Record<string, string | null | undefined>;
   /** 각 사용자별 마지막 읽음 시각(serverTimestamp). */
   readAtBy?: Record<string, unknown>;
+  /** 각 사용자별 읽지 않은 메시지 수(목록 배지용). */
+  unreadCountBy?: Record<string, number | null | undefined>;
 };
 
 export type SocialChatReplyTo = {
@@ -231,6 +234,11 @@ export function subscribeSocialChatRoom(
         return;
       }
       const data = snap.data() as Record<string, unknown>;
+      const unreadRaw = data.unreadCountBy ?? null;
+      const unreadCountBy =
+        unreadRaw && typeof unreadRaw === 'object' && !Array.isArray(unreadRaw)
+          ? (unreadRaw as Record<string, number | null | undefined>)
+          : undefined;
       onRoom({
         id: snap.id,
         isGroup: data.isGroup as boolean | undefined,
@@ -245,6 +253,7 @@ export function subscribeSocialChatRoom(
           data.readAtBy && typeof data.readAtBy === 'object' && !Array.isArray(data.readAtBy)
             ? (data.readAtBy as Record<string, unknown>)
             : undefined,
+        unreadCountBy,
       });
     },
     (err) => {
@@ -270,6 +279,7 @@ export async function updateSocialChatReadReceipt(roomId: string, myAppUserId: s
     if (!key) return;
     pairs.push(new FieldPath('readMessageIdBy', key), msgId);
     pairs.push(new FieldPath('readAtBy', key), serverTimestamp());
+    pairs.push(new FieldPath('unreadCountBy', key), 0);
   };
   pushKey(uid);
   // 기기/버전별 userId 포맷 차이를 흡수하기 위해 가능한 키를 함께 기록합니다.
@@ -708,6 +718,29 @@ export async function sendSocialChatTextMessage(
     }) as Record<string, unknown>,
   );
 
+  // 목록 배지(unreadCountBy)는 룸 문서에 요약값으로 유지합니다.
+  // 1:1 DM 룸이므로 peer는 roomId에서 결정적으로 추출 가능합니다.
+  const peerPk = parsePeerFromSocialRoomId(rid, senderPk);
+  if (peerPk) {
+    const pairs: unknown[] = [];
+    const pushKey = (k: string) => {
+      const key = k.trim();
+      if (!key) return;
+      pairs.push(new FieldPath('unreadCountBy', key), increment(1));
+    };
+    const peerPhone = normalizePhoneUserId(peerPk) ?? peerPk;
+    const peerNormPk = normalizeParticipantId(peerPhone) || peerPhone;
+    pushKey(peerPk);
+    if (peerPhone !== peerPk) pushKey(peerPhone);
+    if (peerNormPk !== peerPk && peerNormPk !== peerPhone) pushKey(peerNormPk);
+    pairs.push('updatedAt', serverTimestamp());
+    try {
+      await updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any));
+    } catch {
+      /* ignore */
+    }
+  }
+
   if (Platform.OS !== 'web') {
     void (async () => {
       try {
@@ -838,6 +871,7 @@ export async function sendSocialChatImageMessage(
   if (!uri) throw new Error('이미지를 선택해 주세요.');
 
   const senderId = normalizePhoneUserId(uid) ?? uid;
+  const senderPk = normalizeParticipantId(senderId) || senderId;
   const cap = (extras?.caption ?? '').trim().slice(0, 500);
   const naturalWidth = extras?.naturalWidth;
   const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
@@ -882,6 +916,28 @@ export async function sendSocialChatImageMessage(
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
+
+  // 이미지도 unread 요약은 텍스트와 동일하게 peer +1
+  const peerPk = parsePeerFromSocialRoomId(rid, senderPk);
+  if (peerPk) {
+    const pairs: unknown[] = [];
+    const pushKey = (k: string) => {
+      const key = k.trim();
+      if (!key) return;
+      pairs.push(new FieldPath('unreadCountBy', key), increment(1));
+    };
+    const peerPhone = normalizePhoneUserId(peerPk) ?? peerPk;
+    const peerNormPk = normalizeParticipantId(peerPhone) || peerPhone;
+    pushKey(peerPk);
+    if (peerPhone !== peerPk) pushKey(peerPhone);
+    if (peerNormPk !== peerPk && peerNormPk !== peerPhone) pushKey(peerNormPk);
+    pairs.push('updatedAt', serverTimestamp());
+    try {
+      await updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any));
+    } catch {
+      /* ignore */
+    }
+  }
 
   if (!suppressRemote) {
     const pv = cap ? `사진 · ${cap}` : '사진';

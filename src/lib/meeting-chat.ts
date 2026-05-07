@@ -52,6 +52,7 @@ import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { getFirestoreDb, getMeetingById, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { bumpMeetingChatRoomSummaryOnSend } from '@/src/lib/meeting-chat-rooms-summary';
 
 export const MEETING_MESSAGES_SUBCOLLECTION = 'messages';
 
@@ -792,8 +793,10 @@ export async function sendMeetingChatTextMessage(
 
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  await addDoc(
-    ref,
+  const msgRef = doc(ref);
+  const batch = writeBatch(getFirestoreDb());
+  batch.set(
+    msgRef,
     stripUndefinedDeep({
       senderId,
       text,
@@ -816,6 +819,19 @@ export async function sendMeetingChatTextMessage(
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
+  await batch.commit();
+
+  // 목록 unread 요약(참여자별 unreadCountBy)
+  const m = await getMeetingById(mid).catch(() => null);
+  if (m) {
+    void bumpMeetingChatRoomSummaryOnSend({
+      meetingId: mid,
+      senderId,
+      messageId: msgRef.id,
+      preview: text,
+      participantIds: m.participantIds ?? [],
+    }).catch(() => {});
+  }
   notifyMeetingChatParticipantsRemoteFireAndForget({
     meetingId: mid,
     senderId,
@@ -887,8 +903,10 @@ export async function sendMeetingChatImageMessage(
   );
 
   const msgRef = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  await addDoc(
-    msgRef,
+  const docRef = doc(msgRef);
+  const batch = writeBatch(getFirestoreDb());
+  batch.set(
+    docRef,
     stripUndefinedDeep({
       senderId,
       text: cap,
@@ -898,8 +916,19 @@ export async function sendMeetingChatImageMessage(
       createdAt: Timestamp.now(),
     }) as Record<string, unknown>,
   );
+  await batch.commit();
   if (!suppressNotify) {
     const imgPreview = cap ? `사진 · ${cap}` : '사진';
+    const m = await getMeetingById(mid).catch(() => null);
+    if (m) {
+      void bumpMeetingChatRoomSummaryOnSend({
+        meetingId: mid,
+        senderId,
+        messageId: docRef.id,
+        preview: imgPreview,
+        participantIds: m.participantIds ?? [],
+      }).catch(() => {});
+    }
     notifyMeetingChatParticipantsRemoteFireAndForget({
       meetingId: mid,
       senderId,

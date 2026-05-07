@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { type RefObject, useCallback } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
-import { MeetingChatKakaoImageCluster } from '@/components/chat/MeetingChatKakaoImageCluster';
+import { MeetingChatGinitImageCluster } from '@/components/chat/MeetingChatGinitImageCluster';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { MeetingChatSwipeToReply } from '@/components/chat/meeting-chat-swipe-to-reply';
 import {
@@ -180,10 +180,10 @@ export function useMeetingChatRenderItem({
         const unreadMsg = isAlbum ? meetingChatAlbumAnchorMessage(item) : singleMsg!;
         const unread = unreadCountForMessage(unreadMsg, unreadIdx);
         const timeSource = anchorMsg.createdAt;
-        const kakaoClusterMine = isAlbum ? (
-          <MeetingChatKakaoImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} alignEnd />
+        const imageClusterMine = isAlbum ? (
+          <MeetingChatGinitImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} alignEnd />
         ) : isImage && singleMsg?.imageUrl ? (
-          <MeetingChatKakaoImageCluster messages={[singleMsg]} onPressImage={openMeetingChatImageViewer} alignEnd />
+          <MeetingChatGinitImageCluster messages={[singleMsg]} onPressImage={openMeetingChatImageViewer} alignEnd />
         ) : isImage ? (
           <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
         ) : null;
@@ -198,10 +198,10 @@ export function useMeetingChatRenderItem({
               <Text style={styles.timeMine}>{formatChatTime(timeSource)}</Text>
             </View>
             {showKakaoPlain ? (
-              <View style={[styles.bubbleMineWrap, styles.kakaoPlainMineWrap]}>
+              <View style={[styles.bubbleMineWrap, styles.ginitPlainMineWrap]}>
                 {renderReply('mine')}
                 {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                {kakaoClusterMine}
+                {imageClusterMine}
                 {(isImage && caption) || (isAlbum && albumCaption) ? (
                   <Text style={styles.imageCaptionMine}>{isAlbum ? albumCaption : caption}</Text>
                 ) : null}
@@ -243,10 +243,10 @@ export function useMeetingChatRenderItem({
         );
       }
 
-      const kakaoClusterOther = isAlbum ? (
-        <MeetingChatKakaoImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} />
+      const imageClusterOther = isAlbum ? (
+        <MeetingChatGinitImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} />
       ) : isImage && singleMsg?.imageUrl ? (
-        <MeetingChatKakaoImageCluster messages={[singleMsg]} onPressImage={openMeetingChatImageViewer} />
+        <MeetingChatGinitImageCluster messages={[singleMsg]} onPressImage={openMeetingChatImageViewer} />
       ) : isImage ? (
         <Text style={styles.bubbleOtherText}>이미지를 불러올 수 없어요.</Text>
       ) : null;
@@ -291,10 +291,10 @@ export function useMeetingChatRenderItem({
             ) : null}
             <View style={styles.bubbleOtherWrap}>
               {showKakaoPlain ? (
-                <View style={[styles.bubbleOtherOuter, styles.kakaoPlainOtherOuter]}>
+                <View style={[styles.bubbleOtherOuter, styles.ginitPlainOtherOuter]}>
                   {renderReply('other')}
                   {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                  {kakaoClusterOther}
+                  {imageClusterOther}
                   {(isImage && caption) || (isAlbum && albumCaption) ? (
                     <Text style={styles.imageCaptionOther}>{isAlbum ? albumCaption : caption}</Text>
                   ) : null}

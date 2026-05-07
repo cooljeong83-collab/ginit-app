@@ -34,16 +34,15 @@ import type { LatLng } from '@/src/lib/geo-distance';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
-  fetchMeetingChatUnreadCount,
   searchMeetingChatMessages,
   subscribeMeetingChatLatestMessage,
 } from '@/src/lib/meeting-chat';
+import { subscribeMeetingChatRoomSummary, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
 import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
-  fetchSocialChatUnreadCount,
   searchSocialChatMessages,
   socialDmPreviewLine,
   socialDmRoomId,
@@ -75,6 +74,20 @@ function profileForCreatedBy(
 }
 
 type ChatKind = 'gather' | 'social';
+
+function coalesceUnreadCountByKeys(
+  map: Record<string, number | null | undefined> | null | undefined,
+  keys: (string | null | undefined)[],
+): number {
+  if (!map) return 0;
+  for (const k of keys) {
+    const key = String(k ?? '').trim();
+    if (!key) continue;
+    const v = map[key];
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+  }
+  return 0;
+}
 
 function latestMeetingChatMessageMs(msg: MeetingChatMessage | null | undefined): number {
   const ts = msg?.createdAt;
@@ -159,10 +172,11 @@ export default function ChatTab() {
   >({});
   const [hostProfiles, setHostProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [socialProfiles, setSocialProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [unreadByMeetingId, setUnreadByMeetingId] = useState<Record<string, number>>({});
   const [latestBySocialRoomId, setLatestBySocialRoomId] = useState<Record<string, SocialChatMessage | null | undefined>>({});
   const [socialRoomDocById, setSocialRoomDocById] = useState<Record<string, SocialChatRoomDoc | null | undefined>>({});
-  const [unreadBySocialRoomId, setUnreadBySocialRoomId] = useState<Record<string, number>>({});
+  const [meetingChatSummaryById, setMeetingChatSummaryById] = useState<Record<string, MeetingChatRoomSummaryDoc | null | undefined>>(
+    {},
+  );
 
   const signedIn = Boolean(userId?.trim());
 
@@ -300,29 +314,28 @@ export default function ChatTab() {
 
   const joinedMeetingRowKey = useMemo(() => joinedMeetings.map((m) => m.id).join('\u0001'), [joinedMeetings]);
 
-  const unreadRefreshSig = useMemo(() => {
-    const pk = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
-    const raw = userId?.trim() ?? '';
-    return joinedMeetings
-      .map((m) => {
-        const lm = latestByMeetingId[m.id];
-        const read = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap, lm?.id);
-        return `${m.id}:${lm?.id ?? ''}:${read}`;
-      })
-      .join('|');
-  }, [joinedMeetings, latestByMeetingId, meetingChatReadMessageIdMap, userId]);
-
   const socialRoomKey = useMemo(() => socialFriendDmRooms.map((r) => r.roomId).join('\u0001'), [socialFriendDmRooms]);
 
-  const gatherTabUnreadTotal = useMemo(
-    () => joinedMeetings.reduce((sum, m) => sum + (unreadByMeetingId[m.id] ?? 0), 0),
-    [joinedMeetings, unreadByMeetingId],
-  );
+  const gatherTabUnreadTotal = useMemo(() => {
+    const raw = userId?.trim() ?? '';
+    const pk = raw ? normalizeParticipantId(raw) : '';
+    return joinedMeetings.reduce((sum, m) => {
+      const doc = meetingChatSummaryById[m.id];
+      const unread = coalesceUnreadCountByKeys(doc?.unreadCountBy, [pk, raw]);
+      return sum + unread;
+    }, 0);
+  }, [joinedMeetings, meetingChatSummaryById, userId]);
 
-  const socialTabUnreadTotal = useMemo(
-    () => socialFriendDmRooms.reduce((sum, r) => sum + (unreadBySocialRoomId[r.roomId] ?? 0), 0),
-    [socialFriendDmRooms, unreadBySocialRoomId],
-  );
+  const socialTabUnreadTotal = useMemo(() => {
+    const raw = userId?.trim() ?? '';
+    const mePhone = normalizePhoneUserId(raw) ?? raw;
+    const mePk = raw ? normalizeParticipantId(raw) : '';
+    return socialFriendDmRooms.reduce((sum, r) => {
+      const doc = socialRoomDocById[r.roomId];
+      const unread = coalesceUnreadCountByKeys(doc?.unreadCountBy, [raw, mePhone, mePk]);
+      return sum + unread;
+    }, 0);
+  }, [socialFriendDmRooms, socialRoomDocById, userId]);
 
   const displayedSocialRooms = useMemo(() => {
     let rows = socialFriendDmRooms;
@@ -484,6 +497,21 @@ export default function ChatTab() {
   }, [joinedMeetingRowKey, signedIn]);
 
   useEffect(() => {
+    if (!signedIn || joinedMeetings.length === 0) {
+      setMeetingChatSummaryById({});
+      return () => {};
+    }
+    const unsubs = joinedMeetings.map((m) =>
+      subscribeMeetingChatRoomSummary(
+        m.id,
+        (doc) => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: doc })),
+        () => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: null })),
+      ),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [joinedMeetingRowKey, signedIn, joinedMeetings]);
+
+  useEffect(() => {
     if (!signedIn || socialFriendDmRooms.length === 0) {
       setLatestBySocialRoomId({});
       return () => {};
@@ -513,92 +541,7 @@ export default function ChatTab() {
     return () => unsubs.forEach((u) => u());
   }, [signedIn, socialRoomKey]);
 
-  const socialUnreadRefreshSig = useMemo(() => {
-    const raw = userId?.trim() ?? '';
-    const mePhone = normalizePhoneUserId(raw) ?? raw;
-    const mePk = raw ? normalizeParticipantId(raw) : '';
-    return socialFriendDmRooms
-      .map((r) => {
-        const lm = latestBySocialRoomId[r.roomId];
-        const doc = socialRoomDocById[r.roomId];
-        const map = doc?.readMessageIdBy ?? {};
-        const read =
-          map[raw] ??
-          map[mePhone] ??
-          (mePk ? map[mePk] : null) ??
-          '';
-        const ms = latestSocialChatMessageMs(lm);
-        return `${r.roomId}:${(lm?.id ?? '').trim()}:${ms}:${String(read ?? '')}`;
-      })
-      .join('|');
-  }, [socialFriendDmRooms, latestBySocialRoomId, socialRoomDocById, userId]);
-
-  useEffect(() => {
-    if (!signedIn || socialFriendDmRooms.length === 0) {
-      setUnreadBySocialRoomId({});
-      return;
-    }
-    const raw = userId?.trim() ?? '';
-    const mePhone = normalizePhoneUserId(raw) ?? raw;
-    const mePk = raw ? normalizeParticipantId(raw) : '';
-    let cancelled = false;
-    void (async () => {
-      const next: Record<string, number> = {};
-      for (const r of socialFriendDmRooms) {
-        if (cancelled) return;
-        const doc = socialRoomDocById[r.roomId];
-        const readMap = doc?.readMessageIdBy ?? {};
-        const atMap = doc?.readAtBy ?? {};
-        const readId =
-          readMap[raw] ??
-          readMap[mePhone] ??
-          (mePk ? readMap[mePk] : null) ??
-          null;
-        const readAt =
-          atMap[raw] ??
-          atMap[mePhone] ??
-          (mePk ? atMap[mePk] : null) ??
-          null;
-        try {
-          next[r.roomId] = await fetchSocialChatUnreadCount(r.roomId, raw, readId, readAt, { maxDocsScanned: 600 });
-        } catch {
-          next[r.roomId] = 0;
-        }
-      }
-      if (!cancelled) setUnreadBySocialRoomId(next);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [signedIn, socialUnreadRefreshSig]);
-
-  useEffect(() => {
-    if (!signedIn || joinedMeetings.length === 0) {
-      setUnreadByMeetingId({});
-      return;
-    }
-    const pk = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
-    const raw = userId?.trim() ?? '';
-    let cancelled = false;
-    void (async () => {
-      const next: Record<string, number> = {};
-      for (const m of joinedMeetings) {
-        if (cancelled) return;
-        const readId = effectiveMeetingChatReadId(m, pk, raw, meetingChatReadMessageIdMap, latestByMeetingId[m.id]?.id);
-        const readForCount =
-          (readId || '').trim() || (latestByMeetingId[m.id]?.id ?? '').trim() || null;
-        try {
-          next[m.id] = await fetchMeetingChatUnreadCount(m.id, readForCount);
-        } catch {
-          next[m.id] = 0;
-        }
-      }
-      if (!cancelled) setUnreadByMeetingId(next);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [signedIn, unreadRefreshSig]);
+  // NOTE: unread는 요약 문서(unreadCountBy) 기반으로만 표시합니다.
 
   useEffect(() => {
     const hosts = [
@@ -911,8 +854,8 @@ export default function ChatTab() {
                   gatherSearchBusy,
                   gatherMsgHits: gatherMessageMatchIds.size,
                   latestByMeetingId,
-                  unreadByMeetingId,
                   hostProfiles,
+                  meetingChatSummaryById,
                 }}
                 keyExtractor={(m) => m.id}
                 style={styles.listFlex}
@@ -934,6 +877,9 @@ export default function ChatTab() {
                 onEndReachedThreshold={0.6}
                 renderItem={({ item: m }) => {
                   const host = profileForCreatedBy(hostProfiles, m.createdBy);
+                  const raw = userId?.trim() ?? '';
+                  const pk = raw ? normalizeParticipantId(raw) : '';
+                  const unread = coalesceUnreadCountByKeys(meetingChatSummaryById[m.id]?.unreadCountBy, [pk, raw]);
                   return (
                     <ChatMeetingListRow
                       meeting={m}
@@ -941,7 +887,7 @@ export default function ChatTab() {
                       hostNickname={host?.nickname ?? '주관자'}
                       hostWithdrawn={isUserProfileWithdrawn(host)}
                       latestMessage={latestByMeetingId[m.id]}
-                      unreadCount={unreadByMeetingId[m.id] ?? 0}
+                      unreadCount={unread}
                       onPress={() => router.push(`/meeting-chat/${m.id}`)}
                     />
                   );
@@ -986,7 +932,10 @@ export default function ChatTab() {
                   const loadingPreview = latest === undefined;
                   const preview = hasMessage ? socialDmPreviewLine(latest) : '대화를 시작해 보세요.';
                   const rightTime = hasMessage ? formatRightTimeFromMs(latestSocialChatMessageMs(latest)) : '';
-                  const unread = unreadBySocialRoomId[row.roomId] ?? 0;
+                  const raw = userId?.trim() ?? '';
+                  const mePhone = normalizePhoneUserId(raw) ?? raw;
+                  const mePk = raw ? normalizeParticipantId(raw) : '';
+                  const unread = coalesceUnreadCountByKeys(socialRoomDocById[row.roomId]?.unreadCountBy, [raw, mePhone, mePk]);
                   return (
                     <Pressable
                       onPress={() =>

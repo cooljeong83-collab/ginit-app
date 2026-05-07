@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Image } from 'expo-image';
 import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -33,13 +33,13 @@ function Cell({
   return (
     <Pressable
       onPress={() => onPress(msg)}
-      style={({ pressed }) => [styles.kakaoCellInner, style, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.ginitCellInner, style, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel="사진 크게 보기">
       {u ? (
         <Image
           source={{ uri: u }}
-          style={styles.kakaoCellImage}
+          style={styles.ginitCellImage}
           contentFit={imageContentFit}
           onLoad={(e) => {
             const src = (e as any)?.source;
@@ -55,9 +55,9 @@ function Cell({
 }
 
 /**
- * 카카오톡 스타일: 단일은 비율 유지(contain), 다장은 한 덩어리 콜라주.
+ * 지닛 스타일: 단일은 비율 유지(contain), 다장은 한 덩어리 콜라주.
  */
-export function MeetingChatKakaoImageCluster({
+export function MeetingChatGinitImageCluster({
   messages,
   onPressImage,
   alignEnd,
@@ -76,7 +76,7 @@ export function MeetingChatKakaoImageCluster({
   const fitCollage: 'contain' | 'cover' = 'cover';
 
   const outer: StyleProp<ViewStyle> = [
-    styles.kakaoClusterOuter,
+    styles.ginitClusterOuter,
     { width: CLUSTER_W, alignSelf: alignEnd ? 'flex-end' : 'flex-start' },
   ];
 
@@ -84,25 +84,26 @@ export function MeetingChatKakaoImageCluster({
     const m = imgs[0]!;
     const ratio = singleRatioById[m.id];
     const computedHeight = typeof ratio === 'number' && ratio > 0 ? CLUSTER_W / ratio : null;
-    const singleCellStyle: StyleProp<ViewStyle> = useMemo(() => {
-      if (typeof computedHeight === 'number' && Number.isFinite(computedHeight) && computedHeight > 0) {
-        // contain 유지 + 컨테이너를 사진 비율로 맞춰 레터박스(위아래 공백) 제거
-        return { width: CLUSTER_W, height: computedHeight };
-      }
-      return styles.kakaoSingleCell;
-    }, [computedHeight]);
+    const singleCellStyle: StyleProp<ViewStyle> =
+      typeof computedHeight === 'number' && Number.isFinite(computedHeight) && computedHeight > 0
+        ? // contain 유지 + 컨테이너를 사진 비율로 맞춰 레터박스(위아래 공백) 제거
+          { width: CLUSTER_W, height: computedHeight }
+        : styles.ginitSingleCell;
 
-    const onNaturalSize = useCallback(
-      (w: number, h: number) => {
-        const r = w > 0 && h > 0 ? w / h : 0;
-        if (!Number.isFinite(r) || r <= 0) return;
-        setSingleRatioById((prev) => (prev[m.id] === r ? prev : { ...prev, [m.id]: r }));
-      },
-      [m.id],
-    );
+    const onNaturalSize = (w: number, h: number) => {
+      const r = w > 0 && h > 0 ? w / h : 0;
+      if (!Number.isFinite(r) || r <= 0) return;
+      setSingleRatioById((prev) => (prev[m.id] === r ? prev : { ...prev, [m.id]: r }));
+    };
     return (
       <View style={outer}>
-        <Cell msg={m} onPress={onPressImage} style={singleCellStyle} imageContentFit={fitSingle} onNaturalSize={onNaturalSize} />
+        <Cell
+          msg={m}
+          onPress={onPressImage}
+          style={singleCellStyle}
+          imageContentFit={fitSingle}
+          onNaturalSize={onNaturalSize}
+        />
       </View>
     );
   }
@@ -112,19 +113,9 @@ export function MeetingChatKakaoImageCluster({
     const wCell = CLUSTER_W / 2;
     return (
       <View style={outer}>
-        <View style={[styles.kakaoRow, { gap: GAP }]}>
-          <Cell
-            msg={imgs[0]!}
-            onPress={onPressImage}
-            style={{ width: wCell, height: h }}
-            imageContentFit={fitCollage}
-          />
-          <Cell
-            msg={imgs[1]!}
-            onPress={onPressImage}
-            style={{ width: wCell, height: h }}
-            imageContentFit={fitCollage}
-          />
+        <View style={[styles.ginitRow, { gap: GAP }]}>
+          <Cell msg={imgs[0]!} onPress={onPressImage} style={{ width: wCell, height: h }} imageContentFit={fitCollage} />
+          <Cell msg={imgs[1]!} onPress={onPressImage} style={{ width: wCell, height: h }} imageContentFit={fitCollage} />
         </View>
       </View>
     );
@@ -133,14 +124,14 @@ export function MeetingChatKakaoImageCluster({
   if (n === 3) {
     return (
       <View style={outer}>
-        <View style={[styles.kakaoRow, { width: CLUSTER_W, height: CLUSTER_W, gap: GAP }]}>
+        <View style={[styles.ginitRow, { width: CLUSTER_W, height: CLUSTER_W, gap: GAP }]}>
           <Cell
             msg={imgs[0]!}
             onPress={onPressImage}
             style={{ flex: 2, minWidth: 0, minHeight: 0 }}
             imageContentFit={fitCollage}
           />
-          <View style={[styles.kakaoCol, { flex: 1, gap: GAP }]}>
+          <View style={[styles.ginitCol, { flex: 1, gap: GAP }]}>
             <Cell msg={imgs[1]!} onPress={onPressImage} style={{ flex: 1, minHeight: 0 }} imageContentFit={fitCollage} />
             <Cell msg={imgs[2]!} onPress={onPressImage} style={{ flex: 1, minHeight: 0 }} imageContentFit={fitCollage} />
           </View>
@@ -154,7 +145,7 @@ export function MeetingChatKakaoImageCluster({
   if (n === 4) {
     return (
       <View style={outer}>
-        <View style={[styles.kakaoGrid4, { width: CLUSTER_W, height: CLUSTER_W, gap: GAP }]}>
+        <View style={[styles.ginitGrid4, { width: CLUSTER_W, height: CLUSTER_W, gap: GAP }]}>
           {imgs.map((m) => (
             <Cell key={m.id} msg={m} onPress={onPressImage} style={{ width: cell, height: cell }} imageContentFit={fitCollage} />
           ))}
@@ -166,7 +157,7 @@ export function MeetingChatKakaoImageCluster({
   const extra = n - 4;
   return (
     <View style={outer}>
-      <View style={[styles.kakaoGrid4, { width: CLUSTER_W, height: CLUSTER_W, gap: GAP }]}>
+      <View style={[styles.ginitGrid4, { width: CLUSTER_W, height: CLUSTER_W, gap: GAP }]}>
         {imgs.slice(0, 3).map((m) => (
           <Cell key={m.id} msg={m} onPress={onPressImage} style={{ width: cell, height: cell }} imageContentFit={fitCollage} />
         ))}
@@ -177,8 +168,8 @@ export function MeetingChatKakaoImageCluster({
           imageContentFit={fitCollage}
           overlay={
             extra > 0 ? (
-              <View style={styles.kakaoMoreOverlay} pointerEvents="none">
-                <Text style={styles.kakaoMoreText}>+{extra}</Text>
+              <View style={styles.ginitMoreOverlay} pointerEvents="none">
+                <Text style={styles.ginitMoreText}>+{extra}</Text>
               </View>
             ) : null
           }
@@ -187,3 +178,4 @@ export function MeetingChatKakaoImageCluster({
     </View>
   );
 }
+

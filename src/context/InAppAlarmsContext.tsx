@@ -48,19 +48,18 @@ import {
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
-import { fetchMeetingChatUnreadCount, subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
-import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer';
+import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
+import { clearMeetingChatUnreadForUser, subscribeMeetingChatRoomSummary, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
-  fetchSocialChatReadPointersForUser,
-  fetchSocialChatUnreadCount,
   socialDmPreviewLine,
   socialMessageTimeMs,
   subscribeMySocialChatRooms,
+  subscribeSocialChatRoom,
   subscribeSocialChatLatestMessage,
 } from '@/src/lib/social-chat-rooms';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
@@ -155,6 +154,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [friendAcceptPeerNickById, setFriendAcceptPeerNickById] = useState<Map<string, string>>(() => new Map());
   const [socialRooms, setSocialRooms] = useState<SocialChatRoomSummary[]>([]);
   const [socialLatestByRoomId, setSocialLatestByRoomId] = useState<Record<string, SocialChatMessage | null | undefined>>(
+    {},
+  );
+  const [socialRoomDocById, setSocialRoomDocById] = useState<Record<string, import('@/src/lib/social-chat-rooms').SocialChatRoomDoc | null | undefined>>(
+    {},
+  );
+  const [meetingChatSummaryById, setMeetingChatSummaryById] = useState<Record<string, MeetingChatRoomSummaryDoc | null | undefined>>(
     {},
   );
   const [socialPeerNickByRoomId, setSocialPeerNickByRoomId] = useState<Map<string, string>>(() => new Map());
@@ -652,7 +657,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         const latest = latestById[m.id];
         const latestId = (latest?.id ?? '').trim();
         const cur = chatReadMessageId[m.id];
-        /** 소셜과 동일: `''` 고착 시 `fetchMeetingChatUnreadCount`가 방 전체를 미읽음으로 집계할 수 있습니다. */
+        /** 소셜과 동일: `''` 고착 시 배지/헤드업 로직이 과대 반응할 수 있어, 최신 id로 베이스라인을 잡습니다. */
         if (cur === undefined || cur === '') {
           if (chatReadMessageId[m.id] !== latestId) {
             chatReadMessageId[m.id] = latestId;
@@ -981,88 +986,72 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     }).length;
   }, [friendInbox, readState.friendRequestDismissedIds]);
 
-  const chatTabUnreadRefreshSig = useMemo(() => {
-    const uid = userId?.trim();
-    if (!uid) return '';
-    const joined = filterJoinedMeetings(meetings, userId);
-    const pk = normalizeParticipantId(uid);
-    const raw = uid;
-    const localMap = readState.chatReadMessageId;
-    const meetingSig = joined
-      .map((m) => {
-        const lm = latestById[m.id];
-        const read = effectiveMeetingChatReadId(m, pk, raw, localMap, lm?.id);
-        return `${m.id}:${lm?.id ?? ''}:${read}`;
-      })
-      .join('|');
-    /** 모임만 있을 때와 달리, 친구 DM 읽음/최신만 바뀌어도 배지 집계 effect가 돌아가야 함 */
-    const socialSig = socialRooms
-      .map((sr) => {
-        const rid = sr.roomId.trim();
-        if (!rid) return '';
-        const lm = socialLatestByRoomId[rid];
-        const read = localMap[rid] ?? '';
-        return `${rid}:${lm?.id?.trim() ?? ''}:${read}`;
-      })
-      .filter(Boolean)
-      .join('|');
-    return `${meetingSig}\u0003${socialSig}`;
-  }, [meetings, userId, latestById, readState.chatReadMessageId, socialRooms, socialLatestByRoomId]);
+  // NOTE: chat tab unread total은 요약 문서(unreadCountBy) 기반으로만 계산합니다.
 
+  // meeting chat room summaries (unreadCountBy)
   useEffect(() => {
-    if (!persistReady || !userId?.trim()) {
+    const uid = userId?.trim() ?? '';
+    if (!persistReady || !uid) {
+      setMeetingChatSummaryById({});
+      return () => {};
+    }
+    const joined = filterJoinedMeetings(meetings, uid);
+    if (joined.length === 0) {
+      setMeetingChatSummaryById({});
+      return () => {};
+    }
+    const unsubs = joined.map((m) =>
+      subscribeMeetingChatRoomSummary(
+        m.id,
+        (doc) => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: doc })),
+        () => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: null })),
+      ),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [persistReady, userId, meetings]);
+
+  // social chat room docs (unreadCountBy)
+  useEffect(() => {
+    const uid = userId?.trim() ?? '';
+    if (!persistReady || !uid || socialRooms.length === 0) {
+      setSocialRoomDocById({});
+      return () => {};
+    }
+    const unsubs = socialRooms.map((r) =>
+      subscribeSocialChatRoom(
+        r.roomId,
+        (doc) => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: doc })),
+        () => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: null })),
+      ),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [persistReady, userId, socialRooms]);
+
+  // chat tab unread total: use summaries instead of message scans
+  useEffect(() => {
+    const uid = userId?.trim() ?? '';
+    if (!persistReady || !uid) {
       setChatTabUnreadTotal(0);
       return;
     }
-    const joined = filterJoinedMeetings(meetings, userId);
-    const pk = normalizeParticipantId(userId.trim());
-    const raw = userId.trim();
-    const localMap = readState.chatReadMessageId;
-    let cancelled = false;
-    void (async () => {
-      let sum = 0;
-      for (const m of joined) {
-        if (cancelled) return;
-        const lm = latestById[m.id];
-        const readId = effectiveMeetingChatReadId(m, pk, raw, localMap, lm?.id);
-        const readForCount = (readId || '').trim() || (lm?.id ?? '').trim() || null;
-        try {
-          sum += await fetchMeetingChatUnreadCount(m.id, readForCount);
-        } catch {
-          /* 한 방 실패는 건너뜀 */
-        }
-      }
-      // 친구(1:1) 채팅 unread도 합산
-      for (const sr of socialRooms) {
-        if (cancelled) return;
-        const rid = sr.roomId.trim();
-        if (!rid) continue;
-        const latest = socialLatestByRoomId[rid];
-        const latestId = latest?.id?.trim() ?? '';
-        // 최신이 없으면 unread도 0
-        if (!latestId) continue;
-        const localRead = (localMap[rid] ?? '').trim();
-        const { readId: serverReadId, readAt } = await fetchSocialChatReadPointersForUser(rid, raw);
-        const readForCount = (serverReadId && serverReadId.trim()) || localRead || null;
-        try {
-          sum += await fetchSocialChatUnreadCount(rid, raw, readForCount, readAt, { maxDocsScanned: 600 });
-        } catch {
-          /* 한 방 실패는 건너뜀 */
-        }
-      }
-      if (!cancelled) {
-        // ginitNotifyDbg('InAppAlarms', 'chat_tab_unread_computed', {
-        //   sum,
-        //   meetingRooms: joined.length,
-        //   socialRooms: socialRooms.length,
-        // });
-        setChatTabUnreadTotal(sum);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [persistReady, userId, meetings, chatTabUnreadRefreshSig, socialRooms, socialLatestByRoomId]);
+    const pk = normalizeParticipantId(uid) ?? uid;
+    const phone = uid.includes('+') ? uid : (uid.trim() || '');
+    let sum = 0;
+    const joined = filterJoinedMeetings(meetings, uid);
+    for (const m of joined) {
+      const doc = meetingChatSummaryById[m.id];
+      const map = doc?.unreadCountBy ?? {};
+      const v = (map[pk] ?? map[uid] ?? map[phone] ?? 0) as number;
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) sum += v;
+    }
+    for (const r of socialRooms) {
+      const doc = socialRoomDocById[r.roomId];
+      const map = doc?.unreadCountBy ?? {};
+      const v = (map[uid] ?? map[pk] ?? 0) as number;
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) sum += v;
+    }
+    setChatTabUnreadTotal(sum);
+  }, [persistReady, userId, meetings, socialRooms, meetingChatSummaryById, socialRoomDocById]);
 
   const markChatReadUpTo = useCallback((meetingId: string, messageId: string | undefined) => {
     const mid = meetingId.trim();
@@ -1074,6 +1063,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       ...p,
       chatReadMessageId: { ...p.chatReadMessageId, [mid]: id },
     }));
+    const uid = userIdRef.current?.trim() ?? '';
+    if (uid) {
+      void clearMeetingChatUnreadForUser(mid, uid).catch(() => {});
+    }
   }, []);
 
   const syncMeetingAckFromMeeting = useCallback((meeting: Meeting) => {
