@@ -31,6 +31,7 @@ import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
   deleteSocialChatImageMessageBestEffort,
+  deleteSocialChatTextMessageBestEffort,
   sendSocialChatImageMessagesBatch,
   sendSocialChatTextMessage,
   socialMessagesToMeetingNewestFirst,
@@ -368,6 +369,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     unreadCountForMessage,
     jumpToRepliedMessage,
     setReplyTo,
+    deleteMessageBestEffort: async (msg) => {
+      const rid = roomId.trim();
+      if (!rid || !msg?.id) return;
+      if (msg.kind === 'image' && msg.imageUrl?.trim()) {
+        await deleteSocialChatImageMessageBestEffort(rid, msg.id, msg.imageUrl.trim());
+        return;
+      }
+      await deleteSocialChatTextMessageBestEffort(rid, msg.id);
+    },
     onOpenUserProfile: setPeerProfileUserIdBridge,
     openMeetingChatImageViewer,
     listRef,

@@ -75,7 +75,7 @@ import {
   meetingOverlapsUserConfirmedSlots,
 } from '@/src/lib/meeting-schedule-overlap';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { MEETING_CAPACITY_UNLIMITED, getMeetingRecruitmentPhase, meetingParticipantCount } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
@@ -975,9 +975,43 @@ export default function FeedScreen() {
             lockRelease();
             return;
           }
+          // 정원 마감(이미 가득 찬 모임)은 목록에서 진입을 막습니다(이미 참여/호스트면 예외).
+          const cap = m.capacity;
+          const full =
+            typeof cap === 'number' &&
+            cap > 0 &&
+            cap < MEETING_CAPACITY_UNLIMITED &&
+            meetingParticipantCount(m) >= cap;
+          const ns = normalizeParticipantId(pk) ?? pk;
+          const host = normalizeParticipantId(m.createdBy?.trim() ?? '') ?? '';
+          const isHost = Boolean(ns && host && ns === host);
+          const isJoined = isUserJoinedMeeting(m, userId);
+          if (full && !isHost && !isJoined) {
+            Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 들어갈 수 없어요.');
+            clearTimeout(tRelease);
+            lockRelease();
+            return;
+          }
           router.push(`/meeting/${m.id}`);
         } catch {
           // 네트워크 실패 등으로 프로필을 못 읽어도, "미인증"으로 단정해 막지 않습니다.
+          const cap = m.capacity;
+          const full =
+            typeof cap === 'number' &&
+            cap > 0 &&
+            cap < MEETING_CAPACITY_UNLIMITED &&
+            meetingParticipantCount(m) >= cap;
+          const pk2 = userId?.trim() ?? '';
+          const ns = pk2 ? normalizeParticipantId(pk2) ?? pk2 : '';
+          const host = normalizeParticipantId(m.createdBy?.trim() ?? '') ?? '';
+          const isHost = Boolean(ns && host && ns === host);
+          const isJoined = isUserJoinedMeeting(m, userId);
+          if (full && !isHost && !isJoined) {
+            Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 들어갈 수 없어요.');
+            clearTimeout(tRelease);
+            lockRelease();
+            return;
+          }
           router.push(`/meeting/${m.id}`);
         }
       })();

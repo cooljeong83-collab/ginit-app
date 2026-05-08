@@ -1024,3 +1024,22 @@ export async function deleteSocialChatImageMessageBestEffort(
     /* best-effort */
   }
 }
+
+/** 소셜 DM 텍스트 메시지 1건 삭제(소프트 삭제). */
+export async function deleteSocialChatTextMessageBestEffort(roomId: string, messageId: string): Promise<void> {
+  const rid = typeof roomId === 'string' ? roomId.trim() : String(roomId ?? '').trim();
+  const msgId = typeof messageId === 'string' ? messageId.trim() : String(messageId ?? '').trim();
+  if (!rid) throw new Error('채팅방 정보가 없습니다.');
+  if (!msgId) throw new Error('메시지 정보가 없습니다.');
+
+  const db = getFirebaseFirestore();
+  const msgRef = doc(db, CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION, msgId);
+  await updateDoc(msgRef, {
+    kind: 'system',
+    senderId: null,
+    text: '메시지가 삭제되었습니다.',
+    imageUrl: null,
+    linkPreview: null,
+    deletedAt: serverTimestamp(),
+  } as Record<string, unknown>);
+}

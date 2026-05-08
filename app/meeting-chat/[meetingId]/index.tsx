@@ -56,6 +56,7 @@ import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
     deleteMeetingChatImageMessageBestEffort,
+    deleteMeetingChatTextMessageBestEffort,
     fetchOlderMeetingChatPagesUntilTargetMessageId,
     searchMeetingChatMessages,
     sendMeetingChatImageMessagesBatch,
@@ -916,6 +917,15 @@ export default function MeetingChatRoomScreen() {
     unreadCountForMessage,
     jumpToRepliedMessage,
     setReplyTo,
+    deleteMessageBestEffort: async (msg) => {
+      const mid = meetingId.trim();
+      if (!mid || !msg?.id) return;
+      if (msg.kind === 'image' && msg.imageUrl?.trim()) {
+        await deleteMeetingChatImageMessageBestEffort(mid, msg.id, msg.imageUrl.trim());
+        return;
+      }
+      await deleteMeetingChatTextMessageBestEffort(mid, msg.id);
+    },
     onOpenUserProfile: openUserProfile,
     openMeetingChatImageViewer,
     listRef,

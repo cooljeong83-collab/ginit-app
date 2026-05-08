@@ -2,10 +2,11 @@
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { type RefObject, useCallback, useMemo, useState } from 'react';
-import { Pressable, Share, Text, View } from 'react-native';
+import { Alert, Pressable, Share, Text, View } from 'react-native';
 
 import { MeetingChatGinitImageCluster } from '@/components/chat/MeetingChatGinitImageCluster';
 import { MeetingChatBubbleActionMenu } from '@/components/chat/MeetingChatBubbleActionMenu';
+import type { MeetingChatBubbleActionMenuAction } from '@/components/chat/MeetingChatBubbleActionMenu';
 import { MeetingChatLinkPreviewCard } from '@/components/chat/MeetingChatLinkPreviewCard';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { MeetingChatSwipeToReply } from '@/components/chat/meeting-chat-swipe-to-reply';
@@ -64,6 +65,8 @@ export type MeetingChatRenderItemDeps = {
   unreadCountForMessage: (message: MeetingChatMessage, messageIndex: number) => number;
   jumpToRepliedMessage: (replyMessageId: string) => void | Promise<void>;
   setReplyTo: (v: MeetingChatMessage['replyTo']) => void;
+  /** 소프트 삭제(best-effort). meeting/social 컨텍스트에 맞게 호출부에서 주입 */
+  deleteMessageBestEffort?: (msg: MeetingChatMessage) => void | Promise<void>;
   onOpenUserProfile: (id: string) => void;
   openMeetingChatImageViewer: (item: MeetingChatMessage) => void;
   listRef: RefObject<unknown>;
@@ -80,6 +83,7 @@ export function useMeetingChatRenderItem({
   unreadCountForMessage,
   jumpToRepliedMessage,
   setReplyTo,
+  deleteMessageBestEffort,
   onOpenUserProfile,
   openMeetingChatImageViewer,
   listRef,
@@ -110,6 +114,8 @@ export function useMeetingChatRenderItem({
     const anchorMsg =
       row.type === 'message' ? row.message : meetingChatAlbumAnchorMessage(row);
     const itemForReply = anchorMsg;
+    const sid = rowSenderNorm(row);
+    const canDelete = Boolean(deleteMessageBestEffort && myId && sid && sid === myId && anchorMsg.kind !== 'system');
     return [
       {
         key: 'share' as const,
@@ -137,8 +143,26 @@ export function useMeetingChatRenderItem({
         label: '복사',
         onPress: () => copyMeetingChatListRowToClipboard(row),
       },
-    ];
-  }, [menu.row, setReplyTo]);
+      ...(canDelete
+        ? ([
+            {
+              key: 'delete' as const,
+              label: '삭제',
+              onPress: () => {
+                Alert.alert('삭제', '이 메시지를 삭제할까요?', [
+                  { text: '취소', style: 'cancel' },
+                  {
+                    text: '삭제',
+                    style: 'destructive',
+                    onPress: () => void deleteMessageBestEffort?.(anchorMsg),
+                  },
+                ]);
+              },
+            },
+          ] as const)
+        : []),
+    ] satisfies MeetingChatBubbleActionMenuAction[];
+  }, [menu.row, setReplyTo, deleteMessageBestEffort, myId]);
 
   return useCallback(
     ({ item, index }: { item: MeetingChatListRow; index: number }) => {

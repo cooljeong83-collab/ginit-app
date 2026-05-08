@@ -307,6 +307,28 @@ export async function deleteMeetingChatImageMessageBestEffort(
   }
 }
 
+/**
+ * 텍스트 메시지 1건 삭제(소프트 삭제).
+ * - 문서는 유지하고, 시스템 메시지로 치환합니다.
+ */
+export async function deleteMeetingChatTextMessageBestEffort(meetingId: string, messageId: string): Promise<void> {
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  const msgId = typeof messageId === 'string' ? messageId.trim() : String(messageId ?? '').trim();
+  if (!mid) throw new Error('모임 정보가 없습니다.');
+  if (!msgId) throw new Error('메시지 정보가 없습니다.');
+
+  const db = getFirestoreDb();
+  const msgRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, msgId);
+  await updateDoc(msgRef, {
+    kind: 'system',
+    senderId: null,
+    text: '메시지가 삭제되었습니다.',
+    imageUrl: null,
+    linkPreview: null,
+    deletedAt: serverTimestamp(),
+  } as Record<string, unknown>);
+}
+
 const SEARCH_PAGE = 120;
 
 /**

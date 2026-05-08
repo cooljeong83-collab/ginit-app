@@ -1,10 +1,10 @@
 
-import { Image } from 'expo-image';
 import type { Timestamp } from 'firebase/firestore';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
+import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
@@ -80,9 +80,9 @@ type Props = {
 
 export function ChatMeetingListRow({
   meeting,
-  hostPhotoUrl,
-  hostNickname,
-  hostWithdrawn,
+  hostPhotoUrl: _hostPhotoUrl,
+  hostNickname: _hostNickname,
+  hostWithdrawn: _hostWithdrawn,
   latestMessage,
   unreadCount = 0,
   onPress,
@@ -90,6 +90,9 @@ export function ChatMeetingListRow({
   const title = meeting.title?.trim() || '모임';
   const place = placeLine(meeting);
   const pCount = meetingParticipantCount(meeting);
+  const capacity = typeof meeting.capacity === 'number' && meeting.capacity > 0 ? meeting.capacity : 0;
+  const capFill = capacity > 0 ? Math.min(1, Math.max(0, pCount / capacity)) : 0;
+  const showCapacityBar = capacity > 0;
 
   const hasMessage = latestMessage != null;
   const loadingPreview = latestMessage === undefined;
@@ -105,7 +108,7 @@ export function ChatMeetingListRow({
 
   const rightTime = hasMessage ? formatRightTime(latestMessage.createdAt) : '';
 
-  const initial = (hostNickname?.trim() || '모').slice(0, 1);
+  const categoryEmoji = categoryEmojiForMeeting(meeting);
 
   return (
     <Pressable
@@ -115,32 +118,24 @@ export function ChatMeetingListRow({
       style={({ pressed }) => [styles.pressableRow, pressed && styles.pressablePressed]}>
       <View style={styles.zoneA}>
         <View style={styles.symbolCol}>
-          <View style={styles.hostBubble}>
-            <View style={styles.hostBubbleMedia}>
-              {hostWithdrawn ? (
-                <View style={styles.hostWithdrawnInner}>
-                  <GinitSymbolicIcon name="person" size={24} color="#94a3b8" />
-                </View>
-              ) : hostPhotoUrl ? (
-                <Image
-                  source={{ uri: hostPhotoUrl }}
-                  style={styles.hostBubbleImg}
-                  contentFit="cover"
-                  cachePolicy="disk"
-                  recyclingKey={hostPhotoUrl}
-                />
-              ) : (
-                <View style={styles.hostFallback}>
-                  <Text style={styles.hostFallbackText}>{initial}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.hostAvatarFooterBand} pointerEvents="none">
-              <Text style={styles.capacityCountLabel} numberOfLines={1}>
-                {pCount}명
+          <View style={styles.meetingThumbRing} accessibilityLabel="모임 썸네일">
+            <MeetingListThumbnailImage meeting={meeting} style={styles.meetingThumbImg} recyclingKey={meeting.id} />
+            <View style={styles.meetingThumbCornerEmojiBadge} accessibilityLabel="카테고리">
+              <Text style={styles.meetingThumbCornerEmojiText} allowFontScaling={false}>
+                {categoryEmoji}
               </Text>
             </View>
           </View>
+          {showCapacityBar ? (
+            <View style={styles.capRow} accessibilityLabel={`참여 인원 ${pCount}명, 최대 ${capacity}명`}>
+              <View style={styles.capTrack}>
+                <View style={[styles.capFill, { width: `${Math.round(capFill * 100)}%` }]} />
+              </View>
+              <Text style={styles.capLabel} numberOfLines={1}>
+                {`${pCount}/${capacity}`}
+              </Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.zoneAMain}>
           <View style={styles.titleRow}>
@@ -197,57 +192,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 1,
   },
-  /** 채팅 탭 1:1 `socialAvatarBubble`과 동일 크기·테두리 */
-  hostBubble: {
+  /** 모임 목록 썸네일과 동일 톤(크기만 축소) */
+  meetingThumbRing: {
     width: 52,
     height: 52,
-    borderRadius: 19,
+    borderRadius: 8,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
-    backgroundColor: GinitTheme.colors.surfaceStrong,
+    backgroundColor: GinitTheme.colors.bgAlt,
     position: 'relative',
-  },
-  hostBubbleMedia: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  hostBubbleImg: {
-    width: '100%',
-    height: '100%',
-  },
-  hostWithdrawnInner: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostFallback: {
+  meetingThumbImg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 82, 204, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 7,
   },
-  hostFallbackText: {
-    fontSize: 21,
-    fontWeight: '600',
-    color: GinitTheme.themeMainColor,
-  },
-  hostAvatarFooterBand: {
+  meetingThumbCornerEmojiBadge: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingVertical: 3,
-    paddingHorizontal: 4,
-    backgroundColor: 'rgba(15, 23, 42, 0.52)',
+    bottom: 2,
+    right: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 0,
+    zIndex: 4,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  capacityCountLabel: {
-    fontSize: 10,
+  meetingThumbCornerEmojiText: {
+    fontSize: 12,
     fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: -0.35,
-    textAlign: 'center',
+  },
+  capRow: {
+    marginTop: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    width: 52,
+  },
+  capTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.10)',
+    overflow: 'hidden',
+  },
+  capFill: {
+    height: '100%',
+    backgroundColor: GinitTheme.colors.primary,
+  },
+  capLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748b',
   },
   zoneAMain: {
     flex: 1,
