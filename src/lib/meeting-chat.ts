@@ -379,7 +379,7 @@ export function subscribeMeetingChatLiveTail(
       if (__DEV__) {
         const newest = tail[0];
         const oldest = tail[tail.length - 1];
-        console.log('[meeting-chat:paging] onSnapshot tail', {
+        const baseLog = {
           meetingId: mid,
           limit: MEETING_CHAT_PAGE_SIZE,
           firestoreDocCount: currDocs.length,
@@ -387,7 +387,29 @@ export function subscribeMeetingChatLiveTail(
           evictedCount: evictedFromTail.length,
           newestId: newest?.id,
           oldestId: oldest?.id,
-        });
+        };
+        const mergedForProbe = [...tail, ...evictedFromTail];
+        const msToIds = new Map<number, string[]>();
+        for (const m of mergedForProbe) {
+          const t = m.createdAt && typeof m.createdAt.toMillis === 'function' ? m.createdAt.toMillis() : 0;
+          const bucket = msToIds.get(t);
+          if (bucket) bucket.push(m.id);
+          else msToIds.set(t, [m.id]);
+        }
+        const sameMsGroups = [...msToIds.entries()].filter(([, ids]) => ids.length > 1);
+        if (evictedFromTail.length > 0 || sameMsGroups.length > 0) {
+          console.log('[meeting-chat:paging] onSnapshot tail+detail (repro)', {
+            ...baseLog,
+            tailIds: tail.map((m) => m.id),
+            evictedIds: evictedFromTail.map((m) => m.id),
+            tailCreatedAtMs: tail.map((m) =>
+              m.createdAt && typeof m.createdAt.toMillis === 'function' ? m.createdAt.toMillis() : 0,
+            ),
+            sameMsSample: sameMsGroups.slice(0, 4).map(([ms, ids]) => ({ ms, ids })),
+          });
+        } else {
+          console.log('[meeting-chat:paging] onSnapshot tail', baseLog);
+        }
       }
 
       onEvent({ tail, tailOldestDoc, evictedFromTail });

@@ -784,13 +784,26 @@ export default function MeetingChatRoomScreen() {
       if (!mid || !rid) return;
 
       const cacheKey = meetingChatMessagesQueryKey(mid);
+      /** React Query 캐시와 동일 순서(`meetingChatMessagesFromInfiniteData`) — 라이브 tail 반영 후 렌더 전에도 맞춤 */
       const indexFromRQ = (): number => {
         const data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
         return flattenMeetingChatInfinitePages(data).findIndex((m) => m.id === rid);
       };
 
-      let idx = messageIndexById.get(rid) ?? -1;
-      if (idx < 0) idx = indexFromRQ();
+      let idx = indexFromRQ();
+      if (idx < 0) idx = messageIndexById.get(rid) ?? -1;
+      if (__DEV__) {
+        const fromMap = messageIndexById.get(rid) ?? -1;
+        const fromCache = indexFromRQ();
+        if (fromMap >= 0 && fromCache >= 0 && fromMap !== fromCache) {
+          console.warn('[meeting-chat:jump] messageIndex vs cache index mismatch (scroll uses cache)', {
+            meetingId: mid,
+            replyToId: rid,
+            indexFromHookMap: fromMap,
+            indexFromQueryCache: fromCache,
+          });
+        }
+      }
 
       if (idx < 0) {
         setSearchNavigateLoading(true);
@@ -1006,8 +1019,8 @@ export default function MeetingChatRoomScreen() {
               <Text style={styles.titleMain} numberOfLines={1}>
                 {title}
               </Text>
-              <Pressable onPress={goMeetingDetail} hitSlop={6} accessibilityRole="link" accessibilityLabel="모임 상세">
-                <Text style={styles.titleLink}>모임으로 가기</Text>
+              <Pressable onPress={exitChatRoom} hitSlop={6} accessibilityRole="button" accessibilityLabel="뒤로가기">
+                <Text style={styles.titleLink}>뒤로가기</Text>
               </Pressable>
             </View>
           )}

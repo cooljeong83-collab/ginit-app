@@ -3032,18 +3032,16 @@ export default function MeetingDetailScreen() {
                       </Text>
                     </Pressable>
                   ) : null}
-                  {recruitmentPhase === 'recruiting' || meeting.scheduleConfirmed === true ? (
-                    <Pressable
-                      onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                      accessibilityRole="button"
-                      accessibilityLabel="모임 채팅">
-                      <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
-                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        채팅
-                      </Text>
-                    </Pressable>
-                  ) : null}
+                  <Pressable
+                    onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="모임 채팅">
+                    <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
+                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+                      채팅
+                    </Text>
+                  </Pressable>
                   {meeting.scheduleConfirmed !== true ? (
                     <Pressable
                       onPress={handleDeleteMeeting}
@@ -3123,33 +3121,37 @@ export default function MeetingDetailScreen() {
                       </Text>
                     </Pressable>
                   ) : null}
-                  {recruitmentPhase === 'recruiting' || meeting.scheduleConfirmed === true ? (
-                    <Pressable
-                      onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                      accessibilityRole="button"
-                      accessibilityLabel="모임 채팅">
-                      <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
-                      <Text
-                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        채팅
-                      </Text>
-                    </Pressable>
-                  ) : null}
+                  <Pressable
+                    onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
+                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    accessibilityRole="button"
+                    accessibilityLabel="모임 채팅">
+                    <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
+                    <Text
+                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
+                      채팅
+                    </Text>
+                  </Pressable>
                   {!isScheduleConfirmed ? (
                     <Pressable
                       onPress={onPressSaveVotes}
+                      disabled={!votesDirty || participantVoteBusy || leaveBusy}
                       style={({ pressed }) => [
                         styles.bottomPill,
                         styles.pillBlue,
                         styles.bottomPillFlex,
                         (participantVoteBusy || leaveBusy) && { opacity: 0.75 },
-                        pressed && !(participantVoteBusy || leaveBusy) && { opacity: 0.9 },
+                        !votesDirty && !participantVoteBusy && !leaveBusy && { opacity: 0.45 },
+                        pressed &&
+                          votesDirty &&
+                          !participantVoteBusy &&
+                          !leaveBusy && { opacity: 0.9 },
                       ]}
                       accessibilityRole="button"
-                      accessibilityLabel="저장">
+                      accessibilityLabel="저장"
+                      accessibilityState={{ disabled: !votesDirty || participantVoteBusy || leaveBusy }}>
                       {participantVoteBusy || leaveBusy ? (
                         <ActivityIndicator color="#fff" size="small" />
                       ) : (

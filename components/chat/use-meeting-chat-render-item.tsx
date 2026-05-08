@@ -97,7 +97,7 @@ export function useMeetingChatRenderItem({
           />
         );
       };
-      const prev = index > 0 ? listRows[index - 1]! : null;
+      /** inverted + 최신순 data: index 작을수록 화면 아래(최신). `next` = 더 과거(위쪽) 이웃 */
       const next = index + 1 < listRows.length ? listRows[index + 1]! : null;
       const currDate = rowAnchorDate(item);
       const nextDate = next ? rowAnchorDate(next) : null;
@@ -138,9 +138,16 @@ export function useMeetingChatRenderItem({
 
       const sid = rowSenderNorm(item);
       const isMine = Boolean(myId && sid && sid === myId);
-      const prevSid = prev ? rowSenderNorm(prev) : '';
-      const sameSenderAsPrev = Boolean(sid && prevSid && prevSid === sid);
-      const showAvatar = !isMine && sid && (index === 0 || !prev || rowIsSystemRow(prev) || !sameSenderAsPrev);
+      const nextSid = next ? rowSenderNorm(next) : '';
+      const sameSenderAsNext = Boolean(sid && nextSid && nextSid === sid);
+      /**
+       * 상대 말풍선: (1) 항상 최신 1건은 표시 (2) 과거 이웃이 다른 사람·시스템이면 그룹 경계로 표시.
+       * 예전에는 더 최신 이웃(`prev`)만 보아, 바로 위(과거)가 다른 사람인데 닉이 숨겨져 상대 글이 위 사람 연속으로 보이는 경우가 있었습니다.
+       */
+      const showAvatar =
+        !isMine &&
+        sid &&
+        (index === 0 || !next || rowIsSystemRow(next) || !sameSenderAsNext);
 
       const prof = sid ? profileForSender(profiles, sid) : undefined;
       const withdrawn = isUserProfileWithdrawn(prof);

@@ -395,11 +395,14 @@ export default function SocialChatRoomScreen() {
               />
             </View>
           ) : (
-            <Pressable disabled style={s.titlePress} accessibilityRole="header" accessibilityLabel="대화 상대">
+            <View style={s.titleBlock} accessibilityRole="header" accessibilityLabel="대화 상대">
               <Text style={s.topTitle} numberOfLines={1}>
                 {peerName}
               </Text>
-            </Pressable>
+              <Pressable onPress={exitSocialChat} hitSlop={6} accessibilityRole="button" accessibilityLabel="뒤로가기">
+                <Text style={s.titleLink}>뒤로가기</Text>
+              </Pressable>
+            </View>
           )}
           {!searchMode ? (
             <>
@@ -490,8 +493,14 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
-  titlePress: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: 4 },
+  titleBlock: { flex: 1, minWidth: 0, gap: 2, justifyContent: 'center', paddingVertical: 4 },
   topTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a', textAlign: 'center' },
+  titleLink: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+    textAlign: 'center',
+  },
   searchTitleBlock: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchTitleInput: {
     flex: 1,

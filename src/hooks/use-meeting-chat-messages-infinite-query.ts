@@ -59,21 +59,29 @@ function countDistinctMessagesInInfiniteData(
   return seen.size;
 }
 
-/** infinite 캐시를 `messages` 배열과 동일 규칙(중복 제거·페이지 순)으로 평탄화 */
+/**
+ * infinite 캐시 → 화면 `messages`와 동일 규칙(`pages.flatMap` 순서 + id당 첫 등장만 유지).
+ * 원글/검색 점프 등 캐시 직접 조회 시에도 훅의 `messages`와 같은 선형 순서를 쓰려면 이 함수만 사용합니다.
+ */
+export function meetingChatMessagesFromInfiniteData(
+  data: InfiniteData<MeetingChatFetchedMessagesPage> | undefined,
+): MeetingChatMessage[] {
+  const flat = (data?.pages ?? []).flatMap((p) => p.messages);
+  const seen = new Set<string>();
+  const out: MeetingChatMessage[] = [];
+  for (const m of flat) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+  }
+  return out;
+}
+
+/** infinite 캐시 평탄화 — `meetingChatMessagesFromInfiniteData`와 동일(기존 호출부 호환) */
 export function flattenMeetingChatInfinitePages(
   data: InfiniteData<MeetingChatFetchedMessagesPage> | undefined,
 ): MeetingChatMessage[] {
-  const pages = data?.pages ?? [];
-  const seen = new Set<string>();
-  const out: MeetingChatMessage[] = [];
-  for (const p of pages) {
-    for (const m of p.messages) {
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
-      out.push(m);
-    }
-  }
-  return out;
+  return meetingChatMessagesFromInfiniteData(data);
 }
 
 /**
@@ -132,18 +140,7 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
       lastPage.hasMore && lastPage.oldestMessageId ? lastPage.oldestMessageId : undefined,
   });
 
-  const messages = useMemo(() => {
-    const pages = query.data?.pages ?? [];
-    const flat = pages.flatMap((p) => p.messages);
-    const seen = new Set<string>();
-    const out: MeetingChatMessage[] = [];
-    for (const m of flat) {
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
-      out.push(m);
-    }
-    return out;
-  }, [query.data]);
+  const messages = useMemo(() => meetingChatMessagesFromInfiniteData(query.data), [query.data]);
 
   const [liveError, setLiveError] = useState<string | null>(null);
 
