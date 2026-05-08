@@ -52,12 +52,22 @@ import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { getFirestoreDb, getMeetingById, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
 import { bumpMeetingChatRoomSummaryOnSend } from '@/src/lib/meeting-chat-rooms-summary';
 import { getUserProfile } from '@/src/lib/user-profile';
 
 export const MEETING_MESSAGES_SUBCOLLECTION = 'messages';
 
 export type MeetingChatMessageKind = 'text' | 'system' | 'image';
+
+/** 링크 미리보기(전송 시 Edge unfurl 결과를 Firestore에 저장). */
+export type MeetingChatLinkPreview = {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  imageUrl?: string | null;
+  siteName?: string | null;
+};
 
 export type MeetingChatMessage = {
   id: string;
@@ -68,6 +78,8 @@ export type MeetingChatMessage = {
   imageUrl: string | null;
   /** 한 번에 여러 장 전송 시 같은 값으로 묶어 앨범 UI에 표시 */
   imageAlbumBatchId?: string | null;
+  /** 텍스트 메시지에 URL이 있을 때 OG 미리보기 */
+  linkPreview?: MeetingChatLinkPreview | null;
   /** 답장(인용) */
   replyTo?: {
     messageId: string;
@@ -153,6 +165,21 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
       text: typeof r.text === 'string' ? String(r.text) : '',
     };
   }
+  let linkPreview: MeetingChatLinkPreview | null = null;
+  const lpRaw = data.linkPreview;
+  if (lpRaw && typeof lpRaw === 'object' && !Array.isArray(lpRaw)) {
+    const o = lpRaw as Record<string, unknown>;
+    const u = typeof o.url === 'string' ? o.url.trim() : '';
+    if (u) {
+      linkPreview = {
+        url: u,
+        title: typeof o.title === 'string' ? o.title : null,
+        description: typeof o.description === 'string' ? o.description : null,
+        imageUrl: typeof o.imageUrl === 'string' ? o.imageUrl : null,
+        siteName: typeof o.siteName === 'string' ? o.siteName : null,
+      };
+    }
+  }
   return {
     id,
     senderId,
@@ -160,6 +187,7 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
     kind,
     imageUrl,
     imageAlbumBatchId,
+    linkPreview,
     replyTo: replyTo?.messageId ? replyTo : null,
     createdAt,
   };
@@ -172,7 +200,11 @@ export function meetingChatMessageSearchHaystack(m: MeetingChatMessage): string 
     const cap = (m.text ?? '').trim();
     return cap ? `사진 ${cap}` : '사진';
   }
-  return (m.text ?? '').trim();
+  const base = (m.text ?? '').trim();
+  const lp = m.linkPreview;
+  if (!lp?.url) return base;
+  const extra = [lp.title, lp.description, lp.siteName].filter((x) => typeof x === 'string' && x.trim()).join(' ');
+  return extra ? `${base} ${extra}` : base;
 }
 
 const CHAT_IMAGES_PAGE_SIZE = 60;
@@ -817,6 +849,7 @@ export async function sendMeetingChatTextMessage(
   const senderId = normalizePhoneUserId(uid) ?? uid;
   // Denormalization: 검색/리스트 렌더에서 Firestore 추가 Read를 막기 위해 sender meta를 메시지에 포함합니다.
   const senderProfile = await getUserProfile(senderId).catch(() => null);
+  const linkPreview = await buildLinkPreviewForChatText(text);
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
   const msgRef = doc(ref);
   const batch = writeBatch(getFirestoreDb());
@@ -827,6 +860,7 @@ export async function sendMeetingChatTextMessage(
       senderName: senderProfile?.nickname ?? null,
       senderAvatarUrl: senderProfile?.profile_photo_url ?? null,
       text,
+      linkPreview,
       replyTo:
         replyTo && replyTo.messageId?.trim()
           ? {

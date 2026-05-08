@@ -32,7 +32,7 @@ import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
-import type { MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
+import type { MeetingChatLinkPreview, MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { getSocialChatNotifyEnabledForUser } from '@/src/lib/social-chat-notify-preference';
 import { supabase } from '@/src/lib/supabase';
@@ -42,6 +42,7 @@ import {
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
 import { getUserProfile } from '@/src/lib/user-profile';
+import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 export const CHAT_ROOMS_COLLECTION = 'chat_rooms';
@@ -74,6 +75,7 @@ export type SocialChatMessage = {
   kind?: MeetingChatMessageKind;
   imageUrl?: string | null;
   imageAlbumBatchId?: string | null;
+  linkPreview?: MeetingChatLinkPreview | null;
   replyTo?: SocialChatReplyTo | null;
   createdAt: Timestamp | null;
 };
@@ -131,6 +133,21 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
       text: typeof r.text === 'string' ? String(r.text) : '',
     };
   }
+  let linkPreview: SocialChatMessage['linkPreview'] = null;
+  const lpRaw = data.linkPreview;
+  if (lpRaw && typeof lpRaw === 'object' && !Array.isArray(lpRaw)) {
+    const o = lpRaw as Record<string, unknown>;
+    const u = typeof o.url === 'string' ? o.url.trim() : '';
+    if (u) {
+      linkPreview = {
+        url: u,
+        title: typeof o.title === 'string' ? o.title : null,
+        description: typeof o.description === 'string' ? o.description : null,
+        imageUrl: typeof o.imageUrl === 'string' ? o.imageUrl : null,
+        siteName: typeof o.siteName === 'string' ? o.siteName : null,
+      };
+    }
+  }
   return {
     id,
     senderId,
@@ -138,6 +155,7 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
     kind,
     imageUrl,
     imageAlbumBatchId,
+    linkPreview,
     replyTo: replyTo?.messageId ? replyTo : null,
     createdAt,
   };
@@ -152,6 +170,7 @@ export function socialMessageToMeetingMessage(m: SocialChatMessage): MeetingChat
     kind: (m.kind ?? 'text') as MeetingChatMessageKind,
     imageUrl: m.imageUrl ?? null,
     imageAlbumBatchId: m.imageAlbumBatchId ?? null,
+    linkPreview: m.linkPreview ?? null,
     replyTo: m.replyTo?.messageId
       ? {
           messageId: m.replyTo.messageId,
@@ -697,6 +716,7 @@ export async function sendSocialChatTextMessage(
   if (blockedByMe) {
     throw new Error('차단한 사용자에게는 메시지를 보낼 수 없어요.');
   }
+  const linkPreview = await buildLinkPreviewForChatText(text);
   const ref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
   await addDoc(
     ref,
@@ -705,6 +725,7 @@ export async function sendSocialChatTextMessage(
       senderName: senderProfile?.nickname ?? null,
       senderAvatarUrl: senderProfile?.profile_photo_url ?? null,
       text,
+      linkPreview,
       kind: 'text' as const,
       replyTo:
         replyTo && replyTo.messageId?.trim()

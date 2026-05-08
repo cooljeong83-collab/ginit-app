@@ -1,10 +1,12 @@
 
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { type RefObject, useCallback } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { type RefObject, useCallback, useMemo, useState } from 'react';
+import { Pressable, Share, Text, View } from 'react-native';
 
 import { MeetingChatGinitImageCluster } from '@/components/chat/MeetingChatGinitImageCluster';
+import { MeetingChatBubbleActionMenu } from '@/components/chat/MeetingChatBubbleActionMenu';
+import { MeetingChatLinkPreviewCard } from '@/components/chat/MeetingChatLinkPreviewCard';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { MeetingChatSwipeToReply } from '@/components/chat/meeting-chat-swipe-to-reply';
 import {
@@ -14,15 +16,17 @@ import {
   replyTargetLabel,
 } from '@/components/chat/meeting-chat-ui-helpers';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { extractFirstHttpUrlFromChatText } from '@/src/lib/chat-text-linkify';
 import {
   meetingChatAlbumAnchorMessage,
   type MeetingChatListRow,
 } from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
+import { copyMeetingChatListRowToClipboard, copyTextForMeetingChatListRow } from '@/src/lib/meeting-chat-bubble-copy';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
-import { HighlightedText } from '@/components/ui/HighlightedText';
+import { LinkableChatText } from '@/components/ui/LinkableChatText';
 
 function rowIsSystemRow(row: MeetingChatListRow): boolean {
   return row.type === 'message' && row.message.kind === 'system';
@@ -81,22 +85,73 @@ export function useMeetingChatRenderItem({
   listRef,
   messageSearchHighlightQuery = '',
 }: MeetingChatRenderItemDeps) {
+  const [menu, setMenu] = useState<{ visible: boolean; x: number; y: number; row: MeetingChatListRow | null }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    row: null,
+  });
+
+  const closeMenu = useCallback(() => setMenu((p) => ({ ...p, visible: false })), []);
+
+  const openMenuForRow = useCallback(
+    (row: MeetingChatListRow, e: any) => {
+      const ne = e?.nativeEvent;
+      const x = typeof ne?.pageX === 'number' ? ne.pageX : 12;
+      const y = typeof ne?.pageY === 'number' ? ne.pageY : 12;
+      setMenu({ visible: true, x, y, row });
+    },
+    [],
+  );
+
+  const menuActions = useMemo(() => {
+    const row = menu.row;
+    if (!row) return [];
+    const anchorMsg =
+      row.type === 'message' ? row.message : meetingChatAlbumAnchorMessage(row);
+    const itemForReply = anchorMsg;
+    return [
+      {
+        key: 'share' as const,
+        label: '공유하기',
+        onPress: async () => {
+          const text = copyTextForMeetingChatListRow(row).trim();
+          if (!text) return;
+          await Share.share({ message: text });
+        },
+      },
+      {
+        key: 'reply' as const,
+        label: '답장하기',
+        onPress: () =>
+          setReplyTo({
+            messageId: itemForReply.id,
+            senderId: itemForReply.senderId ?? null,
+            kind: itemForReply.kind,
+            imageUrl: itemForReply.imageUrl ?? null,
+            text: itemForReply.text,
+          }),
+      },
+      {
+        key: 'copy' as const,
+        label: '복사',
+        onPress: () => copyMeetingChatListRowToClipboard(row),
+      },
+    ];
+  }, [menu.row, setReplyTo]);
+
   return useCallback(
     ({ item, index }: { item: MeetingChatListRow; index: number }) => {
       const highlightQ = String(messageSearchHighlightQuery ?? '').trim();
-      const bubbleText = (raw: string | null | undefined, textStyle: (typeof styles)['bubbleMineText']) => {
-        const t = String(raw ?? '');
-        if (!highlightQ) return <Text style={textStyle}>{t}</Text>;
-        return (
-          <HighlightedText
-            text={t}
-            query={highlightQ}
-            style={textStyle}
-            highlightBackgroundColor="#4527A0"
-            highlightTextColor="#FFFFFF"
-          />
-        );
-      };
+      const bubbleText = (raw: string | null | undefined, textStyle: (typeof styles)['bubbleMineText']) => (
+        <LinkableChatText
+          text={String(raw ?? '')}
+          highlightQuery={highlightQ}
+          style={textStyle}
+          highlightBackgroundColor="#4527A0"
+          highlightTextColor="#FFFFFF"
+        />
+      );
       /** inverted + 최신순 data: index 작을수록 화면 아래(최신). `next` = 더 과거(위쪽) 이웃 */
       const next = index + 1 < listRows.length ? listRows[index + 1]! : null;
       const currDate = rowAnchorDate(item);
@@ -122,7 +177,7 @@ export function useMeetingChatRenderItem({
               </View>
             ) : null}
             <View style={styles.systemRow}>
-              <Text style={styles.systemText}>{sys.text}</Text>
+              <LinkableChatText text={sys.text} style={styles.systemText} />
             </View>
           </View>
         );
@@ -158,6 +213,14 @@ export function useMeetingChatRenderItem({
       const singleMsg = item.type === 'message' ? item.message : null;
       const isImage = Boolean(singleMsg && singleMsg.kind === 'image');
       const caption = singleMsg?.text?.trim();
+      const isLinkOnlyText =
+        Boolean(singleMsg && singleMsg.kind === 'text' && singleMsg.linkPreview?.url) &&
+        (() => {
+          const raw = (singleMsg?.text ?? '').trim();
+          if (!raw) return false;
+          const first = extractFirstHttpUrlFromChatText(raw);
+          return Boolean(first && raw === first);
+        })();
 
       const albumChrono = isAlbum ? item.messages : [];
       const albumCaption = isAlbum ? albumChrono[albumChrono.length - 1]?.text?.trim() : '';
@@ -212,6 +275,43 @@ export function useMeetingChatRenderItem({
         ) : isImage ? (
           <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
         ) : null;
+        const bubbleMainMine = showKakaoPlain ? (
+          <Pressable
+            onLongPress={(e) => openMenuForRow(item, e)}
+            delayLongPress={420}
+            accessibilityLabel="말풍선 옵션"
+            style={({ pressed }) => [[styles.bubbleMineWrap, styles.ginitPlainMineWrap], pressed && styles.pressed]}>
+            {renderReply('mine')}
+            {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+            {imageClusterMine}
+            {(isImage && caption) || (isAlbum && albumCaption) ? (
+              bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionMine)
+            ) : null}
+          </Pressable>
+        ) : isLinkOnlyText && singleMsg?.linkPreview ? (
+          <Pressable
+            onLongPress={(e) => openMenuForRow(item, e)}
+            delayLongPress={420}
+            accessibilityLabel="말풍선 옵션"
+            style={({ pressed }) => [[styles.bubbleMineWrap, styles.ginitPlainMineWrap], pressed && styles.pressed]}>
+            <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={singleMsg.text} standalone />
+          </Pressable>
+        ) : (
+          <Pressable
+            onLongPress={(e) => openMenuForRow(item, e)}
+            delayLongPress={420}
+            accessibilityLabel="말풍선 옵션"
+            style={({ pressed }) => [styles.bubbleMineWrap, pressed && styles.pressed]}>
+            <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
+              {renderReply('mine')}
+              {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+              {bubbleText(singleMsg?.text, styles.bubbleMineText)}
+              {singleMsg?.linkPreview?.url && singleMsg.linkPreview ? (
+                <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''} />
+              ) : null}
+            </BlurView>
+          </Pressable>
+        );
         const bubble = (
           <View style={styles.rowMine}>
             <View style={styles.timeMineCol}>
@@ -222,24 +322,7 @@ export function useMeetingChatRenderItem({
               ) : null}
               <Text style={styles.timeMine}>{formatChatTime(timeSource)}</Text>
             </View>
-            {showKakaoPlain ? (
-              <View style={[styles.bubbleMineWrap, styles.ginitPlainMineWrap]}>
-                {renderReply('mine')}
-                {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                {imageClusterMine}
-                {(isImage && caption) || (isAlbum && albumCaption) ? (
-                  bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionMine)
-                ) : null}
-              </View>
-            ) : (
-              <View style={styles.bubbleMineWrap}>
-                <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
-                  {renderReply('mine')}
-                  {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                  {bubbleText(singleMsg?.text, styles.bubbleMineText)}
-                </BlurView>
-              </View>
-            )}
+            {bubbleMainMine}
           </View>
         );
         return (
@@ -316,7 +399,11 @@ export function useMeetingChatRenderItem({
             ) : null}
             <View style={styles.bubbleOtherWrap}>
               {showKakaoPlain ? (
-                <View style={[styles.bubbleOtherOuter, styles.ginitPlainOtherOuter]}>
+                <Pressable
+                  onLongPress={(e) => openMenuForRow(item, e)}
+                  delayLongPress={420}
+                  accessibilityLabel="말풍선 옵션"
+                  style={({ pressed }) => [[styles.bubbleOtherOuter, styles.ginitPlainOtherOuter], pressed && styles.pressed]}>
                   {renderReply('other')}
                   {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                   {imageClusterOther}
@@ -324,15 +411,32 @@ export function useMeetingChatRenderItem({
                     bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionOther)
                   ) : null}
                   {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
-                </View>
+                </Pressable>
+              ) : isLinkOnlyText && singleMsg?.linkPreview ? (
+                <Pressable
+                  onLongPress={(e) => openMenuForRow(item, e)}
+                  delayLongPress={420}
+                  accessibilityLabel="말풍선 옵션"
+                  style={({ pressed }) => [styles.bubbleOtherOuter, pressed && styles.pressed]}>
+                  <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={singleMsg.text} standalone />
+                </Pressable>
               ) : (
                 <View style={styles.bubbleOtherOuter}>
-                  <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
-                    {renderReply('other')}
-                    {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
-                    {bubbleText(singleMsg?.text, styles.bubbleOtherText)}
-                  </BlurView>
-                  {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
+                  <Pressable
+                    onLongPress={(e) => openMenuForRow(item, e)}
+                    delayLongPress={420}
+                    accessibilityLabel="말풍선 옵션"
+                    style={({ pressed }) => [pressed && styles.pressed]}>
+                    <BlurView tint="light" intensity={60} style={styles.bubbleOther}>
+                      {renderReply('other')}
+                      {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
+                      {bubbleText(singleMsg?.text, styles.bubbleOtherText)}
+                      {singleMsg?.linkPreview?.url && singleMsg.linkPreview ? (
+                        <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''} />
+                      ) : null}
+                    </BlurView>
+                    {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
+                  </Pressable>
                 </View>
               )}
               <Text style={styles.timeOther}>{formatChatTime(anchorMsg.createdAt)}</Text>
@@ -342,6 +446,12 @@ export function useMeetingChatRenderItem({
       );
       return (
         <View>
+          <MeetingChatBubbleActionMenu
+            visible={menu.visible}
+            anchor={menu.visible ? { x: menu.x, y: menu.y } : null}
+            onRequestClose={closeMenu}
+            actions={menuActions}
+          />
           {dateLabel ? (
             <View style={styles.dateChipRow}>
               <View style={styles.dateChip}>
@@ -378,6 +488,12 @@ export function useMeetingChatRenderItem({
       openMeetingChatImageViewer,
       listRef,
       messageSearchHighlightQuery,
+      menu.visible,
+      menu.x,
+      menu.y,
+      menuActions,
+      closeMenu,
+      openMenuForRow,
     ],
   );
 }

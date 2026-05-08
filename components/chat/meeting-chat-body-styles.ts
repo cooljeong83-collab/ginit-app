@@ -142,6 +142,14 @@ export const meetingChatBodyStyles = StyleSheet.create({
   },
   bubbleMineWrap: {
     maxWidth: '78%',
+    // 내 말풍선은 오른쪽 정렬이 일관되게 유지되어야 합니다.
+    // (복사/링크 프리뷰 등으로 래핑 구조가 바뀌어도) 상위 레이아웃의 영향을 덜 받도록 wrap 자체를 우측에 붙입니다.
+    alignSelf: 'flex-end',
+  },
+  /** 링크 프리뷰 등: 말풍선을 가로로 꽉 사용 */
+  bubbleMineWrapFull: {
+    maxWidth: '100%',
+    width: '100%',
   },
   bubbleMine: {
     backgroundColor: 'rgba(103, 58, 183, 0.22)',
@@ -375,6 +383,10 @@ export const meetingChatBodyStyles = StyleSheet.create({
     maxWidth: '78%',
     position: 'relative',
   },
+  bubbleOtherOuterFull: {
+    maxWidth: '100%',
+    width: '100%',
+  },
   bubbleOther: {
     backgroundColor: 'rgba(255,255,255,0.58)',
     paddingHorizontal: 12,
@@ -415,6 +427,65 @@ export const meetingChatBodyStyles = StyleSheet.create({
     fontSize: 14,
     color: '#0f172a',
     lineHeight: 19,
+  },
+  linkPreviewPressable: {
+    marginTop: 4,
+    // `linkPreviewThumb.width = '100%'`가 안정적으로 계산되려면,
+    // 프리뷰 컨테이너가 auto 폭이 아니라 확정 폭을 가져야 합니다.
+    // (auto 폭이면 퍼센트가 0으로 떨어져 썸네일이 안 보이는 증상이 생길 수 있음)
+    maxWidth: '100%',
+    width: '100%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    alignSelf: 'flex-start',
+  },
+  /** 링크-only 말풍선(텍스트 숨김)에서는 위쪽 여백 없이 시간/안읽음과 밀착 */
+  linkPreviewPressableStandalone: {
+    marginTop: 0,
+  },
+  /** 링크 전용 메시지(텍스트 숨김)일 때: 프리뷰 카드를 가능한 가로폭으로 확장 */
+  linkPreviewPressableFull: {
+    maxWidth: '100%',
+    width: '100%',
+  },
+  linkPreviewPressableMine: {
+    alignSelf: 'flex-end',
+  },
+  /** 링크 프리뷰: 썸네일(상단) + 설명(하단) */
+  linkPreviewThumb: {
+    width: '100%',
+    height: 120,
+    backgroundColor: '#e2e8f0',
+  },
+  linkPreviewBody: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  linkPreviewSite: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  linkPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
+    lineHeight: 18,
+  },
+  linkPreviewDesc: {
+    fontSize: 12,
+    color: '#475569',
+    lineHeight: 16,
+  },
+  linkPreviewRawUrl: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
   },
   timeOther: {
     fontSize: 11,
