@@ -274,6 +274,17 @@ export function FriendsHomeScreen() {
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const searchInputRef = useRef<TextInput>(null);
+  /** 친구 탭 중복 네비게이션 방지(더블 탭 등) — 채팅 탭·홈 모임 목록과 동일 900ms */
+  const friendsTabOpenLockRef = useRef(false);
+  const armFriendsTabOpenLock = useCallback((): boolean => {
+    if (friendsTabOpenLockRef.current) return false;
+    friendsTabOpenLockRef.current = true;
+    const lockRelease = () => {
+      friendsTabOpenLockRef.current = false;
+    };
+    setTimeout(lockRelease, 900);
+    return true;
+  }, []);
   const me = useMemo(() => {
     const raw = userId?.trim() ?? '';
     return raw ? normalizeParticipantId(raw) : '';
@@ -448,11 +459,22 @@ export function FriendsHomeScreen() {
     (peerAppUserId: string, peerDisplayName?: string) => {
       const uid = me;
       if (!uid) return;
+      if (!armFriendsTabOpenLock()) return;
       const rid = socialDmRoomId(uid, peerAppUserId);
       const nick = peerDisplayName ?? profileFromMap(profiles, peerAppUserId)?.nickname ?? '친구';
       router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
     },
-    [me, profiles, router],
+    [me, profiles, router, armFriendsTabOpenLock],
+  );
+
+  const openMeetingFromFriendsTab = useCallback(
+    (meetingIdRaw: string) => {
+      const mid = meetingIdRaw?.trim() ?? '';
+      if (!mid) return;
+      if (!armFriendsTabOpenLock()) return;
+      router.push(`/meeting/${encodeURIComponent(mid)}`);
+    },
+    [router, armFriendsTabOpenLock],
   );
 
   const onAcceptPending = useCallback(
@@ -505,21 +527,34 @@ export function FriendsHomeScreen() {
     [me, profiles, reload],
   );
 
-  const goAddFriend = useCallback(() => router.push('/social/discovery'), [router]);
+  const goAddFriend = useCallback(() => {
+    if (!armFriendsTabOpenLock()) return;
+    router.push('/social/discovery');
+  }, [router, armFriendsTabOpenLock]);
   const goMyProfile = useCallback(() => {
     const t = me.trim();
     if (!t) return;
+    if (!armFriendsTabOpenLock()) return;
     router.push(`/profile/user/${encodeURIComponent(t)}`);
-  }, [me, router]);
-  const goFriendManage = useCallback(() => router.push('/social/friends-settings'), [router]);
+  }, [me, router, armFriendsTabOpenLock]);
+  const goFriendManage = useCallback(() => {
+    if (!armFriendsTabOpenLock()) return;
+    router.push('/social/friends-settings');
+  }, [router, armFriendsTabOpenLock]);
   const openFriendPublicProfile = useCallback(
     (peerRaw: string) => {
       const t = friendAppUserKey(peerRaw) || peerRaw.trim();
       if (!t) return;
+      if (!armFriendsTabOpenLock()) return;
       router.push(`/profile/user/${encodeURIComponent(t)}`);
     },
-    [router],
+    [router, armFriendsTabOpenLock],
   );
+
+  const goMapFromFriendsEmpty = useCallback(() => {
+    if (!armFriendsTabOpenLock()) return;
+    router.push('/(tabs)/map');
+  }, [router, armFriendsTabOpenLock]);
 
   const onRemoveAcceptedFriend = useCallback(() => {
     if (!sheetFriend || !me) return;
@@ -709,11 +744,7 @@ export function FriendsHomeScreen() {
                         friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? ''),
                       )
                     }
-                    onPressOpenMeeting={() => {
-                      const mid = item.meeting?.id?.trim() ?? '';
-                      if (!mid) return;
-                      router.push(`/meeting/${encodeURIComponent(mid)}`);
-                    }}
+                    onPressOpenMeeting={() => openMeetingFromFriendsTab(item.meeting?.id ?? '')}
                     onLongPressFriendMenu={() => setSheetFriend(item)}
                   />
                 </View>
@@ -737,6 +768,7 @@ export function FriendsHomeScreen() {
     onDeclinePending,
     openDm,
     openFriendPublicProfile,
+    openMeetingFromFriendsTab,
     peerAliases,
     pending,
     pendingOut,
@@ -753,10 +785,10 @@ export function FriendsHomeScreen() {
         </View>
         <Text style={s.emptyTitle}>아직 연결된 지닛이 없어요</Text>
         <Text style={s.emptyBody}>새로운 모임에서 친구를 찾아보세요.</Text>
-        <GinitButton title="모임 찾기" onPress={() => router.push('/(tabs)/map')} style={s.emptyCta} />
+        <GinitButton title="모임 찾기" onPress={goMapFromFriendsEmpty} style={s.emptyCta} />
       </GinitCard>
     ),
-    [router],
+    [goMapFromFriendsEmpty],
   );
 
   const emptySearch = useMemo(
@@ -900,11 +932,7 @@ export function FriendsHomeScreen() {
                   friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? ''),
                 )
               }
-              onPressOpenMeeting={() => {
-                const mid = item.meeting?.id?.trim() ?? '';
-                if (!mid) return;
-                router.push(`/meeting/${encodeURIComponent(mid)}`);
-              }}
+              onPressOpenMeeting={() => openMeetingFromFriendsTab(item.meeting?.id ?? '')}
               onLongPressFriendMenu={() => setSheetFriend(item)}
             />
           )}
@@ -976,6 +1004,7 @@ export function FriendsHomeScreen() {
                         <Pressable
                           key={m.id}
                           onPress={() => {
+                            if (!armFriendsTabOpenLock()) return;
                             setSheetFriend(null);
                             router.push(`/meeting/${encodeURIComponent(m.id)}`);
                           }}

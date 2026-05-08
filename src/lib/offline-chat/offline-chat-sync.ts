@@ -143,6 +143,12 @@ export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncAr
   const localRoom = await getOrCreateLocalRoom(k);
   if (!localRoom) return { pulledDocs: 0, lastSyncedAtMs: 0 };
 
+  /** Direct Share 등에서 최근 방 정렬용 — 메시지 동기화 시마다 최신 createdAt 기준으로 갱신 */
+  let accumulatedLastMessageMs = (() => {
+    const v = (localRoom as any).lastMessageAtMs as number | null | undefined;
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+  })();
+
   const existingCursorMs = (localRoom as any).lastSyncedAtMs as number | null | undefined;
   const cursorMs =
     typeof existingCursorMs === 'number' && Number.isFinite(existingCursorMs) && existingCursorMs > 0
@@ -167,6 +173,12 @@ export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncAr
 
     const batchRows = snap.docs.map((d) => mapFirestoreMessageToLocal({ roomType: k.roomType, roomId: k.roomId, messageId: d.id, data: d.data() as any }));
     pulled += batchRows.length;
+
+    let batchMaxCreatedMs = 0;
+    for (const row of batchRows) {
+      if (row.createdAtMs > batchMaxCreatedMs) batchMaxCreatedMs = row.createdAtMs;
+    }
+    accumulatedLastMessageMs = Math.max(accumulatedLastMessageMs, batchMaxCreatedMs);
 
     // 로컬 upsert: message_id 기준으로 있으면 update, 없으면 create
     await db.write(async () => {
@@ -212,11 +224,31 @@ export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncAr
       }
       await (localRoom as any).update((r: any) => {
         r.lastSyncedAtMs = newestSeenMs;
+        if (accumulatedLastMessageMs > 0) {
+          r.lastMessageAtMs = accumulatedLastMessageMs;
+        }
       });
     });
 
     lastSnap = snap.docs[snap.docs.length - 1]!;
     if (snap.size < pageSize) break;
+  }
+
+  if (accumulatedLastMessageMs <= 0) {
+    const top = await db
+      .get('chat_messages')
+      .query(Q.where('room_id', k.roomId), Q.where('room_type', k.roomType), Q.sortBy('created_at_ms', Q.desc), Q.take(1))
+      .fetch();
+    const m0 = top[0] as { createdAtMs?: number } | undefined;
+    const ms = typeof m0?.createdAtMs === 'number' && Number.isFinite(m0.createdAtMs) ? m0.createdAtMs : 0;
+    if (ms > 0) {
+      accumulatedLastMessageMs = ms;
+      await db.write(async () => {
+        await (localRoom as any).update((r: any) => {
+          r.lastMessageAtMs = accumulatedLastMessageMs;
+        });
+      });
+    }
   }
 
   return { pulledDocs: pulled, lastSyncedAtMs: newestSeenMs };

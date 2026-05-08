@@ -12,6 +12,7 @@ import { BackgroundExecutionBootstrap } from '@/components/BackgroundExecutionBo
 import { FcmMessagingBootstrap } from '@/components/FcmMessagingBootstrap';
 import { FcmPushRoutingBootstrap } from '@/components/FcmPushRoutingBootstrap';
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
+import { ShareShortcutsWatermelonBootstrap } from '@/components/ShareShortcutsWatermelonBootstrap';
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
@@ -60,6 +61,7 @@ export default function RootLayout() {
         <QueryClientPersistProvider>
           <MeetingCategoriesProvider>
             <UserSessionProvider>
+              <ShareShortcutsWatermelonBootstrap />
               <InAppAlarmsProvider>
                 <DevMemoryDebug />
                 <BackgroundExecutionBootstrap />

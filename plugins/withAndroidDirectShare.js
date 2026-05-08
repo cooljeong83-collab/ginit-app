@@ -62,6 +62,11 @@ function addOrReplaceMeta(app, item) {
   app['meta-data'] = next;
 }
 
+function removeMetaFromApp(app, metaName) {
+  const list = ensureArray(app['meta-data']);
+  app['meta-data'] = list.filter((m) => m?.$?.['android:name'] !== metaName);
+}
+
 function withDirectShareManifest(config) {
   return withAndroidManifest(config, (mod) => {
     const manifest = mod.modResults?.manifest;
@@ -74,14 +79,8 @@ function withDirectShareManifest(config) {
     const app = manifest.application?.[0];
     if (!app) return mod;
 
-    // Shortcuts xml
-    addOrReplaceMeta(app, {
-      $: {
-        'android:name': 'android.app.shortcuts',
-        'android:resource': '@xml/shortcuts',
-        'tools:replace': 'android:resource',
-      },
-    });
+    // Share-target shortcuts meta-data must live on the activity that receives SEND (not application).
+    removeMetaFromApp(app, 'android.app.shortcuts');
 
     // Receiver activity for ACTION_SEND + share targets
     addOrReplaceActivity(app, {
@@ -92,6 +91,15 @@ function withDirectShareManifest(config) {
         'android:excludeFromRecents': 'true',
         'android:taskAffinity': '',
       },
+      'meta-data': [
+        {
+          $: {
+            'android:name': 'android.app.shortcuts',
+            'android:resource': '@xml/shortcuts',
+            'tools:replace': 'android:resource',
+          },
+        },
+      ],
       'intent-filter': [
         {
           action: [{ $: { 'android:name': 'android.intent.action.SEND' } }],
@@ -153,12 +161,11 @@ function withDirectShareNativeFiles(config) {
       const shortcutsXmlPath = path.join(projectRoot, 'android/app/src/main/res/xml/shortcuts.xml');
       const shortcutsXml = `<?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-  <!-- Share target definition for Android Direct Share. Dynamic shortcuts are published at runtime. -->
+  <!-- Share target: image shares → Direct Share row + dynamic shortcuts (category must match setCategories). -->
   <share-target android:targetClass="com.ginit.app.directshare.DirectShareReceiverActivity">
-    <data android:mimeType="text/plain" />
-    <data android:mimeType="text/*" />
     <data android:mimeType="image/*" />
     <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="com.ginit.app.category.SHARE_TARGET" />
   </share-target>
 </shortcuts>
 `;
@@ -267,22 +274,171 @@ class DirectShareReceiverActivity : AppCompatActivity() {
 `;
       writeFileIfChanged(receiverPath, receiverKt);
 
+      const managerPath = path.join(pkgDir, 'GinitShortcutManager.kt');
+      const managerKt = `package com.ginit.app.directshare
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
+import androidx.core.app.Person
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.ArrayList
+import java.util.concurrent.Executors
+
+data class DirectShareRoom(
+  val shortcutId: String,
+  val title: String,
+  val longLabel: String?,
+  val targetType: String?,
+  val targetId: String?,
+  val avatarUrl: String?,
+)
+
+object GinitShortcutManager {
+  private const val SHARE_CATEGORY = "com.ginit.app.category.SHARE_TARGET"
+  private const val PLACEHOLDER_EDGE = 256
+  private const val MAX_ICON_EDGE = 512
+
+  private val ioExecutor = Executors.newSingleThreadExecutor()
+  private val mainHandler = Handler(Looper.getMainLooper())
+
+  /**
+   * Public API name matches product spec; implementation uses [ShortcutManagerCompat.setDynamicShortcuts]
+   * to atomically replace the whole recent-rooms list (max 10).
+   */
+  fun updateShortcuts(ctx: Context, rooms: List<DirectShareRoom>) {
+    val appCtx = ctx.applicationContext
+    ioExecutor.execute {
+      android.util.Log.i("GinitDirectShare", "ShortcutManager.updateShortcuts incoming count=" + rooms.size)
+      val shortcuts = ArrayList<ShortcutInfoCompat>()
+      rooms.take(10).forEachIndexed { idx, room ->
+        val icon = buildIconForRoom(appCtx, room)
+        val person = try {
+          Person.Builder()
+            .setName(room.title)
+            .setIcon(icon)
+            .setImportant(true)
+            .build()
+        } catch (_: Throwable) {
+          null
+        }
+
+        val send = Intent(Intent.ACTION_SEND).apply {
+          type = "image/*"
+          setClassName(appCtx.packageName, "com.ginit.app.directshare.DirectShareReceiverActivity")
+          if (!room.targetType.isNullOrEmpty()) putExtra("targetType", room.targetType)
+          if (!room.targetId.isNullOrEmpty()) putExtra("targetId", room.targetId)
+        }
+
+        val longL = (room.longLabel ?: room.title).trim().ifEmpty { room.title }
+        // shortcuts.xml share-target category + 통신앱 Direct Share 노출용 capability (공식 가이드).
+        val b = ShortcutInfoCompat.Builder(appCtx, room.shortcutId)
+          .setShortLabel(clampLabel(room.title, 10))
+          .setLongLabel(clampLabel(longL, 25))
+          .setIntent(send)
+          .setIcon(icon)
+          .setLongLived(true)
+          .setRank(idx)
+          .setCategories(setOf(Intent.CATEGORY_DEFAULT, SHARE_CATEGORY))
+          .addCapabilityBinding("actions.intent.SEND_MESSAGE")
+        if (person != null) {
+          b.setPerson(person)
+        }
+        try {
+          shortcuts.add(b.build())
+        } catch (t: Throwable) {
+          android.util.Log.w("GinitDirectShare", "shortcut build failed id=" + room.shortcutId, t)
+        }
+      }
+
+      android.util.Log.i("GinitDirectShare", "ShortcutManager built valid shortcuts=" + shortcuts.size)
+
+      mainHandler.post {
+        try {
+          ShortcutManagerCompat.setDynamicShortcuts(appCtx, shortcuts)
+          android.util.Log.i("GinitDirectShare", "setDynamicShortcuts applied count=" + shortcuts.size)
+        } catch (t: Throwable) {
+          android.util.Log.e("GinitDirectShare", "setDynamicShortcuts failed", t)
+        }
+      }
+    }
+  }
+
+  private fun clampLabel(s: String, max: Int): String {
+    val t = s.trim()
+    if (t.length <= max) return t
+    return t.substring(0, max - 1) + "\\u2026"
+  }
+
+  private fun buildIconForRoom(ctx: Context, room: DirectShareRoom): IconCompat {
+    val url = room.avatarUrl?.trim().orEmpty()
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      val bmp = loadBitmapFromUrl(url)
+      if (bmp != null) {
+        val scaled = scaleDownIfNeeded(bmp, MAX_ICON_EDGE)
+        return IconCompat.createWithAdaptiveBitmap(scaled)
+      }
+    }
+    return IconCompat.createWithAdaptiveBitmap(placeholderBitmap())
+  }
+
+  private fun placeholderBitmap(): Bitmap {
+    val size = PLACEHOLDER_EDGE
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    bmp.eraseColor(Color.parseColor("#4527A0"))
+    return bmp
+  }
+
+  private fun scaleDownIfNeeded(src: Bitmap, maxEdge: Int): Bitmap {
+    val w = src.width
+    val h = src.height
+    if (w <= maxEdge && h <= maxEdge) return src
+    val scale = minOf(maxEdge.toFloat() / w, maxEdge.toFloat() / h)
+    val nw = (w * scale).toInt().coerceAtLeast(1)
+    val nh = (h * scale).toInt().coerceAtLeast(1)
+    val out = Bitmap.createScaledBitmap(src, nw, nh, true)
+    if (out !== src) src.recycle()
+    return out
+  }
+
+  private fun loadBitmapFromUrl(urlStr: String): Bitmap? {
+    return try {
+      val url = URL(urlStr)
+      val conn = (url.openConnection() as HttpURLConnection).apply {
+        connectTimeout = 8000
+        readTimeout = 8000
+        instanceFollowRedirects = true
+      }
+      conn.connect()
+      conn.inputStream.use { input -> BitmapFactory.decodeStream(input) }
+    } catch (_: Throwable) {
+      null
+    }
+  }
+}
+`;
+      writeFileIfChanged(managerPath, managerKt);
+
       const modulePath = path.join(pkgDir, 'GinitDirectShareModule.kt');
       const moduleKt = `package com.ginit.app.directshare
 
 import android.content.Context
-import android.content.Intent
-import androidx.core.content.pm.ShortcutInfoCompat
-import androidx.core.content.pm.ShortcutManagerCompat
-import androidx.core.graphics.drawable.IconCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
-import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReadableType
+import java.util.ArrayList
 
 class GinitDirectShareModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
   override fun getName(): String = "GinitDirectShare"
@@ -320,33 +476,28 @@ class GinitDirectShareModule(reactContext: ReactApplicationContext) : ReactConte
   @ReactMethod
   fun setShareShortcuts(items: ReadableArray, promise: Promise) {
     try {
+      android.util.Log.i("GinitDirectShare", "setShareShortcuts RN array size=" + items.size())
       val ctx = reactApplicationContext
-      val list = ArrayList<ShortcutInfoCompat>()
+      val rooms = ArrayList<DirectShareRoom>()
       for (i in 0 until items.size()) {
         val item = items.getMap(i) ?: continue
         val id = item.getString("id")?.trim() ?: continue
         val title = item.getString("title")?.trim() ?: continue
-        val subtitle = item.getString("subtitle")?.trim()
+        val subtitle = if (item.hasKey("subtitle") && item.getType("subtitle") == ReadableType.String) {
+          item.getString("subtitle")?.trim()
+        } else null
         val targetType = item.getString("targetType")?.trim()
         val targetId = item.getString("targetId")?.trim()
-
-        val intent = Intent(Intent.ACTION_SEND)
-        intent.type = "text/plain"
-        intent.setClassName(ctx.packageName, "com.ginit.app.directshare.DirectShareReceiverActivity")
-        if (!targetType.isNullOrEmpty()) intent.putExtra("targetType", targetType)
-        if (!targetId.isNullOrEmpty()) intent.putExtra("targetId", targetId)
-
-        val b = ShortcutInfoCompat.Builder(ctx, id)
-          .setShortLabel(title)
-          .setIntent(intent)
-          .setIcon(IconCompat.createWithResource(ctx, ctx.applicationInfo.icon))
-        if (!subtitle.isNullOrEmpty()) b.setLongLabel(subtitle)
-        list.add(b.build())
+        val avatarUrl = if (item.hasKey("avatarUrl") && item.getType("avatarUrl") == ReadableType.String) {
+          item.getString("avatarUrl")?.trim()
+        } else null
+        rooms.add(DirectShareRoom(id, title, subtitle, targetType, targetId, avatarUrl))
       }
-      ShortcutManagerCompat.removeAllDynamicShortcuts(ctx)
-      ShortcutManagerCompat.addDynamicShortcuts(ctx, list)
+      android.util.Log.i("GinitDirectShare", "setShareShortcuts parsed rooms=" + rooms.size)
+      GinitShortcutManager.updateShortcuts(ctx, rooms)
       promise.resolve(null)
     } catch (t: Throwable) {
+      android.util.Log.e("GinitDirectShare", "setShareShortcuts failed", t)
       promise.resolve(null)
     }
   }

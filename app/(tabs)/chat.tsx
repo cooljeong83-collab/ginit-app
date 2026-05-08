@@ -55,7 +55,6 @@ import {
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
-import { setNativeShareShortcuts } from '@/src/lib/direct-share-native';
 import {
   consumeIncomingDirectSharePayload,
   peekIncomingDirectSharePayload,
@@ -174,6 +173,18 @@ export default function ChatTab() {
   const tabPagerRef = useRef<ScrollView | null>(null);
   const chatKindRef = useRef(chatKind);
   chatKindRef.current = chatKind;
+  /** 채팅방 목록 중복 진입 방지(더블 탭 등) — 모임 목록 `meetingOpenLockRef`와 동일 */
+  const chatRoomOpenLockRef = useRef(false);
+  const beginChatListOpenLock = useCallback((): boolean => {
+    if (chatRoomOpenLockRef.current) return false;
+    chatRoomOpenLockRef.current = true;
+    const lockRelease = () => {
+      chatRoomOpenLockRef.current = false;
+    };
+    // 네비게이션이 끝나기 전 더블탭으로 push가 2번 호출되는 케이스 방지
+    setTimeout(lockRelease, 900);
+    return true;
+  }, []);
   const [refreshing, setRefreshing] = useState(false);
   const [latestByMeetingId, setLatestByMeetingId] = useState<
     Record<string, MeetingChatMessage | null | undefined>
@@ -380,52 +391,6 @@ export default function ChatTab() {
     });
     return list;
   }, [socialFriendDmRooms, appliedSocialTextQuery, socialProfiles, socialMessageMatchRoomIds, latestBySocialRoomId]);
-
-  const directShareShortcutsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const directShareShortcutsLastKeyRef = useRef<string>('');
-  useEffect(() => {
-    if (!signedIn) return;
-    const uid = userId?.trim() ?? '';
-    if (!uid) return;
-
-    // Keep it small: too many dynamic shortcuts is noisy and slower to update.
-    const maxPerType = 5;
-    const meetingItems = displayedGatherMeetings.slice(0, maxPerType).map((m) => ({
-      id: `meeting:${m.id}`,
-      title: (m.title ?? '모임').trim() || '모임',
-      subtitle: '모임 채팅',
-      targetType: 'meeting',
-      targetId: m.id,
-    }));
-    const dmItems = displayedSocialRooms.slice(0, maxPerType).map((r) => {
-      const prof = socialProfiles.get(r.peerAppUserId);
-      const nick = (prof?.nickname ?? r.peerAppUserId ?? '친구').trim() || '친구';
-      // roomId는 r.roomId가 이미 summary에서 결정적이지만, 안전하게 계산 값도 함께 사용(기기별 포맷 차이 방지)
-      const rid = socialDmRoomId(uid, r.peerAppUserId);
-      return {
-        id: `dm:${rid}`,
-        title: nick,
-        subtitle: '친구 메시지',
-        targetType: 'dm',
-        targetId: rid,
-      };
-    });
-    const items = [...meetingItems, ...dmItems];
-
-    const key = items.map((x) => `${x.id}|${x.targetId}`).join('\u0001');
-    if (key === directShareShortcutsLastKeyRef.current) return;
-    directShareShortcutsLastKeyRef.current = key;
-
-    if (directShareShortcutsDebounceRef.current) clearTimeout(directShareShortcutsDebounceRef.current);
-    directShareShortcutsDebounceRef.current = setTimeout(() => {
-      void setNativeShareShortcuts(items as unknown[]);
-    }, 1200);
-
-    return () => {
-      if (directShareShortcutsDebounceRef.current) clearTimeout(directShareShortcutsDebounceRef.current);
-      directShareShortcutsDebounceRef.current = null;
-    };
-  }, [signedIn, userId, displayedGatherMeetings, displayedSocialRooms, socialProfiles]);
 
   const chatSearchFiltersDot = useMemo(
     () =>
@@ -955,6 +920,7 @@ export default function ChatTab() {
                       latestMessage={latestByMeetingId[m.id]}
                       unreadCount={unread}
                       onPress={() => {
+                        if (!beginChatListOpenLock()) return;
                         if (directSharePickMode) {
                           const incoming = consumeIncomingDirectSharePayload();
                           if (incoming) {
@@ -1028,33 +994,32 @@ export default function ChatTab() {
                   const unread = coalesceUnreadCountByKeys(socialRoomDocById[row.roomId]?.unreadCountBy, [raw, mePhone, mePk]);
                   return (
                     <Pressable
-                      onPress={() =>
-                        (() => {
-                          if (directSharePickMode) {
-                            const incoming = consumeIncomingDirectSharePayload();
-                            if (incoming) {
-                              if (incoming.kind === 'image') {
-                                setPendingDirectSharePayload({
-                                  kind: 'image',
-                                  imageUri: incoming.imageUri,
-                                  text: incoming.text,
-                                  targetType: 'dm',
-                                  targetId: rid,
-                                });
-                              } else {
-                                setPendingDirectSharePayload({
-                                  kind: 'text',
-                                  text: incoming.text,
-                                  targetType: 'dm',
-                                  targetId: rid,
-                                });
-                              }
+                      onPress={() => {
+                        if (!beginChatListOpenLock()) return;
+                        if (directSharePickMode) {
+                          const incoming = consumeIncomingDirectSharePayload();
+                          if (incoming) {
+                            if (incoming.kind === 'image') {
+                              setPendingDirectSharePayload({
+                                kind: 'image',
+                                imageUri: incoming.imageUri,
+                                text: incoming.text,
+                                targetType: 'dm',
+                                targetId: rid,
+                              });
+                            } else {
+                              setPendingDirectSharePayload({
+                                kind: 'text',
+                                text: incoming.text,
+                                targetType: 'dm',
+                                targetId: rid,
+                              });
                             }
-                            setDirectSharePickMode(false);
                           }
-                          router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
-                        })()
-                      }
+                          setDirectSharePickMode(false);
+                        }
+                        router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
+                      }}
                       accessibilityRole="button"
                       accessibilityLabel={`${nick}와 채팅`}
                       style={({ pressed }) => [styles.chatPressableRow, pressed && styles.chatPressablePressed]}>

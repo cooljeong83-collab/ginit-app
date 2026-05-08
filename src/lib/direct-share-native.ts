@@ -5,9 +5,19 @@ type NativePendingShare = {
   imageUri?: string | null;
 };
 
+/** Android `GinitDirectShare.setShareShortcuts` 페이로드(동적 Direct Share). */
+export type NativeShareShortcutItem = {
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  targetType: string;
+  targetId: string;
+  avatarUrl?: string | null;
+};
+
 type DirectShareNativeModule = {
   consumePendingShare?: () => Promise<NativePendingShare | null> | NativePendingShare | null;
-  setShareShortcuts?: (items: unknown[]) => Promise<void> | void;
+  setShareShortcuts?: (items: NativeShareShortcutItem[]) => Promise<void> | void;
 };
 
 function getModule(): DirectShareNativeModule | null {
@@ -30,7 +40,7 @@ export async function consumeNativePendingShare(): Promise<NativePendingShare | 
   }
 }
 
-export async function setNativeShareShortcuts(items: unknown[]): Promise<void> {
+export async function setNativeShareShortcuts(items: NativeShareShortcutItem[]): Promise<void> {
   const m = getModule();
   const fn = m?.setShareShortcuts;
   if (typeof fn !== 'function') return;
