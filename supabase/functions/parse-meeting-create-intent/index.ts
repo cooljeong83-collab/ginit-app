@@ -118,7 +118,7 @@ let nluMeetingCategoryPairsCache: CategoryPair[] | null = null;
 let nluMeetingCategoryPairsCacheAt = 0;
 const NLU_MEETING_CAT_CACHE_MS = 10 * 60 * 1000;
 
-/** 앱 `subscribeCategories`(Supabase)와 동일: sort_order → label(ko) */
+/** 앱 `fetchMeetingCategoriesFromSupabase` / 정렬과 동일: sort_order → label(ko) */
 async function loadMeetingCategoriesFromDb(): Promise<CategoryPair[] | null> {
   const url = Deno.env.get('SUPABASE_URL')?.trim();
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();

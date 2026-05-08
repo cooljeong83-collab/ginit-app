@@ -22,10 +22,10 @@ import { GinitButton, GinitCard } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
-import { subscribeCategories } from '@/src/lib/categories';
 import {
   compareFriendsByPresenceDistanceTrust,
   computeFriendSortSignals,
@@ -284,7 +284,8 @@ export function FriendsHomeScreen() {
   const [accepted, setAccepted] = useState<FriendAcceptedRow[]>([]);
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const { categories: categoriesRaw } = useMeetingCategories();
+  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [meProfile, setMeProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -375,10 +376,6 @@ export function FriendsHomeScreen() {
       (list) => setMeetings(list),
       () => {},
     );
-  }, []);
-
-  useEffect(() => {
-    return subscribeCategories((list) => setCategories(list), () => {});
   }, []);
 
   useEffect(() => {

@@ -2,7 +2,7 @@ import { createTable, schemaMigrations } from '@nozbe/watermelondb/Schema/migrat
 
 /**
  * WatermelonDB는 스키마 version 증가 시 migrations가 필요합니다.
- * v1(빈 스키마) -> v2(채팅 오프라인 저장/검색) 마이그레이션.
+ * v1 -> v2(채팅 오프라인), v2 -> v3(`cached_meeting_categories`).
  */
 export const migrations = schemaMigrations({
   migrations: [
@@ -58,6 +58,20 @@ export const migrations = schemaMigrations({
             { name: 'range_end_at_ms', type: 'number', isOptional: true, isIndexed: true },
             { name: 'chunk_text', type: 'string' },
             { name: 'fetched_at_ms', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 3,
+      steps: [
+        createTable({
+          name: 'cached_meeting_categories',
+          columns: [
+            { name: 'label', type: 'string' },
+            { name: 'emoji', type: 'string' },
+            { name: 'sort_order', type: 'number', isIndexed: true },
+            { name: 'major_code', type: 'string', isOptional: true },
           ],
         }),
       ],

@@ -3,6 +3,7 @@ import { Database } from '@nozbe/watermelondb';
 
 import { schema } from './schema';
 import { migrations } from './migrations';
+import { CachedMeetingCategory } from './models/CachedMeetingCategory';
 import { ChatMessage } from './models/ChatMessage';
 import { ChatRoom } from './models/ChatRoom';
 import { ChatSearchIndexChunk } from './models/ChatSearchIndexChunk';
@@ -20,7 +21,7 @@ function createNativeDatabase(): Database {
   });
   return new Database({
     adapter,
-    modelClasses: [ChatRoom, ChatMessage, RecentSearch, ChatSearchIndexChunk],
+    modelClasses: [ChatRoom, ChatMessage, RecentSearch, ChatSearchIndexChunk, CachedMeetingCategory],
   });
 }
 

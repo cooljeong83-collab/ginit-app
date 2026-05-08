@@ -5,7 +5,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  * @see https://watermelondb.dev/docs/Schema
  */
 export const schema = appSchema({
-  version: 2,
+  version: 3,
   tables: [
     /**
      * 채팅방 메타(증분 동기화 커서/상태).
@@ -76,6 +76,17 @@ export const schema = appSchema({
         { name: 'range_end_at_ms', type: 'number', isOptional: true, isIndexed: true },
         { name: 'chunk_text', type: 'string' },
         { name: 'fetched_at_ms', type: 'number', isOptional: true },
+      ],
+    }),
+
+    /** 모임 카테고리 마스터 오프라인 캐시(Supabase/Firestore 동기화 후 스냅샷). */
+    tableSchema({
+      name: 'cached_meeting_categories',
+      columns: [
+        { name: 'label', type: 'string' },
+        { name: 'emoji', type: 'string' },
+        { name: 'sort_order', type: 'number', isIndexed: true },
+        { name: 'major_code', type: 'string', isOptional: true },
       ],
     }),
   ],

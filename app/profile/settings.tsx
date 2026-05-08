@@ -140,6 +140,15 @@ export default function ProfileAppSettingsScreen() {
     dndWindowRef.current = { start: dndStartMin, end: dndEndMin };
   }, [dndStartMin, dndEndMin]);
 
+  useEffect(() => {
+    return () => {
+      if (versionTapResetTimerRef.current) {
+        clearTimeout(versionTapResetTimerRef.current);
+        versionTapResetTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const isSignedIn = Boolean(userId?.trim() || authProfile?.firebaseUid?.trim());
 
   const profilePk = useMemo(() => {
@@ -158,6 +167,9 @@ export default function ProfileAppSettingsScreen() {
   const [soundId, setSoundId] = useState<ProfileNotificationSoundId>('ginit_ring_w');
   const [soundLoaded, setSoundLoaded] = useState(false);
   const [soundPickOpen, setSoundPickOpen] = useState(false);
+  const [showTestCrashRow, setShowTestCrashRow] = useState(false);
+  const versionTapCountRef = useRef(0);
+  const versionTapResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { height: windowHeight } = useWindowDimensions();
   const soundSheetLayout = useMemo(() => {
@@ -495,6 +507,24 @@ export default function ProfileAppSettingsScreen() {
     ]);
   }, []);
 
+  const onPressVersionInfo = useCallback(() => {
+    if (showTestCrashRow) return;
+    if (versionTapResetTimerRef.current) {
+      clearTimeout(versionTapResetTimerRef.current);
+      versionTapResetTimerRef.current = null;
+    }
+    versionTapCountRef.current += 1;
+    if (versionTapCountRef.current >= 10) {
+      versionTapCountRef.current = 0;
+      setShowTestCrashRow(true);
+      return;
+    }
+    versionTapResetTimerRef.current = setTimeout(() => {
+      versionTapCountRef.current = 0;
+      versionTapResetTimerRef.current = null;
+    }, 2000);
+  }, [showTestCrashRow]);
+
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -670,27 +700,34 @@ export default function ProfileAppSettingsScreen() {
             </Pressable>
             <RowSep />
             
-            <View style={styles.row}>
+            <Pressable
+              onPress={onPressVersionInfo}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="버전 정보">
               <SettingsRowLeadIcon name="information-outline" />
               <View style={styles.rowText}>
                 <Text style={styles.rowLabel}>버전 정보</Text>
                 <Text style={styles.rowSub}>{versionLine}</Text>
               </View>
-            </View>
-            <RowSep />
-
-            <Pressable
-              onPress={onPressTestCrash}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="테스트 크래시 발생">
-              <SettingsRowLeadIcon name="warning-outline" />
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>테스트 크래시 발생</Text>
-                <Text style={styles.rowSub}>Crashlytics 연동 확인용으로 앱을 강제 종료해요.</Text>
-              </View>
-              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
             </Pressable>
+            {showTestCrashRow ? (
+              <>
+                <RowSep />
+                <Pressable
+                  onPress={onPressTestCrash}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="테스트 크래시 발생">
+                  <SettingsRowLeadIcon name="warning-outline" />
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>테스트 크래시 발생</Text>
+                    <Text style={styles.rowSub}>Crashlytics 연동 확인용으로 앱을 강제 종료해요.</Text>
+                  </View>
+                  <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+                </Pressable>
+              </>
+            ) : null}
 
             {isSignedIn ? (
               <>

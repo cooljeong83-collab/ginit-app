@@ -15,6 +15,7 @@ import { PushNotificationBootstrap } from '@/components/PushNotificationBootstra
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
+import { MeetingCategoriesProvider } from '@/src/context/MeetingCategoriesContext';
 import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 import { ensureChatMessageFtsReady } from '@/src/watermelon/fts';
@@ -57,27 +58,29 @@ export default function RootLayout() {
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
         <QueryClientPersistProvider>
-          <UserSessionProvider>
-            <InAppAlarmsProvider>
-              <DevMemoryDebug />
-              <BackgroundExecutionBootstrap />
-              <FcmMessagingBootstrap />
-              <FcmPushRoutingBootstrap />
-              <PushNotificationBootstrap />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: '#FFFFFF' },
-                  freezeOnBlur: true,
-                  animation: 'slide_from_right',
-                  gestureEnabled: true,
-                  fullScreenGestureEnabled: true,
-                  ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
-                }}
-              />
-              <TransientBottomMessageHost />
-            </InAppAlarmsProvider>
-          </UserSessionProvider>
+          <MeetingCategoriesProvider>
+            <UserSessionProvider>
+              <InAppAlarmsProvider>
+                <DevMemoryDebug />
+                <BackgroundExecutionBootstrap />
+                <FcmMessagingBootstrap />
+                <FcmPushRoutingBootstrap />
+                <PushNotificationBootstrap />
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: '#FFFFFF' },
+                    freezeOnBlur: true,
+                    animation: 'slide_from_right',
+                    gestureEnabled: true,
+                    fullScreenGestureEnabled: true,
+                    ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
+                  }}
+                />
+                <TransientBottomMessageHost />
+              </InAppAlarmsProvider>
+            </UserSessionProvider>
+          </MeetingCategoriesProvider>
         </QueryClientPersistProvider>
       </AppPoliciesProvider>
     </>

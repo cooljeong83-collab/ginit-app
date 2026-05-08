@@ -32,11 +32,11 @@ import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
-import { subscribeCategories } from '@/src/lib/categories';
 import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
   haystackMatchesFeedRegion,
@@ -155,7 +155,8 @@ export default function FeedScreen() {
   /** 모임 상세 중복 진입 방지(더블 탭 등) */
   const meetingOpenLockRef = useRef(false);
 
-  const [categories, setCategories] = useState<Category[]>([]);
+  const { categories: categoriesRaw } = useMeetingCategories();
+  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [refreshing, setRefreshing] = useState(false);
   const {
     meetings,
@@ -368,16 +369,6 @@ export default function FeedScreen() {
       alive = false;
     };
   }, [feedLocationReady]);
-
-  useEffect(() => {
-    const unsub = subscribeCategories(
-      (list) => setCategories(list),
-      () => {
-        /* 피드는 카테고리 없이도 동작 */
-      },
-    );
-    return unsub;
-  }, []);
 
   useEffect(() => {
     const uid = userId?.trim();

@@ -87,13 +87,13 @@ import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessa
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useCreateMeetingAgentFabMeasure } from '@/src/hooks/use-create-meeting-agent-fab-measure';
 import { useCreateMeetingNluSessionRefs } from '@/src/hooks/use-create-meeting-nlu-session-refs';
 import type { WizardSuggestion } from '@/src/lib/agentic-guide/types';
 import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
 import type { Category } from '@/src/lib/categories';
-import { subscribeCategories } from '@/src/lib/categories';
 import {
   categoryNeedsSpecialty,
   isActiveLifeMajorCode,
@@ -383,9 +383,10 @@ export default function CreateDetailsScreen() {
   const paramCategoryId = pickParam(categoryIdParam)?.trim() ?? '';
   const paramCategoryLabel = pickParam(categoryLabelParam)?.trim() ?? '';
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [catLoading, setCatLoading] = useState(true);
-  const [catError, setCatError] = useState<string | null>(null);
+  const { categories: categoriesRaw, categoriesLoading: catLoading, categoriesError: catErrorRaw } =
+    useMeetingCategories();
+  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
+  const catError = catErrorRaw ?? null;
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const meetingCreateRules = useMemo(
     () => resolveMeetingCreateRules(categories.find((c) => c.id === selectedCategoryId)?.majorCode ?? null),
@@ -773,25 +774,13 @@ export default function CreateDetailsScreen() {
   }, [snsDemographicsBlocked, nluComposerUserDismissed, nluDockReservePx, insets.bottom]);
 
   useEffect(() => {
-    setCatLoading(true);
-    const unsub = subscribeCategories(
-      (list) => {
-        setCategories(list);
-        setCatError(null);
-        setCatLoading(false);
-        setSelectedCategoryId((prev) => {
-          if (paramCategoryId && list.some((c) => c.id === paramCategoryId)) return paramCategoryId;
-          if (prev && list.some((c) => c.id === prev)) return prev;
-          return null;
-        });
-      },
-      (msg) => {
-        setCatError(msg);
-        setCatLoading(false);
-      },
-    );
-    return unsub;
-  }, [paramCategoryId]);
+    if (catLoading) return;
+    setSelectedCategoryId((prev) => {
+      if (paramCategoryId && categories.some((c) => c.id === paramCategoryId)) return paramCategoryId;
+      if (prev && categories.some((c) => c.id === prev)) return prev;
+      return null;
+    });
+  }, [paramCategoryId, categories, catLoading]);
 
   useFocusEffect(
     useCallback(() => {
@@ -2565,7 +2554,7 @@ export default function CreateDetailsScreen() {
                 ) : null}
 
                 <View style={styles.catGrid}>
-                  {categories.map((c) => {
+                  {(categories ?? []).map((c) => {
                     const active = c.id === selectedCategoryId;
                     const agentCatCue = agentWizardApplyCue?.kind === 'category' && agentWizardApplyCue.id === c.id;
                     return (

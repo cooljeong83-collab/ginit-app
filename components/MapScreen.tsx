@@ -52,12 +52,12 @@ import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useFirestoreMeetingPatchesByIds } from '@/src/hooks/useFirestoreMeetingPatchesByIds';
 import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { Category } from '@/src/lib/categories';
-import { subscribeCategories } from '@/src/lib/categories';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
   normalizeFeedRegionLabel,
@@ -550,7 +550,8 @@ export default function MapScreen() {
   const categoryBarModalCategoryListScrollRef = useRef<ScrollView | null>(null);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
-  const [categories, setCategories] = useState<Category[]>([]);
+  const { categories: categoriesRaw } = useMeetingCategories();
+  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [hybridMeetings, setHybridMeetings] = useState<Meeting[]>([]);
   const [rpcMeetings, setRpcMeetings] = useState<Meeting[]>([]);
   const [meetingsBooted, setMeetingsBooted] = useState(false);
@@ -886,11 +887,6 @@ export default function MapScreen() {
         /* ignore */
       }
     };
-  }, []);
-
-  useEffect(() => {
-    const unsub = subscribeCategories((list) => setCategories(list), () => {});
-    return unsub;
   }, []);
 
   useEffect(() => {
