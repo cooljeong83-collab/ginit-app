@@ -28,6 +28,8 @@ import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-ren
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
+import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
   deleteSocialChatImageMessageBestEffort,
@@ -132,6 +134,54 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
 
   const myId = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) : ''), [myUserId]);
   const hostNorm = '';
+
+  const didHandleDirectShareRef = useRef(false);
+  useEffect(() => {
+    if (didHandleDirectShareRef.current) return;
+    const rid = roomId.trim();
+    const uid = myUserId.trim();
+    if (!rid || !uid) return;
+    const peek = peekPendingDirectSharePayload();
+    if (!peek || peek.targetType !== 'dm' || peek.targetId.trim() !== rid) return;
+
+    const payload = consumePendingDirectSharePayload();
+    if (!payload || payload.targetType !== 'dm' || payload.targetId.trim() !== rid) return;
+    didHandleDirectShareRef.current = true;
+
+    ginitNotifyDbg('direct-share', 'dm_consume', {
+      roomId: rid,
+      kind: payload.kind,
+      hasImageUri: payload.kind === 'image' ? Boolean(payload.imageUri?.trim()) : false,
+      textLen: payload.kind === 'text' ? payload.text.length : (payload.text?.length ?? 0),
+      imageUriPrefix: payload.kind === 'image' ? String(payload.imageUri ?? '').slice(0, 28) : '',
+    });
+
+    pendingAutoScrollToLatestRef.current = true;
+    setSending(true);
+    void (async () => {
+      try {
+        if (payload.kind === 'image') {
+          const uri = payload.imageUri.trim();
+          if (uri) {
+            await sendSocialChatImageMessagesBatch(rid, uid, [uri], { naturalWidths: [undefined] });
+          }
+        } else {
+          const text = payload.text.trim();
+          if (text) {
+            await sendSocialChatTextMessage(rid, uid, text, null);
+          }
+        }
+      } catch (e) {
+        ginitNotifyDbg('direct-share', 'dm_send_failed', {
+          roomId: rid,
+          message: e instanceof Error ? e.message : String(e),
+        });
+        Alert.alert('공유 전송 실패', e instanceof Error ? e.message : String(e));
+      } finally {
+        setSending(false);
+      }
+    })();
+  }, [roomId, myUserId]);
 
   const messages = useMemo(() => socialMessagesToMeetingNewestFirst(rawMessages), [rawMessages]);
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);

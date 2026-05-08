@@ -48,6 +48,8 @@ import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-
 import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
 import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
@@ -288,6 +290,54 @@ export default function MeetingChatRoomScreen() {
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
   }, [meeting, userId]);
+
+  const didHandleDirectShareRef = useRef(false);
+  useEffect(() => {
+    if (didHandleDirectShareRef.current) return;
+    if (!meetingId || !userId?.trim()) return;
+    if (allowed !== true) return;
+    const peek = peekPendingDirectSharePayload();
+    if (!peek || peek.targetType !== 'meeting' || peek.targetId.trim() !== meetingId.trim()) return;
+
+    // consume exactly once for this screen
+    const payload = consumePendingDirectSharePayload();
+    if (!payload || payload.targetType !== 'meeting' || payload.targetId.trim() !== meetingId.trim()) return;
+    didHandleDirectShareRef.current = true;
+
+    ginitNotifyDbg('direct-share', 'meeting_consume', {
+      meetingId: meetingId.trim(),
+      kind: payload.kind,
+      hasImageUri: payload.kind === 'image' ? Boolean(payload.imageUri?.trim()) : false,
+      textLen: payload.kind === 'text' ? payload.text.length : (payload.text?.length ?? 0),
+      imageUriPrefix: payload.kind === 'image' ? String(payload.imageUri ?? '').slice(0, 28) : '',
+    });
+
+    pendingAutoScrollToLatestRef.current = true;
+    setSending(true);
+    void (async () => {
+      try {
+        if (payload.kind === 'image') {
+          const uri = payload.imageUri.trim();
+          if (uri) {
+            await sendMeetingChatImageMessagesBatch(meetingId, userId, [uri], { naturalWidths: [undefined] });
+          }
+        } else {
+          const text = payload.text.trim();
+          if (text) {
+            await sendMeetingChatTextMessage(meetingId, userId, text, null);
+          }
+        }
+      } catch (e) {
+        ginitNotifyDbg('direct-share', 'meeting_send_failed', {
+          meetingId: meetingId.trim(),
+          message: e instanceof Error ? e.message : String(e),
+        });
+        Alert.alert('공유 전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+      } finally {
+        setSending(false);
+      }
+    })();
+  }, [allowed, meetingId, userId]);
 
   useOfflineChatRoomSync({ roomType: 'meeting', roomId: meetingId }, allowed === true);
 

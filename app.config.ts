@@ -233,6 +233,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-background-fetch',
       /** Android Phone Number Hint API (play-services-auth) */
       './plugins/withAndroidPlayServicesAuth.js',
+      './plugins/withAndroidDirectShare.js',
       './plugins/withAndroidNotifeeMaven.js',
       './plugins/withAndroidWindowSoftInputAdjustResize.js',
       './plugins/withAndroidMainActivityEdgeToEdge.js',

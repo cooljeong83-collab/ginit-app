@@ -952,7 +952,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     socialPeerNickByRoomId,
   ]);
 
-  const hasUnread = alarms.length > 0;
+  const hasUnread = persistReady && alarms.length > 0;
 
   /** 새 소식 모달: 소식이 많을 때 스크롤되며 화면을 넘지 않도록 카드·목록 최대 높이 */
   const alarmPanelLayout = useMemo(() => {

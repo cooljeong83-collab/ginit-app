@@ -478,6 +478,23 @@ export default function ProfileAppSettingsScreen() {
     return build ? `${app} (${build})` : String(app);
   }, []);
 
+  const onPressTestCrash = useCallback(() => {
+    if (Platform.OS === 'web') {
+      Alert.alert('안내', '웹에서는 테스트 크래시를 지원하지 않아요.');
+      return;
+    }
+    Alert.alert('테스트 크래시', '앱이 즉시 종료됩니다. 계속할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '발생',
+        style: 'destructive',
+        onPress: () => {
+          throw new Error('Ginit: Crashlytics test crash (JS runtime)');
+        },
+      },
+    ]);
+  }, []);
+
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -661,6 +678,19 @@ export default function ProfileAppSettingsScreen() {
               </View>
             </View>
             <RowSep />
+
+            <Pressable
+              onPress={onPressTestCrash}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="테스트 크래시 발생">
+              <SettingsRowLeadIcon name="warning-outline" />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>테스트 크래시 발생</Text>
+                <Text style={styles.rowSub}>Crashlytics 연동 확인용으로 앱을 강제 종료해요.</Text>
+              </View>
+              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+            </Pressable>
 
             {isSignedIn ? (
               <>
