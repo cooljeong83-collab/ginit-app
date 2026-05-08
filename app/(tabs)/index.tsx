@@ -1,27 +1,11 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import {
-  ActivityIndicator,
-  Alert,
-  BackHandler,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import {ActivityIndicator, Alert, BackHandler, Keyboard, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
@@ -1132,7 +1116,7 @@ export default function FeedScreen() {
     <View style={styles.feedHeader}>
       <View style={styles.feedHeaderTopRow}>
         <View style={styles.locationCluster}>
-          <Pressable
+          <GinitPressable
             onPress={openRegionModal}
             style={({ pressed }) => [styles.locationClusterPressable, pressed && styles.locationClusterPressed]}
             accessibilityRole="button"
@@ -1154,18 +1138,18 @@ export default function FeedScreen() {
                   : getInterestRegionDisplayLabel(exploreActiveRegionNorm)
                 : '불러오는 중…'}
             </Text>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={openRegionDropdownModal}
             style={({ pressed }) => [styles.locationChevronPressable, pressed && styles.locationClusterPressed]}
             accessibilityRole="button"
             accessibilityLabel="등록된 관심 지역 중 표시 지역 선택"
             hitSlop={{ top: 20, bottom: 20, left: 16, right: 20 }}>
             <GinitSymbolicIcon name="chevron-down" size={20} color={GinitTheme.colors.primary} />
-          </Pressable>
+          </GinitPressable>
         </View>
         <View style={styles.headerActions}>
-          <Pressable
+          <GinitPressable
             onPress={openFeedSearch}
             accessibilityRole="button"
             accessibilityLabel="검색 및 조건 필터"
@@ -1173,9 +1157,9 @@ export default function FeedScreen() {
             style={styles.searchIconWrap}>
             <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
             {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
-          </Pressable>
+          </GinitPressable>
           <InAppAlarmsBellButton />
-          <Pressable
+          <GinitPressable
             onPress={openCategoryPicker}
             accessibilityRole="button"
             accessibilityLabel="모임 목록·카테고리 설정"
@@ -1183,12 +1167,12 @@ export default function FeedScreen() {
             style={styles.settingsIconWrap}>
             <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
             {feedCategorySlidersDotActive ? <View style={styles.settingsFilterDot} /> : null}
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
       <View style={styles.tabCategoryBar}>
         <View style={styles.tabPair}>
-          <Pressable
+          <GinitPressable
             onPress={() => goToHomeTab('explore')}
             style={({ pressed }) => [
               styles.homeTopChip,
@@ -1202,8 +1186,8 @@ export default function FeedScreen() {
             <Text style={[styles.homeTopChipLabel, homeTab === 'explore' && styles.homeTopChipLabelActive]} numberOfLines={1}>
               탐색
             </Text>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={() => goToHomeTab('my')}
             style={({ pressed }) => [
               styles.homeTopChip,
@@ -1217,8 +1201,8 @@ export default function FeedScreen() {
             <Text style={[styles.homeTopChipLabel, homeTab === 'my' && styles.homeTopChipLabelActive]} numberOfLines={1}>
               내모임
             </Text>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={() => goToHomeTab('private')}
             style={({ pressed }) => [
               styles.homeTopChip,
@@ -1236,9 +1220,9 @@ export default function FeedScreen() {
               accessibilityElementsHidden
               importantForAccessibility="no"
             />
-          </Pressable>
+          </GinitPressable>
         </View>
-        <Pressable
+        <GinitPressable
           onPress={openSortDropdown}
           style={({ pressed }) => [styles.categoryDropdown, pressed && styles.categoryDropdownPressed]}
           accessibilityRole="button"
@@ -1249,7 +1233,7 @@ export default function FeedScreen() {
             {sortComboLabel}
           </Text>
           <GinitSymbolicIcon name="chevron-down" size={18} color="#475569" />
-        </Pressable>
+        </GinitPressable>
       </View>
     </View>
   );
@@ -1417,7 +1401,7 @@ export default function FeedScreen() {
           transparent
           onRequestClose={closeFeedListSettingsModal}>
           <View style={styles.modalRoot}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeFeedListSettingsModal}
               accessibilityRole="button"
@@ -1429,7 +1413,7 @@ export default function FeedScreen() {
                 목록에 쓸 모임 종류·모집중 필터는 «저장»할 때 반영돼요. 정렬·검색 조건은 상단에서 바꿀 수 있어요.
               </Text>
               <View style={styles.mapCategoryBarModalDivider} />
-              <Pressable
+              <GinitPressable
                 onPress={toggleFeedCategoryPickerSelectAll}
                 style={({ pressed }) => [
                   styles.mapCategoryBarModalRow,
@@ -1444,7 +1428,7 @@ export default function FeedScreen() {
                 ) : (
                   <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                 )}
-              </Pressable>
+              </GinitPressable>
               <View style={styles.mapCategoryBarModalDivider} />
               <View style={styles.categoryBarModalScrollWrap}>
                 <ScrollView
@@ -1469,7 +1453,7 @@ export default function FeedScreen() {
                   {sortedFeedCategoryMaster.map((c) => {
                     const on = categoryPickerDraft.visibility.includes(c.id);
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={c.id}
                         onPress={() => toggleFeedCategoryPickerVisibilityDraft(c.id)}
                         style={({ pressed }) => [
@@ -1491,7 +1475,7 @@ export default function FeedScreen() {
                         ) : (
                           <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                         )}
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </ScrollView>
@@ -1514,7 +1498,7 @@ export default function FeedScreen() {
               </View>
               <View style={[styles.mapCategoryBarModalDivider, styles.mapCategoryBarModalDividerBeforeToday]} />
               <Text style={styles.modalSectionTitle}>표시</Text>
-              <Pressable
+              <GinitPressable
                 onPress={() => setRecruitingOnlyDraft((v) => !v)}
                 style={({ pressed }) => [
                   styles.mapCategoryBarModalRow,
@@ -1537,12 +1521,12 @@ export default function FeedScreen() {
                     <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                   )}
                 </View>
-              </Pressable>
+              </GinitPressable>
               {isSignedIn && Platform.OS !== 'web' ? (
                 <>
                   <View style={styles.mapCategoryBarModalDivider} />
                   <Text style={styles.modalSectionTitle}>알림</Text>
-                  <Pressable
+                  <GinitPressable
                     onPress={openMeetingNotifySettings}
                     style={({ pressed }) => [
                       styles.mapCategoryBarModalRow,
@@ -1557,7 +1541,7 @@ export default function FeedScreen() {
                         관심 지역·카테고리별로 새 공개 모임만 알려요.
                       </Text>
                     </View>
-                    <Pressable
+                    <GinitPressable
                       onPress={openMeetingNotifySettings}
                       hitSlop={10}
                       accessibilityElementsHidden
@@ -1575,23 +1559,23 @@ export default function FeedScreen() {
                       ) : (
                         <ActivityIndicator color={GinitTheme.colors.primary} />
                       )}
-                    </Pressable>
-                  </Pressable>
+                    </GinitPressable>
+                  </GinitPressable>
                 </>
               ) : null}
               <View style={styles.categoryBarModalActions}>
-                <Pressable
+                <GinitPressable
                   onPress={closeFeedListSettingsModal}
                   style={({ pressed }) => [styles.categoryBarActionGhost, pressed && { opacity: 0.85 }]}
                   accessibilityRole="button">
                   <Text style={styles.categoryBarActionGhostLabel}>취소</Text>
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
                   onPress={() => void saveCategoryPickerModal()}
                   style={({ pressed }) => [styles.categoryBarActionPrimary, pressed && { opacity: 0.9 }]}
                   accessibilityRole="button">
                   <Text style={styles.modalCloseLabel}>저장</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           </View>
@@ -1611,7 +1595,7 @@ export default function FeedScreen() {
           transparent
           onRequestClose={closeRegionModal}>
           <View style={styles.modalRoot}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeRegionModal}
               accessibilityRole="button"
@@ -1642,20 +1626,20 @@ export default function FeedScreen() {
                         {blockLastDraftRemove ? (
                           <View style={{ width: 22 }} accessibilityElementsHidden />
                         ) : (
-                          <Pressable
+                          <GinitPressable
                             onPress={() => removeDraftRegion(r)}
                             accessibilityRole="button"
                             accessibilityLabel={`${getInterestRegionDisplayLabel(r)} 삭제`}
                             hitSlop={8}>
                             <GinitSymbolicIcon name="trash-outline" size={22} color="#94a3b8" />
-                          </Pressable>
+                          </GinitPressable>
                         )}
                       </View>
                     );
                   })
                 )}
                 {draftRegisteredRegions.length < FEED_REGISTERED_REGIONS_MAX ? (
-                  <Pressable
+                  <GinitPressable
                     onPress={openRegionSearchModal}
                     style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                     accessibilityRole="button"
@@ -1663,18 +1647,18 @@ export default function FeedScreen() {
                     <GinitSymbolicIcon name="add-circle-outline" size={24} color={GinitTheme.colors.primary} />
                     <Text style={[styles.modalRowLabel, styles.interestRegionAddLabel]}>관심 지역 추가</Text>
                     <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
-                  </Pressable>
+                  </GinitPressable>
                 ) : (
                   <Text style={styles.interestRegionEmptyDraft}>최대 {FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.</Text>
                 )}
               </ScrollView>
-              <Pressable onPress={applyDraftRegisteredRegions} style={styles.modalPrimaryBtn} accessibilityRole="button">
+              <GinitPressable onPress={applyDraftRegisteredRegions} style={styles.modalPrimaryBtn} accessibilityRole="button">
                 <Text style={styles.modalPrimaryLabel}>적용</Text>
-              </Pressable>
+              </GinitPressable>
               {registeredRegions.length > 0 ? (
-                <Pressable onPress={closeRegionModal} style={styles.modalCloseBtn} accessibilityRole="button">
+                <GinitPressable onPress={closeRegionModal} style={styles.modalCloseBtn} accessibilityRole="button">
                   <Text style={styles.modalCloseLabel}>닫기</Text>
-                </Pressable>
+                </GinitPressable>
               ) : null}
             </View>
           </View>
@@ -1686,7 +1670,7 @@ export default function FeedScreen() {
           transparent
           onRequestClose={closeRegionDropdownModal}>
           <View style={styles.modalRoot}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeRegionDropdownModal}
               accessibilityRole="button"
@@ -1697,7 +1681,7 @@ export default function FeedScreen() {
               {registeredRegions.length === 0 ? (
                 <>
                   <Text style={styles.modalHint}>등록된 관심 지역이 없어요. 지역 이름을 눌러 등록해 주세요.</Text>
-                  <Pressable
+                  <GinitPressable
                     onPress={() => {
                       closeRegionDropdownModal();
                       openRegionModal();
@@ -1705,7 +1689,7 @@ export default function FeedScreen() {
                     style={styles.modalPrimaryBtn}
                     accessibilityRole="button">
                     <Text style={styles.modalPrimaryLabel}>관심 지역 등록하기</Text>
-                  </Pressable>
+                  </GinitPressable>
                 </>
               ) : (
                 <>
@@ -1714,7 +1698,7 @@ export default function FeedScreen() {
                     const norm = normalizeFeedRegionLabel(r);
                     const active = norm === exploreActiveRegionNorm;
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={norm}
                         onPress={() => pickActiveRegionFromDropdown(norm)}
                         style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
@@ -1726,14 +1710,14 @@ export default function FeedScreen() {
                         ) : (
                           <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                         )}
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </>
               )}
-              <Pressable onPress={closeRegionDropdownModal} style={styles.modalCloseBtn} accessibilityRole="button">
+              <GinitPressable onPress={closeRegionDropdownModal} style={styles.modalCloseBtn} accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>닫기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </Modal>
@@ -1744,7 +1728,7 @@ export default function FeedScreen() {
           transparent
           onRequestClose={closeSortDropdown}>
           <View style={styles.modalRoot}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeSortDropdown}
               accessibilityRole="button"
@@ -1757,7 +1741,7 @@ export default function FeedScreen() {
                 const selected = listSortMode === mode;
                 const label = listSortModeLabel(mode);
                 return (
-                  <Pressable
+                  <GinitPressable
                     key={mode}
                     onPress={() => {
                       setListSortMode(mode);
@@ -1772,12 +1756,12 @@ export default function FeedScreen() {
                     ) : (
                       <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                     )}
-                  </Pressable>
+                  </GinitPressable>
                 );
               })}
-              <Pressable onPress={closeSortDropdown} style={styles.modalCloseBtn} accessibilityRole="button">
+              <GinitPressable onPress={closeSortDropdown} style={styles.modalCloseBtn} accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>닫기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </Modal>
@@ -1794,7 +1778,7 @@ export default function FeedScreen() {
               regionSearchKeyboardVisible && styles.regionSearchModalRootKeyboardOpen,
               regionSearchKeyboardVisible && { paddingTop: safeInsets.top + GinitTheme.spacing.sm },
             ]}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeRegionSearchModal}
               accessibilityRole="button"
@@ -1822,20 +1806,20 @@ export default function FeedScreen() {
                   <Text style={styles.interestRegionSearchEmpty}>검색 결과가 없어요.</Text>
                 ) : (
                   regionSearchResults.map((hit) => (
-                    <Pressable
+                    <GinitPressable
                       key={hit.key}
                       onPress={() => pickSearchResultDistrict(hit.key)}
                       style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                       accessibilityRole="button">
                       <Text style={styles.modalRowLabel}>{hit.label}</Text>
                       <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
-                    </Pressable>
+                    </GinitPressable>
                   ))
                 )}
               </ScrollView>
-              <Pressable onPress={closeRegionSearchModal} style={styles.modalCloseBtn} accessibilityRole="button">
+              <GinitPressable onPress={closeRegionSearchModal} style={styles.modalCloseBtn} accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>닫기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </Modal>

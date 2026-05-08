@@ -1,22 +1,11 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  LayoutChangeEvent,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  ToastAndroid,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, Animated, Easing, LayoutChangeEvent, Platform, ScrollView, StyleSheet, Text, ToastAndroid, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitCard } from '@/components/ginit';
@@ -262,20 +251,20 @@ export default function ProfileTab() {
               프로필
             </Text>
             <View style={styles.headerIcons}>
-              <Pressable
+              <GinitPressable
                 accessibilityLabel="프로필 편집"
                 hitSlop={8}
                 onPress={onGoEditProfile}
                 style={styles.iconBtn}>
                 <GinitSymbolicIcon name="account-edit-outline" size={22} color="#0f172a" />
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 accessibilityLabel="설정"
                 hitSlop={8}
                 onPress={onPressProfileMenu}
                 style={styles.iconBtn}>
                 <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </View>
@@ -298,7 +287,7 @@ export default function ProfileTab() {
 
           {!isSignedIn ? (
             <View style={styles.menuListWrap}>
-              <Pressable
+              <GinitPressable
                 onPress={onGoLogin}
                 style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
                 accessibilityRole="button"
@@ -312,7 +301,7 @@ export default function ProfileTab() {
                   </View>
                 </View>
                 <Text style={styles.menuChevron}>›</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           ) : null}
         </ScrollView>

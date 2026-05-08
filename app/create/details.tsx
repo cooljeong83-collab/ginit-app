@@ -1,3 +1,4 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 /**
  * 모임 등록 — `/create/details`: `currentStep >= n`으로 이전 단계 카드도 유지(한눈에 수정 가능).
  * 확인 버튼만 해당 단계 `currentStep === n`일 때 표시. 카테고리 변경 시 Step 1로 리셋·하위 카드 제거.
@@ -6,37 +7,16 @@
  */
 
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import {useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps
+  useCallback, useEffect, useMemo, useRef, useState, type ComponentProps
 } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  InteractionManager,
-  Keyboard,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-  type LayoutChangeEvent,
-  type ViewStyle
-} from 'react-native';
+  ActivityIndicator, Alert, Animated, Easing, InteractionManager, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type ViewStyle} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
@@ -2456,9 +2436,9 @@ export default function CreateDetailsScreen() {
         />
       <SafeAreaView style={styles.safeArea} edges={['top']}>
           <View style={styles.topBarRow}>
-            <Pressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
+            <GinitPressable onPress={handleBack} hitSlop={12} accessibilityRole="button">
               <Text style={styles.backLink}>← 닫기</Text>
-            </Pressable>
+            </GinitPressable>
             <Text style={styles.screenTitle} numberOfLines={1}>
               {screenTitle}
             </Text>
@@ -2471,13 +2451,13 @@ export default function CreateDetailsScreen() {
               <Text style={styles.snsGateBody}>
                 SNS 간편 가입 계정은 프로필에서 입력을 마친 뒤 모임을 만들 수 있어요. 앱 소개 투어는 그대로 이용할 수 있어요.
               </Text>
-              <Pressable
+              <GinitPressable
                 onPress={() => pushProfileOpenRegisterInfo(router)}
                 style={({ pressed }) => [styles.snsGateBtn, pressed && { opacity: 0.88 }]}
                 accessibilityRole="button"
                 accessibilityLabel="정보 등록 화면으로 이동">
                 <Text style={styles.snsGateBtnLabel}>정보 등록하기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           ) : null}
 
@@ -2558,7 +2538,7 @@ export default function CreateDetailsScreen() {
                     const active = c.id === selectedCategoryId;
                     const agentCatCue = agentWizardApplyCue?.kind === 'category' && agentWizardApplyCue.id === c.id;
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={c.id}
                         onPress={() => requestCategorySelect(c.id)}
                         style={({ pressed }) => [
@@ -2573,7 +2553,7 @@ export default function CreateDetailsScreen() {
                         <Text style={[styles.catLabel, active && styles.catLabelActive]} numberOfLines={2}>
                           {c.label}
                         </Text>
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </View>
@@ -2582,7 +2562,7 @@ export default function CreateDetailsScreen() {
                   style={styles.publicPrivStack}
                   accessibilityRole="radiogroup"
                   accessibilityLabel="모임 공개 여부">
-                  <Pressable
+                  <GinitPressable
                     onPress={() => setIsPublicMeeting(false)}
                     style={({ pressed }) => [
                       styles.publicPrivHalf,
@@ -2610,9 +2590,9 @@ export default function CreateDetailsScreen() {
                         (초대만)
                       </Text>
                     </View>
-                  </Pressable>
+                  </GinitPressable>
                   <View style={styles.publicPrivSepVert} />
-                  <Pressable
+                  <GinitPressable
                     onPress={() => setIsPublicMeeting(true)}
                     style={({ pressed }) => [
                       styles.publicPrivHalf,
@@ -2640,12 +2620,12 @@ export default function CreateDetailsScreen() {
                         (지역 검색)
                       </Text>
                     </View>
-                  </Pressable>
+                  </GinitPressable>
                 </View>
 
 
                 {currentStep === 1 ? (
-                  <Pressable
+                  <GinitPressable
                     onPress={() => onStep1Next({ fromUserPress: true })}
                     disabled={!selectedCategoryId || categories.length === 0}
                     style={({ pressed }) => [
@@ -2672,7 +2652,7 @@ export default function CreateDetailsScreen() {
                     <Text style={styles.wizardPrimaryBtnLabel}>
                       {needsSpecialty ? '확인' : '확인'}
                     </Text>
-                  </Pressable>
+                  </GinitPressable>
                 ) : null}
               </View>
 
@@ -2725,7 +2705,7 @@ export default function CreateDetailsScreen() {
                     />
                   ) : null}
                   {currentStep === 2 ? (
-                    <Pressable
+                    <GinitPressable
                       onPress={onStep2SpecialtyNext}
                       disabled={
                         busy ||
@@ -2772,7 +2752,7 @@ export default function CreateDetailsScreen() {
                           ? '이 후보들로 모임 만들기'
                           : '확인'}
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </View>
               ) : null}
@@ -2811,7 +2791,7 @@ export default function CreateDetailsScreen() {
                             inputMode="text"
                             underlineColorAndroid="transparent"
                           />
-                          <Pressable
+                          <GinitPressable
                             onPress={onPressVoiceInputTitle}
                             style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
                             hitSlop={10}
@@ -2822,7 +2802,7 @@ export default function CreateDetailsScreen() {
                             ) : (
                               <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                             )}
-                          </Pressable>
+                          </GinitPressable>
                         </View>
                       </View>
                     </LinearGradient>
@@ -2838,7 +2818,7 @@ export default function CreateDetailsScreen() {
                           keyboardShouldPersistTaps="handled"
                           contentContainerStyle={styles.aiTitlePickRow}>
                           {aiTitleSuggestions.map((hint) => (
-                            <Pressable
+                            <GinitPressable
                               key={hint}
                               onPress={() => setTitle(hint)}
                               style={({ pressed }) => [
@@ -2850,7 +2830,7 @@ export default function CreateDetailsScreen() {
                               <Text style={styles.aiTitleChipText} numberOfLines={2}>
                                 「{hint}」
                               </Text>
-                            </Pressable>
+                            </GinitPressable>
                           ))}
                         </ScrollView>
                       </View>
@@ -2867,7 +2847,7 @@ export default function CreateDetailsScreen() {
                     </>
                   
                   {currentStep === 3 ? (
-                    <Pressable
+                    <GinitPressable
                       onPress={onStep3BasicNext}
                       style={({ pressed }) => [styles.wizardPrimaryBtn, pressed && styles.addCandidateBtnPressed]}
                       accessibilityRole="button">
@@ -2880,7 +2860,7 @@ export default function CreateDetailsScreen() {
                         />
                       </View>
                       <Text style={styles.wizardPrimaryBtnLabel}>확인</Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </View>
               ) : null}
@@ -2934,7 +2914,7 @@ export default function CreateDetailsScreen() {
                             />
                           </View>
 
-                          <Pressable
+                          <GinitPressable
                             onPress={handleConfirmSchedule}
                             style={({ pressed }) => [
                               styles.wizardPrimaryBtn,
@@ -2955,7 +2935,7 @@ export default function CreateDetailsScreen() {
                               size="lg"
                             />
                             <Text style={styles.wizardPrimaryBtnLabel}>일정 확정하기</Text>
-                          </Pressable>
+                          </GinitPressable>
                         </>
                       ) : currentStep > scheduleStep ? (
                         <View style={styles.wizardFormMount}>
@@ -3023,7 +3003,7 @@ export default function CreateDetailsScreen() {
                       </View>
 
                       {currentStep === placesStep ? (
-                        <Pressable
+                        <GinitPressable
                           disabled={placesConfirmDisabledByAiAssist}
                           onPress={onPlacesStepConfirm}
                           style={({ pressed }) => [
@@ -3042,7 +3022,7 @@ export default function CreateDetailsScreen() {
                             />
                           </View>
                           <Text style={styles.wizardPrimaryBtnLabel}>확인</Text>
-                        </Pressable>
+                        </GinitPressable>
                       ) : null}
                     </View>
                   ) : null}
@@ -3110,7 +3090,7 @@ export default function CreateDetailsScreen() {
                             keyboardType="default"
                             inputMode="text"
                           />
-                          <Pressable
+                          <GinitPressable
                             onPress={onPressVoiceInputDescription}
                             disabled={busy}
                             style={({ pressed }) => [
@@ -3127,7 +3107,7 @@ export default function CreateDetailsScreen() {
                             ) : (
                               <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                             )}
-                          </Pressable>
+                          </GinitPressable>
                         </View>
                       </VoteCandidateCard>
                     </View>
@@ -3163,7 +3143,7 @@ export default function CreateDetailsScreen() {
             </View>
 
           {currentStep === detailStep ? (
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 void onFinalRegister();
               }}
@@ -3197,7 +3177,7 @@ export default function CreateDetailsScreen() {
               ) : (
                 <Text style={styles.detailFinalFloatingLabel}>지닛 시작하기</Text>
               )}
-            </Pressable>
+            </GinitPressable>
           ) : null}
 
           {wizardError ? (
@@ -3207,7 +3187,7 @@ export default function CreateDetailsScreen() {
           ) : null}
 
           {nluDimLayerMounted && !snsDemographicsBlocked ? (
-            <Pressable
+            <GinitPressable
               onPress={() => Keyboard.dismiss()}
               style={styles.nluKeyboardDimFullScreen}
               accessibilityRole="button"
@@ -3224,7 +3204,7 @@ export default function CreateDetailsScreen() {
                   />
                 )}
               </Animated.View>
-            </Pressable>
+            </GinitPressable>
           ) : null}
       </SafeAreaView>
       {!snsDemographicsBlocked ? (

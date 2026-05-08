@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useCallback, useMemo, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native'
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GINIT_HIGH_TRUST_HOST_MIN } from '@/src/lib/ginit-trust';
@@ -54,13 +55,13 @@ function Segmented({
       {options.map((o) => {
         const on = value === o.id;
         return (
-          <Pressable
+          <GinitPressable
             key={o.id}
             onPress={() => onChange(o.id)}
             style={({ pressed }) => [styles.segmentBtn, on && styles.segmentBtnOn, pressed && styles.pressed]}
             accessibilityRole="button">
             <Text style={[styles.segmentLabel, on && styles.segmentLabelOn]}>{o.label}</Text>
-          </Pressable>
+          </GinitPressable>
         );
       })}
     </View>
@@ -155,7 +156,7 @@ export function PublicMeetingDetailsCard({
             {AGE_OPTIONS.map((o) => {
               const on = ageSet.has(o.code);
               return (
-                <Pressable
+                <GinitPressable
                   key={o.code}
                   onPress={() => {
                     setFocused('age');
@@ -164,7 +165,7 @@ export function PublicMeetingDetailsCard({
                   style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.pressed]}
                   accessibilityRole="button">
                   <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{o.label}</Text>
-                </Pressable>
+                </GinitPressable>
               );
             })}
           </View>
@@ -234,7 +235,7 @@ export function PublicMeetingDetailsCard({
         <View style={[styles.section, blockFocusStyle(focused === 'level', reduceHeavyEffects)]}>
           <Text style={styles.label}>참가 자격 (최소 gLevel)</Text>
           <View style={styles.stepperRow}>
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 setFocused('level');
                 bumpLevel(-1);
@@ -242,12 +243,12 @@ export function PublicMeetingDetailsCard({
               style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
               accessibilityRole="button">
               <Text style={styles.stepBtnText}>−</Text>
-            </Pressable>
+            </GinitPressable>
             <View style={styles.stepValueWrap}>
               <Text style={styles.stepValue}>Lv {clampInt(value.minGLevel ?? 1, 1, 50)}</Text>
               <Text style={styles.stepHint}>높을수록 숙련된 멤버만 참여</Text>
             </View>
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 setFocused('level');
                 bumpLevel(1);
@@ -255,7 +256,7 @@ export function PublicMeetingDetailsCard({
               style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
               accessibilityRole="button">
               <Text style={styles.stepBtnText}>+</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         </View>
 
@@ -269,7 +270,7 @@ export function PublicMeetingDetailsCard({
                 없어요.
               </Text>
             </View>
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 setFocused('trust');
                 const on = typeof value.minGTrust === 'number' && value.minGTrust >= GINIT_HIGH_TRUST_HOST_MIN;
@@ -293,7 +294,7 @@ export function PublicMeetingDetailsCard({
                   typeof value.minGTrust === 'number' && value.minGTrust >= GINIT_HIGH_TRUST_HOST_MIN && styles.toggleKnobOn,
                 ]}
               />
-            </Pressable>
+            </GinitPressable>
           </View>
         </View>
 
@@ -307,7 +308,7 @@ export function PublicMeetingDetailsCard({
                 확정해요.
               </Text>
             </View>
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 setFocused('approval');
                 setApproval(value.approvalType === 'HOST_APPROVAL' ? 'INSTANT' : 'HOST_APPROVAL');
@@ -320,11 +321,11 @@ export function PublicMeetingDetailsCard({
               accessibilityRole="switch"
               accessibilityState={{ checked: value.approvalType === 'HOST_APPROVAL' }}>
               <View style={[styles.toggleKnob, value.approvalType === 'HOST_APPROVAL' && styles.toggleKnobOn]} />
-            </Pressable>
+            </GinitPressable>
           </View>
 
           {value.approvalType === 'HOST_APPROVAL' ? (
-            <Pressable
+            <GinitPressable
               onPress={toggleRequestMessage}
               style={({ pressed }) => [styles.checkboxRow, pressed && styles.pressed]}
               accessibilityRole="checkbox"
@@ -336,7 +337,7 @@ export function PublicMeetingDetailsCard({
                 <Text style={styles.checkboxLabel}>신청 메시지 받기</Text>
                 <Text style={styles.checkboxHint}>참가자가 한 줄 메시지를 남길 수 있어요.</Text>
               </View>
-            </Pressable>
+            </GinitPressable>
           ) : null}
         </View>
       </View>

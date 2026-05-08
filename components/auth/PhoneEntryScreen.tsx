@@ -1,6 +1,7 @@
-import { useRouter } from 'expo-router';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -68,14 +69,14 @@ export default function PhoneEntryScreen() {
 
         <View style={styles.form}>
           <View style={styles.row}>
-            <Pressable
+            <GinitPressable
               onPress={() => setCountryOpen(true)}
               style={({ pressed }) => [styles.dialBtn, pressed && styles.pressed]}
               accessibilityRole="button"
               accessibilityLabel="국가 코드 선택">
               <Text style={styles.dialText}>{dial}</Text>
               <Text style={styles.dialArrow}>▾</Text>
-            </Pressable>
+            </GinitPressable>
             <View style={styles.phonePress}>
               <TextInput
                 ref={phoneInputRef}
@@ -96,7 +97,7 @@ export default function PhoneEntryScreen() {
             </View>
           </View>
 
-          <Pressable
+          <GinitPressable
             onPress={() => void onNext()}
             disabled={!canNext}
             style={({ pressed }) => [
@@ -107,16 +108,16 @@ export default function PhoneEntryScreen() {
             accessibilityRole="button"
             accessibilityLabel="다음">
             <Text style={styles.nextText}>{busy ? '전송 중…' : '다음'}</Text>
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.hint}>번호가 맞는지 확인한 뒤 SMS 인증을 진행해 주세요.</Text>
         </View>
 
         <Modal visible={countryOpen} transparent animationType="fade" onRequestClose={() => setCountryOpen(false)}>
-          <Pressable style={styles.dim} onPress={() => setCountryOpen(false)}>
+          <GinitPressable style={styles.dim} onPress={() => setCountryOpen(false)}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>국가 선택</Text>
               {COUNTRIES.map((c) => (
-                <Pressable
+                <GinitPressable
                   key={c.dial}
                   onPress={() => {
                     setDial(c.dial);
@@ -127,10 +128,10 @@ export default function PhoneEntryScreen() {
                   accessibilityLabel={`${c.label} ${c.dial}`}>
                   <Text style={styles.countryLabel}>{c.label}</Text>
                   <Text style={styles.countryDial}>{c.dial}</Text>
-                </Pressable>
+                </GinitPressable>
               ))}
             </View>
-          </Pressable>
+          </GinitPressable>
         </Modal>
       </SafeAreaView>
     </ScreenShell>

@@ -1,9 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import {FlashList, type FlashListRef } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import type { Timestamp } from 'firebase/firestore';
 import { type RefObject, useCallback, useMemo, useRef, useState } from 'react';
-import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { type LayoutChangeEvent, StyleSheet, Text, View} from 'react-native';
 import { runOnJS } from 'react-native-reanimated';
 import { KeyboardStickyView, useGenericKeyboardHandler } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -115,7 +116,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <View style={styles.flexHost}>
         {noticeLine.trim() ? (
-          <Pressable
+          <GinitPressable
             onPress={onPressNotice}
             style={styles.announcementBar}
             accessibilityRole="button"
@@ -127,7 +128,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
               </Text>
               <GinitSymbolicIcon name="chevron-forward" size={16} color="#64748b" />
             </BlurView>
-          </Pressable>
+          </GinitPressable>
         ) : null}
 
         <FlashList
@@ -184,13 +185,13 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
           ListEmptyComponent={<Text style={styles.empty}>첫 인사를 남겨 보세요.</Text>}
         />
         {showJumpToBottomFab ? (
-          <Pressable
+          <GinitPressable
             style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight }]}
             onPress={jumpToLatest}
             accessibilityRole="button"
             accessibilityLabel="최신 메시지로">
             <GinitSymbolicIcon name="chevron-down" size={22} color="#334155" />
-          </Pressable>
+          </GinitPressable>
         ) : null}
 
         <KeyboardStickyView style={styles.composerStickyWrap}>
@@ -214,14 +215,14 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
               dense
               style={styles.composerInput}
             />
-            <Pressable
+            <GinitPressable
               onPress={onSend}
               disabled={sending || !draft.trim()}
               style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnDisabled]}
               accessibilityRole="button"
               accessibilityLabel="보내기">
               <GinitSymbolicIcon name="send" size={20} color="#fff" />
-            </Pressable>
+            </GinitPressable>
           </View>
         </View>
         </KeyboardStickyView>

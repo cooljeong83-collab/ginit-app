@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useMemo } from 'react';
+import { Modal, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { meetingChatBodyStyles as chatStyles } from '@/components/chat/meeting-chat-body-styles';
@@ -59,11 +60,11 @@ export function MeetingChatBubbleActionMenu({
       animationType="fade"
       onRequestClose={onRequestClose}
     >
-      <Pressable style={StyleSheet.absoluteFill} onPress={onRequestClose} />
+      <GinitPressable style={StyleSheet.absoluteFill} onPress={onRequestClose} />
       <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
         <View style={[styles.menu, pos] as StyleProp<ViewStyle>}>
           {actions.map((a) => (
-            <Pressable
+            <GinitPressable
               key={a.key}
               onPress={() => {
                 onRequestClose();
@@ -74,7 +75,7 @@ export function MeetingChatBubbleActionMenu({
               accessibilityLabel={a.label}
             >
               <Text style={styles.itemText}>{a.label}</Text>
-            </Pressable>
+            </GinitPressable>
           ))}
         </View>
       </View>

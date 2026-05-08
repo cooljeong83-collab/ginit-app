@@ -1,5 +1,6 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import {ActivityIndicator, StyleSheet, Text, View} from 'react-native';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 /** Google Sign-In 라이트 테마 버튼 톤(흰 배경·테두리·가독성 있는 라벨) */
@@ -27,7 +28,7 @@ export function GoogleConnectButton({
 }: GoogleConnectButtonProps) {
   const inactive = !!disabled || !!loading;
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       disabled={inactive}
       style={({ pressed }) => [
@@ -48,7 +49,7 @@ export function GoogleConnectButton({
           {loading ? '연결 중…' : label}
         </Text>
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

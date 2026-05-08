@@ -1,12 +1,7 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import {
-  NaverMapMarkerOverlay,
-  NaverMapView,
-  type ClusterMarkerProp,
-  type NaverMapViewRef,
-  type Region as NaverRegion,
-} from '@mj-studio/react-native-naver-map';
+import {NaverMapMarkerOverlay, NaverMapView, type ClusterMarkerProp, type NaverMapViewRef, type Region as NaverRegion, } from '@mj-studio/react-native-naver-map';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
@@ -16,23 +11,7 @@ import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  LayoutAnimation,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  UIManager,
-  View,
-  useWindowDimensions,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native';
+  ActivityIndicator, Alert, Dimensions, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, UIManager, View, useWindowDimensions, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import MapView from 'react-native-map-clustering';
 import { Marker, type Region } from 'react-native-maps';
@@ -1739,7 +1718,7 @@ export default function MapScreen() {
       const metaSecond = m.capacity ? `최대 ${m.capacity}명` : '';
       const listMetaText = categoryDisplay ? metaSecond : [m.categoryLabel, metaSecond].filter(Boolean).join(' · ');
       return (
-        <Pressable
+        <GinitPressable
           onPress={() => {
             setSelectedMeetingId(m.id);
             const cap = m.capacity;
@@ -1779,7 +1758,7 @@ export default function MapScreen() {
               </View>
             </View>
           </View>
-        </Pressable>
+        </GinitPressable>
       );
     },
     [router, categories, selectedMeetingId, userCoords],
@@ -1918,7 +1897,7 @@ export default function MapScreen() {
                 ) : null}
               </View>
               <View style={styles.sheetMovePinCol}>
-                <Pressable
+                <GinitPressable
                   onPress={() => moveMapToMeetingPin(m)}
                   style={({ pressed }) => [styles.sheetMovePinInlineBtn, pressed && { opacity: 0.9 }]}
                   hitSlop={10}
@@ -1928,7 +1907,7 @@ export default function MapScreen() {
                   <Text style={styles.sheetMovePinInlineText} numberOfLines={1}>
                     {formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}
                   </Text>
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
 
@@ -1966,7 +1945,7 @@ export default function MapScreen() {
       const metaSecond = m.capacity ? `최대 ${m.capacity}명` : '';
       const listMetaText = categoryDisplay ? metaSecond : [m.categoryLabel, metaSecond].filter(Boolean).join(' · ');
       return (
-        <Pressable
+        <GinitPressable
           onPress={() => {
             setSelectedMeetingId(m.id);
             const cap = m.capacity;
@@ -2006,7 +1985,7 @@ export default function MapScreen() {
               </View>
             </View>
           </View>
-        </Pressable>
+        </GinitPressable>
       );
     },
     [router, categories, selectedMeetingId, userCoords],
@@ -2281,10 +2260,10 @@ export default function MapScreen() {
 
         {mapMovedSinceSearch && (hasPendingRescan || driftTooFar) ? (
           <View style={[styles.rescanWrap, { top: rescanTop }]} pointerEvents="box-none">
-            <Pressable onPress={onPressRescanThisArea} style={({ pressed }) => [styles.rescanBtn, pressed && { opacity: 0.9 }]} accessibilityRole="button" accessibilityLabel="이 지역 재검색">
+            <GinitPressable onPress={onPressRescanThisArea} style={({ pressed }) => [styles.rescanBtn, pressed && { opacity: 0.9 }]} accessibilityRole="button" accessibilityLabel="이 지역 재검색">
               <GinitSymbolicIcon name="refresh" size={18} color="#fff" />
               <Text style={styles.rescanBtnText}>이 지역 재검색</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         ) : null}
 
@@ -2292,7 +2271,7 @@ export default function MapScreen() {
         <View style={[styles.layerTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
           <BlurView intensity={0} tint="light" style={styles.topGlass}>
             <View style={styles.topGlassInner}>
-              <Pressable
+              <GinitPressable
                 onPress={openMapCategoryBarModal}
                 style={({ pressed }) => [
                   styles.topChip,
@@ -2308,7 +2287,7 @@ export default function MapScreen() {
                   size={20}
                   color={mapCategoryBarFilterActive ? '#ffffff' : '#475569'}
                 />
-              </Pressable>
+              </GinitPressable>
               <View style={styles.chipScrollWrap}>
                 <ScrollView
                   horizontal
@@ -2323,7 +2302,7 @@ export default function MapScreen() {
                   {mapCategoryChips.map((chip) => {
                     const active = chip.filterId === selectedCategoryId;
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={chip.filterId ?? 'all'}
                         onPress={() => setSelectedCategoryId(chip.filterId)}
                         style={[styles.topChip, active && styles.topChipActive]}
@@ -2332,7 +2311,7 @@ export default function MapScreen() {
                         <Text style={[styles.topChipLabel, active && styles.topChipLabelActive]} numberOfLines={1}>
                           {chip.label}
                         </Text>
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </ScrollView>
@@ -2361,27 +2340,27 @@ export default function MapScreen() {
         <Animated.View
           style={[styles.mapControlsRight, { bottom: sheetMiniPeekHeight + 12 }, controlsLiftStyle]}
           pointerEvents="box-none">
-          <Pressable
+          <GinitPressable
             onPress={onPressCreateFab}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="약속 잡기">
             <GinitSymbolicIcon name="add" size={22} color={GinitTheme.colors.deepPurple} />
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={() => setMapSearchOpen(true)}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="검색">
             <GinitSymbolicIcon name="search" size={22} color={GinitTheme.colors.deepPurple} />
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={onPressMyLocation}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
             accessibilityRole="button"
             accessibilityLabel="내 위치로 이동">
             <GinitSymbolicIcon name="locate" size={22} color={GinitTheme.colors.deepPurple} />
-          </Pressable>
+          </GinitPressable>
         </Animated.View>
       </View>
 
@@ -2432,7 +2411,7 @@ export default function MapScreen() {
               </View>
             ) : null}
 
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 const m = sheetMeetings[selectedMeetingIndex];
                 if (!m?.id) return;
@@ -2453,7 +2432,7 @@ export default function MapScreen() {
               accessibilityRole="button"
               accessibilityLabel="모임 상세 보기">
               <Text style={styles.sheetCtaText}>모임 상세 보기</Text>
-            </Pressable>
+            </GinitPressable>
           </Animated.View>
         ) : null}
 
@@ -2469,13 +2448,13 @@ export default function MapScreen() {
                 ? `지금 조회 중인 지도 영역에는 모임이 없습니다.\n검색 필터를 바꿔 보시겠어요?`
                 : '등록된 모임이 없습니다.\n+ 버튼으로 첫 모임을 만들어 보세요.'}
             </Text>
-            <Pressable
+            <GinitPressable
               onPress={onPressCreateFab}
               style={({ pressed }) => [styles.sheetCta, pressed && { opacity: 0.92 }]}
               accessibilityRole="button"
               accessibilityLabel="모임 만들기">
               <Text style={styles.sheetCtaText}>모임 만들기</Text>
-            </Pressable>
+            </GinitPressable>
           </Animated.View>
         ) : null}
       </Animated.View>
@@ -2486,7 +2465,7 @@ export default function MapScreen() {
         transparent
         onRequestClose={closeMapCategoryBarModal}>
         <View style={styles.modalRoot}>
-          <Pressable
+          <GinitPressable
             style={StyleSheet.absoluteFillObject}
             onPress={closeMapCategoryBarModal}
             accessibilityRole="button"
@@ -2500,7 +2479,7 @@ export default function MapScreen() {
               반영돼요.
             </Text>
             <View style={styles.mapCategoryBarModalDivider} />
-            <Pressable
+            <GinitPressable
               onPress={toggleCategoryBarSelectAll}
               style={({ pressed }) => [
                 styles.mapCategoryBarModalRow,
@@ -2515,7 +2494,7 @@ export default function MapScreen() {
               ) : (
                 <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
               )}
-            </Pressable>
+            </GinitPressable>
             <View style={styles.mapCategoryBarModalDivider} />
             <View style={styles.categoryBarModalScrollWrap}>
               <ScrollView
@@ -2540,7 +2519,7 @@ export default function MapScreen() {
                 {sortedMapCategoryMaster.map((c) => {
                   const on = categoryBarDraft.includes(c.id);
                   return (
-                    <Pressable
+                    <GinitPressable
                       key={c.id}
                       onPress={() => toggleCategoryBarDraft(c.id)}
                       style={({ pressed }) => [
@@ -2564,7 +2543,7 @@ export default function MapScreen() {
                       ) : (
                         <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                       )}
-                    </Pressable>
+                    </GinitPressable>
                   );
                 })}
               </ScrollView>
@@ -2586,7 +2565,7 @@ export default function MapScreen() {
               ) : null}
             </View>
             <View style={[styles.mapCategoryBarModalDivider, styles.mapCategoryBarModalDividerBeforeToday]} />
-            <Pressable
+            <GinitPressable
               onPress={() => setCategoryBarTodayOnlyDraft((v) => !v)}
               style={({ pressed }) => [
                 styles.mapCategoryBarModalRow,
@@ -2609,20 +2588,20 @@ export default function MapScreen() {
                   <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
                 )}
               </View>
-            </Pressable>
+            </GinitPressable>
             <View style={styles.categoryBarModalActions}>
-              <Pressable
+              <GinitPressable
                 onPress={closeMapCategoryBarModal}
                 style={({ pressed }) => [styles.categoryBarActionGhost, pressed && { opacity: 0.85 }]}
                 accessibilityRole="button">
                 <Text style={styles.categoryBarActionGhostLabel}>취소</Text>
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 onPress={() => void saveMapCategoryBarModal()}
                 style={({ pressed }) => [styles.categoryBarActionPrimary, pressed && { opacity: 0.9 }]}
                 accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>저장</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </View>
@@ -2630,7 +2609,7 @@ export default function MapScreen() {
 
       <Modal visible={sortFilterModalOpen} animationType="fade" transparent onRequestClose={closeSortFilterModal}>
         <View style={styles.modalRoot}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={closeSortFilterModal} accessibilityRole="button" accessibilityLabel="정렬 닫기" />
+          <GinitPressable style={StyleSheet.absoluteFillObject} onPress={closeSortFilterModal} accessibilityRole="button" accessibilityLabel="정렬 닫기" />
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>정렬</Text>
             <Text style={styles.modalHint}>목록을 어떤 순서로 보여줄지 선택하세요.</Text>
@@ -2638,7 +2617,7 @@ export default function MapScreen() {
               const selected = listSortMode === mode;
               const label = listSortModeLabel(mode);
               return (
-                <Pressable
+                <GinitPressable
                   key={mode}
                   onPress={() => {
                     setListSortMode(mode);
@@ -2649,12 +2628,12 @@ export default function MapScreen() {
                   accessibilityState={{ selected }}>
                   <Text style={styles.modalRowLabel}>{label}</Text>
                   {selected ? <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} /> : <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />}
-                </Pressable>
+                </GinitPressable>
               );
             })}
-            <Pressable onPress={closeSortFilterModal} style={styles.modalCloseBtn} accessibilityRole="button">
+            <GinitPressable onPress={closeSortFilterModal} style={styles.modalCloseBtn} accessibilityRole="button">
               <Text style={styles.modalCloseLabel}>닫기</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         </View>
       </Modal>

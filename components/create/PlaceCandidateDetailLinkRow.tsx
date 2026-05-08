@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {StyleSheet, Text, View, type StyleProp, type ViewStyle} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import {
@@ -40,24 +41,24 @@ export function PlaceCandidateDetailLinkRow({
   return (
     <View style={[styles.row, containerStyle]}>
       {kakaoUrl ? (
-        <Pressable
+        <GinitPressable
           onPress={() => onOpenUrl(kakaoUrl, pageTitle)}
           disabled={disabled}
           style={({ pressed }) => [styles.btn, pressed && !disabled && { opacity: 0.88 }]}
           accessibilityRole="button"
           accessibilityLabel="카카오맵에서 장소 보기">
           <Text style={styles.btnText}>카카오</Text>
-        </Pressable>
+        </GinitPressable>
       ) : null}
       {detailUrl ? (
-        <Pressable
+        <GinitPressable
           onPress={() => onOpenUrl(detailUrl, pageTitle)}
           disabled={disabled}
           style={({ pressed }) => [styles.btn, pressed && !disabled && { opacity: 0.88 }]}
           accessibilityRole="button"
           accessibilityLabel="상세 정보 보기">
           <Text style={styles.btnText}>상세 정보</Text>
-        </Pressable>
+        </GinitPressable>
       ) : null}
     </View>
   );

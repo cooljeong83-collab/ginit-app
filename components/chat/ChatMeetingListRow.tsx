@@ -1,6 +1,7 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import type { Timestamp } from 'firebase/firestore';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
@@ -111,7 +112,7 @@ export function ChatMeetingListRow({
   const categoryEmoji = categoryEmojiForMeeting(meeting);
 
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${title} 채팅`}
@@ -171,7 +172,7 @@ export function ChatMeetingListRow({
           </Text>
         </View>
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

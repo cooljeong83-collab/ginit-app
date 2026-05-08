@@ -1,29 +1,9 @@
-import { LinearGradient } from 'expo-linear-gradient';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {LinearGradient } from 'expo-linear-gradient';
 import {
-  Fragment,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+  Fragment, type RefObject, useCallback, useEffect, useMemo, useRef, useState, } from 'react';
 import {
-  ActivityIndicator,
-  Dimensions,
-  findNodeHandle,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  UIManager,
-  View,
-  type ViewStyle,
-} from 'react-native';
+  ActivityIndicator, Dimensions, findNodeHandle, type NativeScrollEvent, type NativeSyntheticEvent, Platform, ScrollView, StyleSheet, Text, TextInput, UIManager, View, type ViewStyle} from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -570,7 +550,7 @@ export function EarlyPlaceSearch({
       key={key}
       style={Platform.OS === 'web' ? ({ width: '100%' } as const) : { alignSelf: 'stretch' }}
       entering={FadeInDown.duration(320)}>
-      <Pressable
+      <GinitPressable
         onPress={onPress}
         disabled={disabled || loading}
         style={({ pressed }) => [
@@ -586,7 +566,7 @@ export function EarlyPlaceSearch({
         <Text style={styles.resultAddr} numberOfLines={3}>
           {address}
         </Text>
-      </Pressable>
+      </GinitPressable>
     </Animated.View>
   );
 
@@ -653,7 +633,7 @@ export function EarlyPlaceSearch({
                   style={Platform.OS === 'web' ? ({ width: '100%' } as const) : { alignSelf: 'stretch' }}
                   entering={FadeInDown.duration(320)}>
                   <View style={[styles.resultCard, Platform.OS === 'web' && { width: '100%' as const }]}>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => void onPickPlaceRow(item)}
                       disabled={disabled || loading}
                       style={({ pressed }) => [pressed && styles.resultCardPressed]}
@@ -672,7 +652,7 @@ export function EarlyPlaceSearch({
                           {addrOnly}
                         </Text>
                       ) : null}
-                    </Pressable>
+                    </GinitPressable>
                     <PlaceCandidateDetailLinkRow
                       title={item.title}
                       link={item.link}
@@ -778,26 +758,26 @@ export function EarlyPlaceSearch({
                   </Text>
                 ) : null}
               </View>
-              <Pressable
+              <GinitPressable
                 onPress={() => removeOne(item.id)}
                 disabled={disabled}
                 style={({ pressed }) => [pressed && { opacity: 0.85 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`${item.placeName} 후보에서 제거`}>
                 <Text style={styles.pickedRemove}>삭제</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </Animated.View>
         ))}
       </Animated.View>
 
-      <Pressable
+      <GinitPressable
         onPress={toggleAdd}
         disabled={disabled}
         style={({ pressed }) => [styles.addMoreBtn, pressed && styles.addMoreBtnPressed]}
         accessibilityRole="button">
         <Text style={styles.addMoreBtnLabel}>{addingMore ? '검색 닫기' : '+ 다른 장소 후보 추가'}</Text>
-      </Pressable>
+      </GinitPressable>
 
       {addingMore ? (
         <View ref={expandedPickerRef} collapsable={false} style={[styles.pickerRoot, { marginTop: 12 }]}>

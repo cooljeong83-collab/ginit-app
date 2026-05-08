@@ -1,7 +1,8 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import {useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -140,9 +141,9 @@ export default function OtpVerifyScreen() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="뒤로">
+          <GinitPressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="뒤로">
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle}>인증번호</Text>
           <View style={{ width: 26 }} />
         </View>
@@ -164,7 +165,7 @@ export default function OtpVerifyScreen() {
             editable={!busy}
           />
 
-          <Pressable
+          <GinitPressable
             onPress={() => void onVerify()}
             disabled={!canVerify}
             style={({ pressed }) => [
@@ -175,7 +176,7 @@ export default function OtpVerifyScreen() {
             accessibilityRole="button"
             accessibilityLabel="인증하기">
             <Text style={styles.verifyText}>{busy ? '확인 중…' : '인증하기'}</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
 
         <Modal visible={termsOpen} transparent animationType="fade" onRequestClose={() => {}}>
@@ -184,21 +185,21 @@ export default function OtpVerifyScreen() {
               <Text style={styles.termsTitle}>약관 동의</Text>
               <Text style={styles.termsSub}>최초 가입 시에만 필요해요.</Text>
 
-              <Pressable onPress={toggleAll} style={({ pressed }) => [styles.allRow, pressed && styles.pressed]}>
+              <GinitPressable onPress={toggleAll} style={({ pressed }) => [styles.allRow, pressed && styles.pressed]}>
                 <GinitSymbolicIcon
                   name={allRequiredChecked ? 'checkmark-circle' : 'ellipse-outline'}
                   size={22}
                   color={allRequiredChecked ? GinitTheme.colors.primary : '#94a3b8'}
                 />
                 <Text style={styles.allText}>전체 동의</Text>
-              </Pressable>
+              </GinitPressable>
 
               {(Object.keys(TERM_LABELS) as TermKey[]).map((k) => {
                 const label = TERM_LABELS[k];
                 const isChecked = checked[k];
                 return (
                   <View key={k} style={styles.termBlock}>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => toggleOne(k)}
                       style={({ pressed }) => [styles.termRow, pressed && styles.pressed]}
                       accessibilityRole="checkbox"
@@ -210,13 +211,13 @@ export default function OtpVerifyScreen() {
                         color={isChecked ? GinitTheme.colors.primary : '#94a3b8'}
                       />
                       <Text style={styles.termText}>{label.required ? `[필수] ${label.title}` : label.title}</Text>
-                    </Pressable>
+                    </GinitPressable>
                     {k === 'safety' ? <Text style={styles.safetyBody}>{SAFETY_DISCLAIMER_TEXT}</Text> : null}
                   </View>
                 );
               })}
 
-              <Pressable
+              <GinitPressable
                 onPress={() => void onAgreeTerms()}
                 disabled={!allRequiredChecked || busy}
                 style={({ pressed }) => [
@@ -227,7 +228,7 @@ export default function OtpVerifyScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="동의하고 시작하기">
                 <Text style={styles.agreeText}>{busy ? '처리 중…' : '동의하고 시작하기'}</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </Modal>

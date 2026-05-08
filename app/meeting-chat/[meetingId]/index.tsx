@@ -1,5 +1,6 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -7,21 +8,7 @@ import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-    ActivityIndicator,
-    Alert,
-    InteractionManager,
-    Keyboard,
-    type LayoutChangeEvent,
-    Modal,
-    type NativeScrollEvent,
-    type NativeSyntheticEvent,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from 'react-native';
+    ActivityIndicator, Alert, InteractionManager, Keyboard, type LayoutChangeEvent, Modal, type NativeScrollEvent, type NativeSyntheticEvent, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
@@ -639,7 +626,7 @@ export default function MeetingChatRoomScreen() {
           {navEnabled ? searchStatusLabel || ' ' : ' '}
         </Text>
         <View style={styles.bottomSearchNavBtns}>
-          <Pressable
+          <GinitPressable
             onPress={() => void goOlderMatchOrScan()}
             disabled={chatSearchBusy || !navEnabled || atOldestMatch}
             style={({ pressed }) => [
@@ -652,8 +639,8 @@ export default function MeetingChatRoomScreen() {
             <View style={{ transform: [{ rotate: '180deg' }] }}>
               <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
             </View>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={goNewerMatch}
             disabled={
               chatSearchBusy ||
@@ -680,7 +667,7 @@ export default function MeetingChatRoomScreen() {
             accessibilityRole="button"
             accessibilityLabel="더 최신 결과">
             <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
     );
@@ -987,9 +974,9 @@ export default function MeetingChatRoomScreen() {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.muted}>잘못된 주소예요.</Text>
-        <Pressable onPress={exitChatRoom} style={styles.backLink}>
+        <GinitPressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
-        </Pressable>
+        </GinitPressable>
       </SafeAreaView>
     );
   }
@@ -1007,9 +994,9 @@ export default function MeetingChatRoomScreen() {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.errorText}>{meetingError ?? '모임을 찾을 수 없어요.'}</Text>
-        <Pressable onPress={exitChatRoom} style={styles.backLink}>
+        <GinitPressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
-        </Pressable>
+        </GinitPressable>
       </SafeAreaView>
     );
   }
@@ -1018,9 +1005,9 @@ export default function MeetingChatRoomScreen() {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.errorText}>참여 중인 모임의 채팅방만 들어갈 수 있어요.</Text>
-        <Pressable onPress={exitChatRoom} style={styles.backLink}>
+        <GinitPressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
-        </Pressable>
+        </GinitPressable>
       </SafeAreaView>
     );
   }
@@ -1045,13 +1032,13 @@ export default function MeetingChatRoomScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.flexColumn}>
         <View style={styles.topBar}>
-          <Pressable
+          <GinitPressable
             onPress={chatSearchMode ? closeChatSearch : exitChatRoom}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel={chatSearchMode ? '검색 닫기' : '뒤로'}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           {chatSearchMode ? (
             <View style={styles.searchTitleBlock}>
               <TextInput
@@ -1079,38 +1066,38 @@ export default function MeetingChatRoomScreen() {
               <Text style={styles.titleMain} numberOfLines={1}>
                 {title}
               </Text>
-              <Pressable onPress={exitChatRoom} hitSlop={6} accessibilityRole="button" accessibilityLabel="뒤로가기">
+              <GinitPressable onPress={exitChatRoom} hitSlop={6} accessibilityRole="button" accessibilityLabel="뒤로가기">
                 <Text style={styles.titleLink}>뒤로가기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           )}
           {!chatSearchMode ? (
             <View style={styles.topBarRight}>
               <Text style={styles.participantCount}>{pCount}</Text>
               <View style={styles.headerActions}>
-                <Pressable
+                <GinitPressable
                   onPress={openChatSearch}
                   accessibilityRole="button"
                   accessibilityLabel="대화 검색"
                   hitSlop={10}
                   style={styles.searchIconWrap}>
                   <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
                   onPress={() => router.push(`/meeting-chat/${meetingId}/settings`)}
                   accessibilityRole="button"
                   accessibilityLabel="채팅방 설정"
                   hitSlop={10}
                   style={styles.settingsIconWrap}>
                   <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           ) : null}
         </View>
 
         {announcementText ? (
-          <Pressable
+          <GinitPressable
             onPress={goMeetingDetail}
             style={styles.announcementBar}
             accessibilityRole="link"
@@ -1122,7 +1109,7 @@ export default function MeetingChatRoomScreen() {
               </Text>
               <GinitSymbolicIcon name="chevron-forward" size={16} color="#64748b" />
             </BlurView>
-          </Pressable>
+          </GinitPressable>
         ) : null}
 
         <MeetingChatMainColumn
@@ -1168,7 +1155,8 @@ export default function MeetingChatRoomScreen() {
         {/* 사진 크게 보기 */}
         <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
           <GestureHandlerRootView style={meetingChatBodyStyles.viewerRoot}>
-            <Pressable
+            <GinitPressable
+              duplicatePressGuardDisabled
               style={StyleSheet.absoluteFill}
               onPress={() => !imageViewerBusy && setImageViewer(null)}
               pointerEvents="none"
@@ -1177,14 +1165,15 @@ export default function MeetingChatRoomScreen() {
             />
             <View style={meetingChatBodyStyles.viewerSheet} pointerEvents="box-none">
               <View style={[meetingChatBodyStyles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
-                <Pressable
+                <GinitPressable
+                  duplicatePressGuardDisabled
                   onPress={() => setImageViewer(null)}
                   hitSlop={10}
                   disabled={imageViewerBusy}
                   accessibilityRole="button"
                   accessibilityLabel="닫기">
                   <GinitSymbolicIcon name="close" size={26} color="#fff" />
-                </Pressable>
+                </GinitPressable>
                 <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
                   <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
                     {imageViewerMetaResolved.senderLabel}
@@ -1196,7 +1185,8 @@ export default function MeetingChatRoomScreen() {
                   ) : null}
                 </View>
                 <View style={meetingChatBodyStyles.viewerActions}>
-                  <Pressable
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                       if (!u) return;
@@ -1216,8 +1206,9 @@ export default function MeetingChatRoomScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="공유">
                     <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
-                  </Pressable>
-                  <Pressable
+                  </GinitPressable>
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                       if (!u) return;
@@ -1237,9 +1228,10 @@ export default function MeetingChatRoomScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="저장">
                     <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
-                  </Pressable>
+                  </GinitPressable>
                   {imageViewerCanDelete ? (
-                    <Pressable
+                    <GinitPressable
+                      duplicatePressGuardDisabled
                       onPress={() => {
                         const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                         const mid = meetingId.trim();
@@ -1272,7 +1264,7 @@ export default function MeetingChatRoomScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="삭제">
                       <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </View>
               </View>

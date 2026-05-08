@@ -1,8 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -125,9 +126,9 @@ export default function MeetingChatMembersScreen() {
       <SafeAreaView style={styles.safe} edges={['bottom']}>
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyText}>참여 중인 모임만 볼 수 있어요.</Text>
-          <Pressable onPress={onBack} style={styles.textBtn}>
+          <GinitPressable onPress={onBack} style={styles.textBtn}>
             <Text style={styles.textBtnLabel}>돌아가기</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       </SafeAreaView>
     );
@@ -152,7 +153,7 @@ export default function MeetingChatMembersScreen() {
             return (
               <View key={pid}>
                 {i > 0 ? <RowSep /> : null}
-                <Pressable
+                <GinitPressable
                   onPress={() => canOpen && openUserProfile(pid)}
                   disabled={!canOpen}
                   style={({ pressed }) => [styles.row, canOpen && pressed && styles.rowPressed]}
@@ -182,7 +183,7 @@ export default function MeetingChatMembersScreen() {
                   ) : (
                     <View style={styles.chevronSpacer} />
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
             );
           })}

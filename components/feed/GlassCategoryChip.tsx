@@ -1,6 +1,7 @@
-import { BlurView } from 'expo-blur';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, StyleSheet, Text, View, Platform } from 'react-native';
+import { StyleSheet, Text, View, Platform } from 'react-native'
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -19,7 +20,7 @@ type Props = {
 export function GlassCategoryChip({ label, active, onPress, maxLabelWidth, accessibilityLabel }: Props) {
   const a11yLabel = accessibilityLabel ?? `${label} 카테고리 필터`;
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
@@ -69,7 +70,7 @@ export function GlassCategoryChip({ label, active, onPress, maxLabelWidth, acces
           </Text>
         </View>
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

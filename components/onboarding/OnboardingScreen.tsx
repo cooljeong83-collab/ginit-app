@@ -1,18 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    type ListRenderItem,
-    type NativeScrollEvent,
-    type NativeSyntheticEvent,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
+    Animated, Dimensions, type ListRenderItem, type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -182,13 +174,13 @@ export default function OnboardingScreen() {
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Pressable
+          <GinitPressable
             onPress={() => void finishAndLeave()}
             style={({ pressed }) => [styles.skipBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="건너뛰기">
             <Text style={styles.skipLabel}>건너뛰기</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
 
         <View style={styles.mainCol}>
@@ -223,21 +215,21 @@ export default function OnboardingScreen() {
             </View>
 
             {page < lastIndex ? (
-              <Pressable
+              <GinitPressable
                 onPress={goNext}
                 style={({ pressed }) => [styles.btnSecondary, pressed && styles.pressed]}
                 accessibilityRole="button"
                 accessibilityLabel="다음">
                 <Text style={styles.btnSecondaryLabel}>다음</Text>
-              </Pressable>
+              </GinitPressable>
             ) : (
-              <Pressable
+              <GinitPressable
                 onPress={() => void finishAndLeave()}
                 style={({ pressed }) => [styles.btnPrimary, pressed && styles.pressed]}
                 accessibilityRole="button"
                 accessibilityLabel="시작하기">
                 <Text style={styles.btnPrimaryLabel}>시작하기</Text>
-              </Pressable>
+              </GinitPressable>
             )}
           </View>
         </View>

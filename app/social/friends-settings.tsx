@@ -1,8 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useFocusEffect } from '@react-navigation/native';
+import {useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -140,7 +141,7 @@ export default function FriendsSettingsScreen() {
         </View>
 
         <View style={[styles.block, styles.blockGap]}>
-          <Pressable
+          <GinitPressable
             onPress={() => router.push('/social/hidden-friends')}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             accessibilityRole="button"
@@ -152,9 +153,9 @@ export default function FriendsSettingsScreen() {
               </Text>
             </View>
             <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-          </Pressable>
+          </GinitPressable>
           <RowSep />
-          <Pressable
+          <GinitPressable
             onPress={() => router.push('/social/blocked-friends')}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             accessibilityRole="button"
@@ -166,7 +167,7 @@ export default function FriendsSettingsScreen() {
               </Text>
             </View>
             <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-          </Pressable>
+          </GinitPressable>
         </View>
       </ScrollView>
     </SafeAreaView>

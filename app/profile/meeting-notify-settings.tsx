@@ -1,7 +1,8 @@
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -295,9 +296,9 @@ export default function MeetingNotifySettingsScreen() {
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
           <View style={styles.topBar}>
-            <Pressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
+            <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
               <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-            </Pressable>
+            </GinitPressable>
             <Text style={styles.topTitle} numberOfLines={1}>
               모임 생성 알림
             </Text>
@@ -315,9 +316,9 @@ export default function MeetingNotifySettingsScreen() {
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
-          <Pressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
+          <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle} numberOfLines={1}>
             공개 모임 생성 알림 설정
           </Text>

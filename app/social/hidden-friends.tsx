@@ -1,7 +1,8 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -124,13 +125,13 @@ export default function HiddenFriendsScreen() {
                   친구 목록에 표시되지 않아요
                 </Text>
               </View>
-              <Pressable
+              <GinitPressable
                 onPress={() => void onUnhide(item.row.peer_app_user_id)}
                 style={({ pressed }) => [styles.unhideBtn, pressed && { opacity: 0.85 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`${nick} 다시 표시`}>
                 <Text style={styles.unhideBtnText}>숨김 해제</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           );
         }}

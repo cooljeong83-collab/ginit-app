@@ -1,9 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import type { ReactNode, RefObject } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import {ActivityIndicator, Text, TextInput, View} from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
@@ -129,13 +130,13 @@ export function MeetingChatMainColumn({
           />
         </View>
         {showJumpToBottomFab ? (
-          <Pressable
+          <GinitPressable
             style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight + Math.max(0, keyboardHeight ?? 0) }]}
             onPress={jumpToLatest}
             accessibilityRole="button"
             accessibilityLabel="최신 메시지로">
             <GinitSymbolicIcon name="chevron-down" size={22} color="#334155" />
-          </Pressable>
+          </GinitPressable>
         ) : null}
       </View>
       <KeyboardStickyView style={styles.composerStickyWrap}>
@@ -160,13 +161,13 @@ export function MeetingChatMainColumn({
                   <Image source={{ uri: replyTo.imageUrl.trim() }} style={styles.replyPreviewThumb} contentFit="cover" />
                 </View>
               ) : null}
-              <Pressable
+              <GinitPressable
                 onPress={() => setReplyTo(null)}
                 hitSlop={10}
                 accessibilityRole="button"
                 accessibilityLabel="답장 취소">
                 <GinitSymbolicIcon name="close" size={18} color="#475569" />
-              </Pressable>
+              </GinitPressable>
             </BlurView>
           </View>
         ) : null}
@@ -179,7 +180,7 @@ export function MeetingChatMainColumn({
             }}>
             <View style={styles.composer}>
               {onPressAttach ? (
-                <Pressable
+                <GinitPressable
                   onPress={onPressAttach}
                   style={({ pressed }) => [styles.plusBtn, pressed && styles.pressed]}
                   accessibilityRole="button"
@@ -187,7 +188,7 @@ export function MeetingChatMainColumn({
                   <View style={styles.plusBtnIconSlot}>
                     <GinitSymbolicIcon name="add" size={26} color="#475569" />
                   </View>
-                </Pressable>
+                </GinitPressable>
               ) : null}
               <View style={styles.inputShell}>
                 <TextInput
@@ -209,7 +210,7 @@ export function MeetingChatMainColumn({
                   maxLength={4000}
                 />
               </View>
-              <Pressable
+              <GinitPressable
                 onPress={() => void onSend()}
                 style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
                 disabled={sending || !draft.trim()}
@@ -220,7 +221,7 @@ export function MeetingChatMainColumn({
                 ) : (
                   <GinitSymbolicIcon name="send" size={20} color="#fff" />
                 )}
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         ) : null}

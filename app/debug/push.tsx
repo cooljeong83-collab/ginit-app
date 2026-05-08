@@ -1,7 +1,8 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 import notifee from '@notifee/react-native';
 import * as Notifications from 'expo-notifications';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -222,7 +223,7 @@ function ActionButton({
   disabled?: boolean;
 }) {
   return (
-    <Pressable
+    <GinitPressable
       onPress={disabled ? undefined : onPress}
       style={({ pressed }) => [
         styles.btn,
@@ -231,7 +232,7 @@ function ActionButton({
       ]}
     >
       <Text style={styles.btnText}>{label}</Text>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

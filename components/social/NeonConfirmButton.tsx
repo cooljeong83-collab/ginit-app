@@ -1,5 +1,6 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, Text, View } from 'react-native'
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -14,7 +15,7 @@ type Props = {
  */
 export function NeonConfirmButton({ label, onPress, disabled }: Props) {
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
@@ -32,7 +33,7 @@ export function NeonConfirmButton({ label, onPress, disabled }: Props) {
         />
       </View>
       <Text style={styles.btnLabel}>{label}</Text>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import { HighlightedText } from '@/components/ui/HighlightedText';
 import type { OfflineChatRoomKey } from '@/src/lib/offline-chat/offline-chat-types';
@@ -151,7 +152,7 @@ export function OfflineChatSearchPanel({
           <Text style={sStyle.recentTitle}>최근 검색</Text>
           <View style={sStyle.recentChips}>
             {recent.map((r) => (
-              <Pressable
+              <GinitPressable
                 key={r.query}
                 onPress={() => {
                   setQuery(r.query);
@@ -163,7 +164,7 @@ export function OfflineChatSearchPanel({
                 <Text style={sStyle.chipText} numberOfLines={1}>
                   {r.query}
                 </Text>
-              </Pressable>
+              </GinitPressable>
             ))}
           </View>
         </View>
@@ -171,7 +172,7 @@ export function OfflineChatSearchPanel({
 
       <View style={sStyle.results}>
         {rows.map((r) => (
-          <Pressable
+          <GinitPressable
             key={`${r.roomType}:${r.roomId}:${r.messageId}`}
             onPress={() => onPick(r)}
             style={({ pressed }) => [sStyle.row, pressed && sStyle.rowPressed]}
@@ -185,7 +186,7 @@ export function OfflineChatSearchPanel({
             ) : (
               <HighlightedText style={sStyle.body} text={r.text ?? ''} query={highlightQuery} />
             )}
-          </Pressable>
+          </GinitPressable>
         ))}
         {!loading && highlightQuery && rows.length === 0 ? <Text style={sStyle.empty}>결과가 없어요.</Text> : null}
       </View>

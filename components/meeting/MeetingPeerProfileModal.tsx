@@ -1,8 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, StyleSheet, Text, View} from 'react-native';
 
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -313,7 +314,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.profileModalRoot}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} accessibilityRole="button" accessibilityLabel="프로필 닫기" />
+        <GinitPressable style={StyleSheet.absoluteFillObject} onPress={onClose} accessibilityRole="button" accessibilityLabel="프로필 닫기" />
         <View style={styles.profileModalCard}>
           <View style={styles.profileModalTop}>
             <View style={styles.profileAvatarWrap}>
@@ -333,36 +334,36 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
                 {isLoading ? '프로필 불러오는 중…' : metaParts.join(' · ')}
               </Text>
             </View>
-            <Pressable
+            <GinitPressable
               onPress={onClose}
               style={({ pressed }) => [styles.profileModalCloseBtn, pressed && { opacity: 0.9 }]}
               accessibilityRole="button"
               accessibilityLabel="닫기">
               <GinitSymbolicIcon name="close" size={18} color={GinitTheme.colors.textMuted} />
-            </Pressable>
+            </GinitPressable>
           </View>
 
           <View style={styles.profileModalActions}>
             {isMe ? (
-              <Pressable
+              <GinitPressable
                 disabled
                 style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
                 accessibilityRole="button"
                 accessibilityLabel="내 프로필">
                 <GinitSymbolicIcon name="person" size={16} color="#fff" />
                 <Text style={styles.profileActionPrimaryText}>내 프로필</Text>
-              </Pressable>
+              </GinitPressable>
             ) : isAi ? (
-              <Pressable
+              <GinitPressable
                 disabled
                 style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
                 accessibilityRole="text"
                 accessibilityLabel="지닛 도우미">
                 <GinitSymbolicIcon name="sparkles" size={16} color="#fff" />
                 <Text style={styles.profileActionPrimaryText}>지닛 도우미</Text>
-              </Pressable>
+              </GinitPressable>
             ) : (
-              <Pressable
+              <GinitPressable
                 onPress={friendRelation.status === 'pending_in' ? onAcceptFriendGinit : onSendFriendGinit}
                 disabled={(friendGinitDisabled && friendRelation.status !== 'pending_in') || friendInMissingId}
                 style={({ pressed }) => [
@@ -384,7 +385,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
                 <Text style={styles.profileActionPrimaryText} numberOfLines={1}>
                   {friendLabel}
                 </Text>
-              </Pressable>
+              </GinitPressable>
             )}
           </View>
         </View>

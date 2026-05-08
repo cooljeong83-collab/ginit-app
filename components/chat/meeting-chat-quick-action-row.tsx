@@ -1,6 +1,7 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { type ComponentProps, useCallback, useEffect, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import {type ComponentProps, useCallback, useEffect, useState } from 'react';
+import { Animated, Text, View} from 'react-native';
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -95,7 +96,7 @@ export function MeetingChatQuickActionRow({
           {action.label}
         </Text>
       </View>
-      <Pressable
+      <GinitPressable
         onPress={action.onPress}
         accessibilityRole="button"
         accessibilityLabel={action.label}
@@ -130,7 +131,7 @@ export function MeetingChatQuickActionRow({
             </View>
           </View>
         </View>
-      </Pressable>
+      </GinitPressable>
     </Animated.View>
   );
 }

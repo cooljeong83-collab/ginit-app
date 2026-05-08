@@ -1,9 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Modal, Platform, StyleSheet, Text, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -567,7 +568,7 @@ export function UserProfilePublicBody({
   return (
     <View style={{ paddingTop: padTop, paddingHorizontal: padH, paddingBottom: padH }}>
       <View style={styles.hero}>
-        <Pressable
+        <GinitPressable
           onPress={onPressAvatar}
           disabled={withdrawn || (isMe && !onPressMyAvatar && !photo) || (!isMe && !photo)}
           style={({ pressed }) => [styles.heroAvatarPress, pressed && { opacity: 0.9 }]}
@@ -605,7 +606,7 @@ export function UserProfilePublicBody({
               ) : null}
             </View>
           </View>
-        </Pressable>
+        </GinitPressable>
 
         <Text style={styles.heroName} numberOfLines={1}>
           {nick}
@@ -644,7 +645,7 @@ export function UserProfilePublicBody({
       ) : null}
 
       {cta ? (
-        <Pressable
+        <GinitPressable
           onPress={() => void onPressCta()}
           disabled={friendBusy || cta.kind === 'pending'}
           style={({ pressed }) => [
@@ -658,7 +659,7 @@ export function UserProfilePublicBody({
           <Text style={styles.ctaText} numberOfLines={1}>
             {cta.label}
           </Text>
-        </Pressable>
+        </GinitPressable>
       ) : null}
 
       <View style={styles.grid}>
@@ -667,14 +668,14 @@ export function UserProfilePublicBody({
           if (!url) return null;
           const isEndOfRow = (i + 1) % 2 === 0;
           return (
-            <Pressable
+            <GinitPressable
               key={`${url}-${h.createdAt}-${i}`}
               onPress={() => openProfileImageAtUrl(url)}
               style={({ pressed }) => [styles.gridCell, pressed && { opacity: 0.9 }, isEndOfRow && { marginRight: 0 }]}
               accessibilityRole="button"
               accessibilityLabel="프로필 사진 크게 보기">
               <Image source={{ uri: url }} style={styles.gridThumb} contentFit="cover" />
-            </Pressable>
+            </GinitPressable>
           );
         })}
       </View>
@@ -685,7 +686,8 @@ export function UserProfilePublicBody({
         animationType="fade"
         onRequestClose={() => setProfileImageViewer(null)}>
         <GestureHandlerRootView style={meetingChatBodyStyles.viewerRoot}>
-          <Pressable
+          <GinitPressable
+            duplicatePressGuardDisabled
             style={StyleSheet.absoluteFill}
             onPress={() => !profilePhotoDeleteBusy && setProfileImageViewer(null)}
             pointerEvents="none"
@@ -694,14 +696,15 @@ export function UserProfilePublicBody({
           />
           <View style={meetingChatBodyStyles.viewerSheet} pointerEvents="box-none">
             <View style={[meetingChatBodyStyles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
-              <Pressable
+              <GinitPressable
+                duplicatePressGuardDisabled
                 onPress={() => setProfileImageViewer(null)}
                 hitSlop={10}
                 disabled={profilePhotoDeleteBusy}
                 accessibilityRole="button"
                 accessibilityLabel="닫기">
                 <GinitSymbolicIcon name="close" size={26} color="#fff" />
-              </Pressable>
+              </GinitPressable>
               <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
                 <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
                   프로필 사진
@@ -714,7 +717,8 @@ export function UserProfilePublicBody({
               </View>
               <View style={meetingChatBodyStyles.viewerActions}>
                 {showProfileViewerDelete ? (
-                  <Pressable
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       if (profilePhotoDeleteBusy) return;
                       onConfirmDeleteProfilePhotoAtViewer();
@@ -728,7 +732,7 @@ export function UserProfilePublicBody({
                     ) : (
                       <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
                     )}
-                  </Pressable>
+                  </GinitPressable>
                 ) : (
                   <View style={{ width: 26 }} />
                 )}

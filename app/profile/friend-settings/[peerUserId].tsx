@@ -1,20 +1,8 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, Keyboard, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -379,9 +367,9 @@ export default function FriendSettingsScreen() {
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
           <View style={styles.topBar}>
-            <Pressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
+            <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
               <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-            </Pressable>
+            </GinitPressable>
             <Text style={styles.topTitle}>친구 설정</Text>
             <View style={styles.topBarSpacer} />
           </View>
@@ -397,9 +385,9 @@ export default function FriendSettingsScreen() {
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
-          <Pressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
+          <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle}>친구 설정</Text>
           <View style={styles.topBarSpacer} />
         </View>
@@ -412,7 +400,7 @@ export default function FriendSettingsScreen() {
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.block}>
               {sectionTitle('이름')}
-              <Pressable
+              <GinitPressable
                 onPress={openNameMemoEditor}
                 disabled={busy}
                 style={({ pressed }) => [styles.row, styles.rowValignTop, pressed && styles.rowPressed, busy && styles.rowDisabled]}
@@ -432,7 +420,7 @@ export default function FriendSettingsScreen() {
                   )}
                 </View>
                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-              </Pressable>
+              </GinitPressable>
             </View>
 
             <View style={[styles.block, styles.blockGap]}>
@@ -454,7 +442,7 @@ export default function FriendSettingsScreen() {
                 />
               </View>
               <RowSep />
-              <Pressable
+              <GinitPressable
                 onPress={onHide}
                 disabled={busy || hidden}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed, (busy || hidden) && styles.rowDisabled]}
@@ -466,9 +454,9 @@ export default function FriendSettingsScreen() {
                   <Text style={styles.rowSub}>{hidden ? '이미 목록에서 숨긴 상태예요.' : '친구 목록에서만 숨겨요.'}</Text>
                 </View>
                 {!hidden ? <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} /> : null}
-              </Pressable>
+              </GinitPressable>
               <RowSep />
-              <Pressable
+              <GinitPressable
                 onPress={onBlock}
                 disabled={busy || blocked}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed, (busy || blocked) && styles.rowDisabled]}
@@ -480,9 +468,9 @@ export default function FriendSettingsScreen() {
                   <Text style={styles.rowSub}>{blocked ? '이미 차단한 상태예요.' : '목록·상호작용에서 제외해요.'}</Text>
                 </View>
                 {!blocked ? <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} /> : null}
-              </Pressable>
+              </GinitPressable>
               <RowSep />
-              <Pressable
+              <GinitPressable
                 onPress={onDeleteFriend}
                 disabled={busy}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed, busy && styles.rowDisabled]}
@@ -494,9 +482,9 @@ export default function FriendSettingsScreen() {
                   <Text style={[styles.rowSub, styles.rowSubDanger]}>지닛 친구 관계만 삭제돼요.</Text>
                 </View>
                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.danger} />
-              </Pressable>
+              </GinitPressable>
               <RowSep />
-              <Pressable
+              <GinitPressable
                 onPress={onReport}
                 disabled={busy}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed, busy && styles.rowDisabled]}
@@ -508,14 +496,14 @@ export default function FriendSettingsScreen() {
                   <Text style={[styles.rowSub, styles.rowSubDanger]}>부적절한 이용 등을 운영에 알려요.</Text>
                 </View>
                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-              </Pressable>
+              </GinitPressable>
             </View>
           </ScrollView>
         )}
 
         <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => !busy && setEditOpen(false)}>
           <View style={styles.editModalRoot}>
-            <Pressable style={styles.editModalDim} onPress={() => !busy && setEditOpen(false)} accessibilityRole="button" accessibilityLabel="닫기" />
+            <GinitPressable style={styles.editModalDim} onPress={() => !busy && setEditOpen(false)} accessibilityRole="button" accessibilityLabel="닫기" />
             <View style={styles.editKavWrap} pointerEvents="box-none">
               <View style={styles.editKav}>
                 <ScrollView
@@ -567,21 +555,21 @@ export default function FriendSettingsScreen() {
                     />
 
                     <View style={styles.editActions}>
-                      <Pressable
+                      <GinitPressable
                         onPress={() => !busy && setEditOpen(false)}
                         style={({ pressed }) => [styles.editBtnGhost, pressed && { opacity: 0.88 }]}
                         accessibilityRole="button"
                         accessibilityLabel="취소">
                         <Text style={styles.editBtnGhostText}>취소</Text>
-                      </Pressable>
-                      <Pressable
+                      </GinitPressable>
+                      <GinitPressable
                         onPress={() => void saveNameMemoFromModal()}
                         disabled={busy}
                         style={({ pressed }) => [styles.editBtnPrimary, (pressed && !busy) && { opacity: 0.88 }, busy && { opacity: 0.55 }]}
                         accessibilityRole="button"
                         accessibilityLabel="저장">
                         <Text style={styles.editBtnPrimaryText}>{busy ? '저장 중…' : '저장'}</Text>
-                      </Pressable>
+                      </GinitPressable>
                     </View>
                   </View>
                 </ScrollView>

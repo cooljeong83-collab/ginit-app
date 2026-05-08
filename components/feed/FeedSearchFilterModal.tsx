@@ -1,5 +1,6 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {Modal, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -55,7 +56,7 @@ export function FeedSearchFilterModal({ visible, filters, onChangeFilters, onClo
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.root}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} accessibilityRole="button" accessibilityLabel="검색 닫기" />
+        <GinitPressable style={StyleSheet.absoluteFillObject} onPress={onClose} accessibilityRole="button" accessibilityLabel="검색 닫기" />
         <View style={styles.card}>
           <Text style={styles.title}>검색 · 조건</Text>
           <Text style={styles.hint}>이름·소개·장소 글자와 공개 모임 상세 조건으로 목록을 좁혀요.</Text>
@@ -78,21 +79,21 @@ export function FeedSearchFilterModal({ visible, filters, onChangeFilters, onClo
               {AGE_CHIPS.map(({ code, label }) => {
                 const on = filters.ageInclude.includes(code);
                 return (
-                  <Pressable
+                  <GinitPressable
                     key={code}
                     onPress={() => onChangeFilters({ ...filters, ageInclude: toggleAge(filters.ageInclude, code) })}
                     style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityState={{ selected: on }}>
                     <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
-                  </Pressable>
+                  </GinitPressable>
                 );
               })}
             </View>
 
             <Text style={[styles.blockLabel, styles.blockLabelSpaced]}>성별 비율</Text>
             <View style={styles.rowWrap}>
-              <Pressable
+              <GinitPressable
                 onPress={() => onChangeFilters({ ...filters, genderRatio: null })}
                 style={({ pressed }) => [
                   styles.segBtn,
@@ -101,24 +102,24 @@ export function FeedSearchFilterModal({ visible, filters, onChangeFilters, onClo
                 ]}
                 accessibilityRole="button">
                 <Text style={[styles.segText, filters.genderRatio === null && styles.segTextOn]}>전체</Text>
-              </Pressable>
+              </GinitPressable>
               {GENDER_OPTIONS.map(({ value, label }) => {
                 const on = filters.genderRatio === value;
                 return (
-                  <Pressable
+                  <GinitPressable
                     key={value}
                     onPress={() => onChangeFilters({ ...filters, genderRatio: value })}
                     style={({ pressed }) => [styles.segBtn, on && styles.segBtnOn, pressed && styles.pressed]}
                     accessibilityRole="button">
                     <Text style={[styles.segText, on && styles.segTextOn]}>{label}</Text>
-                  </Pressable>
+                  </GinitPressable>
                 );
               })}
             </View>
 
             <Text style={[styles.blockLabel, styles.blockLabelSpaced]}>정산</Text>
             <View style={styles.rowWrap}>
-              <Pressable
+              <GinitPressable
                 onPress={() => onChangeFilters({ ...filters, settlement: null })}
                 style={({ pressed }) => [
                   styles.segBtn,
@@ -127,24 +128,24 @@ export function FeedSearchFilterModal({ visible, filters, onChangeFilters, onClo
                 ]}
                 accessibilityRole="button">
                 <Text style={[styles.segText, filters.settlement === null && styles.segTextOn]}>전체</Text>
-              </Pressable>
+              </GinitPressable>
               {SETTLE_OPTIONS.map(({ value, label }) => {
                 const on = filters.settlement === value;
                 return (
-                  <Pressable
+                  <GinitPressable
                     key={value}
                     onPress={() => onChangeFilters({ ...filters, settlement: value })}
                     style={({ pressed }) => [styles.segBtn, on && styles.segBtnOn, pressed && styles.pressed]}
                     accessibilityRole="button">
                     <Text style={[styles.segText, on && styles.segTextOn]}>{label}</Text>
-                  </Pressable>
+                  </GinitPressable>
                 );
               })}
             </View>
 
             <Text style={[styles.blockLabel, styles.blockLabelSpaced]}>승인</Text>
             <View style={styles.rowWrap}>
-              <Pressable
+              <GinitPressable
                 onPress={() => onChangeFilters({ ...filters, approvalType: null })}
                 style={({ pressed }) => [
                   styles.segBtn,
@@ -153,41 +154,41 @@ export function FeedSearchFilterModal({ visible, filters, onChangeFilters, onClo
                 ]}
                 accessibilityRole="button">
                 <Text style={[styles.segText, filters.approvalType === null && styles.segTextOn]}>전체</Text>
-              </Pressable>
+              </GinitPressable>
               {APPROVAL_OPTIONS.map(({ value, label }) => {
                 const on = filters.approvalType === value;
                 return (
-                  <Pressable
+                  <GinitPressable
                     key={value}
                     onPress={() => onChangeFilters({ ...filters, approvalType: value })}
                     style={({ pressed }) => [styles.segBtn, on && styles.segBtnOn, pressed && styles.pressed]}
                     accessibilityRole="button">
                     <Text style={[styles.segText, on && styles.segTextOn]}>{label}</Text>
-                  </Pressable>
+                  </GinitPressable>
                 );
               })}
             </View>
           </ScrollView>
 
           <View style={styles.footer}>
-            <Pressable
+            <GinitPressable
               onPress={() => onChangeFilters(defaultFeedSearchFilters())}
               style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
               accessibilityRole="button">
               <Text style={styles.secondaryBtnLabel}>초기화</Text>
-            </Pressable>
-            <Pressable
+            </GinitPressable>
+            <GinitPressable
               onPress={onApply}
               style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
               accessibilityRole="button">
               <Text style={styles.primaryBtnLabel}>적용</Text>
               <GinitSymbolicIcon name="checkmark" size={20} color="#fff" />
-            </Pressable>
+            </GinitPressable>
           </View>
 
-          <Pressable onPress={onClose} style={styles.closeLink} accessibilityRole="button">
+          <GinitPressable onPress={onClose} style={styles.closeLink} accessibilityRole="button">
             <Text style={styles.closeLinkLabel}>닫기</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
     </Modal>

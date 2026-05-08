@@ -1,15 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import type { ReactNode } from 'react';
-import { useCallback, useState } from 'react';
+import {useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
-  type LayoutChangeEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+  ActivityIndicator, type LayoutChangeEvent, Platform, StyleSheet, Text, View} from 'react-native';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -40,7 +34,7 @@ type RowProps = {
 function SnsTextLinkRow({ innerBandWidth, label, onPress, disabled, loading, icon, accessibilityLabel }: RowProps) {
   const inactive = !!disabled || !!loading;
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       disabled={inactive}
       android_ripple={{ color: RIPPLE, borderless: false }}
@@ -60,7 +54,7 @@ function SnsTextLinkRow({ innerBandWidth, label, onPress, disabled, loading, ico
           {label}
         </Text>
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

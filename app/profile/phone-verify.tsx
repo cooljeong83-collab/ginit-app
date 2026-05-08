@@ -1,6 +1,7 @@
-import { useRouter } from 'expo-router';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -114,7 +115,7 @@ export default function ProfilePhoneVerifyEntryScreen() {
 
           {isVerified ? <Text style={styles.verifiedText}>인증 완료</Text> : null}
 
-          <Pressable
+          <GinitPressable
             onPress={() => void onNext()}
             disabled={!canNext}
             style={({ pressed }) => [
@@ -127,11 +128,11 @@ export default function ProfilePhoneVerifyEntryScreen() {
             <Text style={styles.nextText}>
               {isVerified ? '인증 완료' : busy ? '전송 중…' : '인증번호 받기'}
             </Text>
-          </Pressable>
+          </GinitPressable>
 
-          <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
+          <GinitPressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
             <Text style={styles.cancelText}>취소</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       </SafeAreaView>
     </ScreenShell>

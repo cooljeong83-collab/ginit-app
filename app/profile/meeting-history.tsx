@@ -1,7 +1,8 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useRouter } from 'expo-router';
+import {useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { JoinedMeetingDashboardCard } from '@/components/joined-meetings/JoinedMeetingDashboardCard';
@@ -53,14 +54,14 @@ export default function ProfileMeetingHistoryScreen() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
-          <Pressable
+          <GinitPressable
             onPress={() => router.back()}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로"
             style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle} numberOfLines={1}>
             참가 모임 히스토리
           </Text>

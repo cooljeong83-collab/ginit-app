@@ -1,4 +1,5 @@
-import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
@@ -12,21 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, Animated, Easing, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
@@ -1516,7 +1503,7 @@ export default function MeetingDetailScreen() {
                     const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
                     const isSelected = dateHostPickMode ? isHostSelected : opts.some((o) => selectedDateIds.includes(o.chipId));
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={c.ymd}
                         onPress={() => {
                           if (!has) return;
@@ -1564,7 +1551,7 @@ export default function MeetingDetailScreen() {
                         ) : (
                           <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
                         )}
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </View>
@@ -1759,13 +1746,13 @@ export default function MeetingDetailScreen() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <View style={styles.topBar}>
-          <Pressable
+          <GinitPressable
             onPress={safeBack}
             style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="뒤로">
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle}>모임 상세</Text>
           {recruitmentBadge ? (
             <View style={[styles.statusBadge, recruitmentBadge.wrap]}>
@@ -1787,7 +1774,7 @@ export default function MeetingDetailScreen() {
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>문제가 생겼어요</Text>
             <Text style={styles.muted}>{loadError}</Text>
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 setRetryNonce((n) => n + 1);
                 void refetchMeetingDetail();
@@ -1802,7 +1789,7 @@ export default function MeetingDetailScreen() {
                 pointerEvents="none"
               />
               <Text style={styles.retryText}>다시 시도</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         ) : null}
 
@@ -1812,7 +1799,7 @@ export default function MeetingDetailScreen() {
             <Text style={styles.muted}>
               모임 상세를 보려면 모임 이용을 위한 인증 정보 등록을 먼저 완료해 주세요.
             </Text>
-            <Pressable
+            <GinitPressable
               onPress={() => pushProfileOpenRegisterInfo(router)}
               style={styles.retryBtn}
               accessibilityRole="button"
@@ -1825,14 +1812,14 @@ export default function MeetingDetailScreen() {
                 pointerEvents="none"
               />
               <Text style={styles.retryText}>정보 등록하기</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         ) : null}
 
         {notFound ? (
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>모임을 찾을 수 없어요</Text>
-            <Pressable onPress={safeBack} style={styles.retryBtn} accessibilityRole="button">
+            <GinitPressable onPress={safeBack} style={styles.retryBtn} accessibilityRole="button">
               <LinearGradient
                 colors={GinitTheme.colors.ctaGradient}
                 start={{ x: 0, y: 0 }}
@@ -1841,7 +1828,7 @@ export default function MeetingDetailScreen() {
                 pointerEvents="none"
               />
               <Text style={styles.retryText}>돌아가기</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         ) : null}
 
@@ -1858,14 +1845,14 @@ export default function MeetingDetailScreen() {
                   {meeting.title || '제목 없음'}
                 </Text>
                 {isHost && !isScheduleConfirmed ? (
-                  <Pressable
+                  <GinitPressable
                     onPress={() => setBasicInfoEditOpen(true)}
                     style={({ pressed }) => [styles.titleEditCircleBtn, pressed && { opacity: 0.82 }]}
                     accessibilityRole="button"
                     accessibilityLabel="기본 정보 수정"
                     hitSlop={8}>
                     <GinitSymbolicIcon name="pencil" size={17} color={GinitTheme.colors.textSub} />
-                  </Pressable>
+                  </GinitPressable>
                 ) : null}
               </View>
             </View>
@@ -1890,7 +1877,7 @@ export default function MeetingDetailScreen() {
                       <View key={`${aid}-${jr.requestedAt}`}>
                         {jrIndex > 0 ? <View style={styles.joinRequestSep} /> : null}
                         <View style={styles.joinRequestRow}>
-                          <Pressable
+                          <GinitPressable
                             onPress={() => openParticipantProfile(aid)}
                             style={({ pressed }) => [
                               styles.joinRequestAvatarPress,
@@ -1914,7 +1901,7 @@ export default function MeetingDetailScreen() {
                                 <Text style={styles.joinRequestAvatarInitial}>{nicknameInitial(nickname)}</Text>
                               )}
                             </View>
-                          </Pressable>
+                          </GinitPressable>
                           <View style={styles.joinRequestMid}>
                             <Text style={styles.joinRequestNick} numberOfLines={1}>
                               {nickname}
@@ -1926,7 +1913,7 @@ export default function MeetingDetailScreen() {
                             </Text>
                           </View>
                           <View style={styles.joinRequestActions}>
-                            <Pressable
+                            <GinitPressable
                               onPress={() => onHostApproveJoin(aid)}
                               disabled={rowBusy}
                               style={({ pressed }) => [
@@ -1941,8 +1928,8 @@ export default function MeetingDetailScreen() {
                               ) : (
                                 <Text style={styles.joinRequestBtnPrimaryText}>승인</Text>
                               )}
-                            </Pressable>
-                            <Pressable
+                            </GinitPressable>
+                            <GinitPressable
                               onPress={() => onHostRejectJoin(aid)}
                               disabled={rowBusy}
                               style={({ pressed }) => [
@@ -1953,7 +1940,7 @@ export default function MeetingDetailScreen() {
                               accessibilityRole="button"
                               accessibilityLabel="참가 거절">
                               <Text style={styles.joinRequestBtnGhostText}>거절</Text>
-                            </Pressable>
+                            </GinitPressable>
                           </View>
                         </View>
                       </View>
@@ -2129,7 +2116,7 @@ export default function MeetingDetailScreen() {
                               setConfirmedScheduleCalPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
                             }}>
                             <View style={styles.voteCalendarHeaderRow}>
-                              <Pressable
+                              <GinitPressable
                                 onPress={() => {
                                   const prevM = new Date(year, month - 1, 1);
                                   setConfirmedScheduleCalMonth(monthStartYmd(fmtDateYmd(prevM)));
@@ -2138,7 +2125,7 @@ export default function MeetingDetailScreen() {
                                 accessibilityRole="button"
                                 accessibilityLabel="이전 달">
                                 <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
-                              </Pressable>
+                              </GinitPressable>
                               <View
                                 style={styles.voteCalendarTitlePress}
                                 accessible
@@ -2146,7 +2133,7 @@ export default function MeetingDetailScreen() {
                                 accessibilityLabel={`확정 일시 ${monthLabel}`}>
                                 <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
                               </View>
-                              <Pressable
+                              <GinitPressable
                                 onPress={() => {
                                   const nextM = new Date(year, month + 1, 1);
                                   setConfirmedScheduleCalMonth(monthStartYmd(fmtDateYmd(nextM)));
@@ -2155,7 +2142,7 @@ export default function MeetingDetailScreen() {
                                 accessibilityRole="button"
                                 accessibilityLabel="다음 달">
                                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
-                              </Pressable>
+                              </GinitPressable>
                             </View>
                             <View style={styles.calendarDowRow}>
                               {WEEK_KO.map((w) => (
@@ -2237,7 +2224,7 @@ export default function MeetingDetailScreen() {
                         height={200}
                         borderRadius={12}
                       />
-                      <Pressable
+                      <GinitPressable
                         onPress={() => void onOpenConfirmedPlaceInNaverMap()}
                         style={({ pressed }) => [
                           styles.confirmedMapTapOverlay,
@@ -2246,7 +2233,7 @@ export default function MeetingDetailScreen() {
                         accessibilityRole="button"
                         accessibilityLabel="네이버 지도에서 이 장소 보기">
                         <View style={StyleSheet.absoluteFillObject} collapsable={false} />
-                      </Pressable>
+                      </GinitPressable>
                       <View style={styles.confirmedMapBadge} pointerEvents="none">
                         <GinitSymbolicIcon name="navigate-outline" size={14} color="#fff" />
                         <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
@@ -2325,7 +2312,7 @@ export default function MeetingDetailScreen() {
                               })()}
                             </View>
                             {resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title) ? (
-                              <Pressable
+                              <GinitPressable
                                 onPress={() => {
                                   const u = resolveNaverMovieSearchWebUrl(confirmedMovieResolved.title);
                                   if (!u) return;
@@ -2342,7 +2329,7 @@ export default function MeetingDetailScreen() {
                                 accessibilityRole="button"
                                 accessibilityLabel="영화 정보 보기">
                                 <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
-                              </Pressable>
+                              </GinitPressable>
                             ) : null}
                           </View>
                         </View>
@@ -2399,7 +2386,7 @@ export default function MeetingDetailScreen() {
                         setDateVoteCalendarPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
                       }}>
                       <View style={styles.voteCalendarHeaderRow}>
-                        <Pressable
+                        <GinitPressable
                           onPress={() => {
                             const prev = new Date(year, month - 1, 1);
                             setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(prev)));
@@ -2408,8 +2395,8 @@ export default function MeetingDetailScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="이전 달">
                           <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
-                        </Pressable>
-                        <Pressable
+                        </GinitPressable>
+                        <GinitPressable
                           onPress={() => {
                             setDateVoteCalendarYmPick({ draft: new Date(year, month, 1) });
                           }}
@@ -2417,8 +2404,8 @@ export default function MeetingDetailScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={`년·월 선택 ${monthLabel}`}>
                           <Text style={styles.voteCalendarTitle}>{monthLabel}</Text>
-                        </Pressable>
-                        <Pressable
+                        </GinitPressable>
+                        <GinitPressable
                           onPress={() => {
                             const next = new Date(year, month + 1, 1);
                             setDateVoteCalendarMonth(monthStartYmd(fmtDateYmd(next)));
@@ -2427,7 +2414,7 @@ export default function MeetingDetailScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="다음 달">
                           <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
-                        </Pressable>
+                        </GinitPressable>
                       </View>
                       <View style={styles.calendarDowRow}>
                         {WEEK_KO.map((w) => (
@@ -2506,14 +2493,14 @@ export default function MeetingDetailScreen() {
               ) : null}
             </>
 
-            <Pressable
+            <GinitPressable
               style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
               accessibilityRole="button"
               accessibilityLabel="날짜 제안"
               onPress={openDateProposeModal}>
               <GinitSymbolicIcon name="calendar-outline" size={20} color="#FFFFFF" />
               <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
-            </Pressable>
+            </GinitPressable>
                   </View>
             </View>
 
@@ -2598,7 +2585,7 @@ export default function MeetingDetailScreen() {
                           })()}
                         </View>
                         {resolveNaverMovieSearchWebUrl(extraMovies[0].title) ? (
-                          <Pressable
+                          <GinitPressable
                             onPress={() => {
                               const u = resolveNaverMovieSearchWebUrl(extraMovies[0].title);
                               if (!u) return;
@@ -2613,7 +2600,7 @@ export default function MeetingDetailScreen() {
                             accessibilityLabel="영화 정보 보기">
                               
                             <Text style={styles.moviePosterInfoBtnText}>영화 정보 보기</Text>
-                          </Pressable>
+                          </GinitPressable>
                         ) : null}
                       </View>
                     </View>
@@ -2630,7 +2617,7 @@ export default function MeetingDetailScreen() {
                         const movieInfoUrl = resolveNaverMovieSearchWebUrl(mv.title);
                         return (
                           <View key={chipId} style={styles.movieVotePosterColumn}>
-                            <Pressable
+                            <GinitPressable
                               onPress={() => onMovieChipPress(chipId)}
                               style={({ pressed }) => [
                                 styles.moviePosterThumbWrap,
@@ -2660,9 +2647,9 @@ export default function MeetingDetailScreen() {
                                   <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                                 </View>
                               ) : null}
-                            </Pressable>
+                            </GinitPressable>
                             {movieInfoUrl ? (
-                              <Pressable
+                              <GinitPressable
                                 onPress={() =>
                                   setNaverPlaceWebModal({ url: movieInfoUrl, title: mv.title.trim() || '영화' })
                                 }
@@ -2670,7 +2657,7 @@ export default function MeetingDetailScreen() {
                                 accessibilityRole="button"
                                 accessibilityLabel="영화 정보">
                                 <Text style={styles.moviePosterInfoBtnText}>영화 정보</Text>
-                              </Pressable>
+                              </GinitPressable>
                             ) : null}
                           </View>
                         );
@@ -2776,7 +2763,7 @@ export default function MeetingDetailScreen() {
                         height={200}
                         borderRadius={12}
                       />
-                      <Pressable
+                      <GinitPressable
                         onPress={() => {
                           const name = placeChips[0]?.title?.trim();
                           void openNaverMapAt(singlePlaceCoords.latitude, singlePlaceCoords.longitude, name).then((ok) => {
@@ -2790,7 +2777,7 @@ export default function MeetingDetailScreen() {
                         accessibilityRole="button"
                         accessibilityLabel="네이버 지도에서 이 장소 보기">
                         <View style={StyleSheet.absoluteFillObject} collapsable={false} />
-                      </Pressable>
+                      </GinitPressable>
                       <View style={styles.confirmedMapBadge} pointerEvents="none">
                         <GinitSymbolicIcon name="navigate-outline" size={14} color="#fff" />
                         <Text style={styles.confirmedMapBadgeText}>네이버 지도</Text>
@@ -2816,7 +2803,7 @@ export default function MeetingDetailScreen() {
                       <View
                         key={chip.id}
                         style={[styles.placeVoteCard, chipSelected ? styles.placeVoteCardSelected : null]}>
-                        <Pressable
+                        <GinitPressable
                           onPress={() => onPlaceChipPress(chip.id)}
                           style={({ pressed }) => [
                             styles.placeVoteCardPressFill,
@@ -2857,7 +2844,7 @@ export default function MeetingDetailScreen() {
                               </Text>
                             ) : null}
                           </View>
-                        </Pressable>
+                        </GinitPressable>
                         <PlaceCandidateDetailLinkRow
                           title={chip.title}
                           link={chip.naverPlaceLink}
@@ -2893,14 +2880,14 @@ export default function MeetingDetailScreen() {
             )}
             
 
-            <Pressable
+            <GinitPressable
               style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
               accessibilityRole="button"
               accessibilityLabel="장소 제안"
               onPress={openPlaceProposeModal}>
               <GinitSymbolicIcon name="location-outline" size={20} color="#FFFFFF" />
               <Text style={styles.addOutlineTextActive}>장소 제안</Text>
-            </Pressable>
+            </GinitPressable>
               </View>
                 </View>
               </>
@@ -2970,7 +2957,7 @@ export default function MeetingDetailScreen() {
                     const isHostUser = Boolean(hostPk && hostPk === userId);
                     const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={userId}
                         onPress={() => openParticipantProfile(userId)}
                         onLongPress={
@@ -3000,13 +2987,13 @@ export default function MeetingDetailScreen() {
                         <Text style={styles.avatarLabel} numberOfLines={2}>
                           {isHostUser ? `${nickname}\n(호스트)` : nickname}
                         </Text>
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                   {recruitmentPhase === 'recruiting' ? (
-                    <Pressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
+                    <GinitPressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
                       <GinitSymbolicIcon name="add" size={26} color={GinitTheme.colors.primary} />
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </ScrollView>
               )}
@@ -3022,7 +3009,7 @@ export default function MeetingDetailScreen() {
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
                   {recruitmentPhase === 'recruiting' ? (
-                    <Pressable
+                    <GinitPressable
                       style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                       accessibilityRole="button"
                       accessibilityLabel="초대">
@@ -3030,9 +3017,9 @@ export default function MeetingDetailScreen() {
                       <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                         초대
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
-                  <Pressable
+                  <GinitPressable
                     onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
@@ -3041,9 +3028,9 @@ export default function MeetingDetailScreen() {
                     <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                       채팅
                     </Text>
-                  </Pressable>
+                  </GinitPressable>
                   {meeting.scheduleConfirmed !== true ? (
-                    <Pressable
+                    <GinitPressable
                       onPress={handleDeleteMeeting}
                       disabled={deleteMeetingBusy || confirmScheduleBusy}
                       style={({ pressed }) => [
@@ -3063,11 +3050,11 @@ export default function MeetingDetailScreen() {
                       <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                         삭제
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
 
                   {orderedParticipantIdsList.length >= 2 ? (
-                    <Pressable
+                    <GinitPressable
                       onPress={
                         meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
                       }
@@ -3100,7 +3087,7 @@ export default function MeetingDetailScreen() {
                         ellipsizeMode="tail">
                         {meeting.scheduleConfirmed === true ? '취소' : '확정'}
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </View>
               </View>
@@ -3108,7 +3095,7 @@ export default function MeetingDetailScreen() {
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
                   {recruitmentPhase === 'recruiting' ? (
-                    <Pressable
+                    <GinitPressable
                       style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                       accessibilityRole="button"
                       accessibilityLabel="초대">
@@ -3119,9 +3106,9 @@ export default function MeetingDetailScreen() {
                         ellipsizeMode="tail">
                         초대
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
-                  <Pressable
+                  <GinitPressable
                     onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
                     accessibilityRole="button"
@@ -3133,9 +3120,9 @@ export default function MeetingDetailScreen() {
                       ellipsizeMode="tail">
                       채팅
                     </Text>
-                  </Pressable>
+                  </GinitPressable>
                   {!isScheduleConfirmed ? (
-                    <Pressable
+                    <GinitPressable
                       onPress={onPressSaveVotes}
                       disabled={!votesDirty || participantVoteBusy || leaveBusy}
                       style={({ pressed }) => [
@@ -3163,9 +3150,9 @@ export default function MeetingDetailScreen() {
                         ellipsizeMode="tail">
                         저장
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
-                  <Pressable
+                  <GinitPressable
                     onPress={handleLeaveParticipant}
                     disabled={participantVoteBusy || leaveBusy}
                     style={({ pressed }) => [
@@ -3184,7 +3171,7 @@ export default function MeetingDetailScreen() {
                       ellipsizeMode="tail">
                       퇴장
                     </Text>
-                  </Pressable>
+                  </GinitPressable>
                 </View>
               </View>
             ) : sessionKickedFromMeeting ? (
@@ -3197,7 +3184,7 @@ export default function MeetingDetailScreen() {
               <View style={styles.guestJoinBottomCol}>
                 <Text style={styles.joinOverlapCaption}>호스트 승인을 기다리는 중이에요.</Text>
                 <View style={styles.bottomBarEqualRow}>
-                  <Pressable
+                  <GinitPressable
                     onPress={() => {
                       if (joinBusy) {
                         Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
@@ -3218,13 +3205,13 @@ export default function MeetingDetailScreen() {
                     <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
                       신청 취소
                     </Text>
-                  </Pressable>
+                  </GinitPressable>
                 </View>
               </View>
             ) : (
               <View style={styles.guestJoinBottomCol}>
                 <View style={styles.bottomBarEqualRow}>
-                  <Pressable
+                  <GinitPressable
                     onPress={() => {
                       if (joinBusy) {
                         Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
@@ -3268,7 +3255,7 @@ export default function MeetingDetailScreen() {
                         {needsHostApprovalJoin ? '참가 신청' : '참여'}
                       </Text>
                     </View>
-                  </Pressable>
+                  </GinitPressable>
                 </View>
                 {joinScheduleOverlapBlock ? (
                   <Text style={styles.joinOverlapCaption}>
@@ -3288,7 +3275,7 @@ export default function MeetingDetailScreen() {
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.proposeModalRoot}>
-            <Pressable
+            <GinitPressable
               style={styles.proposeModalBackdrop}
               onPress={() => !joinBusy && setJoinRequestMessageOpen(false)}
               accessibilityRole="button"
@@ -3321,7 +3308,7 @@ export default function MeetingDetailScreen() {
                 accessibilityLabel="참가 신청 메시지"
               />
               <View style={styles.bottomBarEqualRow}>
-                <Pressable
+                <GinitPressable
                   onPress={() => !joinBusy && setJoinRequestMessageOpen(false)}
                   style={({ pressed }) => [
                     styles.bottomPill,
@@ -3333,8 +3320,8 @@ export default function MeetingDetailScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="닫기">
                   <Text style={[styles.pillText, styles.bottomPillLabel]}>닫기</Text>
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
                   onPress={() => {
                     if (joinBusy) return;
                     void proceedJoinRequestSubmit(joinRequestDraftMessage);
@@ -3353,7 +3340,7 @@ export default function MeetingDetailScreen() {
                   ) : (
                     <Text style={[styles.pillText, styles.bottomPillLabel]}>보내기</Text>
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           </KeyboardAvoidingView>
@@ -3367,7 +3354,7 @@ export default function MeetingDetailScreen() {
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.proposeModalRoot}>
-            <Pressable
+            <GinitPressable
               style={styles.proposeModalBackdrop}
               onPress={() => !proposeSaving && setProposeOpen(false)}
               accessibilityRole="button"
@@ -3423,13 +3410,13 @@ export default function MeetingDetailScreen() {
                 </KeyboardAwareScreenScroll>
               ) : null}
               <View style={[styles.proposeModalFooter, styles.proposeModalFooterDateCompact]}>
-                <Pressable
+                <GinitPressable
                   onPress={() => !proposeSaving && setProposeOpen(false)}
                   style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
                   accessibilityRole="button">
                   <Text style={styles.proposeModalGhostBtnText}>취소</Text>
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
                   onPress={() => void confirmDateProposals()}
                   disabled={proposeSaving}
                   style={({ pressed }) => [
@@ -3449,7 +3436,7 @@ export default function MeetingDetailScreen() {
                   ) : (
                     <Text style={styles.proposeModalPrimaryBtnText}>후보 추가</Text>
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           </KeyboardAvoidingView>
@@ -3463,7 +3450,7 @@ export default function MeetingDetailScreen() {
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.proposeModalRoot}>
-            <Pressable
+            <GinitPressable
               style={styles.proposeModalBackdrop}
               onPress={() => !placeProposeSaving && setPlaceProposeOpen(false)}
               accessibilityRole="button"
@@ -3512,13 +3499,13 @@ export default function MeetingDetailScreen() {
                 </KeyboardAwareScreenScroll>
               ) : null}
               <View style={styles.proposeModalFooter}>
-                <Pressable
+                <GinitPressable
                   onPress={() => !placeProposeSaving && setPlaceProposeOpen(false)}
                   style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
                   accessibilityRole="button">
                   <Text style={styles.proposeModalGhostBtnText}>취소</Text>
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
                   onPress={() => void confirmPlaceProposals()}
                   disabled={placeProposeSaving}
                   style={({ pressed }) => [
@@ -3538,7 +3525,7 @@ export default function MeetingDetailScreen() {
                   ) : (
                     <Text style={styles.proposeModalPrimaryBtnText}>후보 추가</Text>
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           </KeyboardAvoidingView>
@@ -3551,7 +3538,7 @@ export default function MeetingDetailScreen() {
             transparent
             onRequestClose={() => setDateVoteTimePick(null)}>
             <View style={styles.proposeModalRoot}>
-              <Pressable
+              <GinitPressable
                 style={styles.proposeModalBackdrop}
                 onPress={() => setDateVoteTimePick(null)}
                 accessibilityRole="button"
@@ -3576,7 +3563,7 @@ export default function MeetingDetailScreen() {
                   renderItem={({ item: o }) => {
                     const selected = dateHostPickMode ? hostTieDateId === o.chipId : selectedDateIds.includes(o.chipId);
                     return (
-                      <Pressable
+                      <GinitPressable
                         onPress={() => onDateChipPress(o.chipId)}
                         style={({ pressed }) => [
                           styles.timeVoteRow,
@@ -3602,17 +3589,17 @@ export default function MeetingDetailScreen() {
                             <View style={styles.timeVoteCheckPlaceholder} />
                           )}
                         </View>
-                      </Pressable>
+                      </GinitPressable>
                     );
                   }}
                 />
                 <View style={styles.proposeModalFooterDateCompact}>
-                  <Pressable
+                  <GinitPressable
                     onPress={() => setDateVoteTimePick(null)}
                     style={({ pressed }) => [styles.proposeModalGhostBtn, pressed && styles.dateChipPressed]}
                     accessibilityRole="button">
                     <Text style={styles.proposeModalGhostBtnText}>닫기</Text>
-                  </Pressable>
+                  </GinitPressable>
                 </View>
               </View>
             </View>
@@ -3643,7 +3630,7 @@ export default function MeetingDetailScreen() {
         {dateVoteCalendarYmPick && Platform.OS !== 'android' ? (
           <Modal visible transparent animationType="fade" onRequestClose={() => setDateVoteCalendarYmPick(null)}>
             <View style={GinitStyles.modalRoot}>
-              <Pressable
+              <GinitPressable
                 style={GinitStyles.modalBackdrop}
                 onPress={() => setDateVoteCalendarYmPick(null)}
                 accessibilityRole="button"
@@ -3659,12 +3646,12 @@ export default function MeetingDetailScreen() {
                   justifyContent: 'space-between',
                   paddingHorizontal: 16,
                 }}>
-                <Pressable onPress={() => setDateVoteCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
+                <GinitPressable onPress={() => setDateVoteCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
                   <Text style={GinitStyles.modalCancel}>취소</Text>
-                </Pressable>
-                <Pressable onPress={confirmDateVoteCalendarYmPick} hitSlop={10} accessibilityRole="button">
+                </GinitPressable>
+                <GinitPressable onPress={confirmDateVoteCalendarYmPick} hitSlop={10} accessibilityRole="button">
                   <Text style={GinitStyles.modalDone}>완료</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
               <View
                 pointerEvents="box-none"
@@ -3699,7 +3686,7 @@ export default function MeetingDetailScreen() {
           transparent
           onRequestClose={closeParticipantProfile}>
           <View style={styles.profileModalRoot}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeParticipantProfile}
               accessibilityRole="button"
@@ -3768,27 +3755,27 @@ export default function MeetingDetailScreen() {
                           {isLoading ? '프로필 불러오는 중…' : metaParts.join(' · ')}
                         </Text>
                       </View>
-                      <Pressable
+                      <GinitPressable
                         onPress={closeParticipantProfile}
                         style={({ pressed }) => [styles.profileModalCloseBtn, pressed && { opacity: 0.9 }]}
                         accessibilityRole="button"
                         accessibilityLabel="닫기">
                         <GinitSymbolicIcon name="close" size={18} color={GinitTheme.colors.textMuted} />
-                      </Pressable>
+                      </GinitPressable>
                     </View>
 
                     <View style={styles.profileModalActions}>
                       {isMe ? (
-                        <Pressable
+                        <GinitPressable
                           disabled
                           style={[styles.profileActionBtn, styles.profileActionPrimary, { opacity: 0.65 }]}
                           accessibilityRole="button"
                           accessibilityLabel="내 프로필">
                           <GinitSymbolicIcon name="person" size={16} color="#fff" />
                           <Text style={styles.profileActionPrimaryText}>내 프로필</Text>
-                        </Pressable>
+                        </GinitPressable>
                       ) : (
-                        <Pressable
+                        <GinitPressable
                           onPress={
                             friendRelation.status === 'pending_in' ? onAcceptFriendGinit : onSendFriendGinit
                           }
@@ -3817,7 +3804,7 @@ export default function MeetingDetailScreen() {
                           <Text style={styles.profileActionPrimaryText} numberOfLines={1}>
                             {friendLabel}
                           </Text>
-                        </Pressable>
+                        </GinitPressable>
                       )}
                     </View>
                   </>

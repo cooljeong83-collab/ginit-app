@@ -1,8 +1,5 @@
-import {
-  CAPACITY_UNLIMITED,
-  GlassDualCapacityWheel,
-  PARTICIPANT_COUNT_MIN,
-} from '@/components/create/GlassDualCapacityWheel';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {CAPACITY_UNLIMITED, GlassDualCapacityWheel, PARTICIPANT_COUNT_MIN, } from '@/components/create/GlassDualCapacityWheel';
 import { GlassSingleCapacityWheel } from '@/components/create/GlassSingleCapacityWheel';
 import { PublicMeetingDetailsCard } from '@/components/create/PublicMeetingDetailsCard';
 import { KeyboardAwareScreenScroll } from '@/components/ui';
@@ -11,11 +8,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import type { Meeting, PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import {
-  DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG,
-  normalizeProfileGenderToHostSnapshot,
-  parsePublicMeetingDetailsConfig,
-  updateMeetingBasicFieldsByHost,
-} from '@/src/lib/meetings';
+  DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, parsePublicMeetingDetailsConfig, updateMeetingBasicFieldsByHost, } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,23 +16,7 @@ import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { type ElementRef, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  findNodeHandle,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  UIManager,
-  useWindowDimensions,
-  View,
-  type KeyboardEvent,
-} from 'react-native';
+  ActivityIndicator, Alert, Animated, findNodeHandle, Keyboard, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, UIManager, useWindowDimensions, View, type KeyboardEvent} from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -681,7 +658,7 @@ export function MeetingBasicInfoEditModal({
     <>
     <Modal visible={visible} animationType="fade" transparent onRequestClose={() => !saving && onClose()}>
       <View style={styles.modalRoot}>
-        <Pressable
+        <GinitPressable
           style={styles.backdrop}
           onPress={() => !saving && onClose()}
           accessibilityRole="button"
@@ -741,7 +718,7 @@ export function MeetingBasicInfoEditModal({
                       underlineColorAndroid="transparent"
                       textAlign="left"
                     />
-                    <Pressable
+                    <GinitPressable
                       onPress={() => void onPressVoiceInputTitle()}
                       disabled={saving}
                       style={({ pressed }) => [
@@ -757,7 +734,7 @@ export function MeetingBasicInfoEditModal({
                       ) : (
                         <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                       )}
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 </View>
               </LinearGradient>
@@ -786,23 +763,23 @@ export function MeetingBasicInfoEditModal({
 
               <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>공개 / 비공개</Text>
               <View style={styles.segmentRow}>
-                <Pressable
+                <GinitPressable
                   onPress={onPressPrivateSegment}
                   style={[styles.segmentHalf, !isPublicMeeting && styles.segmentHalfOn]}
                   accessibilityRole="button">
                   <Text style={[styles.segmentTitle, !isPublicMeeting && styles.segmentTitleOn]}>🔒 비공개</Text>
                   <Text style={styles.segmentSub}>(초대만)</Text>
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
                   onPress={onPressPublicSegment}
                   style={[styles.segmentHalf, isPublicMeeting && styles.segmentHalfOn]}
                   accessibilityRole="button">
                   <Text style={[styles.segmentTitle, isPublicMeeting && styles.segmentTitleOn]}>🌐 공개</Text>
                   <Text style={styles.segmentSub}>(지역 검색)</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
               {isPublicMeeting && publicDetailsAck ? (
-                <Pressable
+                <GinitPressable
                   onPress={() => {
                     if (saving) return;
                     revertPublicOnDetailsCancelRef.current = false;
@@ -812,7 +789,7 @@ export function MeetingBasicInfoEditModal({
                   accessibilityRole="button"
                   accessibilityLabel="공개 모임 상세 조건 수정">
                   <Text style={styles.publicDetailsEditLinkText}>상세 조건 수정</Text>
-                </Pressable>
+                </GinitPressable>
               ) : null}
 
               <Text style={[styles.wizardFieldLabel, { marginTop: 16 }]}>소개</Text>
@@ -836,7 +813,7 @@ export function MeetingBasicInfoEditModal({
                   underlineColorAndroid="transparent"
                   textAlign="left"
                 />
-                <Pressable
+                <GinitPressable
                   onPress={() => void onPressVoiceInputDescription()}
                   disabled={saving}
                   style={({ pressed }) => [
@@ -853,7 +830,7 @@ export function MeetingBasicInfoEditModal({
                   ) : (
                     <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
 
               {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
@@ -861,13 +838,13 @@ export function MeetingBasicInfoEditModal({
           </KeyboardAwareScreenScroll>
 
           <View style={styles.footer}>
-            <Pressable
+            <GinitPressable
               onPress={() => !saving && onClose()}
               style={({ pressed }) => [styles.ghostBtn, pressed && { opacity: 0.85 }]}
               accessibilityRole="button">
               <Text style={styles.ghostBtnText}>취소</Text>
-            </Pressable>
-            <Pressable
+            </GinitPressable>
+            <GinitPressable
               onPress={() => void validateAndSave()}
               disabled={saving}
               style={({ pressed }) => [styles.primaryBtn, (pressed || saving) && { opacity: saving ? 0.7 : 0.9 }]}
@@ -884,7 +861,7 @@ export function MeetingBasicInfoEditModal({
               ) : (
                 <Text style={styles.primaryBtnLabel}>저장</Text>
               )}
-            </Pressable>
+            </GinitPressable>
           </View>
           </View>
         </View>
@@ -897,7 +874,7 @@ export function MeetingBasicInfoEditModal({
       transparent
       onRequestClose={() => !publicDetailsBusy && onCancelPublicDetailsModal()}>
       <View style={styles.modalRoot}>
-        <Pressable
+        <GinitPressable
           style={styles.backdrop}
           onPress={() => !publicDetailsBusy && onCancelPublicDetailsModal()}
           accessibilityRole="button"
@@ -932,13 +909,13 @@ export function MeetingBasicInfoEditModal({
             </ScrollView>
             {publicDetailsError ? <Text style={styles.errorText}>{publicDetailsError}</Text> : null}
             <View style={styles.footer}>
-              <Pressable
+              <GinitPressable
                 onPress={() => !publicDetailsBusy && onCancelPublicDetailsModal()}
                 style={({ pressed }) => [styles.ghostBtn, pressed && { opacity: 0.85 }]}
                 accessibilityRole="button">
                 <Text style={styles.ghostBtnText}>취소</Text>
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 onPress={() => void onSavePublicDetailsModal()}
                 disabled={publicDetailsBusy}
                 style={({ pressed }) => [
@@ -958,7 +935,7 @@ export function MeetingBasicInfoEditModal({
                 ) : (
                   <Text style={styles.primaryBtnLabel}>저장</Text>
                 )}
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </View>

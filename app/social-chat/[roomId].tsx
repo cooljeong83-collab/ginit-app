@@ -1,8 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import {useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Modal, StyleSheet, Text, TextInput, View} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -356,9 +357,9 @@ export default function SocialChatRoomScreen() {
     return (
       <SafeAreaView style={s.center} edges={['top']}>
         <Text style={s.muted}>채팅방 정보가 올바르지 않아요.</Text>
-        <Pressable onPress={exitSocialChat} style={s.backLink}>
+        <GinitPressable onPress={exitSocialChat} style={s.backLink}>
           <Text style={s.backLinkText}>돌아가기</Text>
-        </Pressable>
+        </GinitPressable>
       </SafeAreaView>
     );
   }
@@ -367,13 +368,13 @@ export default function SocialChatRoomScreen() {
     <View style={s.root}>
       <SafeAreaView edges={['top']} style={s.topSafe}>
         <View style={s.topBar}>
-          <Pressable
+          <GinitPressable
             onPress={searchMode ? closeSearch : exitSocialChat}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel={searchMode ? '검색 닫기' : '뒤로'}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           {searchMode ? (
             <View style={s.searchTitleBlock} accessibilityLabel="검색 입력">
               <TextInput
@@ -399,14 +400,14 @@ export default function SocialChatRoomScreen() {
               <Text style={s.topTitle} numberOfLines={1}>
                 {peerName}
               </Text>
-              <Pressable onPress={exitSocialChat} hitSlop={6} accessibilityRole="button" accessibilityLabel="뒤로가기">
+              <GinitPressable onPress={exitSocialChat} hitSlop={6} accessibilityRole="button" accessibilityLabel="뒤로가기">
                 <Text style={s.titleLink}>뒤로가기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           )}
           {!searchMode ? (
             <>
-              <Pressable
+              <GinitPressable
                 onPress={openSearch}
                 hitSlop={10}
                 accessibilityRole="button"
@@ -414,8 +415,8 @@ export default function SocialChatRoomScreen() {
                 style={s.searchBtn}
               >
                 <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 onPress={openSettings}
                 hitSlop={10}
                 accessibilityRole="button"
@@ -423,7 +424,7 @@ export default function SocialChatRoomScreen() {
                 style={s.settingsBtn}
               >
                 <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
-              </Pressable>
+              </GinitPressable>
             </>
           ) : null}
         </View>

@@ -1,7 +1,8 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import {useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -98,15 +99,15 @@ export default function TermsAgreementScreen() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
-          <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="뒤로">
+          <GinitPressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="뒤로">
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle}>지닛 시작을 위한 약관 동의</Text>
           <View style={{ width: 26 }} />
         </View>
 
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          <Pressable
+          <GinitPressable
             onPress={toggleAll}
             style={({ pressed }) => [styles.allRow, pressed && styles.pressed]}
             accessibilityRole="checkbox"
@@ -118,7 +119,7 @@ export default function TermsAgreementScreen() {
               color={allChecked ? GinitTheme.colors.primary : '#94a3b8'}
             />
             <Text style={styles.allText}>전체 동의</Text>
-          </Pressable>
+          </GinitPressable>
 
           <View style={styles.card}>
             {(Object.keys(TERM_LABELS) as TermKey[]).map((key, idx) => {
@@ -127,7 +128,7 @@ export default function TermsAgreementScreen() {
               const last = idx === 1;
               return (
                 <View key={key} style={[styles.termRow, last && styles.termRowLast]}>
-                  <Pressable
+                  <GinitPressable
                     onPress={() => toggleOne(key)}
                     style={({ pressed }) => [styles.termLeft, pressed && styles.pressed]}
                     accessibilityRole="checkbox"
@@ -142,15 +143,15 @@ export default function TermsAgreementScreen() {
                       {label.required ? '[필수] ' : ''}
                       {label.title}
                     </Text>
-                  </Pressable>
-                  <Pressable
+                  </GinitPressable>
+                  <GinitPressable
                     onPress={() => setDetailKey(key)}
                     hitSlop={10}
                     style={({ pressed }) => [styles.viewBtn, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel={`${label.title} 보기`}>
                     <Text style={styles.viewBtnText}>&gt;</Text>
-                  </Pressable>
+                  </GinitPressable>
                 </View>
               );
             })}
@@ -158,7 +159,7 @@ export default function TermsAgreementScreen() {
         </ScrollView>
 
         <View style={styles.bottom}>
-          <Pressable
+          <GinitPressable
             onPress={() => void onNext()}
             disabled={!allRequiredChecked || busy}
             style={({ pressed }) => [
@@ -169,16 +170,16 @@ export default function TermsAgreementScreen() {
             accessibilityRole="button"
             accessibilityLabel="다음">
             <Text style={styles.nextBtnText}>{busy ? '처리 중…' : '다음'}</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
 
         <Modal visible={detailKey != null} animationType="slide" onRequestClose={() => setDetailKey(null)}>
           <SafeAreaView style={styles.detailSafe} edges={['top', 'bottom']}>
             <View style={styles.detailHeader}>
               <Text style={styles.detailTitle}>{detailTitle}</Text>
-              <Pressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
+              <GinitPressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
                 <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
-              </Pressable>
+              </GinitPressable>
             </View>
             <ScrollView contentContainerStyle={styles.detailBody}>
               <Text style={styles.detailText}>{detailText}</Text>

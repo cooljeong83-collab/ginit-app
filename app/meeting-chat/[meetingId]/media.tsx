@@ -1,21 +1,12 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    Platform,
-    Pressable,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    useWindowDimensions,
-    View,
-} from 'react-native';
+    ActivityIndicator, Alert, Modal, Platform, RefreshControl, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -244,9 +235,9 @@ export default function MeetingChatMediaScreen() {
     return (
       <SafeAreaView style={styles.center} edges={['top', 'bottom']}>
         <Text style={styles.muted}>참여 중인 모임만 볼 수 있어요.</Text>
-        <Pressable onPress={onBack} style={styles.backBtn}>
+        <GinitPressable onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backBtnText}>돌아가기</Text>
-        </Pressable>
+        </GinitPressable>
       </SafeAreaView>
     );
   }
@@ -257,9 +248,9 @@ export default function MeetingChatMediaScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
+        <GinitPressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
           <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-        </Pressable>
+        </GinitPressable>
         <Text style={styles.headerTitle}>사진</Text>
         <View style={{ width: 28 }} />
       </View>
@@ -267,9 +258,9 @@ export default function MeetingChatMediaScreen() {
       {listError ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{listError}</Text>
-          <Pressable onPress={() => void loadFirstPage()} style={styles.retryBtn} accessibilityRole="button">
+          <GinitPressable onPress={() => void loadFirstPage()} style={styles.retryBtn} accessibilityRole="button">
             <Text style={styles.retryBtnText}>다시 시도</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       ) : null}
 
@@ -314,7 +305,7 @@ export default function MeetingChatMediaScreen() {
             if (!u) return <View style={{ width: cell, height: 0 }} />;
             const col = index % 3;
             return (
-              <Pressable
+              <GinitPressable
                 onPress={() => {
                   const ix = rows.findIndex((r) => r.id === item.id);
                   setImageViewer({ index: ix >= 0 ? ix : 0 });
@@ -328,7 +319,7 @@ export default function MeetingChatMediaScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="사진 크게 보기">
                 <Image source={{ uri: u }} style={styles.thumbImg} contentFit="cover" />
-              </Pressable>
+              </GinitPressable>
             );
           }}
         />
@@ -336,7 +327,8 @@ export default function MeetingChatMediaScreen() {
 
       <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
         <GestureHandlerRootView style={styles.viewerRoot}>
-          <Pressable
+          <GinitPressable
+            duplicatePressGuardDisabled
             style={StyleSheet.absoluteFill}
             onPress={() => !viewerBusy && setImageViewer(null)}
             pointerEvents="none"
@@ -345,14 +337,15 @@ export default function MeetingChatMediaScreen() {
           />
           <View style={styles.viewerSheet} pointerEvents="box-none">
             <View style={[styles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
-              <Pressable
+              <GinitPressable
+                duplicatePressGuardDisabled
                 onPress={() => setImageViewer(null)}
                 hitSlop={10}
                 disabled={viewerBusy}
                 accessibilityRole="button"
                 accessibilityLabel="닫기">
                 <GinitSymbolicIcon name="close" size={26} color="#fff" />
-              </Pressable>
+              </GinitPressable>
               <View style={styles.viewerMetaCol} pointerEvents="none">
                 <Text style={styles.viewerMetaName} numberOfLines={1}>
                   {viewerMeta.who}
@@ -364,7 +357,8 @@ export default function MeetingChatMediaScreen() {
                 ) : null}
               </View>
               <View style={styles.viewerActions}>
-                <Pressable
+                <GinitPressable
+                  duplicatePressGuardDisabled
                   onPress={() => {
                     const u = viewer?.imageUrl?.trim() ?? '';
                     if (!u) return;
@@ -384,8 +378,9 @@ export default function MeetingChatMediaScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="공유">
                   <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
-                </Pressable>
-                <Pressable
+                </GinitPressable>
+                <GinitPressable
+                  duplicatePressGuardDisabled
                   onPress={() => {
                     const u = viewer?.imageUrl?.trim() ?? '';
                     if (!u) return;
@@ -405,9 +400,10 @@ export default function MeetingChatMediaScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="저장">
                   <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
-                </Pressable>
+                </GinitPressable>
                 {canDelete ? (
-                  <Pressable
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = viewer?.imageUrl?.trim() ?? '';
                       const mid = meetingId.trim();
@@ -441,7 +437,7 @@ export default function MeetingChatMediaScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="삭제">
                     <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
-                  </Pressable>
+                  </GinitPressable>
                 ) : null}
               </View>
             </View>

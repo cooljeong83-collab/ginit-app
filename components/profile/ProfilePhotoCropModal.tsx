@@ -1,16 +1,8 @@
-import { Image } from 'expo-image';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Image as RNImage,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  ActivityIndicator, Image as RNImage, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, runOnUI, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -115,9 +107,9 @@ export function ProfilePhotoCropModal({ visible, uri, imageWidth, imageHeight, o
           <View style={styles.loadingWrap}>
             <ActivityIndicator color="#fff" />
             <Text style={styles.loadingText}>사진을 불러오는 중…</Text>
-            <Pressable onPress={onRequestClose} style={({ pressed }) => [styles.textBtn, pressed && { opacity: 0.85 }]}>
+            <GinitPressable onPress={onRequestClose} style={({ pressed }) => [styles.textBtn, pressed && { opacity: 0.85 }]}>
               <Text style={styles.textBtnLabel}>닫기</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         )}
       </GestureHandlerRootView>
@@ -288,20 +280,20 @@ function CropStage({
       <View style={[styles.bottomBar, { paddingBottom: 12 + insetsBottom }]} pointerEvents="auto">
         <Text style={styles.hint}>사진을 확대·이동해 원 안에 보일 영역을 맞춘 뒤 확인을 눌러 주세요.</Text>
         <View style={styles.actions}>
-          <Pressable
+          <GinitPressable
             onPress={onRequestClose}
             style={({ pressed }) => [styles.btnGhost, pressed && { opacity: 0.85 }]}
             accessibilityRole="button"
             accessibilityLabel="취소">
             <Text style={styles.btnGhostText}>취소</Text>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={onPressConfirm}
             style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.88 }]}
             accessibilityRole="button"
             accessibilityLabel="확인">
             <Text style={styles.btnPrimaryText}>확인</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
     </View>

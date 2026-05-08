@@ -1,6 +1,7 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
@@ -59,26 +60,26 @@ export default function UserProfileStackScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
-        <Pressable
+        <GinitPressable
           onPress={() => safeRouterBack(router)}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="뒤로"
           style={styles.backBtn}>
           <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-        </Pressable>
+        </GinitPressable>
         <Text style={styles.topTitle} numberOfLines={1}>
           프로필
         </Text>
         {showPeerMoreMenu ? (
-          <Pressable
+          <GinitPressable
             onPress={() => setMoreOpen(true)}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="더보기"
             style={styles.moreBtn}>
             <GinitSymbolicIcon name="ellipsis-vertical" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
         ) : (
           <View style={styles.topBarSpacer} />
         )}
@@ -86,7 +87,7 @@ export default function UserProfileStackScreen() {
 
       <Modal visible={moreOpen} transparent animationType="fade" onRequestClose={() => setMoreOpen(false)}>
         <View style={styles.moreModalRoot}>
-          <Pressable style={styles.moreDim} onPress={() => setMoreOpen(false)} accessibilityRole="button" accessibilityLabel="닫기" />
+          <GinitPressable style={styles.moreDim} onPress={() => setMoreOpen(false)} accessibilityRole="button" accessibilityLabel="닫기" />
           <View
             style={[
               styles.moreSheet,
@@ -95,21 +96,21 @@ export default function UserProfileStackScreen() {
                 right: 28,
               },
             ]}>
-            <Pressable
+            <GinitPressable
               onPress={openFriendSettings}
               style={({ pressed }) => [styles.moreRow, pressed && { opacity: 0.88 }]}
               accessibilityRole="button"
               accessibilityLabel="친구 설정">
               <Text style={styles.moreRowText}>친구 설정</Text>
-            </Pressable>
+            </GinitPressable>
             <View style={styles.moreSep} />
-            <Pressable
+            <GinitPressable
               onPress={openReportFromMenu}
               style={({ pressed }) => [styles.moreRow, pressed && { opacity: 0.88 }]}
               accessibilityRole="button"
               accessibilityLabel="신고">
               <Text style={styles.moreRowText}>신고</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
         </View>
       </Modal>

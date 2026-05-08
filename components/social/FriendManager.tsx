@@ -1,14 +1,9 @@
-import { BlurView } from 'expo-blur';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
+    ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
@@ -39,7 +34,7 @@ function PendingGinitMiniCard({
     photoUrl?.trim() ||
     'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400&q=80';
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       style={({ pressed }) => [HomeGlassStyles.miniCardOuter, pressed && styles.miniPressed]}
       accessibilityRole="button"
@@ -70,7 +65,7 @@ function PendingGinitMiniCard({
           {subtitle}
         </Text>
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 
@@ -85,7 +80,7 @@ function FriendTrustTile({
   const initials = profile.nickname?.trim()?.slice(0, 1) || '?';
   const trust = profile.gTrust ?? 0;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]} accessibilityRole="button">
+    <GinitPressable onPress={onPress} style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]} accessibilityRole="button">
       <View style={styles.tileAvatars}>
         {uri ? (
           <Image source={{ uri }} style={styles.tileAvatarImg} contentFit="cover" />
@@ -104,7 +99,7 @@ function FriendTrustTile({
       <Text style={styles.tileDna} numberOfLines={1}>
         {profile.gDna ?? '—'}
       </Text>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

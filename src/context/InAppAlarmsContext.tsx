@@ -1,28 +1,12 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Notifications from 'expo-notifications';
-import { useRouter } from 'expo-router';
+import {useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+  createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, } from 'react';
 import {
-  AppState,
-  type AppStateStatus,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  AppState, type AppStateStatus, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -1264,8 +1248,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         transparent
         animationType="fade"
         onRequestClose={closeAlarmPanel}>
-        <Pressable style={styles.modalBackdrop} onPress={closeAlarmPanel}>
-          <Pressable
+        <GinitPressable style={styles.modalBackdrop} onPress={closeAlarmPanel}>
+          <GinitPressable
             style={[
               styles.modalCard,
               { marginTop: insets.top + 8, maxHeight: alarmPanelLayout.cardMaxHeight },
@@ -1273,20 +1257,20 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
             onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>새 소식</Text>
-              <Pressable hitSlop={12} onPress={closeAlarmPanel} accessibilityRole="button" accessibilityLabel="닫기">
+              <GinitPressable hitSlop={12} onPress={closeAlarmPanel} accessibilityRole="button" accessibilityLabel="닫기">
                 <GinitSymbolicIcon name="close" size={26} color="#475569" />
-              </Pressable>
+              </GinitPressable>
             </View>
             {alarms.length > 0 ? (
               <View style={styles.markAllRow}>
-                <Pressable
+                <GinitPressable
                   onPress={markAllAlarmsAsRead}
                   hitSlop={{ top: 6, bottom: 10, left: 8, right: 8 }}
                   accessibilityRole="button"
                   accessibilityLabel="모두 읽음 처리"
                   style={({ pressed }) => [styles.markAllBtn, pressed && styles.markAllBtnPressed]}>
                   <Text style={styles.markAllBtnText}>모두 읽음 처리</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
             ) : null}
             {alarms.length === 0 ? (
@@ -1301,7 +1285,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                 contentContainerStyle={styles.listContent}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
-                  <Pressable
+                  <GinitPressable
                     style={({ pressed }) => [styles.alarmRow, pressed && styles.alarmRowPressed]}
                     onPress={() => onPressAlarmRow(item)}>
                     <View style={styles.alarmIconWrap}>
@@ -1329,12 +1313,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                       <Text style={styles.alarmTime}>{formatAlarmTime(item.sortMs)}</Text>
                     </View>
                     <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
-                  </Pressable>
+                  </GinitPressable>
                 )}
               />
             )}
-          </Pressable>
-        </Pressable>
+          </GinitPressable>
+        </GinitPressable>
       </Modal>
     </InAppAlarmsContext.Provider>
   );

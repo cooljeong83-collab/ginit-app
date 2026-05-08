@@ -1,12 +1,13 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, StyleSheet, Text, View} from 'react-native';
 import Animated, {
   Easing,
   Extrapolation,
@@ -398,7 +399,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                   : null;
 
             return (
-              <Pressable
+              <GinitPressable
                 key={route.key}
                 accessibilityRole="button"
                 accessibilityState={focused ? { selected: true } : {}}
@@ -422,7 +423,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                 <Text style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1}>
                   {label}
                 </Text>
-              </Pressable>
+              </GinitPressable>
             );
           })}
         </View>
@@ -449,7 +450,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
               { position: 'absolute', bottom: MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT, left: 0 },
               fabMeetingFaceStyle,
             ]}>
-            <Pressable
+            <GinitPressable
               accessibilityRole="button"
               accessibilityLabel="모임 만들기"
               onPress={onFabPress}
@@ -479,7 +480,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
                   </Animated.View>
                 </View>
               )}
-            </Pressable>
+            </GinitPressable>
           </Animated.View>
         </Animated.View>
       ) : null}

@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useCallback } from 'react';
+import { Text, View } from 'react-native'
 
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
@@ -41,7 +42,7 @@ export function GameKindPreference({ value, onChange, disabled }: GameKindPrefer
         {OPTIONS.map((label) => {
           const active = value.includes(label);
           return (
-            <Pressable
+            <GinitPressable
               key={label}
               onPress={() => selectOne(label)}
               disabled={disabled}
@@ -53,7 +54,7 @@ export function GameKindPreference({ value, onChange, disabled }: GameKindPrefer
               accessibilityRole="button"
               accessibilityState={{ selected: active }}>
               <Text style={S.glassChipText}>{label}</Text>
-            </Pressable>
+            </GinitPressable>
           );
         })}
       </View>

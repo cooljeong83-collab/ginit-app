@@ -1,5 +1,6 @@
-import { Image } from 'expo-image';
-import { Pressable, Text, View } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {Image } from 'expo-image';
+import { Text, View } from 'react-native'
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { openChatLinkInBrowser } from '@/src/lib/chat-text-linkify';
@@ -45,7 +46,7 @@ export function MeetingChatLinkPreviewCard({
   }
 
   return (
-    <Pressable
+    <GinitPressable
       onPress={() => void openChatLinkInBrowser(url)}
       accessibilityRole="link"
       accessibilityLabel={title ? `${title}, 링크 열기` : '링크 열기'}
@@ -92,6 +93,6 @@ export function MeetingChatLinkPreviewCard({
           (카드 전체 탭으로 링크는 열 수 있음)
         */}
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }

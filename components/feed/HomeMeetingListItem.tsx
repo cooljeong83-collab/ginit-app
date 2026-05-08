@@ -1,6 +1,7 @@
-import { Image } from 'expo-image';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native'
 
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -348,7 +349,7 @@ export function HomeMeetingListItem({
   }, [statusCorner]);
 
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityHint="모임 상세로 이동"
@@ -537,7 +538,7 @@ export function HomeMeetingListItem({
           ) : null}
         </View>
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

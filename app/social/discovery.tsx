@@ -1,7 +1,8 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SocialDiscovery, type DiscoveryCardProfile } from '@/components/social/SocialDiscovery';
@@ -102,13 +103,13 @@ export default function SocialDiscoveryScreen() {
       <SafeAreaView style={styles.offWrap} edges={['bottom']}>
         <Text style={styles.offTitle}>친구 추천이 꺼져 있어요</Text>
         <Text style={styles.offBody}>친구 관리에서 「친구 추천 허용」을 켜면 이 화면의 추천을 다시 볼 수 있어요.</Text>
-        <Pressable
+        <GinitPressable
           onPress={() => router.push('/social/friends-settings')}
           style={({ pressed }) => [styles.offBtn, pressed && { opacity: 0.88 }]}
           accessibilityRole="button"
           accessibilityLabel="친구 관리 열기">
           <Text style={styles.offBtnTxt}>친구 관리</Text>
-        </Pressable>
+        </GinitPressable>
       </SafeAreaView>
     );
   }

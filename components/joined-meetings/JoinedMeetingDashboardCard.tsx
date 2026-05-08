@@ -1,6 +1,7 @@
-import { BlurView } from 'expo-blur';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native'
 
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -27,7 +28,7 @@ export function JoinedMeetingDashboardCard({ meeting }: Props) {
       : meeting.scheduleDate?.trim() || null;
 
   return (
-    <Pressable
+    <GinitPressable
       onPress={() => router.push(`/meeting/${meeting.id}`)}
       style={({ pressed }) => [HomeGlassStyles.dashboardCard, pressed && styles.pressed]}
       accessibilityRole="button"
@@ -65,7 +66,7 @@ export function JoinedMeetingDashboardCard({ meeting }: Props) {
           </Text>
         ) : null}
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

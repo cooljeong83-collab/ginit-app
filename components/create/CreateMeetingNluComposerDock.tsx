@@ -1,19 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Keyboard,
-  type KeyboardEvent,
-  LayoutChangeEvent,
-  type NativeSyntheticEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  type TextInputKeyPressEventData,
-  View,
-} from 'react-native';
+  ActivityIndicator, Animated, Dimensions, Keyboard, type KeyboardEvent, LayoutChangeEvent, type NativeSyntheticEvent, Platform, StyleSheet, TextInput, type TextInputKeyPressEventData, View} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
@@ -187,7 +175,7 @@ export function CreateMeetingNluComposerDock({
       <View style={[meetingChatBodyStyles.composerDock, { paddingBottom: composerBottomPad }]}>
         <View style={meetingChatBodyStyles.composerCluster}>
           <View style={meetingChatBodyStyles.composer}>
-            <Pressable
+            <GinitPressable
               style={meetingChatBodyStyles.plusBtn}
               onPress={() => void onPressVoice()}
               disabled={busy || nluBusy}
@@ -199,7 +187,7 @@ export function CreateMeetingNluComposerDock({
               ) : (
                 <GinitSymbolicIcon name="mic" size={22} color="#475569" />
               )}
-            </Pressable>
+            </GinitPressable>
             <View style={meetingChatBodyStyles.inputShell}>
               <TextInput
                 value={draft}
@@ -223,7 +211,7 @@ export function CreateMeetingNluComposerDock({
                 inputMode="text"
               />
             </View>
-            <Pressable
+            <GinitPressable
               focusable={false}
               onPress={() => invokeSend()}
               disabled={sendDisabled}
@@ -235,7 +223,7 @@ export function CreateMeetingNluComposerDock({
               ) : (
                 <GinitSymbolicIcon name="send" size={20} color="#fff" />
               )}
-            </Pressable>
+            </GinitPressable>
           </View>
         </View>
       </View>

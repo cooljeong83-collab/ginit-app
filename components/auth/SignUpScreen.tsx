@@ -1,26 +1,11 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-    AccessibilityInfo,
-    ActivityIndicator,
-    Alert,
-    Animated,
-    findNodeHandle,
-    InteractionManager,
-    Keyboard,
-    Modal,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    type TextInput as TextInputRefType,
-    UIManager,
-    View,
-} from 'react-native';
+    AccessibilityInfo, ActivityIndicator, Alert, Animated, findNodeHandle, InteractionManager, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, type TextInput as TextInputRefType, UIManager, View} from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -324,7 +309,7 @@ export default function SignUpScreen() {
             extraHeight={32}
             dismissKeyboardOnScrollBeginDrag>
             <View style={styles.topBar}>
-              <Pressable
+              <GinitPressable
                 onPress={() => {
                   Keyboard.dismiss();
                   router.back();
@@ -333,17 +318,17 @@ export default function SignUpScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="뒤로 가기">
                 <Text style={styles.backBtnText}>‹</Text>
-              </Pressable>
+              </GinitPressable>
               <Text style={styles.topBarTitle}>회원가입</Text>
             </View>
 
-            <Pressable style={styles.topBrand} onPress={Keyboard.dismiss} accessible={false}>
+            <GinitPressable style={styles.topBrand} onPress={Keyboard.dismiss} accessible={false}>
               <Image source={require('@/assets/images/logo_symbol.png')} style={styles.brandSymbol} contentFit="contain" />
               <Text style={styles.brandName}>Ginit</Text>
               <Text style={styles.greeting}>
                 필수 정보를 입력한 뒤{'\n'}회원가입 완료로 가입을 마쳐 주세요
               </Text>
-            </Pressable>
+            </GinitPressable>
 
             <View style={styles.authCard}>
               {Platform.OS === 'ios' ? (
@@ -401,7 +386,7 @@ export default function SignUpScreen() {
                           selectTextOnFocus
                         />
                       </View>
-                      <Pressable
+                      <GinitPressable
                         onPress={() => setDomainPickerOpen(true)}
                         disabled={busy}
                         style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
@@ -409,7 +394,7 @@ export default function SignUpScreen() {
                         accessibilityLabel="이메일 도메인 선택">
                         <Text style={emailCombo.domainText}>직접 입력</Text>
                         <Text style={emailCombo.domainArrow}>▾</Text>
-                      </Pressable>
+                      </GinitPressable>
                     </>
                   ) : (
                     <>
@@ -438,7 +423,7 @@ export default function SignUpScreen() {
                         />
                       </View>
                       <Text style={emailCombo.at}>@</Text>
-                      <Pressable
+                      <GinitPressable
                         onPress={() => setDomainPickerOpen(true)}
                         disabled={busy}
                         style={({ pressed }) => [emailCombo.domainBtn, pressed && !busy && styles.pressed]}
@@ -446,7 +431,7 @@ export default function SignUpScreen() {
                         accessibilityLabel="이메일 도메인 선택">
                         <Text style={emailCombo.domainText}>{emailDomain}</Text>
                         <Text style={emailCombo.domainArrow}>▾</Text>
-                      </Pressable>
+                      </GinitPressable>
                     </>
                   )}
                 </View>
@@ -455,7 +440,7 @@ export default function SignUpScreen() {
 
               <View style={styles.fieldBlock} onLayout={(e) => setDisplayNameBlockY(e.nativeEvent.layout.y)}>
                 <Text style={styles.fieldLabel}>이름 (필수)</Text>
-                <Pressable
+                <GinitPressable
                   onPress={scrollToDisplayNameBlock}
                   style={({ pressed }) => [pressed && styles.pressed]}>
                   <TextInput
@@ -486,7 +471,7 @@ export default function SignUpScreen() {
                     editable={!busy}
                     selectTextOnFocus
                   />
-                </Pressable>
+                </GinitPressable>
               </View>
 
               <View style={styles.fieldBlock} onLayout={(e) => setPhoneBlockY(e.nativeEvent.layout.y)}>
@@ -537,7 +522,7 @@ export default function SignUpScreen() {
                     }}
                   />
                   <View ref={sendOtpFocusHostRef} focusable={Platform.OS === 'android'} collapsable={false}>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => void onSendOtp()}
                       disabled={!canSendOtp}
                       style={({ pressed }) => [
@@ -548,7 +533,7 @@ export default function SignUpScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="인증번호 받기">
                       <Text style={otpStyles.sendInlineText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 </View>
                 {verifiedFirebaseUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
@@ -573,7 +558,7 @@ export default function SignUpScreen() {
                       enterKeyHint="done"
                       onSubmitEditing={() => void onConfirmOtp()}
                     />
-                    <Pressable
+                    <GinitPressable
                       onPress={() => void onConfirmOtp()}
                       disabled={!canConfirmOtp}
                       style={({ pressed }) => [
@@ -584,7 +569,7 @@ export default function SignUpScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="인증 확인">
                       <Text style={otpStyles.confirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 ) : null}
 
@@ -592,10 +577,10 @@ export default function SignUpScreen() {
               </View>
 
               <Modal visible={domainPickerOpen} animationType="fade" transparent onRequestClose={() => setDomainPickerOpen(false)}>
-                <Pressable style={emailCombo.modalDim} onPress={() => setDomainPickerOpen(false)}>
+                <GinitPressable style={emailCombo.modalDim} onPress={() => setDomainPickerOpen(false)}>
                   <View style={emailCombo.modalCard}>
                     <Text style={emailCombo.modalTitle}>이메일 도메인 선택</Text>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => {
                         setEmailDomainMode('manual');
                         const prev = composedEmail.trim();
@@ -612,7 +597,7 @@ export default function SignUpScreen() {
                         ]}>
                         직접 입력
                       </Text>
-                    </Pressable>
+                    </GinitPressable>
                     {(
                       [
                         'gmail.com',
@@ -625,7 +610,7 @@ export default function SignUpScreen() {
                     ).map((d) => {
                       const selected = d === emailDomain;
                       return (
-                        <Pressable
+                        <GinitPressable
                           key={d}
                           onPress={() => {
                             setEmailDomain(d);
@@ -640,11 +625,11 @@ export default function SignUpScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={`${d}${selected ? ', 선택됨' : ''}`}>
                           <Text style={[emailCombo.domainRowText, selected && emailCombo.domainRowTextSelected]}>{d}</Text>
-                        </Pressable>
+                        </GinitPressable>
                       );
                     })}
                   </View>
-                </Pressable>
+                </GinitPressable>
               </Modal>
 
               <View
@@ -662,7 +647,7 @@ export default function SignUpScreen() {
                   ).map(({ code, label }) => {
                     const selected = genderCode === code;
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={code}
                         disabled={busy}
                         onPress={() => {
@@ -683,7 +668,7 @@ export default function SignUpScreen() {
                         <Text style={selected ? styles.genderBinaryLabelSelected : styles.genderBinaryLabel}>
                           {label}
                         </Text>
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </View>
@@ -708,7 +693,7 @@ export default function SignUpScreen() {
                 />
               </View>
 
-              <Pressable
+              <GinitPressable
                 onLayout={(e) => setSubmitY(e.nativeEvent.layout.y)}
                 onPress={() => {
                   Keyboard.dismiss();
@@ -727,14 +712,14 @@ export default function SignUpScreen() {
                 ) : (
                   <Text style={styles.signUpSubmitBtnLabel}>회원가입 완료</Text>
                 )}
-              </Pressable>
+              </GinitPressable>
               <Text style={styles.signUpSubmitHint}>
                 가입이 완료되면 지닛을 소개하는 짧은 화면이 이어집니다. 건너뛰기로 바로 홈으로 갈 수도 있어요.
               </Text>
               </View>
             </View>
 
-            <Pressable
+            <GinitPressable
               onPress={() => {
                 Keyboard.dismiss();
                 router.back();
@@ -746,14 +731,14 @@ export default function SignUpScreen() {
                 <Text style={styles.registerLinkMuted}>이미 회원이에요?</Text>
                 <Text style={styles.registerLinkAccent}>로그인으로 돌아가기</Text>
               </View>
-            </Pressable>
+            </GinitPressable>
 
             {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
-            <Pressable onPress={Keyboard.dismiss} accessible={false}>
+            <GinitPressable onPress={Keyboard.dismiss} accessible={false}>
               <View style={styles.footerRule} />
               <Text style={styles.footerCredit}>UI/UX Vision by Ginit Human-Connection Team.</Text>
-            </Pressable>
+            </GinitPressable>
           </KeyboardAwareScreenScroll>
         </SafeAreaView>
       </ScreenShell>

@@ -1,8 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { BlurView } from 'expo-blur';
+import {BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { type RefObject, useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, Share, Text, View } from 'react-native';
+import { Alert, Share, Text, View} from 'react-native';
 
 import { MeetingChatGinitImageCluster } from '@/components/chat/MeetingChatGinitImageCluster';
 import { MeetingChatBubbleActionMenu } from '@/components/chat/MeetingChatBubbleActionMenu';
@@ -258,7 +259,7 @@ export function useMeetingChatRenderItem({
         const txt = which === 'mine' ? styles.replyQuoteTextMine : styles.replyQuoteTextOther;
         return (
           <View style={box}>
-            <Pressable
+            <GinitPressable
               onPress={() => void jumpToRepliedMessage(anchorMsg.replyTo?.messageId ?? '')}
               style={({ pressed }) => [styles.replyQuotePressable, pressed && styles.pressed]}
               accessibilityRole="button"
@@ -278,7 +279,7 @@ export function useMeetingChatRenderItem({
                   />
                 ) : null}
               </View>
-            </Pressable>
+            </GinitPressable>
           </View>
         );
       };
@@ -300,7 +301,7 @@ export function useMeetingChatRenderItem({
           <Text style={styles.bubbleMineText}>이미지를 불러올 수 없어요.</Text>
         ) : null;
         const bubbleMainMine = showKakaoPlain ? (
-          <Pressable
+          <GinitPressable
             onLongPress={(e) => openMenuForRow(item, e)}
             delayLongPress={420}
             accessibilityLabel="말풍선 옵션"
@@ -311,17 +312,17 @@ export function useMeetingChatRenderItem({
             {(isImage && caption) || (isAlbum && albumCaption) ? (
               bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionMine)
             ) : null}
-          </Pressable>
+          </GinitPressable>
         ) : isLinkOnlyText && singleMsg?.linkPreview ? (
-          <Pressable
+          <GinitPressable
             onLongPress={(e) => openMenuForRow(item, e)}
             delayLongPress={420}
             accessibilityLabel="말풍선 옵션"
             style={({ pressed }) => [[styles.bubbleMineWrap, styles.ginitPlainMineWrap], pressed && styles.pressed]}>
             <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={singleMsg.text} standalone />
-          </Pressable>
+          </GinitPressable>
         ) : (
-          <Pressable
+          <GinitPressable
             onLongPress={(e) => openMenuForRow(item, e)}
             delayLongPress={420}
             accessibilityLabel="말풍선 옵션"
@@ -334,7 +335,7 @@ export function useMeetingChatRenderItem({
                 <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''} />
               ) : null}
             </BlurView>
-          </Pressable>
+          </GinitPressable>
         );
         const bubble = (
           <View style={styles.rowMine}>
@@ -385,7 +386,7 @@ export function useMeetingChatRenderItem({
 
       const otherBubble = (
         <View style={styles.rowOther}>
-          <Pressable
+          <GinitPressable
             style={styles.avatarCol}
             disabled={!canOpenPeerProfile}
             onPress={() => canOpenPeerProfile && onOpenUserProfile(sid)}
@@ -406,10 +407,10 @@ export function useMeetingChatRenderItem({
             ) : (
               <View style={styles.avatarSpacer} />
             )}
-          </Pressable>
+          </GinitPressable>
           <View style={styles.otherBlock} pointerEvents="box-none">
             {showAvatar ? (
-              <Pressable
+              <GinitPressable
                 disabled={!canOpenPeerProfile}
                 onPress={() => canOpenPeerProfile && onOpenUserProfile(sid)}
                 style={({ pressed }) => [styles.nameRow, canOpenPeerProfile && pressed && styles.pressed]}
@@ -419,11 +420,11 @@ export function useMeetingChatRenderItem({
                   {nick}
                 </Text>
                 {isHost ? <GinitSymbolicIcon name="star" size={14} color="#CA8A04" style={styles.crown} /> : null}
-              </Pressable>
+              </GinitPressable>
             ) : null}
             <View style={styles.bubbleOtherWrap}>
               {showKakaoPlain ? (
-                <Pressable
+                <GinitPressable
                   onLongPress={(e) => openMenuForRow(item, e)}
                   delayLongPress={420}
                   accessibilityLabel="말풍선 옵션"
@@ -435,18 +436,18 @@ export function useMeetingChatRenderItem({
                     bubbleText(isAlbum ? albumCaption : caption ?? '', styles.imageCaptionOther)
                   ) : null}
                   {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
-                </Pressable>
+                </GinitPressable>
               ) : isLinkOnlyText && singleMsg?.linkPreview ? (
-                <Pressable
+                <GinitPressable
                   onLongPress={(e) => openMenuForRow(item, e)}
                   delayLongPress={420}
                   accessibilityLabel="말풍선 옵션"
                   style={({ pressed }) => [styles.bubbleOtherOuter, pressed && styles.pressed]}>
                   <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={singleMsg.text} standalone />
-                </Pressable>
+                </GinitPressable>
               ) : (
                 <View style={styles.bubbleOtherOuter}>
-                  <Pressable
+                  <GinitPressable
                     onLongPress={(e) => openMenuForRow(item, e)}
                     delayLongPress={420}
                     accessibilityLabel="말풍선 옵션"
@@ -460,7 +461,7 @@ export function useMeetingChatRenderItem({
                       ) : null}
                     </BlurView>
                     {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
-                  </Pressable>
+                  </GinitPressable>
                 </View>
               )}
               <Text style={styles.timeOther}>{formatChatTime(anchorMsg.createdAt)}</Text>

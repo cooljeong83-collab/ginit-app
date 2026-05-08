@@ -1,19 +1,9 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import {ActivityIndicator, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
@@ -173,18 +163,6 @@ export default function ChatTab() {
   const tabPagerRef = useRef<ScrollView | null>(null);
   const chatKindRef = useRef(chatKind);
   chatKindRef.current = chatKind;
-  /** 채팅방 목록 중복 진입 방지(더블 탭 등) — 모임 목록 `meetingOpenLockRef`와 동일 */
-  const chatRoomOpenLockRef = useRef(false);
-  const beginChatListOpenLock = useCallback((): boolean => {
-    if (chatRoomOpenLockRef.current) return false;
-    chatRoomOpenLockRef.current = true;
-    const lockRelease = () => {
-      chatRoomOpenLockRef.current = false;
-    };
-    // 네비게이션이 끝나기 전 더블탭으로 push가 2번 호출되는 케이스 방지
-    setTimeout(lockRelease, 900);
-    return true;
-  }, []);
   const [refreshing, setRefreshing] = useState(false);
   const [latestByMeetingId, setLatestByMeetingId] = useState<
     Record<string, MeetingChatMessage | null | undefined>
@@ -680,7 +658,7 @@ export default function ChatTab() {
           </View>
         </View>
         <View style={styles.headerActions}>
-          <Pressable
+          <GinitPressable
             onPress={openChatSearch}
             accessibilityRole="button"
             accessibilityLabel="채팅 검색"
@@ -688,13 +666,13 @@ export default function ChatTab() {
             style={styles.searchIconWrap}>
             <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
             {chatSearchFiltersDot ? <View style={styles.searchFilterDot} /> : null}
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
 
       <View style={styles.tabCategoryBar} accessibilityRole="tablist">
         <View style={styles.tabPair}>
-          <Pressable
+          <GinitPressable
             onPress={() => goToChatKind('gather')}
             style={({ pressed }) => [
               styles.chatTopChip,
@@ -723,8 +701,8 @@ export default function ChatTab() {
                 </View>
               ) : null}
             </View>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={() => goToChatKind('social')}
             style={({ pressed }) => [
               styles.chatTopChip,
@@ -753,7 +731,7 @@ export default function ChatTab() {
                 </View>
               ) : null}
             </View>
-          </Pressable>
+          </GinitPressable>
         </View>
         <View style={styles.categoryDropdownSpacer} pointerEvents="none" />
       </View>
@@ -920,7 +898,6 @@ export default function ChatTab() {
                       latestMessage={latestByMeetingId[m.id]}
                       unreadCount={unread}
                       onPress={() => {
-                        if (!beginChatListOpenLock()) return;
                         if (directSharePickMode) {
                           const incoming = consumeIncomingDirectSharePayload();
                           if (incoming) {
@@ -993,9 +970,8 @@ export default function ChatTab() {
                   const mePk = raw ? normalizeParticipantId(raw) : '';
                   const unread = coalesceUnreadCountByKeys(socialRoomDocById[row.roomId]?.unreadCountBy, [raw, mePhone, mePk]);
                   return (
-                    <Pressable
+                    <GinitPressable
                       onPress={() => {
-                        if (!beginChatListOpenLock()) return;
                         if (directSharePickMode) {
                           const incoming = consumeIncomingDirectSharePayload();
                           if (incoming) {
@@ -1069,7 +1045,7 @@ export default function ChatTab() {
                           </Text>
                         </View>
                       </View>
-                    </Pressable>
+                    </GinitPressable>
                   );
                 }}
               />
@@ -1083,7 +1059,7 @@ export default function ChatTab() {
           transparent
           onRequestClose={closeChatSearch}>
           <View style={styles.modalRoot}>
-            <Pressable
+            <GinitPressable
               style={StyleSheet.absoluteFillObject}
               onPress={closeChatSearch}
               accessibilityRole="button"
@@ -1106,14 +1082,14 @@ export default function ChatTab() {
                 autoCorrect={false}
                 returnKeyType="search"
               />
-              <Pressable
+              <GinitPressable
                 onPress={applyChatSearch}
                 style={styles.socialSearchApplyBtn}
                 accessibilityRole="button"
                 accessibilityLabel="검색">
                 <Text style={styles.socialSearchApplyLabel}>검색</Text>
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 onPress={clearChatSearchFilters}
                 disabled={!hasActiveChatSearchFilter}
                 style={({ pressed }) => [
@@ -1131,10 +1107,10 @@ export default function ChatTab() {
                   ]}>
                   필터 해제
                 </Text>
-              </Pressable>
-              <Pressable onPress={closeChatSearch} style={styles.modalCloseBtn} accessibilityRole="button">
+              </GinitPressable>
+              <GinitPressable onPress={closeChatSearch} style={styles.modalCloseBtn} accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>닫기</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
         </Modal>

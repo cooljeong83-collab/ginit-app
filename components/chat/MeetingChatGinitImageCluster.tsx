@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useState, type ReactNode } from 'react';
 import { Image } from 'expo-image';
-import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Text, View, type StyleProp, type ViewStyle } from 'react-native'
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
@@ -31,7 +32,7 @@ function Cell({
 }) {
   const u = msg.imageUrl?.trim() ?? '';
   return (
-    <Pressable
+    <GinitPressable
       onPress={() => onPress(msg)}
       style={({ pressed }) => [styles.ginitCellInner, style, pressed && styles.pressed]}
       accessibilityRole="button"
@@ -50,7 +51,7 @@ function Cell({
         />
       ) : null}
       {overlay}
-    </Pressable>
+    </GinitPressable>
   );
 }
 

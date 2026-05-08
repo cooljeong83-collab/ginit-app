@@ -1,6 +1,7 @@
-import { BlurView } from 'expo-blur';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {BlurView } from 'expo-blur';
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native'
 
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
@@ -15,7 +16,7 @@ function MiniMeetingGlassCard({ meeting, onPress }: { meeting: Meeting; onPress:
   const orangePhase = phase === 'full';
 
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       style={({ pressed }) => [HomeGlassStyles.miniCardOuter, pressed && styles.miniPressed]}
       accessibilityRole="button"
@@ -50,7 +51,7 @@ function MiniMeetingGlassCard({ meeting, onPress }: { meeting: Meeting; onPress:
           </Text>
         ) : null}
       </View>
-    </Pressable>
+    </GinitPressable>
   );
 }
 

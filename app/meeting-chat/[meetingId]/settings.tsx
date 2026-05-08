@@ -1,17 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -66,7 +59,7 @@ function ChevronRow({
   destructive?: boolean;
 }) {
   return (
-    <Pressable
+    <GinitPressable
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button">
@@ -79,7 +72,7 @@ function ChevronRow({
         ) : null}
       </View>
       <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-    </Pressable>
+    </GinitPressable>
   );
 }
 
@@ -249,9 +242,9 @@ export default function MeetingChatSettingsScreen() {
       <SafeAreaView style={styles.safe} edges={['bottom']}>
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyText}>참여 중인 모임만 설정할 수 있어요.</Text>
-          <Pressable onPress={onBack} style={styles.textBtn}>
+          <GinitPressable onPress={onBack} style={styles.textBtn}>
             <Text style={styles.textBtnLabel}>돌아가기</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       </SafeAreaView>
     );
@@ -280,7 +273,7 @@ export default function MeetingChatSettingsScreen() {
               const isAi = pid === 'ginit_ai';
               const canOpen = !isMe && !isAi && !isUserProfileWithdrawn(p);
               return (
-                <Pressable
+                <GinitPressable
                   key={pid}
                   style={styles.avatarItem}
                   disabled={!canOpen}
@@ -297,7 +290,7 @@ export default function MeetingChatSettingsScreen() {
                   <Text style={styles.avatarNick} numberOfLines={1}>
                     {nick}
                   </Text>
-                </Pressable>
+                </GinitPressable>
               );
             })}
           </ScrollView>

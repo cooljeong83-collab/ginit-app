@@ -1,20 +1,12 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  InteractionManager,
-  Keyboard,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+  ActivityIndicator, InteractionManager, Keyboard, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -332,9 +324,9 @@ function PlaceSearchScreenInner({
       <SafeAreaView style={GinitStyles.safeAreaPadded} edges={['top', 'bottom']}>
         <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <View style={GinitStyles.topBarRow}>
-            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
+            <GinitPressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
               <Text style={GinitStyles.backLink}>← 닫기</Text>
-            </Pressable>
+            </GinitPressable>
             <Text style={GinitStyles.screenTitleLarge}>장소 검색</Text>
             <View style={{ width: 56 }} />
           </View>
@@ -360,7 +352,7 @@ function PlaceSearchScreenInner({
               }}
               onBlur={() => setSearchFocused(false)}
             />
-            <Pressable onPress={onSearchPress} style={GinitStyles.primaryButton} accessibilityRole="button">
+            <GinitPressable onPress={onSearchPress} style={GinitStyles.primaryButton} accessibilityRole="button">
               <LinearGradient
                 colors={GinitTheme.colors.ctaGradient}
                 start={{ x: 0, y: 0 }}
@@ -369,7 +361,7 @@ function PlaceSearchScreenInner({
                 pointerEvents="none"
               />
               <Text style={GinitStyles.primaryButtonLabel}>검색</Text>
-            </Pressable>
+            </GinitPressable>
           </View>
 
           {loading || resolving ? (
@@ -427,7 +419,7 @@ function PlaceSearchScreenInner({
                 return (
                   <View style={GinitStyles.itemWrap}>
                     <View style={GinitStyles.glassListRowWrap}>
-                      <Pressable
+                      <GinitPressable
                         onPress={() => void onSelectPlace(item)}
                         style={[GinitStyles.glassListRow, active && GinitStyles.glassListRowSelected]}
                         accessibilityRole="button"
@@ -454,7 +446,7 @@ function PlaceSearchScreenInner({
                             )}
                           </View>
                         </View>
-                      </Pressable>
+                      </GinitPressable>
                       <PlaceCandidateDetailLinkRow
                         title={item.title}
                         link={item.link}
@@ -475,7 +467,7 @@ function PlaceSearchScreenInner({
             />
           </View>
 
-          <Pressable
+          <GinitPressable
             onPress={onConfirm}
             disabled={!canConfirm}
             style={({ pressed }) => [
@@ -494,7 +486,7 @@ function PlaceSearchScreenInner({
               pointerEvents="none"
             />
             <Text style={GinitStyles.ctaButtonLabel}>확인</Text>
-          </Pressable>
+          </GinitPressable>
 
           <NaverPlaceWebViewModal
             visible={naverPlaceWebModal != null}

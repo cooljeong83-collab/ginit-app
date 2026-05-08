@@ -1,7 +1,8 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useLocalSearchParams, useRouter } from 'expo-router';
 import { serverTimestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -109,7 +110,7 @@ export default function ProfilePhoneVerifyOtpScreen() {
             onSubmitEditing={() => void onVerify()}
           />
 
-          <Pressable
+          <GinitPressable
             onPress={() => void onVerify()}
             disabled={!canVerify}
             style={({ pressed }) => [
@@ -120,11 +121,11 @@ export default function ProfilePhoneVerifyOtpScreen() {
             accessibilityRole="button"
             accessibilityLabel="인증 완료">
             <Text style={styles.verifyText}>{busy ? '확인 중…' : '인증 완료'}</Text>
-          </Pressable>
+          </GinitPressable>
 
-          <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
+          <GinitPressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
             <Text style={styles.cancelText}>뒤로</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       </SafeAreaView>
     </ScreenShell>

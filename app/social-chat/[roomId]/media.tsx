@@ -1,20 +1,12 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    Pressable,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    useWindowDimensions,
-    View,
-} from 'react-native';
+    ActivityIndicator, Alert, Modal, RefreshControl, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -169,9 +161,9 @@ export default function SocialChatMediaScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
+        <GinitPressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
           <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-        </Pressable>
+        </GinitPressable>
         <Text style={styles.headerTitle}>사진</Text>
         <View style={{ width: 28 }} />
       </View>
@@ -179,9 +171,9 @@ export default function SocialChatMediaScreen() {
       {listError ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{listError}</Text>
-          <Pressable onPress={triggerRefresh} style={styles.retryBtn} accessibilityRole="button">
+          <GinitPressable onPress={triggerRefresh} style={styles.retryBtn} accessibilityRole="button">
             <Text style={styles.retryBtnText}>다시 시도</Text>
-          </Pressable>
+          </GinitPressable>
         </View>
       ) : null}
 
@@ -206,7 +198,7 @@ export default function SocialChatMediaScreen() {
             const u = item.imageUrl?.trim() ?? '';
             const col = index % 3;
             return (
-              <Pressable
+              <GinitPressable
                 onPress={() => u && setViewer(item)}
                 style={({ pressed }) => [
                   styles.cell,
@@ -221,7 +213,7 @@ export default function SocialChatMediaScreen() {
                 <View style={styles.cellInner}>
                   {u ? <Image source={{ uri: u }} style={StyleSheet.absoluteFill} contentFit="cover" /> : <View style={styles.thumbFallback} />}
                 </View>
-              </Pressable>
+              </GinitPressable>
             );
           }}
           ListEmptyComponent={<Text style={styles.empty}>아직 사진이 없어요.</Text>}
@@ -231,12 +223,24 @@ export default function SocialChatMediaScreen() {
       <Modal visible={viewer != null} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={styles.viewerOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => !viewerBusy && setViewer(null)} accessibilityRole="button" accessibilityLabel="닫기" />
+            <GinitPressable
+              duplicatePressGuardDisabled
+              style={StyleSheet.absoluteFill}
+              onPress={() => !viewerBusy && setViewer(null)}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+            />
             <View style={styles.viewerSheet} pointerEvents="box-none">
               <View style={[styles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
-                <Pressable onPress={() => setViewer(null)} hitSlop={10} disabled={viewerBusy} accessibilityRole="button" accessibilityLabel="닫기">
+                <GinitPressable
+                  duplicatePressGuardDisabled
+                  onPress={() => setViewer(null)}
+                  hitSlop={10}
+                  disabled={viewerBusy}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기">
                   <GinitSymbolicIcon name="close" size={26} color="#fff" />
-                </Pressable>
+                </GinitPressable>
                 <View style={styles.viewerMetaCol} pointerEvents="none">
                   <Text style={styles.viewerMetaName} numberOfLines={1}>
                     {viewerMeta.who}
@@ -248,7 +252,8 @@ export default function SocialChatMediaScreen() {
                   ) : null}
                 </View>
                 <View style={styles.viewerActions}>
-                  <Pressable
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = viewer?.imageUrl?.trim() ?? '';
                       if (!u) return;
@@ -268,8 +273,9 @@ export default function SocialChatMediaScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="공유">
                     <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
-                  </Pressable>
-                  <Pressable
+                  </GinitPressable>
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = viewer?.imageUrl?.trim() ?? '';
                       if (!u) return;
@@ -289,9 +295,10 @@ export default function SocialChatMediaScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="저장">
                     <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
-                  </Pressable>
+                  </GinitPressable>
                   {canDelete ? (
-                    <Pressable
+                    <GinitPressable
+                      duplicatePressGuardDisabled
                       onPress={() => {
                         const u = viewer?.imageUrl?.trim() ?? '';
                         const rid = roomId.trim();
@@ -324,7 +331,7 @@ export default function SocialChatMediaScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="삭제">
                       <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </View>
               </View>

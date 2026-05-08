@@ -1,20 +1,9 @@
-import { useRouter } from 'expo-router';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useRouter } from 'expo-router';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
@@ -544,7 +533,7 @@ export function MeetingServiceAuthModal({
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         style={styles.sheetKbWrap}>
         <View style={styles.sheetRoot}>
-          <Pressable
+          <GinitPressable
             style={styles.sheetBackdropFill}
             onPress={() => {
               if (!complianceBusy && !googleDemographicsBusy) onRequestClose();
@@ -595,7 +584,7 @@ export function MeetingServiceAuthModal({
                     <Text style={styles.googleCtaHint}>
                       성별·생년월일은 프로필 편집에서 입력한 뒤, 아래에서 저장을 진행해 주세요.
                     </Text>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => {
                         if (!complianceBusy && !googleDemographicsBusy) {
                           onRequestClose();
@@ -607,7 +596,7 @@ export function MeetingServiceAuthModal({
                       accessibilityRole="button"
                       accessibilityLabel="프로필 편집으로 이동">
                       <Text style={styles.profileEditLinkText}>프로필 편집으로 이동</Text>
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 ) : null}
 
@@ -635,7 +624,7 @@ export function MeetingServiceAuthModal({
                       ).map(({ code, label }) => {
                         const selected = genderDemo === code;
                         return (
-                          <Pressable
+                          <GinitPressable
                             key={code}
                             disabled={
                               profileBusy ||
@@ -666,7 +655,7 @@ export function MeetingServiceAuthModal({
                             <Text style={selected ? authFormStyles.genderBinaryLabelSelected : authFormStyles.genderBinaryLabel}>
                               {label}
                             </Text>
-                          </Pressable>
+                          </GinitPressable>
                         );
                       })}
                     </View>
@@ -722,7 +711,7 @@ export function MeetingServiceAuthModal({
                               inputMode="tel"
                               editable={!otpBusy && !profileBusy && !complianceBusy && !isPhoneVerified}
                             />
-                            <Pressable
+                            <GinitPressable
                               onPress={() => void onSendOtp()}
                               disabled={!canSendOtp || isPhoneVerified}
                               style={({ pressed }) => [
@@ -733,7 +722,7 @@ export function MeetingServiceAuthModal({
                               accessibilityRole="button"
                               accessibilityLabel="인증번호 받기">
                               <Text style={styles.otpSendText}>{otpBusy ? '전송 중…' : '인증번호 받기'}</Text>
-                            </Pressable>
+                            </GinitPressable>
                           </View>
 
                           {otpVerificationId ? (
@@ -749,7 +738,7 @@ export function MeetingServiceAuthModal({
                                 textContentType="oneTimeCode"
                                 editable={!otpBusy && !profileBusy && !complianceBusy}
                               />
-                              <Pressable
+                              <GinitPressable
                                 onPress={() => void onConfirmOtp()}
                                 disabled={!canConfirmOtp}
                                 style={({ pressed }) => [
@@ -760,7 +749,7 @@ export function MeetingServiceAuthModal({
                                 accessibilityRole="button"
                                 accessibilityLabel="인증 확인">
                                 <Text style={styles.otpConfirmText}>{otpBusy ? '확인 중…' : '확인'}</Text>
-                              </Pressable>
+                              </GinitPressable>
                             </View>
                           ) : null}
 

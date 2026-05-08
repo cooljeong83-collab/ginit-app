@@ -1,22 +1,11 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import {useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    Switch,
-    StyleSheet,
-    Text,
-    TextInput,
-    ToastAndroid,
-    useWindowDimensions,
-    View
-} from 'react-native';
+    ActivityIndicator, Alert, Platform, ScrollView, Switch, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitButton, GinitCard } from '@/components/ginit';
@@ -686,14 +675,14 @@ export default function ProfileEditScreen() {
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
-          <Pressable
+          <GinitPressable
             onPress={() => safeRouterBack(router)}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로"
             style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle} numberOfLines={1}>
             프로필 편집
           </Text>
@@ -705,7 +694,7 @@ export default function ProfileEditScreen() {
             <View style={styles.heroInner}>
               <Text style={styles.heroSubtitle}>모임에서 보이는 이름과 사진을 바꿀 수 있어요.</Text>
 
-              <Pressable
+              <GinitPressable
                 onPress={() => void onPickAndUploadPhoto()}
                 disabled={photoUploadBusy || profileBusy || deleteBusy || busy}
                 style={({ pressed }) => [styles.avatarPress, pressed && !(photoUploadBusy || profileBusy || deleteBusy || busy) && styles.pressed]}
@@ -728,7 +717,7 @@ export default function ProfileEditScreen() {
                     )}
                   </View>
                 </View>
-              </Pressable>
+              </GinitPressable>
               <Text style={styles.avatarHint}></Text>
             </View>
           </View>

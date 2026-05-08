@@ -1,5 +1,6 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Pressable, StyleSheet, View } from 'react-native';
+import {StyleSheet, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
@@ -13,7 +14,7 @@ export function InAppAlarmsBellButton({ accessibilityLabel = '새 소식' }: Pro
   const { hasUnread, openAlarmPanel } = useInAppAlarms();
 
   return (
-    <Pressable
+    <GinitPressable
       onPress={openAlarmPanel}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -21,7 +22,7 @@ export function InAppAlarmsBellButton({ accessibilityLabel = '새 소식' }: Pro
       style={styles.bellWrap}>
       <GinitSymbolicIcon name="notifications-outline" size={22} color="#0f172a" />
       {hasUnread ? <View style={styles.badge} /> : null}
-    </Pressable>
+    </GinitPressable>
   );
 }
 

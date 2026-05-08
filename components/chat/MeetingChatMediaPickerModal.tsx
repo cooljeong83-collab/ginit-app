@@ -1,19 +1,11 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as MediaLibrary from 'expo-media-library';
-import { FlashList } from '@shopify/flash-list';
+import {FlashList } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
@@ -399,7 +391,7 @@ export function MeetingChatMediaPickerModal({
               {...(Platform.OS === 'android' ? { experimentalBlurMethod: 'dimezisBlurView' as const } : {})}
             />
             <View style={[StyleSheet.absoluteFill, styles.backdropVeil]} pointerEvents="none" />
-            <Pressable style={StyleSheet.absoluteFill} onPress={requestDismiss} accessibilityLabel="닫기" />
+            <GinitPressable style={StyleSheet.absoluteFill} onPress={requestDismiss} accessibilityLabel="닫기" />
           </Animated.View>
           <Animated.View style={[styles.sheet, styles.sheetDocked, sheetAnimStyle]}>
             <SafeAreaView edges={['top', 'bottom']} style={styles.sheetInner}>
@@ -409,9 +401,9 @@ export function MeetingChatMediaPickerModal({
                 </View>
               </GestureDetector>
               <View style={styles.header}>
-                <Pressable onPress={requestDismiss} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="닫기">
+                <GinitPressable onPress={requestDismiss} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="닫기">
                   <GinitSymbolicIcon name="close" size={22} color="#0f172a" />
-                </Pressable>
+                </GinitPressable>
                 <View style={styles.headerCenter}>
                   <View style={styles.headerTitleRow}>
                     <Text style={styles.headerAlbumTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -423,7 +415,7 @@ export function MeetingChatMediaPickerModal({
                       accessibilityLabel={`사진 ${photoTotalCount.toLocaleString('ko-KR')}장`}>
                       {photoTotalCount.toLocaleString('ko-KR')}
                     </Text>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => setAlbumPickerOpen((o) => !o)}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       style={({ pressed }) => [styles.headerChevronBtn, pressed && meetingChatBodyStyles.pressed]}
@@ -431,10 +423,10 @@ export function MeetingChatMediaPickerModal({
                       accessibilityLabel="앨범 목록"
                       accessibilityState={{ expanded: albumPickerOpen }}>
                       <GinitSymbolicIcon name="chevron-down" size={22} color="#0f172a" />
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 </View>
-                <Pressable
+                <GinitPressable
                   onPress={() => void handleSend()}
                   disabled={!canSend || headerBusy}
                   style={({ pressed }) => [
@@ -449,13 +441,13 @@ export function MeetingChatMediaPickerModal({
                   ) : (
                     <Text style={styles.sendTopText}>전송</Text>
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
 
               <View style={styles.sheetBodyColumn}>
                 {albumPickerOpen ? (
                   <>
-                    <Pressable
+                    <GinitPressable
                       style={styles.albumPickerScrim}
                       onPress={() => setAlbumPickerOpen(false)}
                       accessibilityLabel="앨범 목록 닫기"
@@ -471,7 +463,7 @@ export function MeetingChatMediaPickerModal({
                         renderItem={({ item }) => {
                           if (item.type === 'all') {
                             return (
-                              <Pressable
+                              <GinitPressable
                                 onPress={() => void reloadGridForAlbum(null)}
                                 style={({ pressed }) => [styles.albumRow, styles.albumRowLine, pressed && meetingChatBodyStyles.pressed]}
                                 accessibilityRole="button"
@@ -480,12 +472,12 @@ export function MeetingChatMediaPickerModal({
                                 <Text style={styles.albumRowCount} accessibilityLabel={`사진 ${allLibraryPhotoCount.toLocaleString('ko-KR')}장`}>
                                   {allLibraryPhotoCount.toLocaleString('ko-KR')}
                                 </Text>
-                              </Pressable>
+                              </GinitPressable>
                             );
                           }
                           const ac = item.album.assetCount ?? 0;
                           return (
-                            <Pressable
+                            <GinitPressable
                               onPress={() => void reloadGridForAlbum(item.album.id)}
                               style={({ pressed }) => [styles.albumRow, styles.albumRowLine, pressed && meetingChatBodyStyles.pressed]}
                               accessibilityRole="button"
@@ -496,7 +488,7 @@ export function MeetingChatMediaPickerModal({
                               <Text style={styles.albumRowCount} accessibilityLabel={`사진 ${ac.toLocaleString('ko-KR')}장`}>
                                 {ac.toLocaleString('ko-KR')}
                               </Text>
-                            </Pressable>
+                            </GinitPressable>
                           );
                         }}
                       />
@@ -513,9 +505,9 @@ export function MeetingChatMediaPickerModal({
             ) : loadError ? (
               <View style={styles.centerFill}>
                 <Text style={styles.errorText}>{loadError}</Text>
-                <Pressable onPress={() => void loadInitial()} style={styles.retryBtn}>
+                <GinitPressable onPress={() => void loadInitial()} style={styles.retryBtn}>
                   <Text style={styles.retryBtnText}>다시 시도</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
             ) : assets.length === 0 ? (
               <View style={styles.centerFill}>
@@ -541,7 +533,7 @@ export function MeetingChatMediaPickerModal({
                   const selected = selectedOrder.includes(item.id);
                   const col = index % cols;
                   return (
-                    <Pressable
+                    <GinitPressable
                       onPress={() => toggleSelect(item.id)}
                       style={({ pressed }) => [
                         styles.cell,
@@ -562,7 +554,7 @@ export function MeetingChatMediaPickerModal({
                       ) : (
                         <View style={styles.unselectedRing} pointerEvents="none" />
                       )}
-                    </Pressable>
+                    </GinitPressable>
                   );
                 }}
               />

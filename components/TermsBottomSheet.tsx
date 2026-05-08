@@ -1,6 +1,7 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useCallback, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {useCallback, useMemo, useState } from 'react';
+import { Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -78,7 +79,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
           onClose();
         }}>
         <View style={styles.dim}>
-          <Pressable
+          <GinitPressable
             style={StyleSheet.absoluteFillObject}
             onPress={() => {
               if (detailKey) {
@@ -93,12 +94,12 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
           <SafeAreaView style={styles.sheet} edges={['bottom']}>
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
-              <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
+              <GinitPressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
                 <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
-              </Pressable>
+              </GinitPressable>
             </View>
 
-            <Pressable
+            <GinitPressable
               onPress={toggleAll}
               style={({ pressed }) => [styles.allRow, pressed && styles.pressed]}
               accessibilityRole="checkbox"
@@ -110,7 +111,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
                 color={allChecked ? GinitTheme.colors.primary : '#94a3b8'}
               />
               <Text style={styles.allText}>전체 동의</Text>
-            </Pressable>
+            </GinitPressable>
 
             <View style={styles.card}>
               {(Object.keys(TERM_LABELS) as TermKey[]).map((key, idx) => {
@@ -119,7 +120,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
                 const last = idx === 1;
                 return (
                   <View key={key} style={[styles.termRow, last && styles.termRowLast]}>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => toggleOne(key)}
                       style={({ pressed }) => [styles.termLeft, pressed && styles.pressed]}
                       accessibilityRole="checkbox"
@@ -134,21 +135,21 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
                         {label.required ? '[필수] ' : ''}
                         {label.title}
                       </Text>
-                    </Pressable>
-                    <Pressable
+                    </GinitPressable>
+                    <GinitPressable
                       onPress={() => setDetailKey(key)}
                       hitSlop={10}
                       style={({ pressed }) => [styles.viewBtn, pressed && styles.pressed]}
                       accessibilityRole="button"
                       accessibilityLabel={`${label.title} 보기`}>
                       <Text style={styles.viewBtnText}>보기</Text>
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 );
               })}
             </View>
 
-            <Pressable
+            <GinitPressable
               onPress={() => void onAgree()}
               disabled={!allRequiredChecked || busy}
               style={({ pressed }) => [
@@ -159,7 +160,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
               accessibilityRole="button"
               accessibilityLabel="동의하고 시작하기">
               <Text style={styles.agreeBtnText}>{busy ? '처리 중…' : '동의하고 시작하기'}</Text>
-            </Pressable>
+            </GinitPressable>
           </SafeAreaView>
         </View>
       </Modal>
@@ -168,9 +169,9 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
         <SafeAreaView style={styles.detailSafe} edges={['top', 'bottom']}>
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>{detailTitle}</Text>
-            <Pressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
+            <GinitPressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
               <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
-            </Pressable>
+            </GinitPressable>
           </View>
           <ScrollView contentContainerStyle={styles.detailBody}>
             <Text style={styles.detailText}>{detailText}</Text>

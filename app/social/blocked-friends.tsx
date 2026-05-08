@@ -1,7 +1,8 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -136,13 +137,13 @@ export default function BlockedFriendsScreen() {
                   메시지·친구 추천에서 제외돼요
                 </Text>
               </View>
-              <Pressable
+              <GinitPressable
                 onPress={() => onUnblock(item.peerId, nick)}
                 style={({ pressed }) => [styles.unblockBtn, pressed && { opacity: 0.85 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`${nick} 차단 해제`}>
                 <Text style={styles.unblockBtnText}>차단 해제</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
           );
         }}

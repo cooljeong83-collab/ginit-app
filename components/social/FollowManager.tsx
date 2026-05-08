@@ -1,6 +1,7 @@
-import { Image } from 'expo-image';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import {
@@ -189,7 +190,7 @@ export function FollowManager({ userId }: Props) {
         ] as const).map((t) => {
           const active = tab === t.id;
           return (
-            <Pressable
+            <GinitPressable
               key={t.id}
               onPress={() => setTab(t.id)}
               style={[styles.tabBtn, active && styles.tabBtnActive]}
@@ -198,7 +199,7 @@ export function FollowManager({ userId }: Props) {
               <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
                 {t.label}
               </Text>
-            </Pressable>
+            </GinitPressable>
           );
         })}
       </View>
@@ -233,13 +234,13 @@ export function FollowManager({ userId }: Props) {
                 subtitle={mutual ? '맞팔로우' : '팔로잉'}
                 profile={p}
                 right={
-                  <Pressable
+                  <GinitPressable
                     onPress={() => void onUnfollow(peer)}
                     style={({ pressed }) => [styles.smallBtn, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="언팔로우">
                     <Text style={styles.smallBtnText}>언팔</Text>
-                  </Pressable>
+                  </GinitPressable>
                 }
               />
             );
@@ -268,20 +269,20 @@ export function FollowManager({ userId }: Props) {
                 profile={p}
                 right={
                   <View style={styles.actionRow}>
-                    <Pressable
+                    <GinitPressable
                       onPress={() => void onReject(x.row.id)}
                       style={({ pressed }) => [styles.smallBtnGhost, pressed && styles.pressed]}
                       accessibilityRole="button"
                       accessibilityLabel="거절">
                       <Text style={styles.smallBtnGhostText}>거절</Text>
-                    </Pressable>
-                    <Pressable
+                    </GinitPressable>
+                    <GinitPressable
                       onPress={() => void onAccept(x.row.id)}
                       style={({ pressed }) => [styles.smallBtnPrimary, pressed && styles.pressed]}
                       accessibilityRole="button"
                       accessibilityLabel="승인">
                       <Text style={styles.smallBtnPrimaryText}>승인</Text>
-                    </Pressable>
+                    </GinitPressable>
                   </View>
                 }
               />
@@ -297,13 +298,13 @@ export function FollowManager({ userId }: Props) {
               subtitle="요청중"
               profile={p}
               right={
-                <Pressable
+                <GinitPressable
                   onPress={() => void onUnfollow(peer)}
                   style={({ pressed }) => [styles.smallBtnGhost, pressed && styles.pressed]}
                   accessibilityRole="button"
                   accessibilityLabel="요청 취소">
                   <Text style={styles.smallBtnGhostText}>취소</Text>
-                </Pressable>
+                </GinitPressable>
               }
             />
           );

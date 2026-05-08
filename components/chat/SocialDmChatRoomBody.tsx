@@ -1,19 +1,8 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  InteractionManager,
-  type LayoutChangeEvent,
-  Keyboard,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
@@ -606,7 +595,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           {navEnabled ? (searchStatusLabel?.trim() ? searchStatusLabel : ' ') : ' '}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <Pressable
+          <GinitPressable
             onPress={onSearchPrev}
             disabled={disablePrev || !onSearchPrev}
             style={({ pressed }) => [
@@ -627,8 +616,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
             <View style={{ transform: [{ rotate: '180deg' }] }}>
               <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
             </View>
-          </Pressable>
-          <Pressable
+          </GinitPressable>
+          <GinitPressable
             onPress={onSearchNext}
             disabled={disableNext || !onSearchNext}
             style={({ pressed }) => [
@@ -647,7 +636,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
             accessibilityRole="button"
             accessibilityLabel="더 최신 결과">
             <GinitSymbolicIcon name="chevron-down" size={20} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
     );
@@ -708,7 +697,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
 
         <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
           <GestureHandlerRootView style={meetingChatBodyStyles.viewerRoot}>
-            <Pressable
+            <GinitPressable
+              duplicatePressGuardDisabled
               style={StyleSheet.absoluteFill}
               onPress={() => !imageViewerBusy && setImageViewer(null)}
               pointerEvents="none"
@@ -717,14 +707,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
             />
             <View style={meetingChatBodyStyles.viewerSheet} pointerEvents="box-none">
               <View style={[meetingChatBodyStyles.viewerTopRow, { paddingTop: insets.top + 8 }]}>
-                <Pressable
+                <GinitPressable
+                  duplicatePressGuardDisabled
                   onPress={() => setImageViewer(null)}
                   hitSlop={10}
                   disabled={imageViewerBusy}
                   accessibilityRole="button"
                   accessibilityLabel="닫기">
                   <GinitSymbolicIcon name="close" size={26} color="#fff" />
-                </Pressable>
+                </GinitPressable>
                 <View style={meetingChatBodyStyles.viewerMetaCol} pointerEvents="none">
                   <Text style={meetingChatBodyStyles.viewerMetaName} numberOfLines={1}>
                     {imageViewerMetaResolved.senderLabel}
@@ -736,7 +727,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                   ) : null}
                 </View>
                 <View style={meetingChatBodyStyles.viewerActions}>
-                  <Pressable
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                       if (!u) return;
@@ -756,8 +748,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                     accessibilityRole="button"
                     accessibilityLabel="공유">
                     <GinitSymbolicIcon name="share-outline" size={24} color="#fff" />
-                  </Pressable>
-                  <Pressable
+                  </GinitPressable>
+                  <GinitPressable
+                    duplicatePressGuardDisabled
                     onPress={() => {
                       const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                       if (!u) return;
@@ -777,9 +770,10 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                     accessibilityRole="button"
                     accessibilityLabel="저장">
                     <GinitSymbolicIcon name="download-outline" size={24} color="#fff" />
-                  </Pressable>
+                  </GinitPressable>
                   {imageViewerCanDelete ? (
-                    <Pressable
+                    <GinitPressable
+                      duplicatePressGuardDisabled
                       onPress={() => {
                         const u = imageViewerEntry?.imageUrl?.trim() ?? '';
                         const rid = roomId.trim();
@@ -812,7 +806,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                       accessibilityRole="button"
                       accessibilityLabel="삭제">
                       <GinitSymbolicIcon name="trash-outline" size={24} color="#fff" />
-                    </Pressable>
+                    </GinitPressable>
                   ) : null}
                 </View>
               </View>

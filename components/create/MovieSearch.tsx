@@ -1,9 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Font from 'expo-font';
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type RefObject, useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -308,7 +309,7 @@ export function MovieSearch({
                   S.movieResultProposalCardWrap,
                   selected && S.movieResultImageCardSelected,
                 ]}>
-                <Pressable
+                <GinitPressable
                   onPress={() => onTogglePick(item)}
                   disabled={disabled}
                   style={({ pressed }) => [S.movieResultProposalPressFill, pressed && S.movieResultCardPressed]}
@@ -335,9 +336,9 @@ export function MovieSearch({
                       </Text>
                     ) : null}
                   </View>
-                </Pressable>
+                </GinitPressable>
                 {movieDetailUrl ? (
-                  <Pressable
+                  <GinitPressable
                     onPress={() => {
                       const t = item.title.trim() || '영화';
                       setMovieNaverWeb({ url: movieDetailUrl, title: t });
@@ -347,7 +348,7 @@ export function MovieSearch({
                     accessibilityRole="button"
                     accessibilityLabel="상세 정보">
                     <Text style={S.movieResultDetailBtnText}>상세 정보</Text>
-                  </Pressable>
+                  </GinitPressable>
                 ) : null}
               </View>
             );

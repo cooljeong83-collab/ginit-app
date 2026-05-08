@@ -1,17 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { Image } from 'expo-image';
+import {Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    View,
-} from 'react-native';
+    ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -51,7 +44,7 @@ function SettingsRowChevron({
   destructive?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]} accessibilityRole="button">
+    <GinitPressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]} accessibilityRole="button">
       <SettingsRowIcon name={icon} destructive={destructive} />
       <View style={styles.rowTextCol}>
         <Text style={[styles.rowLabel, destructive && styles.rowLabelDanger]}>{label}</Text>
@@ -62,7 +55,7 @@ function SettingsRowChevron({
         ) : null}
       </View>
       <GinitSymbolicIcon name="chevron-forward" size={18} color={destructive ? '#f87171' : '#94a3b8'} />
-    </Pressable>
+    </GinitPressable>
   );
 }
 
@@ -205,9 +198,9 @@ export default function SocialChatSettingsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
+        <GinitPressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로">
           <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-        </Pressable>
+        </GinitPressable>
         <Text style={styles.headerTitle}>채팅방 설정</Text>
         <View style={{ width: 28 }} />
       </View>
@@ -237,7 +230,7 @@ export default function SocialChatSettingsScreen() {
                 {myNick}
               </Text>
             </View>
-            <Pressable
+            <GinitPressable
               style={styles.avatarItem}
               disabled={!peerId.trim() || isUserProfileWithdrawn(peerProfile)}
               onPress={() => peerId.trim() && router.push(`/profile/user/${encodeURIComponent(peerId.trim())}`)}
@@ -253,7 +246,7 @@ export default function SocialChatSettingsScreen() {
               <Text style={styles.avatarNick} numberOfLines={1}>
                 {peerNick}
               </Text>
-            </Pressable>
+            </GinitPressable>
           </ScrollView>
           <View style={styles.cardDivider} />
           <SettingsRowChevron icon="person-outline" label="상대 프로필" sub="gTrust · gDna" onPress={openPeerProfileInfo} />

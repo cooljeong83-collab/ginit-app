@@ -1,18 +1,9 @@
-import { BlurView } from 'expo-blur';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-    type PressableProps,
-    type PressableStateCallbackType,
-    type StyleProp,
-    type TextStyle,
-    type ViewStyle,
-} from 'react-native';
+    Platform, StyleSheet, Text, View, type PressableProps, type PressableStateCallbackType, type StyleProp, type TextStyle, type ViewStyle} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -58,7 +49,7 @@ export function GinitButton({
   };
 
   return (
-    <Pressable
+    <GinitPressable
       accessibilityRole="button"
       disabled={disabled}
       onPress={handlePress}
@@ -103,7 +94,7 @@ export function GinitButton({
           <Text style={[styles.label, { color: labelColor }, textStyle]}>{title}</Text>
         </View>
       )}
-    </Pressable>
+    </GinitPressable>
   );
 }
 

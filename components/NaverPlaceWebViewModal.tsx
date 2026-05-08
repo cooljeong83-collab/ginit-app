@@ -1,14 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  ActivityIndicator, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -61,7 +54,7 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <GestureHandlerRootView style={styles.gestureRoot}>
         <View style={[styles.modalRootCentered, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
-          <Pressable
+          <GinitPressable
             style={GinitStyles.modalBackdrop}
             onPress={handleClose}
             accessibilityRole="button"
@@ -79,9 +72,9 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
               },
             ]}>
             <View style={[GinitStyles.modalHeader, styles.sheetHeaderPad]}>
-              <Pressable onPress={handleClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
+              <GinitPressable onPress={handleClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
                 <Text style={GinitStyles.modalCancel}>닫기</Text>
-              </Pressable>
+              </GinitPressable>
               <View style={styles.headerTitleWrap}>
                 <Text style={GinitStyles.modalTitle} numberOfLines={1}>
                   {pageTitle}
@@ -130,13 +123,13 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
             ) : (
               <View style={styles.emptyBody}>
                 <Text style={styles.emptyText}>표시할 링크가 없어요.</Text>
-                <Pressable
+                <GinitPressable
                   onPress={handleClose}
                   style={({ pressed }) => [styles.emptyClose, pressed && { opacity: 0.88 }]}
                   accessibilityRole="button"
                   accessibilityLabel="닫기">
                   <Text style={GinitStyles.modalCancel}>닫기</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
             )}
           </View>

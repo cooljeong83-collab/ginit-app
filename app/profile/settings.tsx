@@ -1,5 +1,6 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect } from '@react-navigation/native';
+import {useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
@@ -7,21 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Linking,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  ToastAndroid,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Switch, Text, ToastAndroid, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingServiceAuthModal } from '@/components/profile/MeetingServiceAuthModal';
@@ -529,14 +516,14 @@ export default function ProfileAppSettingsScreen() {
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
-          <Pressable
+          <GinitPressable
             onPress={() => safeRouterBack(router)}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로"
             style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
-          </Pressable>
+          </GinitPressable>
           <Text style={styles.topTitle} numberOfLines={1}>
             설정
           </Text>
@@ -575,7 +562,7 @@ export default function ProfileAppSettingsScreen() {
             <RowSep />
             {Platform.OS !== 'web' ? (
               <>
-                <Pressable
+                <GinitPressable
                   onPress={() => {
                     if (soundLoaded) setSoundPickOpen(true);
                   }}
@@ -590,7 +577,7 @@ export default function ProfileAppSettingsScreen() {
                     </Text>
                   </View>
                   <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-                </Pressable>
+                </GinitPressable>
                 <RowSep />
               </>
             ) : null}
@@ -619,7 +606,7 @@ export default function ProfileAppSettingsScreen() {
             {dndOn && dndLoaded && Platform.OS !== 'web' ? (
               <>
                 
-                <Pressable
+                <GinitPressable
                   onPress={() =>
                     setDndPick({ kind: 'start', draft: dateFromMinutesOfDay(dndStartMin) })
                   }
@@ -631,9 +618,9 @@ export default function ProfileAppSettingsScreen() {
                     <Text style={styles.rowLabel}>시작 시각</Text>
                   </View>
                   <Text style={styles.dndTimeValue}>{formatDndTimeLabel(dndStartMin)}</Text>
-                </Pressable>
+                </GinitPressable>
                 
-                <Pressable
+                <GinitPressable
                   onPress={() => setDndPick({ kind: 'end', draft: dateFromMinutesOfDay(dndEndMin) })}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   accessibilityRole="button"
@@ -643,14 +630,14 @@ export default function ProfileAppSettingsScreen() {
                     <Text style={styles.rowLabel}>종료 시각</Text>
                   </View>
                   <Text style={styles.dndTimeValue}>{formatDndTimeLabel(dndEndMin)}</Text>
-                </Pressable>
+                </GinitPressable>
                 
               </>
             ) : null}
             {isSignedIn && Platform.OS !== 'web' ? (
               <>
                 <RowSep />
-                <Pressable
+                <GinitPressable
                   onPress={openMeetingNotifySettings}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   accessibilityRole="button"
@@ -660,7 +647,7 @@ export default function ProfileAppSettingsScreen() {
                     <Text style={styles.rowLabel}>공개 모임 생성 알림</Text>
                     <Text style={styles.rowSub}>관심 지역·카테고리별로 새 공개 모임만 알려요.</Text>
                   </View>
-                  <Pressable
+                  <GinitPressable
                     onPress={openMeetingNotifySettings}
                     hitSlop={10}
                     accessibilityElementsHidden
@@ -678,8 +665,8 @@ export default function ProfileAppSettingsScreen() {
                     ) : (
                       <ActivityIndicator color={GinitTheme.colors.primary} />
                     )}
-                  </Pressable>
-                </Pressable>
+                  </GinitPressable>
+                </GinitPressable>
               </>
             ) : null}
           </View>
@@ -687,7 +674,7 @@ export default function ProfileAppSettingsScreen() {
 
           <View style={[styles.block, styles.blockGap]}>
             {sectionTitle('기타')}
-            <Pressable
+            <GinitPressable
               onPress={() => router.push('/profile/meeting-history')}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
@@ -697,10 +684,10 @@ export default function ProfileAppSettingsScreen() {
                 <Text style={styles.rowLabel}>모임 히스토리</Text>
               </View>
               <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-            </Pressable>
+            </GinitPressable>
             <RowSep />
             
-            <Pressable
+            <GinitPressable
               onPress={onPressVersionInfo}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
@@ -710,11 +697,11 @@ export default function ProfileAppSettingsScreen() {
                 <Text style={styles.rowLabel}>버전 정보</Text>
                 <Text style={styles.rowSub}>{versionLine}</Text>
               </View>
-            </Pressable>
+            </GinitPressable>
             {showTestCrashRow ? (
               <>
                 <RowSep />
-                <Pressable
+                <GinitPressable
                   onPress={onPressTestCrash}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   accessibilityRole="button"
@@ -725,13 +712,13 @@ export default function ProfileAppSettingsScreen() {
                     <Text style={styles.rowSub}>Crashlytics 연동 확인용으로 앱을 강제 종료해요.</Text>
                   </View>
                   <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-                </Pressable>
+                </GinitPressable>
               </>
             ) : null}
 
             {isSignedIn ? (
               <>
-                <Pressable
+                <GinitPressable
                   onPress={() => setAuthSheetVisible(true)}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   accessibilityRole="button"
@@ -750,13 +737,13 @@ export default function ProfileAppSettingsScreen() {
                     )}
                   </View>
                   <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-                </Pressable>
+                </GinitPressable>
               </>
             ) : null}
             {isSignedIn ? (
               <>
                 <RowSep />
-                <Pressable
+                <GinitPressable
                   onPress={() => void onSignOut()}
                   disabled={busy || deleteBusy}
                   style={({ pressed }) => [
@@ -772,9 +759,9 @@ export default function ProfileAppSettingsScreen() {
                     <Text style={styles.rowSub}>이 기기에서 로그아웃해요.</Text>
                   </View>
                   <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-                </Pressable>
+                </GinitPressable>
                 <RowSep />
-                <Pressable
+                <GinitPressable
                   onPress={onRequestDeleteAccount}
                   disabled={deleteBusy || busy}
                   style={({ pressed }) => [
@@ -792,7 +779,7 @@ export default function ProfileAppSettingsScreen() {
                     <Text style={[styles.rowSub, styles.rowSubDanger]}>계정과 개인 식별 정보가 삭제돼요.</Text>
                   </View>
                   <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.danger} />
-                </Pressable>
+                </GinitPressable>
               </>
             ) : null}
           </View>
@@ -840,7 +827,7 @@ export default function ProfileAppSettingsScreen() {
               keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
               style={styles.soundSheetKbWrap}>
               <View style={styles.soundSheetRoot}>
-                <Pressable
+                <GinitPressable
                   style={styles.soundSheetBackdropFill}
                   onPress={() => setSoundPickOpen(false)}
                   accessibilityRole="button"
@@ -868,25 +855,25 @@ export default function ProfileAppSettingsScreen() {
                         const selected = soundId === item.id;
                         return (
                           <View style={styles.soundPickRow}>
-                            <Pressable
+                            <GinitPressable
                               onPress={() => void onPickNotificationSound(item.id)}
                               style={({ pressed }) => [styles.soundPickRowMain, pressed && styles.soundSheetPressed]}
                               accessibilityRole="button"
                               accessibilityState={{ selected }}
                               accessibilityLabel={item.label}>
                               <Text style={styles.soundPickLabel}>{item.label}</Text>
-                            </Pressable>
+                            </GinitPressable>
                             {item.id === 'default' ? (
                               <View style={styles.soundPickPreviewPlaceholder} pointerEvents="none" />
                             ) : (
-                              <Pressable
+                              <GinitPressable
                                 onPress={() => void onPreviewNotificationSound(item.id)}
                                 style={({ pressed }) => [styles.soundPickPreviewBtn, pressed && { opacity: 0.86 }]}
                                 hitSlop={8}
                                 accessibilityRole="button"
                                 accessibilityLabel={`${item.label} 미리듣기`}>
                                 <GinitSymbolicIcon name="volume-high-outline" size={20} color="#0f172a" />
-                              </Pressable>
+                              </GinitPressable>
                             )}
                             {selected ? (
                               <Text style={styles.soundPickCheck}>✓</Text>
@@ -907,7 +894,7 @@ export default function ProfileAppSettingsScreen() {
         {dndPick && Platform.OS === 'ios' ? (
           <Modal visible transparent animationType="fade" onRequestClose={() => setDndPick(null)}>
             <View style={GinitStyles.modalRoot}>
-              <Pressable
+              <GinitPressable
                 style={GinitStyles.modalBackdrop}
                 onPress={() => setDndPick(null)}
                 accessibilityRole="button"
@@ -923,12 +910,12 @@ export default function ProfileAppSettingsScreen() {
                   justifyContent: 'space-between',
                   paddingHorizontal: 16,
                 }}>
-                <Pressable onPress={() => setDndPick(null)} hitSlop={10} accessibilityRole="button">
+                <GinitPressable onPress={() => setDndPick(null)} hitSlop={10} accessibilityRole="button">
                   <Text style={GinitStyles.modalCancel}>취소</Text>
-                </Pressable>
-                <Pressable onPress={confirmDndIosPick} hitSlop={10} accessibilityRole="button">
+                </GinitPressable>
+                <GinitPressable onPress={confirmDndIosPick} hitSlop={10} accessibilityRole="button">
                   <Text style={GinitStyles.modalDone}>완료</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
               <View
                 pointerEvents="box-none"

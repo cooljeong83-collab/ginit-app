@@ -1,6 +1,7 @@
-import { LinearGradient } from 'expo-linear-gradient';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -17,7 +18,7 @@ type Props = {
 export function ChatListCardShell({ accentGradient, onPress, accessibilityLabel, children }: Props) {
   return (
     <View style={styles.meetRowWrap}>
-      <Pressable
+      <GinitPressable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
@@ -33,7 +34,7 @@ export function ChatListCardShell({ accentGradient, onPress, accessibilityLabel,
             <View style={styles.cardInner}>{children}</View>
           </View>
         </View>
-      </Pressable>
+      </GinitPressable>
     </View>
   );
 }

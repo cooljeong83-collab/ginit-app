@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {useCallback } from 'react';
+import { Text, View } from 'react-native'
 
 import { AgentApplyRippleLayer } from './agent-apply-ripple';
 import { wizardSpecialtyStyles as S } from './wizard-specialty-styles';
@@ -34,7 +35,7 @@ export function MenuPreference({ value, onChange, disabled, agentCueLabel = null
           const active = value.includes(label);
           const isAgentCue = agentCueLabel != null && label === agentCueLabel;
           return (
-            <Pressable
+            <GinitPressable
               key={label}
               onPress={() => selectOne(label)}
               disabled={disabled}
@@ -47,7 +48,7 @@ export function MenuPreference({ value, onChange, disabled, agentCueLabel = null
               accessibilityState={{ selected: active }}>
               <AgentApplyRippleLayer active={isAgentCue} size="md" />
               <Text style={S.glassChipText}>{label}</Text>
-            </Pressable>
+            </GinitPressable>
           );
         })}
       </View>

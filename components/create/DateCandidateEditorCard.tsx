@@ -1,17 +1,10 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 /**
  * 일시 후보 카드 — 날짜/시간 입력 전용 (VoteCandidatesForm 전용).
  */
-import { useMemo, useRef, type ReactNode, type RefObject } from 'react';
+import {useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import {
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-    type StyleProp,
-    type ViewStyle,
-} from 'react-native';
+    Platform, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle} from 'react-native';
 
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
@@ -156,7 +149,7 @@ export function DateCandidateEditorCard({
 
   const renderNativePair = () => (
     <View style={styles.row2}>
-      <Pressable
+      <GinitPressable
         onPress={() => onOpenPicker('startDate')}
         style={({ pressed }) => [styles.chipPressable, pressed && styles.chipPressed]}
         accessibilityRole="button"
@@ -166,8 +159,8 @@ export function DateCandidateEditorCard({
             {d.startDate}
           </Text>
         </View>
-      </Pressable>
-      <Pressable
+      </GinitPressable>
+      <GinitPressable
         onPress={() => onOpenPicker('startTime')}
         style={({ pressed }) => [styles.chipPressable, pressed && styles.chipPressed]}
         accessibilityRole="button"
@@ -177,7 +170,7 @@ export function DateCandidateEditorCard({
             {d.startTime ?? '—'}
           </Text>
         </View>
-      </Pressable>
+      </GinitPressable>
     </View>
   );
 
@@ -185,9 +178,9 @@ export function DateCandidateEditorCard({
     <VoteGlassShell reduceHeavyEffects={reduceHeavyEffects}>
       <View style={styles.inner}>
         {canDelete ? (
-          <Pressable onPress={onRemove} style={styles.deleteIconBtn} accessibilityRole="button" hitSlop={6}>
+          <GinitPressable onPress={onRemove} style={styles.deleteIconBtn} accessibilityRole="button" hitSlop={6}>
             <Text style={styles.deleteIconText}>✕</Text>
-          </Pressable>
+          </GinitPressable>
         ) : null}
 
         <Text style={[styles.cardFieldTitle, !canDelete && styles.cardFieldTitleNoDelete]}>

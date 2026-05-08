@@ -1,48 +1,19 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 /**
  * 일정·장소 투표 후보 편집 폼 — 원본: `app/create/details.tsx`에서 분리.
  */
 
 
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from 'react';
+  forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  Image,
-  InteractionManager,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+  ActivityIndicator, Alert, Animated, Easing, Image, InteractionManager, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type ViewStyle} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
@@ -1797,7 +1768,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     const isAfterWindow = c.ymd > maxYmd;
                     const cellDisabled = isPast || isAfterWindow;
                     return (
-                      <Pressable
+                      <GinitPressable
                         key={c.ymd}
                         disabled={cellDisabled}
                         onPress={() => {
@@ -1844,7 +1815,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             {' '}
                           </Text>
                         )}
-                      </Pressable>
+                      </GinitPressable>
                     );
                   })}
                 </View>
@@ -1892,7 +1863,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   inputMode="text"
                   underlineColorAndroid="transparent"
                 />
-                <Pressable
+                <GinitPressable
                   onPress={() => onPressVoiceInput('scheduleIdea')}
                   style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
                   hitSlop={10}
@@ -1903,7 +1874,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   ) : (
                     <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           </LinearGradient>
@@ -1916,7 +1887,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.aiPreviewScroll}>
                 {weekendPreviewSlots.map((slot) => (
-                  <Pressable
+                  <GinitPressable
                     key={`${slot.ymd}-${slot.hm}`}
                     onPress={() => appendWeekendPreviewSlot(slot)}
                     style={({ pressed }) => [
@@ -1929,11 +1900,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     <Text style={styles.aiPreviewScheduleChipLabel} numberOfLines={1} ellipsizeMode="tail">
                       {`${slot.ymd} · ${slot.hm}`}
                     </Text>
-                  </Pressable>
+                  </GinitPressable>
                 ))}
               </ScrollView>
             ) : nlpParsed ? (
-              <Pressable
+              <GinitPressable
                 onPress={onPressAiPreviewParsed}
                 style={({ pressed }) => [
                   styles.aiPreviewScheduleChip,
@@ -1952,7 +1923,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     return `${datePart} · ${timePart}`;
                   })()}
                 </Text>
-              </Pressable>
+              </GinitPressable>
             ) : (
               <View style={styles.aiPreviewScheduleChipPlaceholder}>
                 <Text style={styles.aiPreviewScheduleChipHint} numberOfLines={1} ellipsizeMode="tail">
@@ -1963,13 +1934,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           </View>
 
           {!scheduleAiReplacesFirstCandidate && !(bare && wizardSegment === 'schedule') ? (
-            <Pressable
+            <GinitPressable
               onPress={addDateRow}
               style={({ pressed }) => [styles.addCandidateBtn, pressed && styles.addCandidateBtnPressed]}
               accessibilityRole="button"
               accessibilityLabel="일자 후보 등록">
               <Text style={styles.addCandidateBtnLabel}>+ 일자 후보 등록</Text>
-            </Pressable>
+            </GinitPressable>
           ) : null}
 
           {/** 일반 일정은 AI 미리보기 카드 탭으로 추가할 수 있고, 위 버튼으로 빈 일자 행을 직접 추가할 수 있어요. (날짜 제안 모달은 첫 행만 덮어쓰므로 버튼 숨김) */}
@@ -2001,7 +1972,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               setScheduleCalendarPagerW((prev) => (Math.abs(w - prev) > 1 ? w : prev));
             }}>
             <View style={styles.scheduleCalendarHeaderRow}>
-              <Pressable
+              <GinitPressable
                 onPress={() => {
                   const prev = new Date(year, month - 1, 1);
                   setCalendarMonth(monthStartYmd(fmtDate(prev)));
@@ -2010,8 +1981,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 accessibilityRole="button"
                 accessibilityLabel="이전 달">
                 <GinitSymbolicIcon name="chevron-back" size={18} color={GinitTheme.colors.primary} />
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 onPress={() => {
                   setScheduleCalendarYmPick({ draft: new Date(year, month, 1) });
                 }}
@@ -2019,8 +1990,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 accessibilityRole="button"
                 accessibilityLabel={`년·월 선택 ${monthLabel}`}>
                 <Text style={styles.scheduleCalendarTitle}>{monthLabel}</Text>
-              </Pressable>
-              <Pressable
+              </GinitPressable>
+              <GinitPressable
                 disabled={!canGoScheduleCalendarNext}
                 onPress={() => {
                   if (!canGoScheduleCalendarNext) return;
@@ -2035,7 +2006,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 accessibilityRole="button"
                 accessibilityLabel="다음 달">
                 <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.primary} />
-              </Pressable>
+              </GinitPressable>
             </View>
             <View style={styles.calendarDowRow}>
               {WEEKDAY_KO.map((w) => (
@@ -2158,7 +2129,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   inputMode="text"
                   underlineColorAndroid="transparent"
                 />
-                <Pressable
+                <GinitPressable
                   onPress={() => onPressVoiceInput('placeQuery')}
                   style={({ pressed }) => [styles.voiceBtn, pressed && styles.voiceBtnPressed]}
                   hitSlop={10}
@@ -2169,7 +2140,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   ) : (
                     <GinitSymbolicIcon name="mic" size={18} color={GinitTheme.colors.primary} />
                   )}
-                </Pressable>
+                </GinitPressable>
               </View>
             </View>
           </LinearGradient>
@@ -2182,7 +2153,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.placeSuggestRow}>
               {placeSuggestedQueries.map((q) => (
-                <Pressable
+                <GinitPressable
                   key={q}
                   onPress={() => {
                     placeQueryUserTouchedRef.current = true;
@@ -2195,7 +2166,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   <Text style={styles.placeSuggestChipText} numberOfLines={1}>
                     {q}
                   </Text>
-                </Pressable>
+                </GinitPressable>
               ))}
             </ScrollView>
           ) : null}
@@ -2254,7 +2225,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             styles.placeResultProposalCardWrap,
                             selected && styles.placeResultImageCardSelected,
                           ]}>
-                          <Pressable
+                          <GinitPressable
                             onPress={() => {
                               if (resolving) return;
                               layoutAnimateMeetingCreateWizard();
@@ -2368,7 +2339,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                 </Text>
                               ) : null}
                             </View>
-                          </Pressable>
+                          </GinitPressable>
                           <PlaceCandidateDetailLinkRow
                             title={item.title}
                             link={item.link}
@@ -2409,9 +2380,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 {row.placeName}
               </Text>
               {!placesListOnly ? (
-                <Pressable onPress={() => removePlaceCandidate(row.id)} accessibilityRole="button">
+                <GinitPressable onPress={() => removePlaceCandidate(row.id)} accessibilityRole="button">
                   <Text style={styles.placePickedRemove}>삭제</Text>
-                </Pressable>
+                </GinitPressable>
               ) : null}
             </View>
           ))}
@@ -2476,7 +2447,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {timePick && Platform.OS === 'ios' ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
           <View style={GinitStyles.modalRoot}>
-            <Pressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
+            <GinitPressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
             <View
               pointerEvents="box-none"
               style={{
@@ -2488,12 +2459,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 justifyContent: 'space-between',
                 paddingHorizontal: 16,
               }}>
-              <Pressable onPress={() => setTimePick(null)} hitSlop={10} accessibilityRole="button">
+              <GinitPressable onPress={() => setTimePick(null)} hitSlop={10} accessibilityRole="button">
                 <Text style={GinitStyles.modalCancel}>취소</Text>
-              </Pressable>
-              <Pressable onPress={confirmTimePick} hitSlop={10} accessibilityRole="button">
+              </GinitPressable>
+              <GinitPressable onPress={confirmTimePick} hitSlop={10} accessibilityRole="button">
                 <Text style={GinitStyles.modalDone}>완료</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
             <View
               pointerEvents="box-none"
@@ -2525,21 +2496,21 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {timePick && Platform.OS !== 'android' && Platform.OS !== 'ios' ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
           <View style={GinitStyles.modalRoot}>
-            <Pressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
+            <GinitPressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
             <View style={[GinitStyles.modalSheet, { maxHeight: 320 }]}>
               <View style={GinitStyles.modalHeader}>
-                <Pressable onPress={() => setTimePick(null)} hitSlop={10}>
+                <GinitPressable onPress={() => setTimePick(null)} hitSlop={10}>
                   <Text style={GinitStyles.modalCancel}>취소</Text>
-                </Pressable>
+                </GinitPressable>
                 <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
                   <Text style={GinitStyles.modalTitle}>시간 선택</Text>
                   <Text style={styles.timePickHint} numberOfLines={1}>
                     {timePick.ymd}
                   </Text>
                 </View>
-                <Pressable onPress={confirmTimePick} hitSlop={10}>
+                <GinitPressable onPress={confirmTimePick} hitSlop={10}>
                   <Text style={GinitStyles.modalDone}>완료</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
               <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
                 <DateTimePicker
@@ -2589,7 +2560,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {scheduleCalendarYmPick && Platform.OS !== 'android' ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setScheduleCalendarYmPick(null)}>
           <View style={GinitStyles.modalRoot}>
-            <Pressable
+            <GinitPressable
               style={GinitStyles.modalBackdrop}
               onPress={() => setScheduleCalendarYmPick(null)}
               accessibilityRole="button"
@@ -2605,12 +2576,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 justifyContent: 'space-between',
                 paddingHorizontal: 16,
               }}>
-              <Pressable onPress={() => setScheduleCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
+              <GinitPressable onPress={() => setScheduleCalendarYmPick(null)} hitSlop={10} accessibilityRole="button">
                 <Text style={GinitStyles.modalCancel}>취소</Text>
-              </Pressable>
-              <Pressable onPress={confirmScheduleCalendarYmPick} hitSlop={10} accessibilityRole="button">
+              </GinitPressable>
+              <GinitPressable onPress={confirmScheduleCalendarYmPick} hitSlop={10} accessibilityRole="button">
                 <Text style={GinitStyles.modalDone}>완료</Text>
-              </Pressable>
+              </GinitPressable>
             </View>
             <View
               pointerEvents="box-none"
@@ -2650,7 +2621,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {picker && Platform.OS === 'ios' ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setPicker(null)}>
           <View style={GinitStyles.modalRoot}>
-            <Pressable style={GinitStyles.modalBackdrop} onPress={() => setPicker(null)} accessibilityRole="button" />
+            <GinitPressable style={GinitStyles.modalBackdrop} onPress={() => setPicker(null)} accessibilityRole="button" />
             <View
               style={[
                 GinitStyles.modalSheet,
@@ -2658,13 +2629,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 { maxHeight: Math.min(420, Math.floor(windowHeight * 0.55)), overflow: 'hidden' },
               ]}>
               <View style={GinitStyles.modalHeader}>
-                <Pressable onPress={() => setPicker(null)} hitSlop={10}>
+                <GinitPressable onPress={() => setPicker(null)} hitSlop={10}>
                   <Text style={GinitStyles.modalCancel}>취소</Text>
-                </Pressable>
+                </GinitPressable>
                 <Text style={GinitStyles.modalTitle}>{pickerFieldLabel(picker.field)}</Text>
-                <Pressable onPress={applyIosPicker} hitSlop={10}>
+                <GinitPressable onPress={applyIosPicker} hitSlop={10}>
                   <Text style={GinitStyles.modalDone}>완료</Text>
-                </Pressable>
+                </GinitPressable>
               </View>
               <DateTimePicker
                 value={iosDraft}

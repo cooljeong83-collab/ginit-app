@@ -1,20 +1,11 @@
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useFocusEffect } from '@react-navigation/native';
+import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+  ActivityIndicator, Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
@@ -104,20 +95,20 @@ function PendingGinitRow({
         </Text>
       </View>
       <View style={s.rowActions}>
-        <Pressable
+        <GinitPressable
           accessibilityRole="button"
           accessibilityLabel="수락"
           onPress={() => onAccept(row)}
           style={({ pressed }) => [s.rowActionBtnPrimary, pressed && { opacity: 0.88 }]}>
           <Text style={s.rowActionBtnPrimaryText}>수락</Text>
-        </Pressable>
-        <Pressable
+        </GinitPressable>
+        <GinitPressable
           accessibilityRole="button"
           accessibilityLabel="거절"
           onPress={() => onDecline(row)}
           style={({ pressed }) => [s.rowActionBtnGhost, pressed && { opacity: 0.88 }]}>
           <Text style={s.rowActionBtnGhostText}>거절</Text>
-        </Pressable>
+        </GinitPressable>
       </View>
     </View>
   );
@@ -161,13 +152,13 @@ function OutgoingGinitRow({
       </View>
       <View style={s.rowActions}>
         {canCancel ? (
-          <Pressable
+          <GinitPressable
             accessibilityRole="button"
             accessibilityLabel="요청 취소"
             onPress={() => onCancel(row)}
             style={({ pressed }) => [s.rowActionBtnGhost, pressed && { opacity: 0.88 }]}>
             <Text style={s.rowActionBtnGhostText}>취소</Text>
-          </Pressable>
+          </GinitPressable>
         ) : (
           <View style={s.rowStatusPill} accessibilityElementsHidden>
             <Text style={s.rowStatusPillText}>연결됨</Text>
@@ -217,7 +208,7 @@ function FriendListRow({
 
   return (
     <View style={s.friendRow}>
-      <Pressable
+      <GinitPressable
         onPress={onPressAvatar}
         accessibilityRole="button"
         accessibilityLabel={`${rowTitleText || profile.nickname || '친구'} 프로필`}
@@ -231,10 +222,10 @@ function FriendListRow({
             </View>
           )}
         </View>
-      </Pressable>
+      </GinitPressable>
       <View style={s.friendRowMain}>
         <View style={s.rowCenter}>
-          <Pressable
+          <GinitPressable
             onPress={onPressOpenChat}
             onLongPress={onLongPressFriendMenu}
             accessibilityRole="button"
@@ -249,17 +240,17 @@ function FriendListRow({
                 {subtitle || ' '}
               </Text>
               {showOpenMeeting && onPressOpenMeeting ? (
-                <Pressable
+                <GinitPressable
                   onPress={onPressOpenMeeting}
                   hitSlop={6}
                   accessibilityRole="button"
                   accessibilityLabel="친구 모임 보기"
                   style={({ pressed }) => [s.openMeetingBtn, pressed && { opacity: 0.88 }]}>
                   <Text style={s.openMeetingBtnText}>친구 모임 보기</Text>
-                </Pressable>
+                </GinitPressable>
               ) : null}
             </View>
-          </Pressable>
+          </GinitPressable>
         </View>
       </View>
     </View>
@@ -665,7 +656,7 @@ export function FriendsHomeScreen() {
     const showRequests = pending.length > 0 || pendingOut.length > 0;
     return (
       <View>
-        <Pressable
+        <GinitPressable
           onPress={goMyProfile}
           style={({ pressed }) => [s.myRow, pressed && { opacity: 0.88 }]}
           accessibilityRole="button"
@@ -688,7 +679,7 @@ export function FriendsHomeScreen() {
             </Text>
           </View>
           <GinitSymbolicIcon name="chevron-forward" size={18} color="rgba(100, 116, 139, 0.9)" />
-        </Pressable>
+        </GinitPressable>
 
         {showRequests ? (
           <>
@@ -872,15 +863,15 @@ export function FriendsHomeScreen() {
               친구
             </Text>
             <View style={s.headerIcons}>
-              <Pressable accessibilityLabel="검색" hitSlop={8} onPress={onToggleSearch} style={s.iconBtn}>
+              <GinitPressable accessibilityLabel="검색" hitSlop={8} onPress={onToggleSearch} style={s.iconBtn}>
                 <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
-              </Pressable>
-              <Pressable accessibilityLabel="친구 추가" hitSlop={8} onPress={goAddFriend} style={s.iconBtn}>
+              </GinitPressable>
+              <GinitPressable accessibilityLabel="친구 추가" hitSlop={8} onPress={goAddFriend} style={s.iconBtn}>
                 <GinitSymbolicIcon name="person-add-outline" size={22} color="#0f172a" />
-              </Pressable>
-              <Pressable accessibilityLabel="친구 관리" hitSlop={8} onPress={goFriendManage} style={s.iconBtn}>
+              </GinitPressable>
+              <GinitPressable accessibilityLabel="친구 관리" hitSlop={8} onPress={goFriendManage} style={s.iconBtn}>
                 <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
-              </Pressable>
+              </GinitPressable>
             </View>
           </View>
           {searchOpen ? (
@@ -897,13 +888,13 @@ export function FriendsHomeScreen() {
                 autoCapitalize="none"
               />
               {search.length > 0 ? (
-                <Pressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel="검색 지우기">
+                <GinitPressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel="검색 지우기">
                   <GinitSymbolicIcon name="close-circle" size={20} color="#94a3b8" />
-                </Pressable>
+                </GinitPressable>
               ) : (
-                <Pressable onPress={onToggleSearch} hitSlop={8} accessibilityLabel="검색 닫기">
+                <GinitPressable onPress={onToggleSearch} hitSlop={8} accessibilityLabel="검색 닫기">
                   <GinitSymbolicIcon name="close" size={20} color="#94a3b8" />
-                </Pressable>
+                </GinitPressable>
               )}
             </View>
           ) : null}
@@ -940,7 +931,7 @@ export function FriendsHomeScreen() {
 
         <Modal visible={sheetFriend != null} transparent animationType="slide" onRequestClose={() => setSheetFriend(null)}>
           <View style={s.sheetDim}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSheetFriend(null)} />
+            <GinitPressable style={StyleSheet.absoluteFill} onPress={() => setSheetFriend(null)} />
             <View style={[s.sheetPanel, { paddingBottom: insets.bottom + 16 }]}>
               <View style={s.sheetGrab} />
               {sheetFriend ? (
@@ -970,27 +961,27 @@ export function FriendsHomeScreen() {
                       openDm(peer, nick);
                     }}
                   />
-                  <Pressable
+                  <GinitPressable
                     accessibilityRole="button"
                     accessibilityLabel="목록에서 숨기기"
                     onPress={onHideFriendFromSheet}
                     style={({ pressed }) => [s.sheetSecondaryBtn, pressed && { opacity: 0.88 }]}>
                     <Text style={s.sheetSecondaryTxt}>목록에서 숨기기</Text>
-                  </Pressable>
-                  <Pressable
+                  </GinitPressable>
+                  <GinitPressable
                     accessibilityRole="button"
                     accessibilityLabel="차단"
                     onPress={onBlockFriendFromSheet}
                     style={({ pressed }) => [s.sheetBlockBtn, pressed && { opacity: 0.88 }]}>
                     <Text style={s.sheetBlockTxt}>차단</Text>
-                  </Pressable>
-                  <Pressable
+                  </GinitPressable>
+                  <GinitPressable
                     accessibilityRole="button"
                     accessibilityLabel="친구 삭제"
                     onPress={onRemoveAcceptedFriend}
                     style={({ pressed }) => [s.sheetDeleteBtn, pressed && { opacity: 0.88 }]}>
                     <Text style={s.sheetDeleteTxt}>친구 삭제</Text>
-                  </Pressable>
+                  </GinitPressable>
                   <Text style={s.sheetTitle}>{sheetFriend.profile.nickname}님</Text>
                   <Text style={s.sheetSub}>gDna</Text>
                   <Text style={s.sheetBody}>{sheetFriend.profile.gDna?.trim() || '등록된 gDna가 없어요.'}</Text>
@@ -1001,7 +992,7 @@ export function FriendsHomeScreen() {
                       <Text style={s.sheetMuted}>함께한 공개·참여 모임이 아직 없어요.</Text>
                     ) : (
                       sheetMutualMeetings.map((m) => (
-                        <Pressable
+                        <GinitPressable
                           key={m.id}
                           onPress={() => {
                             if (!armFriendsTabOpenLock()) return;
@@ -1013,13 +1004,13 @@ export function FriendsHomeScreen() {
                             {m.title}
                           </Text>
                           <GinitSymbolicIcon name="chevron-forward" size={18} color="#94a3b8" />
-                        </Pressable>
+                        </GinitPressable>
                       ))
                     )}
                   </ScrollView>
-                  <Pressable style={s.sheetClose} onPress={() => setSheetFriend(null)}>
+                  <GinitPressable style={s.sheetClose} onPress={() => setSheetFriend(null)}>
                     <Text style={s.sheetCloseTxt}>닫기</Text>
-                  </Pressable>
+                  </GinitPressable>
                 </>
               ) : null}
             </View>

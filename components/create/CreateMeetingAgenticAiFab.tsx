@@ -1,8 +1,9 @@
-import { BlurView } from 'expo-blur';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import {BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import Animated, {
   Easing,
   Extrapolation,
@@ -786,22 +787,22 @@ export function CreateMeetingAgenticAiFab({
           <View style={styles.bubbleActionOverlay} pointerEvents="box-none">
             <View style={styles.bubbleActions} pointerEvents="box-none">
               {showAcceptButton ? (
-                <Pressable
+                <GinitPressable
                   onPress={() => playAcceptAutopilotThenApply()}
                   style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
                   accessibilityRole="button"
                   accessibilityLabel="수락">
                   <Text style={styles.bubbleActionLabel}>수락</Text>
-                </Pressable>
+                </GinitPressable>
               ) : null}
               {secondaryActionLabel ? (
-                <Pressable
+                <GinitPressable
                   onPress={() => runSecondaryAction()}
                   style={({ pressed }) => [styles.bubbleActionBtn, pressed && { opacity: 0.86 }]}
                   accessibilityRole="button"
                   accessibilityLabel={secondaryActionLabel}>
                   <Text style={styles.bubbleActionLabel}>{secondaryActionLabel}</Text>
-                </Pressable>
+                </GinitPressable>
               ) : null}
             </View>
           </View>
@@ -819,13 +820,13 @@ export function CreateMeetingAgenticAiFab({
         <Animated.View style={[styles.floorShadowBlob, floorShadowStyle]} />
       </View>
       <Animated.View style={[styles.btnLift, btnStyle]}>
-        <Pressable
+        <GinitPressable
           onPress={onAiFabPress}
           accessibilityRole="button"
           accessibilityLabel="모임 만들기 도우미 AI"
           style={styles.pressFill}>
           {({ pressed }) => <AiCircleButton pressed={pressed} />}
-        </Pressable>
+        </GinitPressable>
       </Animated.View>
     </View>
   );
