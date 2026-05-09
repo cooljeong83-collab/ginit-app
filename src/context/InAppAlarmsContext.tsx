@@ -1,17 +1,29 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Notifications from 'expo-notifications';
+import { useQueryClient } from '@tanstack/react-query';
 import {useRouter } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import {
   createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, } from 'react';
 import {
-  AppState, type AppStateStatus, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+  AppState,
+  type AppStateStatus,
+  DeviceEventEmitter,
+  InteractionManager,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
   fetchFriendsAcceptedList,
@@ -28,6 +40,7 @@ import {
   type InAppAlarmRow,
   MEETING_INFO_FP_PREFIX,
   meetingInfoFingerprint,
+  stableSortedParticipantLine,
 } from '@/src/lib/in-app-alarms';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
@@ -35,7 +48,12 @@ import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import { clearMeetingChatUnreadForUser, subscribeMeetingChatRoomSummary, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
-import type { Meeting } from '@/src/lib/meetings';
+import {
+  type Meeting,
+  isGinitWebGuestParticipantId,
+  meetingParticipantCount,
+  webGuestDisplayNameFromMeeting,
+} from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
@@ -116,6 +134,7 @@ export function useInAppAlarms(): InAppAlarmsContextValue {
 }
 
 export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -192,6 +211,15 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const nextPlaces = next.placeCandidates?.length ?? 0;
     if (nextPlaces > prevPlaces) return `장소 후보가 ${nextPlaces - prevPlaces}개 추가되었습니다.`;
     if ((prev.title ?? '') !== (next.title ?? '')) return '모임 제목이 변경되었습니다.';
+    const prevPart = stableSortedParticipantLine(prev.participantIds);
+    const nextPart = stableSortedParticipantLine(next.participantIds);
+    if (prevPart !== nextPart) {
+      const pc = meetingParticipantCount(prev);
+      const nc = meetingParticipantCount(next);
+      if (nc > pc) return '새 참여자가 들어왔어요.';
+      if (nc < pc) return '참여자가 나갔어요.';
+      return '참여자 구성이 바뀌었어요.';
+    }
     return '모임 정보가 변경되었습니다.';
   }, []);
 
@@ -712,7 +740,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!persistReady || !userId?.trim() || !headsUpReady) return;
+    if (!persistReady || !userId?.trim()) return;
 
     const uid = userId.trim();
     const myPk = normalizeParticipantId(uid);
@@ -725,7 +753,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       const mid = j.id;
       const m = meetingById.get(mid);
       if (!m) continue;
-      // 1) 호스트: 참여자 입장/퇴장 이벤트는 ACK와 무관하게 누적 알림/새소식으로 남깁니다.
+      // 1) 호스트: 참여자 입장/퇴장 — headsUpReady 전에도 새 소식에 쌓이게(채팅 최신 구독 지연과 무관)
       const myIsHost = normalizeParticipantId(m.createdBy?.trim() ?? '') === myPk;
       if (myIsHost) {
         const hasPrev = Object.prototype.hasOwnProperty.call(prevParticipantSetRef.current, mid);
@@ -743,47 +771,78 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           const delta = [...added, ...removed];
           if (delta.length > 0) {
             void (async () => {
-              const map = await getUserProfilesForIds(delta);
-              const nick = (id: string) => map.get(id)?.nickname?.trim() || '참여자';
-              let msg = '';
-              const prevN = prevSet.size;
-              const nextN = nextSet.size;
-              if (nextN > prevN && added.length > 0) {
-                msg =
-                  added.length === 1
-                    ? `${nick(added[0])}님이 참여하셨습니다.`
-                    : `${added.length}명이 참여하셨습니다.`;
-              } else if (nextN < prevN && removed.length > 0) {
-                msg =
-                  removed.length === 1
-                    ? `${nick(removed[0])}님이 나갔습니다.`
-                    : `${removed.length}명이 나갔습니다.`;
-              } else if (added.length > 0 && removed.length === 0) {
-                msg =
-                  added.length === 1
-                    ? `${nick(added[0])}님이 참여하셨습니다.`
-                    : `${added.length}명이 참여하셨습니다.`;
-              } else if (removed.length > 0 && added.length === 0) {
-                msg =
-                  removed.length === 1
-                    ? `${nick(removed[0])}님이 나갔습니다.`
-                    : `${removed.length}명이 나갔습니다.`;
-              } else if (added.length > 0 && removed.length > 0) {
-                msg = '참여자가 변경되었습니다.';
-              }
-              if (msg) {
+              try {
+                const map = await getUserProfilesForIds(delta);
+                const nick = (id: string) => {
+                  if (isGinitWebGuestParticipantId(id)) {
+                    const w = webGuestDisplayNameFromMeeting(m, id)?.trim();
+                    if (w) return w;
+                  }
+                  return map.get(id)?.nickname?.trim() || '참여자';
+                };
+                let msg = '';
+                const prevN = prevSet.size;
+                const nextN = nextSet.size;
+                if (nextN > prevN && added.length > 0) {
+                  msg =
+                    added.length === 1
+                      ? `${nick(added[0]!)}님이 참여하셨습니다.`
+                      : `${added.length}명이 참여하셨습니다.`;
+                } else if (nextN < prevN && removed.length > 0) {
+                  msg =
+                    removed.length === 1
+                      ? `${nick(removed[0]!)}님이 나갔습니다.`
+                      : `${removed.length}명이 나갔습니다.`;
+                } else if (added.length > 0 && removed.length === 0) {
+                  msg =
+                    added.length === 1
+                      ? `${nick(added[0]!)}님이 참여하셨습니다.`
+                      : `${added.length}명이 참여하셨습니다.`;
+                } else if (removed.length > 0 && added.length === 0) {
+                  msg =
+                    removed.length === 1
+                      ? `${nick(removed[0]!)}님이 나갔습니다.`
+                      : `${removed.length}명이 나갔습니다.`;
+                } else if (added.length > 0 && removed.length > 0) {
+                  msg = '참여자가 변경되었습니다.';
+                }
+                if (msg) {
+                  const now = Date.now();
+                  const evId = `${mid}:${now}:${Math.random().toString(36).slice(2)}`;
+                  setHostParticipantEventLog((prev) => {
+                    const cur = prev[mid] ?? [];
+                    const nextEv = [{ id: evId, subtitle: msg, sortMs: now }, ...cur].slice(0, 50);
+                    return { ...prev, [mid]: nextEv };
+                  });
+                }
+              } catch {
                 const now = Date.now();
                 const evId = `${mid}:${now}:${Math.random().toString(36).slice(2)}`;
+                const msg =
+                  added.length && !removed.length
+                    ? added.length === 1
+                      ? '새 참여자가 들어왔어요.'
+                      : `${added.length}명이 참여하셨습니다.`
+                    : removed.length && !added.length
+                      ? removed.length === 1
+                        ? '참여자가 나갔어요.'
+                        : `${removed.length}명이 나갔습니다.`
+                      : '참여자가 변경되었습니다.';
                 setHostParticipantEventLog((prev) => {
                   const cur = prev[mid] ?? [];
-                  const next = [{ id: evId, subtitle: msg, sortMs: now }, ...cur].slice(0, 50);
-                  return { ...prev, [mid]: next };
+                  const nextEv = [{ id: evId, subtitle: msg, sortMs: now }, ...cur].slice(0, 50);
+                  return { ...prev, [mid]: nextEv };
                 });
               }
             })();
           }
         }
         prevParticipantSetRef.current[mid] = nextLine;
+      }
+
+      if (!headsUpReady) {
+        prevMeetingSnapshotRef.current[mid] = m;
+        continue;
       }
 
       const fp = meetingInfoFingerprint(m);
@@ -1107,6 +1166,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const openAlarmPanel = useCallback(() => setPanelOpen(true), []);
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
+  /** 홈 탐색 피드·내 모임 목록·모임 상세 캐시 갱신(알람 탭 후 목록/상세 불일치 방지) */
+  const requestHomeMeetingsAndDetailRefresh = useCallback(
+    (meetingId: string) => {
+      const mid = meetingId.trim();
+      if (!mid) return;
+      void queryClient.invalidateQueries({ queryKey: ['meetings', 'feed'] });
+      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(mid) });
+      DeviceEventEmitter.emit('ginit_home_meetings_refetch');
+    },
+    [queryClient],
+  );
+
   const markAllAlarmsAsRead = useCallback(() => {
     const joined = filterJoinedMeetings(meetings, userId);
     const meetingById = new Map(meetings.map((m) => [m.id, m]));
@@ -1169,8 +1240,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
             chatReadMessageId: { ...p.chatReadMessageId, [row.meetingId]: lid },
           }));
         }
+        requestHomeMeetingsAndDetailRefresh(row.meetingId);
         closeAlarmPanel();
-        router.push(`/meeting-chat/${row.meetingId}`);
+        InteractionManager.runAfterInteractions(() => {
+          router.push(`/meeting-chat/${row.meetingId}`);
+        });
         return;
       }
       if (row.kind === 'social_dm') {
@@ -1195,6 +1269,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           meetingAckFingerprint: { ...p.meetingAckFingerprint, [row.meetingId]: fp },
         }));
       }
+      requestHomeMeetingsAndDetailRefresh(row.meetingId);
       setHostParticipantEventLog((prev) => {
         if (!prev[row.meetingId]?.length) return prev;
         const next = { ...prev };
@@ -1202,9 +1277,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         return next;
       });
       closeAlarmPanel();
-      router.push(`/meeting/${row.meetingId}`);
+      InteractionManager.runAfterInteractions(() => {
+        router.push(`/meeting/${row.meetingId}`);
+      });
     },
-    [closeAlarmPanel, markFriendAcceptedAlarmDismissed, markFriendRequestAlarmDismissed, meetings, router],
+    [
+      closeAlarmPanel,
+      markFriendAcceptedAlarmDismissed,
+      markFriendRequestAlarmDismissed,
+      meetings,
+      requestHomeMeetingsAndDetailRefresh,
+      router,
+    ],
   );
 
   const ctx = useMemo<InAppAlarmsContextValue>(
@@ -1281,7 +1365,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
               <FlashList
                 data={alarms}
                 keyExtractor={(item) => item.id}
-                style={{ maxHeight: alarmPanelLayout.listMaxHeight, flexGrow: 0 }}
+                // 모달·카드 안에서 maxHeight만 주면 일부 기기에서 뷰포트 높이가 0에 가까워져 행이 안 보일 수 있음
+                style={{ height: alarmPanelLayout.listMaxHeight, flexGrow: 0 }}
+                removeClippedSubviews={false}
                 contentContainerStyle={styles.listContent}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (

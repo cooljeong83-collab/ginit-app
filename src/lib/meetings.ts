@@ -101,6 +101,8 @@ export type ParticipantVoteSnapshot = {
   dateChipIds: string[];
   placeChipIds: string[];
   movieChipIds: string[];
+  /** 웹 공유 비회원 참여자 표시용(선택) */
+  displayName?: string | null;
 };
 
 /** 공개 모임 + 호스트 승인 방식일 때, 아직 참여자 목록에 오르기 전 신청 큐 */
@@ -110,11 +112,48 @@ export type MeetingJoinRequest = {
   placeChipIds: string[];
   movieChipIds: string[];
   message?: string | null;
+  /** 웹 공유 비회원 신청자 표시용(선택) */
+  displayName?: string | null;
   /** ISO 8601 */
   requestedAt: string;
 };
 
 export const MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN = 200;
+
+export const GINIT_WEB_GUEST_USER_ID_PREFIX = 'ginitweb_';
+
+/** `participantIds` / joinRequests 에 쓰는 웹 비회원 id (`ginitweb_` + UUID v4) */
+export function isGinitWebGuestParticipantId(userId: string): boolean {
+  const t = userId.trim();
+  if (!t.startsWith(GINIT_WEB_GUEST_USER_ID_PREFIX)) return false;
+  return /^ginitweb_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(t);
+}
+
+/** 투표 로그·참가 신청에 저장된 웹 게스트 표시 이름 */
+export function webGuestDisplayNameFromMeeting(
+  meeting: {
+    participantVoteLog?: ParticipantVoteSnapshot[] | null;
+    joinRequests?: MeetingJoinRequest[] | null;
+  },
+  userId: string,
+): string | null {
+  const ns = normalizeParticipantId(userId.trim());
+  if (!ns) return null;
+  const log = meeting.participantVoteLog ?? [];
+  for (const e of log) {
+    const uid = normalizeParticipantId(e.userId) ?? e.userId.trim();
+    if (uid !== ns) continue;
+    const d = typeof e.displayName === 'string' ? e.displayName.trim() : '';
+    return d || null;
+  }
+  for (const r of meeting.joinRequests ?? []) {
+    const uid = normalizeParticipantId(r.userId) ?? r.userId.trim();
+    if (uid !== ns) continue;
+    const d = typeof r.displayName === 'string' ? r.displayName.trim() : '';
+    return d || null;
+  }
+  return null;
+}
 
 export type Meeting = {
   id: string;
@@ -544,7 +583,21 @@ function parseParticipantVoteLog(data: Record<string, unknown>): ParticipantVote
     const movieChipIds = Array.isArray(o.movieChipIds)
       ? (o.movieChipIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
       : [];
-    out.push({ userId, dateChipIds, placeChipIds, movieChipIds });
+    const displayNameRaw = o.displayName ?? o.display_name;
+    let displayNameOut: string | null | undefined;
+    if (typeof displayNameRaw === 'string') {
+      const t = displayNameRaw.trim().slice(0, 40);
+      displayNameOut = t || null;
+    } else if (displayNameRaw === null) {
+      displayNameOut = null;
+    }
+    out.push({
+      userId,
+      dateChipIds,
+      placeChipIds,
+      movieChipIds,
+      ...(displayNameOut !== undefined ? { displayName: displayNameOut } : {}),
+    });
   }
   return out;
 }
@@ -573,6 +626,14 @@ function parseJoinRequestsField(data: Record<string, unknown>): MeetingJoinReque
         : o.message === null
           ? null
           : undefined;
+    const dnRaw = o.displayName ?? o.display_name;
+    let displayName: string | null | undefined;
+    if (typeof dnRaw === 'string') {
+      const t = dnRaw.trim().slice(0, 40);
+      displayName = t || null;
+    } else if (dnRaw === null) {
+      displayName = null;
+    }
     const requestedAt = typeof o.requestedAt === 'string' && o.requestedAt.trim() ? o.requestedAt.trim() : '';
     if (!requestedAt) continue;
     out.push({
@@ -581,6 +642,7 @@ function parseJoinRequestsField(data: Record<string, unknown>): MeetingJoinReque
       placeChipIds,
       movieChipIds,
       ...(message !== undefined ? { message: message || null } : {}),
+      ...(displayName !== undefined ? { displayName } : {}),
       requestedAt,
     });
   }
@@ -908,6 +970,10 @@ export async function getMeetingById(meetingId: string): Promise<Meeting | null>
   return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
 }
 
+/** __DEV__: 동일 모임에 대한 Realtime CHANNEL_ERROR 로그가 연속으로 쌓이지 않도록 */
+const subscribeMeetingByIdLastChannelErrorLogAtMs = new Map<string, number>();
+const SUBSCRIBE_MEETING_CHANNEL_ERROR_LOG_COOLDOWN_MS = 8000;
+
 /** 단일 모임 문서 실시간 구독(참여자 목록 갱신 등) */
 export function subscribeMeetingById(
   meetingId: string,
@@ -959,7 +1025,12 @@ export function subscribeMeetingById(
           }
           if (status !== 'CHANNEL_ERROR') return;
           if (__DEV__) {
-            console.warn('[subscribeMeetingById] ledger realtime CHANNEL_ERROR (reconnecting)', id);
+            const now = Date.now();
+            const prev = subscribeMeetingByIdLastChannelErrorLogAtMs.get(id) ?? 0;
+            if (now - prev >= SUBSCRIBE_MEETING_CHANNEL_ERROR_LOG_COOLDOWN_MS) {
+              subscribeMeetingByIdLastChannelErrorLogAtMs.set(id, now);
+              console.warn('[subscribeMeetingById] ledger realtime CHANNEL_ERROR (reconnecting)', id);
+            }
           }
           emit();
           dropChannel();
@@ -984,6 +1055,7 @@ export function subscribeMeetingById(
 
     return () => {
       cancelled = true;
+      subscribeMeetingByIdLastChannelErrorLogAtMs.delete(id);
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -1684,9 +1756,12 @@ export async function approveJoinRequest(
   if (!nsApp) throw new Error('신청자 정보가 올바르지 않아요.');
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
-  const applicantProfile = await getUserProfile(appRaw);
-  if (!applicantProfile || !isMeetingServiceComplianceComplete(applicantProfile, appRaw)) {
-    throw new Error('신청자가 모임 이용 인증을 완료하지 않아 승인할 수 없어요.');
+  const webGuestApplicant = isGinitWebGuestParticipantId(nsApp);
+  const applicantProfile = webGuestApplicant ? null : await getUserProfile(appRaw);
+  if (!webGuestApplicant) {
+    if (!applicantProfile || !isMeetingServiceComplianceComplete(applicantProfile, appRaw)) {
+      throw new Error('신청자가 모임 이용 인증을 완료하지 않아 승인할 수 없어요.');
+    }
   }
 
   if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
@@ -1695,8 +1770,10 @@ export async function approveJoinRequest(
     const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
     const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
     if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
-    const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
-    if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
+    if (!webGuestApplicant && applicantProfile) {
+      const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
+      if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
+    }
     const prevJr = parseJoinRequestsField(data);
     const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
     if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
@@ -1708,7 +1785,9 @@ export async function approveJoinRequest(
     };
     const mPre = mapFirestoreMeetingDoc(mid, data);
     assertMeetingHasCapacityForOneMore(mPre);
-    await assertJoinOverlapPrechecks(applicantProfile, appRaw, mid, mPre, votes);
+    if (!webGuestApplicant && applicantProfile) {
+      await assertJoinOverlapPrechecks(applicantProfile, appRaw, mid, mPre, votes);
+    }
     const rawList = Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
       : [];
@@ -1729,6 +1808,8 @@ export async function approveJoinRequest(
     const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
     const log = parseParticipantVoteLog(data);
     const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
+    const dnFromReq =
+      typeof req.displayName === 'string' && req.displayName.trim() ? req.displayName.trim().slice(0, 40) : '';
     const nextLog: ParticipantVoteSnapshot[] = [
       ...filtered,
       {
@@ -1736,6 +1817,7 @@ export async function approveJoinRequest(
         dateChipIds: [...votes.dateChipIds],
         placeChipIds: [...votes.placeChipIds],
         movieChipIds: [...votes.movieChipIds],
+        ...(dnFromReq ? { displayName: dnFromReq } : {}),
       },
     ];
     const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
@@ -1750,13 +1832,10 @@ export async function approveJoinRequest(
     const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
     const mJoined = mapFirestoreMeetingDoc(mid, nextDoc as Record<string, unknown>);
     if (hostId) {
-      notifyMeetingHostParticipantEventFireAndForget(
-        mJoined,
-        hostId,
-        appRaw,
-        'joined',
-        applicantProfile.nickname || applicantProfile.displayName || '참여자',
-      );
+      const joinNick = webGuestApplicant
+        ? dnFromReq || webGuestDisplayNameFromMeeting(mJoined, nsApp) || '웹 참여자'
+        : applicantProfile!.nickname || applicantProfile!.displayName || '참여자';
+      notifyMeetingHostParticipantEventFireAndForget(mJoined, hostId, appRaw, 'joined', joinNick);
     }
     notifyMeetingJoinRequestApplicantDecisionFireAndForget(mJoined, appRaw, 'approved');
     return;
@@ -1768,8 +1847,10 @@ export async function approveJoinRequest(
   const approveCreatedBy = typeof approvePre.createdBy === 'string' ? approvePre.createdBy.trim() : '';
   const approveNsCreated = approveCreatedBy ? normalizeParticipantId(approveCreatedBy) ?? approveCreatedBy : '';
   if (!approveNsCreated || approveNsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
-  const joinBlockPre = getJoinGamificationBlockReason(applicantProfile, approvePre);
-  if (joinBlockPre) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlockPre}`);
+  if (!webGuestApplicant && applicantProfile) {
+    const joinBlockPre = getJoinGamificationBlockReason(applicantProfile, approvePre);
+    if (joinBlockPre) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlockPre}`);
+  }
   const prevJrPre = parseJoinRequestsField(approvePre);
   const reqPre = prevJrPre.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
   if (!reqPre) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
@@ -1780,7 +1861,9 @@ export async function approveJoinRequest(
   };
   const mApprovePre = mapFirestoreMeetingDoc(mid, approvePre);
   assertMeetingHasCapacityForOneMore(mApprovePre);
-  await assertJoinOverlapPrechecks(applicantProfile, appRaw, mid, mApprovePre, approveVotes);
+  if (!webGuestApplicant && applicantProfile) {
+    await assertJoinOverlapPrechecks(applicantProfile, appRaw, mid, mApprovePre, approveVotes);
+  }
 
   let fsApproveDidAddParticipant = false;
   await runTransaction(getFirestoreDb(), async (transaction) => {
@@ -1790,8 +1873,10 @@ export async function approveJoinRequest(
     const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
     const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
     if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
-    const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
-    if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
+    if (!webGuestApplicant && applicantProfile) {
+      const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
+      if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
+    }
     const prevJr = parseJoinRequestsField(data);
     const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
     if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
@@ -1820,6 +1905,8 @@ export async function approveJoinRequest(
     const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
     const log = parseParticipantVoteLog(data);
     const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
+    const dnFs =
+      typeof req.displayName === 'string' && req.displayName.trim() ? req.displayName.trim().slice(0, 40) : '';
     const nextLog: ParticipantVoteSnapshot[] = [
       ...filtered,
       {
@@ -1827,6 +1914,7 @@ export async function approveJoinRequest(
         dateChipIds: [...votes.dateChipIds],
         placeChipIds: [...votes.placeChipIds],
         movieChipIds: [...votes.movieChipIds],
+        ...(dnFs ? { displayName: dnFs } : {}),
       },
     ];
     const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
@@ -1842,13 +1930,14 @@ export async function approveJoinRequest(
     const after = await getMeetingById(mid);
     const hostId = after?.createdBy?.trim() ?? '';
     if (after && hostId) {
-      notifyMeetingHostParticipantEventFireAndForget(
-        after,
-        hostId,
-        appRaw,
-        'joined',
-        applicantProfile.nickname || applicantProfile.displayName || '참여자',
-      );
+      const joinNickFs = webGuestApplicant
+        ? (typeof reqPre.displayName === 'string' && reqPre.displayName.trim()
+            ? reqPre.displayName.trim().slice(0, 40)
+            : null) ||
+          webGuestDisplayNameFromMeeting(after, nsApp) ||
+          '웹 참여자'
+        : applicantProfile!.nickname || applicantProfile!.displayName || '참여자';
+      notifyMeetingHostParticipantEventFireAndForget(after, hostId, appRaw, 'joined', joinNickFs);
     }
     if (after) {
       notifyMeetingJoinRequestApplicantDecisionFireAndForget(after, appRaw, 'approved');

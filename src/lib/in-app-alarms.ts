@@ -58,7 +58,7 @@ export function chatMessageTimeMs(m: MeetingChatMessage | null | undefined): num
   }
 }
 
-function stableSortedParticipantLine(ids: string[] | null | undefined): string {
+export function stableSortedParticipantLine(ids: string[] | null | undefined): string {
   if (!ids?.length) return '';
   return [...ids]
     .map((x) => normalizePhoneUserId(String(x)) ?? String(x).trim())
@@ -109,11 +109,12 @@ export function meetingChangeFingerprint(m: Meeting): string {
 }
 
 /** `meetingAckFingerprint`에 저장되는 값의 접두사(레거시 전체 지문과 구분·마이그레이션용). */
-export const MEETING_INFO_FP_PREFIX = 'ginit_info:v1:';
+/** v2: 참여자 명단 포함(웹 게스트 참여 시 새 소식·ACK 일치). 저장된 v1 지문은 부트스트랩에서 v2로 교체됩니다. */
+export const MEETING_INFO_FP_PREFIX = 'ginit_info:v2:';
 
 /**
- * 참여자·투표 집계는 제외하고 일정·장소·제목·후보만 반영한 지문.
- * 인앱/ACK는 이 값으로만 비교해 참여·탈퇴 시 "모임 정보 업데이트" 알람이 겹치지 않게 합니다.
+ * 일정·장소·제목·후보 + **참여자 명단**(인원·정렬 id) 지문.
+ * 투표 집계(JSON)는 제외해 "표만 바뀐 경우"와 참여 알람을 분리합니다.
  */
 export function meetingInfoFingerprint(m: Meeting): string {
   const parts = [
@@ -129,6 +130,8 @@ export function meetingInfoFingerprint(m: Meeting): string {
     m.location ?? '',
     stableJsonForFingerprint(m.dateCandidates ?? null),
     stableJsonForFingerprint(m.placeCandidates ?? null),
+    String(meetingParticipantCount(m)),
+    stableSortedParticipantLine(m.participantIds),
   ];
   return `${MEETING_INFO_FP_PREFIX}${parts.join('\u001f')}`;
 }

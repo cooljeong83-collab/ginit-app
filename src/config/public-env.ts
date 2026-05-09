@@ -59,6 +59,8 @@ type Extra = {
   /** Expo Push 전송용(클라이언트는 개발만 권장). 프로덕션은 서버에서 전송하세요. */
   expoAccessToken?: string;
   easProjectId?: string;
+  /** 비회원 웹 공유 페이지 오리진 (예: https://share.ginit.app — 끝 슬래시 없이) */
+  meetingShareWebBaseUrl?: string;
 };
 
 function extra(): Extra {
@@ -100,6 +102,7 @@ export const publicEnv: {
   tmdbApiKey: string;
   expoAccessToken: string;
   easProjectId: string;
+  meetingShareWebBaseUrl: string;
 } = {
   supabaseUrl: e.supabaseUrl ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
   supabaseAnonKey: e.supabaseAnonKey ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
@@ -156,4 +159,9 @@ export const publicEnv: {
   tmdbApiKey: e.tmdbApiKey ?? process.env.EXPO_PUBLIC_TMDB_API_KEY ?? process.env.TMDB_API_KEY ?? '',
   expoAccessToken: e.expoAccessToken ?? process.env.EXPO_PUBLIC_EXPO_ACCESS_TOKEN ?? '',
   easProjectId: e.easProjectId ?? process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? process.env.EAS_PROJECT_ID ?? '',
+  meetingShareWebBaseUrl:
+    e.meetingShareWebBaseUrl ??
+    process.env.EXPO_PUBLIC_MEETING_SHARE_WEB_URL ??
+    process.env.MEETING_SHARE_WEB_URL ??
+    '',
 };

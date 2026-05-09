@@ -809,6 +809,42 @@ async function fetchUserProfileFromSupabaseRpcDetailed(appUserId: string): Promi
   return { ok: false, message: lastMessage || '프로필을 불러올 수 없습니다.' };
 }
 
+type SupabasePublicProfilesBatchFetch =
+  | { ok: true; byId: Map<string, UserProfile | null> }
+  | { ok: false; message: string };
+
+/** `get_profiles_public_by_app_user_ids` — 스키마 캐시 지연 시 재시도(루프 1회·N명 공통) */
+async function fetchUserProfilesFromSupabaseRpcBatchDetailed(
+  appUserIds: readonly string[],
+): Promise<SupabasePublicProfilesBatchFetch> {
+  if (appUserIds.length === 0) return { ok: true, byId: new Map() };
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { data, error } = await supabase.rpc('get_profiles_public_by_app_user_ids', {
+      p_app_user_ids: [...appUserIds],
+    });
+    if (!error && data != null && typeof data === 'object' && !Array.isArray(data)) {
+      const byId = new Map<string, UserProfile | null>();
+      for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+        byId.set(k, parseProfileRpcPayload(v));
+      }
+      return { ok: true, byId };
+    }
+    const msg = error?.message?.trim() || 'get_profiles_public_by_app_user_ids failed';
+    const code = typeof (error as { code?: unknown } | undefined)?.code === 'string'
+      ? (error as { code: string }).code
+      : '';
+    lastMessage = msg;
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(msg, code);
+    if (!retryable) {
+      return { ok: false, message: msg };
+    }
+  }
+  return { ok: false, message: lastMessage || '프로필을 불러올 수 없습니다.' };
+}
+
 export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
   const id = phoneUserId.trim();
   if (!id) return null;
@@ -1104,17 +1140,25 @@ export async function deleteUserProfileDocument(phoneUserId: string): Promise<vo
 }
 
 export async function getUserProfilesForIds(phoneUserIds: string[]): Promise<Map<string, UserProfile>> {
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
+  }
   const unique = [...new Set(phoneUserIds.map((x) => x.trim()).filter(Boolean))];
   const out = new Map<string, UserProfile>();
-  await Promise.all(
-    unique.map(async (uid) => {
-      try {
-        const p = await getUserProfile(uid);
-        out.set(uid, p ?? fallbackProfileLabel(uid));
-      } catch {
-        out.set(uid, fallbackProfileLabel(uid));
-      }
-    }),
-  );
-  return out;
+  if (unique.length === 0) return out;
+  try {
+    const r = await fetchUserProfilesFromSupabaseRpcBatchDetailed(unique);
+    if (!r.ok) {
+      for (const uid of unique) out.set(uid, fallbackProfileLabel(uid));
+      return out;
+    }
+    for (const uid of unique) {
+      const p = r.byId.get(uid) ?? null;
+      out.set(uid, p ?? fallbackProfileLabel(uid));
+    }
+    return out;
+  } catch {
+    for (const uid of unique) out.set(uid, fallbackProfileLabel(uid));
+    return out;
+  }
 }

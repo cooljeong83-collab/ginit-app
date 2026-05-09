@@ -12,7 +12,12 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
-import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
+import {
+  isGinitWebGuestParticipantId,
+  meetingParticipantCount,
+  subscribeMeetingById,
+  webGuestDisplayNameFromMeeting,
+} from '@/src/lib/meetings';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
@@ -78,7 +83,16 @@ export default function MeetingChatMembersScreen() {
   useEffect(() => {
     if (!meeting || allowed !== true) return;
     const ids = uniqueParticipantPids(meeting);
-    void getUserProfilesForIds(ids).then(setProfiles);
+    const real = ids.filter((id) => !isGinitWebGuestParticipantId(id));
+    void getUserProfilesForIds(real).then((map) => {
+      const next = new Map(map);
+      for (const id of ids) {
+        if (!isGinitWebGuestParticipantId(id)) continue;
+        const nick = webGuestDisplayNameFromMeeting(meeting, id) ?? '웹 참여자';
+        next.set(id, { nickname: nick, photoUrl: null } as UserProfile);
+      }
+      setProfiles(next);
+    });
   }, [meeting, allowed]);
 
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
@@ -89,13 +103,20 @@ export default function MeetingChatMembersScreen() {
   const rows = useMemo(() => {
     return pids.map((pid) => {
       const p = profileForSender(profiles, pid);
-      const nick = isUserProfileWithdrawn(p) ? '회원' : (p?.nickname ?? '회원');
+      const isWebGuest = Boolean(meeting && isGinitWebGuestParticipantId(pid));
+      const guestFromMeeting =
+        meeting && isWebGuest ? webGuestDisplayNameFromMeeting(meeting, pid)?.trim() : '';
+      const nick = isUserProfileWithdrawn(p)
+        ? '회원'
+        : guestFromMeeting
+          ? guestFromMeeting
+          : p?.nickname ?? '회원';
       const trust = typeof p?.gTrust === 'number' ? p.gTrust : null;
       const dna = typeof p?.gDna === 'string' ? p.gDna : '';
       const isHost = Boolean(hostNorm && pid === hostNorm);
-      return { pid, p, nick, trust, dna, isHost };
+      return { pid, p, nick, trust, dna, isHost, isWebGuest };
     });
-  }, [pids, profiles, hostNorm]);
+  }, [pids, profiles, hostNorm, meeting]);
 
   const onBack = useCallback(() => {
     router.back();
@@ -145,7 +166,7 @@ export default function MeetingChatMembersScreen() {
             </View>
           </View>
           <RowSep />
-          {rows.map(({ pid, p, nick, trust, dna, isHost }, i) => {
+          {rows.map(({ pid, p, nick, trust, dna, isHost, isWebGuest }, i) => {
             const isMe = Boolean(myNorm && pid === myNorm);
             const isAi = pid === 'ginit_ai';
             const withdrawn = isUserProfileWithdrawn(p);
@@ -174,8 +195,9 @@ export default function MeetingChatMembersScreen() {
                       {isHost ? <GinitSymbolicIcon name="star" size={14} color={GinitTheme.colors.warning} /> : null}
                     </View>
                     <Text style={styles.rowSub} numberOfLines={2}>
-                      {trust != null ? `gTrust ${trust}` : 'gTrust -'}
-                      {dna ? ` · ${dna}` : ''}
+                      {isWebGuest
+                        ? '(게스트)'
+                        : `${trust != null ? `gTrust ${trust}` : 'gTrust -'}${dna ? ` · ${dna}` : ''}`}
                     </Text>
                   </View>
                   {canOpen ? (

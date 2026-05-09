@@ -13,7 +13,21 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-  ActivityIndicator, Alert, Animated, Easing, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
@@ -41,6 +55,7 @@ import {
   normalizeTimeInput,
 } from '@/src/lib/date-candidate';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
+import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
@@ -52,6 +67,11 @@ import {
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
   isConfirmedScheduleOverlapErrorMessage,
 } from '@/src/lib/meeting-schedule-overlap';
+import {
+  buildMeetingSharePageUrl,
+  createMeetingShareLinkRpc,
+} from '@/src/lib/meeting-share';
+import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import type { Meeting } from '@/src/lib/meetings';
 import {
   computeMeetingConfirmAnalysis,
@@ -63,6 +83,7 @@ import {
   getMeetingById,
   getMeetingRecruitmentPhase,
   getParticipantVoteSnapshot,
+  isGinitWebGuestParticipantId,
   isUserKickedFromMeeting,
   listMeetingJoinRequests,
   MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
@@ -73,6 +94,7 @@ import {
   updateMeetingPlaceCandidates,
   updateParticipantVotes,
   upsertParticipantVotes,
+  webGuestDisplayNameFromMeeting,
 } from '@/src/lib/meetings';
 import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
@@ -967,6 +989,28 @@ export default function MeetingDetailScreen() {
     participantProfiles,
   });
 
+  const [shareWebBusy, setShareWebBusy] = useState(false);
+  const handleShareWebMeeting = useCallback(async () => {
+    if (!meeting || !userId?.trim()) return;
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) {
+      Alert.alert('웹 공유', 'Supabase 레저 모임만 웹 공유 링크를 만들 수 있어요.');
+      return;
+    }
+    setShareWebBusy(true);
+    try {
+      const { token } = await createMeetingShareLinkRpc(meeting.id, userId);
+      const url = buildMeetingSharePageUrl(token);
+      await Share.share({
+        message: `지닛 모임 초대 (웹에서 참여·투표)\n${url}`,
+        ...(Platform.OS !== 'web' ? { url } : {}),
+      });
+    } catch (e) {
+      Alert.alert('웹 공유', e instanceof Error ? e.message : '링크를 만들지 못했어요.');
+    } finally {
+      setShareWebBusy(false);
+    }
+  }, [meeting, userId]);
+
   const {
     joinBusy,
     joinRequestMessageOpen,
@@ -1246,7 +1290,7 @@ export default function MeetingDetailScreen() {
     for (const userId of orderedParticipantIdsList) {
       const prof = participantProfiles[userId];
       if (!prof) {
-        missingProfile += 1;
+        if (!isGinitWebGuestParticipantId(userId)) missingProfile += 1;
         continue;
       }
       const g = normalizeGender(prof.gender);
@@ -1867,7 +1911,17 @@ export default function MeetingDetailScreen() {
                     const aid = normalizeParticipantId(jr.userId) ?? jr.userId.trim();
                     const prof = participantProfiles[aid];
                     const withdrawn = isUserProfileWithdrawn(prof);
-                    const nickname = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '…');
+                    const jrDisplay = typeof jr.displayName === 'string' ? jr.displayName.trim() : '';
+                    const isWebGuestJr = isGinitWebGuestParticipantId(aid);
+                    const guestNickJr =
+                      isWebGuestJr ? jrDisplay || webGuestDisplayNameFromMeeting(meeting, aid) || '게스트' : '';
+                    const nickname = withdrawn
+                      ? WITHDRAWN_NICKNAME
+                      : isWebGuestJr
+                        ? guestNickJr
+                        : prof?.nickname?.trim()
+                          ? prof.nickname.trim()
+                          : '…';
                     const g = withdrawn ? null : normalizeGender(prof?.gender);
                     const photo = withdrawn ? '' : (prof?.photoUrl?.trim() ?? '');
                     const rowBusy = hostJoinRequestBusyId === aid;
@@ -1903,8 +1957,8 @@ export default function MeetingDetailScreen() {
                             </View>
                           </GinitPressable>
                           <View style={styles.joinRequestMid}>
-                            <Text style={styles.joinRequestNick} numberOfLines={1}>
-                              {nickname}
+                            <Text style={styles.joinRequestNick} numberOfLines={isWebGuestJr ? 2 : 1}>
+                              {isWebGuestJr ? `${nickname}\n(게스트)` : nickname}
                             </Text>
                             <Text
                               style={[styles.joinRequestMessage, !hasMessage && styles.joinRequestMessagePlaceholder]}
@@ -2949,7 +3003,13 @@ export default function MeetingDetailScreen() {
                   {orderedParticipantIdsList.map((userId) => {
                     const prof = participantProfiles[userId];
                     const withdrawn = isUserProfileWithdrawn(prof);
-                    const nickname = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '…');
+                    const isWebGuest = isGinitWebGuestParticipantId(userId);
+                    const guestNickFromLog = isWebGuest ? webGuestDisplayNameFromMeeting(meeting, userId) : null;
+                    const nickname = withdrawn
+                      ? WITHDRAWN_NICKNAME
+                      : isWebGuest
+                        ? guestNickFromLog?.trim() || prof?.nickname?.trim() || '게스트'
+                        : (prof?.nickname ?? '…');
                     const g = withdrawn ? null : normalizeGender(prof?.gender);
                     const hostPk = meeting.createdBy?.trim()
                       ? normalizeParticipantId(meeting.createdBy)
@@ -2959,7 +3019,10 @@ export default function MeetingDetailScreen() {
                     return (
                       <GinitPressable
                         key={userId}
-                        onPress={() => openParticipantProfile(userId)}
+                        onPress={() => {
+                          if (isWebGuest) return;
+                          openParticipantProfile(userId);
+                        }}
                         onLongPress={
                           isHost && meeting.scheduleConfirmed !== true && !isHostUser && !withdrawn
                             ? () => handleHostKickParticipant(userId)
@@ -2968,7 +3031,9 @@ export default function MeetingDetailScreen() {
                         style={({ pressed }) => [styles.avatarCol, pressed && !withdrawn && { opacity: 0.92 }]}
                         pointerEvents={withdrawn ? 'none' : 'auto'}
                         accessibilityRole="button"
-                        accessibilityLabel={`${nickname} 프로필 열기`}>
+                        accessibilityLabel={
+                          isWebGuest ? `${nickname} 웹 게스트` : `${nickname} 프로필 열기`
+                        }>
                         <View
                           style={[
                             styles.avatarCircle,
@@ -2985,7 +3050,11 @@ export default function MeetingDetailScreen() {
                           )}
                         </View>
                         <Text style={styles.avatarLabel} numberOfLines={2}>
-                          {isHostUser ? `${nickname}\n(호스트)` : nickname}
+                          {isHostUser
+                            ? `${nickname}\n(호스트)`
+                            : isWebGuest
+                              ? `${nickname}\n(게스트)`
+                              : nickname}
                         </Text>
                       </GinitPressable>
                     );
@@ -3008,14 +3077,23 @@ export default function MeetingDetailScreen() {
             {isHost ? (
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
-                  {recruitmentPhase === 'recruiting' ? (
+                  {meeting.scheduleConfirmed !== true &&
+                  ledgerWritesToSupabase() &&
+                  isLedgerMeetingId(meeting.id) ? (
                     <GinitPressable
-                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                      onPress={() => void handleShareWebMeeting()}
+                      disabled={shareWebBusy}
+                      style={({ pressed }) => [
+                        styles.bottomPill,
+                        styles.pillBlue,
+                        styles.bottomPillFlex,
+                        (shareWebBusy || pressed) && { opacity: 0.85 },
+                      ]}
                       accessibilityRole="button"
-                      accessibilityLabel="초대">
-                      <GinitSymbolicIcon name="mail-outline" size={18} color="#fff" />
+                      accessibilityLabel="웹으로 공유">
+                      <GinitSymbolicIcon name="share-outline" size={18} color="#fff" />
                       <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        초대
+                        {shareWebBusy ? '링크…' : '웹 공유'}
                       </Text>
                     </GinitPressable>
                   ) : null}
@@ -3094,20 +3172,6 @@ export default function MeetingDetailScreen() {
             ) : alreadyJoinedMeeting ? (
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
-                  {recruitmentPhase === 'recruiting' ? (
-                    <GinitPressable
-                      style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
-                      accessibilityRole="button"
-                      accessibilityLabel="초대">
-                      <GinitSymbolicIcon name="mail-outline" size={16} color="#fff" />
-                      <Text
-                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        초대
-                      </Text>
-                    </GinitPressable>
-                  ) : null}
                   <GinitPressable
                     onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
                     style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}

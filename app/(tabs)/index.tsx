@@ -5,7 +5,24 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import {ActivityIndicator, Alert, BackHandler, Keyboard, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  BackHandler,
+  DeviceEventEmitter,
+  Keyboard,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  ToastAndroid,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
@@ -195,6 +212,15 @@ export default function FeedScreen() {
       cancelled = true;
     };
   }, [shouldLoadMyMeetings, userId]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('ginit_home_meetings_refetch', () => {
+      if (!feedLocationReady) return;
+      void Promise.all([refetchMeetingsFeed(), loadMyMeetings()]);
+    });
+    return () => sub.remove();
+  }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]);
+
   /** 피드 통합 모달 초안: 표시할 마스터 id + 현재 필터(null=전체) */
   const [categoryPickerDraft, setCategoryPickerDraft] = useState<{ visibility: string[] }>({ visibility: [] });
   const feedCategoryModalCategoryListScrollRef = useRef<ScrollView | null>(null);

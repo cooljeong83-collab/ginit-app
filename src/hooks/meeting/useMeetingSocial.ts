@@ -2,7 +2,7 @@ import { acceptGinitRequest, fetchFriendRelationStatus, sendGinitRequest, type F
 import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Meeting } from '@/src/lib/meetings';
-import { listMeetingJoinRequests } from '@/src/lib/meetings';
+import { isGinitWebGuestParticipantId, listMeetingJoinRequests, webGuestDisplayNameFromMeeting } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
@@ -14,7 +14,7 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 
 function orderedParticipantIds(m: Meeting): string[] {
@@ -51,14 +51,34 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
     friendship_id: null,
   });
   const friendsRelationFetchGenRef = useRef(0);
+  const meetingRef = useRef<Meeting | null>(meeting);
+  meetingRef.current = meeting;
+
+  const participantIdsKey = useMemo(() => {
+    if (!meeting) return '';
+    return orderedParticipantIds(meeting).join('\x1e');
+  }, [meeting?.createdBy, JSON.stringify(meeting?.participantIds ?? [])]);
+
+  const joinRequestUserIdsKey = useMemo(() => {
+    if (!meeting) return '';
+    const ids = listMeetingJoinRequests(meeting)
+      .map((r) => normalizeParticipantId(r.userId) ?? r.userId.trim())
+      .filter((x) => Boolean(x));
+    return [...new Set(ids)].sort().join('\x1e');
+  }, [JSON.stringify(meeting?.joinRequests ?? [])]);
 
   useEffect(() => {
-    if (!meeting) {
+    if (!participantIdsKey && !joinRequestUserIdsKey) {
       setParticipantProfiles({});
       return;
     }
-    const base = orderedParticipantIds(meeting);
-    const jrIds = listMeetingJoinRequests(meeting)
+    const m = meetingRef.current;
+    if (!m) {
+      setParticipantProfiles({});
+      return;
+    }
+    const base = orderedParticipantIds(m);
+    const jrIds = listMeetingJoinRequests(m)
       .map((r) => normalizeParticipantId(r.userId) ?? r.userId.trim())
       .filter((x) => Boolean(x));
     const ids = [...new Set([...base, ...jrIds])];
@@ -66,24 +86,38 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
       setParticipantProfiles({});
       return;
     }
+    const supabaseProfileIds = ids.filter((id) => !isGinitWebGuestParticipantId(id));
     let cancelled = false;
-    void getUserProfilesForIds(ids).then((map) => {
+    void getUserProfilesForIds(supabaseProfileIds).then((map) => {
       if (cancelled) return;
       const rec: Record<string, UserProfile> = {};
       map.forEach((v, k) => {
         rec[k] = v;
       });
+      const mm = meetingRef.current;
+      for (const id of ids) {
+        if (!isGinitWebGuestParticipantId(id)) continue;
+        const nick = (mm ? webGuestDisplayNameFromMeeting(mm, id) : null) ?? '웹 참여자';
+        rec[id] = {
+          nickname: nick,
+          photoUrl: null,
+        } as UserProfile;
+      }
       setParticipantProfiles(rec);
     });
     return () => {
       cancelled = true;
     };
-  }, [meeting]);
+  }, [participantIdsKey, joinRequestUserIdsKey]);
 
   const openParticipantProfile = useCallback(
     (peerAppUserId: string) => {
       const pid = peerAppUserId.trim();
       if (!pid) return;
+      if (isGinitWebGuestParticipantId(pid)) {
+        Alert.alert('웹 참여자', '웹 링크로 참여한 분은 지닛 프로필이 없어요.');
+        return;
+      }
       router.push(`/profile/user/${encodeURIComponent(pid)}`);
     },
     [router],

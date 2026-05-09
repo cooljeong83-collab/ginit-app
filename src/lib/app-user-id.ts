@@ -33,6 +33,8 @@ export function normalizeUserId(raw: string): string | null {
 export function normalizeParticipantId(raw: string): string {
   const t = raw.trim();
   if (!t) return '';
+  /** 웹 공유 게스트 id(`ginitweb_…`)는 전화 정규화 대상이 아님(숫자만 추출 시 오탐 방지). */
+  if (t.toLowerCase().startsWith('ginitweb_')) return t;
   if (t.includes('@')) return normalizeUserId(t) ?? t.toLowerCase().trim();
   const phone = normalizePhoneUserId(t);
   if (phone) return phone;

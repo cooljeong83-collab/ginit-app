@@ -98,6 +98,10 @@ function pickExtra(): Record<string, string> {
       process.env.GOOGLE_MAPS_ANDROID_API_KEY,
   );
   set('kakaoRestApiKey', process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY ?? process.env.KAKAO_REST_API_KEY);
+  set(
+    'meetingShareWebBaseUrl',
+    process.env.EXPO_PUBLIC_MEETING_SHARE_WEB_URL ?? process.env.MEETING_SHARE_WEB_URL,
+  );
 
   return out;
 }

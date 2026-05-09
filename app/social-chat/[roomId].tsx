@@ -494,13 +494,20 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
-  titleBlock: { flex: 1, minWidth: 0, gap: 2, justifyContent: 'center', paddingVertical: 4 },
-  topTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a', textAlign: 'center' },
+  titleBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+    justifyContent: 'center',
+    paddingVertical: 4,
+    alignItems: 'flex-start',
+  },
+  topTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a', textAlign: 'left' },
   titleLink: {
     fontSize: 12,
     fontWeight: '600',
     color: '#64748b',
-    textAlign: 'center',
+    textAlign: 'left',
   },
   searchTitleBlock: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchTitleInput: {
