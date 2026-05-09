@@ -1,8 +1,10 @@
 import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebase/messaging';
+import notifee, { EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
 
 import { displayFcmRemoteMessageWithNotifeeAndroid } from '@/src/lib/fcm-notifee-display';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { setPendingPushOpenPayload } from '@/src/lib/pending-push-navigation';
 
 /**
  * FCM Background/Quit 핸들러 (Android).
@@ -30,6 +32,42 @@ setBackgroundMessageHandler(m, async (remoteMessage) => {
     ginitNotifyDbg('fcm-background', 'notifee_display_done', { messageId: remoteMessage?.messageId });
   } catch (e) {
     ginitNotifyDbg('fcm-background', 'handler_error', { message: e instanceof Error ? e.message : String(e) });
+    /* ignore */
+  }
+});
+
+notifee.onBackgroundEvent(async (event) => {
+  if (Platform.OS !== 'android') return;
+  try {
+    if (event.type !== EventType.PRESS) {
+      ginitNotifyDbg('fcm-background', 'notifee_bg_skip_type', { type: event.type });
+      return;
+    }
+    const raw = event.detail.notification?.data;
+    if (!raw || typeof raw !== 'object') {
+      ginitNotifyDbg('fcm-background', 'notifee_bg_press_no_data_object', {});
+      return;
+    }
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string') data[k] = v;
+      else if (v == null) continue;
+      else data[k] = String(v);
+    }
+    const kc = Object.keys(data).length;
+    if (kc === 0) {
+      ginitNotifyDbg('fcm-background', 'notifee_bg_press_empty_keys', {});
+      return;
+    }
+    if (setPendingPushOpenPayload(data)) {
+      ginitNotifyDbg('fcm-background', 'notifee_bg_press_deferred', {
+        action: typeof data.action === 'string' ? data.action : undefined,
+        keyCount: kc,
+      });
+    } else {
+      ginitNotifyDbg('fcm-background', 'notifee_bg_press_set_pending_failed', { keyCount: kc });
+    }
+  } catch {
     /* ignore */
   }
 });

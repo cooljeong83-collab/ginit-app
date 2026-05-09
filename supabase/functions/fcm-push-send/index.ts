@@ -1,28 +1,22 @@
 /**
  * Send FCM push notifications to Android devices using stored `profiles.fcm_token`.
  *
- * Why this exists:
- * - 현재 앱 코드의 "알람"은 클라이언트가 실행 중일 때만 원격 푸시를 전송(또는 로컬 알림 표시)하는 경로가 섞여 있을 수 있습니다.
- * - 앱이 완전히 종료(Quit)된 상태에서도 알림을 받으려면 서버(Edge Function 등)에서 FCM으로 직접 발송해야 합니다.
+ * 구현: Firebase Admin SDK(`npm:firebase-admin`)는 Deno Edge에서 `node:http2` 의
+ * `callTimeout` 미구현으로 UncaughtException 이 날 수 있어, **FCM HTTP v1 REST + fetch** 만 사용합니다.
  *
  * Secrets:
- * - `FIREBASE_SERVICE_ACCOUNT_JSON`: full service account JSON string (same as other functions).
- * Uses:
+ * - `FIREBASE_SERVICE_ACCOUNT_JSON`: full service account JSON string.
  * - auto-injected `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
  *
  * Request (POST JSON):
  * - { "toUserIds": ["010...","..."], "title": "string", "body": "string", "data": { ... } }
  *
  * Notes:
- * - `profiles.fcm_platform = 'android'` 인 토큰은 **data-only**(title/body는 data에 포함)로 보내
- *   앱이 Notifee로 표시·방해금지 시간을 적용할 수 있게 합니다.
- * - `ios` 또는 미기록(null) 토큰은 기존처럼 `notification` payload를 포함합니다.
- * - Android 13+에서는 수신자 디바이스에서 POST_NOTIFICATIONS 권한이 필요합니다.
+ * - `profiles.fcm_platform = 'android'` 인 토큰은 **data-only**(title/body는 data에 포함).
+ * - `ios` 또는 미기록(null) 토큰은 `notification` payload 포함.
  */
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
-import { cert, getApps, initializeApp } from 'npm:firebase-admin@12/app';
-import { getMessaging } from 'npm:firebase-admin@12/messaging';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -37,19 +31,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function getFirebaseMessaging() {
-  const raw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')?.trim();
-  if (!raw) {
-    console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON missing (set Supabase Edge secret)');
-    throw new Error('Missing FIREBASE_SERVICE_ACCOUNT_JSON');
-  }
-  let cred: Record<string, unknown>;
-  try {
-    cred = JSON.parse(raw) as Record<string, unknown>;
-  } catch (e) {
-    console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON', String(e));
-    throw e;
-  }
+type ServiceAccountCreds = {
+  project_id?: unknown;
+  client_email?: unknown;
+  private_key?: unknown;
+};
+
+function parseServiceAccountJson(raw: string): Record<string, unknown> {
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function logServiceAccountDiag(cred: ServiceAccountCreds): void {
   const projectId = typeof cred.project_id === 'string' ? cred.project_id : '';
   const clientEmail = typeof cred.client_email === 'string' ? cred.client_email : '';
   const pk = typeof cred.private_key === 'string' ? cred.private_key : '';
@@ -64,17 +56,157 @@ function getFirebaseMessaging() {
       private_key_starts_with_begin: pk.trimStart().startsWith('-----BEGIN'),
     }),
   );
-  try {
-    if (!getApps().length) {
-      initializeApp({ credential: cert(cred as never) });
-    }
-    console.log('[fcm-push-send] firebase_admin_initialize_ok');
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('[fcm-push-send] firebase_admin_initialize_failed', msg);
-    throw e;
+}
+
+function pemPkcs8ToBinary(pem: string): Uint8Array {
+  const normalized = pem.replace(/\\n/g, '\n');
+  const lines = normalized.split('\n').map((l) => l.trim()).filter(Boolean);
+  const b64 = lines.filter((l) => !l.startsWith('-----')).join('');
+  const binary = atob(b64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+async function importServiceAccountSigningKey(privateKeyPem: string): Promise<CryptoKey> {
+  const der = pemPkcs8ToBinary(privateKeyPem);
+  return await crypto.subtle.importKey(
+    'pkcs8',
+    der,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+}
+
+function base64UrlEncodeJson(obj: unknown): string {
+  const s = JSON.stringify(obj);
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlEncodeBytes(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function createJwtForGoogleAccess(clientEmail: string, privateKey: CryptoKey): Promise<string> {
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: clientEmail,
+    sub: clientEmail,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  };
+  const p1 = base64UrlEncodeJson(header);
+  const p2 = base64UrlEncodeJson(payload);
+  const toSign = new TextEncoder().encode(`${p1}.${p2}`);
+  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, toSign);
+  const p3 = base64UrlEncodeBytes(sig);
+  return `${p1}.${p2}.${p3}`;
+}
+
+async function fetchGoogleAccessTokenForFcm(clientEmail: string, privateKey: CryptoKey): Promise<string> {
+  const assertion = await createJwtForGoogleAccess(clientEmail, privateKey);
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }).toString(),
+  });
+  const j = (await res.json().catch(() => ({}))) as { access_token?: unknown; error?: unknown; error_description?: unknown };
+  const token = typeof j.access_token === 'string' ? j.access_token.trim() : '';
+  if (!res.ok || !token) {
+    const err = typeof j.error === 'string' ? j.error : 'oauth_token_failed';
+    const desc = typeof j.error_description === 'string' ? j.error_description : JSON.stringify(j).slice(0, 400);
+    throw new Error(`${err}: ${desc}`);
   }
-  return getMessaging();
+  return token;
+}
+
+function extractFcmErrorCode(body: unknown): string | undefined {
+  const details = (body as { error?: { details?: unknown } })?.error?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    const t = String((d as { ['@type']?: unknown })?.['@type'] ?? '');
+    if (t.includes('FcmError')) {
+      const code = (d as { errorCode?: unknown })?.errorCode;
+      if (typeof code === 'string' && code.trim()) return code.trim();
+    }
+  }
+  return undefined;
+}
+
+function mapFcmErrorToPseudoMessagingCode(fcmCode: string | undefined): string {
+  if (fcmCode === 'UNREGISTERED') return 'messaging/registration-token-not-registered';
+  if (fcmCode === 'INVALID_ARGUMENT') return 'messaging/invalid-registration-token';
+  return fcmCode ? `messaging/${fcmCode}` : 'messaging/unknown';
+}
+
+async function sendFcmHttpV1Message(
+  projectId: string,
+  accessToken: string,
+  fcmToken: string,
+  kind: 'android' | 'legacy',
+  title: string,
+  body: string,
+  data: Record<string, string>,
+): Promise<{ success: boolean; error?: { code?: string; message?: string } }> {
+  const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`;
+  const dataForAndroid = { ...data, title, body };
+
+  const message: Record<string, unknown> =
+    kind === 'android'
+      ? {
+          token: fcmToken,
+          data: dataForAndroid,
+          android: { priority: 'high' },
+        }
+      : {
+          token: fcmToken,
+          notification: { title, body },
+          data,
+          android: {
+            priority: 'high',
+            notification: {
+              /** 앱 `ensureGinitFcmNotifeeChannel` / `FcmMessagingBootstrap` 과 동일 ID (HIGH) */
+              channel_id: 'ginit_fcm',
+            },
+          },
+          apns: {
+            payload: { aps: { sound: 'default' } },
+          },
+        };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message }),
+  });
+
+  const parsed: unknown = await res.json().catch(() => ({}));
+  const name = typeof (parsed as { name?: unknown })?.name === 'string' ? String((parsed as { name: string }).name).trim() : '';
+  if (res.ok && name.length > 0) {
+    return { success: true };
+  }
+
+  const fcmCode = extractFcmErrorCode(parsed);
+  const pseudo = mapFcmErrorToPseudoMessagingCode(fcmCode);
+  const msgRaw = (parsed as { error?: { message?: unknown } })?.error?.message;
+  const msg = typeof msgRaw === 'string' ? msgRaw : JSON.stringify(parsed).slice(0, 280);
+  return { success: false, error: { code: pseudo, message: msg } };
 }
 
 type ReqBody = {
@@ -116,16 +248,6 @@ serve(async (req) => {
       return jsonResponse({ ok: false, error: 'Missing Supabase env' }, 500);
     }
 
-    /**
-     * NOTE:
-     * 현재 앱은 Supabase Auth 기반 세션을 쓰지 않으므로, 테스트 버튼에서 `Authorization: Bearer <supabase jwt>`를 제공할 수 없습니다.
-     * 따라서 이 엔드포인트는 인증 없이 호출 가능하게 둡니다(테스트/내부용).
-     *
-     * 프로덕션에서 공개 호출을 막고 싶다면:
-     * - `X-FCM-PUSH-KEY` 같은 헤더 시크릿을 요구하거나
-     * - Supabase Auth 로그인(세션)으로 JWT를 제공하도록 앱 구조를 전환하세요.
-     */
-
     let payload: ReqBody;
     try {
       payload = (await req.json()) as ReqBody;
@@ -138,7 +260,6 @@ serve(async (req) => {
     const body = String(payload.body ?? '').trim();
     if (toUserIds.length === 0) return jsonResponse({ ok: false, error: 'toUserIds is empty' }, 400);
     if (!title || !body) return jsonResponse({ ok: false, error: 'title/body required' }, 400);
-    // Abuse guard: prevent huge fan-out from clients
     if (toUserIds.length > 50) return jsonResponse({ ok: false, error: 'toUserIds too large' }, 400);
 
     const supabase = createClient(supabaseUrl, serviceRole, {
@@ -171,7 +292,6 @@ serve(async (req) => {
       }
     }
 
-    // Block filter: if sender <-> recipient has a block relation (either direction), exclude the recipient.
     if (fromUserId && toUserIds.length > 0) {
       const ids = [...new Set([fromUserId, ...toUserIds])];
       const { data: blockRows, error: blockErr } = await supabase
@@ -207,7 +327,6 @@ serve(async (req) => {
       .in('app_user_id', toUserIds);
     if (error) return jsonResponse({ ok: false, error: error.message }, 500);
 
-    /** 동일 토큰은 첫 행의 플랫폼만 사용(중복 row 방지) */
     const tokenPlatform = new Map<string, 'android' | 'legacy'>();
     for (const r of rows ?? []) {
       const t = typeof (r as any)?.fcm_token === 'string' ? String((r as any).fcm_token).trim() : '';
@@ -222,59 +341,70 @@ serve(async (req) => {
       return jsonResponse({ ok: true, attempted: toUserIds.length, sent: 0, reason: 'no_tokens' });
     }
 
-    let messaging;
+    const rawSa = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')?.trim();
+    if (!rawSa) {
+      console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON missing (set Supabase Edge secret)');
+      return jsonResponse({ ok: false, error: 'Missing FIREBASE_SERVICE_ACCOUNT_JSON' }, 500);
+    }
+
+    let cred: Record<string, unknown>;
     try {
-      messaging = getFirebaseMessaging();
+      cred = parseServiceAccountJson(rawSa);
+    } catch (e) {
+      console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON', String(e));
+      return jsonResponse({ ok: false, error: 'Invalid FIREBASE_SERVICE_ACCOUNT_JSON' }, 500);
+    }
+
+    logServiceAccountDiag(cred as ServiceAccountCreds);
+
+    const projectId = typeof cred.project_id === 'string' ? cred.project_id.trim() : '';
+    const clientEmail = typeof cred.client_email === 'string' ? cred.client_email.trim() : '';
+    const privateKeyPem = typeof cred.private_key === 'string' ? cred.private_key : '';
+    if (!projectId || !clientEmail || !privateKeyPem) {
+      return jsonResponse({ ok: false, error: 'Service account JSON missing project_id, client_email, or private_key' }, 500);
+    }
+
+    let signingKey: CryptoKey;
+    let accessToken: string;
+    try {
+      signingKey = await importServiceAccountSigningKey(privateKeyPem);
+      accessToken = await fetchGoogleAccessTokenForFcm(clientEmail, signingKey);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error('[fcm-push-send] getFirebaseMessaging_failed', msg);
+      console.error('[fcm-push-send] auth_failed', msg);
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
-    const dataForAndroid = { ...data, title, body };
-    const allResponses: { success: boolean; error?: { message?: string } }[] = [];
+    console.log('[fcm-push-send] fcm_http_v1_ready', JSON.stringify({ project_id: projectId }));
+
+    const allResponses: { success: boolean; error?: { message?: string; code?: string } }[] = [];
     const allTokensOrdered: string[] = [];
     let successCount = 0;
     let failureCount = 0;
 
+    const runBatch = async (tokens: string[], kind: 'android' | 'legacy') => {
+      const batch = await Promise.all(
+        tokens.map((tok) => sendFcmHttpV1Message(projectId, accessToken, tok, kind, title, body, data)),
+      );
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i]!;
+        const r = batch[i]!;
+        allTokensOrdered.push(tok);
+        allResponses.push(r);
+        if (r.success) successCount += 1;
+        else failureCount += 1;
+      }
+    };
+
     try {
-      if (androidTokens.length > 0) {
-        const resA = await messaging.sendEachForMulticast({
-          tokens: androidTokens,
-          data: dataForAndroid,
-          android: { priority: 'high' },
-        });
-        successCount += resA.successCount;
-        failureCount += resA.failureCount;
-        allResponses.push(...resA.responses);
-        allTokensOrdered.push(...androidTokens);
-      }
-      if (legacyTokens.length > 0) {
-        const resL = await messaging.sendEachForMulticast({
-          tokens: legacyTokens,
-          notification: { title, body },
-          data,
-          android: {
-            priority: 'high',
-            notification: {
-              /** 앱 `ensureGinitFcmNotifeeChannel` / `FcmMessagingBootstrap` 과 동일 ID (HIGH) */
-              channelId: 'ginit_fcm',
-            },
-          },
-        });
-        successCount += resL.successCount;
-        failureCount += resL.failureCount;
-        allResponses.push(...resL.responses);
-        allTokensOrdered.push(...legacyTokens);
-      }
+      if (androidTokens.length > 0) await runBatch(androidTokens, 'android');
+      if (legacyTokens.length > 0) await runBatch(legacyTokens, 'legacy');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error('[fcm-push-send] sendEachForMulticast_failed', msg);
+      console.error('[fcm-push-send] send_fcm_http_v1_failed', msg);
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
-    // Invalid token cleanup: Firebase Admin "에러 코드"가 명백할 때만 DB의 fcm_token을 비웁니다.
-    // 문자열 contains 기반(/invalid/i) 오탐으로 유효 토큰이 지워지는 것을 방지합니다.
     try {
       const invalidTokens: string[] = [];
       for (let i = 0; i < allResponses.length; i++) {
@@ -291,7 +421,7 @@ serve(async (req) => {
         await supabase.from('profiles').update({ fcm_token: null }).in('fcm_token', invalidTokens);
       }
     } catch {
-      // cleanup 실패는 무시(알림 전송 자체는 성공/실패 결과로 충분)
+      /* ignore */
     }
 
     return jsonResponse({
@@ -299,7 +429,6 @@ serve(async (req) => {
       attempted: uniqueTokens.length,
       successCount,
       failureCount,
-      // 너무 길어지는 것을 방지하기 위해 샘플만 반환
       errorsSample: allResponses
         .map((r, i) => ({ ok: r.success, idx: i, err: r.success ? null : r.error?.message ?? 'error' }))
         .filter((x) => !x.ok)
@@ -311,4 +440,3 @@ serve(async (req) => {
     return jsonResponse({ ok: false, error: msg }, 500);
   }
 });
-

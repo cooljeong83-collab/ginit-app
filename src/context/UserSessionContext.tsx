@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { signOut as signOutJsAuth } from 'firebase/auth';
 
 import { clearStoredUserId, readStoredUserId, writeStoredUserId } from '@/src/lib/app-user-id';
+import { clearPendingPushOpenPayload } from '@/src/lib/pending-push-navigation';
 import { signOutGoogle } from '@/src/lib/google-sign-in';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { clearSecureAuthSession } from '@/src/lib/secure-auth-session';
@@ -91,6 +92,7 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
     await clearStoredUserId();
     await clearSecureAuthSession();
     await clearSecureGoogleSession();
+    clearPendingPushOpenPayload();
     setUserIdState(null);
     setAuthProfileState(null);
   }, []);

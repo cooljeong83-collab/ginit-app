@@ -3,13 +3,13 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as Notifications from 'expo-notifications';
 import { useQueryClient } from '@tanstack/react-query';
 import {useRouter } from 'expo-router';
-import { FlashList } from '@shopify/flash-list';
 import {
   createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, } from 'react';
 import {
   AppState,
   type AppStateStatus,
   DeviceEventEmitter,
+  FlatList,
   InteractionManager,
   Modal,
   Platform,
@@ -916,12 +916,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         }
       }
       if (ack !== undefined && fp !== ack) {
+        const previewRaw = meetingChangePreviewRef.current[mid];
+        const preview =
+          typeof previewRaw === 'string' && previewRaw.trim()
+            ? previewRaw.trim()
+            : '참여 중인 모임 정보가 바뀌었어요.';
         rows.push({
           id: `meeting:${mid}:${fp}`,
           kind: 'meeting_change',
           meetingId: mid,
           meetingTitle: m.title?.trim() || '모임',
-          subtitle: meetingChangePreviewRef.current[mid] ?? '참여 중인 모임 정보가 바뀌었어요.',
+          subtitle: preview,
           sortMs: meetingAlarmSinceMs[mid] ?? Date.now(),
         });
       }
@@ -997,15 +1002,29 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const hasUnread = persistReady && alarms.length > 0;
 
-  /** 새 소식 모달: 소식이 많을 때 스크롤되며 화면을 넘지 않도록 카드·목록 최대 높이 */
+  /**
+   * 새 소식 모달: 카드는 헤더·목록만큼만 높이를 쓰고, 화면에 넘치면 목록 영역만 스크롤합니다.
+   * (행 실측 대신 고정 추정 — 폰트 스케일과 크게 어긋나지 않도록 여유를 둡니다.)
+   */
   const alarmPanelLayout = useMemo(() => {
     const topUsed = insets.top + 8;
     const bottomPad = insets.bottom + 12;
     const cardMaxHeight = Math.max(200, Math.floor(windowHeight - topUsed - bottomPad));
     const headerBlock = 56;
-    const markAllBlock = alarms.length > 0 ? 48 : 0;
-    const listMaxHeight = Math.max(120, cardMaxHeight - headerBlock - markAllBlock);
-    return { cardMaxHeight, listMaxHeight };
+    const markAllBlock = alarms.length > 0 ? 52 : 0;
+    const listContentPaddingV = 18; // listContent: paddingVertical 6 + paddingBottom 12
+    const alarmRowEstimate = 100;
+    const intrinsicListHeight =
+      alarms.length > 0 ? listContentPaddingV + alarms.length * alarmRowEstimate : 0;
+    const listScrollMax = Math.max(0, cardMaxHeight - headerBlock - markAllBlock);
+    const listHeight =
+      alarms.length > 0
+        ? listScrollMax > 0
+          ? Math.min(intrinsicListHeight, listScrollMax)
+          : Math.min(intrinsicListHeight, 120)
+        : 0;
+    const listOverflow = alarms.length > 0 && intrinsicListHeight > listHeight;
+    return { cardMaxHeight, listHeight, listOverflow };
   }, [windowHeight, insets.top, insets.bottom, alarms.length]);
 
   /** 홈 상단 종 알람 패널과 동일한 건수 — iOS·지원 Android 런처의 앱 아이콘 배지 */
@@ -1362,14 +1381,16 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                 <Text style={styles.emptyText}>확인하지 않은 새 소식이 없어요.</Text>
               </View>
             ) : (
-              <FlashList
+              <FlatList
                 data={alarms}
                 keyExtractor={(item) => item.id}
-                // 모달·카드 안에서 maxHeight만 주면 일부 기기에서 뷰포트 높이가 0에 가까워져 행이 안 보일 수 있음
-                style={{ height: alarmPanelLayout.listMaxHeight, flexGrow: 0 }}
+                // 모달 내부는 FlashList(RecyclerView) 측정·재사용 이슈로 행이 비어 보이는 사례가 있어 짧은 목록은 FlatList로 고정합니다.
+                style={{ height: alarmPanelLayout.listHeight, flexGrow: 0 }}
                 removeClippedSubviews={false}
                 contentContainerStyle={styles.listContent}
                 keyboardShouldPersistTaps="handled"
+                scrollEnabled={alarmPanelLayout.listOverflow}
+                nestedScrollEnabled
                 renderItem={({ item }) => (
                   <GinitPressable
                     style={({ pressed }) => [styles.alarmRow, pressed && styles.alarmRowPressed]}

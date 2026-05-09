@@ -11,6 +11,7 @@ import { DevMemoryDebug } from '@/components/DevMemoryDebug';
 import { BackgroundExecutionBootstrap } from '@/components/BackgroundExecutionBootstrap';
 import { FcmMessagingBootstrap } from '@/components/FcmMessagingBootstrap';
 import { FcmPushRoutingBootstrap } from '@/components/FcmPushRoutingBootstrap';
+import { PendingPushNavigationFlush } from '@/components/PendingPushNavigationFlush';
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { ShareShortcutsWatermelonBootstrap } from '@/components/ShareShortcutsWatermelonBootstrap';
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
@@ -67,6 +68,7 @@ export default function RootLayout() {
                 <BackgroundExecutionBootstrap />
                 <FcmMessagingBootstrap />
                 <FcmPushRoutingBootstrap />
+                <PendingPushNavigationFlush />
                 <PushNotificationBootstrap />
                 <Stack
                   screenOptions={{

@@ -7,10 +7,20 @@ import * as Notifications from 'expo-notifications';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
-import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
+import {
+  explainShouldDeferPushOpenNavigation,
+  setPendingPushOpenPayload,
+  shouldDeferPushOpenNavigation,
+} from '@/src/lib/pending-push-navigation';
+import {
+  hasPushOpenNavigationSignal,
+  markAlarmReadFromPushData,
+  navigateFromPushData,
+} from '@/src/lib/push-open-navigation';
 
 Notifications.setNotificationHandler({
   handleNotification: async (n) => {
@@ -66,7 +76,7 @@ Notifications.setNotificationHandler({
 export function PushNotificationBootstrap() {
   const router = useRouter();
   const pathname = usePathname();
-  const { userId } = useUserSession();
+  const { userId, isHydrated } = useUserSession();
   const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =
     useInAppAlarms();
   const bootHandled = useRef(false);
@@ -114,6 +124,24 @@ export function PushNotificationBootstrap() {
         return;
       }
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
+      const deferReason = explainShouldDeferPushOpenNavigation({ isHydrated, userId, pathname });
+      ginitNotifyDbg('ExpoPushRouting', 'notification_response', {
+        deferReason: deferReason ?? 'none',
+        dataKeyCount: data && typeof data === 'object' ? Object.keys(data).length : 0,
+        hasNavSignal: hasPushOpenNavigationSignal(data),
+      });
+      if (!hasPushOpenNavigationSignal(data)) {
+        ginitNotifyDbg('ExpoPushRouting', 'skip_non_actionable_payload', {});
+        return;
+      }
+      if (shouldDeferPushOpenNavigation({ isHydrated, userId, pathname })) {
+        if (setPendingPushOpenPayload(data)) {
+          ginitNotifyDbg('ExpoPushRouting', 'defer_expo_notif_response_pending_boot', { deferReason });
+        } else {
+          ginitNotifyDbg('ExpoPushRouting', 'defer_set_pending_failed', { deferReason });
+        }
+        return;
+      }
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
       void markAlarmReadFromPushData(
         data,
@@ -121,6 +149,7 @@ export function PushNotificationBootstrap() {
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
       );
+      ginitNotifyDbg('ExpoPushRouting', 'notification_response_navigate_done', {});
     });
     return () => sub.remove();
   }, [
@@ -129,6 +158,8 @@ export function PushNotificationBootstrap() {
     markFriendRequestAlarmDismissed,
     markFriendAcceptedAlarmDismissed,
     pathname,
+    isHydrated,
+    userId,
   ]);
 
   useEffect(() => {
@@ -140,6 +171,24 @@ export function PushNotificationBootstrap() {
       if (!last) return;
       if (last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
       const data = last.notification.request.content.data as Record<string, unknown> | undefined;
+      const deferReason = explainShouldDeferPushOpenNavigation({ isHydrated, userId, pathname });
+      ginitNotifyDbg('ExpoPushRouting', 'getLastNotificationResponse', {
+        deferReason: deferReason ?? 'none',
+        dataKeyCount: data && typeof data === 'object' ? Object.keys(data).length : 0,
+        hasNavSignal: hasPushOpenNavigationSignal(data),
+      });
+      if (!hasPushOpenNavigationSignal(data)) {
+        ginitNotifyDbg('ExpoPushRouting', 'getLast_skip_non_actionable_payload', {});
+        return;
+      }
+      if (shouldDeferPushOpenNavigation({ isHydrated, userId, pathname })) {
+        if (setPendingPushOpenPayload(data)) {
+          ginitNotifyDbg('ExpoPushRouting', 'defer_expo_last_notif_pending_boot', { deferReason });
+        } else {
+          ginitNotifyDbg('ExpoPushRouting', 'defer_last_set_pending_failed', { deferReason });
+        }
+        return;
+      }
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
       await markAlarmReadFromPushData(
         data,
@@ -147,6 +196,7 @@ export function PushNotificationBootstrap() {
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
       );
+      ginitNotifyDbg('ExpoPushRouting', 'getLastNotification_navigate_done', {});
     })();
   }, [
     router,
@@ -154,6 +204,8 @@ export function PushNotificationBootstrap() {
     markFriendRequestAlarmDismissed,
     markFriendAcceptedAlarmDismissed,
     pathname,
+    isHydrated,
+    userId,
   ]);
 
   return null;
