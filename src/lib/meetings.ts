@@ -2802,6 +2802,21 @@ export function isConfirmedMeetingPastListEndWindow(
   return nowMs >= startMs + windowMs;
 }
 
+/**
+ * 내 모임 목록 보관 기준: 확정 모임 종료 시각(`list_ongoing_duration_hours`) 이후 24시간이 지나면 히스토리 전용으로 봅니다.
+ */
+export function isConfirmedMeetingPastMyMeetingsRetentionWindow(
+  m: Pick<Meeting, 'scheduleConfirmed' | 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>,
+  nowMs: number = Date.now(),
+): boolean {
+  if (m.scheduleConfirmed !== true) return false;
+  const startMs = meetingPrimaryStartMs(m);
+  if (startMs == null || !Number.isFinite(startMs)) return false;
+  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 3);
+  const endMs = startMs + Math.max(1, hours) * 60 * 60 * 1000;
+  return nowMs >= endMs + 24 * 60 * 60 * 1000;
+}
+
 const SEOUL_YMD = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Seoul',
   year: 'numeric',

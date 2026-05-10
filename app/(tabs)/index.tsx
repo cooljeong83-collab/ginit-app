@@ -78,7 +78,7 @@ import {
 } from '@/src/lib/meeting-schedule-overlap';
 import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, isConfirmedMeetingPastMyMeetingsRetentionWindow } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
@@ -535,9 +535,11 @@ export default function FeedScreen() {
 
   const joinedFilteredMeetings = useMemo(() => {
     // 내 모임 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
+    const now = Date.now();
     const base = myTabsMeetings.filter((m) => {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
       if (!id) return false;
+      if (isConfirmedMeetingPastMyMeetingsRetentionWindow(m, now)) return false;
       if (rpcMyMeetingIdSet?.has(id)) return true;
       return isUserJoinedMeeting(m, userId);
     });
@@ -555,6 +557,7 @@ export default function FeedScreen() {
     feedBarVisibleCategoryIds,
     categories,
     appliedFeedSearch,
+    appPoliciesVersion,
   ]);
 
   /** 참여중 탭: 명시 비공개(`isPublic === false`)는 비공개 탭 전용 */

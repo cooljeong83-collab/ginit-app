@@ -12,7 +12,7 @@ import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
-import type { Meeting } from '@/src/lib/meetings';
+import { isConfirmedMeetingPastListEndWindow, type Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
@@ -45,8 +45,8 @@ export default function ProfileMeetingHistoryScreen() {
     void sweepStalePublicUnconfirmedMeetingsForHost(uid, meetings);
   }, [userId, meetings]);
 
-  const joinedMeetings = useMemo(
-    () => filterJoinedMeetings(meetings, userId),
+  const historyMeetings = useMemo(
+    () => filterJoinedMeetings(meetings, userId).filter((m) => isConfirmedMeetingPastListEndWindow(m)),
     [meetings, userId],
   );
 
@@ -72,7 +72,7 @@ export default function ProfileMeetingHistoryScreen() {
           contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scroll]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <Text style={styles.desc}>프로필에서 참가했던 모임과 동일하게, 지금 참여 중인 모임을 모아 보여줘요.</Text>
+          <Text style={styles.desc}>확정된 뒤 종료된 모임만 히스토리로 모아 보여줘요.</Text>
 
           {loading ? (
             <View style={styles.centerRow}>
@@ -81,12 +81,12 @@ export default function ProfileMeetingHistoryScreen() {
             </View>
           ) : error ? (
             <Text style={styles.errorText}>{error}</Text>
-          ) : joinedMeetings.length === 0 ? (
+          ) : historyMeetings.length === 0 ? (
             <Text style={styles.empty}>
-              아직 참여 중인 모임이 없어요. 홈에서 모임에 참여하면 여기에 표시돼요.
+              아직 종료된 확정 모임이 없어요.
             </Text>
           ) : (
-            joinedMeetings.map((m) => <JoinedMeetingDashboardCard key={m.id} meeting={m} />)
+            historyMeetings.map((m) => <JoinedMeetingDashboardCard key={m.id} meeting={m} showPhasePill={false} />)
           )}
         </ScrollView>
       </SafeAreaView>

@@ -962,6 +962,8 @@ export default function MeetingDetailScreen() {
     [isConfirmedMeetingEndedForDetail, alreadyJoinedMeeting, isHost],
   );
 
+  const showBottomSaveScheduleCalendarCta = showBottomSaveScheduleCalendar && !isConfirmedMeetingEndedForDetail;
+
   const withinArrivalVerifyWindow = useMemo(() => {
     void arrivalUiTick;
     if (!meeting) return false;
@@ -3676,7 +3678,8 @@ export default function MeetingDetailScreen() {
                 <View style={styles.bottomBarEqualRow}>
                   {ledgerWritesToSupabase() &&
                   isLedgerMeetingId(meeting.id) &&
-                  meetingShareWebConfigured() ? (
+                  meetingShareWebConfigured() &&
+                  !isConfirmedMeetingEndedForDetail ? (
                     <GinitPressable
                       onPress={() => void handleShareWebMeeting()}
                       disabled={shareWebBusy}
@@ -3691,7 +3694,7 @@ export default function MeetingDetailScreen() {
                       <GinitSymbolicIcon name="share-outline" size={18} color="#fff" />
                     </GinitPressable>
                   ) : null}
-                  {showBottomSaveScheduleCalendar ? (
+                  {showBottomSaveScheduleCalendarCta ? (
                     <GinitPressable
                       onPress={() => void onPressSaveScheduleToCalendar()}
                       disabled={saveCalendarBusy}
@@ -3793,7 +3796,7 @@ export default function MeetingDetailScreen() {
             ) : alreadyJoinedMeeting ? (
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
-                  {showBottomSaveScheduleCalendar ? (
+                  {showBottomSaveScheduleCalendarCta ? (
                     <GinitPressable
                       onPress={() => void onPressSaveScheduleToCalendar()}
                       disabled={saveCalendarBusy}

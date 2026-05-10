@@ -11,12 +11,13 @@ import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 
 type Props = {
   meeting: Meeting;
+  showPhasePill?: boolean;
 };
 
 /**
  * 프로필 탭 — 홈 피드와 같은 톤의 풀블리드 이미지 + 글래스 레이어 카드
  */
-export function JoinedMeetingDashboardCard({ meeting }: Props) {
+export function JoinedMeetingDashboardCard({ meeting, showPhasePill = true }: Props) {
   const router = useRouter();
   const phase = getMeetingRecruitmentPhase(meeting);
   const phaseLabel =
@@ -47,13 +48,15 @@ export function JoinedMeetingDashboardCard({ meeting }: Props) {
       <View style={HomeGlassStyles.dashboardVeil} pointerEvents="none" />
       <View style={HomeGlassStyles.dashboardInnerBorder} pointerEvents="none" />
       <View style={HomeGlassStyles.dashboardBody}>
-        <View style={[HomeGlassStyles.phasePill, orangePhase && HomeGlassStyles.phasePillOrange]}>
-          <Text
-            style={[HomeGlassStyles.phasePillText, orangePhase && HomeGlassStyles.phasePillOrangeText]}
-            numberOfLines={1}>
-            {phaseLabel}
-          </Text>
-        </View>
+        {showPhasePill ? (
+          <View style={[HomeGlassStyles.phasePill, orangePhase && HomeGlassStyles.phasePillOrange]}>
+            <Text
+              style={[HomeGlassStyles.phasePillText, orangePhase && HomeGlassStyles.phasePillOrangeText]}
+              numberOfLines={1}>
+              {phaseLabel}
+            </Text>
+          </View>
+        ) : null}
         <Text style={HomeGlassStyles.dashboardTitle} numberOfLines={2}>
           {meeting.title}
         </Text>
