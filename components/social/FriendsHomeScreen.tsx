@@ -9,7 +9,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
-import { GinitButton, GinitCard } from '@/components/ginit';
+import { GinitButton } from '@/components/ginit';
 import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -770,14 +770,27 @@ export function FriendsHomeScreen() {
 
   const emptyAll = useMemo(
     () => (
-      <GinitCard appearance="light" style={s.emptyCard}>
-        <View style={s.emptyIconWrap}>
-          <GinitSymbolicIcon name="people-outline" size={28} color={GinitTheme.colors.primary} />
+      <View style={s.emptyAllWrap} accessibilityRole="summary" accessibilityLabel="아직 연결된 지닛이 없어요. 모임 찾기">
+        <View style={s.fullSeparator} />
+        <View style={s.emptyAllRow}>
+          <View style={s.rowAvatarWrap} accessibilityElementsHidden>
+            <GinitSymbolicIcon name="people-outline" size={22} color={GinitTheme.colors.primary} />
+          </View>
+          <View style={s.emptyAllTextCol}>
+            <Text style={s.emptyAllTitle}>아직 연결된 지닛이 없어요</Text>
+            <Text style={s.emptyAllBody}>새로운 모임에서 지닛을 찾아보세요.</Text>
+          </View>
+          <View style={s.rowActions}>
+            <GinitPressable
+              accessibilityRole="button"
+              accessibilityLabel="모임 찾기"
+              onPress={goMapFromFriendsEmpty}
+              style={({ pressed }) => [s.rowActionBtnPrimary, pressed && { opacity: 0.88 }]}>
+              <Text style={s.rowActionBtnPrimaryText}>모임 찾기</Text>
+            </GinitPressable>
+          </View>
         </View>
-        <Text style={s.emptyTitle}>아직 연결된 지닛이 없어요</Text>
-        <Text style={s.emptyBody}>새로운 모임에서 친구를 찾아보세요.</Text>
-        <GinitButton title="모임 찾기" onPress={goMapFromFriendsEmpty} style={s.emptyCta} />
-      </GinitCard>
+      </View>
     ),
     [goMapFromFriendsEmpty],
   );
@@ -1169,11 +1182,34 @@ const s = StyleSheet.create({
     backgroundColor: GinitTheme.colors.border,
     marginLeft: 54,
   },
-  emptyCard: {
-    marginTop: 8,
+  emptyAllWrap: {
+    alignSelf: 'stretch',
+    marginTop: 2,
+  },
+  emptyAllRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 22,
-    paddingHorizontal: 16,
+    gap: 10,
+    paddingVertical: 10,
+  },
+  emptyAllTextCol: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+    gap: 4,
+  },
+  emptyAllTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.1,
+    color: GinitTheme.colors.text,
+  },
+  emptyAllBody: {
+    fontSize: 13,
+    fontWeight: '400',
+    lineHeight: 18,
+    letterSpacing: -0.1,
+    color: GinitTheme.colors.textMuted,
   },
   emptySearchPlain: {
     marginTop: 8,
@@ -1181,20 +1217,8 @@ const s = StyleSheet.create({
     paddingVertical: 22,
     paddingHorizontal: 16,
   },
-  emptyIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.06)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15, 23, 42, 0.34)',
-    marginBottom: 12,
-  },
   emptyTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a', textAlign: 'center', marginBottom: 6 },
   emptyBody: { fontSize: 14, fontWeight: '600', color: '#64748b', textAlign: 'center', lineHeight: 21, marginBottom: 18 },
-  emptyCta: { alignSelf: 'stretch', width: '100%' },
   sheetDim: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
   sheetPanel: {
     backgroundColor: '#f8fafc',
