@@ -3,6 +3,8 @@
  */
 
 import { isPcGameMajorCode, isPlayAndVibeMajorCode, type SpecialtyKind } from './category-specialty';
+import { primaryScheduleFromDateCandidate } from './date-candidate';
+import type { DateCandidate } from './meeting-place-bridge';
 
 const FRIDAY_MOODS = ['불금', '드디어 금요일'];
 const MORNING_LUNCH_MOODS = ['활기찬', '브런치', '상쾌한'];
@@ -510,6 +512,132 @@ export function getFinalDescriptionPlaceholder(input: {
   return `「${label}」 모임, 어떤 분위기로 모이고 싶나요? 비우면 ${tail}`;
 }
 
+/** 마지막 글자에 종성(받침)이 있는지 — '와/과', '이/가' 등 한국어 조사 선택용 */
+function hasJongseong(s: string): boolean {
+  const last = s.trim().slice(-1);
+  if (!last) return false;
+  const code = last.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return false;
+  return ((code - 0xac00) % 28) !== 0;
+}
+
+/** 후보 라벨들을 한국어 자연어로 결합: 1개=그대로, 2개="A와/과 B", 3개+="A, B, C" */
+function joinCandidatesWithMidParticle(items: readonly string[]): string {
+  const arr = items.map((s) => s.trim()).filter(Boolean);
+  if (arr.length === 0) return '';
+  if (arr.length === 1) return arr[0]!;
+  if (arr.length === 2) {
+    return `${arr[0]}${hasJongseong(arr[0]!) ? '과' : '와'} ${arr[1]}`;
+  }
+  return arr.join(', ');
+}
+
+/** 후보 1건을 한국어 라벨로 — 'M월 D일 H시(분)' 기본, 마감/시간 미정/자유 서술 분기 */
+function formatDateCandidateLabel(d: DateCandidate): string {
+  if ((d.type === 'multi' || d.type === 'flexible') && d.textLabel?.trim()) {
+    return d.textLabel.trim();
+  }
+  const { scheduleDate, scheduleTime } = primaryScheduleFromDateCandidate(d);
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(scheduleDate);
+  if (!dm) return scheduleDate;
+  const month = Number(dm[2]);
+  const day = Number(dm[3]);
+  const tm = /^(\d{1,2}):(\d{2})$/.exec(scheduleTime);
+  if (d.type === 'tbd' || !tm) {
+    return `${month}월 ${day}일`;
+  }
+  const hour = Number(tm[1]);
+  const min = Number(tm[2]);
+  const timeLabel = min === 0 ? `${hour}시` : `${hour}시 ${min}분`;
+  if (d.type === 'deadline') {
+    return `${month}월 ${day}일 ${timeLabel}까지`;
+  }
+  return `${month}월 ${day}일 ${timeLabel}`;
+}
+
+/** 일시 후보 ≥ 2 → 투표/조율 안내 문장. 같은 날짜면 'M월 D일 H1시와 H2시'로 압축. */
+function formatVotingDateClause(cands?: readonly DateCandidate[]): string {
+  if (!cands || cands.length < 2) return '';
+  const labels = cands.map(formatDateCandidateLabel).map((s) => s.trim()).filter(Boolean);
+  if (labels.length < 2) return '';
+  const prefixOf = (s: string): string => {
+    const m = /^(\d+월 \d+일)\s+/.exec(s);
+    return m ? m[1] : '';
+  };
+  const firstPrefix = prefixOf(labels[0]!);
+  const allSameDate = firstPrefix !== '' && labels.every((l) => prefixOf(l) === firstPrefix);
+  let joined: string;
+  if (allSameDate) {
+    const tails = labels.map((l) => l.slice(firstPrefix.length).trim()).filter(Boolean);
+    joined = tails.length >= 2 ? `${firstPrefix} ${joinCandidatesWithMidParticle(tails)}` : joinCandidatesWithMidParticle(labels);
+  } else {
+    joined = joinCandidatesWithMidParticle(labels);
+  }
+  return `${joined} 중 어느 시간이 좋을지 모이는 분들과 정하고 있어요.`;
+}
+
+/** 다건 후보일 때 사용되는 톤별 인트로 — `${when}`/`${where}` 단일 언급 없이 제목·카테고리만 사용 */
+function buildMultiCandidateIntro(input: {
+  tone: DescTone;
+  title: string;
+  label: string;
+  movies: readonly string[];
+  hasMovieTitles: boolean;
+  seed: number;
+}): string {
+  const { tone, title, label, movies, hasMovieTitles, seed } = input;
+  if (tone === 'movie' && hasMovieTitles) {
+    const head = movies.slice(0, 3).join(', ');
+    const tailM = movies.length > 3 ? ` 외 ${movies.length - 3}편` : '';
+    const v = seed % 2;
+    if (v === 0) {
+      return `「${title}」은(는) 영화 모임이에요. 후보로 ${head}${tailM}을(를) 올려 두었고, 함께 볼 작품은 모임에서 가볍게 정하면 돼요.`;
+    }
+    return `영화 좋아하시는 분 환영이에요. 「${title}」 모임에서는 ${head}${tailM} 중에서 보고 싶은 작품을 나눠 보려 해요.`;
+  }
+  if (tone === 'movie') {
+    const v = seed % 2;
+    if (v === 0) {
+      return `「${title}」은(는) 영화 모임이에요. 보고 싶은 작품은 모임에서 천천히 정해도 괜찮아요.`;
+    }
+    return `영화 한 편 같이 보실 분을 모아요. 「${title}」 모임에 편하게 와 주세요.`;
+  }
+  if (tone === 'food') {
+    const v = seed % 2;
+    if (v === 0) {
+      return `「${title}」 — ${label} 모임이에요. 부담 없이 한 끼(또는 한 잔) 즐기면 좋겠어요.`;
+    }
+    return `${label} 좋아하시는 분, 「${title}」에 참여해 보세요.`;
+  }
+  if (tone === 'cafe') {
+    const v = seed % 2;
+    if (v === 0) {
+      return `「${title}」 — ${label} 모임이에요. 천천히 이야기 나누려고 해요.`;
+    }
+    return `커피 한 잔 하며 수다 나누실 분, 「${title}」에 와 주세요.`;
+  }
+  if (tone === 'sports') {
+    const v = seed % 2;
+    if (v === 0) {
+      return `「${title}」 — ${label} 모임이에요. 페이스는 모임에서 가볍게 맞추면 좋겠어요.`;
+    }
+    return `함께 움직이고 싶은 분, 「${title}」에 참여해 보세요. 준비물·강도는 모임에서 가볍게 나눌게요.`;
+  }
+  const v = seed % 2;
+  if (v === 0) {
+    return `「${title}」은(는) ${label} 모임이에요. 처음 뵙는 분도 편하게 오실 수 있게 할게요.`;
+  }
+  return `${label} 모임 「${title}」이에요. 편한 마음으로 오시면 돼요.`;
+}
+
+/** 장소 후보 ≥ 2 → 조율 안내 문장 */
+function formatCoordinatingPlaceClause(names?: readonly string[]): string {
+  if (!names || names.length < 2) return '';
+  const arr = names.map((s) => s.trim()).filter(Boolean);
+  if (arr.length < 2) return '';
+  return `${joinCandidatesWithMidParticle(arr)} 중 어느 곳에서 만날지 함께 정하고 있어요.`;
+}
+
 function descSeed(parts: { categoryLabel: string; meetingTitle: string; when: string; where: string; now: Date }): number {
   return (
     parts.now.getTime() +
@@ -535,6 +663,10 @@ export function generateAiMeetingDescription(input: {
   isPublic: boolean;
   /** 같은 입력이라도 문장이 바뀌도록(선택) */
   now?: Date;
+  /** 일시 후보 전체 — 2건 이상이면 "...중 어느 시간이 좋을지..." 문장이 추가됨 */
+  dateCandidates?: readonly DateCandidate[];
+  /** 장소 후보명 전체 — 2건 이상이면 "...중 어느 곳에서 만날지..." 문장이 추가됨 */
+  placeNames?: readonly string[];
 }): string {
   const now = input.now ?? new Date();
   const label = input.categoryLabel.trim() || '모임';
@@ -553,6 +685,16 @@ export function generateAiMeetingDescription(input: {
   const hasMovieTitles = movies.length > 0;
   const tone = resolveDescTone(label, hasMovieTitles);
   const s = descSeed(seedParts);
+
+  /** 다건 후보(일시/장소 ≥ 2) — 단일 일시·첫 장소 언급 없이 인트로 + 조율 안내만으로 구성 */
+  const coordParts = [
+    formatVotingDateClause(input.dateCandidates),
+    formatCoordinatingPlaceClause(input.placeNames),
+  ].filter((sx) => sx.length > 0);
+  if (coordParts.length > 0) {
+    const intro = buildMultiCandidateIntro({ tone, title, label, movies, hasMovieTitles, seed: s });
+    return `${intro} ${coordParts.join(' ')} ${vis} ${tail}`;
+  }
 
   if (tone === 'movie' && hasMovieTitles) {
     const head = movies.slice(0, 3).join(', ');

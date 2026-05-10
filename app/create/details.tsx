@@ -2287,6 +2287,8 @@ export default function CreateDetailsScreen() {
             scheduleTime: primary.scheduleTime.trim(),
             movieTitles: specialtyKind === 'movie' ? movieCandidates.map((m) => m.title) : undefined,
             isPublic: isPublicMeeting,
+            dateCandidates: vote.dateCandidates,
+            placeNames: vote.placeCandidates.map((p) => p.placeName),
           });
 
     const extraData =
