@@ -87,6 +87,13 @@ function formatAlarmTime(sortMs: number): string {
   }
 }
 
+/** `buildMeetingChangePreview`의 순수 참가자 명단 변경 문구 — 호스트는 `hostParticipantEventLog`와 중복되지 않게 fp 알람 행을 생략합니다. */
+const MEETING_FP_PREVIEW_PARTICIPANTS_ONLY = new Set([
+  '새 참여자가 들어왔어요.',
+  '참여자가 나갔어요.',
+  '참여자 구성이 바뀌었어요.',
+]);
+
 /** 재연결 직후 오래된 스냅샷으로 로컬 알림이 몰리지 않게 — 실시간 건은 송신 측 원격 푸시로 이미 전달됐을 수 있음 */
 const HEADS_UP_MAX_EVENT_AGE_MS = 120_000;
 
@@ -921,14 +928,18 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           typeof previewRaw === 'string' && previewRaw.trim()
             ? previewRaw.trim()
             : '참여 중인 모임 정보가 바뀌었어요.';
-        rows.push({
-          id: `meeting:${mid}:${fp}`,
-          kind: 'meeting_change',
-          meetingId: mid,
-          meetingTitle: m.title?.trim() || '모임',
-          subtitle: preview,
-          sortMs: meetingAlarmSinceMs[mid] ?? Date.now(),
-        });
+        const skipFingerprintRow =
+          isHost && MEETING_FP_PREVIEW_PARTICIPANTS_ONLY.has(preview);
+        if (!skipFingerprintRow) {
+          rows.push({
+            id: `meeting:${mid}:${fp}`,
+            kind: 'meeting_change',
+            meetingId: mid,
+            meetingTitle: m.title?.trim() || '모임',
+            subtitle: preview,
+            sortMs: meetingAlarmSinceMs[mid] ?? Date.now(),
+          });
+        }
       }
     }
     for (const fr of friendInbox) {
@@ -1261,7 +1272,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         }
         requestHomeMeetingsAndDetailRefresh(row.meetingId);
         closeAlarmPanel();
+        const latest = latestById[row.meetingId];
+        const latestId = (latest?.id ?? '').trim();
+        const senderRaw = typeof latest?.senderId === 'string' ? latest.senderId.trim() : '';
+        const senderNs = senderRaw ? normalizeParticipantId(senderRaw) : '';
+        const openMeetingDetailForWebGuestChat =
+          Boolean(lid && latestId === lid && senderNs && isGinitWebGuestParticipantId(senderNs));
         InteractionManager.runAfterInteractions(() => {
+          if (openMeetingDetailForWebGuestChat) {
+            router.push(`/meeting/${row.meetingId}`);
+            return;
+          }
           router.push(`/meeting-chat/${row.meetingId}`);
         });
         return;
@@ -1302,6 +1323,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     },
     [
       closeAlarmPanel,
+      latestById,
       markFriendAcceptedAlarmDismissed,
       markFriendRequestAlarmDismissed,
       meetings,

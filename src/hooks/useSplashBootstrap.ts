@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { notifySplashReplacedToTabs } from '@/src/lib/splash-to-tabs-navigation';
 import { normalizeUserId, readStoredUserId } from '@/src/lib/app-user-id';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { isPhoneRegistered } from '@/src/lib/phone-registry';
@@ -42,6 +43,7 @@ export function useSplashBootstrap() {
 
   const goTabs = useCallback(() => {
     router.replace('/(tabs)');
+    notifySplashReplacedToTabs();
   }, [router]);
 
   const goLogin = useCallback(

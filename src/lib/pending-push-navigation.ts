@@ -2,7 +2,12 @@
  * 앱 부트(스플래시) 중 `router.replace('/(tabs)')`가 푸시 딥링크를 덮어쓰는 것을 막기 위해
  * 세션(`isHydrated` + `userId`) 준비 전 수신한 푸시 payload 를 잠시 보관합니다.
  */
+import { DeviceEventEmitter, Platform } from 'react-native';
+
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+
+/** `setPendingPushOpenPayload` 성공 직후 — 스플래시 이탈보다 늦게 pending 이 오는 경우 `PendingPushNavigationFlush`에서 소비 */
+export const GINIT_PUSH_OPEN_PENDING_SET = 'ginit_push_open_pending_set_v1';
 
 let pendingPayload: Record<string, unknown> | null = null;
 
@@ -22,7 +27,14 @@ export function setPendingPushOpenPayload(data: Record<string, unknown> | undefi
     keysPreview: keysPreview(pendingPayload),
     action: typeof pendingPayload.action === 'string' ? pendingPayload.action : undefined,
   });
+  if (Platform.OS !== 'web') {
+    DeviceEventEmitter.emit(GINIT_PUSH_OPEN_PENDING_SET);
+  }
   return true;
+}
+
+export function peekPendingPushOpenPayload(): Record<string, unknown> | null {
+  return pendingPayload;
 }
 
 export function consumePendingPushOpenPayload(): Record<string, unknown> | null {
