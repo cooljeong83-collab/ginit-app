@@ -1721,16 +1721,6 @@ export default function MapScreen() {
         <GinitPressable
           onPress={() => {
             setSelectedMeetingId(m.id);
-            const cap = m.capacity;
-            const full =
-              typeof cap === 'number' &&
-              cap > 0 &&
-              cap < MEETING_CAPACITY_UNLIMITED &&
-              meetingParticipantCount(m) >= cap;
-            if (full) {
-              Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 들어갈 수 없어요.');
-              return;
-            }
             router.push(`/meeting/${m.id}`);
           }}
           style={[styles.carouselCard, selected && styles.carouselCardSelected]}
@@ -1948,16 +1938,6 @@ export default function MapScreen() {
         <GinitPressable
           onPress={() => {
             setSelectedMeetingId(m.id);
-            const cap = m.capacity;
-            const full =
-              typeof cap === 'number' &&
-              cap > 0 &&
-              cap < MEETING_CAPACITY_UNLIMITED &&
-              meetingParticipantCount(m) >= cap;
-            if (full) {
-              Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 들어갈 수 없어요.');
-              return;
-            }
             router.push(`/meeting/${m.id}`);
           }}
           style={[styles.listCard, selected && styles.listCardSelected]}
@@ -2416,16 +2396,6 @@ export default function MapScreen() {
                 const m = sheetMeetings[selectedMeetingIndex];
                 if (!m?.id) return;
                 setSelectedMeetingId(m.id);
-                const cap = m.capacity;
-                const full =
-                  typeof cap === 'number' &&
-                  cap > 0 &&
-                  cap < MEETING_CAPACITY_UNLIMITED &&
-                  meetingParticipantCount(m) >= cap;
-                if (full) {
-                  Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 들어갈 수 없어요.');
-                  return;
-                }
                 router.push(`/meeting/${m.id}`);
               }}
               style={({ pressed }) => [styles.sheetCta, pressed && { opacity: 0.92 }]}

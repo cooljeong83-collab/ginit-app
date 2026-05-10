@@ -12,6 +12,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import {
   applyTrustPenaltyLeaveConfirmedMeeting,
   cancelJoinRequest,
+  getMeetingRecruitmentPhase,
   isUserKickedFromMeeting,
   joinMeeting,
   leaveMeeting,
@@ -120,6 +121,10 @@ export function useMeetingJoin({
       Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참여할 수 없어요.');
       return;
     }
+    if (getMeetingRecruitmentPhase(meeting) === 'full') {
+      Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 참여할 수 없어요.');
+      return;
+    }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : [...selectedDateIds];
     const effectivePlaceIds = autoPlacePick && placeChips[0]?.id ? [placeChips[0].id] : [...selectedPlaceIds];
     const effectiveMovieIds =
@@ -208,6 +213,10 @@ export function useMeetingJoin({
       }
       if (meeting.scheduleConfirmed === true) {
         Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.');
+        return;
+      }
+      if (getMeetingRecruitmentPhase(meeting) === 'full') {
+        Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 참가 신청할 수 없어요.');
         return;
       }
       if (isUserKickedFromMeeting(meeting, sessionPk)) {
@@ -310,6 +319,10 @@ export function useMeetingJoin({
     }
     if (meeting.scheduleConfirmed === true) {
       Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.');
+      return;
+    }
+    if (getMeetingRecruitmentPhase(meeting) === 'full') {
+      Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 참가 신청할 수 없어요.');
       return;
     }
     if (isUserKickedFromMeeting(meeting, sessionPk)) {
