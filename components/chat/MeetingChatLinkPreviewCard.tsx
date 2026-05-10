@@ -1,18 +1,13 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {Image } from 'expo-image';
-import { Text, View } from 'react-native'
+import { memo } from 'react';
+import { Text, View } from 'react-native';
 
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { openChatLinkInBrowser } from '@/src/lib/chat-text-linkify';
 import type { MeetingChatLinkPreview } from '@/src/lib/meeting-chat';
 
-export function MeetingChatLinkPreviewCard({
-  preview,
-  mine,
-  fullWidth = false,
-  rawUrlText,
-  standalone = false,
-}: {
+export type MeetingChatLinkPreviewCardProps = {
   preview: MeetingChatLinkPreview;
   mine: boolean;
   fullWidth?: boolean;
@@ -20,7 +15,15 @@ export function MeetingChatLinkPreviewCard({
   rawUrlText?: string;
   /** 링크-only 메시지 등: 외곽 marginTop 제거 */
   standalone?: boolean;
-}) {
+};
+
+function MeetingChatLinkPreviewCardInner({
+  preview,
+  mine,
+  fullWidth = false,
+  rawUrlText: _rawUrlText,
+  standalone = false,
+}: MeetingChatLinkPreviewCardProps) {
   const url = preview.url?.trim();
   if (!url) return null;
 
@@ -38,12 +41,6 @@ export function MeetingChatLinkPreviewCard({
   const title = preview.title?.trim();
   const desc = preview.description?.trim();
   const img = preview.imageUrl?.trim();
-  const raw = typeof rawUrlText === 'string' ? rawUrlText.trim() : '';
-
-  if (__DEV__ && (!img || !title)) {
-    // eslint-disable-next-line no-console
-    console.log('[chat:link-preview] render', { url, img, title, site });
-  }
 
   return (
     <GinitPressable
@@ -96,3 +93,6 @@ export function MeetingChatLinkPreviewCard({
     </GinitPressable>
   );
 }
+
+/** 상위(입력 `draft` 등) 리렌더 시 메시지 행의 프리뷰 props가 같으면 다시 그리지 않음 */
+export const MeetingChatLinkPreviewCard = memo(MeetingChatLinkPreviewCardInner);

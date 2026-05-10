@@ -19,6 +19,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import { meetingCreatedAtMs } from '@/src/lib/feed-meeting-utils';
 import type { LatLng } from '@/src/lib/geo-distance';
@@ -33,6 +34,7 @@ import { effectiveMeetingChatReadId } from '@/src/lib/meeting-chat-read-pointer'
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import type { Meeting } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import {
   searchSocialChatMessages,
   socialDmPreviewLine,
@@ -206,6 +208,75 @@ export default function ChatTab() {
     refetchOnWindowFocus: false,
   });
 
+  /** Supabase: 공개 피드에 없는 비공개·내 모임을 홈 탭과 동일 RPC로 보강 */
+  const [myMeetings, setMyMeetings] = useState<Meeting[]>([]);
+  const [myMeetingsFetchDone, setMyMeetingsFetchDone] = useState(false);
+  const shouldLoadMyMeetingsForChat = useMemo(
+    () => signedIn && Boolean(userId?.trim()) && meetingListSource() === 'supabase',
+    [signedIn, userId],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!shouldLoadMyMeetingsForChat) {
+      setMyMeetings([]);
+      setMyMeetingsFetchDone(true);
+      return;
+    }
+    const uid = userId?.trim() ?? '';
+    if (!uid) {
+      setMyMeetings([]);
+      setMyMeetingsFetchDone(true);
+      return;
+    }
+    setMyMeetingsFetchDone(false);
+    void (async () => {
+      const res = await fetchMyMeetingsForFeedFromSupabase(uid);
+      if (cancelled) return;
+      if (!res.ok) {
+        setMyMeetings([]);
+      } else {
+        setMyMeetings(res.meetings);
+      }
+      setMyMeetingsFetchDone(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldLoadMyMeetingsForChat, userId]);
+
+  /** 공개 피드가 비어 있을 때는 내 모임 RPC까지 끝나야 빈 화면 판단(비공개만 참여 중인 경우) */
+  const gatherListStillLoading = useMemo(
+    () =>
+      (meetingsFeedInitialLoading && meetings.length === 0) ||
+      (shouldLoadMyMeetingsForChat && meetings.length === 0 && !myMeetingsFetchDone),
+    [
+      meetingsFeedInitialLoading,
+      meetings.length,
+      shouldLoadMyMeetingsForChat,
+      myMeetingsFetchDone,
+    ],
+  );
+
+  const mergedMeetingsForChat = useMemo(() => {
+    if (meetingListSource() !== 'supabase') return meetings;
+    if (myMeetings.length === 0) return meetings;
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of meetings) {
+      if (!m?.id) continue;
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+    }
+    for (const m of myMeetings) {
+      if (!m?.id) continue;
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+    }
+    return out;
+  }, [meetings, myMeetings]);
+
   const fetchNextMeetingsFeedPageGuarded = useCallback(async () => {
     if (!hasMoreMeetingsFeed || isFetchingMoreMeetingsFeed) return;
     await fetchNextMeetingsFeedPage();
@@ -240,13 +311,13 @@ export default function ChatTab() {
 
   useEffect(() => {
     const uid = userId?.trim();
-    if (!uid || meetings.length === 0) return;
-    void sweepStalePublicUnconfirmedMeetingsForHost(uid, meetings);
-  }, [userId, meetings]);
+    if (!uid || mergedMeetingsForChat.length === 0) return;
+    void sweepStalePublicUnconfirmedMeetingsForHost(uid, mergedMeetingsForChat);
+  }, [userId, mergedMeetingsForChat]);
 
   const joinedMeetings = useMemo(
-    () => filterJoinedMeetings(meetings, userId),
-    [meetings, userId],
+    () => filterJoinedMeetings(mergedMeetingsForChat, userId),
+    [mergedMeetingsForChat, userId],
   );
 
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
@@ -582,11 +653,16 @@ export default function ChatTab() {
         await refetchSocialRooms();
       } else {
         await refetchMeetingsFeed();
+        if (shouldLoadMyMeetingsForChat && userId?.trim()) {
+          const res = await fetchMyMeetingsForFeedFromSupabase(userId.trim());
+          if (res.ok) setMyMeetings(res.meetings);
+          else setMyMeetings([]);
+        }
       }
     } finally {
       setRefreshing(false);
     }
-  }, [chatKind, refetchSocialRooms, refetchMeetingsFeed]);
+  }, [chatKind, refetchSocialRooms, refetchMeetingsFeed, shouldLoadMyMeetingsForChat, userId]);
 
   const openChatSearch = useCallback(() => {
     setDraftChatSearchQuery(chatKind === 'gather' ? appliedGatherTextQuery : appliedSocialTextQuery);
@@ -742,7 +818,7 @@ export default function ChatTab() {
 
   const chatTabListAlerts = (kind: ChatKind): ReactElement => (
     <>
-      {kind === 'gather' && meetingsFeedInitialLoading && meetings.length === 0 ? (
+      {kind === 'gather' && gatherListStillLoading ? (
         <View style={styles.centerRow}>
           <ActivityIndicator color={GinitTheme.colors.primary} />
           <Text style={styles.muted}>불러오는 중…</Text>
@@ -779,7 +855,7 @@ export default function ChatTab() {
 
       {!signedIn &&
       (kind === 'gather'
-        ? !(meetingsFeedInitialLoading && meetings.length === 0) && !gatherListError
+        ? !gatherListStillLoading && !gatherListError
         : !(socialRoomsInitialLoading && socialRooms.length === 0) && !socialListError)
         ? chatListEmptyCentered(
             'chatbubbles-outline',
@@ -789,7 +865,7 @@ export default function ChatTab() {
         : null}
 
       {kind === 'gather' &&
-      !(meetingsFeedInitialLoading && meetings.length === 0) &&
+      !gatherListStillLoading &&
       !gatherListError &&
       signedIn &&
       joinedMeetings.length === 0
@@ -813,7 +889,7 @@ export default function ChatTab() {
         : null}
 
       {kind === 'gather' &&
-      !(meetingsFeedInitialLoading && meetings.length === 0) &&
+      !gatherListStillLoading &&
       !gatherListError &&
       signedIn &&
       !gatherSearchBusy &&
