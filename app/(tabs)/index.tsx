@@ -518,7 +518,6 @@ export default function FeedScreen() {
     return base.filter((m) => {
       if (!meetingMatchesFeedCategoryBarAndFilter(m, selectedCategoryId, feedBarVisibleCategoryIds, categories))
         return false;
-      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
       if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
       return true;
     });
@@ -529,7 +528,6 @@ export default function FeedScreen() {
     selectedCategoryId,
     feedBarVisibleCategoryIds,
     categories,
-    recruitingOnly,
     appliedFeedSearch,
   ]);
 
@@ -1436,7 +1434,7 @@ export default function FeedScreen() {
             <View style={[styles.modalCard, { maxHeight: feedMeetingOptionsModalCardMaxH, overflow: 'hidden' }]}>
               <Text style={styles.modalTitle}>모임 목록</Text>
               <Text style={[styles.modalHint, styles.feedMeetingOptionsModalHint]}>
-                목록에 쓸 모임 종류·모집중 필터는 «저장»할 때 반영돼요. 정렬·검색 조건은 상단에서 바꿀 수 있어요.
+                목록에 쓸 모임 종류는 «저장»할 때 반영돼요. 모집중만 보기는 탐색 탭에만 적용돼요. 정렬·검색 조건은 상단에서 바꿀 수 있어요.
               </Text>
               <View style={styles.mapCategoryBarModalDivider} />
               <GinitPressable
@@ -1537,7 +1535,7 @@ export default function FeedScreen() {
                 <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
                   <Text style={styles.modalRowLabel}>모집중만 보기</Text>
                   <Text style={styles.mapCategoryBarModalSubHint} numberOfLines={2}>
-                    정원 미달·일정 미확정 모임만 목록에 표시합니다.
+                    탐색 탭에서만 정원 미달·일정 미확정 모임만 표시합니다. 내 모임·비공개 탭에는 적용되지 않아요.
                   </Text>
                 </View>
                 <View style={styles.mapCategoryBarModalCheckCol}>

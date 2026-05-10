@@ -1,8 +1,6 @@
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import {
-  assertNoConfirmedScheduleOverlapHybrid,
-  getScheduleOverlapBufferHours,
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
   isConfirmedScheduleOverlapErrorMessage,
 } from '@/src/lib/meeting-schedule-overlap';
@@ -18,7 +16,6 @@ import {
   joinMeeting,
   leaveMeeting,
   MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
-  meetingPrimaryStartMs,
   requestJoinMeeting,
 } from '@/src/lib/meetings';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
@@ -109,47 +106,18 @@ export function useMeetingJoin({
       setJoinScheduleOverlapBlock(false);
       return;
     }
-    if (meeting.scheduleConfirmed !== true) {
-      setJoinScheduleOverlapBlock(false);
-      return;
-    }
-    const startMs = meetingPrimaryStartMs(meeting);
-    if (startMs == null) {
-      setJoinScheduleOverlapBlock(false);
-      return;
-    }
-    let alive = true;
-    void (async () => {
-      let buf = 3;
-      try {
-        const prof = await getUserProfile(sessionPk);
-        buf = getScheduleOverlapBufferHours(prof);
-        await assertNoConfirmedScheduleOverlapHybrid({
-          appUserId: sessionPk,
-          startMs,
-          bufferHours: buf,
-          excludeMeetingId: meeting.id,
-        });
-        if (alive) {
-          setJoinOverlapBufferHours(buf);
-          setJoinScheduleOverlapBlock(false);
-        }
-      } catch {
-        if (alive) {
-          setJoinOverlapBufferHours(buf);
-          setJoinScheduleOverlapBlock(true);
-        }
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [meeting, sessionPk, alreadyJoinedMeeting, isHost, meeting?.id, meeting?.scheduleConfirmed, appPoliciesVersion]);
+    // 일정 확정 후 비참여자는 참여·신청 자체가 막힘 — 겹침 안내용 이펙트 불필요
+    setJoinScheduleOverlapBlock(false);
+  }, [meeting, sessionPk, alreadyJoinedMeeting, isHost, meeting?.id]);
 
   const handleJoinMeeting = useCallback(async () => {
     if (!meeting) return;
     if (!sessionPk) {
       Alert.alert('안내', '로그인 후 참여할 수 있어요.');
+      return;
+    }
+    if (meeting.scheduleConfirmed === true) {
+      Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참여할 수 없어요.');
       return;
     }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : [...selectedDateIds];
@@ -193,10 +161,11 @@ export function useMeetingJoin({
         );
         return;
       }
-      const joinVotes =
-        meeting.scheduleConfirmed === true
-          ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }
-          : { dateChipIds: effectiveDateIds, placeChipIds: effectivePlaceIds, movieChipIds: effectiveMovieIds };
+      const joinVotes = {
+        dateChipIds: effectiveDateIds,
+        placeChipIds: effectivePlaceIds,
+        movieChipIds: effectiveMovieIds,
+      };
       await joinMeeting(meeting.id, sessionPk, joinVotes);
       void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
     } catch (e) {
@@ -235,6 +204,10 @@ export function useMeetingJoin({
       if (!meeting) return;
       if (!sessionPk) {
         Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+        return;
+      }
+      if (meeting.scheduleConfirmed === true) {
+        Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.');
         return;
       }
       if (isUserKickedFromMeeting(meeting, sessionPk)) {
@@ -282,10 +255,11 @@ export function useMeetingJoin({
           );
           return;
         }
-        const joinVotes =
-          meeting.scheduleConfirmed === true
-            ? { dateChipIds: [] as string[], placeChipIds: [] as string[], movieChipIds: [] as string[] }
-            : { dateChipIds: effectiveDateIds, placeChipIds: effectivePlaceIds, movieChipIds: effectiveMovieIds };
+        const joinVotes = {
+          dateChipIds: effectiveDateIds,
+          placeChipIds: effectivePlaceIds,
+          movieChipIds: effectiveMovieIds,
+        };
         const msgTrim = (messageFromModal ?? '').trim();
         const opts =
           publicMeetingDetails?.requestMessageEnabled === true
@@ -332,6 +306,10 @@ export function useMeetingJoin({
   const onPressRequestJoin = useCallback(() => {
     if (!meeting || !sessionPk) {
       Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+      return;
+    }
+    if (meeting.scheduleConfirmed === true) {
+      Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.');
       return;
     }
     if (isUserKickedFromMeeting(meeting, sessionPk)) {
@@ -451,9 +429,15 @@ export function useMeetingJoin({
               let penaltyLedgerOk = false;
               if (confirmed) {
                 try {
+                  // RPC는 public.profiles.app_user_id로 조회 — 행이 없으면 즉시 실패하므로 선행 보장
+                  await ensureUserProfile(sessionPk);
                   await applyTrustPenaltyLeaveConfirmedMeeting(sessionPk, meeting.id);
                   penaltyLedgerOk = true;
-                } catch {
+                } catch (e) {
+                  if (__DEV__) {
+                    // eslint-disable-next-line no-console
+                    console.warn('[useMeetingJoin] applyTrustPenaltyLeaveConfirmedMeeting failed after leave', e);
+                  }
                   Alert.alert(
                     '안내',
                     '모임에서는 나갔지만 신뢰 점수 반영이 잠시 실패했어요. 프로필을 새로고침한 뒤에도 이상하면 고객 지원에 문의해 주세요.',

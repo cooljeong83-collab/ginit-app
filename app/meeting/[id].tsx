@@ -495,6 +495,8 @@ export default function MeetingDetailScreen() {
   const needsDatePick = dateChips.length > 0;
   const needsPlacePick = placeChips.length > 0;
   const needsMoviePick = (specialtyKind === 'movie' || extraMovies.length > 0) && extraMovies.length > 0;
+  /** 일시·장소·영화 중 참여자가 고를 후보가 하나라도 있을 때만 투표 저장 UI 노출 */
+  const hasSelectableVoteCandidates = needsDatePick || needsPlacePick || needsMoviePick;
 
   // 후보가 1개뿐이면 “투표”가 아니라 확정 내역처럼 고정 표시(자동 선택)합니다.
   const autoDatePick = needsDatePick && dateChips.length === 1;
@@ -3168,7 +3170,9 @@ export default function MeetingDetailScreen() {
                       채팅
                     </Text>
                   </GinitPressable>
-                  {!isScheduleConfirmed ? (
+                  {!isScheduleConfirmed &&
+                  hasSelectableVoteCandidates &&
+                  recruitmentPhase !== 'full' ? (
                     <GinitPressable
                       onPress={onPressSaveVotes}
                       disabled={!votesDirty || participantVoteBusy || leaveBusy}
