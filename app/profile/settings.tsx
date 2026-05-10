@@ -6,9 +6,22 @@ import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlashList } from '@shopify/flash-list';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Switch, Text, ToastAndroid, useWindowDimensions, View} from 'react-native';
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  ToastAndroid,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingServiceAuthModal } from '@/components/profile/MeetingServiceAuthModal';
@@ -844,12 +857,14 @@ export default function ProfileAppSettingsScreen() {
                     ]}>
                     <Text style={styles.soundSheetTitle}>알림음</Text>
                     <Text style={styles.soundSheetLead}>푸시·로컬 알림에 사용할 소리를 골라요.</Text>
-                    <FlashList
+                    <FlatList
                       data={[...PROFILE_NOTIFICATION_SOUND_OPTIONS]}
                       keyExtractor={(item) => item.id}
                       style={{ maxHeight: soundSheetLayout.scrollMax }}
                       scrollEnabled={PROFILE_NOTIFICATION_SOUND_OPTIONS.length > 6}
                       showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      nestedScrollEnabled
                       ItemSeparatorComponent={() => <View style={styles.soundListSep} />}
                       renderItem={({ item }) => {
                         const selected = soundId === item.id;
