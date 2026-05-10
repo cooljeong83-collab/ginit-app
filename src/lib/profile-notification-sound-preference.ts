@@ -2,6 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'ginit_profile_notification_sound_v1';
 
+/**
+ * AsyncStorage·`profiles.metadata.notification_sound` 저장용 시스템 기본 마커.
+ * 값 `default`는 JSON/메타데이터·SQL 경로에서 예외 처리되기 쉬워 분리합니다.
+ */
+export const PROFILE_NOTIFICATION_SOUND_SYSTEM_MARKER = 'system' as const;
+
 /** 시스템 기본 + 번들에 포함된 커스텀 ID (확장 시 배열만 추가) */
 export type ProfileBundledNotificationSoundId = 'ginit_ring_c1' | 'ginit_ring_w';
 
@@ -20,7 +26,8 @@ export type ProfileNotificationSoundOption = {
 
 export const PROFILE_NOTIFICATION_SOUND_OPTIONS: readonly ProfileNotificationSoundOption[] = [
   { id: 'default', label: '시스템 기본' },
-  { id: 'ginit_ring_w', label: '지닛 벨 1', expoFilename: 'ginit_ring_w.wav' },
+  /** Android `@raw/ginit_ring_w` 명과 분리 — 일부 빌드에서 벨1만 시스템 기본으로 떨어지는 회귀 방지 */
+  { id: 'ginit_ring_w', label: '지닛 벨 1', expoFilename: 'ginit_bell_1.wav' },
   { id: 'ginit_ring_c1', label: '지닛 벨 2', expoFilename: 'ginit_ring_c1.wav' },
 ] as const;
 
@@ -28,7 +35,7 @@ const BUNDLED_IDS = new Set<string>(PROFILE_NOTIFICATION_SOUND_OPTIONS.filter((o
 
 function normalizeStored(raw: string | null): ProfileNotificationSoundId {
   const s = (raw ?? '').trim();
-  if (s === 'default') return 'default';
+  if (s === 'default' || s === PROFILE_NOTIFICATION_SOUND_SYSTEM_MARKER) return 'default';
   if (s === '') return DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
   if (BUNDLED_IDS.has(s)) return s as ProfileBundledNotificationSoundId;
   return DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
@@ -44,8 +51,13 @@ export async function loadProfileNotificationSoundId(): Promise<ProfileNotificat
 }
 
 export async function saveProfileNotificationSoundId(id: ProfileNotificationSoundId): Promise<void> {
-  const next = id === 'default' || BUNDLED_IDS.has(id) ? id : DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
-  await AsyncStorage.setItem(STORAGE_KEY, next);
+  const persist =
+    id === 'default'
+      ? PROFILE_NOTIFICATION_SOUND_SYSTEM_MARKER
+      : BUNDLED_IDS.has(id)
+        ? id
+        : DEFAULT_BUNDLED_NOTIFICATION_SOUND_ID;
+  await AsyncStorage.setItem(STORAGE_KEY, persist);
 }
 
 export function labelForProfileNotificationSoundId(id: ProfileNotificationSoundId): string {

@@ -45,6 +45,7 @@ import {
   labelForProfileNotificationSoundId,
   loadProfileNotificationSoundId,
   PROFILE_NOTIFICATION_SOUND_OPTIONS,
+  PROFILE_NOTIFICATION_SOUND_SYSTEM_MARKER,
   saveProfileNotificationSoundId,
   type ProfileNotificationSoundId,
 } from '@/src/lib/profile-notification-sound-preference';
@@ -61,7 +62,7 @@ import {
   saveProfileDndQuietHoursWindow,
 } from '@/src/lib/profile-settings-local';
 import { safeRouterBack } from '@/src/lib/router-safe';
-import { ensureUserProfile, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
+import { ensureUserProfile, isMeetingServiceComplianceComplete, updateUserProfile } from '@/src/lib/user-profile';
 
 function RowSep() {
   return <View style={styles.sep} />;
@@ -276,12 +277,24 @@ export default function ProfileAppSettingsScreen() {
       setSoundId(id);
       await ensureGinitFcmNotifeeChannel();
       await ensureGinitInAppAndroidChannel();
+      const pk = profilePk.trim();
+      if (pk) {
+        try {
+          await updateUserProfile(pk, {
+            metadata: {
+              notification_sound: id === 'default' ? PROFILE_NOTIFICATION_SOUND_SYSTEM_MARKER : id,
+            },
+          });
+        } catch {
+          /* 오프라인 등 — 로컬 저장은 이미 완료, FCM 동기화는 다음 성공 시 */
+        }
+      }
       if (Platform.OS === 'ios' || Platform.OS === 'android') void Haptics.selectionAsync();
       setSoundPickOpen(false);
     } catch {
       /* noop */
     }
-  }, []);
+  }, [profilePk]);
 
   const onPreviewNotificationSound = useCallback(async (id: ProfileNotificationSoundId) => {
     if (Platform.OS === 'web') return;

@@ -1,10 +1,11 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
+import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import type { ProfileBundledNotificationSoundId, ProfileNotificationSoundId } from '@/src/lib/profile-notification-sound-preference';
 
 const BUNDLE_REQUIRES: Record<ProfileBundledNotificationSoundId, number> = {
   ginit_ring_c1: require('../../assets/sounds/ginit_ring_c1.wav'),
-  ginit_ring_w: require('../../assets/sounds/ginit_ring_w.wav'),
+  ginit_ring_w: require('../../assets/sounds/ginit_bell_1.wav'),
 };
 
 let playing: AudioPlayer | null = null;
@@ -39,6 +40,11 @@ export async function playProfileNotificationSoundPreview(id: ProfileNotificatio
 
   const src = BUNDLE_REQUIRES[id as ProfileBundledNotificationSoundId];
   if (src == null) return;
+
+  ginitNotifyDbg('notify-sound-diag', 'preview_play', {
+    id,
+    bundleAssetModuleId: typeof src === 'number' ? src : 'non-number',
+  });
 
   await setAudioModeAsync({
     playsInSilentMode: true,

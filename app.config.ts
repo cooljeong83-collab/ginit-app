@@ -228,11 +228,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-notifications',
         {
           icon: './assets/images/notification_icon_monochrome.png',
-          sounds: ['./assets/sounds/ginit_ring_c1.wav', './assets/sounds/ginit_ring_w.wav'],
+          /** 지닛 벨 1을 먼저 두면 일부 툴체인에서 두 번째 wav만 패키징되는 이슈를 줄입니다. */
+          sounds: ['./assets/sounds/ginit_bell_1.wav', './assets/sounds/ginit_ring_c1.wav'],
           /** FCM v1: 페이로드에 channelId가 없을 때 기본으로 쓸 채널(앱 종료·콜드 스타트 수신 보강) */
           defaultChannel: 'default',
         },
       ],
+      './plugins/withAndroidKeepNotificationRawSounds.js',
       [
         'expo-calendar',
         {

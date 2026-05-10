@@ -9,11 +9,12 @@
  * - `PendingPushFlush` — 스플래시 이탈 후 보류 소비·재시도
  * - `fcm-background` — 백그라운드 Notifee 탭 → pending 적재
  * - `ExpoPushRouting` — Expo 알림 탭 경로
+ * - `notify-sound-diag` — Android 알림 채널·커스텀 소리(지닛 벨) 적용 여부 스냅샷
  *
  * - 개발 빌드(`__DEV__`): 항상 켜짐
  * - 릴리스에서 잠깐 켜기: `.env` 에 `EXPO_PUBLIC_GINIT_NOTIFY_DEBUG=1` 후 재빌드
  */
-function isGinitNotifyDebugEnabled(): boolean {
+export function isGinitNotifyDebugEnabled(): boolean {
   try {
     if (typeof __DEV__ !== 'undefined' && __DEV__) return true;
   } catch {

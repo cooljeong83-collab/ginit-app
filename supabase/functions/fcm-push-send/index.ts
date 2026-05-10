@@ -13,7 +13,7 @@
  *
  * Notes:
  * - `profiles.fcm_platform = 'android'` 인 토큰은 **data-only**(title/body는 data에 포함).
- * - `ios` 또는 미기록(null) 토큰은 `notification` payload 포함.
+ * - `ios` 또는 미기록(null) 토큰은 `notification` payload 포함(채널·`aps.sound`는 `profiles.metadata.notification_sound` 반영).
  */
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
@@ -152,6 +152,35 @@ function mapFcmErrorToPseudoMessagingCode(fcmCode: string | undefined): string {
   return fcmCode ? `messaging/${fcmCode}` : 'messaging/unknown';
 }
 
+/** RN `getGinitFcmDisplayNotifeeChannelId` / `notifeeAndroidRawBaseName`(벨1 raw=`ginit_bell_1`) 과 동일 규칙 유지 */
+type EdgeBundledSoundPref = 'default' | 'ginit_ring_w' | 'ginit_ring_c1';
+
+function normalizeEdgeNotificationSoundId(raw: unknown): EdgeBundledSoundPref {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'default' || s === 'system') return 'default';
+  if (s === 'ginit_ring_c1') return 'ginit_ring_c1';
+  if (s === 'ginit_ring_w') return 'ginit_ring_w';
+  return 'ginit_ring_w';
+}
+
+/** RN `notifeeAndroidRawBaseName`(지닛 벨1 → `ginit_bell_1`) 과 동일해야 레거시 notification 채널이 맞습니다 */
+function fcmLegacyAndroidChannelId(pref: EdgeBundledSoundPref): string {
+  if (pref === 'default') return 'ginit_fcm_w_default';
+  if (pref === 'ginit_ring_c1') return 'ginit_fcm_w_ginit_ring_c1';
+  return 'ginit_fcm_w_ginit_bell_1';
+}
+
+function fcmLegacyIosApsSound(pref: EdgeBundledSoundPref): string {
+  if (pref === 'default') return 'default';
+  if (pref === 'ginit_ring_c1') return 'ginit_ring_c1.wav';
+  return 'ginit_bell_1.wav';
+}
+
+type LegacyFcmDisplayOpts = {
+  androidChannelId: string;
+  iosApsSound: string;
+};
+
 async function sendFcmHttpV1Message(
   projectId: string,
   accessToken: string,
@@ -160,6 +189,7 @@ async function sendFcmHttpV1Message(
   title: string,
   body: string,
   data: Record<string, string>,
+  legacyDisplay?: LegacyFcmDisplayOpts,
 ): Promise<{ success: boolean; error?: { code?: string; message?: string } }> {
   const url = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`;
   const dataForAndroid = { ...data, title, body };
@@ -178,12 +208,12 @@ async function sendFcmHttpV1Message(
           android: {
             priority: 'high',
             notification: {
-              /** 앱 `ensureGinitFcmNotifeeChannel` / `FcmMessagingBootstrap` 과 동일 ID (HIGH) */
-              channel_id: 'ginit_fcm',
+              /** 앱 `ensureGinitFcmNotifeeChannel` 이 만든 채널과 동일 ID (프로필 `metadata.notification_sound`) */
+              channel_id: legacyDisplay?.androidChannelId ?? 'ginit_fcm_w_default',
             },
           },
           apns: {
-            payload: { aps: { sound: 'default' } },
+            payload: { aps: { sound: legacyDisplay?.iosApsSound ?? 'default' } },
           },
         };
 
@@ -373,34 +403,48 @@ serve(async (req) => {
       }
     }
 
-    type ProfileTokenRow = { fcm_token?: unknown; fcm_platform?: unknown };
+    type ProfileTokenRow = { fcm_token?: unknown; fcm_platform?: unknown; notification_sound?: unknown };
     const { data: rpcRows, error: rpcErr } = await supabase.rpc('fcm_push_list_profile_tokens_for_user_ids', {
       p_app_user_ids: toUserIds,
     });
     let rows: ProfileTokenRow[] | null = (rpcRows ?? null) as ProfileTokenRow[] | null;
     if (rpcErr) {
       fcmPushLog(runId, 'profile_tokens_rpc_error', { message: rpcErr.message, code: rpcErr.code ?? '' });
-      const fb = await supabase.from('profiles').select('fcm_token, fcm_platform').in('app_user_id', toUserIds);
+      const fb = await supabase.from('profiles').select('fcm_token, fcm_platform, metadata').in('app_user_id', toUserIds);
       if (fb.error) {
         fcmPushLog(runId, 'profile_tokens_fallback_error', { message: fb.error.message });
         return jsonResponse({ ok: false, error: fb.error.message }, 500);
       }
-      rows = (fb.data ?? null) as ProfileTokenRow[] | null;
+      const fbRows = (fb.data ?? []) as { fcm_token?: unknown; fcm_platform?: unknown; metadata?: unknown }[];
+      rows = fbRows.map((row) => {
+        const meta = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : {};
+        const ns = meta.notification_sound;
+        return {
+          fcm_token: row.fcm_token,
+          fcm_platform: row.fcm_platform,
+          notification_sound: typeof ns === 'string' ? ns : undefined,
+        };
+      });
       fcmPushLog(runId, 'profile_tokens_fallback_ok', { rowCount: rows?.length ?? 0 });
     } else {
       fcmPushLog(runId, 'profile_tokens_rpc_ok', { rowCount: rows?.length ?? 0 });
     }
 
-    const tokenPlatform = new Map<string, 'android' | 'legacy'>();
+    type TokenJob = { token: string; platform: 'android' | 'legacy'; soundPref: EdgeBundledSoundPref };
+    const tokenJobs: TokenJob[] = [];
+    const seenTok = new Set<string>();
     for (const r of rows ?? []) {
       const t = typeof (r as any)?.fcm_token === 'string' ? String((r as any).fcm_token).trim() : '';
-      if (!t || tokenPlatform.has(t)) continue;
+      if (!t || seenTok.has(t)) continue;
+      seenTok.add(t);
       const platRaw = typeof (r as any)?.fcm_platform === 'string' ? String((r as any).fcm_platform).trim().toLowerCase() : '';
-      tokenPlatform.set(t, platRaw === 'android' ? 'android' : 'legacy');
+      const platform = platRaw === 'android' ? 'android' : 'legacy';
+      const soundPref = normalizeEdgeNotificationSoundId((r as any)?.notification_sound);
+      tokenJobs.push({ token: t, platform, soundPref });
     }
-    const androidTokens = [...tokenPlatform.entries()].filter(([, p]) => p === 'android').map(([tok]) => tok);
-    const legacyTokens = [...tokenPlatform.entries()].filter(([, p]) => p === 'legacy').map(([tok]) => tok);
-    const uniqueTokens = [...tokenPlatform.keys()];
+    const uniqueTokens = tokenJobs.map((j) => j.token);
     if (uniqueTokens.length === 0) {
       fcmPushLog(runId, 'early_exit', {
         reason: 'no_tokens',
@@ -413,8 +457,8 @@ serve(async (req) => {
 
     fcmPushLog(runId, 'tokens_resolved', {
       uniqueTokenCount: uniqueTokens.length,
-      androidCount: androidTokens.length,
-      legacyCount: legacyTokens.length,
+      androidCount: tokenJobs.filter((j) => j.platform === 'android').length,
+      legacyCount: tokenJobs.filter((j) => j.platform === 'legacy').length,
     });
 
     const rawSa = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')?.trim();
@@ -463,13 +507,29 @@ serve(async (req) => {
     let successCount = 0;
     let failureCount = 0;
 
-    const runBatch = async (tokens: string[], kind: 'android' | 'legacy') => {
-      fcmPushLog(runId, 'fcm_batch_start', { kind, count: tokens.length });
+    const runAllTokenJobs = async () => {
+      fcmPushLog(runId, 'fcm_batch_start', { kind: 'per_token', count: tokenJobs.length });
       const batch = await Promise.all(
-        tokens.map((tok) => sendFcmHttpV1Message(projectId, accessToken, tok, kind, title, body, data)),
+        tokenJobs.map((job) =>
+          sendFcmHttpV1Message(
+            projectId,
+            accessToken,
+            job.token,
+            job.platform,
+            title,
+            body,
+            data,
+            job.platform === 'legacy'
+              ? {
+                  androidChannelId: fcmLegacyAndroidChannelId(job.soundPref),
+                  iosApsSound: fcmLegacyIosApsSound(job.soundPref),
+                }
+              : undefined,
+          ),
+        ),
       );
-      for (let i = 0; i < tokens.length; i++) {
-        const tok = tokens[i]!;
+      for (let i = 0; i < tokenJobs.length; i++) {
+        const tok = tokenJobs[i]!.token;
         const r = batch[i]!;
         allTokensOrdered.push(tok);
         allResponses.push(r);
@@ -478,7 +538,7 @@ serve(async (req) => {
       }
       const firstFail = batch.find((r) => !r.success);
       fcmPushLog(runId, 'fcm_batch_done', {
-        kind,
+        kind: 'per_token',
         ok: batch.every((r) => r.success),
         firstErr: firstFail?.error?.message ?? null,
         firstCode: firstFail?.error?.code ?? null,
@@ -486,8 +546,7 @@ serve(async (req) => {
     };
 
     try {
-      if (androidTokens.length > 0) await runBatch(androidTokens, 'android');
-      if (legacyTokens.length > 0) await runBatch(legacyTokens, 'legacy');
+      if (tokenJobs.length > 0) await runAllTokenJobs();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       fcmPushLog(runId, 'fcm_batch_throw', { message: msg });

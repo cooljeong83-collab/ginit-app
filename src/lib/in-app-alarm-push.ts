@@ -5,6 +5,7 @@ import { dispatchRemotePushToRecipients } from '@/src/lib/remote-push-hub';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { diagLogAfterEnsureExpoInAppChannel } from '@/src/lib/notification-sound-diag';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import {
   getExpoNotificationContentSound,
@@ -31,6 +32,7 @@ export async function ensureGinitInAppAndroidChannel(): Promise<void> {
     bypassDnd: false,
     sound: channelSound,
   });
+  void diagLogAfterEnsureExpoInAppChannel();
 }
 
 /** 로컬·시스템 배너 표시 전에 호출 — 미요청/거절 시 한 번 더 요청합니다. */

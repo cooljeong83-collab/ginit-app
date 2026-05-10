@@ -2,6 +2,7 @@ import notifee, { AndroidImportance } from '@notifee/react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { consumeNotifeeDisplayOnceGlobalSync } from '@/src/lib/fcm-foreground-message-dedupe';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { diagLogAfterEnsureFcmNotifeeChannels } from '@/src/lib/notification-sound-diag';
 import { isMeetingChatNotifyEnabled } from '@/src/lib/meeting-chat-notify-preference';
 import {
   getGinitFcmDisplayNotifeeChannelId,
@@ -43,6 +44,7 @@ export async function ensureGinitFcmNotifeeChannel(): Promise<void> {
     sound: raw ?? 'default',
     vibrationPattern: [220, 220],
   });
+  void diagLogAfterEnsureFcmNotifeeChannels();
 }
 
 function titleBodyFromRemoteMessage(rm: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } | null {
@@ -94,13 +96,18 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
     ginitNotifyDbg('fcm-notifee-display', 'skip_duplicate_message_id', { messageId: rm.messageId });
     return;
   }
+  await ensureGinitFcmNotifeeChannel();
+  const channelId = await getGinitFcmDisplayNotifeeChannelId();
+  const prefSnap = await loadProfileNotificationSoundId();
+  const rawSnap = notifeeAndroidRawBaseName(prefSnap);
   ginitNotifyDbg('fcm-notifee-display', 'display', {
     messageId: rm.messageId,
     action: action || undefined,
     meetingId: meetingId || undefined,
+    androidChannelId: channelId,
+    notificationSoundPref: prefSnap,
+    notifeeRawHint: rawSnap,
   });
-  await ensureGinitFcmNotifeeChannel();
-  const channelId = await getGinitFcmDisplayNotifeeChannelId();
   await notifee.displayNotification({
     title,
     body,
