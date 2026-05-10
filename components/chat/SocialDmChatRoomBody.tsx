@@ -265,7 +265,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     void getUserProfilesForIds(ids).then(setProfiles);
   }, [myUserId, peerId]);
 
-  const composerBottomPad = useMemo(() => Math.max(insets.bottom, 8), [insets.bottom]);
+  /** 모임 채팅과 동일: IME 표시 중 일부 기기에서 하단 inset이 키보드 오프셋과 중복될 수 있어 최소 패딩만 사용 */
+  const composerBottomPad = useMemo(
+    () => (keyboardHeight > 0 ? 8 : Math.max(insets.bottom, 8)),
+    [insets.bottom, keyboardHeight],
+  );
 
   const onChatScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {

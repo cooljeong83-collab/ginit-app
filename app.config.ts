@@ -233,6 +233,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           defaultChannel: 'default',
         },
       ],
+      [
+        'expo-calendar',
+        {
+          calendarPermission: '확정된 모임 일정을 기기 캘린더에 저장하려면 캘린더 접근이 필요합니다.',
+        },
+      ],
       './plugins/withAndroidFcmDefaultChannelManifest.js',
       'expo-background-task',
       /** Android Phone Number Hint API (play-services-auth) */

@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
@@ -37,6 +37,7 @@ import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
+import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import type { Category } from '@/src/lib/categories';
 import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
@@ -155,6 +156,8 @@ export default function FeedScreen() {
   const homeExitBackPressRef = useRef(0);
   /** 모임 상세 중복 진입 방지(더블 탭 등) */
   const meetingOpenLockRef = useRef(false);
+  /** 피드 blur·재탭 시 이전 `router.push` 비동기가 늦게 끝나 상세로 다시 열리는 것을 막음 */
+  const cancelPendingMeetingOpenFromFeedRef = useRef<(() => void) | null>(null);
 
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
@@ -221,6 +224,15 @@ export default function FeedScreen() {
     return () => sub.remove();
   }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]);
 
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        cancelPendingMeetingOpenFromFeedRef.current?.();
+        cancelPendingMeetingOpenFromFeedRef.current = null;
+      };
+    }, []),
+  );
+
   /** 피드 통합 모달 초안: 표시할 마스터 id + 현재 필터(null=전체) */
   const [categoryPickerDraft, setCategoryPickerDraft] = useState<{ visibility: string[] }>({ visibility: [] });
   const feedCategoryModalCategoryListScrollRef = useRef<ScrollView | null>(null);
@@ -233,40 +245,47 @@ export default function FeedScreen() {
   const [feedUserProfile, setFeedUserProfile] = useState<UserProfile | null>(null);
   const [feedCoords, setFeedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== 'android') return undefined;
-      const anyOverlayOpen =
-        regionSearchModalOpen ||
-        regionDropdownOpen ||
-        regionModalOpen ||
-        feedListSettingsModalOpen ||
-        feedSearchModalOpen ||
-        sortDropdownOpen;
-      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-        if (anyOverlayOpen) return false;
-        const now = Date.now();
-        if (now - homeExitBackPressRef.current < 2200) {
-          BackHandler.exitApp();
-          return true;
-        }
-        homeExitBackPressRef.current = now;
-        ToastAndroid.show('한 번 더 누르면 앱이 종료돼요.', ToastAndroid.SHORT);
+  const isHomeMeetingsScreenFocused = useIsFocused();
+
+  /** `useFocusEffect`만으로는 일부 기기(예: 구형 갤럭시)에서 모임 상세로 올라간 뒤에도 리스너가 남아 뒤로가기를 가로채는 경우가 있어 `isFocused`로 게이트합니다. */
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    if (!isHomeMeetingsScreenFocused) {
+      homeExitBackPressRef.current = 0;
+      return undefined;
+    }
+    const anyOverlayOpen =
+      regionSearchModalOpen ||
+      regionDropdownOpen ||
+      regionModalOpen ||
+      feedListSettingsModalOpen ||
+      feedSearchModalOpen ||
+      sortDropdownOpen;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (isAndroidTabHomeHardwareExitSuppressed()) return false;
+      if (anyOverlayOpen) return false;
+      const now = Date.now();
+      if (now - homeExitBackPressRef.current < 2200) {
+        BackHandler.exitApp();
         return true;
-      });
-      return () => {
-        homeExitBackPressRef.current = 0;
-        sub.remove();
-      };
-    }, [
-      regionSearchModalOpen,
-      regionDropdownOpen,
-      regionModalOpen,
-      feedListSettingsModalOpen,
-      feedSearchModalOpen,
-      sortDropdownOpen,
-    ]),
-  );
+      }
+      homeExitBackPressRef.current = now;
+      ToastAndroid.show('한 번 더 누르면 앱이 종료돼요.', ToastAndroid.SHORT);
+      return true;
+    });
+    return () => {
+      homeExitBackPressRef.current = 0;
+      sub.remove();
+    };
+  }, [
+    isHomeMeetingsScreenFocused,
+    regionSearchModalOpen,
+    regionDropdownOpen,
+    regionModalOpen,
+    feedListSettingsModalOpen,
+    feedSearchModalOpen,
+    sortDropdownOpen,
+  ]);
 
   useEffect(() => {
     if (!userId?.trim()) {
@@ -948,11 +967,21 @@ export default function FeedScreen() {
       // 네비게이션이 끝나기 전 더블탭으로 push가 2번 호출되는 케이스 방지
       const tRelease = setTimeout(lockRelease, 900);
 
+      cancelPendingMeetingOpenFromFeedRef.current?.();
+      let cancelled = false;
+      const cancelThisOpen = () => {
+        cancelled = true;
+      };
+      cancelPendingMeetingOpenFromFeedRef.current = cancelThisOpen;
+
       const pk = userId?.trim() ?? '';
       if (!pk) {
         Alert.alert('로그인이 필요해요', '모임 상세는 로그인 후 볼 수 있어요.');
         clearTimeout(tRelease);
         lockRelease();
+        if (cancelPendingMeetingOpenFromFeedRef.current === cancelThisOpen) {
+          cancelPendingMeetingOpenFromFeedRef.current = null;
+        }
         return;
       }
       // feedUserProfile은 탭 진입 직후 null일 수 있어(비동기 로드),
@@ -960,7 +989,9 @@ export default function FeedScreen() {
       void (async () => {
         try {
           await ensureUserProfile(pk);
+          if (cancelled) return;
           const p = await getUserProfile(pk);
+          if (cancelled) return;
           const ok = isMeetingServiceComplianceComplete(p, pk);
           if (!ok) {
             const detailMsg = MEETING_PHONE_VERIFICATION_UI_ENABLED
@@ -970,14 +1001,20 @@ export default function FeedScreen() {
               { text: '닫기', style: 'cancel' },
               { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
             ]);
-            clearTimeout(tRelease);
-            lockRelease();
             return;
           }
+          if (cancelled) return;
           router.push(`/meeting/${m.id}`);
         } catch {
           // 네트워크 실패 등으로 프로필을 못 읽어도, "미인증"으로 단정해 막지 않습니다.
+          if (cancelled) return;
           router.push(`/meeting/${m.id}`);
+        } finally {
+          clearTimeout(tRelease);
+          lockRelease();
+          if (cancelPendingMeetingOpenFromFeedRef.current === cancelThisOpen) {
+            cancelPendingMeetingOpenFromFeedRef.current = null;
+          }
         }
       })();
     },

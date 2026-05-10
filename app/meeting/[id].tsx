@@ -63,6 +63,8 @@ import {
   createMeetingShareLinkRpc,
   meetingShareWebConfigured,
 } from '@/src/lib/meeting-share';
+import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
+import { saveConfirmedMeetingToDeviceCalendar } from '@/src/lib/save-confirmed-meeting-device-calendar';
 import type { Meeting } from '@/src/lib/meetings';
 import {
   computeMeetingConfirmAnalysis,
@@ -426,6 +428,7 @@ export default function MeetingDetailScreen() {
   const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, retryNonce);
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
+  const [saveCalendarBusy, setSaveCalendarBusy] = useState(false);
   const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
 
@@ -1213,7 +1216,16 @@ export default function MeetingDetailScreen() {
     };
   }, [sessionPk]);
 
+  /** 탭 피드의 Android 이중 탭 종료 `BackHandler`가 상세 위에서도 살아 있는 기기 대비 — 포커스 콜백보다 먼저 억제 */
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    return pushAndroidTabHomeHardwareExitSuppress();
+  }, []);
+
   // join/vote 파생 로직은 각 훅으로 이동
+
+  /** Alert로 나가기 확정 후 재진입하는 `beforeRemove`에서 동일 팝업이 두 번 뜨지 않도록 우회 */
+  const voteDirtyLeaveBypassRef = useRef(false);
 
   const proceedScreenBack = useCallback(() => {
     try {
@@ -1234,7 +1246,14 @@ export default function MeetingDetailScreen() {
         '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
         [
           { text: '머무르기', style: 'cancel' },
-          { text: '나가기', style: 'destructive', onPress: proceedScreenBack },
+          {
+            text: '나가기',
+            style: 'destructive',
+            onPress: () => {
+              voteDirtyLeaveBypassRef.current = true;
+              proceedScreenBack();
+            },
+          },
         ],
       );
       return;
@@ -1245,6 +1264,7 @@ export default function MeetingDetailScreen() {
   useEffect(() => {
     if (!meeting) return undefined;
     const unsub = navigation.addListener('beforeRemove', (e) => {
+      if (voteDirtyLeaveBypassRef.current) return;
       if (!votesDirty || !alreadyJoinedMeeting || isHost) return;
       e.preventDefault();
       Alert.alert(
@@ -1256,13 +1276,17 @@ export default function MeetingDetailScreen() {
             text: '나가기',
             style: 'destructive',
             onPress: () => {
+              voteDirtyLeaveBypassRef.current = true;
               navigation.dispatch(e.data.action);
             },
           },
         ],
       );
     });
-    return unsub;
+    return () => {
+      voteDirtyLeaveBypassRef.current = false;
+      unsub();
+    };
   }, [navigation, meeting, votesDirty, isHost, alreadyJoinedMeeting]);
 
   const participantGenderCounts = useMemo(() => {
@@ -1772,6 +1796,26 @@ export default function MeetingDetailScreen() {
     });
   }, [meeting, confirmedPlaceCoords, confirmedPlaceChipResolved?.title]);
 
+  const onPressSaveScheduleToCalendar = useCallback(async () => {
+    if (!meeting) return;
+    if (saveCalendarBusy) return;
+    setSaveCalendarBusy(true);
+    try {
+      const res = await saveConfirmedMeetingToDeviceCalendar(meeting);
+      if (res.ok) {
+        if (Platform.OS === 'web') {
+          showTransientBottomMessage('구글 캘린더에서 저장을 완료해 주세요.');
+        } else {
+          showTransientBottomMessage('내 캘린더에 저장했어요.');
+        }
+      } else {
+        Alert.alert('일정 저장', res.message);
+      }
+    } finally {
+      setSaveCalendarBusy(false);
+    }
+  }, [meeting, saveCalendarBusy]);
+
   const notFound = !loading && !loadError && meeting === null;
 
   const viewBlockedByCompliance = meetingAuthGateReady && !meetingAuthComplete;
@@ -2202,6 +2246,23 @@ export default function MeetingDetailScreen() {
                         );
                       })()
                     ) : null}
+                    <GinitPressable
+                      onPress={() => void onPressSaveScheduleToCalendar()}
+                      disabled={saveCalendarBusy}
+                      style={({ pressed }) => [
+                        styles.confirmedCalSaveBtn,
+                        saveCalendarBusy && { opacity: 0.7 },
+                        pressed && !saveCalendarBusy && { opacity: 0.88 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="일정 저장하기">
+                      {saveCalendarBusy ? (
+                        <ActivityIndicator color={GinitTheme.colors.primary} size="small" />
+                      ) : (
+                        <GinitSymbolicIcon name="calendar-outline" size={18} color={GinitTheme.colors.primary} />
+                      )}
+                      <Text style={styles.confirmedCalSaveBtnLabel}>일정 저장하기</Text>
+                    </GinitPressable>
                   </>
                 ) : (
                   <Text style={styles.infoRowMuted}>저장된 확정 일시가 없어요.</Text>
@@ -4354,6 +4415,25 @@ const styles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     backgroundColor: 'rgba(255, 255, 255, 0.45)',
     overflow: 'hidden',
+  },
+  confirmedCalSaveBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+  },
+  confirmedCalSaveBtnLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GinitTheme.colors.primary,
   },
   voteCalendarHeaderRow: {
     flexDirection: 'row',

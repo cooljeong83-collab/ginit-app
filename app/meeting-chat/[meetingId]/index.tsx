@@ -477,8 +477,14 @@ export default function MeetingChatRoomScreen() {
     };
   }, []);
 
-  /** 입력 독 하단: 세이프만(`KeyboardStickyView`가 키보드 동기화). */
-  const composerBottomPad = useMemo(() => Math.max(insets.bottom, 8), [insets.bottom]);
+  /**
+   * 입력 독 하단 패딩. IME가 떠 있을 때 일부 Android(예: 구형 One UI)는 safe-area bottom이 0으로 줄지 않아
+   * `KeyboardStickyView` 보정과 겹쳐 키보드–입력창 사이가 과하게 벌어질 수 있어, 키보드 표시 중엔 최소만 둡니다.
+   */
+  const composerBottomPad = useMemo(
+    () => (keyboardHeight > 0 ? 8 : Math.max(insets.bottom, 8)),
+    [insets.bottom, keyboardHeight],
+  );
 
   const goMeetingDetail = useCallback(() => {
     if (!meetingId) return;
