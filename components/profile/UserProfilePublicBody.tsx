@@ -16,6 +16,7 @@ import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-style
 import { ProfileSquareAvatar } from '@/components/profile/ProfileSquareAvatar';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
@@ -25,7 +26,14 @@ import {
   sendGinitRequest,
   type FriendRelationStatusRow,
 } from '@/src/lib/friends';
-import { effectiveGTrust, levelBarFillColorForTrust, trustTierForUser, xpProgressWithinLevel } from '@/src/lib/ginit-trust';
+import { compositeReputationTier } from '@/src/lib/ginit-composite-tier';
+import {
+  effectiveGLevel,
+  effectiveGTrust,
+  effectiveGXp,
+  levelBarFillColorForTrust,
+  xpProgressWithinLevel,
+} from '@/src/lib/ginit-trust';
 import {
   avatarsObjectPathFromPublicUrlIfOwned,
   deleteProfilePhotoHistoryUrl,
@@ -71,14 +79,18 @@ export function UserProfilePublicBody({
   layout,
   onPressMyAvatar,
   hideMyEditCta,
+  refreshTrigger = 0,
 }: {
   targetUserId: string;
   layout: 'tab' | 'stack';
   onPressMyAvatar?: () => void;
   hideMyEditCta?: boolean;
+  /** 부모(탭 등)에서 당겨서 새로고침 시 증가시키면 `getUserProfile`을 다시 호출합니다. */
+  refreshTrigger?: number;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { version: appPoliciesVersion } = useAppPolicies();
   const { userId } = useUserSession();
 
   const meRaw = userId?.trim() ?? '';
@@ -114,7 +126,7 @@ export function UserProfilePublicBody({
     return () => {
       alive = false;
     };
-  }, [targetNorm]);
+  }, [targetNorm, refreshTrigger]);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,10 +242,10 @@ export function UserProfilePublicBody({
   const bio = withdrawn ? '' : (profile?.bio?.trim() ?? '');
   const trust = effectiveGTrust(profile);
   const ringBase = useMemo(() => levelBarFillColorForTrust(trust), [trust]);
-  const trustTier = useMemo(() => trustTierForUser(profile), [profile]);
-  const gLevel = typeof profile?.gLevel === 'number' && Number.isFinite(profile.gLevel) ? Math.max(1, Math.trunc(profile.gLevel)) : 1;
-  const gXp = typeof profile?.gXp === 'number' && Number.isFinite(profile.gXp) ? Math.max(0, Math.trunc(profile.gXp)) : 0;
-  const xpBar = useMemo(() => xpProgressWithinLevel({ nickname: '', photoUrl: null, gLevel, gXp } as UserProfile), [gLevel, gXp]);
+  const compositeTier = useMemo(() => compositeReputationTier(profile), [profile, appPoliciesVersion]);
+  const gLevel = effectiveGLevel(profile);
+  const gXp = effectiveGXp(profile);
+  const xpBar = useMemo(() => xpProgressWithinLevel(profile), [profile]);
 
   const showProgress = isMe;
   const showCta = !withdrawn && !isAi;
@@ -623,7 +635,10 @@ export function UserProfilePublicBody({
         </View>
         <View style={styles.metricDivider} />
         <View style={styles.metricCell}>
-          <Text style={styles.metricValue}>{trustTier.label}</Text>
+          <Text style={styles.metricValue} accessibilityLabel={`등급 ${compositeTier.label}`}>
+            {compositeTier.emoji ? `${compositeTier.emoji} ` : ''}
+            {compositeTier.label}
+          </Text>
           <Text style={styles.metricLabel}>등급</Text>
         </View>
         <View style={styles.metricDivider} />

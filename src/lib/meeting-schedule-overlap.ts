@@ -11,6 +11,7 @@ import {
   parseScheduleToTimestamp,
   type MeetingScheduleTimeFields,
 } from '@/src/lib/meeting-schedule-times';
+import { effectiveGLevel } from '@/src/lib/ginit-trust';
 import { supabase } from '@/src/lib/supabase';
 import type { UserProfile } from '@/src/lib/user-profile';
 
@@ -71,8 +72,7 @@ const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 export function getScheduleOverlapBufferHours(profile: UserProfile | null | undefined): number {
   const baseRaw = getPolicyNumeric('meeting', 'overlap_hours', 3);
   const base = Math.max(1, Math.min(168, Math.round(Number(baseRaw)) || 3));
-  const lv =
-    typeof profile?.gLevel === 'number' && Number.isFinite(profile.gLevel) ? Math.floor(profile.gLevel) : 1;
+  const lv = effectiveGLevel(profile);
   const trust =
     typeof profile?.gTrust === 'number' && Number.isFinite(profile.gTrust) ? Math.floor(profile.gTrust) : 0;
   if (lv >= OVERLAP_RELAX_G_LEVEL_MIN && trust >= OVERLAP_RELAX_G_TRUST_MIN) return 2;

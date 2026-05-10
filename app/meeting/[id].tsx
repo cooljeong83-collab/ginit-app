@@ -3203,8 +3203,8 @@ export default function MeetingDetailScreen() {
                     </GinitPressable>
                   ) : null}
 
-                  {orderedParticipantIdsList.length >= 2 &&
-                  !(meeting.scheduleConfirmed === true && hideHostScheduleUnconfirmPill) ? (
+                  {((meeting.scheduleConfirmed !== true && orderedParticipantIdsList.length >= 2) ||
+                    (meeting.scheduleConfirmed === true && !hideHostScheduleUnconfirmPill)) ? (
                     <GinitPressable
                       onPress={
                         meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
@@ -3236,7 +3236,7 @@ export default function MeetingDetailScreen() {
                         ]}
                         numberOfLines={1}
                         ellipsizeMode="tail">
-                        {meeting.scheduleConfirmed === true ? '취소' : '확정'}
+                        {meeting.scheduleConfirmed === true ? '확정 취소' : '확정'}
                       </Text>
                     </GinitPressable>
                   ) : null}

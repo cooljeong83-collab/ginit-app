@@ -44,6 +44,8 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
   trust: {
     /** 서버 `ensure_profile_minimal`이 신규 `g_trust`에 사용(폴백). */
     default_score: 100,
+    /** gTrust 등급 구간 — DB `app_policies`와 동일 키·의미 유지 */
+    tier_thresholds: { restricted_lt: 30, caution_lt: 50, normal_lt: 80 },
     penalty_noshow: { xp: -100, trust: -50, restricted_below: 30 },
     penalty_late_cancel: { xp: -30, trust: -10 },
     /** 확정 일정 모임에서 참여자 나가기(모임당 1회, Supabase RPC) */
@@ -51,6 +53,26 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     penalty_report_approved: { trust: -20, restricted_below: 30 },
     recovery_checkin: { streak_need: 3, trust_delta: 5, cap: 100 },
     min_join_score: 70,
+    /** 복합 평판 10단계 — DB `0101_trust_composite_tier_xp_balance`와 동기 */
+    composite_tier: {
+      trust_edges: [10, 20, 30, 40, 50, 60, 70, 80, 90],
+      level_mode: 'linear_max',
+      max_level: 28,
+      xp_edges: [200, 450, 700, 1100, 1600, 2400, 3600, 5200, 7600],
+      tiers: [
+        { step: 1, label: '씨앗', emoji: '🌱' },
+        { step: 2, label: '새싹', emoji: '🌿' },
+        { step: 3, label: '줄기', emoji: '🪴' },
+        { step: 4, label: '잎', emoji: '🍃' },
+        { step: 5, label: '가지', emoji: '🌳' },
+        { step: 6, label: '숲', emoji: '🌲' },
+        { step: 7, label: '산', emoji: '⛰️' },
+        { step: 8, label: '별', emoji: '✨' },
+        { step: 9, label: '달', emoji: '🌙' },
+        { step: 10, label: '태양', emoji: '☀️' },
+      ],
+      restricted: { force_step: 1, label: '제한', emoji: '🔒' },
+    },
   },
 };
 

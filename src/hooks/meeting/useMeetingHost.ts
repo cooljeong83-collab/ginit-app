@@ -12,10 +12,7 @@ import {
   unconfirmMeetingSchedule,
 } from '@/src/lib/meetings';
 import { isConfirmedScheduleOverlapErrorMessage, GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION } from '@/src/lib/meeting-schedule-overlap';
-import {
-  HOST_SCHEDULE_UNCONFIRM_HIDE_MINUTES_BEFORE_START,
-  isHostScheduleUnconfirmHiddenByStartProximity,
-} from '@/src/lib/meeting-schedule-times';
+import { isHostScheduleUnconfirmHiddenByStartProximity } from '@/src/lib/meeting-schedule-times';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { UserProfile } from '@/src/lib/user-profile';
 
@@ -156,11 +153,7 @@ export function useMeetingHost({
     }
     if (meeting.scheduleConfirmed !== true) return;
     if (isHostScheduleUnconfirmHiddenByStartProximity(meeting, Date.now())) {
-      Alert.alert(
-        '안내',
-        `모임 시작 ${HOST_SCHEDULE_UNCONFIRM_HIDE_MINUTES_BEFORE_START}분 전부터는 일정 확정을 취소할 수 없어요.`,
-        [{ text: '확인' }],
-      );
+      Alert.alert('안내', '모임 시작 시각이 지난 뒤에는 일정 확정을 취소할 수 없어요.', [{ text: '확인' }]);
       return;
     }
     Alert.alert(

@@ -5,7 +5,7 @@ export function parseScheduleToTimestamp(dateStr: string, timeStr: string): Time
   const d = dateStr.trim();
   const t = timeStr.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(t);
   if (!m) return null;
   const hh = m[1].padStart(2, '0');
   const mm = m[2].padStart(2, '0');
@@ -21,12 +21,41 @@ export type MeetingScheduleTimeFields = {
   scheduleTime?: string | null;
 };
 
+/** Firestore Timestamp·ISO 문자열·epoch ms·JSON `{ seconds }` 등 → epoch ms (실패 시 null). */
+export function coerceScheduledAtToEpochMs(scheduledAt: unknown): number | null {
+  if (scheduledAt == null) return null;
+  if (typeof scheduledAt === 'string') {
+    const d = new Date(scheduledAt.trim());
+    return Number.isFinite(d.getTime()) ? d.getTime() : null;
+  }
+  if (typeof scheduledAt === 'number' && Number.isFinite(scheduledAt)) {
+    return scheduledAt;
+  }
+  if (typeof scheduledAt === 'object' && scheduledAt !== null) {
+    const toMillis = (scheduledAt as { toMillis?: () => number }).toMillis;
+    if (typeof toMillis === 'function') {
+      try {
+        const ms = toMillis.call(scheduledAt);
+        return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+      } catch {
+        return null;
+      }
+    }
+    const o = scheduledAt as Record<string, unknown>;
+    const sec = o.seconds ?? o._seconds;
+    if (typeof sec === 'number' && Number.isFinite(sec)) {
+      const nano = o.nanoseconds ?? o._nanoseconds;
+      const n = typeof nano === 'number' && Number.isFinite(nano) ? nano : 0;
+      return sec * 1000 + Math.floor(n / 1e6);
+    }
+  }
+  return null;
+}
+
 /** `scheduledAt` 또는 `scheduleDate`+`scheduleTime` 기준 시작 epoch ms. */
 export function meetingScheduleStartMs(m: MeetingScheduleTimeFields): number | null {
-  const sa = m.scheduledAt;
-  if (sa && typeof (sa as { toMillis?: () => number }).toMillis === 'function') {
-    return (sa as { toMillis: () => number }).toMillis();
-  }
+  const fromSa = coerceScheduledAtToEpochMs(m.scheduledAt);
+  if (fromSa != null) return fromSa;
   const d = m.scheduleDate?.trim() ?? '';
   const t = m.scheduleTime?.trim() ?? '';
   if (!d || !t) return null;
@@ -34,14 +63,11 @@ export function meetingScheduleStartMs(m: MeetingScheduleTimeFields): number | n
   return ts ? ts.toMillis() : null;
 }
 
-/** 모임 상세: 확정된 시작 시각 기준 이 분 전부터 호스트「일정 확정 취소」UI 숨김·차단 */
-export const HOST_SCHEDULE_UNCONFIRM_HIDE_MINUTES_BEFORE_START = 30;
-
 export type MeetingScheduleUnconfirmTimeGateFields = MeetingScheduleTimeFields & {
   scheduleConfirmed?: boolean | null;
 };
 
-/** `scheduleConfirmed === true`이고 시작 시각을 알 수 있을 때만, `nowMs`가 차단 시각 이후면 true */
+/** `scheduleConfirmed === true`이고 시작 시각을 알 수 있을 때만, `nowMs`가 예정 시작 시각 이후면 true(확정 취소 UI 숨김·차단) */
 export function isHostScheduleUnconfirmHiddenByStartProximity(
   m: MeetingScheduleUnconfirmTimeGateFields,
   nowMs: number,
@@ -49,6 +75,5 @@ export function isHostScheduleUnconfirmHiddenByStartProximity(
   if (m.scheduleConfirmed !== true) return false;
   const startMs = meetingScheduleStartMs(m);
   if (startMs == null) return false;
-  const cutoffMs = startMs - HOST_SCHEDULE_UNCONFIRM_HIDE_MINUTES_BEFORE_START * 60 * 1000;
-  return nowMs >= cutoffMs;
+  return nowMs >= startMs;
 }

@@ -506,7 +506,7 @@ export type CreateMeetingInput = {
   meetingConfig?: PublicMeetingDetailsConfig | null;
 };
 
-import { parseScheduleToTimestamp } from './meeting-schedule-times';
+import { coerceScheduledAtToEpochMs, parseScheduleToTimestamp } from './meeting-schedule-times';
 
 export { parseScheduleToTimestamp };
 
@@ -2752,10 +2752,8 @@ function scheduleFieldsAfterHostConfirm(m: Meeting, dateChipId: string | null): 
 
 /** 모임 대표 일시(상단 `scheduledAt` 또는 scheduleDate+scheduleTime)의 epoch ms. 없으면 null. */
 export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>): number | null {
-  const ts = m.scheduledAt;
-  if (ts != null && typeof (ts as Timestamp).toMillis === 'function') {
-    return (ts as Timestamp).toMillis();
-  }
+  const fromSa = coerceScheduledAtToEpochMs(m.scheduledAt);
+  if (fromSa != null) return fromSa;
   const d = m.scheduleDate?.trim() ?? '';
   const t = m.scheduleTime?.trim() ?? '';
   const parsed = parseScheduleToTimestamp(d, t);

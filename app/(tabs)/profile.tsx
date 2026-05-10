@@ -5,7 +5,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Easing, LayoutChangeEvent, Platform, ScrollView, StyleSheet, Text, ToastAndroid, View} from 'react-native';
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Easing,
+  LayoutChangeEvent,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitCard } from '@/components/ginit';
@@ -17,9 +29,9 @@ import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBod
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import {
+  effectiveGLevel,
   effectiveGTrust,
   levelBarFillColorForTrust,
-  trustTierForUser,
   xpProgressWithinLevel,
 } from '@/src/lib/ginit-trust';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
@@ -55,6 +67,8 @@ export default function ProfileTab() {
   const trustDropOpacity = useRef(new Animated.Value(0)).current;
   const trustDropTranslate = useRef(new Animated.Value(0)).current;
   const [trustSectionY, setTrustSectionY] = useState<number | null>(null);
+  const [profileBodyRefreshTrigger, setProfileBodyRefreshTrigger] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const isSignedIn = !!profilePk;
 
   const refreshProfile = useCallback(async () => {
@@ -66,7 +80,7 @@ export default function ProfileTab() {
       const nextTrust = effectiveGTrust(p);
       setGTrust(nextTrust);
       setGXp(typeof p.gXp === 'number' && Number.isFinite(p.gXp) ? Math.trunc(p.gXp) : 0);
-      setGLevel(typeof p.gLevel === 'number' && Number.isFinite(p.gLevel) ? Math.max(1, Math.trunc(p.gLevel)) : 1);
+      setGLevel(effectiveGLevel(p));
       setPenaltyCount(typeof p.penaltyCount === 'number' && Number.isFinite(p.penaltyCount) ? Math.max(0, Math.trunc(p.penaltyCount)) : 0);
       setIsRestricted(p.isRestricted === true);
     } catch {
@@ -125,13 +139,9 @@ export default function ProfileTab() {
     ]).start(() => setTrustDropFx(null));
   }, [trustDropFx, trustDropOpacity, trustDropTranslate]);
 
-  const trustTier = useMemo(
-    () => trustTierForUser({ nickname: '', photoUrl: null, gTrust, isRestricted } as UserProfile),
-    [gTrust, isRestricted],
-  );
   const xpBar = useMemo(
-    () => xpProgressWithinLevel({ nickname: '', photoUrl: null, gLevel, gXp } as UserProfile),
-    [gLevel, gXp],
+    () => xpProgressWithinLevel({ nickname: '', photoUrl: null, gLevel, gXp, gTrust } as UserProfile),
+    [gLevel, gXp, gTrust],
   );
   const levelBarColor = useMemo(() => levelBarFillColorForTrust(gTrust), [gTrust]);
 
@@ -242,6 +252,17 @@ export default function ProfileTab() {
     router.replace('/login');
   }, [router]);
 
+  const onPullRefreshProfile = useCallback(async () => {
+    if (!profilePk) return;
+    setPullRefreshing(true);
+    try {
+      await refreshProfile();
+      setProfileBodyRefreshTrigger((n) => n + 1);
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [profilePk, refreshProfile]);
+
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -274,7 +295,12 @@ export default function ProfileTab() {
           style={styles.scrollFlex}
           contentContainerStyle={[HomeGlassStyles.scrollPad, styles.scrollBottom]}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            profilePk ? (
+              <RefreshControl refreshing={pullRefreshing} onRefresh={() => void onPullRefreshProfile()} />
+            ) : undefined
+          }>
           {profilePk ? (
             <UserProfilePublicBody
               key={photoUrl || 'no-photo'}
@@ -282,6 +308,7 @@ export default function ProfileTab() {
               layout="tab"
               onPressMyAvatar={() => void onPickHeaderProfilePhoto()}
               hideMyEditCta
+              refreshTrigger={profileBodyRefreshTrigger}
             />
           ) : null}
 
@@ -335,6 +362,7 @@ const styles = StyleSheet.create({
   headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   iconBtn: { padding: 6, borderRadius: 10 },
   scrollBottom: {
+    flexGrow: 1,
     paddingTop: 8,
     paddingBottom: 32,
   },
