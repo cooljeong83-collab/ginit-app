@@ -2426,6 +2426,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           value={timePick.draft}
           mode="time"
           display="spinner"
+          is24Hour
           {...({ accentColor: GinitTheme.colors.primary } as any)}
           onChange={(event, d) => {
             const t = (event as unknown as { type?: string } | null)?.type ?? '';
@@ -2481,6 +2482,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 value={timePick.draft}
                 mode="time"
                 display="spinner"
+                is24Hour
                 themeVariant="light"
                 locale="ko-KR"
                 onChange={(_event, d) => {
@@ -2517,6 +2519,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   value={timePick.draft}
                   mode="time"
                   display="spinner"
+                  is24Hour
                   onChange={(_event, d) => {
                     if (!d) return;
                     setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
@@ -2641,6 +2644,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 value={iosDraft}
                 mode={picker.field === 'startDate' ? 'date' : 'time'}
                 display="spinner"
+                is24Hour
                 onChange={(_, date) => {
                   if (date) setIosDraft(date);
                 }}
@@ -2659,6 +2663,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           value={iosDraft}
           mode={picker.field === 'startDate' ? 'date' : 'time'}
           display="spinner"
+          is24Hour
           minimumDate={iosPickerMinimumDate}
           maximumDate={iosPickerMaximumDate}
           {...({ accentColor: GinitTheme.colors.primary } as any)}

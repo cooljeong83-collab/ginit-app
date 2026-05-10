@@ -92,7 +92,12 @@ export function normalizeTimeInput(t: string | undefined): string {
   if (t == null || !t.trim()) return '';
   const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
   if (!m) return t.trim();
-  return `${pad2(Number(m[1]))}:${m[2]}`;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return '';
+  }
+  return `${pad2(hh)}:${pad2(mm)}`;
 }
 
 function startOfLocalDay(d: Date): Date {
@@ -258,7 +263,7 @@ export function validateDateCandidate(
     case 'point': {
       const nt = normalizeTimeInput(d.startTime);
       if (!nt || !TIME_RE.test(nt)) {
-        return `${label}: 시간은 HH:mm 형식이어야 합니다.`;
+        return `${label}: 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       break;
     }
@@ -267,10 +272,10 @@ export function validateDateCandidate(
         return `${label}: 종료 날짜(YYYY-MM-DD)를 입력해 주세요.`;
       }
       if (d.startTime != null && d.startTime !== '' && !TIME_RE.test(normalizeTimeInput(d.startTime))) {
-        return `${label}: 시작 시간 형식을 확인해 주세요.`;
+        return `${label}: 시작 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       if (d.endTime != null && d.endTime !== '' && !TIME_RE.test(normalizeTimeInput(d.endTime))) {
-        return `${label}: 종료 시간 형식을 확인해 주세요.`;
+        return `${label}: 종료 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       break;
     case 'datetime-range':
@@ -278,10 +283,10 @@ export function validateDateCandidate(
         return `${label}: 종료 날짜를 입력해 주세요.`;
       }
       if (!d.startTime?.trim() || !TIME_RE.test(normalizeTimeInput(d.startTime))) {
-        return `${label}: 시작 시간은 HH:mm 형식이어야 합니다.`;
+        return `${label}: 시작 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       if (!d.endTime?.trim() || !TIME_RE.test(normalizeTimeInput(d.endTime))) {
-        return `${label}: 종료 시간은 HH:mm 형식이어야 합니다.`;
+        return `${label}: 종료 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       break;
     case 'recurring':
@@ -289,7 +294,7 @@ export function validateDateCandidate(
         return `${label}: 반복 주기(매일/매주/매월)를 선택해 주세요.`;
       }
       if (!d.startTime?.trim() || !TIME_RE.test(normalizeTimeInput(d.startTime))) {
-        return `${label}: 반복 일정의 기준 시간은 HH:mm 형식이어야 합니다.`;
+        return `${label}: 반복 일정의 기준 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       break;
     case 'multi':
@@ -312,7 +317,7 @@ export function validateDateCandidate(
         return `${label}: 마감 날짜를 입력해 주세요.`;
       }
       if (!d.endTime?.trim() || !TIME_RE.test(normalizeTimeInput(d.endTime))) {
-        return `${label}: 마감 시간은 HH:mm 형식이어야 합니다.`;
+        return `${label}: 마감 시간은 24시간 기준 HH:mm 형식(00:00~23:59)이어야 합니다.`;
       }
       break;
     default:

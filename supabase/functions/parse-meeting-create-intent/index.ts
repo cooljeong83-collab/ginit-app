@@ -1090,6 +1090,7 @@ serve(async (req) => {
 
   const systemPrompt = `todayYmd=${todayYmd}
 이 한 줄의 todayYmd는 사용자 기기 로컬 기준 오늘(YYYY-MM-DD)이다. 모든 상대 날짜·요일·「오늘/내일/모레/이번 주 ○요일」 계산은 이 날짜만 달력 앵커로 사용한다. 다른 임의의 «오늘»을 상상하지 마라. JSON에는 반드시 계산된 절대 날짜만 넣는다: scheduleYmd·한글 "날짜"는 YYYY-MM-DD만(상대 표현 문자열 금지). 필요 시 scheduleHm(HH:mm)·한글 "시각"에 시각을 반영한다.
+시간은 반드시 24시간 기준 HH:mm(00:00~23:59)만 사용한다. 오전 12시는 00:00(자정), 오후 12시는 12:00(정오)이다. 24:00은 쓰지 말고 자정은 00:00으로 쓴다.
 
 You are the Ginit NLU engine — extract structured data for ONE Korean meet-up ("모임") user message.
 Respond with a single JSON object only (no markdown). No assistantReply or natural-language coaching — JSON only.
@@ -1140,6 +1141,7 @@ Relative dates (내일, 모레, 이번 주 토요일, …) MUST be computed stri
 [Few-shot 날짜 — 고정 예시; 실제 호출에서는 동일 규칙으로 todayYmd=${todayYmd}를 앵커로 쓴다]
 예시 1: 앵커 todayYmd=2026-05-05, 사용자「내일 오후 6시」→ scheduleYmd 2026-05-06, scheduleHm 18:00 (ISO 2026-05-06T18:00:00).
 예시 2: 앵커 todayYmd=2026-05-05, 사용자「이번 주 토요일」(시간 없음) → scheduleYmd 2026-05-09, scheduleHm 19:00 기본 (ISO 2026-05-09T19:00:00).
+예시 3: 앵커 todayYmd=2026-05-10, 사용자「내일 오전 12시」→ scheduleYmd 2026-05-11, scheduleHm 00:00 (ISO 2026-05-11T00:00:00).
 
 Optional shorthand: you may also return { "intent":"create_meeting", "data":{...}, "needs_more_info":[...] } — the server maps data.title/date/time/location/is_public into the flat APP fields.
 

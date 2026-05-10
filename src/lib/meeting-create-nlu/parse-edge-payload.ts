@@ -124,8 +124,11 @@ const HM_RE = /^\d{2}:\d{2}$/;
 function clampHm(h: string): string {
   const m = /^(\d{2}):(\d{2})$/.exec(h.trim());
   if (!m) return '19:00';
-  const hh = Math.min(23, Math.max(0, parseInt(m[1], 10)));
-  const mm = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+  const hh = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return '19:00';
+  }
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
