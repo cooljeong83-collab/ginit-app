@@ -83,6 +83,7 @@ export function MeetingServiceAuthModal({
   const [complianceBusy, setComplianceBusy] = useState(false);
   const [googleDemographicsBusy, setGoogleDemographicsBusy] = useState(false);
   const [hydratedProfile, setHydratedProfile] = useState<UserProfile | null>(null);
+  const [hydratingProfile, setHydratingProfile] = useState(false);
   const [googleDemoGenderLocked, setGoogleDemoGenderLocked] = useState(false);
   const [googleDemoBirthLocked, setGoogleDemoBirthLocked] = useState(false);
   const [profileHasStoredGender, setProfileHasStoredGender] = useState(false);
@@ -114,8 +115,13 @@ export function MeetingServiceAuthModal({
   }, [otpCode, otpSmsUserConsent]);
 
   useEffect(() => {
-    if (!visible || !pk) return;
+    if (!visible || !pk) {
+      setHydratingProfile(false);
+      return;
+    }
     let alive = true;
+    setHydratingProfile(true);
+    setHydratedProfile(null);
     void (async () => {
       try {
         const p = await ensureUserProfile(pk);
@@ -198,6 +204,8 @@ export function MeetingServiceAuthModal({
         setGoogleDemoBirthLocked(false);
         setProfileHasStoredGender(false);
         setProfileHasStoredBirth(false);
+      } finally {
+        if (alive) setHydratingProfile(false);
       }
     })();
     return () => {
@@ -553,13 +561,19 @@ export function MeetingServiceAuthModal({
                 style={{ maxHeight: authSheetLayout.scrollMax }}
                 contentContainerStyle={styles.sheetScrollContent}>
                 <Text style={styles.sheetTitle}>서비스 이용 인증</Text>
-                <Text style={styles.sheetLead}>
-                  {meetingAuthComplete
-                    ? '이용 인증이 완료된 계정이에요. 아래에서 등록된 정보를 확인할 수 있어요.'
-                    : MEETING_PHONE_VERIFICATION_UI_ENABLED
-                      ? '모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.'
-                      : '모임 만들기·참여를 위해 정보 수집 동의와 필수 프로필 정보 입력이 필요해요.'}
-                </Text>
+                {hydratingProfile ? (
+                  <View style={styles.authLoadingBox}>
+                    <Text style={styles.sheetLead}>인증 정보를 불러오는 중이에요.</Text>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.sheetLead}>
+                      {meetingAuthComplete
+                        ? '이용 인증이 완료된 계정이에요. 아래에서 등록된 정보를 확인할 수 있어요.'
+                        : MEETING_PHONE_VERIFICATION_UI_ENABLED
+                          ? '모임 만들기·참여를 위해 정보 수집 동의와 전화번호 인증이 필요해요.'
+                          : '모임 만들기·참여를 위해 정보 수집 동의와 필수 프로필 정보 입력이 필요해요.'}
+                    </Text>
                 {(googleDemoGenderLocked ||
                   googleDemoBirthLocked ||
                   profileHasStoredGender ||
@@ -777,6 +791,8 @@ export function MeetingServiceAuthModal({
                     disabled={complianceBusy || googleDemographicsBusy || otpBusy || profileBusy}
                   />
                 ) : null}
+                  </>
+                )}
               </ScrollView>
             </View>
           </View>
@@ -834,6 +850,10 @@ const styles = StyleSheet.create({
     color: '#64748b',
     lineHeight: 20,
     marginBottom: 14,
+  },
+  authLoadingBox: {
+    minHeight: 180,
+    justifyContent: 'center',
   },
   sheetGoogleLockHint: {
     fontSize: 13,

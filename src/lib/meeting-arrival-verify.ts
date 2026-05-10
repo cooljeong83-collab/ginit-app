@@ -23,8 +23,8 @@ export const MEETING_ARRIVAL_VERIFY_POLICY_FALLBACK = {
   auth_radius_m: 120,
   /** 게스트 하단 장소 인증 pill(시간 외·인증 완료 포함)을 예정 시작 몇 분 전부터 표시할지 — 그 전에는 퇴장만 */
   guest_arrival_pill_visible_before_min: 30,
-  window_before_min: 45,
-  window_after_min: 90,
+  window_before_min: 30,
+  window_after_min: 180,
   min_accuracy_m: 50,
   xp_reward: 15,
   trust_reward: 2,

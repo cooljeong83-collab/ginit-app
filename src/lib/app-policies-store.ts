@@ -24,8 +24,8 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     arrival_verify: {
       auth_radius_m: 120,
       guest_arrival_pill_visible_before_min: 30,
-      window_before_min: 45,
-      window_after_min: 90,
+      window_before_min: 30,
+      window_after_min: 180,
       min_accuracy_m: 50,
       xp_reward: 15,
       trust_reward: 2,

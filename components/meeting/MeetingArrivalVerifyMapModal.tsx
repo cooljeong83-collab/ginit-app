@@ -9,8 +9,8 @@ import {
 } from '@mj-studio/react-native-naver-map';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, Modal, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -93,6 +93,9 @@ export function MeetingArrivalVerifyMapModal({
   const [submitting, setSubmitting] = useState(false);
   /** 0~1 루프 — 반경 물결 애니메이션 */
   const [ripplePhase, setRipplePhase] = useState(0);
+  const [renderVisible, setRenderVisible] = useState(visible);
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const sheetTranslateY = useRef(new Animated.Value(48)).current;
 
   const markerMeeting = pinMeeting as Meeting;
   const pinColor = useMemo(() => getMeetingMapPinAccentColor(markerMeeting, categories), [markerMeeting, categories]);
@@ -109,6 +112,46 @@ export function MeetingArrivalVerifyMapModal({
     };
     return centerRegionToNaverRegion(center);
   }, [placeCoords.latitude, placeCoords.longitude, mapViewRadiusM]);
+
+  useEffect(() => {
+    if (visible) {
+      setRenderVisible(true);
+      backdropOpacity.setValue(0);
+      sheetTranslateY.setValue(48);
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(sheetTranslateY, {
+          toValue: 0,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+
+    Animated.parallel([
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(sheetTranslateY, {
+        toValue: 48,
+        duration: 180,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setRenderVisible(false);
+    });
+  }, [visible, backdropOpacity, sheetTranslateY]);
 
   useEffect(() => {
     if (!visible) {
@@ -285,9 +328,10 @@ export function MeetingArrivalVerifyMapModal({
   }, [userCoords, userHeadingDeg, userInsideRadiusGeom]);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onRequestClose}>
+    <Modal visible={renderVisible} animationType="none" transparent onRequestClose={onRequestClose}>
       <GestureHandlerRootView style={styles.gestureRoot}>
-        <View style={[styles.sheet, { paddingBottom: 12 + insets.bottom }]}>
+        <Animated.View pointerEvents="none" style={[styles.backdrop, { opacity: backdropOpacity }]} />
+        <Animated.View style={[styles.sheet, { paddingBottom: 12 + insets.bottom, transform: [{ translateY: sheetTranslateY }] }]}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>장소 인증</Text>
             <GinitPressable
@@ -418,7 +462,7 @@ export function MeetingArrivalVerifyMapModal({
               <Text style={styles.submitBtnText}>인증하기</Text>
             )}
           </GinitPressable>
-        </View>
+        </Animated.View>
       </GestureHandlerRootView>
     </Modal>
   );
@@ -427,8 +471,12 @@ export function MeetingArrivalVerifyMapModal({
 const styles = StyleSheet.create({
   gestureRoot: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    backgroundColor: 'transparent',
     justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
   sheet: {
     backgroundColor: GinitTheme.colors.bg,
