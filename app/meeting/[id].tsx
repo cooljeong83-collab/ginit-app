@@ -1,17 +1,17 @@
-import { GinitPressable } from '@/components/ui/GinitPressable';
-import {GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
+import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
-import { VoteCandidatesForm, type VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
+import { VoteCandidatesForm } from '@/components/create/VoteCandidatesForm';
+import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FlashList } from '@shopify/flash-list';
 import {
   ActivityIndicator,
   Alert,
@@ -40,12 +40,11 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { useMeetingHost } from '@/src/hooks/meeting/useMeetingHost';
 import { useMeetingJoin } from '@/src/hooks/meeting/useMeetingJoin';
 import { useMeetingSocial } from '@/src/hooks/meeting/useMeetingSocial';
 import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
-import { getPolicy } from '@/src/lib/app-policies-store';
+import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import {
@@ -61,17 +60,13 @@ import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-ext
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
-  assertNoConfirmedScheduleOverlapHybrid,
   DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  getScheduleOverlapBufferHours,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
-  isConfirmedScheduleOverlapErrorMessage,
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION
 } from '@/src/lib/meeting-schedule-overlap';
 import {
   buildMeetingSharePageUrl,
   createMeetingShareLinkRpc,
 } from '@/src/lib/meeting-share';
-import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import type { Meeting } from '@/src/lib/meetings';
 import {
   computeMeetingConfirmAnalysis,
@@ -82,20 +77,17 @@ import {
   formatPublicMeetingSettlementSummary,
   getMeetingById,
   getMeetingRecruitmentPhase,
-  getParticipantVoteSnapshot,
   isGinitWebGuestParticipantId,
   isUserKickedFromMeeting,
   listMeetingJoinRequests,
   MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
-  meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
-  updateParticipantVotes,
-  upsertParticipantVotes,
-  webGuestDisplayNameFromMeeting,
+  webGuestDisplayNameFromMeeting
 } from '@/src/lib/meetings';
+import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
@@ -105,12 +97,9 @@ import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import {
   ensureUserProfile,
   getUserProfile,
-  getUserProfilesForIds,
   isMeetingServiceComplianceComplete,
   isUserProfileWithdrawn,
-  meetingDemographicsIncomplete,
-  WITHDRAWN_NICKNAME,
-  type UserProfile,
+  WITHDRAWN_NICKNAME
 } from '@/src/lib/user-profile';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
@@ -3093,7 +3082,7 @@ export default function MeetingDetailScreen() {
                       accessibilityLabel="웹으로 공유">
                       <GinitSymbolicIcon name="share-outline" size={18} color="#fff" />
                       <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        {shareWebBusy ? '링크…' : '웹 공유'}
+                        {shareWebBusy ? '공유' : '공유'}
                       </Text>
                     </GinitPressable>
                   ) : null}

@@ -237,14 +237,40 @@ function dataToStringRecord(data: Record<string, unknown> | undefined): Record<s
   return out;
 }
 
+function maskAppUserId(id: string): string {
+  const t = id.trim();
+  if (!t) return '(empty)';
+  if (t.includes('@')) {
+    const [a, d] = t.split('@');
+    const al = (a ?? '').length;
+    return `${al > 2 ? `${(a ?? '').slice(0, 2)}…` : '?'}@${d ?? ''}`;
+  }
+  if (t.length <= 10) return `${t.slice(0, 2)}…`;
+  return `${t.slice(0, 4)}…${t.slice(-4)}`;
+}
+
+function fcmPushLog(runId: string, phase: string, detail: Record<string, unknown> = {}): void {
+  const line = JSON.stringify({ runId, phase, ts: new Date().toISOString(), ...detail });
+  console.log(`[fcm-push-send] ${line}`);
+}
+
 serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
-  if (req.method !== 'POST') return jsonResponse({ ok: false, error: 'POST only' }, 405);
+  const runId = crypto.randomUUID().slice(0, 8);
+  if (req.method === 'OPTIONS') {
+    fcmPushLog(runId, 'options', {});
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+  if (req.method !== 'POST') {
+    fcmPushLog(runId, 'reject_method', { method: req.method });
+    return jsonResponse({ ok: false, error: 'POST only' }, 405);
+  }
 
   try {
+    fcmPushLog(runId, 'request_start', { urlPath: new URL(req.url).pathname });
     const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
     const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
     if (!supabaseUrl || !serviceRole) {
+      fcmPushLog(runId, 'missing_supabase_env', { hasUrl: Boolean(supabaseUrl), hasServiceRole: Boolean(serviceRole) });
       return jsonResponse({ ok: false, error: 'Missing Supabase env' }, 500);
     }
 
@@ -252,15 +278,33 @@ serve(async (req) => {
     try {
       payload = (await req.json()) as ReqBody;
     } catch {
+      fcmPushLog(runId, 'invalid_json_body', {});
       return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400);
     }
 
     let toUserIds = normalizeIds(payload.toUserIds);
     const title = String(payload.title ?? '').trim();
     const body = String(payload.body ?? '').trim();
-    if (toUserIds.length === 0) return jsonResponse({ ok: false, error: 'toUserIds is empty' }, 400);
-    if (!title || !body) return jsonResponse({ ok: false, error: 'title/body required' }, 400);
-    if (toUserIds.length > 50) return jsonResponse({ ok: false, error: 'toUserIds too large' }, 400);
+    if (toUserIds.length === 0) {
+      fcmPushLog(runId, 'validation_fail', { reason: 'toUserIds_empty' });
+      return jsonResponse({ ok: false, error: 'toUserIds is empty' }, 400);
+    }
+    if (!title || !body) {
+      fcmPushLog(runId, 'validation_fail', { reason: 'title_or_body_empty' });
+      return jsonResponse({ ok: false, error: 'title/body required' }, 400);
+    }
+    if (toUserIds.length > 50) {
+      fcmPushLog(runId, 'validation_fail', { reason: 'toUserIds_too_large', count: toUserIds.length });
+      return jsonResponse({ ok: false, error: 'toUserIds too large' }, 400);
+    }
+
+    fcmPushLog(runId, 'payload_ok', {
+      toUserCount: toUserIds.length,
+      toUserMasks: toUserIds.slice(0, 5).map(maskAppUserId),
+      titleLen: title.length,
+      bodyLen: body.length,
+      dataKeys: Object.keys(dataToStringRecord(payload.data)).slice(0, 12),
+    });
 
     const supabase = createClient(supabaseUrl, serviceRole, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -277,7 +321,10 @@ serve(async (req) => {
         .select('app_user_id, notify_enabled')
         .eq('room_id', roomId)
         .in('app_user_id', toUserIds);
-      if (prefErr) return jsonResponse({ ok: false, error: prefErr.message }, 500);
+      if (prefErr) {
+        fcmPushLog(runId, 'chat_pref_query_error', { message: prefErr.message });
+        return jsonResponse({ ok: false, error: prefErr.message }, 500);
+      }
       const muted = new Set(
         (prefRows ?? [])
           .filter((r: any) => r?.notify_enabled === false)
@@ -288,6 +335,7 @@ serve(async (req) => {
         toUserIds = toUserIds.filter((id) => !muted.has(id));
       }
       if (toUserIds.length === 0) {
+        fcmPushLog(runId, 'early_exit', { reason: 'all_recipients_muted', roomIdTail: roomId.length > 8 ? roomId.slice(-8) : roomId });
         return jsonResponse({ ok: true, attempted: 0, sent: 0, reason: 'all_recipients_muted' });
       }
     }
@@ -299,7 +347,10 @@ serve(async (req) => {
         .select('blocker_app_user_id, blocked_app_user_id')
         .in('blocker_app_user_id', ids)
         .in('blocked_app_user_id', ids);
-      if (blockErr) return jsonResponse({ ok: false, error: blockErr.message }, 500);
+      if (blockErr) {
+        fcmPushLog(runId, 'user_blocks_query_error', { message: blockErr.message });
+        return jsonResponse({ ok: false, error: blockErr.message }, 500);
+      }
 
       const blockedPairs = new Set<string>();
       for (const r of blockRows ?? []) {
@@ -317,15 +368,28 @@ serve(async (req) => {
         });
       }
       if (toUserIds.length === 0) {
+        fcmPushLog(runId, 'early_exit', { reason: 'all_recipients_blocked' });
         return jsonResponse({ ok: true, attempted: 0, sent: 0, reason: 'all_recipients_blocked' });
       }
     }
 
-    const { data: rows, error } = await supabase
-      .from('profiles')
-      .select('id, fcm_token, fcm_platform')
-      .in('app_user_id', toUserIds);
-    if (error) return jsonResponse({ ok: false, error: error.message }, 500);
+    type ProfileTokenRow = { fcm_token?: unknown; fcm_platform?: unknown };
+    const { data: rpcRows, error: rpcErr } = await supabase.rpc('fcm_push_list_profile_tokens_for_user_ids', {
+      p_app_user_ids: toUserIds,
+    });
+    let rows: ProfileTokenRow[] | null = (rpcRows ?? null) as ProfileTokenRow[] | null;
+    if (rpcErr) {
+      fcmPushLog(runId, 'profile_tokens_rpc_error', { message: rpcErr.message, code: rpcErr.code ?? '' });
+      const fb = await supabase.from('profiles').select('fcm_token, fcm_platform').in('app_user_id', toUserIds);
+      if (fb.error) {
+        fcmPushLog(runId, 'profile_tokens_fallback_error', { message: fb.error.message });
+        return jsonResponse({ ok: false, error: fb.error.message }, 500);
+      }
+      rows = (fb.data ?? null) as ProfileTokenRow[] | null;
+      fcmPushLog(runId, 'profile_tokens_fallback_ok', { rowCount: rows?.length ?? 0 });
+    } else {
+      fcmPushLog(runId, 'profile_tokens_rpc_ok', { rowCount: rows?.length ?? 0 });
+    }
 
     const tokenPlatform = new Map<string, 'android' | 'legacy'>();
     for (const r of rows ?? []) {
@@ -338,12 +402,24 @@ serve(async (req) => {
     const legacyTokens = [...tokenPlatform.entries()].filter(([, p]) => p === 'legacy').map(([tok]) => tok);
     const uniqueTokens = [...tokenPlatform.keys()];
     if (uniqueTokens.length === 0) {
+      fcmPushLog(runId, 'early_exit', {
+        reason: 'no_tokens',
+        toUserCount: toUserIds.length,
+        toUserMasks: toUserIds.slice(0, 5).map(maskAppUserId),
+        action: String(data.action ?? '').trim() || undefined,
+      });
       return jsonResponse({ ok: true, attempted: toUserIds.length, sent: 0, reason: 'no_tokens' });
     }
 
+    fcmPushLog(runId, 'tokens_resolved', {
+      uniqueTokenCount: uniqueTokens.length,
+      androidCount: androidTokens.length,
+      legacyCount: legacyTokens.length,
+    });
+
     const rawSa = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')?.trim();
     if (!rawSa) {
-      console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON missing (set Supabase Edge secret)');
+      fcmPushLog(runId, 'missing_firebase_sa', {});
       return jsonResponse({ ok: false, error: 'Missing FIREBASE_SERVICE_ACCOUNT_JSON' }, 500);
     }
 
@@ -351,7 +427,7 @@ serve(async (req) => {
     try {
       cred = parseServiceAccountJson(rawSa);
     } catch (e) {
-      console.error('[fcm-push-send] FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON', String(e));
+      fcmPushLog(runId, 'firebase_sa_json_invalid', { err: String(e) });
       return jsonResponse({ ok: false, error: 'Invalid FIREBASE_SERVICE_ACCOUNT_JSON' }, 500);
     }
 
@@ -361,6 +437,11 @@ serve(async (req) => {
     const clientEmail = typeof cred.client_email === 'string' ? cred.client_email.trim() : '';
     const privateKeyPem = typeof cred.private_key === 'string' ? cred.private_key : '';
     if (!projectId || !clientEmail || !privateKeyPem) {
+      fcmPushLog(runId, 'firebase_sa_incomplete', {
+        hasProjectId: Boolean(projectId),
+        hasClientEmail: Boolean(clientEmail),
+        hasPrivateKey: Boolean(privateKeyPem),
+      });
       return jsonResponse({ ok: false, error: 'Service account JSON missing project_id, client_email, or private_key' }, 500);
     }
 
@@ -371,11 +452,11 @@ serve(async (req) => {
       accessToken = await fetchGoogleAccessTokenForFcm(clientEmail, signingKey);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error('[fcm-push-send] auth_failed', msg);
+      fcmPushLog(runId, 'google_oauth_failed', { message: msg });
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
-    console.log('[fcm-push-send] fcm_http_v1_ready', JSON.stringify({ project_id: projectId }));
+    fcmPushLog(runId, 'google_oauth_ok', { project_id: projectId });
 
     const allResponses: { success: boolean; error?: { message?: string; code?: string } }[] = [];
     const allTokensOrdered: string[] = [];
@@ -383,6 +464,7 @@ serve(async (req) => {
     let failureCount = 0;
 
     const runBatch = async (tokens: string[], kind: 'android' | 'legacy') => {
+      fcmPushLog(runId, 'fcm_batch_start', { kind, count: tokens.length });
       const batch = await Promise.all(
         tokens.map((tok) => sendFcmHttpV1Message(projectId, accessToken, tok, kind, title, body, data)),
       );
@@ -394,6 +476,13 @@ serve(async (req) => {
         if (r.success) successCount += 1;
         else failureCount += 1;
       }
+      const firstFail = batch.find((r) => !r.success);
+      fcmPushLog(runId, 'fcm_batch_done', {
+        kind,
+        ok: batch.every((r) => r.success),
+        firstErr: firstFail?.error?.message ?? null,
+        firstCode: firstFail?.error?.code ?? null,
+      });
     };
 
     try {
@@ -401,7 +490,7 @@ serve(async (req) => {
       if (legacyTokens.length > 0) await runBatch(legacyTokens, 'legacy');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.error('[fcm-push-send] send_fcm_http_v1_failed', msg);
+      fcmPushLog(runId, 'fcm_batch_throw', { message: msg });
       return jsonResponse({ ok: false, error: msg }, 500);
     }
 
@@ -424,7 +513,7 @@ serve(async (req) => {
       /* ignore */
     }
 
-    return jsonResponse({
+    const resBody = {
       ok: true,
       attempted: uniqueTokens.length,
       successCount,
@@ -433,10 +522,17 @@ serve(async (req) => {
         .map((r, i) => ({ ok: r.success, idx: i, err: r.success ? null : r.error?.message ?? 'error' }))
         .filter((x) => !x.ok)
         .slice(0, 10),
+    };
+    fcmPushLog(runId, 'request_done', {
+      ok: true,
+      attempted: resBody.attempted,
+      successCount: resBody.successCount,
+      failureCount: resBody.failureCount,
     });
+    return jsonResponse(resBody);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[fcm-push-send] unhandled error:', msg);
+    fcmPushLog(runId, 'unhandled_throw', { message: msg });
     return jsonResponse({ ok: false, error: msg }, 500);
   }
 });
