@@ -1,4 +1,4 @@
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
 import type { ProfileBundledNotificationSoundId, ProfileNotificationSoundId } from '@/src/lib/profile-notification-sound-preference';
 
@@ -7,13 +7,23 @@ const BUNDLE_REQUIRES: Record<ProfileBundledNotificationSoundId, number> = {
   ginit_ring_w: require('../../assets/sounds/ginit_ring_w.wav'),
 };
 
-let playing: Audio.Sound | null = null;
+let playing: AudioPlayer | null = null;
+let statusListener: { remove: () => void } | null = null;
 
 export async function stopProfileNotificationSoundPreview(): Promise<void> {
+  if (statusListener) {
+    try {
+      statusListener.remove();
+    } catch {
+      /* noop */
+    }
+    statusListener = null;
+  }
   if (!playing) return;
   try {
-    await playing.stopAsync();
-    await playing.unloadAsync();
+    playing.pause();
+    await playing.seekTo(0);
+    playing.remove();
   } catch {
     /* noop */
   }
@@ -30,20 +40,22 @@ export async function playProfileNotificationSoundPreview(id: ProfileNotificatio
   const src = BUNDLE_REQUIRES[id as ProfileBundledNotificationSoundId];
   if (src == null) return;
 
-  await Audio.setAudioModeAsync({
-    playsInSilentModeIOS: true,
-    allowsRecordingIOS: false,
-    staysActiveInBackground: false,
-    shouldDuckAndroid: true,
-    playThroughEarpieceAndroid: false,
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    allowsRecording: false,
+    shouldPlayInBackground: false,
+    interruptionMode: 'duckOthers',
+    shouldRouteThroughEarpiece: false,
   });
 
-  const { sound } = await Audio.Sound.createAsync(src, { shouldPlay: true, volume: 1 });
-  playing = sound;
+  const player = createAudioPlayer(src);
+  playing = player;
 
-  sound.setOnPlaybackStatusUpdate((status) => {
-    if (status.isLoaded && status.didJustFinish) {
+  statusListener = player.addListener('playbackStatusUpdate', (status) => {
+    if (status.didJustFinish) {
       void stopProfileNotificationSoundPreview();
     }
   });
+
+  player.play();
 }

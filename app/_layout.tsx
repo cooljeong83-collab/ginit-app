@@ -95,7 +95,7 @@ export default function RootLayout() {
       {Platform.OS === 'web' ? (
         appTree
       ) : (
-        <KeyboardProvider statusBarTranslucent navigationBarTranslucent preserveEdgeToEdge>
+        <KeyboardProvider>
           {appTree}
         </KeyboardProvider>
       )}

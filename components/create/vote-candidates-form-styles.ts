@@ -429,7 +429,7 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 6,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     minHeight: 44,
     borderRadius: 12,
   },
@@ -446,8 +446,8 @@ export const voteCandidatesFormStyles = StyleSheet.create({
   },
   calendarCellHas: {
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.45)',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   calendarCellAgentDemo: {
     backgroundColor: `${GinitTheme.colors.primary}22`,

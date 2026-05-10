@@ -190,14 +190,24 @@ export default function MeetingChatRoomScreen() {
   const resolveListScroller = useCallback(() => {
     const r = innerFlashListRef.current ?? listRef.current;
     if (!r) return null;
+    // FlashList 내부 _scrollViewRef.current가 null인 짧은 구간(언마운트 직후 등)에
+    // getNode()/getScrollResponder() 호출 자체가 던지는 케이스를 막는다.
+    const safeCall = (fn: unknown): unknown => {
+      if (typeof fn !== 'function') return null;
+      try {
+        return (fn as () => unknown)();
+      } catch {
+        return null;
+      }
+    };
     // FlashList / 레거시 래퍼 케이스
     const candidates = [
       r,
-      typeof (r as any).getNode === 'function' ? (r as any).getNode() : null,
-      typeof (r as any).getScrollResponder === 'function' ? (r as any).getScrollResponder() : null,
+      safeCall((r as any).getNode?.bind(r)),
+      safeCall((r as any).getScrollResponder?.bind(r)),
       (r as any)._flatListRef ?? null,
       (r as any)._flatList ?? null,
-    ].filter(Boolean);
+    ].filter(Boolean) as any[];
     for (const c of candidates) {
       if (c && (typeof c.scrollToIndex === 'function' || typeof c.scrollToOffset === 'function')) return c;
     }

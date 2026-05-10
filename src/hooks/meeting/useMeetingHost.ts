@@ -7,6 +7,7 @@ import {
   confirmMeetingSchedule,
   deleteMeetingByHost,
   hostRemoveParticipant,
+  isGinitWebGuestParticipantId,
   rejectJoinRequest,
   unconfirmMeetingSchedule,
 } from '@/src/lib/meetings';
@@ -203,6 +204,12 @@ export function useMeetingHost({
                 markRecentSelfMeetingChange(meeting.id);
                 await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
                 void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+                const hasWebGuest = (meeting.participantIds ?? []).some((id) =>
+                  typeof id === 'string' && isGinitWebGuestParticipantId(id),
+                );
+                if (hasWebGuest) {
+                  Alert.alert('확정 완료', '게스트 참여자가 있어요. 확정된 일정을 공유해 주세요.', [{ text: '확인' }]);
+                }
               } catch (e) {
                 const msg = e instanceof Error ? e.message : '';
                 if (isConfirmedScheduleOverlapErrorMessage(msg)) {

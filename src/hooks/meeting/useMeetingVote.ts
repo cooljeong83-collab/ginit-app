@@ -533,10 +533,14 @@ export function useMeetingVote({
 
   const votesDirty = useMemo(() => {
     void votePersistNonce;
+    // 확정된 모임은 투표가 비활성(저장 버튼도 가려짐)이라 dirty 비교 자체가 의미 없음.
+    // 게스트는 join 시 빈 votes로 저장되지만 클라 effectiveIds는 autoPick 칩이 들어가
+    // baseline≠current가 되어 나가기 시 미저장 팝업이 잘못 떴음 → 가드.
+    if (meeting?.scheduleConfirmed === true) return false;
     const base = votesBaselineFpRef.current;
     if (!base) return false;
     return base !== currentVotesFp;
-  }, [currentVotesFp, votePersistNonce]);
+  }, [currentVotesFp, votePersistNonce, meeting?.scheduleConfirmed]);
 
   const flushVoteSelectionsToServer = useCallback(async (): Promise<boolean> => {
     if (!meeting) return false;

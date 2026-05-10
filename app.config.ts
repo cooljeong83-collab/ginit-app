@@ -234,7 +234,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       './plugins/withAndroidFcmDefaultChannelManifest.js',
-      'expo-background-fetch',
+      'expo-background-task',
       /** Android Phone Number Hint API (play-services-auth) */
       './plugins/withAndroidPlayServicesAuth.js',
       './plugins/withAndroidDirectShare.js',

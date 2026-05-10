@@ -26,6 +26,11 @@ function isPrivateOrLocalShareOrigin(base: string): boolean {
   return false;
 }
 
+/** `EXPO_PUBLIC_MEETING_SHARE_WEB_URL`(또는 `extra.meetingShareWebBaseUrl`)이 설정된 경우에만 true. */
+export function meetingShareWebConfigured(): boolean {
+  return Boolean(publicEnv.meetingShareWebBaseUrl?.trim());
+}
+
 /** 공유 시트·클립보드에 넣을 페이지 오리진(끝 슬래시 없음). */
 export function resolveMeetingSharePageOrigin(): string {
   const configured = publicEnv.meetingShareWebBaseUrl?.trim().replace(/\/$/, '') ?? '';

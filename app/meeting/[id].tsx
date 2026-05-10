@@ -6,7 +6,6 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
-import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,6 +16,7 @@ import {
   Alert,
   Animated,
   Easing,
+  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -66,6 +66,7 @@ import {
 import {
   buildMeetingSharePageUrl,
   createMeetingShareLinkRpc,
+  meetingShareWebConfigured,
 } from '@/src/lib/meeting-share';
 import type { Meeting } from '@/src/lib/meetings';
 import {
@@ -985,6 +986,10 @@ export default function MeetingDetailScreen() {
       Alert.alert('웹 공유', 'Supabase 레저 모임만 웹 공유 링크를 만들 수 있어요.');
       return;
     }
+    if (!meetingShareWebConfigured()) {
+      Alert.alert('웹 공유', 'EXPO_PUBLIC_MEETING_SHARE_WEB_URL 이 설정되지 않았어요.');
+      return;
+    }
     setShareWebBusy(true);
     try {
       const { token } = await createMeetingShareLinkRpc(meeting.id, userId);
@@ -1568,16 +1573,26 @@ export default function MeetingDetailScreen() {
                               const timeSelected = dateHostPickMode
                                 ? hostTieDateId === o.chipId
                                 : selectedDateIds.includes(o.chipId);
-                              return timeSelected ? (
-                                <View key={o.chipId} style={styles.calendarCellTimePillSelected}>
-                                  <Text style={styles.calendarCellTimeLabelSelected} numberOfLines={1}>
-                                    {o.hm}
-                                  </Text>
+                              return (
+                                <View key={o.chipId} style={styles.calendarTimeVoteRow}>
+                                  <View
+                                    style={[
+                                      styles.calendarTimeVoteSlot,
+                                      timeSelected && styles.calendarTimeVoteSlotSelected,
+                                    ]}>
+                                    <Text
+                                      style={[
+                                        styles.calendarTimeVoteHm,
+                                        timeSelected && styles.calendarTimeVoteHmSelected,
+                                      ]}
+                                      numberOfLines={1}>
+                                      {o.hm}
+                                    </Text>
+                                    <View style={styles.calendarVoteCountBox}>
+                                      <Text style={styles.calendarVoteCountText}>{o.tally}</Text>
+                                    </View>
+                                  </View>
                                 </View>
-                              ) : (
-                                <Text key={o.chipId} style={styles.calendarCellMeta} numberOfLines={1}>
-                                  {o.hm}
-                                </Text>
                               );
                             })}
                           </View>
@@ -1657,19 +1672,30 @@ export default function MeetingDetailScreen() {
                         </Text>
                         {has ? (
                           <View style={styles.calendarTimesWrap} pointerEvents="none">
-                            {opts.map((o) =>
-                              o.chipId === confirmedChipId ? (
-                                <View key={o.chipId} style={styles.calendarCellTimePillSelected}>
-                                  <Text style={styles.calendarCellTimeLabelSelected} numberOfLines={1}>
-                                    {o.hm}
-                                  </Text>
+                            {opts.map((o) => {
+                              const timeSelected = o.chipId === confirmedChipId;
+                              return (
+                                <View key={o.chipId} style={styles.calendarTimeVoteRow}>
+                                  <View
+                                    style={[
+                                      styles.calendarTimeVoteSlot,
+                                      timeSelected && styles.calendarTimeVoteSlotSelected,
+                                    ]}>
+                                    <Text
+                                      style={[
+                                        styles.calendarTimeVoteHm,
+                                        timeSelected && styles.calendarTimeVoteHmSelected,
+                                      ]}
+                                      numberOfLines={1}>
+                                      {o.hm}
+                                    </Text>
+                                    <View style={styles.calendarVoteCountBox}>
+                                      <Text style={styles.calendarVoteCountText}>{o.tally}</Text>
+                                    </View>
+                                  </View>
                                 </View>
-                              ) : (
-                                <Text key={o.chipId} style={styles.calendarCellMeta} numberOfLines={1}>
-                                  {o.hm}
-                                </Text>
-                              ),
-                            )}
+                              );
+                            })}
                           </View>
                         ) : (
                           <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
@@ -3048,11 +3074,6 @@ export default function MeetingDetailScreen() {
                       </GinitPressable>
                     );
                   })}
-                  {recruitmentPhase === 'recruiting' ? (
-                    <GinitPressable style={styles.avatarAdd} accessibilityRole="button" accessibilityLabel="참여자 초대">
-                      <GinitSymbolicIcon name="add" size={26} color={GinitTheme.colors.primary} />
-                    </GinitPressable>
-                  ) : null}
                 </ScrollView>
               )}
             </View>
@@ -3066,9 +3087,9 @@ export default function MeetingDetailScreen() {
             {isHost ? (
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
-                  {meeting.scheduleConfirmed !== true &&
-                  ledgerWritesToSupabase() &&
-                  isLedgerMeetingId(meeting.id) ? (
+                  {ledgerWritesToSupabase() &&
+                  isLedgerMeetingId(meeting.id) &&
+                  meetingShareWebConfigured() ? (
                     <GinitPressable
                       onPress={() => void handleShareWebMeeting()}
                       disabled={shareWebBusy}
@@ -3607,7 +3628,7 @@ export default function MeetingDetailScreen() {
                     <Text style={styles.proposeModalSubDateCompact}>{dateVoteTimePick.ymd}</Text>
                   </View>
                 </View>
-                <FlashList
+                <FlatList
                   data={dateVoteByYmd[dateVoteTimePick.ymd] ?? []}
                   keyExtractor={(o) => o.chipId}
                   showsVerticalScrollIndicator={false}
@@ -4411,56 +4432,86 @@ const styles = StyleSheet.create({
   calendarCell: {
     flexGrow: 1,
     flexBasis: 0,
-    paddingHorizontal: 4,
+    paddingHorizontal: 0,
     paddingVertical: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
     minHeight: 44,
     borderRadius: 12,
+    borderWidth: 0,
   },
   calendarCellRowEmpty: { paddingVertical: 2, minHeight: 18 },
   calendarCellOut: { opacity: 0.42 },
   calendarCellHas: {
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.45)',
+    borderWidth: 0,
   },
   calendarCellSelected: {
-    borderWidth: 1,
-    borderColor: 'rgba(31, 42, 68, 0.55)',
+    borderWidth: 0,
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
   calendarCellPressed: { opacity: 0.9 },
-  calendarCellDay: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18 },
+  calendarCellDay: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.colors.text,
+    lineHeight: 18,
+    width: '100%',
+    textAlign: 'center',
+  },
   calendarCellDayOut: { color: GinitTheme.colors.textMuted },
   calendarTimesWrap: {
-    //flexDirection: 'row',
-    flexWrap: 'nowrap',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    justifyContent: 'flex-start',
     width: '100%',
     marginTop: 0,
     marginBottom: 0,
-    gap: 2,
+    gap: 0,
   },
-  calendarCellMeta: {
+  calendarTimeVoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    width: '100%',
+  },
+  /** 일시 투표 달력 — 시간+득표 한 줄(선택 여부와 동일 패딩·간격, 선택 시 배경만 추가) */
+  calendarTimeVoteSlot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    minWidth: 0,
+    gap: 2,
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+  },
+  calendarTimeVoteSlotSelected: {
+    backgroundColor: GinitTheme.colors.deepPurple,
+  },
+  calendarTimeVoteHm: {
     fontSize: 10,
     fontWeight: '600',
     color: GinitTheme.colors.primary,
     marginTop: 0,
     marginBottom: 0,
   },
-  calendarCellTimePillSelected: {
-    flexShrink: 0,
-    paddingHorizontal: 0,
-    paddingVertical: 1,
-    borderRadius: 5,
-    backgroundColor: GinitTheme.colors.deepPurple,
-  },
-  calendarCellTimeLabelSelected: {
-    fontSize: 10,
-    fontWeight: '600',
+  calendarTimeVoteHmSelected: {
     color: '#FFFFFF',
+  },
+  calendarVoteCountBox: {
+    flexShrink: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 2,
+    paddingVertical: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarVoteCountText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '600',
+    lineHeight: 11,
+    fontVariant: ['tabular-nums'],
   },
   calendarCellMetaEmpty: { marginTop: 0, marginBottom: 0, fontSize: 10, color: 'transparent' },
   placeVoteCarouselContent: {
@@ -4866,18 +4917,6 @@ const styles = StyleSheet.create({
   avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.colors.primary },
   avatarLabel: { marginTop: 6, fontSize: 11, color: '#333', textAlign: 'center', lineHeight: 14 },
   genderCountText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted },
-  avatarAdd: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: GinitTheme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 0,
-    opacity: 0.85,
-  },
   joinRequestList: { paddingVertical: 2 },
   joinRequestSep: { height: StyleSheet.hairlineWidth, backgroundColor: GinitTheme.colors.border },
   joinRequestRow: {
