@@ -14,6 +14,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
@@ -146,6 +147,7 @@ export default function ChatTab() {
   const router = useRouter();
   const [directSharePickMode, setDirectSharePickMode] = useState(false);
   const { userId } = useUserSession();
+  const { categories: meetingCategories } = useMeetingCategories();
   const { meetingChatReadMessageIdMap } = useInAppAlarms();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
@@ -865,6 +867,7 @@ export default function ChatTab() {
                   latestByMeetingId,
                   hostProfiles,
                   meetingChatSummaryById,
+                  meetingCategories,
                 }}
                 keyExtractor={(m) => m.id}
                 style={styles.listFlex}
@@ -897,6 +900,7 @@ export default function ChatTab() {
                       hostWithdrawn={isUserProfileWithdrawn(host)}
                       latestMessage={latestByMeetingId[m.id]}
                       unreadCount={unread}
+                      categories={meetingCategories}
                       onPress={() => {
                         if (directSharePickMode) {
                           const incoming = consumeIncomingDirectSharePayload();

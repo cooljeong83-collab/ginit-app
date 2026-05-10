@@ -5,6 +5,7 @@ import {StyleSheet, Text, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
+import type { Category } from '@/src/lib/categories';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
@@ -76,6 +77,8 @@ type Props = {
   latestMessage: MeetingChatMessage | null | undefined;
   /** 읽지 않은 새 메시지 수(목록 우측 시간 아래) */
   unreadCount?: number;
+  /** 홈·지도 모임 목록과 동일한 카테고리 이모지(미전달 시 휴리스틱 폴백) */
+  categories?: readonly Category[] | null;
   onPress: () => void;
 };
 
@@ -86,6 +89,7 @@ export function ChatMeetingListRow({
   hostWithdrawn: _hostWithdrawn,
   latestMessage,
   unreadCount = 0,
+  categories = null,
   onPress,
 }: Props) {
   const title = meeting.title?.trim() || '모임';
@@ -109,7 +113,7 @@ export function ChatMeetingListRow({
 
   const rightTime = hasMessage ? formatRightTime(latestMessage.createdAt) : '';
 
-  const categoryEmoji = categoryEmojiForMeeting(meeting);
+  const categoryEmoji = categoryEmojiForMeeting(meeting, categories);
 
   return (
     <GinitPressable
