@@ -3291,26 +3291,28 @@ export default function MeetingDetailScreen() {
                       </Text>
                     </GinitPressable>
                   ) : null}
-                  <GinitPressable
-                    onPress={handleLeaveParticipant}
-                    disabled={participantVoteBusy || leaveBusy}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillDanger,
-                      styles.bottomPillFlex,
-                      (participantVoteBusy || leaveBusy) && { opacity: 0.75 },
-                      pressed && !(participantVoteBusy || leaveBusy) && { opacity: 0.9 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="퇴장">
-                    <GinitSymbolicIcon name="exit-outline" size={16} color="#fff" />
-                    <Text
-                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      퇴장
-                    </Text>
-                  </GinitPressable>
+                  {!(isScheduleConfirmed && hideHostScheduleUnconfirmPill) ? (
+                    <GinitPressable
+                      onPress={handleLeaveParticipant}
+                      disabled={participantVoteBusy || leaveBusy}
+                      style={({ pressed }) => [
+                        styles.bottomPill,
+                        styles.pillDanger,
+                        styles.bottomPillFlex,
+                        (participantVoteBusy || leaveBusy) && { opacity: 0.75 },
+                        pressed && !(participantVoteBusy || leaveBusy) && { opacity: 0.9 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="퇴장">
+                      <GinitSymbolicIcon name="exit-outline" size={16} color="#fff" />
+                      <Text
+                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail">
+                        퇴장
+                      </Text>
+                    </GinitPressable>
+                  ) : null}
                 </View>
               </View>
             ) : sessionKickedFromMeeting ? (
