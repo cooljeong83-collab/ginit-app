@@ -18,7 +18,10 @@ export type NaverLocalPlace = {
   category: string;
   /** 네이버 지역 검색 API `link` — 플레이스 등 상세 URL (없을 수 있음) */
   link?: string;
-  /** 지역 검색 직후에는 null — 항목 선택 시 NCP Geocoding으로 채움 */
+  /**
+   * OpenAPI(local.json)는 응답 `mapx`/`mapy`(WGS84×10⁷ 정수 문자열, 네이버 2023-08 이후)로 여기서 채움.
+   * 스크랩 등 다른 경로는 null일 수 있으며, 그때만 선택 시 NCP Geocoding으로 보강합니다.
+   */
   latitude: number | null;
   longitude: number | null;
 };
@@ -467,7 +470,25 @@ export function stableNaverLocalSearchDedupeKey(row: { id: string }): string {
   return row.id;
 }
 
-/** 지역 검색 JSON → 목록용 플레이스 (좌표는 선택 후 Geocoding으로만 채움). */
+/**
+ * 네이버 지역 검색 local.json `mapx`/`mapy` → WGS84 (도).
+ * 2023-08 이후 응답은 정수×10⁷ 문자열; 그보다 작은 값은 구형 좌표계로 보고 변환하지 않습니다(지오코딩 폴백).
+ */
+function naverLocalSearchMapxyToLatLng(mapx: string, mapy: string): { latitude: number; longitude: number } | null {
+  const rawX = mapx.trim();
+  const rawY = mapy.trim();
+  if (!rawX || !rawY) return null;
+  const x = Number(rawX);
+  const y = Number(rawY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (Math.abs(x) < 1_000_000 || Math.abs(y) < 1_000_000) return null;
+  const longitude = x / 1e7;
+  const latitude = y / 1e7;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+}
+
+/** 지역 검색 JSON → 목록용 플레이스 (OpenAPI는 mapx/mapy로 좌표 우선 채움, 없으면 선택 시 Geocoding). */
 function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] {
   const items = json.items ?? [];
   const out: NaverLocalPlace[] = [];
@@ -480,6 +501,7 @@ function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] 
     const mapy = typeof it.mapy === 'string' ? it.mapy : '';
     const linkRaw = typeof it.link === 'string' ? it.link : '';
     const link = sanitizeNaverLocalPlaceLink(linkRaw);
+    const fromMapxy = naverLocalSearchMapxyToLatLng(mapx, mapy);
     out.push({
       id: `local-${mapx}-${mapy}-${idx}`,
       title,
@@ -487,8 +509,8 @@ function parseOpenApiLocalItems(json: NaverOpenApiLocalJson): NaverLocalPlace[] 
       roadAddress,
       category,
       ...(link ? { link } : {}),
-      latitude: null,
-      longitude: null,
+      latitude: fromMapxy?.latitude ?? null,
+      longitude: fromMapxy?.longitude ?? null,
     });
   });
   return out;
@@ -542,9 +564,19 @@ async function fetchOpenApiLocalSearch(
 }
 
 /**
- * 유저가 고른 항목의 주소로 NCP Geocoding → 위·경도 (Maps용 `naverLocal*` + X-NCP-* 는 `geocodeNaverMapsAddress` 내부).
+ * 좌표가 없을 때만 유저가 고른 항목의 주소로 NCP Geocoding → 위·경도.
+ * (OpenAPI 지역 검색은 `parseOpenApiLocalItems`에서 `mapx`/`mapy`로 이미 채운 경우가 많음.)
  */
 export async function resolveNaverPlaceCoordinates(place: NaverLocalPlace): Promise<NaverLocalPlace> {
+  if (
+    place.latitude != null &&
+    place.longitude != null &&
+    Number.isFinite(place.latitude) &&
+    Number.isFinite(place.longitude)
+  ) {
+    return place;
+  }
+
   const q = (place.roadAddress?.trim() || place.address?.trim() || place.title?.trim() || '').trim();
   if (!q) {
     throw new Error('주소 정보가 없어 위치를 표시할 수 없습니다.');

@@ -889,7 +889,25 @@ export function computeMeetingConfirmAnalysis(
   };
 }
 
+/** camel 빈 배열이 snake 쪽 실데이터를 가리지 않도록 후보 배열을 고릅니다(ledger fs·웹 공유 호환). */
+function resolveFirestoreCandidatesField(
+  data: Record<string, unknown>,
+  camel: 'dateCandidates' | 'placeCandidates',
+  snake: 'date_candidates' | 'place_candidates',
+): unknown {
+  const primary = data[camel];
+  const secondary = data[snake];
+  const nonEmpty = (v: unknown) => (Array.isArray(v) && v.length > 0 ? v : undefined);
+  return (
+    nonEmpty(primary) ??
+    nonEmpty(secondary) ??
+    (Array.isArray(primary) ? primary : Array.isArray(secondary) ? secondary : null)
+  );
+}
+
 export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
+  const dateCandidatesRaw = resolveFirestoreCandidatesField(data, 'dateCandidates', 'date_candidates');
+  const placeCandidatesRaw = resolveFirestoreCandidatesField(data, 'placeCandidates', 'place_candidates');
   const readAtRaw = (data.chatReadAtBy ?? null) as unknown;
   const chatReadAtBy =
     readAtRaw && typeof readAtRaw === 'object' && !Array.isArray(readAtRaw) ? (readAtRaw as Record<string, Timestamp | null>) : null;
@@ -921,9 +939,9 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
     longitude: typeof data.longitude === 'number' && Number.isFinite(data.longitude) ? data.longitude : null,
     extraData: (data.extraData as Meeting['extraData']) ?? null,
     meetingConfig: (data.meetingConfig as Meeting['meetingConfig']) ?? null,
-    dateCandidates: Array.isArray(data.dateCandidates) ? (data.dateCandidates as DateCandidate[]) : null,
-    placeCandidates: Array.isArray(data.placeCandidates)
-      ? (data.placeCandidates as Meeting['placeCandidates'])
+    dateCandidates: Array.isArray(dateCandidatesRaw) ? (dateCandidatesRaw as DateCandidate[]) : null,
+    placeCandidates: Array.isArray(placeCandidatesRaw)
+      ? (placeCandidatesRaw as Meeting['placeCandidates'])
       : null,
     participantIds: Array.isArray(data.participantIds)
       ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)

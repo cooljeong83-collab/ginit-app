@@ -26,12 +26,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import type { VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
-import {
-  clampYmdToScheduleProposalWindow,
-  createPointCandidate,
-  fmtDateYmd,
-  normalizeTimeInput,
-} from '@/src/lib/date-candidate';
+import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 
 type VoteSection = 'date' | 'movie' | 'place';
 
@@ -164,7 +159,6 @@ type UseMeetingVoteArgs = {
   autoPlacePick: boolean;
   autoMoviePick: boolean;
   publicMeetingDetails: { requestMessageEnabled?: boolean | null } | null;
-  insertModalSchedule: { scheduleDate: string; scheduleTime: string };
 };
 
 export function useMeetingVote({
@@ -186,7 +180,6 @@ export function useMeetingVote({
   autoPlacePick,
   autoMoviePick,
   publicMeetingDetails,
-  insertModalSchedule,
 }: UseMeetingVoteArgs) {
   const [selectedDateIds, setSelectedDateIds] = useState<string[]>([]);
   const [selectedPlaceIds, setSelectedPlaceIds] = useState<string[]>([]);
@@ -253,18 +246,11 @@ export function useMeetingVote({
 
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
-    const dates = [
-      createPointCandidate(
-        newDateCandidateId(),
-        clampYmdToScheduleProposalWindow(insertModalSchedule.scheduleDate),
-        insertModalSchedule.scheduleTime,
-      ),
-    ];
     const places: PlaceCandidate[] = meeting.placeCandidates?.length
       ? (meeting.placeCandidates.map((p) => ({ ...p })) as PlaceCandidate[])
       : [];
-    return { dateCandidates: dates, placeCandidates: places };
-  }, [meeting, insertModalSchedule, proposeOpen, proposeFormKey]);
+    return { dateCandidates: [], placeCandidates: places };
+  }, [meeting, proposeOpen, proposeFormKey]);
 
   const placeProposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !placeProposeOpen) return null;

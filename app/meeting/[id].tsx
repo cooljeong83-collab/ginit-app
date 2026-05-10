@@ -47,12 +47,7 @@ import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
-import {
-  clampYmdToScheduleProposalWindow,
-  createPointCandidate,
-  fmtDateYmd,
-  normalizeTimeInput,
-} from '@/src/lib/date-candidate';
+import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -950,7 +945,6 @@ export default function MeetingDetailScreen() {
     autoPlacePick,
     autoMoviePick,
     publicMeetingDetails,
-    insertModalSchedule,
   });
 
   const {
@@ -1046,18 +1040,11 @@ export default function MeetingDetailScreen() {
 
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
-    const dates = [
-      createPointCandidate(
-        newDateCandidateId(),
-        clampYmdToScheduleProposalWindow(insertModalSchedule.scheduleDate),
-        insertModalSchedule.scheduleTime,
-      ),
-    ];
     const places: PlaceCandidate[] = meeting.placeCandidates?.length
       ? (meeting.placeCandidates.map((p) => ({ ...p })) as PlaceCandidate[])
       : [];
-    return { dateCandidates: dates, placeCandidates: places };
-  }, [meeting, insertModalSchedule, proposeOpen, proposeFormKey]);
+    return { dateCandidates: [], placeCandidates: places };
+  }, [meeting, proposeOpen, proposeFormKey]);
 
   /** 장소 제안 모달 — 빈 행으로 시작(내부적으로만 기본 일시 시드 사용) */
   const placeProposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
@@ -1322,18 +1309,14 @@ export default function MeetingDetailScreen() {
     [sortedMovieVoteRows, meeting?.voteTallies?.movies],
   );
 
+  /** 주관자 동점 확정용 탭 모드(집계 최다 득표가 2개 이상). 달력에서는 후보 전체를 항상 표시 — 게스트가 여러 후보에 1표씩만 줘도 나머지 후보가 숨겨지지 않게 함. */
   const dateHostPickMode = Boolean(isHost && dateTallyTopIds.length > 1);
   const placeHostPickMode = Boolean(isHost && placeTallyTopIds.length > 1);
   const movieHostPickMode = Boolean(isHost && movieTallyTopIds.length > 1);
 
-  const dateChipsShown = useMemo(() => {
-    if (!dateHostPickMode) return sortedDateChips;
-    return sortedDateChips.filter((c) => dateTallyTopIds.includes(c.id));
-  }, [dateHostPickMode, dateTallyTopIds, sortedDateChips]);
-
   const dateVoteByYmd = useMemo(() => {
     const list = meeting?.dateCandidates ?? [];
-    const shown = new Set(dateChipsShown.map((c) => c.id));
+    const shown = new Set(sortedDateChips.map((c) => c.id));
     const by: Record<string, { chipId: string; hm: string; tally: number }[]> = {};
     list.forEach((dc, i) => {
       const ymd = typeof dc.startDate === 'string' ? dc.startDate.trim() : '';
@@ -1356,7 +1339,7 @@ export default function MeetingDetailScreen() {
       by[k] = rows;
     });
     return by;
-  }, [dateChipsShown, meeting?.dateCandidates, meeting?.voteTallies?.dates]);
+  }, [sortedDateChips, meeting?.dateCandidates, meeting?.voteTallies?.dates]);
 
   /** 확정된 일시 1건을 달력 셀(시간 pill)에 올리기 위한 ymd 맵 */
   const confirmedScheduleVoteByYmd = useMemo(() => {
@@ -1382,16 +1365,6 @@ export default function MeetingDetailScreen() {
     if (ymd) setConfirmedScheduleCalMonth(monthStartYmd(ymd));
   }, [meeting?.id, confirmedScheduleVoteByYmd]);
 
-  const placeChipsShown = useMemo(() => {
-    if (!placeHostPickMode) return sortedPlaceChips;
-    return sortedPlaceChips.filter((c) => placeTallyTopIds.includes(c.id));
-  }, [placeHostPickMode, placeTallyTopIds, sortedPlaceChips]);
-
-  const movieRowsShown = useMemo(() => {
-    if (!movieHostPickMode) return sortedMovieVoteRows;
-    return sortedMovieVoteRows.filter((r) => movieTallyTopIds.includes(r.chipId));
-  }, [movieHostPickMode, movieTallyTopIds, sortedMovieVoteRows]);
-
   // join 관련 로직은 `useMeetingJoin`로 이동
 
   // join 관련 로직은 `useMeetingJoin`로 이동
@@ -1399,9 +1372,9 @@ export default function MeetingDetailScreen() {
   // host 관련 로직은 `useMeetingHost`로 이동
 
   useEffect(() => {
-    if (placeChipsShown.length === 0) return;
+    if (sortedPlaceChips.length === 0) return;
     let alive = true;
-    const visible = placeChipsShown.slice(0, 24);
+    const visible = sortedPlaceChips.slice(0, 24);
     const t = setTimeout(() => {
       void (async () => {
         for (const chip of visible) {
@@ -1429,7 +1402,7 @@ export default function MeetingDetailScreen() {
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placeChipsShown]);
+  }, [sortedPlaceChips]);
 
   useEffect(() => {
     const chip =
@@ -2425,7 +2398,7 @@ export default function MeetingDetailScreen() {
                     </Text>
               <Text style={styles.dateVoteSub}>
                 {dateHostPickMode
-                  ? '동점 후보만 표시됩니다. 한 곳만 탭해 확정할 일시를 고르세요. (집계 표 숫자에는 반영되지 않아요.)'
+                  ? '모든 후보 일정이 표시됩니다. 동점이면 확정할 일시를 한 곳만 탭해 주세요. (집계 표 숫자에는 반영되지 않아요.)'
                   : '가능한 날짜를 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
               </Text>
               {dateHostPickMode ? (
@@ -2586,7 +2559,7 @@ export default function MeetingDetailScreen() {
                   </Text>
                   <Text style={styles.dateVoteSub}>
                     {movieHostPickMode
-                      ? '동점 작품만 표시됩니다. 여러 편 투표한 뒤, 동점 후보를 탭하면 확정용 선택이 갱신돼요. (집계 표 숫자에는 반영되지 않아요.)'
+                      ? '모든 후보가 표시됩니다. 동점이면 확정용으로 탭한 작품이 갱신돼요. (집계 표 숫자에는 반영되지 않아요.)'
                       : '포스터를 눌러 보고 싶은 작품을 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
                   </Text>
                   {movieHostPickMode ? (
@@ -2680,7 +2653,7 @@ export default function MeetingDetailScreen() {
                       horizontal
                       showsHorizontalScrollIndicator={false}
                       contentContainerStyle={styles.movieScrollContent}>
-                      {movieRowsShown.map(({ mv, chipId }) => {
+                      {sortedMovieVoteRows.map(({ mv, chipId }) => {
                         const chipSelected = selectedMovieIds.includes(chipId);
                         const tally = meeting.voteTallies?.movies?.[chipId] ?? 0;
                         const movieInfoUrl = resolveNaverMovieSearchWebUrl(mv.title);
@@ -2770,7 +2743,7 @@ export default function MeetingDetailScreen() {
               </Text>
               {/* <Text style={styles.dateVoteSub}>
                 {placeHostPickMode
-                  ? '동점 장소만 표시됩니다. 한 곳만 탭하세요. (집계 표 숫자에는 반영되지 않아요.)'
+                  ? '모든 후보 장소가 표시됩니다. 동점이면 확정할 곳을 한 곳만 탭해 주세요. (집계 표 숫자에는 반영되지 않아요.)'
                   : '가능한 장소를 가로로 스크롤하며 여러 개 선택할 수 있어요.'}
               </Text> */}
               {placeHostPickMode ? (
@@ -2862,7 +2835,7 @@ export default function MeetingDetailScreen() {
                   showsHorizontalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
                   contentContainerStyle={styles.placeVoteCarouselContent}>
-                  {placeChipsShown.map((chip) => {
+                  {sortedPlaceChips.map((chip) => {
                     const chipSelected = placeHostPickMode
                       ? hostTiePlaceId === chip.id
                       : selectedPlaceIds.includes(chip.id);
@@ -3479,7 +3452,6 @@ export default function MeetingDetailScreen() {
                     initialPayload={proposeInitialPayload}
                     bare
                     wizardSegment="schedule"
-                    scheduleAiReplacesFirstCandidate
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
@@ -3647,21 +3619,27 @@ export default function MeetingDetailScreen() {
                         accessibilityRole={dateHostPickMode ? 'radio' : 'checkbox'}
                         accessibilityState={{ checked: selected, selected }}
                         accessibilityLabel={`${o.hm}${selected ? ', 선택됨' : ''}`}>
-                        <Text style={styles.timeVoteHm} numberOfLines={1}>
-                          {o.hm}
-                        </Text>
-                        <View style={styles.timeVoteRightMeta} pointerEvents="none">
-                          <View style={[styles.timeVoteTallyPill, selected ? styles.timeVoteTallyPillSelected : null]}>
-                            <Text
-                              style={[styles.timeVoteTallyText, selected ? styles.timeVoteTallyTextSelected : null]}>
-                              {o.tally}
-                            </Text>
-                          </View>
+                        <View style={styles.timeVoteLeftCluster} pointerEvents="none">
                           {selected ? (
                             <GinitSymbolicIcon name="checkmark-circle" size={18} color={GinitTheme.colors.primary} />
                           ) : (
                             <View style={styles.timeVoteCheckPlaceholder} />
                           )}
+                          <Text style={styles.timeVoteHm} numberOfLines={1}>
+                            {o.hm}
+                          </Text>
+                        </View>
+                        <View
+                          style={[
+                            styles.timeVoteTallyPill,
+                            styles.timeVoteTallyAtEnd,
+                            selected ? styles.timeVoteTallyPillSelected : null,
+                          ]}
+                          pointerEvents="none">
+                          <Text
+                            style={[styles.timeVoteTallyText, selected ? styles.timeVoteTallyTextSelected : null]}>
+                            {o.tally}
+                          </Text>
                         </View>
                       </GinitPressable>
                     );
@@ -4785,6 +4763,13 @@ const styles = StyleSheet.create({
   timeVoteRowPressed: {
     opacity: 0.88,
   },
+  timeVoteLeftCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+    gap: 8,
+  },
   timeVoteHm: {
     flex: 1,
     minWidth: 0,
@@ -4793,10 +4778,7 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
   },
-  timeVoteRightMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  timeVoteTallyAtEnd: {
     marginLeft: 12,
   },
   timeVoteTallyPill: {
