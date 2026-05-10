@@ -9,6 +9,7 @@ import {
   getHomeCategoryVisual,
   homeCategoryMarkerIconColor,
   homeMeetingStatusBadgeLabel,
+  type HomeMeetingStatusBadgeListKind,
 } from '@/src/lib/feed-home-visual';
 import { firstKakaoPlaceDetailPageUrlFromMeeting, type FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
@@ -161,6 +162,8 @@ type Props = {
   /** (레거시) 썸네일 우측 하단 작은 배지: 내 프로필 사진 */
   cornerViewerPhotoUrl?: string | null;
   cornerViewerGTrust?: number | null;
+  /** 기본 explore — 내 모임·비공개 탭에서 확정 시작 경과 배지 */
+  statusBadgeListKind?: HomeMeetingStatusBadgeListKind;
 };
 
 /**
@@ -178,9 +181,13 @@ export function HomeMeetingListItem({
   categories = null,
   cornerViewerPhotoUrl = null,
   cornerViewerGTrust = null,
+  statusBadgeListKind = 'explore',
 }: Props) {
   const visual = useMemo(() => getHomeCategoryVisual(m), [m]);
-  const statusCorner = useMemo(() => homeMeetingStatusBadgeLabel(m), [m]);
+  const statusCorner = useMemo(
+    () => homeMeetingStatusBadgeLabel(m, { listKind: statusBadgeListKind }),
+    [m, statusBadgeListKind],
+  );
   const iconColor = useMemo(() => homeCategoryMarkerIconColor(visual.gradient), [visual.gradient]);
   const scheduleLine = useMemo(() => formatMeetingScheduleLine(m), [m]);
   const capFill = useMemo(() => capacityFillRatio(m), [m]);
@@ -342,7 +349,7 @@ export function HomeMeetingListItem({
   }, [ownership]);
 
   const statusStyle = useMemo(() => {
-    if (statusCorner === '일정 확정') return s.statusConfirmed;
+    if (statusCorner === '일정 확정' || statusCorner === '모임 중') return s.statusConfirmed;
     if (statusCorner === '모집 중') return s.statusOpen;
     if (statusCorner === '정원 마감') return s.statusFull;
     return s.statusDefault;

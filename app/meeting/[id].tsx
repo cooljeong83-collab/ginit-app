@@ -31,6 +31,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { MeetingArrivalVerifyMapModal } from '@/components/meeting/MeetingArrivalVerifyMapModal';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -45,12 +46,25 @@ import { useMeetingJoin } from '@/src/hooks/meeting/useMeetingJoin';
 import { useMeetingSocial } from '@/src/hooks/meeting/useMeetingSocial';
 import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
+import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import {
+  alertBodyForArrivalRpc,
+  getMeetingArrivalVerifyPolicy,
+  isWithinArrivalVerifyTimeWindow,
+  type MeetingArrivalRpcResult,
+} from '@/src/lib/meeting-arrival-verify';
+import {
+  cancelMeetingArrivalReminderLocalNotifications,
+  fetchLedgerMeetingArrivalVerifiedAppUserIds,
+  hasLedgerArrivalVerified,
+  syncMeetingArrivalReminderLocalNotifications,
+} from '@/src/lib/meeting-arrival-verify-reminders';
 import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
@@ -67,8 +81,6 @@ import {
   createMeetingShareLinkRpc,
   meetingShareWebConfigured,
 } from '@/src/lib/meeting-share';
-import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
-import { saveConfirmedMeetingToDeviceCalendar } from '@/src/lib/save-confirmed-meeting-device-calendar';
 import type { Meeting } from '@/src/lib/meetings';
 import {
   computeMeetingConfirmAnalysis,
@@ -79,10 +91,12 @@ import {
   formatPublicMeetingSettlementSummary,
   getMeetingById,
   getMeetingRecruitmentPhase,
+  isConfirmedMeetingPastListEndWindow,
   isGinitWebGuestParticipantId,
   isUserKickedFromMeeting,
   listMeetingJoinRequests,
   MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
+  meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
   updateMeetingDateCandidates,
@@ -95,7 +109,9 @@ import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/sr
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { saveConfirmedMeetingToDeviceCalendar } from '@/src/lib/save-confirmed-meeting-device-calendar';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
+import { supabase } from '@/src/lib/supabase';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -433,6 +449,13 @@ export default function MeetingDetailScreen() {
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
   const [saveCalendarBusy, setSaveCalendarBusy] = useState(false);
+  /** Supabase 레저 모임 장소 도착 인증(RPC) — 서비스 이용 인증(프로필)과 별개 */
+  const [arrivalVerifyMapOpen, setArrivalVerifyMapOpen] = useState(false);
+  /** `meeting_arrival_verifications`에 현재 사용자 행이 있으면 true */
+  const [meetingArrivalVerifiedByMe, setMeetingArrivalVerifiedByMe] = useState(false);
+  /** 레저 확정 모임: 장소 인증 완료한 참가자 PK(`normalizeParticipantId` 기준) */
+  const [ledgerArrivalVerifiedParticipantIds, setLedgerArrivalVerifiedParticipantIds] = useState<string[]>([]);
+  const [arrivalUiTick, setArrivalUiTick] = useState(0);
   const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
   const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
 
@@ -532,6 +555,9 @@ export default function MeetingDetailScreen() {
     const id = meeting.confirmedDateChipId.trim();
     return dateChips.find((c) => c.id === id) ?? null;
   }, [isScheduleConfirmed, meeting?.confirmedDateChipId, dateChips]);
+
+  /** 확정 일시가 있을 때만 — 하단바 캘린더 저장 버튼 노출 */
+  const showBottomSaveScheduleCalendar = Boolean(isScheduleConfirmed && confirmedDateChipResolved);
 
   const confirmedPlaceChipResolved = useMemo(() => {
     if (!isScheduleConfirmed || !meeting?.confirmedPlaceChipId?.trim()) return null;
@@ -851,6 +877,297 @@ export default function MeetingDetailScreen() {
     return orderedParticipantIdsList.includes(sessionPk);
   }, [sessionPk, orderedParticipantIdsList]);
 
+  const showLedgerParticipantArrivalLine = useMemo(
+    () =>
+      Boolean(
+        meeting &&
+          meeting.scheduleConfirmed === true &&
+          ledgerWritesToSupabase() &&
+          isLedgerMeetingId(meeting.id),
+      ),
+    [meeting?.id, meeting?.scheduleConfirmed],
+  );
+
+  const ledgerArrivalVerifiedByUserId = useMemo(() => {
+    const s = new Set<string>();
+    for (const k of ledgerArrivalVerifiedParticipantIds) {
+      if (k) s.add(k);
+    }
+    return s;
+  }, [ledgerArrivalVerifiedParticipantIds]);
+
+  const reloadLedgerArrivalVerifiedParticipantIds = useCallback(async () => {
+    const m = meeting;
+    if (!m?.id?.trim() || !userId?.trim()) {
+      setLedgerArrivalVerifiedParticipantIds([]);
+      return;
+    }
+    if (m.scheduleConfirmed !== true || !ledgerWritesToSupabase() || !isLedgerMeetingId(m.id)) {
+      setLedgerArrivalVerifiedParticipantIds([]);
+      return;
+    }
+    const rows = await fetchLedgerMeetingArrivalVerifiedAppUserIds(m.id, userId.trim());
+    setLedgerArrivalVerifiedParticipantIds(
+      rows
+        .map((x) => normalizeParticipantId(x) || x.trim())
+        .filter((k): k is string => k.length > 0),
+    );
+  }, [meeting, userId]);
+
+  const arrivalVerifyPol = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
+
+  const [meetingDetailListEndUiTick, setMeetingDetailListEndUiTick] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      const m = meeting;
+      if (!m || m.scheduleConfirmed !== true) return undefined;
+      if (meetingPrimaryStartMs(m) == null) return undefined;
+      const id = setInterval(() => setMeetingDetailListEndUiTick((x) => x + 1), 30_000);
+      return () => clearInterval(id);
+    }, [
+      meeting?.id,
+      meeting?.scheduleConfirmed,
+      meeting?.scheduledAt,
+      meeting?.scheduleDate,
+      meeting?.scheduleTime,
+    ]),
+  );
+
+  const isConfirmedMeetingEndedForDetail = useMemo(() => {
+    void arrivalUiTick;
+    void meetingDetailListEndUiTick;
+    if (!meeting) return false;
+    return isConfirmedMeetingPastListEndWindow(meeting, Date.now());
+  }, [meeting, appPoliciesVersion, arrivalUiTick, meetingDetailListEndUiTick]);
+
+  useEffect(() => {
+    if (!isFocused || !meeting || meeting.scheduleConfirmed !== true) return;
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) return;
+    if (Platform.OS === 'web') return;
+    const iv = setInterval(() => setArrivalUiTick((n) => n + 1), 30_000);
+    return () => clearInterval(iv);
+  }, [isFocused, meeting?.id, meeting?.scheduleConfirmed]);
+
+  const showMeetingArrivalVerify = useMemo(() => {
+    if (Platform.OS === 'web') return false;
+    if (!meeting || meeting.scheduleConfirmed !== true) return false;
+    if (isConfirmedMeetingEndedForDetail) return false;
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) return false;
+    if (!alreadyJoinedMeeting && !isHost) return false;
+    return true;
+  }, [meeting, alreadyJoinedMeeting, isHost, isConfirmedMeetingEndedForDetail]);
+
+  const showMeetingReviewWriteCta = useMemo(
+    () => isConfirmedMeetingEndedForDetail && (alreadyJoinedMeeting || isHost),
+    [isConfirmedMeetingEndedForDetail, alreadyJoinedMeeting, isHost],
+  );
+
+  const withinArrivalVerifyWindow = useMemo(() => {
+    void arrivalUiTick;
+    if (!meeting) return false;
+    return isWithinArrivalVerifyTimeWindow(meeting, Date.now(), arrivalVerifyPol);
+  }, [meeting, arrivalUiTick, arrivalVerifyPol]);
+
+  const arrivalVerifyBottomCtaDisabled = useMemo(
+    () =>
+      meetingArrivalVerifiedByMe ||
+      !userId?.trim() ||
+      (!withinArrivalVerifyWindow && !meetingArrivalVerifiedByMe),
+    [meetingArrivalVerifiedByMe, userId, withinArrivalVerifyWindow],
+  );
+
+  const arrivalVerifyBottomCtaLabel = useMemo(
+    () =>
+      meetingArrivalVerifiedByMe
+        ? '인증 완료'
+        : withinArrivalVerifyWindow
+          ? '인증'
+          : '시간 외',
+    [meetingArrivalVerifiedByMe, withinArrivalVerifyWindow],
+  );
+
+  /** 참가자 전용: N분 전 이전에는 장소 인증 pill(시간 외)을 숨기고 퇴장 노출 — 호스트 하단은 기존과 동일 */
+  const showParticipantArrivalBottomSlot = useMemo(() => {
+    if (!showMeetingArrivalVerify) return false;
+    if (meetingArrivalVerifiedByMe) return true;
+    const m = meeting;
+    if (!m) return false;
+    const startMs = meetingScheduleStartMs(m);
+    if (startMs == null) return false;
+    void arrivalUiTick;
+    void meetingDetailListEndUiTick;
+    const beforeMin = arrivalVerifyPol.guest_arrival_pill_visible_before_min;
+    const ms = Math.max(0, Math.trunc(beforeMin)) * 60_000;
+    return Date.now() >= startMs - ms;
+  }, [
+    showMeetingArrivalVerify,
+    meetingArrivalVerifiedByMe,
+    meeting,
+    arrivalUiTick,
+    meetingDetailListEndUiTick,
+    arrivalVerifyPol,
+  ]);
+
+  useEffect(() => {
+    if (!userId?.trim() || !meeting?.id?.trim()) return;
+    if (showMeetingArrivalVerify) return;
+    void cancelMeetingArrivalReminderLocalNotifications(meeting.id, userId.trim());
+  }, [showMeetingArrivalVerify, meeting?.id, userId]);
+
+  useEffect(() => {
+    if (!isFocused || !showMeetingArrivalVerify || !meeting || !userId?.trim()) return;
+    void syncMeetingArrivalReminderLocalNotifications({
+      meeting,
+      appUserId: userId.trim(),
+    });
+  }, [
+    isFocused,
+    showMeetingArrivalVerify,
+    meeting?.id,
+    meeting?.scheduleConfirmed,
+    meeting?.scheduledAt,
+    meeting?.scheduleDate,
+    meeting?.scheduleTime,
+    meeting?.title,
+    userId,
+    appPoliciesVersion,
+  ]);
+
+  useEffect(() => {
+    if (!showMeetingArrivalVerify || !meeting?.id?.trim() || !userId?.trim()) {
+      setMeetingArrivalVerifiedByMe(false);
+      return;
+    }
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) {
+      setMeetingArrivalVerifiedByMe(false);
+      return;
+    }
+    if (!isFocused) return;
+
+    const mid = meeting.id.trim();
+    const uid = userId.trim();
+    let cancelled = false;
+    void (async () => {
+      const v = await hasLedgerArrivalVerified(mid, uid);
+      if (!cancelled) setMeetingArrivalVerifiedByMe(v);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showMeetingArrivalVerify, meeting?.id, userId, arrivalUiTick, isFocused]);
+
+  useEffect(() => {
+    if (!meeting?.id?.trim() || !userId?.trim()) {
+      setLedgerArrivalVerifiedParticipantIds([]);
+      return;
+    }
+    if (!showLedgerParticipantArrivalLine) {
+      setLedgerArrivalVerifiedParticipantIds([]);
+      return;
+    }
+    if (!isFocused) return;
+    if (!(alreadyJoinedMeeting || isHost)) {
+      setLedgerArrivalVerifiedParticipantIds([]);
+      return;
+    }
+    void reloadLedgerArrivalVerifiedParticipantIds();
+  }, [
+    meeting?.id,
+    userId,
+    showLedgerParticipantArrivalLine,
+    isFocused,
+    arrivalUiTick,
+    alreadyJoinedMeeting,
+    isHost,
+    reloadLedgerArrivalVerifiedParticipantIds,
+  ]);
+
+  useEffect(() => {
+    if (!meetingArrivalVerifiedByMe || !sessionPk) return;
+    setLedgerArrivalVerifiedParticipantIds((prev) =>
+      prev.indexOf(sessionPk) >= 0 ? prev : [...prev, sessionPk],
+    );
+  }, [meetingArrivalVerifiedByMe, sessionPk]);
+
+  const handleArrivalVerifyRpcResult = useCallback(
+    ({ rpc, errorMessage }: { rpc: MeetingArrivalRpcResult | null; errorMessage: string | null }) => {
+      setArrivalVerifyMapOpen(false);
+      const m = meeting;
+      const uid = userId?.trim();
+      if (!m?.id?.trim() || !uid) return;
+      if (errorMessage && errorMessage !== 'mock_location' && errorMessage !== 'accuracy_too_low') {
+        Alert.alert('장소 인증', errorMessage);
+        return;
+      }
+      if (!rpc) return;
+      if (rpc.ok) {
+        void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
+        setMeetingArrivalVerifiedByMe(true);
+        Alert.alert(
+          '인증 완료',
+          `도착이 확인됐어요.\nXP +${rpc.xp_granted} · 신뢰 +${rpc.trust_granted}\n\n(gTrust·XP는 서버 정책에 따라만 반영됩니다.)`,
+        );
+        void refetchMeetingDetail();
+        return;
+      }
+      if (rpc.ok === false && rpc.code === 'already_verified') {
+        void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
+        setMeetingArrivalVerifiedByMe(true);
+        void refetchMeetingDetail();
+        return;
+      }
+      Alert.alert('장소 인증', alertBodyForArrivalRpc(rpc));
+    },
+    [meeting, userId, refetchMeetingDetail],
+  );
+
+  const openArrivalVerifyMap = useCallback(() => {
+    if (!meeting || !userId?.trim()) return;
+    if (meetingArrivalVerifiedByMe) return;
+    if (Platform.OS === 'web') return;
+    if (!confirmedPlaceCoords) {
+      Alert.alert('장소 인증', '확정 장소 좌표가 없어 지도를 열 수 없어요.');
+      return;
+    }
+    setArrivalVerifyMapOpen(true);
+  }, [meeting, userId, meetingArrivalVerifiedByMe, confirmedPlaceCoords]);
+
+  /** 레저 확정 모임: `meeting_arrival_verifications` INSERT 시 참여자 인증 배지 갱신, 호스트는 하단 토스트. */
+  useEffect(() => {
+    if (!isFocused || !meeting) return;
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) return;
+    if (meeting.scheduleConfirmed !== true) return;
+    if (!(alreadyJoinedMeeting || isHost)) return;
+    const ch = supabase
+      .channel(`meeting-arrival-verifs-${meeting.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'meeting_arrival_verifications',
+          filter: `meeting_id=eq.${meeting.id}`,
+        },
+        () => {
+          if (isHost) {
+            showTransientBottomMessage('참가자가 장소 도착을 인증했어요.', 3200, 0);
+          }
+          void reloadLedgerArrivalVerifiedParticipantIds();
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+  }, [
+    isFocused,
+    meeting?.id,
+    meeting?.scheduleConfirmed,
+    isHost,
+    alreadyJoinedMeeting,
+    reloadLedgerArrivalVerifiedParticipantIds,
+  ]);
+
   const {
     participantProfiles,
     profilePopupUserId,
@@ -1001,8 +1318,33 @@ export default function MeetingDetailScreen() {
 
   const hideHostScheduleUnconfirmPill = useMemo(() => {
     if (!meeting) return false;
-    return isHostScheduleUnconfirmHiddenByStartProximity(meeting, Date.now());
-  }, [meeting, hostScheduleTimeGateTick]);
+    return isHostScheduleUnconfirmHiddenByStartProximity(
+      meeting,
+      Date.now(),
+      arrivalVerifyPol.guest_arrival_pill_visible_before_min,
+    );
+  }, [meeting, hostScheduleTimeGateTick, arrivalVerifyPol]);
+
+  const showHostArrivalBottomSlot = useMemo(() => {
+    if (!showMeetingArrivalVerify) return false;
+    if (meetingArrivalVerifiedByMe) return true;
+    const m = meeting;
+    if (!m) return false;
+    const startMs = meetingScheduleStartMs(m);
+    if (startMs == null) return false;
+    void arrivalUiTick;
+    void meetingDetailListEndUiTick;
+    const beforeMin = arrivalVerifyPol.guest_arrival_pill_visible_before_min;
+    const beforeMs = Math.max(0, Math.trunc(beforeMin)) * 60_000;
+    return Date.now() >= startMs - beforeMs;
+  }, [
+    showMeetingArrivalVerify,
+    meetingArrivalVerifiedByMe,
+    meeting,
+    arrivalUiTick,
+    meetingDetailListEndUiTick,
+    arrivalVerifyPol,
+  ]);
 
   const [shareWebBusy, setShareWebBusy] = useState(false);
   const handleShareWebMeeting = useCallback(async () => {
@@ -1494,7 +1836,23 @@ export default function MeetingDetailScreen() {
     [meeting],
   );
 
-  const recruitmentBadge = useMemo(() => {
+  /** 우측 상단: 목록(내 모임·비공개)과 동일 기준으로 확정 후 모임 중·종료, 그 외는 모집 단계 */
+  const meetingDetailHeaderStatusBadge = useMemo(() => {
+    void meetingDetailListEndUiTick;
+    void arrivalUiTick;
+    const m = meeting;
+    if (m?.scheduleConfirmed === true) {
+      const startMs = meetingPrimaryStartMs(m);
+      if (startMs != null && Number.isFinite(startMs)) {
+        const now = Date.now();
+        if (isConfirmedMeetingPastListEndWindow(m, now)) {
+          return { label: '모임 종료', wrap: styles.statusBadgeEndedWrap, text: styles.statusBadgeEndedText };
+        }
+        if (now >= startMs) {
+          return { label: '모임 중', wrap: styles.statusBadgeBlack, text: styles.statusBadgeTextLight };
+        }
+      }
+    }
     if (!recruitmentPhase) return null;
     switch (recruitmentPhase) {
       case 'confirmed':
@@ -1504,7 +1862,123 @@ export default function MeetingDetailScreen() {
       default:
         return { label: '모집중', wrap: styles.statusBadgeGreen, text: styles.statusBadgeTextLight };
     }
-  }, [recruitmentPhase]);
+  }, [meeting, recruitmentPhase, meetingDetailListEndUiTick, arrivalUiTick, appPoliciesVersion]);
+
+  const hostArrivalBottomCtaEl = useMemo(() => {
+    if (!showHostArrivalBottomSlot) return null;
+    return (
+      <GinitPressable
+        onPress={() => void openArrivalVerifyMap()}
+        disabled={arrivalVerifyBottomCtaDisabled}
+        style={({ pressed }) => [
+          styles.bottomPill,
+          styles.bottomPillFlex,
+          { backgroundColor: GinitTheme.colors.deepPurple },
+          arrivalVerifyBottomCtaDisabled && { opacity: 0.7 },
+          pressed &&
+            !meetingArrivalVerifiedByMe &&
+            withinArrivalVerifyWindow &&
+            Boolean(userId?.trim()) && { opacity: 0.88 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={meetingArrivalVerifiedByMe ? '인증 완료' : '인증하기'}>
+        <GinitSymbolicIcon name="location-outline" size={18} color="#fff" />
+        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+          {arrivalVerifyBottomCtaLabel}
+        </Text>
+      </GinitPressable>
+    );
+  }, [
+    showHostArrivalBottomSlot,
+    meetingArrivalVerifiedByMe,
+    arrivalVerifyBottomCtaDisabled,
+    arrivalVerifyBottomCtaLabel,
+    withinArrivalVerifyWindow,
+    userId,
+    openArrivalVerifyMap,
+  ]);
+
+  const participantArrivalBottomCtaEl = useMemo(() => {
+    if (!showParticipantArrivalBottomSlot) return null;
+    return (
+      <GinitPressable
+        onPress={() => void openArrivalVerifyMap()}
+        disabled={arrivalVerifyBottomCtaDisabled}
+        style={({ pressed }) => [
+          styles.bottomPill,
+          styles.bottomPillFlex,
+          { backgroundColor: GinitTheme.colors.deepPurple },
+          arrivalVerifyBottomCtaDisabled && { opacity: 0.7 },
+          pressed &&
+            !meetingArrivalVerifiedByMe &&
+            withinArrivalVerifyWindow &&
+            Boolean(userId?.trim()) && { opacity: 0.88 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={meetingArrivalVerifiedByMe ? '인증 완료' : '인증하기'}>
+        <GinitSymbolicIcon name="location-outline" size={16} color="#fff" />
+        <Text
+          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+          numberOfLines={1}
+          ellipsizeMode="tail">
+          {arrivalVerifyBottomCtaLabel}
+        </Text>
+      </GinitPressable>
+    );
+  }, [
+    showParticipantArrivalBottomSlot,
+    meetingArrivalVerifiedByMe,
+    arrivalVerifyBottomCtaDisabled,
+    arrivalVerifyBottomCtaLabel,
+    withinArrivalVerifyWindow,
+    userId,
+    openArrivalVerifyMap,
+  ]);
+
+  const hostReviewBottomCtaEl = useMemo(() => {
+    if (!showMeetingReviewWriteCta) return null;
+    return (
+      <GinitPressable
+        disabled
+        style={[
+          styles.bottomPill,
+          styles.bottomPillFlex,
+          { backgroundColor: GinitTheme.colors.deepPurple, opacity: 0.55 },
+        ]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: true }}
+        accessibilityLabel="후기 작성 준비 중">
+        <GinitSymbolicIcon name="pencil" size={18} color="#fff" />
+        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+          후기
+        </Text>
+      </GinitPressable>
+    );
+  }, [showMeetingReviewWriteCta]);
+
+  const participantReviewBottomCtaEl = useMemo(() => {
+    if (!showMeetingReviewWriteCta) return null;
+    return (
+      <GinitPressable
+        disabled
+        style={[
+          styles.bottomPill,
+          styles.bottomPillFlex,
+          { backgroundColor: GinitTheme.colors.deepPurple, opacity: 0.55 },
+        ]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: true }}
+        accessibilityLabel="후기 작성 준비 중">
+        <GinitSymbolicIcon name="pencil" size={16} color="#fff" />
+        <Text
+          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+          numberOfLines={1}
+          ellipsizeMode="tail">
+          후기
+        </Text>
+      </GinitPressable>
+    );
+  }, [showMeetingReviewWriteCta]);
 
   const onDateChipPress = useCallback(
     (chipId: string) => {
@@ -1563,6 +2037,8 @@ export default function MeetingDetailScreen() {
                   {week.map((c) => {
                     const opts = dateVoteByYmd[c.ymd] ?? [];
                     const has = opts.length > 0;
+                    /** 후보 1건일 때 달력 셀을 확정 일정 달력과 같은 톤으로 표시 */
+                    const fixedScheduleLikeCell = dateChips.length === 1 && has;
                     const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
                     const isSelected = dateHostPickMode ? isHostSelected : opts.some((o) => selectedDateIds.includes(o.chipId));
                     return (
@@ -1580,15 +2056,20 @@ export default function MeetingDetailScreen() {
                           styles.calendarCell,
                           !weekHasAny && styles.calendarCellRowEmpty,
                           !c.inMonth && styles.calendarCellOut,
-                          has && styles.calendarCellHas,
-                          isSelected && styles.calendarCellSelected,
+                          fixedScheduleLikeCell && styles.calendarCellConfirmedSelected,
+                          has && !fixedScheduleLikeCell && styles.calendarCellHas,
+                          isSelected && !fixedScheduleLikeCell && styles.calendarCellSelected,
                           pressed && styles.calendarCellPressed,
                         ]}
                         accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
                         accessibilityLabel={`${c.ymd}${has ? ` ${opts.length}개` : ''}`}>
                         
                         <Text
-                          style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}
+                          style={[
+                            styles.calendarCellDay,
+                            !c.inMonth && !fixedScheduleLikeCell && styles.calendarCellDayOut,
+                            fixedScheduleLikeCell && styles.calendarCellDayConfirmed,
+                          ]}
                           numberOfLines={1}>
                           {c.day}
                         </Text>
@@ -1599,21 +2080,38 @@ export default function MeetingDetailScreen() {
                                 ? hostTieDateId === o.chipId
                                 : selectedDateIds.includes(o.chipId);
                               return (
-                                <View key={o.chipId} style={styles.calendarTimeVoteRow}>
+                                <View
+                                  key={o.chipId}
+                                  style={[
+                                    styles.calendarTimeVoteRow,
+                                    fixedScheduleLikeCell && styles.calendarTimeVoteRowConfirmed,
+                                  ]}>
                                   <View
                                     style={[
                                       styles.calendarTimeVoteSlot,
-                                      timeSelected && styles.calendarTimeVoteSlotSelected,
+                                      fixedScheduleLikeCell && styles.calendarTimeVoteSlotInConfirmedCell,
+                                      timeSelected &&
+                                        (fixedScheduleLikeCell
+                                          ? styles.calendarTimeVoteSlotSelectedOnConfirmedCell
+                                          : styles.calendarTimeVoteSlotSelected),
                                     ]}>
                                     <Text
                                       style={[
                                         styles.calendarTimeVoteHm,
+                                        fixedScheduleLikeCell && styles.calendarTimeVoteHmConfirmedCentered,
                                         timeSelected && styles.calendarTimeVoteHmSelected,
+                                        fixedScheduleLikeCell &&
+                                          !timeSelected &&
+                                          styles.calendarTimeVoteHmOnConfirmedCellMuted,
                                       ]}
                                       numberOfLines={1}>
                                       {o.hm}
                                     </Text>
-                                    <View style={styles.calendarVoteCountBox}>
+                                    <View
+                                      style={[
+                                        styles.calendarVoteCountBox,
+                                        fixedScheduleLikeCell && styles.calendarVoteCountBoxOnPurpleCell,
+                                      ]}>
                                       <Text style={styles.calendarVoteCountText}>{o.tally}</Text>
                                     </View>
                                   </View>
@@ -1634,7 +2132,7 @@ export default function MeetingDetailScreen() {
         </View>
       );
     },
-    [dateVoteByYmd, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
+    [dateVoteByYmd, dateChips.length, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
   );
 
   const renderConfirmedScheduleCalendarMonthGrid = useCallback(
@@ -1685,13 +2183,17 @@ export default function MeetingDetailScreen() {
                         style={[
                           styles.calendarCell,
                           !c.inMonth && styles.calendarCellOut,
-                          has && styles.calendarCellHas,
-                          isSelected && styles.calendarCellSelected,
+                          has && !isSelected && styles.calendarCellHas,
+                          isSelected && styles.calendarCellConfirmedSelected,
                         ]}
                         accessibilityElementsHidden={!has}
                         importantForAccessibility={has ? 'yes' : 'no-hide-descendants'}>
                         <Text
-                          style={[styles.calendarCellDay, !c.inMonth && styles.calendarCellDayOut]}
+                          style={[
+                            styles.calendarCellDay,
+                            !c.inMonth && !isSelected && styles.calendarCellDayOut,
+                            isSelected && styles.calendarCellDayConfirmed,
+                          ]}
                           numberOfLines={1}>
                           {c.day}
                         </Text>
@@ -1700,23 +2202,28 @@ export default function MeetingDetailScreen() {
                             {opts.map((o) => {
                               const timeSelected = o.chipId === confirmedChipId;
                               return (
-                                <View key={o.chipId} style={styles.calendarTimeVoteRow}>
+                                <View
+                                  key={o.chipId}
+                                  style={[styles.calendarTimeVoteRow, isSelected && styles.calendarTimeVoteRowConfirmed]}>
                                   <View
                                     style={[
                                       styles.calendarTimeVoteSlot,
-                                      timeSelected && styles.calendarTimeVoteSlotSelected,
+                                      isSelected && styles.calendarTimeVoteSlotInConfirmedCell,
+                                      timeSelected &&
+                                        (isSelected
+                                          ? styles.calendarTimeVoteSlotSelectedOnConfirmedCell
+                                          : styles.calendarTimeVoteSlotSelected),
                                     ]}>
                                     <Text
                                       style={[
                                         styles.calendarTimeVoteHm,
+                                        isSelected && styles.calendarTimeVoteHmConfirmedCentered,
                                         timeSelected && styles.calendarTimeVoteHmSelected,
+                                        isSelected && !timeSelected && styles.calendarTimeVoteHmOnConfirmedCellMuted,
                                       ]}
                                       numberOfLines={1}>
                                       {o.hm}
                                     </Text>
-                                    <View style={styles.calendarVoteCountBox}>
-                                      <Text style={styles.calendarVoteCountText}>{o.tally}</Text>
-                                    </View>
                                   </View>
                                 </View>
                               );
@@ -1830,9 +2337,11 @@ export default function MeetingDetailScreen() {
       const res = await saveConfirmedMeetingToDeviceCalendar(meeting);
       if (res.ok) {
         if (Platform.OS === 'web') {
-          showTransientBottomMessage('구글 캘린더에서 저장을 완료해 주세요.');
-        } else {
+          showTransientBottomMessage('구글 캘린더에서 내용을 확인한 뒤 저장해 주세요.');
+        } else if (res.savedLikely) {
           showTransientBottomMessage('내 캘린더에 저장했어요.');
+        } else {
+          showTransientBottomMessage('캘린더에서 내용을 확인한 뒤 저장해 주세요.');
         }
       } else {
         Alert.alert('일정 저장', res.message);
@@ -1858,9 +2367,11 @@ export default function MeetingDetailScreen() {
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </GinitPressable>
           <Text style={styles.topTitle}>모임 상세</Text>
-          {recruitmentBadge ? (
-            <View style={[styles.statusBadge, recruitmentBadge.wrap]}>
-              <Text style={[styles.statusBadgeText, recruitmentBadge.text]}>{recruitmentBadge.label}</Text>
+          {meetingDetailHeaderStatusBadge ? (
+            <View style={[styles.statusBadge, meetingDetailHeaderStatusBadge.wrap]}>
+              <Text style={[styles.statusBadgeText, meetingDetailHeaderStatusBadge.text]}>
+                {meetingDetailHeaderStatusBadge.label}
+              </Text>
             </View>
           ) : (
             <View style={styles.statusBadgePlaceholder} />
@@ -2272,23 +2783,6 @@ export default function MeetingDetailScreen() {
                         );
                       })()
                     ) : null}
-                    <GinitPressable
-                      onPress={() => void onPressSaveScheduleToCalendar()}
-                      disabled={saveCalendarBusy}
-                      style={({ pressed }) => [
-                        styles.confirmedCalSaveBtn,
-                        saveCalendarBusy && { opacity: 0.7 },
-                        pressed && !saveCalendarBusy && { opacity: 0.88 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="일정 저장하기">
-                      {saveCalendarBusy ? (
-                        <ActivityIndicator color={GinitTheme.colors.primary} size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="calendar-outline" size={18} color={GinitTheme.colors.primary} />
-                      )}
-                      <Text style={styles.confirmedCalSaveBtnLabel}>일정 저장하기</Text>
-                    </GinitPressable>
                   </>
                 ) : (
                   <Text style={styles.infoRowMuted}>저장된 확정 일시가 없어요.</Text>
@@ -3109,7 +3603,21 @@ export default function MeetingDetailScreen() {
                         pointerEvents={withdrawn ? 'none' : 'auto'}
                         accessibilityRole="button"
                         accessibilityLabel={
-                          isWebGuest ? `${nickname} 웹 게스트` : `${nickname} 프로필 열기`
+                          (() => {
+                            const base = isWebGuest ? `${nickname} 웹 게스트` : `${nickname} 프로필 열기`;
+                            if (
+                              !showLedgerParticipantArrivalLine ||
+                              !(alreadyJoinedMeeting || isHost) ||
+                              withdrawn ||
+                              isWebGuest
+                            ) {
+                              return base;
+                            }
+                            const tail = ledgerArrivalVerifiedByUserId.has(userId)
+                              ? ', 장소 인증 완료'
+                              : ', 장소 미인증';
+                            return base + tail;
+                          })()
                         }>
                         <View
                           style={[
@@ -3126,6 +3634,23 @@ export default function MeetingDetailScreen() {
                             <Text style={styles.avatarInitial}>{nicknameInitial(nickname)}</Text>
                           )}
                         </View>
+                        {showLedgerParticipantArrivalLine && (alreadyJoinedMeeting || isHost) ? (
+                          <Text
+                            style={
+                              withdrawn || isWebGuest
+                                ? styles.avatarArrivalLineMuted
+                                : ledgerArrivalVerifiedByUserId.has(userId)
+                                  ? styles.avatarArrivalLineDone
+                                  : styles.avatarArrivalLinePending
+                            }
+                            numberOfLines={1}>
+                            {withdrawn || isWebGuest
+                              ? '—'
+                              : ledgerArrivalVerifiedByUserId.has(userId)
+                                ? '인증 완료'
+                                : '미인증'}
+                          </Text>
+                        ) : null}
                         <Text style={styles.avatarLabel} numberOfLines={2}>
                           {isHostUser
                             ? `${nickname}\n(호스트)`
@@ -3157,21 +3682,42 @@ export default function MeetingDetailScreen() {
                       disabled={shareWebBusy}
                       style={({ pressed }) => [
                         styles.bottomPill,
+                        styles.bottomIconPill,
                         styles.pillBlue,
-                        styles.bottomPillFlex,
                         (shareWebBusy || pressed) && { opacity: 0.85 },
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel="웹으로 공유">
                       <GinitSymbolicIcon name="share-outline" size={18} color="#fff" />
-                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        {shareWebBusy ? '공유' : '공유'}
-                      </Text>
+                    </GinitPressable>
+                  ) : null}
+                  {showBottomSaveScheduleCalendar ? (
+                    <GinitPressable
+                      onPress={() => void onPressSaveScheduleToCalendar()}
+                      disabled={saveCalendarBusy}
+                      style={({ pressed }) => [
+                        styles.bottomPill,
+                        styles.bottomIconPill,
+                        styles.pillBlue,
+                        saveCalendarBusy && { opacity: 0.7 },
+                        pressed && !saveCalendarBusy && { opacity: 0.88 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="달력에 저장하기">
+                      {saveCalendarBusy ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <GinitSymbolicIcon name="calendar-outline" size={18} color="#fff" />
+                      )}
                     </GinitPressable>
                   ) : null}
                   <GinitPressable
                     onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    style={[
+                      styles.bottomPill,
+                      styles.pillBlue,
+                      styles.bottomPillFlex,
+                    ]}
                     accessibilityRole="button"
                     accessibilityLabel="모임 채팅">
                     <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
@@ -3240,14 +3786,40 @@ export default function MeetingDetailScreen() {
                       </Text>
                     </GinitPressable>
                   ) : null}
+                  {hostArrivalBottomCtaEl}
+                  {hostReviewBottomCtaEl}
                 </View>
               </View>
             ) : alreadyJoinedMeeting ? (
               <View style={styles.bottomBarCol}>
                 <View style={styles.bottomBarEqualRow}>
+                  {showBottomSaveScheduleCalendar ? (
+                    <GinitPressable
+                      onPress={() => void onPressSaveScheduleToCalendar()}
+                      disabled={saveCalendarBusy}
+                      style={({ pressed }) => [
+                        styles.bottomPill,
+                        styles.bottomIconPill,
+                        styles.pillBlue,
+                        saveCalendarBusy && { opacity: 0.7 },
+                        pressed && !saveCalendarBusy && { opacity: 0.88 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="달력에 저장하기">
+                      {saveCalendarBusy ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <GinitSymbolicIcon name="calendar-outline" size={16} color="#fff" />
+                      )}
+                    </GinitPressable>
+                  ) : null}
                   <GinitPressable
                     onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                    style={[styles.bottomPill, styles.pillBlue, styles.bottomPillFlex]}
+                    style={[
+                      styles.bottomPill,
+                      styles.pillBlue,
+                      styles.bottomPillFlex,
+                    ]}
                     accessibilityRole="button"
                     accessibilityLabel="모임 채팅">
                     <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
@@ -3291,7 +3863,7 @@ export default function MeetingDetailScreen() {
                       </Text>
                     </GinitPressable>
                   ) : null}
-                  {!(isScheduleConfirmed && hideHostScheduleUnconfirmPill) ? (
+                  {!(isScheduleConfirmed && hideHostScheduleUnconfirmPill) && !showParticipantArrivalBottomSlot ? (
                     <GinitPressable
                       onPress={handleLeaveParticipant}
                       disabled={participantVoteBusy || leaveBusy}
@@ -3303,16 +3875,18 @@ export default function MeetingDetailScreen() {
                         pressed && !(participantVoteBusy || leaveBusy) && { opacity: 0.9 },
                       ]}
                       accessibilityRole="button"
-                      accessibilityLabel="퇴장">
+                      accessibilityLabel="나가기">
                       <GinitSymbolicIcon name="exit-outline" size={16} color="#fff" />
                       <Text
                         style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
                         numberOfLines={1}
                         ellipsizeMode="tail">
-                        퇴장
+                        나가기
                       </Text>
                     </GinitPressable>
                   ) : null}
+                  {participantArrivalBottomCtaEl}
+                  {participantReviewBottomCtaEl}
                 </View>
               </View>
             ) : sessionKickedFromMeeting ? (
@@ -3973,6 +4547,26 @@ export default function MeetingDetailScreen() {
           }}
         />
 
+        {meeting && userId?.trim() && confirmedPlaceCoords ? (
+          <MeetingArrivalVerifyMapModal
+            visible={arrivalVerifyMapOpen}
+            onRequestClose={() => setArrivalVerifyMapOpen(false)}
+            placeCoords={confirmedPlaceCoords}
+            authRadiusM={arrivalVerifyPol.auth_radius_m}
+            minAccuracyM={arrivalVerifyPol.min_accuracy_m}
+            meetingId={meeting.id}
+            appUserId={userId.trim()}
+            pinMeeting={{
+              id: meeting.id,
+              categoryId: meeting.categoryId ?? null,
+              categoryLabel: meeting.categoryLabel ?? null,
+              title: meeting.title ?? '',
+            }}
+            mapViewRadiusM={70}
+            onRpcResult={handleArrivalVerifyRpcResult}
+          />
+        ) : null}
+
         <NaverPlaceWebViewModal
           visible={naverPlaceWebModal != null}
           url={naverPlaceWebModal?.url}
@@ -4009,6 +4603,8 @@ const styles = StyleSheet.create({
   statusBadgeGreen: { backgroundColor: '#16A34A' },
   statusBadgeYellow: { backgroundColor: '#FACC15' },
   statusBadgeBlack: { backgroundColor: GinitTheme.colors.deepPurple },
+  statusBadgeEndedWrap: { backgroundColor: GinitTheme.colors.primarySoft },
+  statusBadgeEndedText: { color: GinitTheme.colors.textMuted },
   statusBadgeText: { fontSize: 12, fontWeight: '700' },
   statusBadgeTextLight: { color: '#fff' },
   statusBadgeTextOnYellow: { color: '#422006' },
@@ -4029,7 +4625,7 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 12 },
   joinCtaBtn: {
-    borderRadius: 18,
+    borderRadius: 999,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -4445,25 +5041,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.45)',
     overflow: 'hidden',
   },
-  confirmedCalSaveBtn: {
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    alignSelf: 'stretch',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    backgroundColor: 'rgba(255, 255, 255, 0.55)',
-  },
-  confirmedCalSaveBtnLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: GinitTheme.colors.primary,
-  },
   voteCalendarHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4541,6 +5118,15 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
   },
+  /** 확정 일정 달력 + 일시 후보 1건 달력 — 해당 일자 셀 */
+  calendarCellConfirmedSelected: {
+    borderWidth: 0,
+    backgroundColor: GinitTheme.colors.deepPurple,
+    opacity: 1,
+  },
+  calendarCellDayConfirmed: {
+    color: '#FFFFFF',
+  },
   calendarCellPressed: { opacity: 0.9 },
   calendarCellDay: {
     fontSize: 13,
@@ -4566,6 +5152,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     width: '100%',
   },
+  calendarTimeVoteRowConfirmed: {
+    justifyContent: 'center',
+  },
   /** 일시 투표 달력 — 시간+득표 한 줄(선택 여부와 동일 패딩·간격, 선택 시 배경만 추가) */
   calendarTimeVoteSlot: {
     flexDirection: 'row',
@@ -4579,6 +5168,16 @@ const styles = StyleSheet.create({
   calendarTimeVoteSlotSelected: {
     backgroundColor: GinitTheme.colors.deepPurple,
   },
+  /** 확정 일자 셀(딥퍼플 배경) 위 확정 시간 — 가운데 정렬용 슬롯 */
+  calendarTimeVoteSlotInConfirmedCell: {
+    alignItems: 'center',
+  },
+  calendarTimeVoteSlotSelectedOnConfirmedCell: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
   calendarTimeVoteHm: {
     fontSize: 10,
     fontWeight: '600',
@@ -4589,6 +5188,13 @@ const styles = StyleSheet.create({
   calendarTimeVoteHmSelected: {
     color: '#FFFFFF',
   },
+  calendarTimeVoteHmOnConfirmedCellMuted: {
+    color: 'rgba(255, 255, 255, 0.78)',
+  },
+  calendarTimeVoteHmConfirmedCentered: {
+    textAlign: 'center',
+    alignSelf: 'stretch',
+  },
   calendarVoteCountBox: {
     flexShrink: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -4596,6 +5202,9 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  calendarVoteCountBoxOnPurpleCell: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
   calendarVoteCountText: {
     color: '#FFFFFF',
@@ -5010,6 +5619,30 @@ const styles = StyleSheet.create({
   },
   avatarPhoto: { width: 52, height: 52, borderRadius: 26 },
   avatarInitial: { fontSize: 18, fontWeight: '700', color: GinitTheme.colors.primary },
+  avatarArrivalLineDone: {
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: GinitTheme.colors.textSub,
+  },
+  avatarArrivalLinePending: {
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: GinitTheme.colors.textMuted,
+  },
+  avatarArrivalLineMuted: {
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: GinitTheme.colors.textMuted,
+  },
   avatarLabel: { marginTop: 6, fontSize: 11, color: '#333', textAlign: 'center', lineHeight: 14 },
   genderCountText: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted },
   joinRequestList: { paddingVertical: 2 },
@@ -5167,7 +5800,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
     minHeight: 50,
-    borderRadius: 22,
+    borderRadius: 999,
+  },
+  bottomIconPill: {
+    width: 50,
+    height: 50,
+    minHeight: 50,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    borderRadius: 25,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   /** 게스트 2버튼일 때 가로 폭 균등 */
   bottomPillFlex: { flex: 1, minWidth: 0 },

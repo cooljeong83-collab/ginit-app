@@ -1,4 +1,4 @@
-import { getMeetingRecruitmentPhase, type Meeting } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, isConfirmedMeetingPastListEndWindow, meetingPrimaryStartMs, type Meeting } from '@/src/lib/meetings';
 import type { SymbolicIconName } from '@/src/lib/ginit-symbolic-icon-map';
 
 /** 2026 홈 글래스 스펙 — Trust Blue / Energetic Orange */
@@ -147,11 +147,30 @@ export function meetingIsTomorrowInSeoul(m: Meeting): boolean {
   return d === seoulTomorrowYmd();
 }
 
+/** 홈 탐색은 기본 배지; 내 모임·비공개는 확정 시작 경과 시 모임 중/종료 문구 */
+export type HomeMeetingStatusBadgeListKind = 'explore' | 'my_private';
+
 /**
  * 홈 카드 우측 상단 상태 한 줄( D-day 없음 ).
- * 우선순위: 서울 기준 내일 일정 → 일정 확정 → 정원 마감(미확정) → 모집 중.
+ * `my_private`: **일정 확정(`scheduleConfirmed === true`)인 모임만** 확정 시작 시각 기준으로
+ * 모임 중 / 모임 종료를 표시합니다. 미확정 모임은 후보 일시가 지나 만료된 것처럼 보여도 이 구간을 쓰지 않고
+ * 아래 일반 우선순위(내일 모임 → 일정 확정 → …)만 적용됩니다(미확정이면 ‘일정 확정’ 라벨도 나오지 않음).
+ * 그 외 우선순위: 서울 기준 내일 일정 → 일정 확정 → 정원 마감(미확정) → 모집 중.
  */
-export function homeMeetingStatusBadgeLabel(m: Meeting): string {
+export function homeMeetingStatusBadgeLabel(
+  m: Meeting,
+  opts?: { listKind?: HomeMeetingStatusBadgeListKind },
+): string {
+  const listKind = opts?.listKind ?? 'explore';
+  const now = Date.now();
+  // 미확정 + 시간 경과(expired) 모임: 여기서 분기하지 않음 — 반드시 scheduleConfirmed === true 일 때만.
+  if (listKind === 'my_private' && m.scheduleConfirmed === true) {
+    const startMs = meetingPrimaryStartMs(m);
+    if (startMs != null && Number.isFinite(startMs)) {
+      if (isConfirmedMeetingPastListEndWindow(m, now)) return '모임 종료';
+      if (now >= startMs) return '모임 중';
+    }
+  }
   if (meetingIsTomorrowInSeoul(m)) return '내일 모임';
   if (m.scheduleConfirmed === true) return '일정 확정';
   if (getMeetingRecruitmentPhase(m) === 'full') return '정원 마감';

@@ -1,9 +1,9 @@
 import { primaryScheduleFromDateCandidate, normalizeTimeInput } from '@/src/lib/date-candidate';
 import type { DateCandidate, PlaceCandidate } from '@/src/lib/meeting-place-bridge';
-import type { Meeting } from '@/src/lib/meetings';
+import { MEETING_CAPACITY_UNLIMITED, type Meeting } from '@/src/lib/meetings';
 import { Linking, Platform } from 'react-native';
 
-const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000;
+const DEFAULT_DURATION_MS = 3 * 60 * 60 * 1000;
 
 function dateCandidateChipId(d: DateCandidate, index: number): string {
   return d.id?.trim() || `dc-${index}`;
@@ -46,31 +46,30 @@ function findConfirmedDateCandidate(meeting: Meeting): DateCandidate | null {
   return null;
 }
 
-function resolveConfirmedPlaceLine(meeting: Meeting): string | null {
+function resolveConfirmedPlaceInfo(meeting: Meeting): { name: string | null; address: string | null } {
   const id = meeting.confirmedPlaceChipId?.trim();
   if (!id) {
-    const line = [meeting.placeName, meeting.address]
-      .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .filter(Boolean)
-      .join(' · ');
-    return line || null;
+    const name =
+      (typeof meeting.placeName === 'string' ? meeting.placeName.trim() : '') ||
+      (typeof meeting.location === 'string' ? meeting.location.trim() : '');
+    const address = typeof meeting.address === 'string' ? meeting.address.trim() : '';
+    return { name: name || null, address: address || null };
   }
   const cands: PlaceCandidate[] = meeting.placeCandidates ?? [];
   for (let i = 0; i < cands.length; i += 1) {
     if (placeCandidateChipId(cands[i], i) !== id) continue;
-    const title = cands[i].placeName?.trim() || '';
-    const addr = cands[i].address?.trim() || '';
-    const line = [title, addr].filter(Boolean).join(' · ');
-    return line || null;
+    const name = cands[i].placeName?.trim() || '';
+    const address = cands[i].address?.trim() || '';
+    return { name: name || null, address: address || null };
   }
   if (id === 'legacy-place') {
-    const line = [meeting.placeName, meeting.address]
-      .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .filter(Boolean)
-      .join(' · ');
-    return line || null;
+    const name =
+      (typeof meeting.placeName === 'string' ? meeting.placeName.trim() : '') ||
+      (typeof meeting.location === 'string' ? meeting.location.trim() : '');
+    const address = typeof meeting.address === 'string' ? meeting.address.trim() : '';
+    return { name: name || null, address: address || null };
   }
-  return null;
+  return { name: null, address: null };
 }
 
 export type ConfirmedMeetingCalendarPayload = {
@@ -81,6 +80,44 @@ export type ConfirmedMeetingCalendarPayload = {
   location: string | null;
   notes: string;
 };
+
+const NOTES_MAX_LEN = 6000;
+
+function formatCapacityForCalendarNotes(m: Meeting): string | null {
+  const max = m.capacity;
+  const min = m.minParticipants ?? null;
+  if (typeof max !== 'number' || !Number.isFinite(max)) return null;
+  const maxUnlimited = max >= MEETING_CAPACITY_UNLIMITED;
+  const maxPart = maxUnlimited ? '무제한' : `최대 ${max}명`;
+  if (min != null && min > 0 && !maxUnlimited && min !== max) {
+    return `${min}명 ~ ${maxPart}`;
+  }
+  return maxPart;
+}
+
+/** OS 캘린더·구글 템플릿 `details`에 넣을 모임 요약(제목·위치는 각 필드로 별도 전달) */
+function buildMeetingCalendarNotes(meeting: Meeting, placeName: string | null): string {
+  const lines: string[] = ['지닛(Ginit) 모임 일정'];
+  if (placeName) lines.push(`모임 장소 : ${placeName}`);
+  if (meeting.categoryLabel?.trim()) lines.push(`카테고리: ${meeting.categoryLabel.trim()}`);
+  const cap = formatCapacityForCalendarNotes(meeting);
+  if (cap) lines.push(`인원: ${cap}`);
+  lines.push(`공개: ${meeting.isPublic === false ? '비공개' : '공개 모집'}`);
+  const desc = meeting.description?.trim();
+  if (desc) {
+    const clipped = desc.length > 2000 ? `${desc.slice(0, 2000)}…` : desc;
+    lines.push('', '— 소개 —', clipped);
+  }
+  let body = lines.join('\n');
+  if (body.length > NOTES_MAX_LEN) {
+    body = `${body.slice(0, NOTES_MAX_LEN - 1)}…`;
+  }
+  return body;
+}
+
+export type SaveConfirmedMeetingCalendarResult =
+  | { ok: true; savedLikely: boolean }
+  | { ok: false; message: string };
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -128,11 +165,11 @@ export function buildConfirmedMeetingCalendarPayload(meeting: Meeting): Confirme
   const dc = findConfirmedDateCandidate(meeting);
   if (!dc) return null;
 
-  const title = meeting.title?.trim() || '지닛 모임';
-  const location = resolveConfirmedPlaceLine(meeting);
-  const notesLines = ['지닛(Ginit) 모임 일정'];
-  if (meeting.id) notesLines.push(`모임 ID: ${meeting.id}`);
-  const notes = notesLines.join('\n');
+  const meetingTitle = meeting.title?.trim() || '지닛 모임';
+  const title = `[지닛]${meetingTitle}`;
+  const place = resolveConfirmedPlaceInfo(meeting);
+  const location = place.address;
+  const notes = buildMeetingCalendarNotes(meeting, place.name);
 
   const t = dc.type;
   if (t === 'date-range') {
@@ -151,12 +188,10 @@ export function buildConfirmedMeetingCalendarPayload(meeting: Meeting): Confirme
 
   if (t === 'datetime-range') {
     const startYmd = (dc.startDate ?? '').trim();
-    const endYmd = (dc.endDate ?? '').trim();
-    if (startYmd && endYmd) {
+    if (startYmd) {
       const st = localDateFromYmdAndHm(startYmd, dc.startTime);
-      const et = localDateFromYmdAndHm(endYmd, dc.endTime ?? dc.startTime);
-      if (st && et) {
-        const endDate = et > st ? et : new Date(st.getTime() + DEFAULT_DURATION_MS);
+      if (st) {
+        const endDate = new Date(st.getTime() + DEFAULT_DURATION_MS);
         return { title, startDate: st, endDate, allDay: false, location, notes };
       }
     }
@@ -172,11 +207,13 @@ export function buildConfirmedMeetingCalendarPayload(meeting: Meeting): Confirme
 }
 
 /**
- * 확정 일정을 기기 캘린더에 추가합니다. (웹: 구글 캘린더 템플릿 링크)
+ * 확정 일정을 캘린더에 넣습니다.
+ * - 웹: 구글 캘린더 작성 화면(템플릿) — 필드 채운 뒤 사용자가 저장
+ * - iOS/Android: OS 제공 일정 작성 UI — 필드 채운 뒤 사용자가 저장
  */
 export async function saveConfirmedMeetingToDeviceCalendar(
   meeting: Meeting,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<SaveConfirmedMeetingCalendarResult> {
   const payload = buildConfirmedMeetingCalendarPayload(meeting);
   if (!payload) return { ok: false, message: '저장할 확정 일시가 없어요.' };
 
@@ -184,7 +221,7 @@ export async function saveConfirmedMeetingToDeviceCalendar(
     try {
       const url = buildGoogleCalendarTemplateUrl(payload);
       await Linking.openURL(url);
-      return { ok: true };
+      return { ok: true, savedLikely: false };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : '캘린더를 열지 못했어요.' };
     }
@@ -195,37 +232,25 @@ export async function saveConfirmedMeetingToDeviceCalendar(
     const available = await Calendar.isAvailableAsync();
     if (!available) return { ok: false, message: '이 기기에서는 캘린더를 쓸 수 없어요.' };
 
-    const perm = await Calendar.requestCalendarPermissionsAsync();
-    if (perm.status !== 'granted') {
-      return { ok: false, message: '캘린더 권한이 필요해요. 설정에서 허용해 주세요.' };
-    }
-
-    let calendarId: string;
-    if (Platform.OS === 'ios') {
-      const def = await Calendar.getDefaultCalendarAsync();
-      calendarId = def.id;
-    } else {
-      const cals = await Calendar.getCalendarsAsync();
-      const writable = cals.filter((c) => c.allowsModifications);
-      const prim = writable.find((c) => c.isPrimary) ?? writable[0];
-      if (!prim) return { ok: false, message: '쓸 수 있는 캘린더가 없어요.' };
-      calendarId = prim.id;
-    }
-
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    await Calendar.createEventAsync(calendarId, {
+    const eventData: Record<string, unknown> = {
       title: payload.title,
       startDate: payload.startDate,
       endDate: payload.endDate,
       allDay: payload.allDay,
-      location: payload.location ?? undefined,
       notes: payload.notes,
       alarms: [],
-      ...(Platform.OS === 'ios' ? { timeZone } : {}),
-    });
+    };
+    if (payload.location) eventData.location = payload.location;
+    if (Platform.OS === 'ios') {
+      eventData.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    }
 
-    return { ok: true };
+    /** OS 일정 작성 시트 — 저장은 사용자가 눌러야 함 */
+    const presentationOptions = Platform.OS === 'android' ? { startNewActivityTask: false } : undefined;
+    const dialog = await Calendar.createEventInCalendarAsync(eventData, presentationOptions);
+    const action = typeof dialog === 'object' && dialog != null && 'action' in dialog ? String((dialog as { action: unknown }).action) : '';
+    const savedLikely = Platform.OS === 'ios' && action === 'saved';
+    return { ok: true, savedLikely };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : '일정을 저장하지 못했어요.' };
   }

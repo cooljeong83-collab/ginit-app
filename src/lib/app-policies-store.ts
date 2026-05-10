@@ -15,7 +15,26 @@ type PolicyEntry = { value: unknown; isActive: boolean };
 
 /** 오프라인·마이그레이션 전 기본값(서버 시드와 맞출 것) */
 const DEFAULTS: Record<string, Record<string, unknown>> = {
-  meeting: { overlap_hours: 3, map_radius_km: 5 },
+  meeting: {
+    overlap_hours: 3,
+    /** `0109_meeting_home_list_ongoing_duration_hours.sql` 시드와 동일 — 내 모임·비공개 목록 "모임 중" 구간 길이(시간) */
+    list_ongoing_duration_hours: 3,
+    map_radius_km: 5,
+    /** `0102_meeting_arrival_verify.sql` 시드와 동일 의미 */
+    arrival_verify: {
+      auth_radius_m: 120,
+      guest_arrival_pill_visible_before_min: 30,
+      window_before_min: 45,
+      window_after_min: 90,
+      min_accuracy_m: 50,
+      xp_reward: 15,
+      trust_reward: 2,
+      trust_cap: 100,
+      reminder_interval_min: 30,
+      reminder_max_count: 1,
+      reminder_after_scheduled_min: 0,
+    },
+  },
   meeting_create: {
     rules_by_major: {
       _default: {
@@ -50,6 +69,13 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     penalty_late_cancel: { xp: -30, trust: -10 },
     /** 확정 일정 모임에서 참여자 나가기(모임당 1회, Supabase RPC) */
     penalty_leave_confirmed: { xp: -30, trust: -12, restricted_below: 30 },
+    /** `0111` — outer 이내·시작 전에 패널티 후보, inner 이내는 강한 티어(leave/host_unconfirm RPC) */
+    penalty_near_meeting_cancel_window_hours: { outer_hours: 2, inner_hours: 1 },
+    /** 예정 시작 outer~inner 구간 퇴장·취소 시(전체 패널티보다 약함) */
+    penalty_leave_confirmed_soft: { xp: -15, trust: -6, restricted_below: 30 },
+    penalty_host_unconfirm_confirmed_soft: { xp: -15, trust: -6, restricted_below: 30 },
+    /** 호스트 확정 취소(레저) 시 패널티 — `0107` RPC */
+    penalty_host_unconfirm_confirmed: { xp: -30, trust: -12, restricted_below: 30 },
     penalty_report_approved: { trust: -20, restricted_below: 30 },
     recovery_checkin: { streak_need: 3, trust_delta: 5, cap: 100 },
     min_join_score: 70,

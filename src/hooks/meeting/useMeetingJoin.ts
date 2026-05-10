@@ -4,6 +4,10 @@ import {
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
   isConfirmedScheduleOverlapErrorMessage,
 } from '@/src/lib/meeting-schedule-overlap';
+import {
+  getTrustPenaltyLeaveNearMeetingTier,
+  parseNearMeetingCancelPenaltyWindowPolicy,
+} from '@/src/lib/meeting-schedule-times';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
@@ -413,21 +417,40 @@ export function useMeetingJoin({
       return;
     }
     const confirmed = meeting.scheduleConfirmed === true;
-    const penaltyCfg = confirmed
-      ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_leave_confirmed', { xp: -30, trust: -12 })
-      : null;
+    const winPolicyRaw = getPolicy<unknown>('trust', 'penalty_near_meeting_cancel_window_hours', {
+      outer_hours: 2,
+      inner_hours: 1,
+    });
+    const winParsed = parseNearMeetingCancelPenaltyWindowPolicy(winPolicyRaw);
+    const tier = confirmed ? getTrustPenaltyLeaveNearMeetingTier(meeting, Date.now(), winParsed) : 'none';
+    const withinPenaltyWindow = tier !== 'none';
+    const penaltyCfg =
+      tier === 'full'
+        ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_leave_confirmed', { xp: -30, trust: -12 })
+        : tier === 'soft'
+          ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_leave_confirmed_soft', {
+              xp: -15,
+              trust: -6,
+            })
+          : null;
     const trustDrop =
-      confirmed && penaltyCfg && typeof penaltyCfg.trust === 'number' && Number.isFinite(penaltyCfg.trust)
+      penaltyCfg && typeof penaltyCfg.trust === 'number' && Number.isFinite(penaltyCfg.trust)
         ? Math.abs(Math.trunc(penaltyCfg.trust))
         : 12;
     const xpDrop =
-      confirmed && penaltyCfg && typeof penaltyCfg.xp === 'number' && Number.isFinite(penaltyCfg.xp)
+      penaltyCfg && typeof penaltyCfg.xp === 'number' && Number.isFinite(penaltyCfg.xp)
         ? Math.abs(Math.trunc(penaltyCfg.xp))
         : 30;
     const baseMsg = '참여를 취소하면 내가 넣었던 투표는 집계에서 빠져요. 다시 들어오려면 참여 절차가 필요해요.';
-    const penaltyMsg = confirmed
-      ? `\n\n일정이 확정된 모임이에요. 나가면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
-      : '';
+    const oh = winParsed.outerHours;
+    const ih = winParsed.innerHours;
+    const penaltyMsg = withinPenaltyWindow
+      ? tier === 'full'
+        ? `\n\n예정 시작 ${ih}시간 이내예요. 나가면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
+        : `\n\n예정 시작 ${oh}시간 이내·${ih}시간 전보다는 일찍 나가요. 나가면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
+      : confirmed
+        ? `\n\n일정이 확정된 모임이에요. 예정 시작 ${oh}시간 전보다 일찍 나가면 신뢰·XP 패널티는 적용되지 않아요.`
+        : '';
     Alert.alert('모임에서 나가기', baseMsg + penaltyMsg, [
       { text: '취소', style: 'cancel' },
       {
@@ -440,7 +463,7 @@ export function useMeetingJoin({
               await leaveMeeting(meeting.id, sessionPk);
               void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
               let penaltyLedgerOk = false;
-              if (confirmed) {
+              if (withinPenaltyWindow) {
                 try {
                   // RPC는 public.profiles.app_user_id로 조회 — 행이 없으면 즉시 실패하므로 선행 보장
                   await ensureUserProfile(sessionPk);

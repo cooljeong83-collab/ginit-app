@@ -1,7 +1,10 @@
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
+import { getPolicy } from '@/src/lib/app-policies-store';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  applyTrustPenaltyHostUnconfirmConfirmedMeeting,
   approveJoinRequest,
   computeMeetingConfirmAnalysis,
   confirmMeetingSchedule,
@@ -12,13 +15,20 @@ import {
   unconfirmMeetingSchedule,
 } from '@/src/lib/meetings';
 import { isConfirmedScheduleOverlapErrorMessage, GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION } from '@/src/lib/meeting-schedule-overlap';
-import { isHostScheduleUnconfirmHiddenByStartProximity } from '@/src/lib/meeting-schedule-times';
+import {
+  isHostScheduleUnconfirmHiddenByStartProximity,
+  getTrustPenaltyLeaveNearMeetingTier,
+  parseNearMeetingCancelPenaltyWindowPolicy,
+} from '@/src/lib/meeting-schedule-times';
+import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
-import type { UserProfile } from '@/src/lib/user-profile';
+import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
+import { ensureUserProfile } from '@/src/lib/user-profile';
+import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 
 import type { QueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 
@@ -152,35 +162,110 @@ export function useMeetingHost({
       return;
     }
     if (meeting.scheduleConfirmed !== true) return;
-    if (isHostScheduleUnconfirmHiddenByStartProximity(meeting, Date.now())) {
-      Alert.alert('안내', '모임 시작 시각이 지난 뒤에는 일정 확정을 취소할 수 없어요.', [{ text: '확인' }]);
+    const arrivalPol = getMeetingArrivalVerifyPolicy();
+    if (
+      isHostScheduleUnconfirmHiddenByStartProximity(
+        meeting,
+        Date.now(),
+        arrivalPol.guest_arrival_pill_visible_before_min,
+      )
+    ) {
+      Alert.alert('안내', `모임 시작 ${arrivalPol.guest_arrival_pill_visible_before_min}분 전부터는 일정 확정을 취소할 수 없어요.`, [
+        { text: '확인' },
+      ]);
       return;
     }
-    Alert.alert(
-      '확정 취소',
-      '일정 확정을 되돌리면 다시 투표·확정 절차를 진행할 수 있는 상태로 바뀝니다. 취소할까요?',
-      [
-        { text: '닫기', style: 'cancel' },
-        {
-          text: '확정 취소',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setConfirmScheduleBusy(true);
-              try {
-                markRecentSelfMeetingChange(meeting.id);
-                await unconfirmMeetingSchedule(meeting.id, userId.trim());
-                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-              } catch (e) {
-                Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-              } finally {
-                setConfirmScheduleBusy(false);
+    const winPolicyRaw = getPolicy<unknown>('trust', 'penalty_near_meeting_cancel_window_hours', {
+      outer_hours: 2,
+      inner_hours: 1,
+    });
+    const winParsed = parseNearMeetingCancelPenaltyWindowPolicy(winPolicyRaw);
+    const tier = getTrustPenaltyLeaveNearMeetingTier(meeting, Date.now(), winParsed);
+    const withinPenaltyWindow = tier !== 'none';
+    const hostPenCfg =
+      tier === 'full'
+        ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_host_unconfirm_confirmed', {
+            xp: -30,
+            trust: -12,
+          })
+        : tier === 'soft'
+          ? getPolicy<{ xp?: number; trust?: number }>('trust', 'penalty_host_unconfirm_confirmed_soft', {
+              xp: -15,
+              trust: -6,
+            })
+          : null;
+    const trustDrop =
+      hostPenCfg && typeof hostPenCfg.trust === 'number' && Number.isFinite(hostPenCfg.trust)
+        ? Math.abs(Math.trunc(hostPenCfg.trust))
+        : 12;
+    const xpDrop =
+      hostPenCfg && typeof hostPenCfg.xp === 'number' && Number.isFinite(hostPenCfg.xp)
+        ? Math.abs(Math.trunc(hostPenCfg.xp))
+        : 30;
+    const baseUnconfirm =
+      '일정 확정을 되돌리면 다시 투표·확정 절차를 진행할 수 있는 상태로 바뀝니다. 취소할까요?';
+    const oh = winParsed.outerHours;
+    const ih = winParsed.innerHours;
+    const penaltyHint = withinPenaltyWindow
+      ? tier === 'full'
+        ? `\n\n예정 시작 ${ih}시간 이내예요. 확정을 취소하면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
+        : `\n\n예정 시작 ${oh}시간 이내·${ih}시간 전보다는 일찍 취소해요. 확정을 취소하면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
+      : `\n\n예정 시작 ${oh}시간 전보다 일찍 취소하면 신뢰·XP 패널티는 적용되지 않아요.`;
+    Alert.alert('확정 취소', baseUnconfirm + penaltyHint, [
+      { text: '닫기', style: 'cancel' },
+      {
+        text: '확정 취소',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setConfirmScheduleBusy(true);
+            let hostPenaltyApplied = false;
+            try {
+              if (
+                withinPenaltyWindow &&
+                ledgerWritesToSupabase() &&
+                isLedgerMeetingId(meeting.id) &&
+                userId.trim()
+              ) {
+                try {
+                  await ensureUserProfile(userId.trim());
+                  await applyTrustPenaltyHostUnconfirmConfirmedMeeting(userId.trim(), meeting.id);
+                  hostPenaltyApplied = true;
+                } catch (e) {
+                  Alert.alert(
+                    '처리 실패',
+                    e instanceof Error
+                      ? e.message
+                      : '신뢰 패널티 반영에 실패했어요. 잠시 후 다시 시도해 주세요.',
+                  );
+                  return;
+                }
               }
-            })();
-          },
+              markRecentSelfMeetingChange(meeting.id);
+              await unconfirmMeetingSchedule(meeting.id, userId.trim());
+              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+              if (hostPenaltyApplied) {
+                if (Platform.OS === 'web') {
+                  setTimeout(() => {
+                    Alert.alert(
+                      '신뢰 패널티가 반영됐어요',
+                      `gTrust ${trustDrop}점·XP ${xpDrop}가 차감됐고, 누적 패널티가 1회 늘었어요.`,
+                      [{ text: '확인' }],
+                    );
+                  }, 400);
+                } else {
+                  notifyTrustPenaltyAppliedFireAndForget({ trustPoints: trustDrop, xpPoints: xpDrop });
+                }
+              }
+            } catch (e) {
+              Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+            } finally {
+              setConfirmScheduleBusy(false);
+            }
+          })();
         },
-      ],
-    );
+      },
+    ]);
   }, [meeting, userId, queryClient]);
 
   const handleConfirmSchedule = useCallback(() => {

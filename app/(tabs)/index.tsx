@@ -1052,6 +1052,7 @@ export default function FeedScreen() {
           }
           symbolBox={feedMeetingSymbolBox(item, feedHostProfileMap)}
           categories={categories}
+          statusBadgeListKind={tab === 'explore' ? 'explore' : 'my_private'}
         />
       );
     },

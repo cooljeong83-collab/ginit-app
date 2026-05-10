@@ -2222,6 +2222,32 @@ export async function applyTrustPenaltyLeaveConfirmedMeeting(
   }
 }
 
+/** 레저 확정 모임: 호스트 확정 취소 직전(예정 시작 N시간 이내) 신뢰 패널티 — `0107` RPC. */
+export async function applyTrustPenaltyHostUnconfirmConfirmedMeeting(
+  phoneUserId: string,
+  meetingUuid: string,
+): Promise<void> {
+  const uid = phoneUserId.trim();
+  const mid = meetingUuid.trim();
+  if (!uid || !mid) throw new Error('사용자 또는 모임 정보가 없습니다.');
+  let lastMessage = '';
+  for (let i = 0; i < LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS.length; i += 1) {
+    const wait = LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('apply_trust_penalty_host_unconfirm_confirmed_meeting', {
+      p_app_user_id: uid,
+      p_meeting_id: mid,
+    });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'apply_trust_penalty_host_unconfirm_confirmed_meeting failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isRetryableLeaveConfirmedTrustRpcError(lastMessage, code);
+    if (!retryable || i === LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
+}
+
 export async function leaveMeeting(meetingId: string, phoneUserId: string): Promise<void> {
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
@@ -2758,6 +2784,22 @@ export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'schedule
   const t = m.scheduleTime?.trim() ?? '';
   const parsed = parseScheduleToTimestamp(d, t);
   return parsed ? parsed.toMillis() : null;
+}
+
+/**
+ * 일정 확정 모임의 대표 시작 시각 + `meeting.list_ongoing_duration_hours`가 지난 뒤인지.
+ * 홈 목록 “모임 종료” 배지·모임 상세 하단(장소 인증 숨김·후기 자리 등)과 동일 기준입니다.
+ */
+export function isConfirmedMeetingPastListEndWindow(
+  m: Pick<Meeting, 'scheduleConfirmed' | 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>,
+  nowMs: number = Date.now(),
+): boolean {
+  if (m.scheduleConfirmed !== true) return false;
+  const startMs = meetingPrimaryStartMs(m);
+  if (startMs == null || !Number.isFinite(startMs)) return false;
+  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 3);
+  const windowMs = Math.max(1, hours) * 60 * 60 * 1000;
+  return nowMs >= startMs + windowMs;
 }
 
 const SEOUL_YMD = new Intl.DateTimeFormat('en-CA', {
