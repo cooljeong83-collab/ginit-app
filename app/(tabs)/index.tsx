@@ -76,6 +76,7 @@ import {
   getScheduleOverlapBufferHours,
   meetingOverlapsUserConfirmedSlots,
 } from '@/src/lib/meeting-schedule-overlap';
+import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -489,9 +490,15 @@ export default function FeedScreen() {
     return sortMeetingsForFeed(filteredMeetings, listSortMode, feedCoords);
   }, [filteredMeetings, listSortMode, feedCoords]);
 
-  /** 탐색 탭: 비공개(`false`)뿐 아니라 플래그 미설정(`null`/`undefined`)도 목록에서 제외 */
+  /** 탐색 탭: 비공개(`false`)뿐 아니라 플래그 미설정(`null`/`undefined`)도 목록에서 제외. 일정 시작이 지난 공개 모임도 제외 */
   const exploreFeedMeetings = useMemo(
-    () => sortedFilteredMeetings.filter((m) => m.isPublic === true),
+    () =>
+      sortedFilteredMeetings.filter((m) => {
+        if (m.isPublic !== true) return false;
+        const startMs = meetingScheduleStartMs(m);
+        if (startMs != null && startMs < Date.now()) return false;
+        return true;
+      }),
     [sortedFilteredMeetings],
   );
 

@@ -33,3 +33,22 @@ export function meetingScheduleStartMs(m: MeetingScheduleTimeFields): number | n
   const ts = parseScheduleToTimestamp(d, t);
   return ts ? ts.toMillis() : null;
 }
+
+/** 모임 상세: 확정된 시작 시각 기준 이 분 전부터 호스트「일정 확정 취소」UI 숨김·차단 */
+export const HOST_SCHEDULE_UNCONFIRM_HIDE_MINUTES_BEFORE_START = 30;
+
+export type MeetingScheduleUnconfirmTimeGateFields = MeetingScheduleTimeFields & {
+  scheduleConfirmed?: boolean | null;
+};
+
+/** `scheduleConfirmed === true`이고 시작 시각을 알 수 있을 때만, `nowMs`가 차단 시각 이후면 true */
+export function isHostScheduleUnconfirmHiddenByStartProximity(
+  m: MeetingScheduleUnconfirmTimeGateFields,
+  nowMs: number,
+): boolean {
+  if (m.scheduleConfirmed !== true) return false;
+  const startMs = meetingScheduleStartMs(m);
+  if (startMs == null) return false;
+  const cutoffMs = startMs - HOST_SCHEDULE_UNCONFIRM_HIDE_MINUTES_BEFORE_START * 60 * 1000;
+  return nowMs >= cutoffMs;
+}

@@ -5,7 +5,7 @@ import { VoteCandidatesForm } from '@/components/create/VoteCandidatesForm';
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -58,6 +58,10 @@ import {
   DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION
 } from '@/src/lib/meeting-schedule-overlap';
+import {
+  isHostScheduleUnconfirmHiddenByStartProximity,
+  meetingScheduleStartMs,
+} from '@/src/lib/meeting-schedule-times';
 import {
   buildMeetingSharePageUrl,
   createMeetingShareLinkRpc,
@@ -977,6 +981,28 @@ export default function MeetingDetailScreen() {
     scrollToVoteBlock,
     participantProfiles,
   });
+
+  const [hostScheduleTimeGateTick, setHostScheduleTimeGateTick] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      const m = meeting;
+      if (!m || m.scheduleConfirmed !== true) return undefined;
+      if (meetingScheduleStartMs(m) == null) return undefined;
+      const id = setInterval(() => setHostScheduleTimeGateTick((x) => x + 1), 30_000);
+      return () => clearInterval(id);
+    }, [
+      meeting?.id,
+      meeting?.scheduleConfirmed,
+      meeting?.scheduledAt,
+      meeting?.scheduleDate,
+      meeting?.scheduleTime,
+    ]),
+  );
+
+  const hideHostScheduleUnconfirmPill = useMemo(() => {
+    if (!meeting) return false;
+    return isHostScheduleUnconfirmHiddenByStartProximity(meeting, Date.now());
+  }, [meeting, hostScheduleTimeGateTick]);
 
   const [shareWebBusy, setShareWebBusy] = useState(false);
   const handleShareWebMeeting = useCallback(async () => {
@@ -3177,7 +3203,8 @@ export default function MeetingDetailScreen() {
                     </GinitPressable>
                   ) : null}
 
-                  {orderedParticipantIdsList.length >= 2 ? (
+                  {orderedParticipantIdsList.length >= 2 &&
+                  !(meeting.scheduleConfirmed === true && hideHostScheduleUnconfirmPill) ? (
                     <GinitPressable
                       onPress={
                         meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
