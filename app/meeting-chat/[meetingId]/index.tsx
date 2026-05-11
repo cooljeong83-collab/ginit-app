@@ -43,6 +43,7 @@ import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-ren
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
 import {
@@ -81,9 +82,13 @@ import {
 } from '@/src/lib/meeting-arrival-verify-reminders';
 import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
 import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
+import type { Category } from '@/src/lib/categories';
 import type { Meeting } from '@/src/lib/meetings';
 import {
-  buildConfirmedScheduleNoticeText,
+  buildConfirmedScheduleNoticeAccessibilityLabel,
+  buildConfirmedScheduleNoticeTimeRight,
+  buildConfirmedScheduleNoticeTitleLeft,
+  buildMeetingTopNoticeTitleLeft,
   isConfirmedMeetingPastListEndWindow,
   meetingParticipantCount,
   shouldShowConfirmedScheduleNoticeBar,
@@ -171,6 +176,8 @@ export default function MeetingChatRoomScreen() {
       : '';
   const { userId } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
+  const { categories: categoriesRaw } = useMeetingCategories();
+  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const queryClient = useQueryClient();
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
@@ -1121,7 +1128,7 @@ export default function MeetingChatRoomScreen() {
     const slides: MeetingDetailTopNoticeSlide[] = [];
     if (!meeting) return slides;
     const mid = meetingId?.trim() ?? '';
-    const quoted = (meeting?.title ?? '').trim() || '모임';
+    const noticeTitleLeft = buildMeetingTopNoticeTitleLeft(meeting, categories);
     if (showSettlementHostBanner && mid) {
       slides.push({
         key: 'settlement',
@@ -1130,7 +1137,7 @@ export default function MeetingChatRoomScreen() {
             hideTopBorder
             pillCapsule
             slideTrackFullBleed
-            quotedMeetingTitle={quoted}
+            quotedMeetingTitle={noticeTitleLeft}
             ctaSuffix="정산하기"
             onPress={() => router.push(`/settlement/${encodeURIComponent(mid)}`)}
           />
@@ -1145,29 +1152,35 @@ export default function MeetingChatRoomScreen() {
             hideTopBorder
             pillCapsule
             slideTrackFullBleed
-            quotedMeetingTitle={quoted}
-            ctaSuffix="장소 인증하기"
+            quotedMeetingTitle={noticeTitleLeft}
+            ctaSuffix="장소 인증"
             onPress={() => router.push(`/arrival-verify/${encodeURIComponent(mid)}`)}
           />
         ),
       });
     }
-    const scheduleLine = shouldShowConfirmedScheduleNoticeBar(meeting, Date.now(), {
+    const scheduleOk = shouldShowConfirmedScheduleNoticeBar(meeting, Date.now(), {
       showArrivalVerifyBanner: showMeetingArrivalVerifyTopBanner,
       showSettlementHostBanner: showSettlementHostBanner,
-    })
-      ? buildConfirmedScheduleNoticeText(meeting).trim()
-      : '';
-    if (scheduleLine) {
+    });
+    const schedTitleLeft = scheduleOk ? buildConfirmedScheduleNoticeTitleLeft(meeting, categories) : '';
+    const schedTimeRight = scheduleOk ? buildConfirmedScheduleNoticeTimeRight(meeting) : '';
+    const schedA11y = scheduleOk ? buildConfirmedScheduleNoticeAccessibilityLabel(meeting, categories) : '';
+    if (scheduleOk && schedTitleLeft.trim() !== '' && schedTimeRight.trim() !== '') {
       slides.push({
         key: 'schedule',
         element: (
           <GinitPressable
             onPress={goMeetingDetail}
             accessibilityRole="link"
-            accessibilityLabel="모임 상세"
+            accessibilityLabel={schedA11y.trim() || '모임 상세'}
             style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
-            <MeetingDetailStaticNoticeRow text={scheduleLine} slideTrackFullBleed />
+            <MeetingDetailStaticNoticeRow
+              titleLeft={schedTitleLeft}
+              timeRight={schedTimeRight}
+              accessibilityLabel={schedA11y}
+              slideTrackFullBleed
+            />
           </GinitPressable>
         ),
       });
@@ -1181,6 +1194,7 @@ export default function MeetingChatRoomScreen() {
     arrivalBannerUiTick,
     router,
     goMeetingDetail,
+    categories,
   ]);
 
   if (!meetingId) {

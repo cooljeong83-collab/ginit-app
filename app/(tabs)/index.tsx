@@ -1,6 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
@@ -10,6 +11,8 @@ import {
   Alert,
   BackHandler,
   DeviceEventEmitter,
+  FlatList,
+  InteractionManager,
   Keyboard,
   Modal,
   Platform,
@@ -24,18 +27,17 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FlashList } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
+import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
+import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import {
   MeetingDetailStaticNoticeRow,
   MeetingDetailTopNoticesPager,
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
-import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
-import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -43,8 +45,8 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
-import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
+import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
 import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
@@ -76,6 +78,13 @@ import { ledgerWritesToSupabase, meetingListSource } from '@/src/lib/hybrid-data
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
+import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
+import {
+  isMeetingArrivalReminderBannerTimeEligible,
+  shouldShowMeetingArrivalVerifyTopBanner,
+} from '@/src/lib/meeting-arrival-verify-banner';
+import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
+import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import {
@@ -86,22 +95,18 @@ import {
 import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { Meeting } from '@/src/lib/meetings';
 import {
-  buildConfirmedScheduleNoticeText,
+  buildConfirmedScheduleNoticeAccessibilityLabel,
+  buildConfirmedScheduleNoticeTimeRight,
+  buildConfirmedScheduleNoticeTitleLeft,
+  buildMeetingTopNoticeTitleLeft,
   getMeetingRecruitmentPhase,
   isConfirmedMeetingPastListEndWindow,
   isConfirmedMeetingPastMyMeetingsRetentionWindow,
   shouldShowConfirmedScheduleNoticeBar,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
-import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
-import {
-  isMeetingArrivalReminderBannerTimeEligible,
-  shouldShowMeetingArrivalVerifyTopBanner,
-} from '@/src/lib/meeting-arrival-verify-banner';
-import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
-import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
-import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
@@ -123,6 +128,24 @@ function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean 
 }
 
 type HomeMeetingTopTab = 'explore' | 'my' | 'private';
+
+/** 홈 상단 공지 모달 행 — `homeTopNoticeSlides`와 동일 순서·조건 */
+type HomeFeedNoticeRow =
+  | { key: string; kind: 'settlement'; meetingId: string; meetingTitle: string }
+  | { key: string; kind: 'arrival'; meetingId: string; meetingTitle: string }
+  | { key: string; kind: 'schedule'; meetingId: string; titleLeft: string; timeRight: string };
+
+function homeFeedNoticeRowSubtitle(row: HomeFeedNoticeRow): string {
+  if (row.kind === 'settlement') return '정산하기';
+  if (row.kind === 'arrival') return '장소 인증';
+  return row.timeRight;
+}
+
+function homeFeedNoticeRowIcon(kind: HomeFeedNoticeRow['kind']): SymbolicIconName {
+  if (kind === 'settlement') return 'wallet-outline';
+  if (kind === 'arrival') return 'location-outline';
+  return 'megaphone-outline';
+}
 
 const HOME_MEETING_TOP_TABS = ['explore', 'my', 'private'] as const satisfies readonly HomeMeetingTopTab[];
 
@@ -168,6 +191,7 @@ export default function FeedScreen() {
   /** 목록·카테고리 통합 모달 초안 — 저장 시 recruitingOnly에 반영 */
   const [recruitingOnlyDraft, setRecruitingOnlyDraft] = useState(false);
   const [feedSearchModalOpen, setFeedSearchModalOpen] = useState(false);
+  const [homeNoticesModalOpen, setHomeNoticesModalOpen] = useState(false);
   const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
   const [draftFeedSearch, setDraftFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
   /** 홈 상단 탭: 공개 탐색 · 참여중(공개만) · 비공개만 */
@@ -789,7 +813,7 @@ export default function FeedScreen() {
               hideTopBorder
               pillCapsule
               slideTrackFullBleed
-              quotedMeetingTitle={(m.title ?? '').trim() || '모임'}
+              quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
               ctaSuffix="정산하기"
               onPress={() => router.push(`/settlement/${encodeURIComponent(id)}`)}
             />
@@ -804,36 +828,116 @@ export default function FeedScreen() {
               hideTopBorder
               pillCapsule
               slideTrackFullBleed
-              quotedMeetingTitle={(m.title ?? '').trim() || '모임'}
-              ctaSuffix="장소 인증하기"
+              quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
+              ctaSuffix="장소 인증"
               onPress={() => router.push(`/arrival-verify/${encodeURIComponent(id)}`)}
             />
           ),
         });
       }
-      const scheduleLine = shouldShowConfirmedScheduleNoticeBar(m, now, {
+      const scheduleOk = shouldShowConfirmedScheduleNoticeBar(m, now, {
         showArrivalVerifyBanner: arrivalNoticeIdSet.has(id),
         showSettlementHostBanner: settlementNoticeIdSet.has(id),
-      })
-        ? buildConfirmedScheduleNoticeText(m).trim()
-        : '';
-      if (scheduleLine) {
+      });
+      const titleLeft = scheduleOk ? buildConfirmedScheduleNoticeTitleLeft(m, categories) : '';
+      const timeRight = scheduleOk ? buildConfirmedScheduleNoticeTimeRight(m) : '';
+      const scheduleA11y = scheduleOk ? buildConfirmedScheduleNoticeAccessibilityLabel(m, categories) : '';
+      if (scheduleOk && titleLeft.trim() !== '' && timeRight.trim() !== '') {
         slides.push({
           key: `schedule-${id}`,
           element: (
             <GinitPressable
               onPress={() => router.push(`/meeting/${encodeURIComponent(id)}`)}
               accessibilityRole="link"
-              accessibilityLabel="모임 상세"
+              accessibilityLabel={scheduleA11y.trim() || '모임 상세'}
               style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
-              <MeetingDetailStaticNoticeRow text={scheduleLine} slideTrackFullBleed />
+              <MeetingDetailStaticNoticeRow
+                titleLeft={titleLeft}
+                timeRight={timeRight}
+                accessibilityLabel={scheduleA11y}
+                slideTrackFullBleed
+              />
             </GinitPressable>
           ),
         });
       }
     }
     return slides;
-  }, [homeNoticeOrderedMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, router, homeArrivalNoticeUiTick]);
+  }, [
+    homeNoticeOrderedMeetings,
+    settlementNoticeIdSet,
+    arrivalNoticeIdSet,
+    router,
+    homeArrivalNoticeUiTick,
+    categories,
+  ]);
+
+  const homeFeedNoticeRows = useMemo((): HomeFeedNoticeRow[] => {
+    void homeArrivalNoticeUiTick;
+    const rows: HomeFeedNoticeRow[] = [];
+    const now = Date.now();
+    for (const m of homeNoticeOrderedMeetings) {
+      const id = m.id.trim();
+      const titleLine = buildMeetingTopNoticeTitleLeft(m, categories);
+      if (settlementNoticeIdSet.has(id)) {
+        rows.push({ key: `settlement-${id}`, kind: 'settlement', meetingId: id, meetingTitle: titleLine });
+      }
+      if (arrivalNoticeIdSet.has(id)) {
+        rows.push({ key: `arrival-${id}`, kind: 'arrival', meetingId: id, meetingTitle: titleLine });
+      }
+      const scheduleOk = shouldShowConfirmedScheduleNoticeBar(m, now, {
+        showArrivalVerifyBanner: arrivalNoticeIdSet.has(id),
+        showSettlementHostBanner: settlementNoticeIdSet.has(id),
+      });
+      const schedTitleLeft = scheduleOk ? buildConfirmedScheduleNoticeTitleLeft(m, categories) : '';
+      const schedTimeRight = scheduleOk ? buildConfirmedScheduleNoticeTimeRight(m) : '';
+      if (scheduleOk && schedTitleLeft.trim() !== '' && schedTimeRight.trim() !== '') {
+        rows.push({
+          key: `schedule-${id}`,
+          kind: 'schedule',
+          meetingId: id,
+          titleLeft: schedTitleLeft,
+          timeRight: schedTimeRight,
+        });
+      }
+    }
+    return rows;
+  }, [homeNoticeOrderedMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick, categories]);
+
+  const homeNoticesModalLayout = useMemo(() => {
+    const topUsed = safeInsets.top + 8;
+    const bottomPad = safeInsets.bottom + 12;
+    const cardMaxHeight = Math.max(200, Math.floor(windowHeight - topUsed - bottomPad));
+    const headerBlock = 56;
+    const rowEstimate = 100;
+    const listContentPaddingV = 18;
+    const n = homeFeedNoticeRows.length;
+    const intrinsicListHeight = n > 0 ? listContentPaddingV + n * rowEstimate : 0;
+    const listScrollMax = Math.max(0, cardMaxHeight - headerBlock);
+    const listHeight =
+      n > 0 ? (listScrollMax > 0 ? Math.min(intrinsicListHeight, listScrollMax) : Math.min(intrinsicListHeight, 120)) : 0;
+    const listOverflow = n > 0 && intrinsicListHeight > listHeight;
+    return { cardMaxHeight, listHeight, listOverflow };
+  }, [windowHeight, safeInsets.top, safeInsets.bottom, homeFeedNoticeRows.length]);
+
+  const onPressHomeFeedNoticeRow = useCallback(
+    (row: HomeFeedNoticeRow) => {
+      setHomeNoticesModalOpen(false);
+      const mid = row.meetingId.trim();
+      InteractionManager.runAfterInteractions(() => {
+        if (row.kind === 'settlement') {
+          router.push(`/settlement/${encodeURIComponent(mid)}`);
+          return;
+        }
+        if (row.kind === 'arrival') {
+          router.push(`/arrival-verify/${encodeURIComponent(mid)}`);
+          return;
+        }
+        router.push(`/meeting/${encodeURIComponent(mid)}`);
+      });
+    },
+    [router],
+  );
 
   const goToHomeTab = useCallback(
     (t: HomeMeetingTopTab) => {
@@ -1454,6 +1558,19 @@ export default function FeedScreen() {
             <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
             {feedSearchFiltersActive(appliedFeedSearch) ? <View style={styles.searchFilterDot} /> : null}
           </GinitPressable>
+          <GinitPressable
+            onPress={() => setHomeNoticesModalOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              homeFeedNoticeRows.length > 0
+                ? `모임 공지 모아보기, 공지 ${homeFeedNoticeRows.length}건`
+                : '모임 공지 모아보기'
+            }
+            hitSlop={10}
+            style={styles.searchIconWrap}>
+            <GinitSymbolicIcon name="megaphone-outline" size={22} color="#0f172a" />
+            {homeFeedNoticeRows.length > 0 ? <View style={styles.homeNoticesIconBadge} /> : null}
+          </GinitPressable>
           <InAppAlarmsBellButton />
           <GinitPressable
             onPress={openCategoryPicker}
@@ -1880,6 +1997,83 @@ export default function FeedScreen() {
           </View>
         </Modal>
 
+        <Modal
+          visible={homeNoticesModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setHomeNoticesModalOpen(false)}>
+          <GinitPressable style={styles.homeNoticesModalBackdrop} onPress={() => setHomeNoticesModalOpen(false)}>
+            <GinitPressable
+              style={[
+                styles.homeNoticesModalCard,
+                { marginTop: safeInsets.top + 8, maxHeight: homeNoticesModalLayout.cardMaxHeight },
+              ]}
+              onPress={(e) => e.stopPropagation()}>
+              <View style={styles.homeNoticesModalHeader}>
+                <Text style={styles.homeNoticesModalTitle}>모임 공지</Text>
+                <GinitPressable
+                  hitSlop={12}
+                  onPress={() => setHomeNoticesModalOpen(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기">
+                  <GinitSymbolicIcon name="close" size={26} color="#475569" />
+                </GinitPressable>
+              </View>
+              {homeFeedNoticeRows.length === 0 ? (
+                <View style={styles.homeNoticesModalEmpty}>
+                  <Text style={styles.homeNoticesModalEmptyText}>상단에 표시할 모임 공지가 없어요.</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={homeFeedNoticeRows}
+                  keyExtractor={(item) => item.key}
+                  style={{ height: homeNoticesModalLayout.listHeight, flexGrow: 0 }}
+                  removeClippedSubviews={false}
+                  contentContainerStyle={styles.homeNoticesModalListContent}
+                  keyboardShouldPersistTaps="handled"
+                  scrollEnabled={homeNoticesModalLayout.listOverflow}
+                  nestedScrollEnabled
+                  renderItem={({ item }) => (
+                    <GinitPressable
+                      style={({ pressed }) => [
+                        styles.homeNoticesModalRow,
+                        pressed && styles.homeNoticesModalRowPressed,
+                      ]}
+                      onPress={() => onPressHomeFeedNoticeRow(item)}>
+                      <View style={styles.homeNoticesModalIconWrap}>
+                        <GinitSymbolicIcon
+                          name={homeFeedNoticeRowIcon(item.kind)}
+                          size={22}
+                          color={
+                            item.kind === 'schedule'
+                              ? GinitTheme.colors.deepPurple
+                              : GinitTheme.themeMainColor
+                          }
+                        />
+                      </View>
+                      <View style={styles.homeNoticesModalTextCol}>
+                        <Text style={styles.homeNoticesModalRowTitle} numberOfLines={1}>
+                          {item.kind === 'schedule' ? item.titleLeft : item.meetingTitle}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.homeNoticesModalRowSub,
+                            (item.kind === 'settlement' || item.kind === 'arrival') &&
+                              styles.homeNoticesModalRowSubCta,
+                          ]}
+                          {...(item.kind === 'schedule' ? {} : { numberOfLines: 3 as const })}>
+                          {homeFeedNoticeRowSubtitle(item)}
+                        </Text>
+                      </View>
+                      <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
+                    </GinitPressable>
+                  )}
+                />
+              )}
+            </GinitPressable>
+          </GinitPressable>
+        </Modal>
+
         <FeedSearchFilterModal
           visible={feedSearchModalOpen}
           filters={draftFeedSearch}
@@ -2291,7 +2485,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 10,
     flexShrink: 0,
   },
   searchIconWrap: {
@@ -2309,6 +2503,17 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#fff',
   },
+  homeNoticesIconBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: GinitTheme.colors.deepPurple,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
   settingsIconWrap: {
     position: 'relative',
     padding: 2,
@@ -2323,6 +2528,87 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.themeMainColor,
     borderWidth: 1.5,
     borderColor: '#fff',
+  },
+  /** 새 소식 모달과 동일 레이아웃 — 홈 상단 공지 모아보기 */
+  homeNoticesModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+  },
+  homeNoticesModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  homeNoticesModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(148, 163, 184, 0.4)',
+  },
+  homeNoticesModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  homeNoticesModalListContent: {
+    paddingVertical: 6,
+    paddingBottom: 12,
+  },
+  homeNoticesModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  homeNoticesModalRowPressed: {
+    backgroundColor: 'rgba(241, 245, 249, 0.9)',
+  },
+  homeNoticesModalIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeNoticesModalTextCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  homeNoticesModalRowTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  homeNoticesModalRowSub: {
+    fontSize: 13,
+    color: '#475569',
+    lineHeight: 18,
+  },
+  homeNoticesModalRowSubCta: {
+    color: GinitTheme.colors.deepPurple,
+    fontWeight: '700',
+  },
+  homeNoticesModalEmpty: {
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+  },
+  homeNoticesModalEmptyText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
   },
   /** 정렬 콤보 옆 — 모집중만 표시 토글(기존 pill과 동일 크기·초록 on, 기본 off) */
   recruitTogglePill: {

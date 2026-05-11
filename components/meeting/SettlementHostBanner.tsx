@@ -14,7 +14,7 @@ type SettlementHostBannerCommon = {
   slideTrackFullBleed?: boolean;
 };
 
-/** `quotedMeetingTitle`+`ctaSuffix` 사용 시 `「제목」`만 말줄임, CTA 문구는 한 줄 전체 노출 */
+/** `quotedMeetingTitle`+`ctaSuffix` 사용 시 좌측 제목만 말줄임, CTA 문구는 한 줄 전체 노출 */
 export type SettlementHostBannerProps = SettlementHostBannerCommon &
   ({ label: string; quotedMeetingTitle?: never; ctaSuffix?: never } | { quotedMeetingTitle: string; ctaSuffix: string; label?: never });
 
@@ -35,7 +35,7 @@ export function SettlementHostBanner(props: SettlementHostBannerProps) {
   const useSplitTitle = quotedMeetingTitle != null && ctaSuffix != null;
   const a11yLabel =
     accessibilityLabel ??
-    (useSplitTitle ? `「${quotedMeetingTitle}」${ctaSuffix}` : label ?? '정산하기');
+    (useSplitTitle ? `${quotedMeetingTitle} ${ctaSuffix}` : label ?? '정산하기');
 
   const wrapStyle = pillCapsule
     ? [
@@ -55,7 +55,7 @@ export function SettlementHostBanner(props: SettlementHostBannerProps) {
         {useSplitTitle ? (
           <View style={styles.labelSplit}>
             <Text style={styles.labelTitle} numberOfLines={1} ellipsizeMode="tail">
-              {`「${quotedMeetingTitle}」`}
+              {quotedMeetingTitle}
             </Text>
             <Text style={styles.labelCta} numberOfLines={1}>
               {ctaSuffix}
@@ -128,6 +128,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     fontSize: 13,
     fontWeight: '600',
-    color: GinitTheme.colors.text,
+    color: GinitTheme.colors.deepPurple,
   },
 });

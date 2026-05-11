@@ -18,22 +18,48 @@ export type MeetingDetailTopNoticeSlide = {
  */
 export function MeetingDetailStaticNoticeRow({
   text,
+  titleLeft,
+  timeRight,
+  accessibilityLabel: accessibilityLabelProp,
   slideTrackFullBleed,
 }: {
-  text: string;
+  text?: string;
+  titleLeft?: string;
+  timeRight?: string;
+  accessibilityLabel?: string;
   slideTrackFullBleed?: boolean;
 }) {
+  const useSplit =
+    typeof titleLeft === 'string' &&
+    typeof timeRight === 'string' &&
+    (titleLeft.trim().length > 0 || timeRight.trim().length > 0);
+  const accessibilityLabel =
+    accessibilityLabelProp ??
+    (useSplit ? `${titleLeft?.trim() ?? ''} ${timeRight?.trim() ?? ''}`.trim() : (text ?? ''));
   return (
     <View
       style={[staticStyles.pillShell, slideTrackFullBleed && staticStyles.pillShellFullBleed]}
       accessibilityRole="text"
-      accessibilityLabel={text}>
+      accessibilityLabel={accessibilityLabel}>
       <View style={staticStyles.pillRow}>
-        <GinitSymbolicIcon name="megaphone-outline" size={16} color="#0052CC" />
-        <Text style={staticStyles.text} numberOfLines={1} ellipsizeMode="tail">
-          {text}
-        </Text>
-        <View style={staticStyles.trailingSpacer} />
+        <GinitSymbolicIcon name="megaphone-outline" size={16} color={GinitTheme.colors.deepPurple} />
+        {useSplit ? (
+          <>
+            <Text style={staticStyles.text} numberOfLines={1} ellipsizeMode="tail">
+              {(titleLeft ?? '').trim() || '모임'}
+            </Text>
+            <Text style={staticStyles.timeRight} numberOfLines={1}>
+              {(timeRight ?? '').trim()}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={staticStyles.text} numberOfLines={1} ellipsizeMode="tail">
+              {text ?? ''}
+            </Text>
+            <View style={staticStyles.trailingSpacer} />
+          </>
+        )}
       </View>
     </View>
   );
@@ -60,6 +86,12 @@ const staticStyles = StyleSheet.create({
   text: {
     flex: 1,
     minWidth: 0,
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.colors.text,
+  },
+  timeRight: {
+    flexShrink: 0,
     fontSize: 13,
     fontWeight: '600',
     color: GinitTheme.colors.text,

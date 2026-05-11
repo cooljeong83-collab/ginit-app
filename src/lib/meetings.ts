@@ -2958,16 +2958,57 @@ export type ConfirmedScheduleNoticeBarOpts = {
   showSettlementHostBanner: boolean;
 };
 
-/** 홈·채팅·모임 상단 공지 "확정: 장소 · 일시" 한 줄(없으면 빈 문자열). */
-export function buildConfirmedScheduleNoticeText(
-  m: Pick<Meeting, 'scheduleConfirmed' | 'placeName' | 'location' | 'scheduleDate' | 'scheduleTime'>,
+/** 확정 공지 우측 일시(`scheduleDate`·`scheduleTime`, 없으면 `scheduledAt` 기준 포맷). 없으면 빈 문자열. */
+export function buildConfirmedScheduleNoticeTimeRight(
+  m: Pick<Meeting, 'scheduleConfirmed' | 'scheduleDate' | 'scheduleTime' | 'scheduledAt'>,
 ): string {
   if (m.scheduleConfirmed !== true) return '';
-  const place = m.placeName?.trim() || m.location?.trim();
   const d = m.scheduleDate?.trim();
   const t = m.scheduleTime?.trim();
-  const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
-  return parts.length ? `확정: ${parts.join(' · ')}` : '';
+  if (d && t) return `${d} ${t}`;
+  if (d || t) return (d || t) ?? '';
+  const ms = meetingPrimaryStartMs(m);
+  if (ms == null || !Number.isFinite(ms)) return '';
+  const date = new Date(ms);
+  return `${fmtDateYmd(date)} ${fmtTimeHm(date)}`;
+}
+
+/** 정산·장소 인증 등 상단 공지 — `[카테고리] 제목`(대괄호 뒤 한 칸, 카테고리 없으면 제목만). `meetingCategoryDisplayLabel`과 동일 규칙. */
+export function buildMeetingTopNoticeTitleLeft(
+  m: Pick<Meeting, 'categoryId' | 'categoryLabel' | 'title'>,
+  categories?: readonly { id: string; label: string }[] | null | undefined,
+): string {
+  const title = (m.title ?? '').trim() || '모임';
+  const cat = meetingCategoryDisplayLabel(m, categories)?.trim();
+  return cat ? `[${cat}] ${title}` : title;
+}
+
+/** 확정 공지 한 줄에서 말줄임되는 좌측 — `확정 : [카테고리] 제목`(대괄호 뒤 한 칸, 카테고리 없으면 `확정 : 제목`). 우측 일시는 `buildConfirmedScheduleNoticeTimeRight`. */
+export function buildConfirmedScheduleNoticeTitleLeft(
+  m: Pick<Meeting, 'scheduleConfirmed' | 'categoryId' | 'categoryLabel' | 'title'>,
+  categories?: readonly { id: string; label: string }[] | null | undefined,
+): string {
+  if (m.scheduleConfirmed !== true) return '';
+  return `확정 : ${buildMeetingTopNoticeTitleLeft(m, categories)}`;
+}
+
+/** 접근성·보조용 한 줄(`확정 : [카] 제목` + 공백 + 일시). */
+export function buildConfirmedScheduleNoticeAccessibilityLabel(
+  m: Pick<
+    Meeting,
+    | 'scheduleConfirmed'
+    | 'categoryId'
+    | 'categoryLabel'
+    | 'title'
+    | 'scheduleDate'
+    | 'scheduleTime'
+    | 'scheduledAt'
+  >,
+  categories?: readonly { id: string; label: string }[] | null | undefined,
+): string {
+  const left = buildConfirmedScheduleNoticeTitleLeft(m, categories).trim();
+  const right = buildConfirmedScheduleNoticeTimeRight(m).trim();
+  return [left, right].filter((x) => x.length > 0).join(' ');
 }
 
 /**
@@ -2981,7 +3022,7 @@ export function shouldShowConfirmedScheduleNoticeBar(
   opts: ConfirmedScheduleNoticeBarOpts,
 ): boolean {
   if (!m) return false;
-  if (buildConfirmedScheduleNoticeText(m).trim() === '') return false;
+  if (buildConfirmedScheduleNoticeTimeRight(m).trim() === '') return false;
   if (opts.showArrivalVerifyBanner || opts.showSettlementHostBanner) return false;
   const startMs = meetingPrimaryStartMs(m);
   if (startMs != null && Number.isFinite(startMs) && nowMs >= startMs) return false;

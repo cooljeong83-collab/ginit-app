@@ -46,6 +46,7 @@ import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingHost } from '@/src/hooks/meeting/useMeetingHost';
 import { useMeetingJoin } from '@/src/hooks/meeting/useMeetingJoin';
@@ -85,9 +86,13 @@ import {
   createMeetingShareLinkRpc,
   meetingShareWebConfigured,
 } from '@/src/lib/meeting-share';
+import type { Category } from '@/src/lib/categories';
 import type { Meeting } from '@/src/lib/meetings';
 import {
-  buildConfirmedScheduleNoticeText,
+  buildConfirmedScheduleNoticeAccessibilityLabel,
+  buildConfirmedScheduleNoticeTimeRight,
+  buildConfirmedScheduleNoticeTitleLeft,
+  buildMeetingTopNoticeTitleLeft,
   computeMeetingConfirmAnalysis,
   findMeetingJoinRequestForUser,
   formatPublicMeetingAgeSummary,
@@ -452,6 +457,8 @@ export default function MeetingDetailScreen() {
 
   const [retryNonce, setRetryNonce] = useState(0);
   const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, retryNonce);
+  const { categories: categoriesRaw } = useMeetingCategories();
+  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
   const [saveCalendarBusy, setSaveCalendarBusy] = useState(false);
@@ -1849,8 +1856,8 @@ export default function MeetingDetailScreen() {
     isHost,
   ]);
 
-  const meetingDetailScheduleNoticeText = useMemo(() => {
-    if (!meeting) return '';
+  const meetingDetailScheduleNoticeParts = useMemo(() => {
+    if (!meeting) return null;
     void arrivalUiTick;
     void meetingDetailListEndUiTick;
     const now = Date.now();
@@ -1860,14 +1867,22 @@ export default function MeetingDetailScreen() {
         showSettlementHostBanner: showSettlementHostBanner,
       })
     )
-      return '';
-    return buildConfirmedScheduleNoticeText(meeting);
+      return null;
+    const titleLeft = buildConfirmedScheduleNoticeTitleLeft(meeting, categories);
+    const timeRight = buildConfirmedScheduleNoticeTimeRight(meeting);
+    if (!titleLeft.trim() || !timeRight.trim()) return null;
+    return {
+      titleLeft,
+      timeRight,
+      a11y: buildConfirmedScheduleNoticeAccessibilityLabel(meeting, categories),
+    };
   }, [
     meeting,
     showMeetingArrivalVerifyTopBanner,
     showSettlementHostBanner,
     arrivalUiTick,
     meetingDetailListEndUiTick,
+    categories,
   ]);
 
   const meetingDetailTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
@@ -1881,7 +1896,7 @@ export default function MeetingDetailScreen() {
             hideTopBorder
             pillCapsule
             slideTrackFullBleed
-            quotedMeetingTitle={(meeting.title ?? '').trim() || '모임'}
+            quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
             ctaSuffix="정산하기"
             onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
           />
@@ -1896,18 +1911,24 @@ export default function MeetingDetailScreen() {
             hideTopBorder
             pillCapsule
             slideTrackFullBleed
-            quotedMeetingTitle={(meeting.title ?? '').trim() || '모임'}
-            ctaSuffix="장소 인증하기"
+            quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
+            ctaSuffix="장소 인증"
             onPress={() => void openArrivalVerifyMap()}
           />
         ),
       });
     }
-    const scheduleLine = meetingDetailScheduleNoticeText.trim();
-    if (scheduleLine) {
+    if (meetingDetailScheduleNoticeParts) {
       slides.push({
         key: 'schedule',
-        element: <MeetingDetailStaticNoticeRow text={scheduleLine} slideTrackFullBleed />,
+        element: (
+          <MeetingDetailStaticNoticeRow
+            titleLeft={meetingDetailScheduleNoticeParts.titleLeft}
+            timeRight={meetingDetailScheduleNoticeParts.timeRight}
+            accessibilityLabel={meetingDetailScheduleNoticeParts.a11y}
+            slideTrackFullBleed
+          />
+        ),
       });
     }
     return slides;
@@ -1915,9 +1936,10 @@ export default function MeetingDetailScreen() {
     meeting,
     showSettlementHostBanner,
     showMeetingArrivalVerifyTopBanner,
-    meetingDetailScheduleNoticeText,
+    meetingDetailScheduleNoticeParts,
     router,
     openArrivalVerifyMap,
+    categories,
   ]);
 
   const hostArrivalBottomCtaEl = useMemo(() => {

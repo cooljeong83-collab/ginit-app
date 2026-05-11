@@ -25,7 +25,7 @@ export function MeetingArrivalVerifyTopBanner(props: MeetingArrivalVerifyTopBann
   const useSplitTitle = quotedMeetingTitle != null && ctaSuffix != null;
   const a11yLabel =
     accessibilityLabel ??
-    (useSplitTitle ? `「${quotedMeetingTitle}」${ctaSuffix}` : label ?? '장소 인증하기');
+    (useSplitTitle ? `${quotedMeetingTitle} ${ctaSuffix}` : label ?? '장소 인증');
 
   const wrapStyle = pillCapsule
     ? [
@@ -45,7 +45,7 @@ export function MeetingArrivalVerifyTopBanner(props: MeetingArrivalVerifyTopBann
         {useSplitTitle ? (
           <View style={styles.labelSplit}>
             <Text style={styles.labelTitle} numberOfLines={1} ellipsizeMode="tail">
-              {`「${quotedMeetingTitle}」`}
+              {quotedMeetingTitle}
             </Text>
             <Text style={styles.labelCta} numberOfLines={1}>
               {ctaSuffix}
@@ -118,6 +118,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     fontSize: 13,
     fontWeight: '600',
-    color: GinitTheme.colors.text,
+    color: GinitTheme.colors.deepPurple,
   },
 });

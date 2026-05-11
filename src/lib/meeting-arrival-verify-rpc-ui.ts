@@ -4,7 +4,7 @@ import { alertBodyForArrivalRpc, type MeetingArrivalRpcResult } from '@/src/lib/
 import { cancelMeetingArrivalReminderLocalNotifications } from '@/src/lib/meeting-arrival-verify-reminders';
 import type { Meeting } from '@/src/lib/meetings';
 
-/** 홈·채팅·상세 등에서 `장소 인증하기` 배너를 즉시 내리기 위한 브로드캐스트 */
+/** 홈·채팅·상세 등에서 `장소 인증` 배너를 즉시 내리기 위한 브로드캐스트 */
 export const GINIT_MEETING_ARRIVAL_VERIFIED_EVENT = 'ginit_meeting_arrival_verified';
 
 export type GinitMeetingArrivalVerifiedPayload = {
