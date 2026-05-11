@@ -1,10 +1,9 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import {NaverMapMarkerOverlay, NaverMapView, type ClusterMarkerProp, type NaverMapViewRef, type Region as NaverRegion, } from '@mj-studio/react-native-naver-map';
+import {NaverMapMarkerOverlay, NaverMapView, type NaverMapViewRef, type Region as NaverRegion, } from '@mj-studio/react-native-naver-map';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
@@ -21,7 +20,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -70,7 +68,6 @@ import {
   groupMeetingsByCoordinateOverlap,
   meetingCoordinateKey,
 } from '@/src/lib/map-people-markers';
-import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { setPendingMeetingPlace } from '@/src/lib/meeting-place-bridge';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
 import {
@@ -110,7 +107,6 @@ if (Platform.OS === 'android' && !isFabric && UIManager.setLayoutAnimationEnable
 // 내 위치 마커에만 any 캐스팅을 사용합니다.
 const AnyMarker = Marker as any;
 
-const SPRING = { damping: 22, stiffness: 260, mass: 0.85 };
 const SHEET_REVEAL_TIMING_MS = 340;
 const SHEET_SNAP_THRESHOLD = 0.52;
 const SHEET_VELOCITY_OPEN = -520;
@@ -158,19 +154,12 @@ const LIST_CARD_HEIGHT = 118;
 const LIST_CARD_GAP = 10;
 const LIST_ITEM_STRIDE = LIST_CARD_HEIGHT + LIST_CARD_GAP;
 
-/** `styles.sheet`의 paddingTop과 동일하게 유지 */
-const SHEET_OUTER_PADDING_TOP_PX = 8;
-/** 핸들 히트 영역 + 핸들바(측정에 포함되지 않는 상단 고정 구간) */
-const SHEET_HANDLE_STACK_MIN_PX = 48;
 /** `styles.sheetCta` + 한 줄 라벨(모임 상세 보기) 세로 합 — sheetPeekHeight·캐러셀 상한에서 동일 값 사용 */
 const SHEET_CTA_BLOCK_HEIGHT_PX = 8 + 14 + 14 + 20;
 
 // 초기 화면에서 보이는 북남 방향 지도 높이(미터). 중심 기준 반경 ≈ 1km → 전체 약 2km.
 // 검색·RPC 반경(mapRadiusKm)과는 별도입니다.
 const INITIAL_VIEW_NS_SPAN_METERS = 2000;
-
-/** Android(Naver): 이 줌 이하에서는 SDK 숫자 클러스터, 그 이상에서는 개별 마커(핀+caption) */
-const NAVER_CLUSTER_MAX_ZOOM = 15;
 
 // 위치 권한 미허용·관심 지역 미설정 시 기본 진입 중심(영등포구)
 const DEFAULT_NO_LOCATION_CENTER: LatLng = { latitude: 37.5263, longitude: 126.8962 };
@@ -337,7 +326,7 @@ export default function MapScreen() {
   const router = useRouter();
   const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
   const { addCleanup } = useUnmountCleanup();
   const mapBootInit = useMemo(() => mapBootAnchorAndRegionFromInterestMemory(MAP_BOOT_POLICY_RADIUS_KM), []);
   // `react-native-map-clustering`의 ref 타입은 내부적으로 콜백 ref를 쓰므로 any로 둡니다.
@@ -359,26 +348,9 @@ export default function MapScreen() {
   /** 내 위치: 카메라는 좁게·RPC·병합은 `mapRadiusKm`일 때, idle에서 `pending`이 좁은 카메라로 덮이며 재검색이 뜨는 것 방지 */
   const mapSnapCameraTighterThanQueryRef = useRef(false);
 
-  const sheetExpandedPx = useMemo(() => Math.min(Math.round(windowHeight * 0.62), 560), [windowHeight]);
-  const sheetCollapsedPx = useMemo(() => {
-    const peek = Math.round(200 + Math.max(insets.bottom, 10));
-    const maxPeek = sheetExpandedPx - 80;
-    return Math.max(168, Math.min(peek, maxPeek));
-  }, [insets.bottom, sheetExpandedPx]);
-
-  const sheetHeight = useSharedValue(sheetCollapsedPx);
-  const dragStartHeight = useSharedValue(sheetCollapsedPx);
-
-  const [isSheetExpanded, setIsSheetExpanded] = useState(false);
-
-  const animatedSheetStyle = useAnimatedStyle(() => ({
-    height: sheetHeight.value,
-  }));
-
   const [selectedMeetingIndex, setSelectedMeetingIndex] = useState(0);
   // 바텀시트는 기본으로 요약 영역이 펼쳐진 상태(핸들만이 아닌 전체 피크)로 시작합니다.
   const sheetShown = useSharedValue(1);
-  const sheetBoot = useSharedValue(1);
   const carouselDragStartIndexRef = useRef(0);
   const followSelectedRef = useRef(true);
   const lastMarkerTapAtRef = useRef(0);
@@ -414,8 +386,6 @@ export default function MapScreen() {
     setMapMovedSinceSearch(true);
     closeSheet();
   }, [closeSheet]);
-
-  const [sheetSummaryInnerHeight, setSheetSummaryInnerHeight] = useState(0);
 
   // 닫힌 상태에서는 "핸들바만" 보이게 (내용이 잘려 보이지 않도록)
   const sheetMiniPeekHeight = useMemo(() => 28, []);
@@ -475,33 +445,6 @@ export default function MapScreen() {
     [dragStartShown, liftDelta, sheetShown, enableFollowSelected, setMapMovedSinceSearch],
   );
 
-  const setSheetExpandedJS = useCallback((expanded: boolean) => {
-    setIsSheetExpanded(expanded);
-  }, []);
-
-  const sheetPanGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetY([-10, 10])
-        .failOffsetX([-28, 28])
-        .onBegin(() => {
-          dragStartHeight.value = sheetHeight.value;
-          runOnJS(setMapMovedSinceSearch)(true);
-        })
-        .onUpdate((e) => {
-          const next = dragStartHeight.value - e.translationY;
-          sheetHeight.value = Math.min(sheetExpandedPx, Math.max(sheetCollapsedPx, next));
-        })
-        .onEnd(() => {
-          const mid = (sheetExpandedPx + sheetCollapsedPx) / 2;
-          const expand = sheetHeight.value >= mid;
-          sheetHeight.value = withSpring(expand ? sheetExpandedPx : sheetCollapsedPx, SPRING, (finished) => {
-            if (finished) runOnJS(setSheetExpandedJS)(expand);
-          });
-        }),
-    [sheetCollapsedPx, sheetExpandedPx, dragStartHeight, sheetHeight, setSheetExpandedJS, setMapMovedSinceSearch],
-  );
-
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
   const regionLabelRef = useRef(FEED_LOCATION_FALLBACK_SHORT);
   const userCoordsRef = useRef<LatLng | null>(null);
@@ -517,7 +460,7 @@ export default function MapScreen() {
   const [userHeadingDeg, setUserHeadingDeg] = useState<number | null>(null);
   const [genderByUserId, setGenderByUserId] = useState<Map<string, string>>(new Map());
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
-  const [recruitingOnly, setRecruitingOnly] = useState(true);
+  const recruitingOnly = true;
   /** 탐색 상단 카테고리 팝업에서 저장 시 적용 — 서울 달력 기준 오늘 일정 모임만 */
   const [mapTodayOnly, setMapTodayOnly] = useState(false);
   const [categoryBarTodayOnlyDraft, setCategoryBarTodayOnlyDraft] = useState(false);
@@ -530,7 +473,7 @@ export default function MapScreen() {
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
   const { categories: categoriesRaw } = useMeetingCategories();
-  const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
+  const categories: Category[] = useMemo(() => (Array.isArray(categoriesRaw) ? categoriesRaw : []), [categoriesRaw]);
   const [hybridMeetings, setHybridMeetings] = useState<Meeting[]>([]);
   const [rpcMeetings, setRpcMeetings] = useState<Meeting[]>([]);
   const [meetingsBooted, setMeetingsBooted] = useState(false);
@@ -538,7 +481,6 @@ export default function MapScreen() {
   const [mapGeoMeetingsLoading, setMapGeoMeetingsLoading] = useState(false);
   const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(() => mapBootInit.anchor);
   const [driftTooFar, setDriftTooFar] = useState(false);
-  const [listingRegion, setListingRegion] = useState<Region | null>(() => mapBootInit.region);
   /** 마지막으로 조회한 지도 가시 영역(이 지역 재검색·초기 로드·내 위치) — RPC·목록·마커 기준 */
   const [mapGeoQueryRegion, setMapGeoQueryRegion] = useState<Region | null>(() => mapBootInit.region);
   useEffect(() => {
@@ -547,7 +489,6 @@ export default function MapScreen() {
   const [zoomDeltaForClustering, setZoomDeltaForClustering] = useState(
     INITIAL_VIEW_NS_SPAN_METERS / 111320,
   );
-  const [naverZoom, setNaverZoom] = useState<number>(16);
   /** 상단 카테고리 칩 가로 스크롤 — 오른쪽 «더 있음» 표시용 */
   const [chipScrollLayoutW, setChipScrollLayoutW] = useState(0);
   const [chipScrollContentW, setChipScrollContentW] = useState(0);
@@ -560,11 +501,8 @@ export default function MapScreen() {
    */
   const showSheetSplash = !meetingsBooted || mapGeoMeetingsLoading;
 
-  const { version: appPoliciesVersion } = useAppPolicies();
-  const mapRadiusKm = useMemo(() => {
-    const raw = getPolicyNumeric('meeting', 'map_radius_km', 3);
-    return Math.max(0.5, Math.min(80, raw));
-  }, [appPoliciesVersion]);
+  useAppPolicies();
+  const mapRadiusKm = Math.max(0.5, Math.min(80, getPolicyNumeric('meeting', 'map_radius_km', 3)));
 
   /**
    * 지도 중심을 `u`로 맞춥니다. `viewRadiusKm`이 정책보다 작으면(내 위치 버튼) 카메라만 그 줌으로 두고,
@@ -613,7 +551,6 @@ export default function MapScreen() {
       mapSnapCameraTighterThanQueryRef.current = cameraTighterThanPolicy;
       lastCompleteRegionRef.current = rCamera;
       setSearchAnchor(u);
-      setListingRegion(rCamera);
       setMapGeoQueryRegion(rQuery);
       setQueriedRegion(rQuery);
       setPendingRegion(rQuery);
@@ -652,12 +589,10 @@ export default function MapScreen() {
     useCallback(() => {
       setMapMovedSinceSearch(false);
       openSheet();
-      sheetHeight.value = withSpring(sheetCollapsedPx, SPRING);
-      setIsSheetExpanded(false);
       return () => {
         /* 스택(모임 상세 등)으로 가려질 때 네이티브 지도 freeze 이슈 완화: 포커스 해제 시 별도 처리 없음 */
       };
-    }, [openSheet, sheetCollapsedPx, sheetHeight, setMapMovedSinceSearch]),
+    }, [openSheet, setMapMovedSinceSearch]),
   );
 
   const driftThresholdM = mapRadiusKm * 1000;
@@ -675,13 +610,6 @@ export default function MapScreen() {
       [searchAnchor, driftThresholdM],
     ),
     400,
-  );
-
-  const debouncedListingRegionSet = useDebouncedRegion(
-    useCallback((r: Region) => {
-      if (isSheetExpanded) setListingRegion(r);
-    }, [isSheetExpanded]),
-    280,
   );
 
   const debouncedZoomClustering = useDebouncedRegion(
@@ -708,7 +636,6 @@ export default function MapScreen() {
         const qRadKm = regionCoverageRadiusKm(q, 80);
         if (centerMoveM < 55 && rRadKm < qRadKm * 0.92) {
           debouncedDriftCheck(r);
-          debouncedListingRegionSet(r);
           debouncedZoomClustering(r);
           return;
         }
@@ -716,10 +643,9 @@ export default function MapScreen() {
       }
       setPendingRegion(r);
       debouncedDriftCheck(r);
-      debouncedListingRegionSet(r);
       debouncedZoomClustering(r);
     },
-    [debouncedDriftCheck, debouncedListingRegionSet, debouncedZoomClustering],
+    [debouncedDriftCheck, debouncedZoomClustering],
   );
 
   useEffect(() => {
@@ -812,7 +738,6 @@ export default function MapScreen() {
       if (movedM > 120 || zoomChanged) {
         lastCompleteRegionRef.current = r0;
         setSearchAnchor(interestCenter);
-        setListingRegion(r0);
         setMapGeoQueryRegion(r0);
         setPendingRegion(r0);
         lastQueriedRegionRef.current = r0;
@@ -936,12 +861,6 @@ export default function MapScreen() {
     setDriftTooFar(false);
   }, [searchAnchor]);
 
-  useEffect(() => {
-    if (!isSheetExpanded) return;
-    const r = lastCompleteRegionRef.current;
-    if (r) setListingRegion(r);
-  }, [isSheetExpanded]);
-
   const hybridInMapQueryArea = useMemo(() => {
     if (!mapGeoQueryRegion) return [];
     return hybridMeetings.filter((m) => meetingInBounds(m, mapGeoQueryRegion));
@@ -1061,33 +980,9 @@ export default function MapScreen() {
     return items;
   }, [meetingsOnMap]);
 
-  const naverClusterMarkers: ClusterMarkerProp[] = useMemo(
-    () =>
-      mapMarkerRenderItems.map((item) => {
-        const m = item.kind === 'single' ? item.meeting : item.lead;
-        const c = mapMarkerCoordsByMeetingId.get(m.id) ?? {
-          latitude: m.latitude as number,
-          longitude: m.longitude as number,
-        };
-        return {
-          identifier: m.id,
-          latitude: c.latitude,
-          longitude: c.longitude,
-        };
-      }),
-    [mapMarkerRenderItems, mapMarkerCoordsByMeetingId],
-  );
-
-  const naverUseClusters = Platform.OS === 'android' && naverZoom <= NAVER_CLUSTER_MAX_ZOOM;
-
   // (겹침(spider) 확장 기능 제거됨)
 
   // (겹침(동일 좌표) 그룹 선택 UI 제거됨 — 바텀시트는 현재 화면 내 전체 모임을 보여줍니다.)
-
-  const boundsMeetings = useMemo(() => {
-    if (!isSheetExpanded || !listingRegion) return sortedFilteredMeetings;
-    return sortedFilteredMeetings.filter((m) => meetingInBounds(m, listingRegion));
-  }, [sortedFilteredMeetings, isSheetExpanded, listingRegion]);
 
   const sheetMeetings = useMemo(() => {
     const r = mapGeoQueryRegion;
@@ -1337,10 +1232,7 @@ export default function MapScreen() {
     setMapCategoryBarModalOpen(false);
   }, [sortedMapCategoryMaster, categoryBarDraft, categoryBarTodayOnlyDraft]);
 
-  const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
-
-  const sortComboLabel = useMemo(() => listSortModeLabel(listSortMode), [listSortMode]);
 
   const onPressRescanThisArea = useCallback(() => {
     const r = pendingRegion ?? lastCompleteRegionRef.current;
@@ -1348,7 +1240,6 @@ export default function MapScreen() {
     mapSnapCameraTighterThanQueryRef.current = false;
     const next: LatLng = { latitude: r.latitude, longitude: r.longitude };
     setSearchAnchor(next);
-    setListingRegion(r);
     setMapGeoQueryRegion(r);
     setQueriedRegion(r);
     lastQueriedRegionRef.current = r;
@@ -1422,7 +1313,7 @@ export default function MapScreen() {
           /* 등록 시 addMeeting에서 재검증 */
         }
       }
-      const r = lastCompleteRegionRef.current ?? listingRegion ?? initialMapRegion;
+      const r = lastCompleteRegionRef.current ?? initialMapRegion;
       const lat = r.latitude;
       const lng = r.longitude;
       applyNearbySearchBiasFromMapNavigation(
@@ -1437,7 +1328,7 @@ export default function MapScreen() {
       });
       router.push('/create/details');
     })();
-  }, [router, userId, listingRegion, initialMapRegion]);
+  }, [router, userId, initialMapRegion]);
 
   useEffect(() => {
     addCleanup(() => {
@@ -1525,10 +1416,6 @@ export default function MapScreen() {
     [sheetMeetings],
   );
 
-  const onMeetingListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    listScrollY.current = e.nativeEvent.contentOffset.y;
-  }, []);
-
   useEffect(() => {
     if (!selectedMeetingId) return;
     if (!sortedFilteredMeetings.some((m) => m.id === selectedMeetingId)) {
@@ -1594,7 +1481,7 @@ export default function MapScreen() {
 
   const onClusterPress = useCallback(
     // `react-native-map-clustering`의 콜백 시그니처는 버전마다 달라 any로 처리합니다.
-    (cluster: any, markers?: any[]) => {
+    () => {
       try {
         if (Platform.OS === 'ios') {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
@@ -1603,32 +1490,12 @@ export default function MapScreen() {
         /* ignore */
       }
 
-      const coord =
-        cluster?.geometry?.coordinates && Array.isArray(cluster.geometry.coordinates)
-          ? { latitude: cluster.geometry.coordinates[1], longitude: cluster.geometry.coordinates[0] }
-          : cluster?.coordinate;
-
-      const rawMarkers = Array.isArray(markers)
-        ? markers
-        : Array.isArray(cluster?.markers)
-          ? cluster.markers
-          : [];
-
-      const ids = rawMarkers
-        .map((mk: any) => mk?.props?.identifier ?? mk?.identifier ?? mk?.id)
-        .filter((x: any) => typeof x === 'string' && x && !x.startsWith('spider-'));
-
       // 클러스터 탭 시 spider 펼침은 제거. 기본 줌 동작은 라이브러리에 맡깁니다.
 
       // 기본 동작(확대/센터 이동)은 라이브러리에 맡깁니다.
     },
-    [meetingsOnMap],
+    [],
   );
-
-  const onCarouselViewable = useCallback(({ viewableItems }: { viewableItems: { item: Meeting }[] }) => {
-    const first = viewableItems[0]?.item;
-    if (first?.id) setSelectedMeetingId(first.id);
-  }, []);
 
   const onSelectedViewable = useCallback(
     ({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
@@ -1709,50 +1576,6 @@ export default function MapScreen() {
       cancelled = true;
     };
   }, [genderByUserId, selectedMeetingIndex, sheetMeetings]);
-
-  const renderCarouselCard = useCallback(
-    ({ item: m }: { item: Meeting }) => {
-      const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
-      const selected = m.id === selectedMeetingId;
-      const categoryDisplay = meetingCategoryDisplayLabel(m, categories)?.trim() ?? '';
-      const metaSecond = m.capacity ? `최대 ${m.capacity}명` : '';
-      const listMetaText = categoryDisplay ? metaSecond : [m.categoryLabel, metaSecond].filter(Boolean).join(' · ');
-      return (
-        <GinitPressable
-          onPress={() => {
-            setSelectedMeetingId(m.id);
-            router.push(`/meeting/${m.id}`);
-          }}
-          style={[styles.carouselCard, selected && styles.carouselCardSelected]}
-          accessibilityRole="button">
-          <MeetingListThumbnailImage meeting={m} style={styles.listThumb} recyclingKey={m.id} />
-          <View style={styles.listCardBody}>
-            <View style={styles.listTitleRow}>
-              <Text style={styles.listTitle} numberOfLines={1} ellipsizeMode="tail">
-                {categoryDisplay ? <Text style={styles.listTitleCategory}>[{categoryDisplay}] </Text> : null}
-                {m.title}
-              </Text>
-              <View style={progressPill.wrap}>
-                <Text style={progressPill.text} numberOfLines={1}>
-                  {progressPill.label}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.listMeta} numberOfLines={1}>
-              {listMetaText}
-            </Text>
-            <View style={styles.listFooter}>
-              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}</Text>
-              <View style={styles.joinBtn}>
-                <Text style={styles.joinBtnText}>참가 신청</Text>
-              </View>
-            </View>
-          </View>
-        </GinitPressable>
-      );
-    },
-    [router, categories, selectedMeetingId, userCoords],
-  );
 
   const renderSheetMeetingText = useCallback(
     ({ item: m }: { item: Meeting }) => {
@@ -1924,51 +1747,7 @@ export default function MapScreen() {
         </View>
       );
     },
-    [categories, selectedMeetingId, userCoords, moveMapToMeetingPin],
-  );
-
-  const renderVerticalRow = useCallback(
-    ({ item: m }: { item: Meeting }) => {
-      const progressPill = meetingProgressPillStyles(getMeetingRecruitmentPhase(m));
-      const selected = m.id === selectedMeetingId;
-      const categoryDisplay = meetingCategoryDisplayLabel(m, categories)?.trim() ?? '';
-      const metaSecond = m.capacity ? `최대 ${m.capacity}명` : '';
-      const listMetaText = categoryDisplay ? metaSecond : [m.categoryLabel, metaSecond].filter(Boolean).join(' · ');
-      return (
-        <GinitPressable
-          onPress={() => {
-            setSelectedMeetingId(m.id);
-            router.push(`/meeting/${m.id}`);
-          }}
-          style={[styles.listCard, selected && styles.listCardSelected]}
-          accessibilityRole="button">
-          <MeetingListThumbnailImage meeting={m} style={styles.listThumb} recyclingKey={m.id} />
-          <View style={styles.listCardBody}>
-            <View style={styles.listTitleRow}>
-              <Text style={styles.listTitle} numberOfLines={1} ellipsizeMode="tail">
-                {categoryDisplay ? <Text style={styles.listTitleCategory}>[{categoryDisplay}] </Text> : null}
-                {m.title}
-              </Text>
-              <View style={progressPill.wrap}>
-                <Text style={progressPill.text} numberOfLines={1}>
-                  {progressPill.label}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.listMeta} numberOfLines={1}>
-              {listMetaText}
-            </Text>
-            <View style={styles.listFooter}>
-              <Text style={styles.listDist}>{formatDistanceForList(meetingDistanceMetersFromUser(m, userCoords))}</Text>
-              <View style={styles.joinBtn}>
-                <Text style={styles.joinBtnText}>참가 신청</Text>
-              </View>
-            </View>
-          </View>
-        </GinitPressable>
-      );
-    },
-    [router, categories, selectedMeetingId, userCoords],
+    [categories, selectedMeetingId, userCoords, moveMapToMeetingPin, genderByUserId],
   );
 
   const carouselWidth = useMemo(() => Dimensions.get('window').width - 32, []);
@@ -2000,18 +1779,13 @@ export default function MapScreen() {
                     }
                   : { isVisible: false }
               }
-              onCameraChanged={({ zoom, reason }) => {
-                if (typeof zoom === 'number' && Number.isFinite(zoom)) setNaverZoom(zoom);
+              onCameraChanged={({ reason }) => {
                 // 마커 탭/프로그램 이동(Developer/Control/Location)까지 제스처로 오인하면
                 // 바텀시트가 "올라왔다가 바로 사라지는" 문제가 생깁니다.
                 if (reason === 'Gesture') onUserMapGesture();
               }}
               onCameraIdle={({ region }) => onRegionChangeComplete(naverRegionToCenter(region))}
               onTapMap={onMapPress}
-              onTapClusterLeaf={({ markerIdentifier }) => {
-                const m = meetingsOnMap.find((x) => x.id === markerIdentifier);
-                if (m) onPeopleMarkerPress(m);
-              }}
               isShowZoomControls={false}
               isShowCompass={false}
               isShowScaleBar={false}
@@ -2019,29 +1793,8 @@ export default function MapScreen() {
               isExtentBoundedInKorea
               locale="ko"
               isUseTextureViewAndroid
-              clusters={
-                naverUseClusters && naverClusterMarkers.length > 0
-                  ? [
-                      {
-                        markers: naverClusterMarkers,
-                        animate: true,
-                        screenDistance: 48,
-                        minZoom: 0,
-                        maxZoom: NAVER_CLUSTER_MAX_ZOOM,
-                        width: 44,
-                        height: 44,
-                      },
-                    ]
-                  : []
-              }
               accessibilityLabel="모임 지도 (네이버맵)">
-              {/*
-               * 줌 아웃: SDK `clusters`로 동그라미+개수. 줌 인: `NaverMapMarkerOverlay`로 기본 핀+caption(이모지).
-               * 클러스터 leaf에는 caption API가 없어, 멀리서는 숫자 묶음만 보이는 것이 정상입니다.
-               */}
-              {naverUseClusters
-                ? null
-                : mapMarkerRenderItems.map((item) => {
+              {mapMarkerRenderItems.map((item) => {
                 if (item.kind === 'single') {
                   const m = item.meeting;
                   const selected = m.id === selectedMeetingId;
