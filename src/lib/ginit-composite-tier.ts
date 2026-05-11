@@ -164,10 +164,11 @@ export function compositeReputationTier(profile: UserProfile | null | undefined)
   const tLevel = levelStepLinearMax(effectiveGLevel(profile), policy.max_level);
   const step = Math.min(tTrust, tXp, tLevel);
   const row = policy.tiers[step - 1];
+  const fallbackRow = COMPOSITE_TIER_POLICY_FALLBACK.tiers[step - 1];
   return {
     step,
-    label: row?.label ?? `등급 ${step}`,
-    emoji: sanitizeEmoji(row?.emoji),
+    label: row?.label?.trim() || fallbackRow?.label || `등급 ${step}`,
+    emoji: sanitizeEmoji(row?.emoji || fallbackRow?.emoji),
     trust,
   };
 }

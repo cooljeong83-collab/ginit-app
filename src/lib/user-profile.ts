@@ -551,16 +551,12 @@ export async function reactivateWithdrawnUserForOtpSignup(normalizedPhone: strin
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  // 레거시 OTP(전화 PK) 재가입 최소 동작: 해당 PK로 Supabase 행을 재활성화합니다.
-  await rpcEnsureProfileMinimalWithRetry(phone);
-  await rpcUpsertProfilePayloadWithRetry(
+  await rpcReactivateWithdrawnProfileForSignupWithRetry(
     phone,
     profilePatchToSupabaseJsonb({
       phone,
       // 탈퇴 후 재가입 시, 예전 인증 완료 시각이 남아 "이미 인증됨"으로 보이지 않게 초기화합니다.
       phoneVerifiedAt: null,
-      isWithdrawn: false,
-      withdrawnAt: null,
     }),
   );
   return phone;
@@ -907,6 +903,50 @@ async function rpcUpsertProfilePayloadWithRetry(id: string, fields: Record<strin
   }
 }
 
+/** `withdraw_anonymize_profile` — metric 필드는 전용 security-definer RPC에서만 초기화 */
+async function rpcWithdrawAnonymizeProfileWithRetry(id: string): Promise<void> {
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('withdraw_anonymize_profile', {
+      p_app_user_id: id,
+    });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'withdraw_anonymize_profile failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
+    if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
+}
+
+/** `reactivate_withdrawn_profile_for_signup` — 탈퇴 후 재가입 정책 검증 + 재활성화 */
+async function rpcReactivateWithdrawnProfileForSignupWithRetry(
+  id: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const payload = { ...fields };
+    sanitizeFcmTokenFieldForRpc(payload);
+    const { error } = await supabase.rpc('reactivate_withdrawn_profile_for_signup', {
+      p_app_user_id: id,
+      p_fields: payload,
+    });
+    if (!error) return;
+    lastMessage = error.message?.trim() || 'reactivate_withdrawn_profile_for_signup failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
+    if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
+      throw new Error(lastMessage);
+    }
+  }
+}
+
 /**
  * 로그인 직후 등: 프로필이 없으면 랜덤 닉네임으로 생성합니다.
  */
@@ -986,29 +1026,29 @@ export async function applyGoogleSignupProfile(
   }
 
   await rpcEnsureProfileMinimalWithRetry(id);
-  await rpcUpsertProfilePayloadWithRetry(
-    id,
-    profilePatchToSupabaseJsonb({
-      nickname: patch.nickname,
-      photoUrl: patch.photoUrl,
-      phone: patch.phone ?? undefined,
-      phoneVerifiedAt: patch.phoneVerifiedAt ?? undefined,
-      email: patch.email ?? undefined,
-      displayName: patch.displayName ?? undefined,
-      // undefined면 기존 값 유지(로그인/가입 플로우에서 People API 값이 없다고 기존 성별을 지우면 안 됨)
-      gender: patch.gender ?? undefined,
-      ageBand: patch.ageBand ?? undefined,
-      birthDate: patch.birthDate ?? undefined,
-      birthYear: patch.birthYear ?? undefined,
-      birthMonth: patch.birthMonth ?? undefined,
-      birthDay: patch.birthDay ?? undefined,
-      signupProvider: patch.signupProvider ?? undefined,
-      metadata: patch.metadata ?? undefined,
-      // 재가입/복구 케이스: withdrawn이면 재활성화
-      isWithdrawn: false,
-      withdrawnAt: null,
-    }),
-  );
+  const fields = profilePatchToSupabaseJsonb({
+    nickname: patch.nickname,
+    photoUrl: patch.photoUrl,
+    phone: patch.phone ?? undefined,
+    phoneVerifiedAt: patch.phoneVerifiedAt ?? undefined,
+    email: patch.email ?? undefined,
+    displayName: patch.displayName ?? undefined,
+    // undefined면 기존 값 유지(로그인/가입 플로우에서 People API 값이 없다고 기존 성별을 지우면 안 됨)
+    gender: patch.gender ?? undefined,
+    ageBand: patch.ageBand ?? undefined,
+    birthDate: patch.birthDate ?? undefined,
+    birthYear: patch.birthYear ?? undefined,
+    birthMonth: patch.birthMonth ?? undefined,
+    birthDay: patch.birthDay ?? undefined,
+    signupProvider: patch.signupProvider ?? undefined,
+    metadata: patch.metadata ?? undefined,
+  });
+  const existing = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  if (existing.ok && existing.profile.isWithdrawn === true) {
+    await rpcReactivateWithdrawnProfileForSignupWithRetry(id, fields);
+  } else {
+    await rpcUpsertProfilePayloadWithRetry(id, fields);
+  }
 
   const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
   if (!r.ok) throw new Error(r.message);
@@ -1086,33 +1126,7 @@ export async function withdrawAnonymizeUserProfile(phoneUserId: string): Promise
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  await rpcUpsertProfilePayloadWithRetry(id, {
-    is_withdrawn: true,
-    nickname: WITHDRAWN_NICKNAME,
-    withdrawn_at: new Date().toISOString(),
-
-    // 개인정보/인증/동의/프로필성 정보는 모두 null 처리합니다.
-    photo_url: null,
-    bio: null,
-    phone: null,
-    phone_verified_at: null,
-    email: null,
-    display_name: null,
-    fcm_token: null,
-    fcm_platform: null,
-    terms_agreed_at: null,
-    gender: null,
-    age_band: null,
-    birth_year: null,
-    birth_month: null,
-    birth_day: null,
-    g_level: 1,
-    g_xp: 0,
-    signup_provider: null,
-    // private 계정 플래그는 운영상 의미가 없으므로 기본값으로 되돌립니다.
-    is_private: false,
-    metadata: {},
-  });
+  await rpcWithdrawAnonymizeProfileWithRetry(id);
 }
 
 /**

@@ -10,13 +10,16 @@ import { deleteUser } from 'firebase/auth';
 import { getAuth } from '@react-native-firebase/auth';
 
 import { getFirebaseAuth } from '@/src/lib/firebase';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import { fetchMeetingsOnceHybrid } from '@/src/lib/meetings-hybrid';
 import type { Meeting } from '@/src/lib/meetings';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { deleteMeetingDocumentByHostForce, leaveMeeting, transferMeetingHost } from '@/src/lib/meetings';
 import { purgeAllFollowRelations } from '@/src/lib/follow';
 import { withdrawAnonymizeUserProfile, withdrawAnonymizeUserProfileByFirebaseUid } from '@/src/lib/user-profile';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { getPolicyNumeric } from '@/src/lib/app-policies-store';
+import { purgeProfilePhotosForWithdrawal } from '@/src/lib/profile-photo-history';
 
 function isMeetingHost(meeting: Meeting, sessionUserIdNorm: string): boolean {
   const c = meeting.createdBy?.trim() ?? '';
@@ -27,6 +30,92 @@ function isMeetingHost(meeting: Meeting, sessionUserIdNorm: string): boolean {
 export type AccountDeletionResult =
   | { ok: true }
   | { ok: false; message: string };
+
+const RECENT_LOGIN_MAX_AGE_MS = 4 * 60 * 1000;
+
+export function accountDeletionRejoinPolicyNotice(): string {
+  const daysRaw = getPolicyNumeric('account', 'withdraw_rejoin_wait_days', 0);
+  const days = Math.max(0, Math.floor(Number.isFinite(daysRaw) ? daysRaw : 0));
+  if (days <= 0) {
+    return '• 재가입 정책: 현재는 탈퇴 후 바로 재가입할 수 있습니다.';
+  }
+  return `• 재가입 정책: 탈퇴 후 ${days}일 동안 같은 계정으로 재가입할 수 없습니다.`;
+}
+
+function currentAuthDeletionSnapshot(): {
+  uid: string;
+  email: string;
+  phone: string;
+  lastSignInMs: number | null;
+} | null {
+  const jsUser = getFirebaseAuth().currentUser;
+  const rnUser = getAuth().currentUser;
+  const uid = (jsUser?.uid ?? rnUser?.uid ?? '').trim();
+  const email = (jsUser?.email ?? rnUser?.email ?? '').trim();
+  const phone = (jsUser?.phoneNumber ?? rnUser?.phoneNumber ?? '').trim();
+  const lastSignInRaw =
+    jsUser?.metadata?.lastSignInTime ??
+    (rnUser?.metadata as unknown as { lastSignInTime?: string | number | null } | undefined)?.lastSignInTime ??
+    null;
+  const lastSignInMs =
+    typeof lastSignInRaw === 'number'
+      ? lastSignInRaw
+      : typeof lastSignInRaw === 'string'
+        ? Date.parse(lastSignInRaw)
+        : null;
+  if (!uid && !email && !phone) return null;
+  return {
+    uid,
+    email,
+    phone,
+    lastSignInMs: typeof lastSignInMs === 'number' && Number.isFinite(lastSignInMs) ? lastSignInMs : null,
+  };
+}
+
+function authSnapshotMatchesDeletionTarget(
+  snap: NonNullable<ReturnType<typeof currentAuthDeletionSnapshot>>,
+  sessionUserId: string,
+  fallbackFirebaseUid: string,
+): boolean {
+  const target = sessionUserId.trim();
+  const fallbackUid = fallbackFirebaseUid.trim();
+  if (fallbackUid && snap.uid && snap.uid !== fallbackUid) return false;
+  if (!target && fallbackUid && snap.uid === fallbackUid) return true;
+  if (!target) return false;
+  if (snap.uid && target === snap.uid) return true;
+  const targetEmail = normalizeUserId(target);
+  const authEmail = snap.email ? normalizeUserId(snap.email) : null;
+  if (targetEmail && authEmail && targetEmail === authEmail) return true;
+  const targetPhone = normalizePhoneUserId(target);
+  const authPhone = snap.phone ? normalizePhoneUserId(snap.phone) : null;
+  if (targetPhone && authPhone && targetPhone === authPhone) return true;
+  return false;
+}
+
+/**
+ * 원격 익명화 전에 현재 Firebase Auth 사용자와 앱 세션 대상이 같은 계정인지, 최근 로그인 상태인지 확인합니다.
+ * 실패하면 서버 프로필/모임 정리를 시작하지 않아 부분 탈퇴를 방지합니다.
+ */
+export function validateAccountDeletionPreflight(sessionUserId: string, fallbackFirebaseUid: string): AccountDeletionResult {
+  const snap = currentAuthDeletionSnapshot();
+  if (!snap) {
+    return { ok: false, message: '현재 로그인 인증 정보를 확인하지 못했습니다. 다시 로그인한 뒤 탈퇴를 시도해 주세요.' };
+  }
+  if (!authSnapshotMatchesDeletionTarget(snap, sessionUserId, fallbackFirebaseUid)) {
+    return {
+      ok: false,
+      message:
+        '현재 로그인 인증 정보와 앱 세션의 계정이 일치하지 않습니다.\n\n다른 계정 정보가 남아 있을 수 있으니 로그아웃 후 탈퇴할 계정으로 다시 로그인해 주세요.',
+    };
+  }
+  if (snap.lastSignInMs == null || Date.now() - snap.lastSignInMs > RECENT_LOGIN_MAX_AGE_MS) {
+    return {
+      ok: false,
+      message: '보안을 위해 최근 로그인 확인이 필요합니다.\n로그아웃 후 다시 로그인한 뒤, 회원 탈퇴를 다시 시도해 주세요.',
+    };
+  }
+  return { ok: true };
+}
 
 function pickNextHostFromParticipants(m: Meeting, nsHost: string): string | null {
   const list = Array.isArray(m.participantIds) ? m.participantIds : [];
@@ -128,6 +217,17 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
     return { ok: false, message: msg };
   }
 
+  // 4) Supabase Storage 프로필 사진 삭제 + 이력 정리
+  try {
+    const photos = await purgeProfilePhotosForWithdrawal(raw);
+    if (!photos.ok) {
+      return { ok: false, message: photos.message };
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '프로필 사진 삭제에 실패했습니다.';
+    return { ok: false, message: msg };
+  }
+
   try {
     await withdrawAnonymizeUserProfile(raw);
   } catch (e) {
@@ -193,6 +293,16 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
     await purgeAllFollowRelations(uid);
   } catch (e) {
     const msg = e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.';
+    return { ok: false, message: msg };
+  }
+
+  try {
+    const photos = await purgeProfilePhotosForWithdrawal(uid);
+    if (!photos.ok) {
+      return { ok: false, message: photos.message };
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '프로필 사진 삭제에 실패했습니다.';
     return { ok: false, message: msg };
   }
 

@@ -118,7 +118,7 @@ export default function LoginScreen() {
   const params = useLocalSearchParams<{ phone?: string | string[] }>();
   const initialPhone = useMemo(() => paramToString(params.phone), [params.phone]);
   const win = useWindowDimensions();
-  const { isHydrated, setAuthProfile, setUserId } = useUserSession();
+  const { isHydrated, setAuthProfile, setUserId, signOutSession } = useUserSession();
   const [busyGoogle, setBusyGoogle] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [phoneField, setPhoneField] = useState('');
@@ -465,12 +465,18 @@ export default function LoginScreen() {
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
       const message = e instanceof Error ? e.message : '알 수 없는 오류';
       if (code === REDIRECT_STARTED) return;
+      try {
+        await signOutSession();
+      } catch {
+        /* 실패한 Google 가입 세션이 앱 진입으로 이어지지 않도록 가능한 범위에서만 정리합니다. */
+      }
+      setPendingConsentAction(null);
       setLoginError(`${message}${code ? ` (${code})` : ''}`);
       Alert.alert('Google 연동 실패', code ? `${code}\n${message}` : message);
     } finally {
       setBusyGoogle(false);
     }
-  }, [setAuthProfile, setUserId, router]);
+  }, [setAuthProfile, setUserId, signOutSession, router]);
 
   const isExpoGo = Constants.appOwnership === 'expo';
 

@@ -24,6 +24,10 @@ export type DeleteProfilePhotoHistoryUrlResult =
   | { ok: false; skipped: true; reason: 'empty_id' | 'empty_url' }
   | { ok: false; message: string; code?: string; details?: string; hint?: string };
 
+export type PurgeProfilePhotosForWithdrawalResult =
+  | { ok: true; storageRemovedCount: number }
+  | { ok: false; message: string };
+
 /** 공개 URL에서 `avatars` 객체 경로만 추출. 본인 폴더(`users/<segment>/`)일 때만 반환 */
 export function avatarsObjectPathFromPublicUrlIfOwned(photoUrl: string, appUserId: string): string | null {
   const url = photoUrl.trim();
@@ -165,5 +169,85 @@ export async function deleteProfilePhotoHistoryUrl(
     hadParsedPath: Boolean(objectPath),
   });
   return { ok: true, storageRemoved };
+}
+
+async function purgeProfilePhotoHistoryRowsWithRetry(appUserId: string): Promise<void> {
+  const id = appUserId.trim();
+  let lastMessage = '';
+  for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
+    const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const { error } = await supabase.rpc('purge_profile_photo_history_for_user', {
+      p_app_user_id: id,
+    });
+    if (!error) return;
+    const msg = error.message?.trim() || 'purge_profile_photo_history_for_user failed';
+    const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+    lastMessage = msg;
+    if (!isPostgrestSchemaCacheOrMissingRpcError(msg, code) || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
+      throw new Error(msg);
+    }
+  }
+  throw new Error(lastMessage || '프로필 사진 이력 정리에 실패했습니다.');
+}
+
+async function removeAllAvatarObjectsInUserFolder(appUserId: string): Promise<number> {
+  const id = appUserId.trim();
+  if (!id) return 0;
+  const folder = `users/${storageSafeUserFolderSegment(id)}`;
+  const bucket = supabase.storage.from(SUPABASE_STORAGE_BUCKET_AVATARS);
+  const paths: string[] = [];
+  const pageSize = 100;
+
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await bucket.list(folder, {
+      limit: pageSize,
+      offset,
+      sortBy: { column: 'name', order: 'asc' },
+    });
+    if (error) {
+      throw new Error(error.message || '프로필 사진 목록을 불러오지 못했습니다.');
+    }
+    const files = Array.isArray(data) ? data : [];
+    for (const file of files) {
+      const name = typeof file?.name === 'string' ? file.name.trim() : '';
+      if (!name || name === '.emptyFolderPlaceholder') continue;
+      paths.push(`${folder}/${name}`);
+    }
+    if (files.length < pageSize) break;
+  }
+
+  for (let i = 0; i < paths.length; i += pageSize) {
+    const slice = paths.slice(i, i + pageSize);
+    const { error } = await bucket.remove(slice);
+    if (error) {
+      throw new Error(error.message || '프로필 사진 Storage 삭제에 실패했습니다.');
+    }
+  }
+
+  return paths.length;
+}
+
+export async function purgeProfilePhotosForWithdrawal(appUserId: string): Promise<PurgeProfilePhotosForWithdrawalResult> {
+  const id = appUserId.trim();
+  if (!id) return { ok: false, message: '사용자 ID가 없습니다.' };
+
+  try {
+    const history = await fetchProfilePhotoHistory(id, 60);
+    const urls = Array.from(new Set(history.map((item) => item.photoUrl.trim()).filter(Boolean)));
+    for (const url of urls) {
+      const res = await deleteProfilePhotoHistoryUrl(id, url);
+      if (res.ok === false && !('skipped' in res && res.skipped)) {
+        return { ok: false, message: res.message };
+      }
+    }
+
+    const storageRemovedCount = await removeAllAvatarObjectsInUserFolder(id);
+    await purgeProfilePhotoHistoryRowsWithRetry(id);
+    return { ok: true, storageRemovedCount };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '프로필 사진 Storage 삭제에 실패했습니다.';
+    return { ok: false, message: msg };
+  }
 }
 

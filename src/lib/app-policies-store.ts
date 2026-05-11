@@ -15,6 +15,10 @@ type PolicyEntry = { value: unknown; isActive: boolean };
 
 /** 오프라인·마이그레이션 전 기본값(서버 시드와 맞출 것) */
 const DEFAULTS: Record<string, Record<string, unknown>> = {
+  account: {
+    /** `0114_withdraw_rejoin_wait_policy.sql` 시드와 동일 — 탈퇴 후 재가입 가능 대기 기간(일) */
+    withdraw_rejoin_wait_days: 0,
+  },
   meeting: {
     overlap_hours: 3,
     /** `0109_meeting_home_list_ongoing_duration_hours.sql` 시드와 동일 — 내 모임·비공개 목록 "모임 중" 구간 길이(시간) */

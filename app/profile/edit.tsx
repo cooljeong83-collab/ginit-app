@@ -16,7 +16,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
-import { deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, wipeLocalAppData } from '@/src/lib/account-deletion';
+import { accountDeletionRejoinPolicyNotice, deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, validateAccountDeletionPreflight, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
@@ -607,6 +607,11 @@ export default function ProfileEditScreen() {
     }
     setDeleteBusy(true);
     try {
+      const preflight = validateAccountDeletionPreflight(sessionUserId, firebaseUid);
+      if (!preflight.ok) {
+        Alert.alert('탈퇴를 진행할 수 없어요', preflight.message);
+        return;
+      }
       const res = sessionUserId ? await purgeUserAccountRemote(sessionUserId) : await purgeUserAccountRemoteByFirebaseUid(firebaseUid);
       if (!res.ok) {
         Alert.alert('탈퇴를 완료하지 못했어요', res.message);
@@ -641,6 +646,7 @@ export default function ProfileEditScreen() {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
+    const rejoinNotice = accountDeletionRejoinPolicyNotice();
     Alert.alert(
       '회원 탈퇴',
       '탈퇴 시 이름·연락처·이메일·프로필 사진 등 개인 식별 정보는 서버에서 즉시 삭제(비식별화)됩니다.\n\n' +
@@ -648,7 +654,8 @@ export default function ProfileEditScreen() {
         '• 내가 만든 모임에 나 혼자만 있다면 해당 모임은 자동으로 삭제됩니다.\n' +
         '• 내가 만든 모임에 참여자가 2명 이상 있다면, 방장 권한이 다음 참여자에게 자동으로 이관되고 저는 모임에서 탈퇴합니다.\n' +
         '• 팔로워/팔로잉/맞팔(요청 포함) 관계는 모두 삭제됩니다.\n' +
-        '• 이 기기에 저장된 로그인·캐시 등은 모두 지워집니다.',
+        '• 이 기기에 저장된 로그인·캐시 등은 모두 지워집니다.\n' +
+        rejoinNotice,
       [
         { text: '취소', style: 'cancel' },
         {
