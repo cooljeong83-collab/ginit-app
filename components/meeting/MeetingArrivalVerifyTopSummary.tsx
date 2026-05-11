@@ -5,9 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
 
 import {
-  arrivalVerifyPlaceChipToNaverImageFields,
-  buildArrivalVerifyPlaceChips,
-  resolveArrivalVerifyConfirmedPlaceChip,
+    arrivalVerifyPlaceChipToNaverImageFields,
+    buildArrivalVerifyPlaceChips,
+    resolveArrivalVerifyConfirmedPlaceChip,
 } from '@/src/lib/meeting-arrival-verify-place-summary-data';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingPrimaryStartMs } from '@/src/lib/meetings';
