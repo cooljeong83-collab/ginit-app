@@ -23,6 +23,8 @@ export const MEETING_ARRIVAL_VERIFY_POLICY_FALLBACK = {
   auth_radius_m: 120,
   /** 게스트 하단 장소 인증 pill(시간 외·인증 완료 포함)을 예정 시작 몇 분 전부터 표시할지 — 그 전에는 퇴장만 */
   guest_arrival_pill_visible_before_min: 30,
+  /** 상단 장소 인증 공지를 예정 시작 몇 분 전부터 표시할지 — 0이면 시작 시각부터 */
+  notice_before_min: 30,
   window_before_min: 30,
   window_after_min: 180,
   min_accuracy_m: 50,
@@ -40,6 +42,7 @@ export const MEETING_ARRIVAL_VERIFY_POLICY_FALLBACK = {
 export type MeetingArrivalVerifyPolicy = {
   auth_radius_m: number;
   guest_arrival_pill_visible_before_min: number;
+  notice_before_min: number;
   window_before_min: number;
   window_after_min: number;
   min_accuracy_m: number;
@@ -77,6 +80,7 @@ export function parseMeetingArrivalVerifyPolicy(raw: unknown): MeetingArrivalVer
       0,
       24 * 60,
     ),
+    notice_before_min: clampInt(numFromUnknown(o.notice_before_min, fb.notice_before_min), 0, 24 * 60),
     window_before_min: clampInt(numFromUnknown(o.window_before_min, fb.window_before_min), 0, 24 * 60),
     window_after_min: clampInt(numFromUnknown(o.window_after_min, fb.window_after_min), 0, 24 * 60),
     min_accuracy_m: clampInt(numFromUnknown(o.min_accuracy_m, fb.min_accuracy_m), 1, 5000),

@@ -24,7 +24,8 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     show_settle_cta_after_start_hours: 1,
   },
   meeting: {
-    overlap_hours: 3,
+    /** `0121_meeting_overlap_hours_policy_2.sql` 시드와 동일 — 생성/참여 겹침 방지 기준 시간 */
+    overlap_hours: 2,
     /** `0109_meeting_home_list_ongoing_duration_hours.sql` 시드와 동일 — 내 모임·비공개 목록 "모임 중" 구간 길이(시간) */
     list_ongoing_duration_hours: 3,
     map_radius_km: 5,
@@ -32,6 +33,7 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     arrival_verify: {
       auth_radius_m: 120,
       guest_arrival_pill_visible_before_min: 30,
+      notice_before_min: 30,
       window_before_min: 30,
       window_after_min: 180,
       min_accuracy_m: 50,
@@ -44,6 +46,8 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     },
   },
   meeting_create: {
+    /** `0123_meeting_create_min_schedule_lead_policy.sql` 시드와 동일 — 0이면 과거 시각만 차단 */
+    min_schedule_lead_minutes: 0,
     rules_by_major: {
       _default: {
         capacity_max: 100,

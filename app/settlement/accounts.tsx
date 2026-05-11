@@ -154,7 +154,7 @@ export default function SettlementAccountsScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
-          <SettlementAccountsScreenTopBar title="정산 계좌" onBack={() => safeRouterBack(router)} />
+          <SettlementAccountsScreenTopBar title="정산 계좌 관리" onBack={() => safeRouterBack(router)} />
           <View style={[styles.center, styles.bodyGrow]}>
             <Text style={styles.muted}>로그인이 필요해요.</Text>
           </View>
@@ -167,7 +167,7 @@ export default function SettlementAccountsScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
-          <SettlementAccountsScreenTopBar title="정산 계좌" onBack={() => safeRouterBack(router)} />
+          <SettlementAccountsScreenTopBar title="정산 계좌 관리" onBack={() => safeRouterBack(router)} />
           <View style={[styles.center, styles.bodyGrow]}>
             <ActivityIndicator color={GinitTheme.colors.primary} />
           </View>
@@ -179,7 +179,7 @@ export default function SettlementAccountsScreen() {
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SettlementAccountsScreenTopBar title="정산 계좌" onBack={() => safeRouterBack(router)} />
+        <SettlementAccountsScreenTopBar title="정산 계좌 관리" onBack={() => safeRouterBack(router)} />
         <View style={[styles.container, { paddingBottom: insets.bottom + 16 }]}>
           {state.items.length === 0 ? (
             <View style={styles.emptyWrap}>
@@ -198,15 +198,17 @@ export default function SettlementAccountsScreen() {
                 keyExtractor={(it) => it.id}
                 renderItem={renderItem}
                 ItemSeparatorComponent={() => <View style={styles.sep} />}
+                ListFooterComponent={
+                  <GinitPressable
+                    onPress={() => router.push('/settlement/account-edit')}
+                    style={({ pressed }) => [styles.footerAdd, pressed && { opacity: 0.86 }]}>
+                    <GinitSymbolicIcon name="add-circle-outline" size={22} color={GinitTheme.colors.primary} />
+                    <Text style={styles.footerAddText}>계좌 추가</Text>
+                  </GinitPressable>
+                }
                 contentContainerStyle={styles.listContent}
                 style={styles.listFlex}
               />
-              <GinitPressable
-                onPress={() => router.push('/settlement/account-edit')}
-                style={({ pressed }) => [styles.footerAdd, pressed && { opacity: 0.86 }]}>
-                <GinitSymbolicIcon name="add-circle-outline" size={22} color={GinitTheme.colors.primary} />
-                <Text style={styles.footerAddText}>계좌 추가</Text>
-              </GinitPressable>
             </>
           )}
         </View>

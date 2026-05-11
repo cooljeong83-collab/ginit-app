@@ -2,7 +2,7 @@ import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateD
 import { GinitTheme } from '@/constants/ginit-theme';
 import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
 
 import {
   arrivalVerifyPlaceChipToNaverImageFields,
@@ -16,6 +16,9 @@ import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 export type MeetingArrivalVerifyTopSummaryProps = {
   meeting: Meeting;
   onOpenPlaceUrl: (url: string, title: string) => void;
+  hidePlaceDetails?: boolean;
+  titleText?: string;
+  titleStyle?: StyleProp<TextStyle>;
 };
 
 function formatArrivalVerifyScheduleLine(m: Meeting): string {
@@ -39,17 +42,31 @@ function formatArrivalVerifyScheduleLine(m: Meeting): string {
 }
 
 /**
- * 장소 인증 상단 — 모임 제목·일시·상세와 동일 레이아웃의 확정 장소 카드(썸네일 좌 / 상호·업종·주소 우).
+ * 장소 인증·정산 상단 — 모임 제목·일시·확정 장소 카드(썸네일 좌 / 상호·업종·주소 우).
  */
-export function MeetingArrivalVerifyTopSummary({ meeting, onOpenPlaceUrl }: MeetingArrivalVerifyTopSummaryProps) {
-  const placeChips = useMemo(() => buildArrivalVerifyPlaceChips(meeting), [meeting]);
-  const chip = useMemo(() => resolveArrivalVerifyConfirmedPlaceChip(meeting, placeChips), [meeting, placeChips]);
+export function MeetingArrivalVerifyTopSummary({
+  meeting,
+  onOpenPlaceUrl,
+  hidePlaceDetails,
+  titleText,
+  titleStyle,
+}: MeetingArrivalVerifyTopSummaryProps) {
+  const showPlaceDetails = hidePlaceDetails !== true;
+  const placeChips = useMemo(() => (showPlaceDetails ? buildArrivalVerifyPlaceChips(meeting) : []), [
+    meeting,
+    showPlaceDetails,
+  ]);
+  const chip = useMemo(
+    () => (showPlaceDetails ? resolveArrivalVerifyConfirmedPlaceChip(meeting, placeChips) : null),
+    [meeting, placeChips, showPlaceDetails],
+  );
   const scheduleLine = useMemo(() => formatArrivalVerifyScheduleLine(meeting), [meeting]);
 
   /** 모임 상세 확정 장소 카드와 동일: `placeThumbByChipId` 검색 썸네일만 표시 */
   const [placeThumbByChipId, setPlaceThumbByChipId] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
+    if (!showPlaceDetails) return;
     if (!chip) return;
     if (placeThumbByChipId[chip.id] !== undefined) return;
     let alive = true;
@@ -75,7 +92,7 @@ export function MeetingArrivalVerifyTopSummary({ meeting, onOpenPlaceUrl }: Meet
       alive = false;
       clearTimeout(t);
     };
-  }, [chip, placeThumbByChipId]);
+  }, [chip, placeThumbByChipId, showPlaceDetails]);
 
   const thumb = chip ? placeThumbByChipId[chip.id] ?? null : null;
 
@@ -85,47 +102,44 @@ export function MeetingArrivalVerifyTopSummary({ meeting, onOpenPlaceUrl }: Meet
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}>
-      <Text style={styles.meetingTitle}>{(meeting.title ?? '').trim() || '모임'}</Text>
+      <Text style={[styles.meetingTitle, titleStyle]}>{titleText?.trim() || (meeting.title ?? '').trim() || '모임'}</Text>
       {scheduleLine ? <Text style={styles.scheduleLine}>{scheduleLine}</Text> : null}
-      {chip ? (
-        <>
-          <Text style={styles.sectionLabel}>장소</Text>
-          <View style={styles.placeDetailBlock}>
-            <View style={styles.placeDetailHeroRow}>
-              <View style={styles.placeDetailSquareThumbWrap}>
-                {thumb ? (
-                  <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
-                ) : (
-                  <View style={styles.placeVoteImageFallback} />
-                )}
-              </View>
-              <View style={styles.placeDetailRightCol}>
-                <View style={styles.placeDetailRightColTop}>
-                  <Text style={styles.placeVoteTitle} numberOfLines={3}>
-                    {chip.title}
+      {showPlaceDetails && chip ? (
+        <View style={styles.placeDetailBlock}>
+          <View style={styles.placeDetailHeroRow}>
+            <View style={styles.placeDetailSquareThumbWrap}>
+              {thumb ? (
+                <Image source={{ uri: thumb }} style={styles.placeVoteImage} contentFit="cover" />
+              ) : (
+                <View style={styles.placeVoteImageFallback} />
+              )}
+            </View>
+            <View style={styles.placeDetailRightCol}>
+              <View style={styles.placeDetailRightColTop}>
+                <Text style={styles.placeVoteTitle} numberOfLines={3}>
+                  {chip.title}
+                </Text>
+                {chip.category ? (
+                  <Text style={styles.placeVoteSub} numberOfLines={2}>
+                    {chip.category}
                   </Text>
-                  {chip.category ? (
-                    <Text style={styles.placeVoteSub} numberOfLines={2}>
-                      {chip.category}
-                    </Text>
-                  ) : null}
-                  {chip.sub ? (
-                    <Text style={styles.placeVoteSub} numberOfLines={6}>
-                      {chip.sub}
-                    </Text>
-                  ) : null}
-                </View>
-                <PlaceCandidateDetailLinkRow
-                  title={chip.title}
-                  link={chip.naverPlaceLink}
-                  addressLine={chip.sub}
-                  containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
-                  onOpenUrl={onOpenPlaceUrl}
-                />
+                ) : null}
+                {chip.sub ? (
+                  <Text style={styles.placeVoteSub} numberOfLines={6}>
+                    {chip.sub}
+                  </Text>
+                ) : null}
               </View>
+              <PlaceCandidateDetailLinkRow
+                title={chip.title}
+                link={chip.naverPlaceLink}
+                addressLine={chip.sub}
+                containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
+                onOpenUrl={onOpenPlaceUrl}
+              />
             </View>
           </View>
-        </>
+        </View>
       ) : null}
     </ScrollView>
   );
@@ -142,7 +156,6 @@ const styles = StyleSheet.create({
   },
   meetingTitle: { ...GinitTheme.typography.h2, color: GinitTheme.colors.text },
   scheduleLine: { ...GinitTheme.typography.caption, color: GinitTheme.colors.textMuted },
-  sectionLabel: { fontSize: 15, fontWeight: '700', color: GinitTheme.colors.text, marginTop: 4 },
   placeDetailBlock: { marginTop: 0 },
   placeDetailHeroRow: {
     flexDirection: 'row',

@@ -10,6 +10,7 @@ import { MEETINGS_COLLECTION, parseMeetingSettlementDraftReceipts } from '@/src/
 function settlementInfoToDocValue(info: MeetingSettlementInfo): Record<string, unknown> {
   const o: Record<string, unknown> = {};
   if (info.draftTotalWon != null) o.draftTotalWon = info.draftTotalWon;
+  if (info.paymentMethod != null) o.paymentMethod = info.paymentMethod;
   if (info.hostAccountText != null) o.hostAccountText = info.hostAccountText;
   if (info.hostBankCode != null) o.hostBankCode = info.hostBankCode;
   if (info.hostAccountNumber != null) o.hostAccountNumber = info.hostAccountNumber;
@@ -35,6 +36,8 @@ function readSettlementInfoRaw(doc: Record<string, unknown>): MeetingSettlementI
   const out: MeetingSettlementInfo = {};
   const d = o.draftTotalWon ?? o.draft_total_won;
   if (typeof d === 'number' && Number.isFinite(d)) out.draftTotalWon = Math.trunc(d);
+  const pm = o.paymentMethod ?? o.payment_method;
+  if (pm === 'cash' || pm === 'bank_transfer') out.paymentMethod = pm;
   const h = o.hostAccountText ?? o.host_account_text;
   if (typeof h === 'string') out.hostAccountText = h;
   const bc = o.hostBankCode ?? o.host_bank_code;

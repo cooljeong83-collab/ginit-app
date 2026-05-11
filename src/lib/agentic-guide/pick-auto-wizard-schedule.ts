@@ -33,7 +33,7 @@ function bumpYmdHm(ymd: string, hm: string, addMinutes: number): { ymd: string; 
 
 /**
  * FAB 자동 일정 1안 — 참여 습관(주말 비중 등)과 현재 시간대 슬롯을 반영한 뒤,
- * `validateDateCandidate`(최소 1시간 리드 등)을 통과하도록 앞으로만 보정합니다.
+ * `validateDateCandidate`(정책 기반 최소 리드 등)을 통과하도록 앞으로만 보정합니다.
  */
 export function pickAutoWizardScheduleFromSnapshot(s: AgentWelcomeSnapshot): { ymd: string; hm: string } {
   const now = s.now instanceof Date && !Number.isNaN(s.now.getTime()) ? s.now : new Date();

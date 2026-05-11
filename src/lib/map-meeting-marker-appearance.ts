@@ -33,3 +33,15 @@ export function getMeetingMapPinAccentColor(
       return GinitTheme.colors.success;
   }
 }
+
+const MAP_PIN_GRADIENT_COLORS: Record<string, [string, string]> = {
+  [GinitTheme.colors.danger]: ['#F87171', GinitTheme.colors.danger],
+  [GinitTheme.colors.warning]: ['#FBBF24', GinitTheme.colors.warning],
+  [GinitTheme.colors.genderSymbolMale]: ['#60A5FA', GinitTheme.colors.genderSymbolMale],
+  [GinitTheme.themeMainColor]: ['#8B5CF6', GinitTheme.themeMainColor],
+  [GinitTheme.colors.success]: ['#4ADE80', GinitTheme.colors.success],
+};
+
+export function getMapPinGradientColors(accentColor: string): [string, string] {
+  return MAP_PIN_GRADIENT_COLORS[accentColor] ?? [accentColor, accentColor];
+}

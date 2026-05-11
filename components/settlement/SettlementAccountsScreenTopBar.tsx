@@ -21,7 +21,7 @@ export function SettlementAccountsScreenTopBar({
         style={styles.backBtn}>
         <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
       </GinitPressable>
-      <Text style={styles.topTitle} numberOfLines={1}>
+      <Text style={styles.topTitle} numberOfLines={1} ellipsizeMode="tail">
         {title}
       </Text>
       <View style={styles.topBarSpacer} />

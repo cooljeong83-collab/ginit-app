@@ -19,7 +19,9 @@ import type { UserSettlementAccountItem } from '@/src/lib/user-settlement-accoun
 
 type Props = {
   visible: boolean;
+  animationType?: 'none' | 'slide' | 'fade';
   onClose: () => void;
+  onManageAccounts: () => void;
   items: UserSettlementAccountItem[];
   selectedAccountId: string;
   defaultAccountId: string | null;
@@ -28,7 +30,9 @@ type Props = {
 
 export function SettlementAccountPickerModal({
   visible,
+  animationType = 'slide',
   onClose,
+  onManageAccounts,
   items,
   selectedAccountId,
   defaultAccountId,
@@ -81,12 +85,25 @@ export function SettlementAccountPickerModal({
   );
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType={animationType} presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={[styles.sheet, { paddingTop: insets.top + 8, maxHeight: winH * 0.92 }]}>
         <View style={styles.header}>
+          <GinitPressable
+            onPress={onClose}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="뒤로가기"
+            style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.86 }]}>
+            <GinitSymbolicIcon name="chevron-back" size={27} color={GinitTheme.colors.text} />
+          </GinitPressable>
           <Text style={styles.title}>정산 계좌 선택</Text>
-          <GinitPressable onPress={onClose} hitSlop={12} style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.86 }]}>
-            <GinitSymbolicIcon name="close" size={26} color={GinitTheme.colors.text} />
+          <GinitPressable
+            onPress={onManageAccounts}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="계좌 관리"
+            style={({ pressed }) => [styles.headerIconBtn, pressed && { opacity: 0.86 }]}>
+            <GinitSymbolicIcon name="settings-outline" size={23} color={GinitTheme.colors.text} />
           </GinitPressable>
         </View>
         <FlatList
@@ -113,8 +130,8 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   /** 프로필 설정 `topTitle`과 동일(17 / 700 / 본문 텍스트 색) */
-  title: { flex: 1, fontSize: 17, fontWeight: '700', color: GinitTheme.colors.text},
-  closeBtn: { padding: 4 },
+  title: { flex: 1, fontSize: 17, fontWeight: '700', color: GinitTheme.colors.text, textAlign: 'center' },
+  headerIconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',

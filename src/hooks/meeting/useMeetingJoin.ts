@@ -2,6 +2,7 @@ import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import {
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+  getScheduleOverlapBufferHours,
   isConfirmedScheduleOverlapErrorMessage,
 } from '@/src/lib/meeting-schedule-overlap';
 import {
@@ -98,9 +99,13 @@ export function useMeetingJoin({
   const [joinRequestMessageOpen, setJoinRequestMessageOpen] = useState(false);
   const [joinRequestDraftMessage, setJoinRequestDraftMessage] = useState('');
   const [joinScheduleOverlapBlock, setJoinScheduleOverlapBlock] = useState(false);
-  const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(3);
+  const [joinOverlapBufferHours, setJoinOverlapBufferHours] = useState(() => getScheduleOverlapBufferHours(null));
 
   const [leaveBusy, setLeaveBusy] = useState(false);
+
+  useEffect(() => {
+    setJoinOverlapBufferHours(getScheduleOverlapBufferHours(null));
+  }, [appPoliciesVersion]);
 
   useEffect(() => {
     if (!meeting || !sessionPk) {

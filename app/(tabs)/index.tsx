@@ -80,7 +80,7 @@ import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/s
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 import {
-  isMeetingArrivalReminderBannerTimeEligible,
+  isMeetingArrivalNoticeBannerTimeEligible,
   shouldShowMeetingArrivalVerifyTopBanner,
 } from '@/src/lib/meeting-arrival-verify-banner';
 import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
@@ -685,7 +685,7 @@ export default function FeedScreen() {
       if (m.scheduleConfirmed !== true) continue;
       if (isConfirmedMeetingPastListEndWindow(m, now)) continue;
       if (!isUserJoinedMeeting(m, uid) && !isMeetingHost(m, uid)) continue;
-      if (!isMeetingArrivalReminderBannerTimeEligible(m, now, pol)) continue;
+      if (!isMeetingArrivalNoticeBannerTimeEligible(m, now, pol)) continue;
       seen.add(id);
       out.push(m);
     }

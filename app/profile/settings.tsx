@@ -569,24 +569,7 @@ export default function ProfileAppSettingsScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          {isSignedIn ? (
-            <View style={styles.block}>
-              {sectionTitle('개인')}
-              <GinitPressable
-                onPress={() => router.push('/settlement/accounts')}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="정산 계좌 관리">
-                <SettingsRowLeadIcon name="card-outline" />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>정산 계좌 관리</Text>
-                  <Text style={styles.rowSub}>입금 받을 계좌를 등록하고 대표 계좌를 지정해요.</Text>
-                </View>
-                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-              </GinitPressable>
-            </View>
-          ) : null}
-          <View style={[styles.block, isSignedIn ? styles.blockGap : null]}>
+          <View style={styles.block}>
             {sectionTitle('알림')}
             <View style={styles.row}>
               <SettingsRowLeadIcon name="notifications-outline" />
@@ -722,23 +705,60 @@ export default function ProfileAppSettingsScreen() {
               </>
             ) : null}
           </View>
-          
+
+          {isSignedIn ? (
+            <View style={[styles.block, styles.blockGap]}>
+              {sectionTitle('개인')}
+              <GinitPressable
+                onPress={() => router.push('/profile/meeting-history')}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="모임 히스토리">
+                <SettingsRowLeadIcon name="history-outline" />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>모임 히스토리</Text>
+                </View>
+                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+              </GinitPressable>
+              <RowSep />
+              <GinitPressable
+                onPress={() => router.push('/settlement/accounts')}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="정산 계좌 관리">
+                <SettingsRowLeadIcon name="card-outline" />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>정산 계좌 관리</Text>
+                  <Text style={styles.rowSub}>입금 받을 계좌를 등록하고 대표 계좌를 지정해요.</Text>
+                </View>
+                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+              </GinitPressable>
+              <RowSep />
+              <GinitPressable
+                onPress={() => setAuthSheetVisible(true)}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="인증 정보 등록">
+                <SettingsRowLeadIcon name="shield-checkmark-outline" />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>인증 정보 등록</Text>
+                  {meetingAuthLoaded ? (
+                    <Text
+                      style={[styles.rowSub, meetingAuthComplete ? styles.rowSubOk : styles.rowSubWarn]}
+                      numberOfLines={1}>
+                      {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
+                    </Text>
+                  ) : (
+                    <Text style={styles.rowSub}>불러오는 중…</Text>
+                  )}
+                </View>
+                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+              </GinitPressable>
+            </View>
+          ) : null}
 
           <View style={[styles.block, styles.blockGap]}>
             {sectionTitle('기타')}
-            <GinitPressable
-              onPress={() => router.push('/profile/meeting-history')}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="모임 히스토리">
-              <SettingsRowLeadIcon name="history-outline" />
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>모임 히스토리</Text>
-              </View>
-              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-            </GinitPressable>
-            <RowSep />
-            
             <GinitPressable
               onPress={onPressVersionInfo}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
@@ -768,30 +788,6 @@ export default function ProfileAppSettingsScreen() {
               </>
             ) : null}
 
-            {isSignedIn ? (
-              <>
-                <GinitPressable
-                  onPress={() => setAuthSheetVisible(true)}
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="인증 정보 등록">
-                  <SettingsRowLeadIcon name="shield-checkmark-outline" />
-                  <View style={styles.rowText}>
-                    <Text style={styles.rowLabel}>인증 정보 등록</Text>
-                    {meetingAuthLoaded ? (
-                      <Text
-                        style={[styles.rowSub, meetingAuthComplete ? styles.rowSubOk : styles.rowSubWarn]}
-                        numberOfLines={1}>
-                        {meetingAuthComplete ? '인증 완료' : '미완료 · 눌러서 진행'}
-                      </Text>
-                    ) : (
-                      <Text style={styles.rowSub}>불러오는 중…</Text>
-                    )}
-                  </View>
-                  <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-                </GinitPressable>
-              </>
-            ) : null}
             {isSignedIn ? (
               <>
                 <RowSep />

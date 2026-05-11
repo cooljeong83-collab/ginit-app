@@ -119,6 +119,7 @@ export type MeetingSettlementReceiptItem = {
 /** 원장 `extra_data.fs`에만 저장되는 정산 전용 부가 데이터(핵심 모임 필드와 분리). */
 export type MeetingSettlementInfo = {
   draftTotalWon?: number | null;
+  paymentMethod?: 'cash' | 'bank_transfer' | null;
   hostAccountText?: string | null;
   /** `SETTLEMENT_BANK_CHOICES`의 `id` (시중·인터넷·기타 은행 선택) */
   hostBankCode?: string | null;
@@ -996,6 +997,13 @@ function parseMeetingSettlementInfoField(data: Record<string, unknown>): Meeting
   })();
   const hostRaw = o.hostAccountText ?? o.host_account_text;
   const hostAccountText = typeof hostRaw === 'string' && hostRaw.trim() ? hostRaw.trim() : null;
+  const pmRaw = o.paymentMethod ?? o.payment_method;
+  const paymentMethod =
+    typeof pmRaw === 'string' && pmRaw.trim() === 'cash'
+      ? 'cash'
+      : typeof pmRaw === 'string' && pmRaw.trim() === 'bank_transfer'
+        ? 'bank_transfer'
+        : null;
   const bankRaw = o.hostBankCode ?? o.host_bank_code;
   const hostBankCode = typeof bankRaw === 'string' && bankRaw.trim() ? bankRaw.trim() : null;
   const numRaw = o.hostAccountNumber ?? o.host_account_number;
@@ -1019,6 +1027,7 @@ function parseMeetingSettlementInfoField(data: Record<string, unknown>): Meeting
   const hasDraftReceipts = draftReceiptsParsed.length > 0;
   if (
     draftTotalWon == null &&
+    !paymentMethod &&
     !hostAccountText &&
     !hostBankCode &&
     !hostAccountNumber &&
@@ -1033,6 +1042,7 @@ function parseMeetingSettlementInfoField(data: Record<string, unknown>): Meeting
   }
   const out: MeetingSettlementInfo = {};
   if (draftTotalWon != null) out.draftTotalWon = draftTotalWon;
+  if (paymentMethod) out.paymentMethod = paymentMethod;
   if (hostAccountText) out.hostAccountText = hostAccountText;
   if (hostBankCode) out.hostBankCode = hostBankCode;
   if (hostAccountNumber) out.hostAccountNumber = hostAccountNumber;

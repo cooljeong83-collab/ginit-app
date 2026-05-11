@@ -3,10 +3,10 @@ import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { MeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 
 /**
- * 로컬 장소 인증 리마인더 알림과 동일한 시간대(예정 시작+지연 ~ 인증 마감).
- * @see syncMeetingArrivalReminderLocalNotifications
+ * 상단 장소 인증 공지 노출 시간대.
+ * `notice_before_min`이 30이면 예정 30분 전부터, 0이면 시작 시각부터 노출합니다.
  */
-export function isMeetingArrivalReminderBannerTimeEligible(
+export function isMeetingArrivalNoticeBannerTimeEligible(
   meeting: Pick<Meeting, 'scheduleConfirmed' | 'scheduledAt' | 'scheduleDate' | 'scheduleTime'>,
   nowMs: number,
   pol: MeetingArrivalVerifyPolicy,
@@ -15,7 +15,7 @@ export function isMeetingArrivalReminderBannerTimeEligible(
   const scheduledMs = meetingScheduleStartMs(meeting);
   if (scheduledMs == null) return false;
   const windowEndMs = scheduledMs + pol.window_after_min * 60_000;
-  const eligibleFromMs = scheduledMs + pol.reminder_after_scheduled_min * 60_000;
+  const eligibleFromMs = scheduledMs - pol.notice_before_min * 60_000;
   return nowMs >= eligibleFromMs && nowMs <= windowEndMs;
 }
 
@@ -42,5 +42,5 @@ export function shouldShowMeetingArrivalVerifyTopBanner(i: MeetingArrivalVerifyT
   if (!i.canAccessArrivalFlow) return false;
   if (!i.userId?.trim()) return false;
   if (i.verifiedByMe) return false;
-  return isMeetingArrivalReminderBannerTimeEligible(i.meeting, i.nowMs, i.pol);
+  return isMeetingArrivalNoticeBannerTimeEligible(i.meeting, i.nowMs, i.pol);
 }

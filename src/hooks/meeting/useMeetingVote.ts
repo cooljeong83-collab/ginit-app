@@ -1,8 +1,8 @@
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+  getScheduleOverlapBufferHours,
   isConfirmedScheduleOverlapErrorMessage,
 } from '@/src/lib/meeting-schedule-overlap';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
@@ -280,7 +280,7 @@ export function useMeetingVote({
         await assertDateCandidatesNoOverlapWithOtherMeetings({
           appUserId: uid,
           candidates: additions,
-          bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+          bufferHours: getScheduleOverlapBufferHours(null),
           excludeMeetingId: meeting.id,
         });
       } catch (e) {

@@ -1,13 +1,33 @@
 /**
  * DateCandidate 스마트 일정 — 정규화·검증·레거시 호환·Firestore primary 필드 도출.
  */
+import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { DateCandidate, DateCandidateType } from '@/src/lib/meeting-place-bridge';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{1,2}:\d{2}$/;
 
-/** 약속 일시는 지금 기준 최소 이만큼 이후만 허용 (밀리초) */
-export const MIN_SCHEDULE_LEAD_MS = 60 * 60 * 1000;
+export function getMeetingCreateMinScheduleLeadMinutes(): number {
+  const raw = getPolicyNumeric('meeting_create', 'min_schedule_lead_minutes', 0);
+  const parsed = Math.round(Number(raw));
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(43_200, parsed)) : 0;
+}
+
+export function meetingCreateMinScheduleLeadDescription(minutes = getMeetingCreateMinScheduleLeadMinutes()): string {
+  const m = Math.max(0, Math.trunc(minutes));
+  if (m <= 0) return '현재 이후 일정만 등록할 수 있어요.';
+  if (m % 60 === 0) return `지금부터 최소 ${m / 60}시간 이상 남은 일정만 등록할 수 있어요.`;
+  return `지금부터 최소 ${m}분 이상 남은 일정만 등록할 수 있어요.`;
+}
+
+function meetingCreateMinScheduleLeadErrorMessage(label: string, suffix: string, minutes: number): string {
+  const m = Math.max(0, Math.trunc(minutes));
+  if (m <= 0) return `${label}${suffix}: 약속 일시는 현재 이후 시각만 등록할 수 있어요.`;
+  if (m % 60 === 0) {
+    return `${label}${suffix}: 약속 일시는 지금부터 최소 ${m / 60}시간 이상 남은 시각만 등록할 수 있어요.`;
+  }
+  return `${label}${suffix}: 약속 일시는 지금부터 최소 ${m}분 이상 남은 시각만 등록할 수 있어요.`;
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, '0');
@@ -106,6 +126,12 @@ function startOfLocalDay(d: Date): Date {
   return x;
 }
 
+function startOfLocalMinuteMs(d: Date): number {
+  const x = new Date(d);
+  x.setSeconds(0, 0);
+  return x.getTime();
+}
+
 /** 로컬 달력에서 `now`의 날짜 기준 한 달 뒤(달력 `setMonth` 규칙) 같은 일의 00:00 */
 export function maxSelectableScheduleDayStartLocal(now: Date = new Date()): Date {
   const t0 = startOfLocalDay(now);
@@ -181,7 +207,8 @@ function validateDateCandidateSchedulePolicy(
 ): string | null {
   const label = `일시 후보 ${index + 1}`;
   const todayStart = startOfLocalDay(now).getTime();
-  const minInstant = now.getTime() + MIN_SCHEDULE_LEAD_MS;
+  const minLeadMinutes = getMeetingCreateMinScheduleLeadMinutes();
+  const minInstant = minLeadMinutes <= 0 ? startOfLocalMinuteMs(now) : now.getTime() + minLeadMinutes * 60 * 1000;
   const oneMonthMax = opts?.oneMonthMax !== false;
   const maxDayStart = maxSelectableScheduleDayStartLocal(now).getTime();
 
@@ -194,7 +221,7 @@ function validateDateCandidateSchedulePolicy(
       return `${label}${suffix}: 약속 날짜는 오늘부터 한 달 이내만 선택할 수 있어요.`;
     }
     if (dt.getTime() < minInstant) {
-      return `${label}${suffix}: 약속 일시는 지금부터 최소 1시간 이상 남은 시각만 등록할 수 있어요.`;
+      return meetingCreateMinScheduleLeadErrorMessage(label, suffix, minLeadMinutes);
     }
     return null;
   };

@@ -40,6 +40,7 @@ import {
   fmtDateYmd,
   maxSelectableScheduleDayStartLocal,
   maxSelectableScheduleYmdLocal,
+  meetingCreateMinScheduleLeadDescription,
   validateDateCandidate,
 } from '@/src/lib/date-candidate';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
@@ -78,8 +79,8 @@ import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src
 import { consumePendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+  getScheduleOverlapBufferHours,
 } from '@/src/lib/meeting-schedule-overlap';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
@@ -450,7 +451,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       await assertDateCandidatesNoOverlapWithOtherMeetings({
         appUserId: sessionUserId,
         candidates: nextDates,
-        bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+        bufferHours: getScheduleOverlapBufferHours(null),
         excludeMeetingId: null,
       });
       return true;
@@ -586,7 +587,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         if (err) {
           Alert.alert(
             '일시 확인',
-            `${err}\n\n자연어로 추가할 때도 오늘 이후이며, 지금부터 최소 1시간 이상 남은 일정만 등록할 수 있어요.`,
+            `${err}\n\n자연어로 추가할 때도 오늘 이후이며, ${meetingCreateMinScheduleLeadDescription()}`,
           );
           return;
         }
@@ -610,7 +611,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       if (err) {
         Alert.alert(
           '일시 확인',
-          `${err}\n\n자연어로 추가할 때도 오늘 이후이며, 지금부터 최소 1시간 이상 남은 일정만 등록할 수 있어요.`,
+          `${err}\n\n자연어로 추가할 때도 오늘 이후이며, ${meetingCreateMinScheduleLeadDescription()}`,
         );
         return;
       }
@@ -1005,7 +1006,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           await assertDateCandidatesNoOverlapWithOtherMeetings({
             appUserId: sessionUserId,
             candidates: dates,
-            bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+            bufferHours: getScheduleOverlapBufferHours(null),
             excludeMeetingId: null,
           });
         } catch (e) {

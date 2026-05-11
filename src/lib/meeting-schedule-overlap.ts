@@ -11,7 +11,6 @@ import {
   parseScheduleToTimestamp,
   type MeetingScheduleTimeFields,
 } from '@/src/lib/meeting-schedule-times';
-import { effectiveGLevel } from '@/src/lib/ginit-trust';
 import { supabase } from '@/src/lib/supabase';
 import type { UserProfile } from '@/src/lib/user-profile';
 
@@ -52,10 +51,6 @@ function isUserJoinedMeetingForScheduleOverlap(
   return false;
 }
 
-/** Lv.4+ & 높은 gTrust 시 버퍼 완화 */
-export const OVERLAP_RELAX_G_LEVEL_MIN = 4;
-export const OVERLAP_RELAX_G_TRUST_MIN = 80;
-
 /** 레거시·테스트용 — 런타임 문구는 `overlapThrowMessageForHours` 사용 */
 export const OVERLAP_CONFLICT_MESSAGE_3H = '이미 해당 시간대 근처(3시간 이내)에 다른 확정된 약속이 있습니다.';
 export const OVERLAP_CONFLICT_MESSAGE_2H = '이미 해당 시간대 근처(2시간 이내)에 다른 확정된 약속이 있습니다.';
@@ -66,17 +61,13 @@ export const GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION =
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
- * 일정 겹침 버퍼(시간). 기본값은 `app_policies` meeting.overlap_hours(캐시)이며,
- * Lv.4+ & gTrust 80+ 구간은 제품상 2시간으로 완화합니다.
+ * 일정 겹침 버퍼(시간). 단일 기준은 `app_policies` meeting.overlap_hours(캐시)입니다.
+ * 인자는 기존 호출부 호환용이며, 사용자 등급별 완화 없이 정책값을 그대로 사용합니다.
  */
-export function getScheduleOverlapBufferHours(profile: UserProfile | null | undefined): number {
-  const baseRaw = getPolicyNumeric('meeting', 'overlap_hours', 3);
-  const base = Math.max(1, Math.min(168, Math.round(Number(baseRaw)) || 3));
-  const lv = effectiveGLevel(profile);
-  const trust =
-    typeof profile?.gTrust === 'number' && Number.isFinite(profile.gTrust) ? Math.floor(profile.gTrust) : 0;
-  if (lv >= OVERLAP_RELAX_G_LEVEL_MIN && trust >= OVERLAP_RELAX_G_TRUST_MIN) return 2;
-  return base;
+export function getScheduleOverlapBufferHours(_profile?: UserProfile | null | undefined): number {
+  const baseRaw = getPolicyNumeric('meeting', 'overlap_hours', 2);
+  const parsed = Math.round(Number(baseRaw));
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(168, parsed)) : 2;
 }
 
 export function isUuidMeetingIdForOverlap(id: string): boolean {
@@ -246,12 +237,6 @@ export async function loadOverlapMeetingScans(appUserId: string): Promise<Overla
   return fr.meetings.map((m) => scanFromFirestoreMeeting(m));
 }
 
-/**
- * 모임 만들기·일정 후보 UI — 다른 참여 약속과의 겹침 검사 시 사용하는 버퍼(시간).
- * (`getScheduleOverlapBufferHours` 정책 완화와 별도로 후보 입력 단계에서는 3시간 고정)
- */
-export const DATE_CANDIDATE_OVERLAP_BUFFER_HOURS = 3;
-
 export function collectScheduleInstantMsFromDateCandidates(candidates: readonly DateCandidate[]): number[] {
   const raw: number[] = [];
   for (const c of candidates) {
@@ -294,6 +279,7 @@ export async function assertProposedStartsOverlapHybrid(opts: {
   const uid = appUserId.trim();
   const uniq = [...new Set(opts.startMsList.filter((t): t is number => Number.isFinite(t)))];
   if (!uid || uniq.length === 0) return;
+  if (!Number.isFinite(bufferHours) || bufferHours <= 0) return;
 
   const excludeUuid =
     excludeMeetingId?.trim() && isUuidMeetingIdForOverlap(excludeMeetingId) ? excludeMeetingId.trim() : null;
@@ -342,6 +328,7 @@ export function findFirestoreConfirmedOverlap(
 ): boolean {
   const uid = appUserId.trim();
   if (!uid || !Number.isFinite(proposedStartMs)) return false;
+  if (!Number.isFinite(bufferHours) || bufferHours <= 0) return false;
   const bufMs = bufferHours * 60 * 60 * 1000;
   const ex = excludeMeetingId?.trim() ?? '';
   for (const m of meetings) {
@@ -400,6 +387,7 @@ export function meetingOverlapsUserConfirmedSlots(
 ): boolean {
   const t = meetingScheduleStartMs(card);
   if (t == null) return false;
+  if (!Number.isFinite(bufferHours) || bufferHours <= 0) return false;
   const bufMs = bufferHours * 60 * 60 * 1000;
   for (const s of slots) {
     if (s.meetingId === card.id) continue;

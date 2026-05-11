@@ -64,7 +64,7 @@ import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
-import { getMeetingMapPinAccentColor } from '@/src/lib/map-meeting-marker-appearance';
+import { getMapPinGradientColors, getMeetingMapPinAccentColor } from '@/src/lib/map-meeting-marker-appearance';
 import {
   MAP_AVATAR_CLUSTERING_MAX_DELTA,
   groupMeetingsByCoordinateOverlap,
@@ -2050,14 +2050,15 @@ export default function MapScreen() {
                     longitude: m.longitude as number,
                   };
                   const pinColor = getMeetingMapPinAccentColor(m, categories);
+                  const pinGradientColors = getMapPinGradientColors(pinColor);
                   const emoji = categoryEmojiForMeeting(m, categories);
                   return (
                     <NaverMapMarkerOverlay
                       key={item.key}
                       latitude={c.latitude}
                       longitude={c.longitude}
-                      width={56}
-                      height={60}
+                      width={72}
+                      height={76}
                       anchor={{ x: 0.5, y: 1 }}
                       zIndex={selected ? 1200 : 600}
                       onTap={() => onPeopleMarkerPress(m)}>
@@ -2066,12 +2067,54 @@ export default function MapScreen() {
                         pointerEvents="none"
                         collapsable={false}
                         style={styles.naverMeetingPinRoot}>
+                        <View pointerEvents="none" style={styles.naverMeetingPinGroundShadow}>
+                          <View style={styles.naverMeetingPinGroundShadowFeather} />
+                          <View style={styles.naverMeetingPinGroundShadowSoft} />
+                          <View style={styles.naverMeetingPinGroundShadowCore} />
+                        </View>
                         <MaterialCommunityIcons
                           name="map-marker"
-                          size={60}
-                          color={pinColor}
+                          size={72}
+                          color="rgba(15, 23, 42, 0.2)"
+                          style={styles.naverMeetingPinBodyShadow}
+                        />
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color="rgba(15, 23, 42, 0.3)"
+                          style={styles.naverMeetingPinOuterEdge}
+                        />
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color={pinGradientColors[1]}
                           style={styles.naverMeetingPinGlyph}
                         />
+                        <View pointerEvents="none" style={styles.naverMeetingPinLowerDepth}>
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={72}
+                            color="rgba(15, 23, 42, 0.16)"
+                            style={styles.naverMeetingPinLowerDepthGlyph}
+                          />
+                        </View>
+                        <View pointerEvents="none" style={styles.naverMeetingPinHighlightTop}>
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={72}
+                            color={pinGradientColors[0]}
+                            style={styles.naverMeetingPinHighlightGlyphTop}
+                          />
+                        </View>
+                        <View pointerEvents="none" style={styles.naverMeetingPinHighlightMid}>
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={72}
+                            color={pinGradientColors[0]}
+                            style={styles.naverMeetingPinHighlightGlyphMid}
+                          />
+                        </View>
+                        <View pointerEvents="none" style={styles.naverMeetingPinGloss} />
                         <View style={styles.naverMeetingPinEmojiDisc} collapsable={false}>
                           <Text style={styles.naverMeetingPinEmojiText} allowFontScaling={false}>
                             {emoji}
@@ -2089,13 +2132,14 @@ export default function MapScreen() {
                 };
                 const stackEmoji = categoryEmojiForMeeting(lead, categories);
                 const stackPinColor = getMeetingMapPinAccentColor(lead, categories);
+                const stackPinGradientColors = getMapPinGradientColors(stackPinColor);
                 return (
                   <NaverMapMarkerOverlay
                     key={item.key}
                     latitude={c.latitude}
                     longitude={c.longitude}
-                    width={56}
-                    height={60}
+                    width={72}
+                    height={76}
                     anchor={{ x: 0.5, y: 1 }}
                     zIndex={stackSelected ? 1200 : 600}
                     onTap={() => onPeopleMarkerPress(lead)}>
@@ -2104,12 +2148,54 @@ export default function MapScreen() {
                       pointerEvents="none"
                       collapsable={false}
                       style={styles.naverMeetingPinRoot}>
+                      <View pointerEvents="none" style={styles.naverMeetingPinGroundShadow}>
+                        <View style={styles.naverMeetingPinGroundShadowFeather} />
+                        <View style={styles.naverMeetingPinGroundShadowSoft} />
+                        <View style={styles.naverMeetingPinGroundShadowCore} />
+                      </View>
                       <MaterialCommunityIcons
                         name="map-marker"
-                        size={60}
-                        color={stackPinColor}
+                        size={72}
+                        color="rgba(15, 23, 42, 0.2)"
+                        style={styles.naverMeetingPinBodyShadow}
+                      />
+                      <MaterialCommunityIcons
+                        name="map-marker"
+                        size={72}
+                        color="rgba(15, 23, 42, 0.3)"
+                        style={styles.naverMeetingPinOuterEdge}
+                      />
+                      <MaterialCommunityIcons
+                        name="map-marker"
+                        size={72}
+                        color={stackPinGradientColors[1]}
                         style={styles.naverMeetingPinGlyph}
                       />
+                      <View pointerEvents="none" style={styles.naverMeetingPinLowerDepth}>
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color="rgba(15, 23, 42, 0.16)"
+                          style={styles.naverMeetingPinLowerDepthGlyph}
+                        />
+                      </View>
+                      <View pointerEvents="none" style={styles.naverMeetingPinHighlightTop}>
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color={stackPinGradientColors[0]}
+                          style={styles.naverMeetingPinHighlightGlyphTop}
+                        />
+                      </View>
+                      <View pointerEvents="none" style={styles.naverMeetingPinHighlightMid}>
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color={stackPinGradientColors[0]}
+                          style={styles.naverMeetingPinHighlightGlyphMid}
+                        />
+                      </View>
+                      <View pointerEvents="none" style={styles.naverMeetingPinGloss} />
                       <View style={styles.naverMeetingPinEmojiDiscStack} collapsable={false}>
                         <Text style={styles.naverMeetingPinEmojiTextStack} allowFontScaling={false}>
                           {stackEmoji}
@@ -2151,6 +2237,7 @@ export default function MapScreen() {
                     longitude: m.longitude as number,
                   };
                   const iosPinAccent = getMeetingMapPinAccentColor(m, categories);
+                  const iosPinGradientColors = getMapPinGradientColors(iosPinAccent);
                   return (
                     <Marker
                       key={item.key}
@@ -2166,7 +2253,17 @@ export default function MapScreen() {
                       <View
                         pointerEvents="none"
                         collapsable={false}
-                        style={[styles.mapCategoryEmojiMarker, { borderColor: iosPinAccent }]}>
+                        style={[
+                          styles.mapCategoryEmojiMarker,
+                          { backgroundColor: iosPinAccent, borderColor: iosPinAccent },
+                        ]}>
+                        <LinearGradient
+                          colors={iosPinGradientColors}
+                          locations={[0, 1]}
+                          start={{ x: 0.2, y: 0 }}
+                          end={{ x: 0.85, y: 1 }}
+                          style={styles.mapCategoryMarkerGradientFill}
+                        />
                         <Text style={styles.mapCategoryEmojiMarkerText} allowFontScaling={false}>
                           {categoryEmojiForMeeting(m, categories)}
                         </Text>
@@ -2181,6 +2278,7 @@ export default function MapScreen() {
                   longitude: lead.longitude as number,
                 };
                 const iosStackAccent = getMeetingMapPinAccentColor(lead, categories);
+                const iosStackGradientColors = getMapPinGradientColors(iosStackAccent);
                 return (
                   <Marker
                     key={item.key}
@@ -2199,6 +2297,13 @@ export default function MapScreen() {
                         { backgroundColor: iosStackAccent, borderColor: GinitTheme.colors.surfaceStrong },
                       ]}
                       collapsable={false}>
+                      <LinearGradient
+                        colors={iosStackGradientColors}
+                        locations={[0, 1]}
+                        start={{ x: 0.2, y: 0 }}
+                        end={{ x: 0.85, y: 1 }}
+                        style={styles.mapStackGradientFill}
+                      />
                       <Text style={styles.mapStackCountBubbleEmoji} allowFontScaling={false}>
                         {categoryEmojiForMeeting(lead, categories)}
                       </Text>
@@ -3420,47 +3525,160 @@ const styles = StyleSheet.create({
   },
   /** Android 네이버: MCI 핀 + 흰 원(이모지) — 핀 머리(상단 둥근 부분) 안에 맞춤 */
   naverMeetingPinRoot: {
-    width: 56,
-    height: 60,
+    width: 72,
+    height: 76,
     position: 'relative',
   },
   naverMeetingPinGlyph: {
     position: 'absolute',
     alignSelf: 'center',
+    bottom: 2,
+    zIndex: 2,
+  },
+  naverMeetingPinGroundShadow: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 1,
+    width: 30,
+    height: 10,
+    zIndex: 0,
+  },
+  naverMeetingPinGroundShadowFeather: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 0,
+    width: 28,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.05)',
+    transform: [{ scaleX: 1.16 }],
+  },
+  naverMeetingPinGroundShadowSoft: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 2,
+    width: 22,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    transform: [{ scaleX: 1.08 }],
+  },
+  naverMeetingPinGroundShadowCore: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 3,
+    width: 14,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.14)',
+  },
+  naverMeetingPinBodyShadow: {
+    position: 'absolute',
+    alignSelf: 'center',
     bottom: 0,
     zIndex: 0,
+    transform: [{ translateY: 2 }],
+  },
+  naverMeetingPinOuterEdge: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 2,
+    zIndex: 1,
+    transform: [{ scale: 1.035 }],
+  },
+  naverMeetingPinLowerDepth: {
+    position: 'absolute',
+    top: 36,
+    left: 0,
+    right: 0,
+    height: 38,
+    overflow: 'hidden',
+    zIndex: 3,
+  },
+  naverMeetingPinLowerDepthGlyph: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: -34,
+  },
+  naverMeetingPinHighlightTop: {
+    position: 'absolute',
+    top: 2,
+    left: 0,
+    right: 0,
+    height: 36,
+    overflow: 'hidden',
+    opacity: 0.66,
+    zIndex: 4,
+  },
+  naverMeetingPinHighlightMid: {
+    position: 'absolute',
+    top: 34,
+    left: 0,
+    right: 0,
+    height: 12,
+    overflow: 'hidden',
+    opacity: 0.18,
+    zIndex: 4,
+  },
+  naverMeetingPinHighlightGlyphTop: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: -2,
+  },
+  naverMeetingPinHighlightGlyphMid: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: -32,
+  },
+  naverMeetingPinGloss: {
+    position: 'absolute',
+    top: 14,
+    left: 23,
+    width: 13,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.26)',
+    transform: [{ rotate: '-22deg' }],
+    zIndex: 5,
   },
   naverMeetingPinEmojiDisc: {
     position: 'absolute',
-    top: 8,
+    top: 11,
     alignSelf: 'center',
-    width: 28,
-    height: 28,
-    marginLeft: 4,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: GinitTheme.colors.surfaceStrong,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1,
+    zIndex: 6,
   },
   naverMeetingPinEmojiDiscStack: {
     position: 'absolute',
-    top: 8,
+    top: 10,
     alignSelf: 'center',
-    width: 29,
-    height: 29,
-    borderRadius: 14,
-    marginLeft: 4,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: GinitTheme.colors.surfaceStrong,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1,
+    zIndex: 6,
   },
   naverMeetingPinEmojiText: {
+    fontSize: 16,
+    lineHeight: 18,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
+  },
+  naverMeetingPinEmojiTextStack: {
     fontSize: 14,
     lineHeight: 16,
     textAlign: 'center',
@@ -3469,17 +3687,8 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  naverMeetingPinEmojiTextStack: {
-    fontSize: 12,
-    lineHeight: 14,
-    textAlign: 'center',
-    ...Platform.select({
-      android: { includeFontPadding: false },
-      default: {},
-    }),
-  },
   naverMeetingPinStackCountText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: GinitTheme.colors.text,
     marginTop: -2,
@@ -3499,10 +3708,19 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
+  mapCategoryMarkerGradientFill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 17,
+  },
+  mapStackGradientFill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
+  },
   mapCategoryEmojiMarkerText: {
     fontSize: 20,
     lineHeight: 24,
     textAlign: 'center',
+    zIndex: 1,
     ...Platform.select({
       android: { includeFontPadding: false },
       default: {},
@@ -3520,15 +3738,18 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.colors.primary,
     borderWidth: 2,
     borderColor: '#FFFFFF',
+    overflow: 'hidden',
   },
   mapStackCountBubbleEmoji: {
     fontSize: 18,
     lineHeight: 22,
+    zIndex: 1,
   },
   mapStackCountBubbleText: {
     fontSize: 17,
     fontWeight: '600',
     color: '#FFFFFF',
+    zIndex: 1,
   },
 
 });

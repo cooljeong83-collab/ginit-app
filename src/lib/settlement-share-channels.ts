@@ -21,27 +21,48 @@ function maskNameMiddleForShare(name: string): string {
 
 export type SettlementShareMessageParams = {
   meetingTitle: string;
-  meetingId: string;
+  participantCount: number;
+  settlementMethodText: string;
+  paymentMethod?: 'cash' | 'bank_transfer' | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountHolder?: string | null;
   perPersonWon: number | null;
   totalWon: number | null;
-  hostAccountText: string;
 };
 
 export function buildSettlementShareMessage(p: SettlementShareMessageParams): string {
   const title = (p.meetingTitle ?? '').trim() || '모임';
+  const formatWon = (value: number | null) =>
+    value != null && Number.isFinite(value) ? `${Math.trunc(value).toLocaleString('ko-KR')}원` : '';
+  const paymentMethod = p.paymentMethod === 'cash' ? 'cash' : 'bank_transfer';
+  const paymentMethodText = paymentMethod === 'cash' ? '현금' : '계좌';
   const lines = [
     `[지닛 정산] ${title}`,
-    `모임 ID: ${p.meetingId}`,
-    p.totalWon != null && Number.isFinite(p.totalWon) ? `총액: ${Math.trunc(p.totalWon).toLocaleString()}원` : null,
-    p.perPersonWon != null && Number.isFinite(p.perPersonWon)
-      ? `인당: ${Math.trunc(p.perPersonWon).toLocaleString()}원`
-      : null,
-    p.hostAccountText.trim()
-      ? `입금 계좌: ${maskHolderInHostAccountTextForShare(p.hostAccountText.trim())}`
-      : null,
-    '앱에서 모임 상세를 확인해 주세요.',
-  ].filter((x): x is string => typeof x === 'string' && x.length > 0);
+    `인원 : ${Math.max(0, Math.trunc(p.participantCount)).toLocaleString('ko-KR')}명`,
+    `총 금액 : ${formatWon(p.totalWon)}`,
+    `정산 방식 : ${(p.settlementMethodText ?? '').trim()}`,
+    `지불 방식 : ${paymentMethodText}`,
+  ];
+  if (paymentMethod === 'bank_transfer') {
+    const bankName = (p.bankName ?? '').trim();
+    const accountNumber = (p.accountNumber ?? '').replace(/\D/g, '').trim();
+    const accountHolder = maskNameMiddleWithOForShare(p.accountHolder ?? '');
+    if (bankName) lines.push(`입금은행 : ${bankName}`);
+    if (accountNumber) lines.push(`계좌번호 : ${accountNumber}`);
+    if (accountHolder) lines.push(`입금자명 : ${accountHolder}`);
+  }
+  lines.push(`내가 지불할 금액 : ${formatWon(p.perPersonWon)}`);
+  lines.push('영수증 및 상세 내역을 확인하고 싶으시면 어플 모임 상세에서 확인하세요.');
   return lines.join('\n');
+}
+
+function maskNameMiddleWithOForShare(name: string): string {
+  const s = name.trim();
+  const n = s.length;
+  if (n <= 1) return s;
+  if (n === 2) return `${s[0]}o`;
+  return `${s[0]}${'o'.repeat(n - 2)}${s[n - 1]}`;
 }
 
 export async function shareSettlementText(message: string): Promise<void> {

@@ -73,8 +73,8 @@ import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-ext
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
-  DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
-  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION
+  GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
+  getScheduleOverlapBufferHours
 } from '@/src/lib/meeting-schedule-overlap';
 import {
   isHostScheduleUnconfirmHiddenByStartProximity,
@@ -1415,7 +1415,7 @@ export default function MeetingDetailScreen() {
         await assertDateCandidatesNoOverlapWithOtherMeetings({
           appUserId: uid,
           candidates: additions,
-          bufferHours: DATE_CANDIDATE_OVERLAP_BUFFER_HOURS,
+          bufferHours: getScheduleOverlapBufferHours(null),
           excludeMeetingId: meeting.id,
         });
       } catch (e) {
@@ -1827,6 +1827,20 @@ export default function MeetingDetailScreen() {
     return isMeetingSettlementCtaEligibleForHost(meeting, uid, Date.now());
   }, [meeting, userId, appPoliciesVersion]);
 
+  const meetingSettlementCompleted = meeting?.lifecycleStatus === 'SETTLED';
+
+  const canViewMeetingSettlement = useMemo(() => {
+    if (!meeting || !sessionPk || !meetingSettlementCompleted) return false;
+    if (isHost) return true;
+    if (!alreadyJoinedMeeting) return false;
+    const selected = meeting.settlementInfo?.selectedParticipantIds ?? [];
+    if (selected.length === 0) return true;
+    return selected.some((id) => (normalizeParticipantId(String(id)) ?? String(id).trim()) === sessionPk);
+  }, [meeting, sessionPk, meetingSettlementCompleted, isHost, alreadyJoinedMeeting]);
+
+  const showHostSettlementBottomCta = Boolean(isHost && (showSettlementHostBanner || canViewMeetingSettlement));
+  const showParticipantSettlementBottomCta = Boolean(!isHost && canViewMeetingSettlement);
+
   const showMeetingArrivalVerifyTopBanner = useMemo(() => {
     void arrivalUiTick;
     void appPoliciesVersion;
@@ -2057,6 +2071,52 @@ export default function MeetingDetailScreen() {
       </GinitPressable>
     );
   }, [showMeetingReviewWriteCta]);
+
+  const hostSettlementBottomCtaEl = useMemo(() => {
+    if (!meeting || !showHostSettlementBottomCta) return null;
+    const completed = meeting.lifecycleStatus === 'SETTLED';
+    return (
+      <GinitPressable
+        onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
+        style={({ pressed }) => [
+          styles.bottomPill,
+          styles.bottomPillFlex,
+          { backgroundColor: GinitTheme.colors.deepPurple },
+          pressed && { opacity: 0.88 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="정산">
+        <GinitSymbolicIcon name="wallet-outline" size={18} color="#fff" />
+        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
+          정산
+        </Text>
+      </GinitPressable>
+    );
+  }, [meeting, showHostSettlementBottomCta, router]);
+
+  const participantSettlementBottomCtaEl = useMemo(() => {
+    if (!meeting || !showParticipantSettlementBottomCta) return null;
+    return (
+      <GinitPressable
+        onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
+        style={({ pressed }) => [
+          styles.bottomPill,
+          styles.bottomPillFlex,
+          { backgroundColor: GinitTheme.colors.deepPurple },
+          pressed && { opacity: 0.88 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="정산">
+        <GinitSymbolicIcon name="wallet-outline" size={16} color="#fff" />
+        <Text
+          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
+          numberOfLines={1}
+          ellipsizeMode="tail">
+          정산
+        </Text>
+      </GinitPressable>
+    );
+  }, [meeting, showParticipantSettlementBottomCta, router]);
 
   const onDateChipPress = useCallback(
     (chipId: string) => {
@@ -3872,6 +3932,7 @@ export default function MeetingDetailScreen() {
                     </GinitPressable>
                   ) : null}
                   {hostArrivalBottomCtaEl}
+                  {hostSettlementBottomCtaEl}
                   {hostReviewBottomCtaEl}
                 </View>
               </View>
@@ -3971,6 +4032,7 @@ export default function MeetingDetailScreen() {
                     </GinitPressable>
                   ) : null}
                   {participantArrivalBottomCtaEl}
+                  {participantSettlementBottomCtaEl}
                   {participantReviewBottomCtaEl}
                 </View>
               </View>
