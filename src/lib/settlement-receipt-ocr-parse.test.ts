@@ -33,4 +33,36 @@ describe('parseSettlementReceiptOcrText', () => {
     expect(r.accountHint).toBeTruthy();
     expect(r.accountHint).toContain('국민');
   });
+
+  it('품목 합계와 할인으로 결제액을 검증합니다', () => {
+    const r = parseSettlementReceiptOcrText(['카페 지닛', '아메리카노 2개 4,500 9,000', '쿠폰할인 -1,000', '결제금액 8,000원']);
+    expect(r.totalWon).toBe(8000);
+    expect(r.analysis.review_source.items).toHaveLength(1);
+    expect(r.analysis.review_source.items[0]?.name).toContain('아메리카노');
+    expect(r.analysis.billing.total_amount).toBe(8000);
+    expect(r.analysis.billing.is_verified).toBe(true);
+  });
+
+  it('부가세와 봉사료를 더해 결제액을 검증합니다', () => {
+    const r = parseSettlementReceiptOcrText(['레스토랑', '파스타 1개 10,000', '부가세 1,000원', '봉사료 500원', '받을 금액', '11,500원']);
+    expect(r.totalWon).toBe(11500);
+    expect(r.analysis.verification.store_name).toBe('레스토랑');
+    expect(r.analysis.billing.total_amount).toBe(11500);
+    expect(r.analysis.billing.is_verified).toBe(true);
+  });
+
+  it('산술이 맞지 않으면 확인 필요로 표시합니다', () => {
+    const r = parseSettlementReceiptOcrText(['메뉴 1개 10,000', '할인 -1,000', '결제금액 8,000원']);
+    expect(r.totalWon).toBe(8000);
+    expect(r.analysis.billing.total_amount).toBe(8000);
+    expect(r.analysis.billing.is_verified).toBe(false);
+  });
+
+  it('단일 품목 숫자 1자리 OCR 오인은 산술상 명확할 때만 교정합니다', () => {
+    const r = parseSettlementReceiptOcrText(['메뉴 1개 18,000', '할인 -8,000', '결제금액 2,000원']);
+    expect(r.totalWon).toBe(2000);
+    expect(r.analysis.review_source.items[0]?.name).toContain('메뉴');
+    expect(r.analysis.billing.total_amount).toBe(2000);
+    expect(r.analysis.billing.is_verified).toBe(true);
+  });
 });

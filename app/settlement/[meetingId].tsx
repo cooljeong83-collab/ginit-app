@@ -1,11 +1,12 @@
-import * as ImagePicker from 'expo-image-picker';
-import type { ImagePickerAsset } from 'expo-image-picker';
 import { Image } from 'expo-image';
+import type { ImagePickerAsset } from 'expo-image-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   DeviceEventEmitter,
   Modal,
   Platform,
@@ -14,8 +15,10 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
@@ -35,45 +38,52 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import {
-  buildMeetingTopNoticeTitleLeft,
-  formatPublicMeetingSettlementSummary,
-  getMeetingById,
-  type Meeting,
-  type MeetingSettlementReceiptItem,
-  parsePublicMeetingDetailsConfig,
-} from '@/src/lib/meetings';
-import {
-  markMeetingLifecycleSettled,
-  persistMeetingLocationDataPatch,
-  persistMeetingSettlementInfoPatch,
-} from '@/src/lib/meeting-settlement-persist';
-import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
-import {
-  buildSettlementShareMessage,
-  maskHolderInHostAccountTextForShare,
-  shareSettlementText,
-} from '@/src/lib/settlement-share-channels';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
-import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
-import { runSettlementReceiptOcrFromUri } from '@/src/lib/settlement-receipt-ocr';
-import {
-  isRemoteSettlementReceiptImageUri,
-  uploadCompressedSettlementReceiptToSupabase,
-} from '@/src/lib/settlement-receipt-storage';
 import {
   composeSettlementHostAccountText,
   getSettlementBankById,
   parseSettlementLegacyHostAccountText,
 } from '@/src/lib/korean-banks-settlement';
+import {
+  markMeetingLifecycleSettled,
+  persistMeetingLocationDataPatch,
+  persistMeetingSettlementInfoPatch,
+} from '@/src/lib/meeting-settlement-persist';
+import {
+  buildMeetingTopNoticeTitleLeft,
+  formatPublicMeetingSettlementSummary,
+  getMeetingById,
+  parsePublicMeetingDetailsConfig,
+  type Meeting,
+  type MeetingSettlementReceiptItem,
+} from '@/src/lib/meetings';
+import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
+import {
+  fetchSettlementReceiptAnalysesFromSupabase,
+  syncSettlementReceiptAnalysesToSupabase,
+  type SettlementReceiptAnalysisRecord,
+} from '@/src/lib/settlement-receipt-analysis-storage';
+import { runSettlementReceiptOcrFromUri } from '@/src/lib/settlement-receipt-ocr';
+import type { SettlementReceiptOcrAnalysis, SettlementReceiptOcrProgress } from '@/src/lib/settlement-receipt-ocr-types';
+import {
+  isRemoteSettlementReceiptImageUri,
+  uploadCompressedSettlementReceiptToSupabase,
+} from '@/src/lib/settlement-receipt-storage';
+import {
+  buildSettlementShareMessage,
+  maskHolderInHostAccountTextForShare,
+  type SettlementShareReceiptSummary,
+  shareSettlementText,
+} from '@/src/lib/settlement-share-channels';
+import { getUserProfilesForIds, type UserProfile } from '@/src/lib/user-profile';
 import {
   getUserSettlementAccountById,
   loadUserSettlementAccounts,
   resolveEffectiveDefaultId,
   type UserSettlementAccountsState,
 } from '@/src/lib/user-settlement-accounts';
-import { getUserProfilesForIds, type UserProfile } from '@/src/lib/user-profile';
 
 const MAX_SETTLEMENT_PUSH_RECIPIENTS = 50;
 const MAX_RECEIPT_IMAGES_PER_BATCH = 12;
@@ -116,10 +126,143 @@ type SettlementReceiptRow = {
   previewUri: string;
   amountWon: number;
   naturalWidth?: number;
+  analysis?: SettlementReceiptOcrAnalysis;
+};
+
+type SettlementReceiptAddition = {
+  assetIndex: number;
+  uri: string;
+  amountWon: number;
+  naturalWidth?: number;
+  analysis?: SettlementReceiptOcrAnalysis;
+};
+
+type SettlementReceiptScanStage = 'scanning' | 'ready' | 'error';
+
+type SettlementReceiptScanPreviewState = {
+  assets: ImagePickerAsset[];
+  currentIndex: number;
+  processingIndex: number | null;
+  stage: SettlementReceiptScanStage;
+  message: string;
+  recognizedText: string[];
+  recognizedTextByIndex: Record<number, string[]>;
+  scanErrorsByIndex: Record<number, string>;
+  additions: SettlementReceiptAddition[];
+  accountHint: string | null;
+  errorMessage?: string;
 };
 
 function newSettlementReceiptId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function compactReceiptOcrText(chunks: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of chunks) {
+    const text = raw.replace(/\s+/g, ' ').trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function summarizeReceiptScanTags(additions: SettlementReceiptAddition[]): string {
+  const tags = new Set<string>();
+  for (const addition of additions) {
+    for (const item of addition.analysis?.review_source.items ?? []) {
+      for (const tag of item.tags ?? []) {
+        const t = tag.trim();
+        if (t) tags.add(t);
+      }
+    }
+  }
+  return tags.size > 0 ? [...tags].slice(0, 8).join(', ') : '추출된 태그 없음';
+}
+
+function summarizeReceiptAnalysisTags(analysis: SettlementReceiptOcrAnalysis | undefined): string {
+  if (!analysis) return '태그 없음';
+  return summarizeReceiptScanTags([
+    {
+      assetIndex: 0,
+      uri: '',
+      amountWon: analysis.billing.total_amount ?? 0,
+      analysis,
+    },
+  ]);
+}
+
+function receiptAnalysisTags(analysis: SettlementReceiptOcrAnalysis | undefined): string[] {
+  if (!analysis) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of analysis.review_source.items ?? []) {
+    for (const raw of item.tags ?? []) {
+      const tag = raw.trim();
+      if (!tag || seen.has(tag)) continue;
+      seen.add(tag);
+      out.push(tag);
+      if (out.length >= 8) return out;
+    }
+  }
+  return out;
+}
+
+function settlementReceiptImageKey(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const path = trimmed.split('?')[0] ?? trimmed;
+  return decodeURIComponent(path.split('/').filter(Boolean).at(-1) ?? '').trim();
+}
+
+function findReceiptScanAdditionByAssetIndex(
+  additions: SettlementReceiptAddition[],
+  assetIndex: number,
+): SettlementReceiptAddition | undefined {
+  return additions.find((x) => x.assetIndex === assetIndex);
+}
+
+function waitReceiptScanResultPreview(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 650));
+}
+
+function waitReceiptScanSlideTransition(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 420));
+}
+
+function SettlementReceiptScanOverlay({ active }: { active: boolean }) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    if (!active) {
+      progress.value = 0;
+      return;
+    }
+    progress.value = 0;
+    progress.value = withRepeat(
+      withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.cubic) }),
+      -1,
+      true,
+    );
+  }, [active, progress]);
+
+  const scanLineStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: progress.value * 244 }],
+  }));
+
+  if (!active) return null;
+
+  return (
+    <View pointerEvents="none" style={styles.receiptScanOverlay}>
+      <View style={styles.receiptScanDim} />
+      <Animated.View style={[styles.receiptScanLine, scanLineStyle]}>
+        <View style={styles.receiptScanLineCore} />
+      </Animated.View>
+    </View>
+  );
 }
 
 function normalizeSettlementCompareDigits(raw: string | null | undefined): string {
@@ -147,6 +290,7 @@ function sameSettlementStringList(a: readonly string[], b: readonly string[]): b
 export default function SettlementMeetingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { userId, authProfile } = useUserSession();
   const { categories } = useMeetingCategories();
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
@@ -162,7 +306,18 @@ export default function SettlementMeetingScreen() {
   const [pushing, setPushing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [settlementHasUnsavedUserChanges, setSettlementHasUnsavedUserChanges] = useState(false);
   const [receiptItems, setReceiptItems] = useState<SettlementReceiptRow[]>([]);
+  const [settlementReceiptAnalysesById, setSettlementReceiptAnalysesById] = useState<Map<string, SettlementReceiptAnalysisRecord>>(
+    new Map(),
+  );
+  const [settlementReceiptAnalysesByImageUrl, setSettlementReceiptAnalysesByImageUrl] = useState<
+    Map<string, SettlementReceiptAnalysisRecord>
+  >(new Map());
+  const [settlementReceiptAnalysesByImageKey, setSettlementReceiptAnalysesByImageKey] = useState<
+    Map<string, SettlementReceiptAnalysisRecord>
+  >(new Map());
+  const [receiptScanPreview, setReceiptScanPreview] = useState<SettlementReceiptScanPreviewState | null>(null);
   const [receiptImageViewerIndex, setReceiptImageViewerIndex] = useState<number | null>(null);
 
   const [totalWonInput, setTotalWonInput] = useState('');
@@ -182,6 +337,9 @@ export default function SettlementMeetingScreen() {
   const [bulkAmountModalOpen, setBulkAmountModalOpen] = useState(false);
   const [bulkAmountDraft, setBulkAmountDraft] = useState('');
   const reopenAccountPickerOnFocusRef = useRef(false);
+  const receiptScanRunIdRef = useRef(0);
+  const receiptScanPagerRef = useRef<ScrollView | null>(null);
+  const receiptScanLastAutoScrollRef = useRef<{ page: number; width: number } | null>(null);
 
   const reload = useCallback(async () => {
     if (!meetingId) return;
@@ -327,18 +485,26 @@ export default function SettlementMeetingScreen() {
     }
     const drRows = si?.draftReceipts;
     if (Array.isArray(drRows) && drRows.length > 0) {
-      setReceiptItems(
+      setReceiptItems((prev) =>
         drRows
-          .map((r) => ({
-            id: typeof r.id === 'string' && r.id.trim() ? r.id.trim() : newSettlementReceiptId(),
-            previewUri: (r.imageUrl ?? '').trim(),
-            amountWon: typeof r.amountWon === 'number' && Number.isFinite(r.amountWon) ? Math.trunc(r.amountWon) : 0,
-          }))
+          .map((r) => {
+            const id = typeof r.id === 'string' && r.id.trim() ? r.id.trim() : newSettlementReceiptId();
+            const previewUri = (r.imageUrl ?? '').trim();
+            const previous = prev.find((item) => item.id === id || item.previewUri.trim() === previewUri);
+            return {
+              id,
+              previewUri,
+              amountWon: typeof r.amountWon === 'number' && Number.isFinite(r.amountWon) ? Math.trunc(r.amountWon) : 0,
+              naturalWidth: previous?.naturalWidth,
+              analysis: previous?.analysis,
+            };
+          })
           .filter((row) => row.previewUri.length > 0),
       );
     } else {
       setReceiptItems([]);
     }
+    setSettlementHasUnsavedUserChanges(false);
   }, [meeting, hostNorm, allSettlementParticipantIds]);
 
   useEffect(() => {
@@ -478,10 +644,80 @@ export default function SettlementMeetingScreen() {
 
   const settlementReadOnly = !canEditSettlement && canViewSettledSettlement;
   const settlementParticipantDisplayIds = settlementReadOnly ? activeSplitParticipantIds : allSettlementParticipantIds;
+  useEffect(() => {
+    if (!settlementReadOnly || !meetingId || receiptItems.length === 0) {
+      setSettlementReceiptAnalysesById(new Map());
+      setSettlementReceiptAnalysesByImageUrl(new Map());
+      setSettlementReceiptAnalysesByImageKey(new Map());
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const rows = await fetchSettlementReceiptAnalysesFromSupabase(meetingId);
+        if (!alive) return;
+        setSettlementReceiptAnalysesById(new Map(rows.map((row) => [row.receiptId, row])));
+        setSettlementReceiptAnalysesByImageUrl(new Map(rows.map((row) => [row.imageUrl.trim(), row])));
+        const imageKeyEntries: [string, SettlementReceiptAnalysisRecord][] = [];
+        for (const row of rows) {
+          const key = settlementReceiptImageKey(row.imageUrl);
+          if (key) imageKeyEntries.push([key, row]);
+        }
+        setSettlementReceiptAnalysesByImageKey(
+          new Map(imageKeyEntries),
+        );
+      } catch {
+        if (alive) {
+          setSettlementReceiptAnalysesById(new Map());
+          setSettlementReceiptAnalysesByImageUrl(new Map());
+          setSettlementReceiptAnalysesByImageKey(new Map());
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [meetingId, receiptItems.length, settlementReadOnly]);
+
   const settlementAccountTextForReadOnly = useMemo(() => {
     const saved = meeting?.settlementInfo?.hostAccountText?.trim() ?? '';
     return saved || composedHostAccountText.trim();
   }, [meeting?.settlementInfo?.hostAccountText, composedHostAccountText]);
+  const maskedSettlementAccountTextForReadOnly = useMemo(
+    () => maskHolderInHostAccountTextForShare(settlementAccountTextForReadOnly),
+    [settlementAccountTextForReadOnly],
+  );
+  const maskedHostAccountHolder = useMemo(() => {
+    const composed = composeSettlementHostAccountText({
+      bankLabel: selectedBank?.label ?? '',
+      accountNumberDigits: hostAccountNumber,
+      holder: hostAccountHolder,
+    });
+    const masked = maskHolderInHostAccountTextForShare(composed);
+    return masked.split(/\s+/).filter(Boolean).at(-1) ?? hostAccountHolder.trim();
+  }, [selectedBank?.label, hostAccountNumber, hostAccountHolder]);
+
+  const settlementShareReceiptSummaries = useMemo<SettlementShareReceiptSummary[]>(() => {
+    return receiptItems.map((it) => {
+      const savedAnalysis =
+        settlementReceiptAnalysesById.get(it.id) ??
+        settlementReceiptAnalysesByImageUrl.get(it.previewUri.trim()) ??
+        settlementReceiptAnalysesByImageKey.get(settlementReceiptImageKey(it.previewUri));
+      const analysis = savedAnalysis?.analysis ?? it.analysis;
+      return {
+        storeName: savedAnalysis?.storeName?.trim() || analysis?.verification.store_name?.trim() || null,
+        bizNum: savedAnalysis?.bizNum?.trim() || analysis?.verification.biz_num?.trim() || null,
+        visitedAt: savedAnalysis?.receiptDateText?.trim() || analysis?.verification.datetime?.trim() || null,
+        amountWon: analysis?.billing.total_amount ?? savedAnalysis?.amountWon ?? it.amountWon,
+        tags: receiptAnalysisTags(analysis),
+      };
+    });
+  }, [
+    receiptItems,
+    settlementReceiptAnalysesById,
+    settlementReceiptAnalysesByImageUrl,
+    settlementReceiptAnalysesByImageKey,
+  ]);
 
   const settlementModeSummaryLine = useMemo(() => {
     if (!meeting) return formatPublicMeetingSettlementSummary('DUTCH', null);
@@ -556,6 +792,35 @@ export default function SettlementMeetingScreen() {
     savedSettlementReceiptsForShare,
   ]);
 
+  const hasUnsavedSettlementChanges =
+    canEditSettlement && settlementHasUnsavedUserChanges && !isCurrentSettlementDraftSavedForShare;
+
+  const requestSettlementBack = useCallback(() => {
+    if (!hasUnsavedSettlementChanges) {
+      safeRouterBack(router);
+      return;
+    }
+    Alert.alert('저장되지 않은 변경', '임시저장 또는 정산 완료 처리하지 않은 변경사항은 저장되지 않아요. 나가시겠어요?', [
+      { text: '계속 작성', style: 'cancel' },
+      {
+        text: '나가기',
+        style: 'destructive',
+        onPress: () => safeRouterBack(router),
+      },
+    ]);
+  }, [hasUnsavedSettlementChanges, router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasUnsavedSettlementChanges) return undefined;
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        requestSettlementBack();
+        return true;
+      });
+      return () => subscription.remove();
+    }, [hasUnsavedSettlementChanges, requestSettlementBack]),
+  );
+
   /** 최상단 바: `정산 방식 요약` + 한 칸 + `정산`(모임 미로드·id 불일치 시 `정산`만). */
   const settlementScreenTopBarTitle = useMemo(() => {
     const mid = meetingId.trim();
@@ -573,6 +838,12 @@ export default function SettlementMeetingScreen() {
     }
 
     const snapshots: MeetingSettlementReceiptItem[] = [];
+    const analysisReceipts: {
+      receiptId: string;
+      imageUrl: string;
+      amountWon: number;
+      analysis?: SettlementReceiptOcrAnalysis;
+    }[] = [];
     for (const row of receiptItems) {
       const rawUri = row.previewUri.trim();
       if (!rawUri) continue;
@@ -589,6 +860,7 @@ export default function SettlementMeetingScreen() {
         });
       }
       snapshots.push({ id: row.id, imageUrl, amountWon: row.amountWon });
+      analysisReceipts.push({ receiptId: row.id, imageUrl, amountWon: row.amountWon, analysis: row.analysis });
     }
 
     await persistMeetingSettlementInfoPatch(meetingId, {
@@ -602,6 +874,11 @@ export default function SettlementMeetingScreen() {
       hostAccountText: usesBankTransferSettlement ? composedHostAccountText.trim() || undefined : null,
       selectedParticipantIds: selectedCount > 0 ? [...selectedParticipantIds] : undefined,
       draftReceipts: snapshots,
+    });
+    await syncSettlementReceiptAnalysesToSupabase({
+      meetingId,
+      uploaderUserId: uid,
+      receipts: analysisReceipts,
     });
     if (meeting.confirmedPlaceChipId?.trim()) {
       await persistMeetingLocationDataPatch(meetingId, {
@@ -635,6 +912,7 @@ export default function SettlementMeetingScreen() {
     setSaving(true);
     try {
       await persistSettlementDraftToServer();
+      setSettlementHasUnsavedUserChanges(false);
       Alert.alert('저장됨', '임시 저장했어요.');
     } catch (e) {
       Alert.alert('오류', e instanceof Error ? e.message : String(e));
@@ -709,6 +987,7 @@ export default function SettlementMeetingScreen() {
         return;
       }
       await markMeetingLifecycleSettled(meetingId);
+      setSettlementHasUnsavedUserChanges(false);
       DeviceEventEmitter.emit('ginit_home_meetings_refetch');
       const fresh = await getMeetingById(meetingId);
       if (fresh) setMeeting(fresh);
@@ -751,6 +1030,7 @@ export default function SettlementMeetingScreen() {
       accountHolder: hostAccountHolder,
       perPersonWon,
       totalWon: effectiveTotalWonParsed,
+      receiptSummaries: settlementShareReceiptSummaries,
     });
   }, [
     meeting,
@@ -762,6 +1042,7 @@ export default function SettlementMeetingScreen() {
     hostAccountHolder,
     perPersonWon,
     effectiveTotalWonParsed,
+    settlementShareReceiptSummaries,
   ]);
 
   const onShareSheet = useCallback(async () => {
@@ -782,6 +1063,7 @@ export default function SettlementMeetingScreen() {
   }, [isCurrentSettlementDraftSavedForShare, sharePayload]);
 
   const toggleParticipant = useCallback((id: string) => {
+    setSettlementHasUnsavedUserChanges(true);
     setSelectedParticipantIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -792,6 +1074,7 @@ export default function SettlementMeetingScreen() {
   }, []);
 
   const switchToSplitNTab = useCallback(() => {
+    if (settlementAmountTab !== 'split_n') setSettlementHasUnsavedUserChanges(true);
     if (settlementAmountTab === 'manual' && manualSumParsed != null) {
       setTotalWonInput(formatWonInput(String(manualSumParsed)));
     }
@@ -799,6 +1082,7 @@ export default function SettlementMeetingScreen() {
   }, [settlementAmountTab, manualSumParsed]);
 
   const switchToManualTab = useCallback(() => {
+    if (settlementAmountTab !== 'manual') setSettlementHasUnsavedUserChanges(true);
     const ids = allSettlementParticipantIds.filter((id) => selectedParticipantIds.has(id));
     const nextManual: Record<string, string> = {};
     if (totalWonParsed != null && ids.length > 0) {
@@ -821,6 +1105,7 @@ export default function SettlementMeetingScreen() {
     const ids = allSettlementParticipantIds.filter((id) => selectedParticipantIds.has(id));
     const next: Record<string, string> = { ...manualAmountsByParticipant };
     for (const id of ids) next[id] = formatWonInput(String(v));
+    setSettlementHasUnsavedUserChanges(true);
     setManualAmountsByParticipant(next);
     setBulkAmountModalOpen(false);
     setBulkAmountDraft('');
@@ -831,6 +1116,7 @@ export default function SettlementMeetingScreen() {
       if (!profileAccounts?.items.length) return;
       const acc = getUserSettlementAccountById(profileAccounts, id);
       if (!acc) return;
+      setSettlementHasUnsavedUserChanges(true);
       setSelectedProfileAccountId(acc.id);
       setHostBankId(acc.bankCode);
       setHostAccountNumber(acc.accountNumber.replace(/\D/g, ''));
@@ -854,6 +1140,7 @@ export default function SettlementMeetingScreen() {
   }, []);
 
   const removeReceiptItem = useCallback((id: string) => {
+    setSettlementHasUnsavedUserChanges(true);
     setReceiptItems((prev) => {
       const next = prev.filter((x) => x.id !== id);
       if (next.length === 0) {
@@ -868,65 +1155,259 @@ export default function SettlementMeetingScreen() {
       const list = (assets ?? []).filter((a) => a?.uri?.trim());
       if (list.length === 0) return;
 
+      const runId = receiptScanRunIdRef.current + 1;
+      receiptScanRunIdRef.current = runId;
+      receiptScanLastAutoScrollRef.current = null;
       setOcrBusy(true);
-      const additions: { uri: string; amountWon: number; naturalWidth?: number }[] = [];
+      setReceiptScanPreview({
+        assets: list,
+        currentIndex: 0,
+        processingIndex: 0,
+        stage: 'scanning',
+        message: '영수증을 스캔하고 있어요.',
+        recognizedText: [],
+        recognizedTextByIndex: {},
+        scanErrorsByIndex: {},
+        additions: [],
+        accountHint: null,
+      });
+
+      const additions: SettlementReceiptAddition[] = [];
       let lastAccountHint: string | null = null;
+      const failMessages: string[] = [];
       try {
-        for (const a of list) {
-          const r = await runSettlementReceiptOcrFromUri(a.uri.trim(), { width: a.width, height: a.height });
+        for (let index = 0; index < list.length; index += 1) {
+          const a = list[index]!;
+          setReceiptScanPreview((prev) =>
+            prev && receiptScanRunIdRef.current === runId
+              ? {
+                  ...prev,
+                  currentIndex: index,
+                  processingIndex: index === 0 ? index : null,
+                  stage: 'scanning',
+                  message:
+                    index > 0
+                      ? `${index + 1}번째 영수증으로 이동하고 있어요.`
+                      : list.length > 1
+                      ? `${index + 1}번째 영수증을 스캔하고 있어요.`
+                      : '영수증을 스캔하고 있어요.',
+                  recognizedText: [],
+                  errorMessage: undefined,
+                }
+              : prev,
+          );
+          if (index > 0) {
+            await waitReceiptScanSlideTransition();
+            if (receiptScanRunIdRef.current !== runId) return;
+            setReceiptScanPreview((prev) =>
+              prev && receiptScanRunIdRef.current === runId
+                ? {
+                    ...prev,
+                    processingIndex: index,
+                    stage: 'scanning',
+                    message: `${index + 1}번째 영수증을 스캔하고 있어요.`,
+                  }
+                : prev,
+            );
+          }
+
+          const onProgress = (progress: SettlementReceiptOcrProgress) => {
+            if (receiptScanRunIdRef.current !== runId) return;
+            const recognizedText = compactReceiptOcrText(progress.chunks);
+            setReceiptScanPreview((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    message:
+                      progress.phase === 'ai_analysis'
+                        ? '인식한 글씨를 AI가 확인하고 있어요.'
+                        : '영수증에서 글씨를 읽고 있어요.',
+                    recognizedText,
+                    recognizedTextByIndex: {
+                      ...prev.recognizedTextByIndex,
+                      [index]: recognizedText,
+                    },
+                  }
+                : prev,
+            );
+          };
+
+          const r = await runSettlementReceiptOcrFromUri(
+            a.uri.trim(),
+            { width: a.width, height: a.height },
+            { onProgress },
+          );
+          if (receiptScanRunIdRef.current !== runId) return;
           if (!r.ok) {
-            if (list.length === 1) {
-              Alert.alert('영수증 인식', r.message);
+            if (r.code === 'not_receipt') {
+              setReceiptScanPreview((prev) =>
+                prev && receiptScanRunIdRef.current === runId
+                  ? {
+                      ...prev,
+                      currentIndex: index,
+                      processingIndex: null,
+                      stage: 'error',
+                      message: '영수증 사진이 아니에요.',
+                      additions: [],
+                      accountHint: lastAccountHint,
+                      errorMessage: r.message,
+                      scanErrorsByIndex: {
+                        ...prev.scanErrorsByIndex,
+                        [index]: r.message,
+                      },
+                    }
+                  : prev,
+              );
+              return;
+            }
+            failMessages.push(r.message);
+            setReceiptScanPreview((prev) =>
+              prev && receiptScanRunIdRef.current === runId
+                ? {
+                    ...prev,
+                    processingIndex: null,
+                    message: r.message,
+                    scanErrorsByIndex: {
+                      ...prev.scanErrorsByIndex,
+                      [index]: r.message,
+                    },
+                  }
+                : prev,
+            );
+            if (list.length > 1 && index < list.length - 1) {
+              await waitReceiptScanResultPreview();
             }
             continue;
           }
           if (r.accountHint?.trim()) lastAccountHint = r.accountHint.trim();
           if (r.totalWon != null) {
-            additions.push({
+            const addition: SettlementReceiptAddition = {
+              assetIndex: index,
               uri: a.uri.trim(),
               amountWon: r.totalWon,
               naturalWidth: typeof a.width === 'number' && a.width > 0 ? a.width : undefined,
-            });
+              analysis: r.analysis,
+            };
+            additions.push(addition);
+            setReceiptScanPreview((prev) =>
+              prev && receiptScanRunIdRef.current === runId
+                ? {
+                    ...prev,
+                    currentIndex: index,
+                    processingIndex: null,
+                    message: 'AI가 영수증 내용을 확인했어요.',
+                    additions: [...additions],
+                    accountHint: lastAccountHint,
+                  }
+                : prev,
+            );
+            if (list.length > 1 && index < list.length - 1) {
+              await waitReceiptScanResultPreview();
+            }
+          } else {
+            const message = '결제 금액을 찾지 못했어요.';
+            failMessages.push(message);
+            setReceiptScanPreview((prev) =>
+              prev && receiptScanRunIdRef.current === runId
+                ? {
+                    ...prev,
+                    currentIndex: index,
+                    processingIndex: null,
+                    message,
+                    scanErrorsByIndex: {
+                      ...prev.scanErrorsByIndex,
+                      [index]: message,
+                    },
+                  }
+                : prev,
+            );
+            if (list.length > 1 && index < list.length - 1) {
+              await waitReceiptScanResultPreview();
+            }
           }
         }
 
         if (additions.length === 0) {
-          Alert.alert(
-            '영수증 인식',
-            list.length > 1
-              ? '선택한 사진에서 금액을 찾지 못했어요. 각 장이 잘 보이게 다시 선택해 주세요.'
-              : '금액·계좌를 자동으로 찾지 못했어요. 직접 입력하거나 다른 각도로 다시 촬영해 보세요.',
+          setReceiptScanPreview((prev) =>
+            prev && receiptScanRunIdRef.current === runId
+              ? {
+                  ...prev,
+                  stage: 'error',
+                  processingIndex: null,
+                  message: '금액을 찾지 못했어요.',
+                  additions: [],
+                  accountHint: lastAccountHint,
+                  errorMessage:
+                    failMessages[0] ??
+                    (list.length > 1
+                      ? '선택한 사진에서 금액을 찾지 못했어요. 각 장이 잘 보이게 다시 선택해 주세요.'
+                      : '금액·계좌를 자동으로 찾지 못했어요. 직접 입력하거나 다른 각도로 다시 촬영해 보세요.'),
+                }
+              : prev,
           );
           return;
         }
 
-        const sum = additions.reduce((s, x) => s + x.amountWon, 0);
-        const lines = additions.map((x, i) => `영수증 ${i + 1}: ${x.amountWon.toLocaleString()}원`);
-        lines.push(`인식 합계: ${sum.toLocaleString()}원`);
-        if (lastAccountHint) lines.push(`계좌 힌트: ${lastAccountHint}`);
-
-        Alert.alert('영수증 인식', `${lines.join('\n')}\n\n목록에 추가하고 총액에 합산할까요?`, [
-          { text: '취소', style: 'cancel' },
-          {
-            text: '추가',
-            onPress: () => {
-              mergeAccountHint(lastAccountHint);
-              const rows: SettlementReceiptRow[] = additions.map((x) => ({
-                id: newSettlementReceiptId(),
-                previewUri: x.uri,
-                amountWon: x.amountWon,
-                naturalWidth: x.naturalWidth,
-              }));
-              setReceiptItems((prev) => [...prev, ...rows]);
-            },
-          },
-        ]);
+        setReceiptScanPreview((prev) =>
+          prev && receiptScanRunIdRef.current === runId
+            ? {
+                ...prev,
+                currentIndex: list.length > 1 ? list.length : 0,
+                processingIndex: null,
+                stage: 'ready',
+                message: 'AI가 영수증 내용을 확인했어요.',
+                additions,
+                accountHint: lastAccountHint,
+                errorMessage: failMessages[0],
+              }
+            : prev,
+        );
+      } catch (e) {
+        setReceiptScanPreview((prev) =>
+          prev && receiptScanRunIdRef.current === runId
+            ? {
+                ...prev,
+                stage: 'error',
+                processingIndex: null,
+                message: '영수증 인식에 실패했어요.',
+                additions,
+                accountHint: lastAccountHint,
+                errorMessage: e instanceof Error ? e.message : '잠시 후 다시 시도해 주세요.',
+              }
+            : prev,
+        );
       } finally {
-        setOcrBusy(false);
+        if (receiptScanRunIdRef.current === runId) {
+          setOcrBusy(false);
+        }
       }
     },
-    [mergeAccountHint],
+    [],
   );
+
+  const closeReceiptScanPreview = useCallback(() => {
+    receiptScanRunIdRef.current += 1;
+    receiptScanLastAutoScrollRef.current = null;
+    setOcrBusy(false);
+    setReceiptScanPreview(null);
+  }, []);
+
+  const applyReceiptScanPreview = useCallback(() => {
+    if (!receiptScanPreview || receiptScanPreview.stage !== 'ready' || receiptScanPreview.additions.length === 0) {
+      return;
+    }
+    mergeAccountHint(receiptScanPreview.accountHint);
+    const rows: SettlementReceiptRow[] = receiptScanPreview.additions.map((x) => ({
+      id: newSettlementReceiptId(),
+      previewUri: x.uri,
+      amountWon: x.amountWon,
+      naturalWidth: x.naturalWidth,
+      analysis: x.analysis,
+    }));
+    setSettlementHasUnsavedUserChanges(true);
+    setReceiptItems((prev) => [...prev, ...rows]);
+    setReceiptScanPreview(null);
+  }, [mergeAccountHint, receiptScanPreview]);
 
   const pickReceiptImageAndOcr = useCallback(
     async (source: 'camera' | 'library') => {
@@ -968,6 +1449,31 @@ export default function SettlementMeetingScreen() {
       { text: '앨범', onPress: () => void pickReceiptImageAndOcr('library') },
     ]);
   }, [pickReceiptImageAndOcr]);
+
+  const receiptScanPageWidth = Math.max(280, windowWidth - 36);
+  const receiptScanPageCount = receiptScanPreview
+    ? receiptScanPreview.stage === 'ready'
+      ? receiptScanPreview.assets.length > 1
+        ? receiptScanPreview.assets.length + 1
+        : receiptScanPreview.assets.length
+      : receiptScanPreview.assets.length
+    : 0;
+  const receiptScanTotalWon = (receiptScanPreview?.additions ?? []).reduce((sum, x) => sum + x.amountWon, 0);
+  const receiptScanCurrentPage = Math.min(receiptScanPreview?.currentIndex ?? 0, Math.max(receiptScanPageCount - 1, 0));
+
+  useEffect(() => {
+    if (!receiptScanPreview || receiptScanPageCount <= 0) return;
+    const last = receiptScanLastAutoScrollRef.current;
+    if (last?.page === receiptScanCurrentPage && last.width === receiptScanPageWidth) return;
+    receiptScanLastAutoScrollRef.current = { page: receiptScanCurrentPage, width: receiptScanPageWidth };
+    const frame = requestAnimationFrame(() => {
+      receiptScanPagerRef.current?.scrollTo({
+        x: receiptScanCurrentPage * receiptScanPageWidth,
+        animated: true,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [receiptScanCurrentPage, receiptScanPageCount, receiptScanPageWidth]);
 
   if (!meetingId) {
     return (
@@ -1014,7 +1520,7 @@ export default function SettlementMeetingScreen() {
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SettlementAccountsScreenTopBar title={settlementScreenTopBarTitle} onBack={() => safeRouterBack(router)} />
+        <SettlementAccountsScreenTopBar title={settlementScreenTopBarTitle} onBack={requestSettlementBack} />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
@@ -1029,35 +1535,17 @@ export default function SettlementMeetingScreen() {
           />
           <View style={styles.settlementFormBlock}>
             {settlementReadOnly ? (
-              <View style={styles.readonlySettlementCard}>
-                <View style={styles.readonlySettlementRow}>
-                  <Text style={styles.readonlySettlementLabel}>총 금액</Text>
-                  <Text style={styles.readonlySettlementValue}>
-                    {effectiveTotalWonParsed != null ? `${effectiveTotalWonParsed.toLocaleString()}원` : '—'}
+              <View style={styles.readonlyTotalBlock}>
+                <Text style={styles.sectionLabelInRow}>총 금액</Text>
+                <View style={styles.totalHeroInputRow}>
+                  <Text style={styles.totalHeroSum} numberOfLines={1}>
+                    {effectiveTotalWonParsed != null ? effectiveTotalWonParsed.toLocaleString() : '0'}
                   </Text>
+                  <Text style={styles.totalHeroUnit}>원</Text>
                 </View>
-                <View style={styles.readonlySettlementRow}>
-                  <Text style={styles.readonlySettlementLabel}>정산 방식</Text>
-                  <Text style={styles.readonlySettlementValue}>{settlementModeSummaryLine}</Text>
-                </View>
-                <View style={styles.readonlySettlementRow}>
-                  <Text style={styles.readonlySettlementLabel}>참여 인원</Text>
-                  <Text style={styles.readonlySettlementValue}>{selectedCount.toLocaleString()}명</Text>
-                </View>
-                <View style={styles.readonlySettlementRow}>
-                  <Text style={styles.readonlySettlementLabel}>내가 지불할 금액</Text>
-                  <Text style={styles.readonlySettlementValue}>
-                    {perPersonWon != null ? `${perPersonWon.toLocaleString()}원` : '—'}
-                  </Text>
-                </View>
-                {settlementAccountTextForReadOnly ? (
-                  <View style={styles.readonlySettlementRow}>
-                    <Text style={styles.readonlySettlementLabel}>입금 계좌</Text>
-                    <Text style={styles.readonlySettlementValue} numberOfLines={2}>
-                      {settlementAccountTextForReadOnly}
-                    </Text>
-                  </View>
-                ) : null}
+                <Text style={styles.totalHeroHint}>
+                  {settlementModeSummaryLine} · {selectedCount.toLocaleString()}명
+                </Text>
               </View>
             ) : (
               <>
@@ -1095,18 +1583,21 @@ export default function SettlementMeetingScreen() {
                 </View>
 
                 {settlementAmountTab === 'split_n' ? (
-              <View style={styles.totalHeroInputRow}>
-                <TextInput
-                  value={formatWonInput(totalWonInput)}
-                  onChangeText={(t) => setTotalWonInput(formatWonInput(t))}
-                  keyboardType="number-pad"
-                  placeholder="0"
-                  placeholderTextColor={GinitTheme.colors.textMuted}
-                  style={styles.totalHeroInput}
-                  textAlign="right"
-                />
-                <Text style={styles.totalHeroUnit}>원</Text>
-              </View>
+                  <View style={styles.totalHeroInputRow}>
+                    <TextInput
+                      value={formatWonInput(totalWonInput)}
+                      onChangeText={(t) => {
+                        setSettlementHasUnsavedUserChanges(true);
+                        setTotalWonInput(formatWonInput(t));
+                      }}
+                      keyboardType="number-pad"
+                      placeholder="0"
+                      placeholderTextColor={GinitTheme.colors.textMuted}
+                      style={styles.totalHeroInput}
+                      textAlign="right"
+                    />
+                    <Text style={styles.totalHeroUnit}>원</Text>
+                  </View>
                 ) : (
                   <>
                     <View style={styles.totalHeroInputRow}>
@@ -1120,7 +1611,6 @@ export default function SettlementMeetingScreen() {
                 )}
               </>
             )}
-
             <View style={styles.sectionLabelRow}>
               <Text style={styles.sectionLabelInRow}>
                 {settlementReadOnly ? '정산 대상' : '정산 대상 선택'} {selectedCount}
@@ -1190,12 +1680,13 @@ export default function SettlementMeetingScreen() {
                     ) : (
                       <TextInput
                         value={formatWonInput(manualAmountsByParticipant[pid] ?? '')}
-                        onChangeText={(t) =>
+                        onChangeText={(t) => {
+                          setSettlementHasUnsavedUserChanges(true);
                           setManualAmountsByParticipant((prev) => ({
                             ...prev,
                             [pid]: formatWonInput(t),
-                          }))
-                        }
+                          }));
+                        }}
                         keyboardType="number-pad"
                         placeholder="0"
                         placeholderTextColor={GinitTheme.colors.textMuted}
@@ -1228,22 +1719,68 @@ export default function SettlementMeetingScreen() {
           {receiptItems.length > 0 ? (
             <>
               {settlementReadOnly ? <Text style={[styles.sectionLabelInRow, styles.receiptSubtitle]}>영수증</Text> : null}
-              <ScrollView
-                horizontal
-                nestedScrollEnabled
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.receiptThumbRow}>
-                {receiptItems.map((it, index) => (
-                  <View key={it.id} style={styles.receiptThumbColumn}>
-                    <View style={styles.receiptThumbImageShell}>
-                      <GinitPressable
-                        onPress={() => setReceiptImageViewerIndex(index)}
-                        style={({ pressed }) => [styles.receiptThumbImagePressable, pressed && { opacity: 0.88 }]}
-                        accessibilityRole="imagebutton"
-                        accessibilityLabel="영수증 확대 보기">
-                        <Image source={{ uri: it.previewUri }} style={styles.receiptThumbImg} contentFit="cover" />
-                      </GinitPressable>
-                      {!settlementReadOnly ? (
+              {settlementReadOnly ? (
+                <View style={styles.receiptReadonlyList}>
+                  {receiptItems.map((it, index) => {
+                    const savedAnalysis =
+                      settlementReceiptAnalysesById.get(it.id) ??
+                      settlementReceiptAnalysesByImageUrl.get(it.previewUri.trim()) ??
+                      settlementReceiptAnalysesByImageKey.get(settlementReceiptImageKey(it.previewUri));
+                    const analysis = savedAnalysis?.analysis ?? it.analysis;
+                    const storeName =
+                      savedAnalysis?.storeName?.trim() || analysis?.verification.store_name?.trim() || '상호명 미인식';
+                    const bizNum = savedAnalysis?.bizNum?.trim() || analysis?.verification.biz_num?.trim() || '사업자번호 미인식';
+                    const visitedAt =
+                      savedAnalysis?.receiptDateText?.trim() || analysis?.verification.datetime?.trim() || '방문 시점 미인식';
+                    const amountWon = analysis?.billing.total_amount ?? savedAnalysis?.amountWon ?? it.amountWon;
+                    return (
+                      <View key={it.id} style={styles.receiptReadonlyCard}>
+                        <GinitPressable
+                          onPress={() => setReceiptImageViewerIndex(index)}
+                          style={({ pressed }) => [styles.receiptReadonlyImagePressable, pressed && { opacity: 0.88 }]}
+                          accessibilityRole="imagebutton"
+                          accessibilityLabel="영수증 확대 보기">
+                          <Image source={{ uri: it.previewUri }} style={styles.receiptReadonlyImg} contentFit="cover" />
+                        </GinitPressable>
+                        <View style={styles.receiptReadonlyInfo}>
+                          <View style={styles.receiptReadonlyTopRow}>
+                            <Text style={styles.receiptReadonlyStore} numberOfLines={1}>
+                              {storeName}
+                            </Text>
+                            <Text style={styles.receiptReadonlyAmount} numberOfLines={1}>
+                              {amountWon.toLocaleString()}원
+                            </Text>
+                          </View>
+                          <Text style={styles.receiptReadonlyMeta} numberOfLines={1}>
+                            {bizNum}
+                          </Text>
+                          <Text style={styles.receiptReadonlyMeta} numberOfLines={1}>
+                            {visitedAt}
+                          </Text>
+                          <Text style={styles.receiptReadonlyTags} numberOfLines={2}>
+                            {summarizeReceiptAnalysisTags(analysis)}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : (
+                <ScrollView
+                  horizontal
+                  nestedScrollEnabled
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.receiptThumbRow}>
+                  {receiptItems.map((it, index) => (
+                    <View key={it.id} style={styles.receiptThumbColumn}>
+                      <View style={styles.receiptThumbImageShell}>
+                        <GinitPressable
+                          onPress={() => setReceiptImageViewerIndex(index)}
+                          style={({ pressed }) => [styles.receiptThumbImagePressable, pressed && { opacity: 0.88 }]}
+                          accessibilityRole="imagebutton"
+                          accessibilityLabel="영수증 확대 보기">
+                          <Image source={{ uri: it.previewUri }} style={styles.receiptThumbImg} contentFit="cover" />
+                        </GinitPressable>
                         <GinitPressable
                           onPress={() => removeReceiptItem(it.id)}
                           hitSlop={8}
@@ -1254,18 +1791,41 @@ export default function SettlementMeetingScreen() {
                             <GinitSymbolicIcon name="close" size={12} color="#fff" />
                           </View>
                         </GinitPressable>
-                      ) : null}
+                      </View>
+                      <Text style={styles.receiptThumbCaption} numberOfLines={1}>
+                        {it.amountWon.toLocaleString()}원
+                      </Text>
                     </View>
-                    <Text style={styles.receiptThumbCaption} numberOfLines={1}>
-                      {it.amountWon.toLocaleString()}원
-                    </Text>
-                  </View>
-                ))}
-              </ScrollView>
+                  ))}
+                </ScrollView>
+              )}
             </>
           ) : null}
         </>
       ) : null}
+
+            {settlementReadOnly ? (
+              <View style={styles.readonlySettlementInfoList}>
+                <View style={styles.readonlySettlementInfoRow}>
+                  <Text style={styles.readonlySettlementLabel}>내가 지불할 금액</Text>
+                  <Text style={styles.readonlySettlementValue}>
+                    {perPersonWon != null ? `${perPersonWon.toLocaleString()}원` : '—'}
+                  </Text>
+                </View>
+                <View style={styles.readonlySettlementInfoRow}>
+                  <Text style={styles.readonlySettlementLabel}>정산 방식</Text>
+                  <Text style={styles.readonlySettlementValue}>{settlementModeSummaryLine}</Text>
+                </View>
+                {settlementAccountTextForReadOnly ? (
+                  <View style={styles.readonlySettlementInfoRowLast}>
+                    <Text style={styles.readonlySettlementLabel}>입금 계좌</Text>
+                    <Text style={styles.readonlySettlementValue} numberOfLines={2}>
+                      {maskedSettlementAccountTextForReadOnly}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
             {!settlementReadOnly ? (
               <>
@@ -1273,7 +1833,10 @@ export default function SettlementMeetingScreen() {
               <Text style={styles.sectionLabelInRow}>지불 방식</Text>
               <View style={styles.paymentMethodRow}>
                 <GinitPressable
-                  onPress={() => setSettlementPaymentMethod('cash')}
+                  onPress={() => {
+                    if (settlementPaymentMethod !== 'cash') setSettlementHasUnsavedUserChanges(true);
+                    setSettlementPaymentMethod('cash');
+                  }}
                   style={({ pressed }) => [
                     styles.paymentMethodOption,
                     settlementPaymentMethod === 'cash' && styles.paymentMethodOptionSelected,
@@ -1288,7 +1851,10 @@ export default function SettlementMeetingScreen() {
                   </Text>
                 </GinitPressable>
                 <GinitPressable
-                  onPress={() => setSettlementPaymentMethod('bank_transfer')}
+                  onPress={() => {
+                    if (settlementPaymentMethod !== 'bank_transfer') setSettlementHasUnsavedUserChanges(true);
+                    setSettlementPaymentMethod('bank_transfer');
+                  }}
                   style={({ pressed }) => [
                     styles.paymentMethodOption,
                     settlementPaymentMethod === 'bank_transfer' && styles.paymentMethodOptionSelected,
@@ -1339,7 +1905,7 @@ export default function SettlementMeetingScreen() {
                           </Text>
                           <Text style={styles.accountPickSub}>
                             {hostAccountNumber.trim()}
-                            {hostAccountHolder.trim() ? ` · ${hostAccountHolder.trim()}` : ''}
+                            {maskedHostAccountHolder ? ` · ${maskedHostAccountHolder}` : ''}
                           </Text>
                         </View>
                         {profileDefaultAccountId && selectedProfileAccountId === profileDefaultAccountId ? (
@@ -1423,6 +1989,203 @@ export default function SettlementMeetingScreen() {
               </View>
             </GinitPressable>
           </GinitPressable>
+        </Modal>
+        <Modal
+          visible={receiptScanPreview != null}
+          transparent
+          animationType="fade"
+          onRequestClose={closeReceiptScanPreview}>
+          <GestureHandlerRootView style={styles.receiptScanModalRoot}>
+            <View
+              style={[
+                styles.receiptScanModalBackdrop,
+                { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
+              ]}>
+              <View style={styles.receiptScanModalCard}>
+                <View style={styles.receiptScanHeader}>
+                  <View style={styles.receiptScanHeaderTextCol}>
+                    <Text style={styles.receiptScanTitle}>영수증 인식</Text>
+                    <Text style={styles.receiptScanSubtitle}>
+                      {receiptScanPageCount > 0 ? `${receiptScanCurrentPage + 1} / ${receiptScanPageCount}` : '0 / 0'}
+                    </Text>
+                  </View>
+                  <GinitPressable
+                    onPress={closeReceiptScanPreview}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel="영수증 인식 닫기">
+                    <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
+                  </GinitPressable>
+                </View>
+
+                {receiptScanPreview ? (
+                  <ScrollView
+                    ref={receiptScanPagerRef}
+                    horizontal
+                    pagingEnabled
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={false}
+                    scrollEnabled={receiptScanPageCount > 1}
+                    style={styles.receiptScanPager}
+                    onMomentumScrollEnd={(event) => {
+                      const nextIndex = Math.round(event.nativeEvent.contentOffset.x / receiptScanPageWidth);
+                      setReceiptScanPreview((prev) =>
+                        prev ? { ...prev, currentIndex: Math.max(0, Math.min(nextIndex, receiptScanPageCount - 1)) } : prev,
+                      );
+                    }}>
+                    {receiptScanPreview.assets.map((asset, index) => {
+                      const addition = findReceiptScanAdditionByAssetIndex(receiptScanPreview.additions, index);
+                      const recognizedText = receiptScanPreview.recognizedTextByIndex[index] ?? [];
+                      const pageError = receiptScanPreview.scanErrorsByIndex[index];
+                      const isScanning =
+                        receiptScanPreview.stage === 'scanning' &&
+                        receiptScanPreview.processingIndex === index &&
+                        !addition &&
+                        !pageError;
+
+                      return (
+                        <View key={`${asset.uri}-${index}`} style={[styles.receiptScanPage, { width: receiptScanPageWidth }]}>
+                          <View style={styles.receiptScanImageShell}>
+                            <Image source={{ uri: asset.uri }} style={styles.receiptScanImage} contentFit="contain" />
+                            <SettlementReceiptScanOverlay active={isScanning} />
+                          </View>
+
+                          <ScrollView
+                            style={styles.receiptScanBodyScroll}
+                            contentContainerStyle={styles.receiptScanBody}
+                            showsVerticalScrollIndicator={false}>
+                            {addition ? (
+                              <>
+                                <View style={styles.receiptScanResultCard}>
+                                  <View style={styles.receiptScanResultRow}>
+                                    <Text style={styles.receiptScanResultLabel}>상호명</Text>
+                                    <Text style={styles.receiptScanResultValue} numberOfLines={1}>
+                                      {addition.analysis?.verification.store_name?.trim() || '상호명 미인식'}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.receiptScanResultRow}>
+                                    <Text style={styles.receiptScanResultLabel}>사업자번호</Text>
+                                    <Text style={styles.receiptScanResultValue} numberOfLines={1}>
+                                      {addition.analysis?.verification.biz_num?.trim() || '미인식'}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.receiptScanResultRow}>
+                                    <Text style={styles.receiptScanResultLabel}>결제일시</Text>
+                                    <Text style={styles.receiptScanResultValue} numberOfLines={1}>
+                                      {addition.analysis?.verification.datetime?.trim() || '미인식'}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.receiptScanResultRow}>
+                                    <Text style={styles.receiptScanResultLabel}>후기 태그</Text>
+                                    <Text style={styles.receiptScanResultValue} numberOfLines={2}>
+                                      {summarizeReceiptScanTags([addition])}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.receiptScanResultRowLast}>
+                                    <Text style={styles.receiptScanResultLabel}>결제금액</Text>
+                                    <Text style={styles.receiptScanAmountText}>{addition.amountWon.toLocaleString()}원</Text>
+                                  </View>
+                                </View>
+                              </>
+                            ) : pageError || receiptScanPreview.stage === 'error' ? (
+                              <View style={styles.receiptScanErrorBox}>
+                                <Text style={styles.receiptScanReadyTitle}>
+                                  {pageError ? '이 사진은 적용할 수 없어요' : receiptScanPreview.message}
+                                </Text>
+                                <Text style={styles.receiptScanErrorText}>
+                                  {pageError || receiptScanPreview.errorMessage || '사진이 선명하게 보이도록 다시 선택해 주세요.'}
+                                </Text>
+                              </View>
+                            ) : (
+                              <>
+                                <View style={styles.receiptScanStatusRow}>
+                                  <ActivityIndicator color={GinitTheme.colors.primary} />
+                                  <Text style={styles.receiptScanStatusText}>
+                                    {isScanning ? receiptScanPreview.message : '인식 순서를 기다리고 있어요.'}
+                                  </Text>
+                                </View>
+                                <View style={styles.receiptScanTextBox}>
+                                  <Text style={styles.receiptScanTextBoxTitle}>인식한 글씨</Text>
+                                  {recognizedText.length > 0 ? (
+                                    recognizedText.map((line, textIndex) => (
+                                      <Text
+                                        key={`${line}-${textIndex}`}
+                                        style={styles.receiptScanRecognizedLine}
+                                        numberOfLines={1}>
+                                        {line}
+                                      </Text>
+                                    ))
+                                  ) : (
+                                    <Text style={styles.receiptScanEmptyText}>사진에서 글씨를 찾고 있어요.</Text>
+                                  )}
+                                </View>
+                              </>
+                            )}
+                          </ScrollView>
+                        </View>
+                      );
+                    })}
+                    {receiptScanPreview.stage === 'ready' && receiptScanPreview.assets.length > 1 ? (
+                      <View style={[styles.receiptScanPage, styles.receiptScanSummaryPage, { width: receiptScanPageWidth }]}>
+                        <Text style={styles.receiptScanSectionLabel}>인식한 영수증 최종 확인</Text>
+                        <View style={styles.receiptScanResultCard}>
+                          {receiptScanPreview.additions.map((addition, index) => (
+                            <View key={`${addition.uri}-${index}`} style={styles.receiptScanSummaryReceiptRow}>
+                              <View style={styles.receiptScanSummaryReceiptText}>
+                                <Text style={styles.receiptScanSummaryStore} numberOfLines={1}>
+                                  {addition.analysis?.verification.store_name?.trim() || '상호명 미인식'}
+                                </Text>
+                                <Text style={styles.receiptScanSummaryMeta} numberOfLines={1}>
+                                  {(addition.analysis?.verification.biz_num?.trim() || '사업자번호 미인식') +
+                                    ' · ' +
+                                    (addition.analysis?.verification.datetime?.trim() || '방문 시점 미인식')}
+                                </Text>
+                              </View>
+                              <Text style={styles.receiptScanSummaryAmount}>{addition.amountWon.toLocaleString()}원</Text>
+                            </View>
+                          ))}
+                          <View style={styles.receiptScanResultRowLast}>
+                            <Text style={styles.receiptScanResultLabel}>최종 합계</Text>
+                            <Text style={styles.receiptScanAmountText}>{receiptScanTotalWon.toLocaleString()}원</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.receiptScanConfirmText}>이 값으로 적용하시겠습니까?</Text>
+                      </View>
+                    ) : null}
+                  </ScrollView>
+                ) : null}
+
+                <View style={styles.receiptScanActions}>
+                  {receiptScanPreview?.stage === 'ready' ? (
+                    <>
+                      <GinitPressable
+                        onPress={closeReceiptScanPreview}
+                        style={({ pressed }) => [styles.secondaryBtn, styles.receiptScanActionButton, pressed && { opacity: 0.86 }]}>
+                        <Text style={styles.secondaryBtnText}>취소</Text>
+                      </GinitPressable>
+                      <GinitPressable
+                        onPress={applyReceiptScanPreview}
+                        style={({ pressed }) => [styles.primaryBtn, styles.receiptScanActionButton, pressed && { opacity: 0.88 }]}>
+                        <Text style={styles.primaryBtnText}>이 값으로 적용</Text>
+                      </GinitPressable>
+                    </>
+                  ) : receiptScanPreview?.stage === 'error' ? (
+                    <GinitPressable
+                      onPress={closeReceiptScanPreview}
+                      style={({ pressed }) => [styles.secondaryBtn, styles.receiptScanActionButton, pressed && { opacity: 0.86 }]}>
+                      <Text style={styles.secondaryBtnText}>닫기</Text>
+                    </GinitPressable>
+                  ) : (
+                    <GinitPressable
+                      onPress={closeReceiptScanPreview}
+                      style={({ pressed }) => [styles.secondaryBtn, styles.receiptScanActionButton, pressed && { opacity: 0.86 }]}>
+                      <Text style={styles.secondaryBtnText}>취소</Text>
+                    </GinitPressable>
+                  )}
+                </View>
+              </View>
+            </View>
+          </GestureHandlerRootView>
         </Modal>
         <NaverPlaceWebViewModal
           visible={naverPlaceWebModal != null}
@@ -1642,6 +2405,143 @@ const styles = StyleSheet.create({
   bulkModalTitle: { fontSize: 17, fontWeight: '700', color: GinitTheme.colors.text },
   bulkModalActions: { flexDirection: 'row', gap: 10 },
   bulkModalBtn: { flex: 1 },
+  receiptScanModalRoot: { flex: 1 },
+  receiptScanModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.46)',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  receiptScanModalCard: {
+    maxHeight: '92%',
+    borderRadius: 16,
+    backgroundColor: GinitTheme.colors.bg,
+    overflow: 'hidden',
+  },
+  receiptScanHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingTop: 15,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  receiptScanHeaderTextCol: { flex: 1, minWidth: 0, gap: 2 },
+  receiptScanTitle: { fontSize: 17, fontWeight: '800', color: GinitTheme.colors.text },
+  receiptScanSubtitle: { fontSize: 12, fontWeight: '700', color: GinitTheme.colors.textMuted },
+  receiptScanPager: { width: '100%' },
+  receiptScanPage: { paddingBottom: 2 },
+  receiptScanImageShell: {
+    height: 290,
+    marginHorizontal: 18,
+    marginTop: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(126, 126, 126, 0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+  },
+  receiptScanImage: { width: '100%', height: '100%' },
+  receiptScanOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-start',
+  },
+  receiptScanDim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.18)',
+  },
+  receiptScanLine: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    top: 18,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
+  },
+  receiptScanLineCore: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: GinitTheme.colors.primary,
+  },
+  receiptScanBodyScroll: { maxHeight: 250 },
+  receiptScanBody: { paddingHorizontal: 18, paddingTop: 14, gap: 10 },
+  receiptScanStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  receiptScanStatusText: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: '700', color: GinitTheme.colors.text },
+  receiptScanTextBox: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+    backgroundColor: GinitTheme.colors.bg,
+    paddingHorizontal: 0,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  receiptScanTextBoxTitle: { fontSize: 12, fontWeight: '800', color: GinitTheme.colors.textSub, marginBottom: 2 },
+  receiptScanRecognizedLine: { fontSize: 12, color: GinitTheme.colors.textMuted, lineHeight: 17 },
+  receiptScanEmptyText: { fontSize: 13, color: GinitTheme.colors.textMuted },
+  receiptScanReadyTitle: { fontSize: 16, fontWeight: '800', color: GinitTheme.colors.text },
+  receiptScanSectionLabel: { fontSize: 13, fontWeight: '800', color: GinitTheme.colors.textSub },
+  receiptScanResultCard: {
+    backgroundColor: GinitTheme.colors.bg,
+  },
+  receiptScanResultRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  receiptScanResultRowLast: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  receiptScanResultLabel: { fontSize: 13, fontWeight: '800', color: GinitTheme.colors.textSub },
+  receiptScanResultValue: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 14, fontWeight: '700', color: GinitTheme.colors.text },
+  receiptScanAmountText: { flex: 1, textAlign: 'right', fontSize: 18, fontWeight: '800', color: GinitTheme.colors.primary },
+  receiptScanSummaryPage: { paddingHorizontal: 18, paddingTop: 16 },
+  receiptScanSummaryReceiptRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  receiptScanSummaryReceiptText: { flex: 1, minWidth: 0, gap: 2 },
+  receiptScanSummaryStore: { fontSize: 14, fontWeight: '800', color: GinitTheme.colors.text },
+  receiptScanSummaryMeta: { fontSize: 12, color: GinitTheme.colors.textMuted },
+  receiptScanSummaryAmount: { fontSize: 14, fontWeight: '800', color: GinitTheme.colors.text },
+  receiptScanConfirmText: { fontSize: 14, fontWeight: '700', color: GinitTheme.colors.text, textAlign: 'center' },
+  receiptScanErrorBox: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+    backgroundColor: GinitTheme.colors.bg,
+    paddingHorizontal: 0,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  receiptScanErrorText: { fontSize: 14, lineHeight: 20, color: GinitTheme.colors.textSub },
+  receiptScanActions: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 18,
+  },
+  receiptScanActionButton: { flex: 1 },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.border,
@@ -1656,14 +2556,28 @@ const styles = StyleSheet.create({
   rowIdLabel: { fontSize: 11, color: GinitTheme.colors.textMuted },
   muted: { fontSize: 14, color: GinitTheme.colors.textMuted },
   body: { fontSize: 15, color: GinitTheme.colors.text, lineHeight: 22 },
-  readonlySettlementCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.border,
-    borderRadius: 12,
-    backgroundColor: GinitTheme.colors.noticeSurface,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
+  readonlyTotalBlock: { gap: 4 },
+  readonlySettlementInfoList: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  readonlySettlementInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  readonlySettlementInfoRowLast: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 11,
   },
   readonlySettlementRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   readonlySettlementLabel: { fontSize: 13, fontWeight: '700', color: GinitTheme.colors.textSub },
@@ -1710,6 +2624,35 @@ const styles = StyleSheet.create({
   paymentMethodOptionText: { fontSize: 14, fontWeight: '700', color: GinitTheme.colors.textSub },
   paymentMethodOptionTextSelected: { color: GinitTheme.colors.primary },
   receiptSubtitle: { marginTop: 12 },
+  receiptReadonlyList: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+  },
+  receiptReadonlyCard: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GinitTheme.colors.border,
+    backgroundColor: GinitTheme.colors.bg,
+    paddingVertical: 10,
+  },
+  receiptReadonlyImagePressable: {
+    width: 86,
+    height: 104,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: GinitTheme.colors.border,
+  },
+  receiptReadonlyImg: { width: 86, height: 104 },
+  receiptReadonlyInfo: { flex: 1, minWidth: 0, gap: 5, justifyContent: 'center' },
+  receiptReadonlyTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  receiptReadonlyStore: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: '800', color: GinitTheme.colors.text },
+  receiptReadonlyAmount: { fontSize: 14, fontWeight: '800', color: GinitTheme.colors.primary },
+  receiptReadonlyMeta: { fontSize: 12, color: GinitTheme.colors.textMuted },
+  receiptReadonlyTags: { fontSize: 12, lineHeight: 17, fontWeight: '700', color: GinitTheme.colors.textSub },
   receiptThumbRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4 },
   receiptThumbColumn: { width: 76, alignItems: 'center' },
   receiptThumbImageShell: {

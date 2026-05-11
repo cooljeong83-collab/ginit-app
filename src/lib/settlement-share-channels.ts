@@ -29,40 +29,70 @@ export type SettlementShareMessageParams = {
   accountHolder?: string | null;
   perPersonWon: number | null;
   totalWon: number | null;
+  receiptSummaries?: SettlementShareReceiptSummary[];
+};
+
+export type SettlementShareReceiptSummary = {
+  storeName?: string | null;
+  bizNum?: string | null;
+  visitedAt?: string | null;
+  amountWon?: number | null;
+  tags?: string[] | null;
 };
 
 export function buildSettlementShareMessage(p: SettlementShareMessageParams): string {
   const title = (p.meetingTitle ?? '').trim() || '모임';
   const formatWon = (value: number | null) =>
     value != null && Number.isFinite(value) ? `${Math.trunc(value).toLocaleString('ko-KR')}원` : '';
-  const paymentMethod = p.paymentMethod === 'cash' ? 'cash' : 'bank_transfer';
-  const paymentMethodText = paymentMethod === 'cash' ? '현금' : '계좌';
+  const paymentMethodText = buildPaymentMethodText(p);
   const lines = [
     `[지닛 정산] ${title}`,
     `인원 : ${Math.max(0, Math.trunc(p.participantCount)).toLocaleString('ko-KR')}명`,
     `총 금액 : ${formatWon(p.totalWon)}`,
+    `내가 지불할 금액 : ${formatWon(p.perPersonWon)}`,
     `정산 방식 : ${(p.settlementMethodText ?? '').trim()}`,
     `지불 방식 : ${paymentMethodText}`,
   ];
-  if (paymentMethod === 'bank_transfer') {
-    const bankName = (p.bankName ?? '').trim();
-    const accountNumber = (p.accountNumber ?? '').replace(/\D/g, '').trim();
-    const accountHolder = maskNameMiddleWithOForShare(p.accountHolder ?? '');
-    if (bankName) lines.push(`입금은행 : ${bankName}`);
-    if (accountNumber) lines.push(`계좌번호 : ${accountNumber}`);
-    if (accountHolder) lines.push(`입금자명 : ${accountHolder}`);
+  const receiptLines = buildReceiptSummaryLines(p.receiptSummaries ?? [], formatWon);
+  if (receiptLines.length > 0) {
+    lines.push('');
+    lines.push('[ 영수증 인식 정보 ]');
+    lines.push(...receiptLines);
   }
-  lines.push(`내가 지불할 금액 : ${formatWon(p.perPersonWon)}`);
+  lines.push('');
   lines.push('영수증 및 상세 내역을 확인하고 싶으시면 어플 모임 상세에서 확인하세요.');
   return lines.join('\n');
 }
 
-function maskNameMiddleWithOForShare(name: string): string {
-  const s = name.trim();
-  const n = s.length;
-  if (n <= 1) return s;
-  if (n === 2) return `${s[0]}o`;
-  return `${s[0]}${'o'.repeat(n - 2)}${s[n - 1]}`;
+function buildPaymentMethodText(p: SettlementShareMessageParams): string {
+  if (p.paymentMethod === 'cash') return '현금';
+  const bankName = (p.bankName ?? '').trim();
+  const accountNumber = (p.accountNumber ?? '').replace(/\D/g, '').trim();
+  const accountHolder = maskNameMiddleForShare(p.accountHolder ?? '');
+  const accountText = [bankName, accountNumber, accountHolder].filter(Boolean).join(' ');
+  return accountText ? `계좌 (${accountText})` : '계좌';
+}
+
+function buildReceiptSummaryLines(
+  receipts: readonly SettlementShareReceiptSummary[],
+  formatWon: (value: number | null) => string,
+): string[] {
+  const lines: string[] = [];
+  receipts.forEach((receipt, index) => {
+    if (index > 0) lines.push('');
+    const storeName = (receipt.storeName ?? '').trim() || `영수증 ${index + 1}`;
+    const amount =
+      typeof receipt.amountWon === 'number' && Number.isFinite(receipt.amountWon)
+        ? formatWon(receipt.amountWon)
+        : '';
+    lines.push(`${index + 1}. ${storeName}`);
+    const bizNum = (receipt.bizNum ?? '').trim();
+    const visitedAt = (receipt.visitedAt ?? '').trim();
+    if (bizNum) lines.push(`사업자번호 : ${bizNum}`);
+    if (visitedAt) lines.push(`결제일시 : ${visitedAt}`);
+    if (amount) lines.push(`결제금액 : ${amount}`);
+  });
+  return lines;
 }
 
 export async function shareSettlementText(message: string): Promise<void> {

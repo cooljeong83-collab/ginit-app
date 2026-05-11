@@ -173,7 +173,7 @@ export function navigateFromPushData(
   const urlRaw = typeof data.url === 'string' ? data.url.trim() : '';
   if (meetingId && (action === 'settlement_share' || typeRaw === 'SETTLEMENT')) {
     ginitNotifyDbg('push-open-nav', 'branch_settlement', { meetingIdLen: meetingId.length });
-    navTo(`/meeting/${meetingId}`);
+    navTo(`/settlement/${meetingId}`);
     return;
   }
   if (meetingId && action === 'new_meeting_in_feed_region') {

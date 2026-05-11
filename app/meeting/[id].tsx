@@ -973,10 +973,11 @@ export default function MeetingDetailScreen() {
     [meetingArrivalVerifiedByMe, withinArrivalVerifyWindow],
   );
 
-  /** 참가자 전용: N분 전 이전에는 장소 인증 pill(시간 외)을 숨기고 퇴장 노출 — 호스트 하단은 기존과 동일 */
+  /** 참가자 전용: N분 전 이전이나 인증 가능 시간 밖에는 장소 인증 pill을 숨기고 퇴장 노출 */
   const showParticipantArrivalBottomSlot = useMemo(() => {
     if (!showMeetingArrivalVerify) return false;
     if (meetingArrivalVerifiedByMe) return true;
+    if (!withinArrivalVerifyWindow) return false;
     const m = meeting;
     if (!m) return false;
     const startMs = meetingScheduleStartMs(m);
@@ -989,6 +990,7 @@ export default function MeetingDetailScreen() {
   }, [
     showMeetingArrivalVerify,
     meetingArrivalVerifiedByMe,
+    withinArrivalVerifyWindow,
     meeting,
     arrivalUiTick,
     meetingDetailListEndUiTick,
@@ -1284,6 +1286,7 @@ export default function MeetingDetailScreen() {
   const showHostArrivalBottomSlot = useMemo(() => {
     if (!showMeetingArrivalVerify) return false;
     if (meetingArrivalVerifiedByMe) return true;
+    if (!withinArrivalVerifyWindow) return false;
     const m = meeting;
     if (!m) return false;
     const startMs = meetingScheduleStartMs(m);
@@ -1296,6 +1299,7 @@ export default function MeetingDetailScreen() {
   }, [
     showMeetingArrivalVerify,
     meetingArrivalVerifiedByMe,
+    withinArrivalVerifyWindow,
     meeting,
     arrivalUiTick,
     meetingDetailListEndUiTick,
