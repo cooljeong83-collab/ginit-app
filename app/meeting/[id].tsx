@@ -3021,8 +3021,8 @@ export default function MeetingDetailScreen() {
             ) : null}
               
             {isScheduleConfirmed ? (
-              <View style={styles.infoCard}>
-                {(specialtyKind === 'movie' || extraMovies.length > 0) && (
+              specialtyKind === 'movie' || extraMovies.length > 0 ? (
+                <View style={styles.infoCard}>
                   <>
                     <Text style={styles.infoSectionLabel}>영화</Text>
                     {confirmedMovieResolved ? (
@@ -3112,8 +3112,8 @@ export default function MeetingDetailScreen() {
                       <Text style={styles.infoRowMuted}>등록된 영화 후보가 없었어요.</Text>
                     )}
                   </>
-                )}
-              </View>
+                </View>
+              ) : null
             ) : (
               <>
                 <View

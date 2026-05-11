@@ -291,6 +291,32 @@ class NaverMobilePlaceScrapeModule : Module() {
         "제주",
       )
 
+    private val strictRegionPrefixesForAddressLine =
+      listOf(
+        "서울특별시",
+        "부산광역시",
+        "대구광역시",
+        "인천광역시",
+        "광주광역시",
+        "대전광역시",
+        "울산광역시",
+        "세종특별자치시",
+        "경기도",
+        "강원특별자치도",
+        "강원도",
+        "충청북도",
+        "충청남도",
+        "전북특별자치도",
+        "전라북도",
+        "전라남도",
+        "경상북도",
+        "경상남도",
+        "제주특별자치도",
+      )
+
+    private val safeShortRegionAddressStartRegex =
+      Regex("""(?:^|\s)((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|충청|전라|경상)\s+[가-힣A-Za-z0-9·._-]{1,24}(?:시|군|구))""")
+
     /** UI 한 줄: 위치 아이콘·`[…]` 뒤 본문, `지도/내비게이션/거리뷰` 링크 문구 앞까지가 주소. */
     private fun normalizeNaverPlaceAddressUiText(raw: String): String {
       var t = raw.replace('\u00a0', ' ').trim()
@@ -311,12 +337,22 @@ class NaverMobilePlaceScrapeModule : Module() {
     }
 
     private fun trimLeadingToFirstRegionPrefix(s: String): String {
+      val best = findKrAddressStart(s)
+      return if (best > 0) s.substring(best).trim() else s.trim()
+    }
+
+    private fun findKrAddressStart(s: String): Int {
       var best = -1
-      for (p in regionPrefixesForAddressLine) {
+      for (p in strictRegionPrefixesForAddressLine) {
         val i = s.indexOf(p)
         if (i >= 0 && (best < 0 || i < best)) best = i
       }
-      return if (best > 0) s.substring(best).trim() else s.trim()
+      if (best >= 0) return best
+      for (m in safeShortRegionAddressStartRegex.findAll(s)) {
+        val i = m.groups[1]?.range?.first ?: m.range.first
+        if (i >= 0 && (best < 0 || i < best)) best = i
+      }
+      return best
     }
 
     private fun trimTrailingNaverPlaceLinkLabels(s: String): String {
@@ -831,6 +867,7 @@ class NaverMobilePlaceScrapeModule : Module() {
           .map { cleanText(it).trim() }
           .firstOrNull { looksLikeCategoryLabel(it) }
           .orEmpty()
+      title = stripTrailingCategoryFromTitle(title, category)
 
       val address = pickBestListAddressCandidate(
         linkedSetOf<String>().also { set ->
@@ -854,6 +891,7 @@ class NaverMobilePlaceScrapeModule : Module() {
         } else {
           extractKrAddressFromBlockText(cleanText(block))
         }
+      val cleanedAddress = stripCategoryNoiseFromAddress(address2, title, category)
       val thumb = firstImageUrlInRow(block)
 
       val out = mutableMapOf<String, String?>(
@@ -862,7 +900,7 @@ class NaverMobilePlaceScrapeModule : Module() {
         "placeId" to placeId,
       )
       if (category.isNotEmpty() && category.length <= 40 && !isStatusLikeTitle(category)) out["category"] = category
-      if (address2.isNotEmpty()) out["address"] = address2
+      if (cleanedAddress.isNotEmpty()) out["address"] = cleanedAddress
       if (!thumb.isNullOrBlank()) out["thumbnailUrl"] = thumb
       return out
     }
@@ -875,11 +913,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       var t = rawText.replace('\u00a0', ' ').trim()
       if (t.isEmpty()) return ""
       t = t.replace("주소보기", " ").replace(Regex("""\s+"""), " ").trim()
-      var best = -1
-      for (p in regionPrefixesForAddressLine) {
-        val i = t.indexOf(p)
-        if (i >= 0 && (best < 0 || i < best)) best = i
-      }
+      val best = findKrAddressStart(t)
       if (best < 0) return ""
       var tail = t.substring(best).trim()
       // 액션 라벨(공유/지도/길찾기/전화/예약/가격 등) 앞에서 잘라 주소만 남김
@@ -934,6 +968,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       // 카테고리 후보: 블록 내 짧은 라벨
       val category =
         block.selectFirst("span.KCMnt, span.NOJeK, span.category, em, i")?.let { cleanText(it) }?.trim().orEmpty()
+      title = stripTrailingCategoryFromTitle(title, category)
 
       // 주소 후보: 기존 휴리스틱 재사용(블록 전체 span 훑기)
       val address = pickBestListAddressCandidate(
@@ -952,6 +987,7 @@ class NaverMobilePlaceScrapeModule : Module() {
           // m.map 결과는 주소 줄에 액션 라벨이 붙거나 span이 잘게 쪼개지지 않는 케이스가 있어 블록 텍스트 폴백
           extractKrAddressFromBlockText(cleanText(block))
         }
+      val cleanedAddress = stripCategoryNoiseFromAddress(address2, title, category)
 
       val thumb = firstImageUrlInRow(block)
       val out = mutableMapOf<String, String?>(
@@ -962,7 +998,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       val pid = placeDetailRe.find(href)?.groupValues?.getOrNull(1)?.trim().orEmpty()
       if (pid.isNotEmpty()) out["placeId"] = pid
       if (category.isNotEmpty()) out["category"] = category
-      if (address2.isNotEmpty()) out["address"] = address2
+      if (cleanedAddress.isNotEmpty()) out["address"] = cleanedAddress
       if (!thumb.isNullOrBlank()) out["thumbnailUrl"] = thumb
       return out
     }
@@ -1039,6 +1075,68 @@ class NaverMobilePlaceScrapeModule : Module() {
       return Pair(t, null)
     }
 
+    private fun normalizeCategoryBoundaryText(raw: String?): String {
+      return raw.orEmpty().replace('\u00a0', ' ').replace(Regex("""\s+"""), " ").trim()
+    }
+
+    private fun stripTrailingCategoryFromTitle(rawTitle: String, rawCategory: String?): String {
+      val title = normalizeCategoryBoundaryText(rawTitle)
+      val category = normalizeCategoryBoundaryText(rawCategory)
+      if (title.isEmpty() || category.length < 2) return title
+
+      val candidates =
+        linkedSetOf(
+          category,
+          category.replace(" ", ""),
+        ).filter { it.length >= 2 }
+
+      for (cat in candidates) {
+        if (title.length > cat.length + 1 && title.endsWith(cat)) {
+          val base = title.dropLast(cat.length).trimEnd()
+          if (base.length >= 2) return base
+        }
+        val spacedCat = " $cat"
+        if (title.length > spacedCat.length + 1 && title.endsWith(spacedCat)) {
+          val base = title.dropLast(spacedCat.length).trimEnd()
+          if (base.length >= 2) return base
+        }
+      }
+
+      return title
+    }
+
+    private fun stripCategoryNoiseFromAddress(rawAddress: String, title: String, rawCategory: String?): String {
+      val address = normalizeCategoryBoundaryText(rawAddress)
+      if (address.isEmpty()) return address
+
+      val addressStart = findKrAddressStart(address)
+      if (addressStart > 0) return address.substring(addressStart).trim()
+
+      val category = normalizeCategoryBoundaryText(rawCategory)
+      if (category.length < 2) return address
+
+      val titleText = normalizeCategoryBoundaryText(title)
+      val prefixes =
+        linkedSetOf(
+          "$titleText$category",
+          "$titleText $category",
+          category,
+          category.replace(" ", ""),
+        )
+          .map { it.trim() }
+          .filter { it.length >= 2 }
+
+      for (prefix in prefixes) {
+        if (!address.startsWith(prefix) || address.length <= prefix.length + 2) continue
+        val stripped = address.removePrefix(prefix).trimStart()
+        val strippedAddressStart = findKrAddressStart(stripped)
+        if (strippedAddressStart >= 0) return stripped.substring(strippedAddressStart).trim()
+        if (looksLikeListAddressSnippet(stripped)) return stripped
+      }
+
+      return address
+    }
+
     private fun isStatusLikeTitle(title: String): Boolean {
       val t = title.replace('\u00a0', ' ').trim()
       if (t.isEmpty()) return true
@@ -1066,9 +1164,11 @@ class NaverMobilePlaceScrapeModule : Module() {
     ): Map<String, String?> {
       val normalizedLink = normalizePlaceDetailLink(link)
       val derivedId = placeId ?: extractPlaceIdFromLink(normalizedLink)
-      val m = mutableMapOf<String, String?>("title" to title)
+      val cleanedTitle = stripTrailingCategoryFromTitle(title, category)
+      val cleanedAddress = stripCategoryNoiseFromAddress(address, cleanedTitle, category)
+      val m = mutableMapOf<String, String?>("title" to cleanedTitle)
       if (category.isNotEmpty()) m["category"] = category
-      if (address.isNotEmpty()) m["address"] = address
+      if (cleanedAddress.isNotEmpty()) m["address"] = cleanedAddress
       if (normalizedLink != null) m["link"] = normalizedLink
       if (derivedId != null) m["placeId"] = derivedId
       if (!thumbnailUrl.isNullOrBlank()) m["thumbnailUrl"] = thumbnailUrl
@@ -1228,38 +1328,31 @@ class NaverMobilePlaceScrapeModule : Module() {
       return pickBestListAddressCandidate(cands, titleT)
     }
 
+    private fun normalizeListAddressCandidateText(raw: String): String {
+      var t = raw.replace('\u00a0', ' ').replace("주소보기", " ").replace(Regex("""\s+"""), " ").trim()
+      if (t.isEmpty()) return t
+      val start = findKrAddressStart(t)
+      if (start > 0) t = t.substring(start).trim()
+      t = trimTrailingNaverPlaceLinkLabels(t)
+      return t.trim()
+    }
+
+    private fun hasStrictOrSafeRegionStart(s: String): Boolean {
+      if (strictRegionPrefixesForAddressLine.any { s.startsWith(it) }) return true
+      val m = safeShortRegionAddressStartRegex.find(s) ?: return false
+      return (m.groups[1]?.range?.first ?: m.range.first) == 0
+    }
+
     private fun looksLikeListAddressSnippet(s: String): Boolean {
       // 지도(m.map)에서는 "주소보기" 라벨이 주소 앞에 붙어 내려오는 경우가 많아 제거합니다.
-      val t = s.replace('\u00a0', ' ').replace("주소보기", "").trim()
+      val t = normalizeListAddressCandidateText(s)
       if (t.length < 8) return false
-      val regions =
-        listOf(
-          "서울",
-          "부산",
-          "대구",
-          "인천",
-          "광주",
-          "대전",
-          "울산",
-          "세종",
-          "경기",
-          "강원",
-          "충북",
-          "충남",
-          "전북",
-          "전남",
-          "경북",
-          "경남",
-          "제주",
-          "충청",
-          "전라",
-          "경상",
-        )
-      if (!regions.any { t.contains(it) }) return false
+      if (!hasStrictOrSafeRegionStart(t)) return false
       if (t.startsWith("영업") || t.startsWith("리뷰")) return false
       if (t.contains("⭐")) return false
       if (Regex("""\d+\s*km""", RegexOption.IGNORE_CASE).containsMatchIn(t)) return false
-      return t.any { ch -> ch in "구동읍면리로길번층호시군0123456789" }
+      val detail = Regex("""[가-힣A-Za-z0-9·._-]{1,24}(?:시|군|구|읍|면|동|리|로|길|번길)|\d+(?:-\d+)?|\d+\s*(?:층|호)""")
+      return detail.containsMatchIn(t)
     }
 
     private fun listAddressDetailScore(s: String): Int {
@@ -1275,7 +1368,7 @@ class NaverMobilePlaceScrapeModule : Module() {
       val titleT = title.trim()
       val cleaned =
         cands
-          .map { it.replace('\u00a0', ' ').replace("주소보기", "").trim() }
+          .map { normalizeListAddressCandidateText(it) }
           .filter { it.isNotEmpty() && it != titleT && !titleT.equals(it, ignoreCase = true) }
           .filter { !it.startsWith("영업") && !it.startsWith("리뷰") }
           .filter { looksLikeListAddressSnippet(it) }

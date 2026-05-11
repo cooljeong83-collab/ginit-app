@@ -1,5 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useCallback, useEffect, useState } from 'react';
+import {useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -30,22 +30,39 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
   const insets = useSafeAreaInsets();
   const [webLoading, setWebLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const initialLoadSettledRef = useRef(false);
 
   const safeUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : null;
   const webViewUri = safeUrl ? normalizeNaverPlaceDetailWebUrl(safeUrl) : null;
 
   useEffect(() => {
     if (visible && webViewUri) {
+      initialLoadSettledRef.current = false;
       setWebLoading(true);
       setLoadError(null);
     }
   }, [visible, webViewUri]);
 
+  useEffect(() => {
+    if (!visible || !webViewUri || !webLoading) return;
+    const timeout = setTimeout(() => {
+      initialLoadSettledRef.current = true;
+      setWebLoading(false);
+    }, 8000);
+    return () => clearTimeout(timeout);
+  }, [visible, webViewUri, webLoading]);
+
   const handleClose = useCallback(() => {
+    initialLoadSettledRef.current = false;
     setWebLoading(true);
     setLoadError(null);
     onClose();
   }, [onClose]);
+
+  const settleInitialLoad = useCallback(() => {
+    initialLoadSettledRef.current = true;
+    setWebLoading(false);
+  }, []);
 
   const maxSheet = Math.max(280, windowHeight - insets.top - insets.bottom - 24);
   const sheetHeight = Math.round(Math.min(windowHeight * 0.9, maxSheet));
@@ -91,16 +108,21 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
                   userAgent={NAVER_PLACE_WEBVIEW_USER_AGENT}
                   style={styles.webview}
                   onLoadStart={() => {
-                    setWebLoading(true);
+                    if (!initialLoadSettledRef.current) {
+                      setWebLoading(true);
+                    }
                     setLoadError(null);
                   }}
-                  onLoadEnd={() => setWebLoading(false)}
+                  onLoadProgress={({ nativeEvent }) => {
+                    if (nativeEvent.progress >= 0.85) settleInitialLoad();
+                  }}
+                  onLoadEnd={settleInitialLoad}
                   onHttpError={() => {
-                    setWebLoading(false);
+                    settleInitialLoad();
                     setLoadError('페이지를 불러오지 못했습니다.');
                   }}
                   onError={() => {
-                    setWebLoading(false);
+                    settleInitialLoad();
                     setLoadError('페이지를 불러오지 못했습니다.');
                   }}
                   startInLoadingState={false}

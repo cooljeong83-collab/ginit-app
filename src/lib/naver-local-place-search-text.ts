@@ -310,12 +310,21 @@ export async function searchPlacesText(
   return { places, nextPageToken };
 }
 
+function hasPlaceSearchRowCoordinates(row: PlaceSearchRow): boolean {
+  return (
+    row.latitude != null &&
+    row.longitude != null &&
+    Number.isFinite(row.latitude) &&
+    Number.isFinite(row.longitude)
+  );
+}
+
 /** 목록에 좌표가 없으면 NCP 지오코딩으로 보강(네이버 지역 검색 응답). */
 export async function resolvePlaceSearchRowCoordinates(row: PlaceSearchRow): Promise<PlaceSearchRow> {
   let base: PlaceSearchRow = { ...row };
   let detailAddressLine: string | null = null;
 
-  if (base.latitude != null && base.longitude != null) {
+  if (hasPlaceSearchRowCoordinates(base)) {
     if (detailAddressLine) {
       return {
         ...base,
@@ -354,4 +363,29 @@ export async function resolvePlaceSearchRowCoordinates(row: PlaceSearchRow): Pro
     roadAddress: resolved.roadAddress || base.roadAddress,
     address: resolved.address || base.address,
   };
+}
+
+/** 검색 결과 로딩 시점에 좌표 없는 행만 미리 보강합니다. 실패한 행은 원본을 유지합니다. */
+export async function preloadPlaceSearchRowsCoordinates(rows: readonly PlaceSearchRow[]): Promise<PlaceSearchRow[]> {
+  if (rows.length === 0) return [];
+  return Promise.all(
+    rows.map(async (row) => {
+      if (hasPlaceSearchRowCoordinates(row)) return row;
+      try {
+        return await resolvePlaceSearchRowCoordinates(row);
+      } catch (e) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[NaverLocalKeywordSearch]', {
+            source: 'preload_coordinate_failed',
+            id: row.id,
+            title: row.title,
+            address: row.roadAddress || row.address,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        }
+        return row;
+      }
+    }),
+  );
 }

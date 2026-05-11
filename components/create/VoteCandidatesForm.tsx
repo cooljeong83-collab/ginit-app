@@ -46,7 +46,7 @@ import {
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import {
-  resolvePlaceSearchRowCoordinates,
+  preloadPlaceSearchRowsCoordinates,
   searchPlacesText,
   stableNaverLocalSearchDedupeKey,
   type PlaceSearchRow,
@@ -104,6 +104,17 @@ const DEFAULT_CALENDAR_PICK_TIME = '19:00';
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 /** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
 const CALENDAR_MONTH_SWIPE_TRANSITION_OPACITY = 0.76;
+
+function hasResolvedPlaceSearchRowCoordinates(
+  row: PlaceSearchRow,
+): row is PlaceSearchRow & { latitude: number; longitude: number } {
+  return (
+    row.latitude != null &&
+    row.longitude != null &&
+    Number.isFinite(row.latitude) &&
+    Number.isFinite(row.longitude)
+  );
+}
 
 function animate() {
   layoutAnimateMeetingCreateWizard();
@@ -918,9 +929,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const addr = (item.roadAddress || item.address || '').trim();
     try {
       setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
-      const resolved = await resolvePlaceSearchRowCoordinates(item);
+      if (!hasResolvedPlaceSearchRowCoordinates(item)) {
+        throw new Error('이 장소의 좌표를 미리 불러오지 못했습니다.');
+      }
+      const resolved = item;
       const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
-      if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
       const placeName = resolved.title.trim() || title.trim();
       const linkFromApi =
         sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
@@ -944,7 +957,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       });
       return true;
     } catch (e) {
-      setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+      showTransientBottomMessage(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
       return false;
     } finally {
       setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
@@ -1473,15 +1486,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           pageToken: token,
           excludeStablePlaceKeys,
         });
+        const listWithCoords = await preloadPlaceSearchRowsCoordinates(list);
         const prevRows = placeSearchRowsRef.current;
         const seen0 = new Set(prevRows.map((r) => r.id));
-        const fresh0 = list.filter((r) => !seen0.has(r.id));
+        const fresh0 = listWithCoords.filter((r) => !seen0.has(r.id));
         if (fresh0.length === 0) {
           setPlaceSearchNextPageToken(null);
         } else {
           setPlaceSearchRows((prev) => {
             const seen = new Set(prev.map((r) => r.id));
-            const fresh = list.filter((r) => !seen.has(r.id));
+            const fresh = listWithCoords.filter((r) => !seen.has(r.id));
             return fresh.length ? [...prev, ...fresh] : prev;
           });
           setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
@@ -1609,8 +1623,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           userCoords: coords,
           maxResultCount: PLACE_SEARCH_PAGE_SIZE,
         });
+        const listWithCoords = await preloadPlaceSearchRowsCoordinates(list);
         if (!alive) return;
-        setPlaceSearchRows(list);
+        setPlaceSearchRows(listWithCoords);
         setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
         setPlaceThumbById({});
       } catch (e) {
@@ -2264,13 +2279,20 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                 return;
                               }
 
+                              if (!hasResolvedPlaceSearchRowCoordinates(item)) {
+                                showTransientBottomMessage(
+                                  '이 장소의 좌표를 미리 불러오지 못했어요. 다른 후보를 선택해 주세요.',
+                                );
+                                return;
+                              }
+
+                              const resolvedPlace = item;
                               setPlaceResolvingById((prev) => ({ ...prev, [item.id]: true }));
                               void (async () => {
                                 try {
-                                  const resolved = await resolvePlaceSearchRowCoordinates(item);
+                                  const resolved = resolvedPlace;
                                   const address =
                                     resolved.roadAddress?.trim() || resolved.address?.trim() || addressOnly;
-                                  if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
                                   const placeName = resolved.title.trim() || title.trim();
                                   const linkFromApi =
                                     sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
@@ -2297,7 +2319,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                     return [...prev, placeRowFromCandidate(p)];
                                   });
                                 } catch (e) {
-                                  setPlaceSearchErr(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
+                                  showTransientBottomMessage(e instanceof Error ? e.message : '장소 추가에 실패했습니다.');
                                 } finally {
                                   setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
                                 }

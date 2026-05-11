@@ -814,12 +814,6 @@ export default function CreateDetailsScreen() {
   );
 
   useEffect(() => {
-    const label = selectedCategory?.label?.trim() ?? paramCategoryLabel.trim();
-    if (!label) {
-      setTitleRegion(null);
-      setTitleWeatherMood(null);
-      return;
-    }
     const gen = ++titleSuggestionsGenRef.current;
     let alive = true;
     void (async () => {
