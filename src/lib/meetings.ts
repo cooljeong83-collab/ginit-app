@@ -2953,6 +2953,41 @@ export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'schedule
   return parsed ? parsed.toMillis() : null;
 }
 
+export type ConfirmedScheduleNoticeBarOpts = {
+  showArrivalVerifyBanner: boolean;
+  showSettlementHostBanner: boolean;
+};
+
+/** 홈·채팅·모임 상단 공지 "확정: 장소 · 일시" 한 줄(없으면 빈 문자열). */
+export function buildConfirmedScheduleNoticeText(
+  m: Pick<Meeting, 'scheduleConfirmed' | 'placeName' | 'location' | 'scheduleDate' | 'scheduleTime'>,
+): string {
+  if (m.scheduleConfirmed !== true) return '';
+  const place = m.placeName?.trim() || m.location?.trim();
+  const d = m.scheduleDate?.trim();
+  const t = m.scheduleTime?.trim();
+  const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
+  return parts.length ? `확정: ${parts.join(' · ')}` : '';
+}
+
+/**
+ * 확정 일시·장소 한 줄 공지 표시 여부(홈·채팅·모임 상세 동일).
+ * - 예정 시작(`meetingPrimaryStartMs`)이 지나면 숨김(진행중·이후).
+ * - 장소 인증·정산 상단 배너가 노출되는 동안은 숨김.
+ */
+export function shouldShowConfirmedScheduleNoticeBar(
+  m: Meeting | null | undefined,
+  nowMs: number,
+  opts: ConfirmedScheduleNoticeBarOpts,
+): boolean {
+  if (!m) return false;
+  if (buildConfirmedScheduleNoticeText(m).trim() === '') return false;
+  if (opts.showArrivalVerifyBanner || opts.showSettlementHostBanner) return false;
+  const startMs = meetingPrimaryStartMs(m);
+  if (startMs != null && Number.isFinite(startMs) && nowMs >= startMs) return false;
+  return true;
+}
+
 /**
  * 일정 확정 모임의 대표 시작 시각 + `meeting.list_ongoing_duration_hours`가 지난 뒤인지.
  * 홈 목록 “모임 종료” 배지·모임 상세 하단(장소 인증 숨김·후기 자리 등)과 동일 기준입니다.

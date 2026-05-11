@@ -2,13 +2,26 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
-import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-    ActivityIndicator, Alert, InteractionManager, Keyboard, type LayoutChangeEvent, Modal, type NativeScrollEvent, type NativeSyntheticEvent, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
+    ActivityIndicator,
+    Alert,
+    DeviceEventEmitter,
+    InteractionManager,
+    Keyboard,
+    type LayoutChangeEvent,
+    Modal,
+    type NativeScrollEvent,
+    type NativeSyntheticEvent,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
@@ -17,6 +30,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
 import { MeetingChatImageViewerGallery } from '@/components/chat/MeetingChatImageViewerGallery';
 import { MeetingChatMainColumn } from '@/components/chat/MeetingChatMainColumn';
+import {
+  MeetingDetailStaticNoticeRow,
+  MeetingDetailTopNoticesPager,
+  type MeetingDetailTopNoticeSlide,
+} from '@/components/meeting/MeetingDetailTopNoticesPager';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
@@ -62,8 +80,15 @@ import {
   syncMeetingArrivalReminderLocalNotifications,
 } from '@/src/lib/meeting-arrival-verify-reminders';
 import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
+import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
 import type { Meeting } from '@/src/lib/meetings';
-import { isConfirmedMeetingPastListEndWindow, meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
+import {
+  buildConfirmedScheduleNoticeText,
+  isConfirmedMeetingPastListEndWindow,
+  meetingParticipantCount,
+  shouldShowConfirmedScheduleNoticeBar,
+  subscribeMeetingById,
+} from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import type { UserProfile } from '@/src/lib/user-profile';
@@ -360,12 +385,21 @@ export default function MeetingChatRoomScreen() {
     let cancelled = false;
     void (async () => {
       const v = await hasLedgerArrivalVerified(m.id.trim(), userId.trim());
-      if (!cancelled) setMeetingArrivalBannerVerified(v);
+      if (!cancelled) setMeetingArrivalBannerVerified((prev) => prev || v);
     })();
     return () => {
       cancelled = true;
     };
   }, [allowed, meetingId, userId, meeting, isFocused, arrivalBannerUiTick]);
+
+  useEffect(() => {
+    const mid = meetingId?.trim();
+    if (!mid) return undefined;
+    const sub = DeviceEventEmitter.addListener(GINIT_MEETING_ARRIVAL_VERIFIED_EVENT, (e: { meetingId?: string }) => {
+      if (e?.meetingId?.trim() === mid) setMeetingArrivalBannerVerified(true);
+    });
+    return () => sub.remove();
+  }, [meetingId]);
 
   useEffect(() => {
     if (!isFocused || allowed !== true || !meeting || !userId?.trim()) return;
@@ -892,16 +926,6 @@ export default function MeetingChatRoomScreen() {
 
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
 
-  const announcementText = useMemo(() => {
-    if (!meeting) return '';
-    if (meeting.scheduleConfirmed !== true) return '';
-    const place = meeting.placeName?.trim() || meeting.location?.trim();
-    const d = meeting.scheduleDate?.trim();
-    const t = meeting.scheduleTime?.trim();
-    const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
-    return parts.length ? `확정: ${parts.join(' · ')}` : '';
-  }, [meeting]);
-
   const participantIdsForReadCount = useMemo(() => {
     if (!meeting) return [] as string[];
     const ids = [...(meeting.participantIds ?? [])];
@@ -1092,6 +1116,73 @@ export default function MeetingChatRoomScreen() {
     return isMeetingSettlementCtaEligibleForHost(meeting, uid, Date.now());
   }, [meeting, userId, appPoliciesVersion]);
 
+  const chatTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
+    void arrivalBannerUiTick;
+    const slides: MeetingDetailTopNoticeSlide[] = [];
+    if (!meeting) return slides;
+    const mid = meetingId?.trim() ?? '';
+    const quoted = (meeting?.title ?? '').trim() || '모임';
+    if (showSettlementHostBanner && mid) {
+      slides.push({
+        key: 'settlement',
+        element: (
+          <SettlementHostBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={quoted}
+            ctaSuffix="정산하기"
+            onPress={() => router.push(`/settlement/${encodeURIComponent(mid)}`)}
+          />
+        ),
+      });
+    }
+    if (showMeetingArrivalVerifyTopBanner && mid) {
+      slides.push({
+        key: 'arrival',
+        element: (
+          <MeetingArrivalVerifyTopBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={quoted}
+            ctaSuffix="장소 인증하기"
+            onPress={() => router.push(`/arrival-verify/${encodeURIComponent(mid)}`)}
+          />
+        ),
+      });
+    }
+    const scheduleLine = shouldShowConfirmedScheduleNoticeBar(meeting, Date.now(), {
+      showArrivalVerifyBanner: showMeetingArrivalVerifyTopBanner,
+      showSettlementHostBanner: showSettlementHostBanner,
+    })
+      ? buildConfirmedScheduleNoticeText(meeting).trim()
+      : '';
+    if (scheduleLine) {
+      slides.push({
+        key: 'schedule',
+        element: (
+          <GinitPressable
+            onPress={goMeetingDetail}
+            accessibilityRole="link"
+            accessibilityLabel="모임 상세"
+            style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+            <MeetingDetailStaticNoticeRow text={scheduleLine} slideTrackFullBleed />
+          </GinitPressable>
+        ),
+      });
+    }
+    return slides;
+  }, [
+    meeting,
+    meetingId,
+    showSettlementHostBanner,
+    showMeetingArrivalVerifyTopBanner,
+    arrivalBannerUiTick,
+    router,
+    goMeetingDetail,
+  ]);
+
   if (!meetingId) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
@@ -1218,36 +1309,10 @@ export default function MeetingChatRoomScreen() {
           ) : null}
         </View>
 
-        {showSettlementHostBanner ? (
-          <SettlementHostBanner
-            quotedMeetingTitle={title.trim() || '모임'}
-            ctaSuffix="정산하기"
-            onPress={() => router.push(`/settlement/${encodeURIComponent(meetingId)}`)}
-          />
-        ) : null}
-
-        {showMeetingArrivalVerifyTopBanner ? (
-          <MeetingArrivalVerifyTopBanner
-            quotedMeetingTitle={title.trim() || '모임'}
-            ctaSuffix="장소 인증하기"
-            onPress={() => router.push(`/arrival-verify/${encodeURIComponent(meetingId)}`)}
-          />
-        ) : null}
-
-        {announcementText ? (
-          <GinitPressable
-            onPress={goMeetingDetail}
-            style={styles.announcementBar}
-            accessibilityRole="link"
-            accessibilityLabel="모임 상세">
-            <BlurView tint="light" intensity={60} style={styles.announcementInner}>
-              <GinitSymbolicIcon name="megaphone-outline" size={16} color="#0052CC" />
-              <Text style={styles.announcementText} numberOfLines={1}>
-                {announcementText}
-              </Text>
-              <GinitSymbolicIcon name="chevron-forward" size={16} color="#64748b" />
-            </BlurView>
-          </GinitPressable>
+        {chatTopNoticeSlides.length > 0 ? (
+          <View style={styles.chatNoticePagerWrap}>
+            <MeetingDetailTopNoticesPager slides={chatTopNoticeSlides} />
+          </View>
         ) : null}
 
         <MeetingChatMainColumn
@@ -1452,28 +1517,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(15, 23, 42, 0.08)',
   },
-  announcementBar: {
-    paddingHorizontal: 8,
-    paddingTop: 6,
-    backgroundColor: GinitTheme.colors.noticeSurface,
-  },
-  announcementInner: {
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    overflow: 'hidden',
-  },
-  announcementText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0f172a',
+  /** 홈 `feedHeader`와 동일: 좌우 20, 탭줄~공지 간격 12 */
+  chatNoticePagerWrap: {
+    paddingHorizontal: 20,
+    marginTop: 12,
   },
   titleBlock: {
     flex: 1,

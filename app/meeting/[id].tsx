@@ -87,6 +87,7 @@ import {
 } from '@/src/lib/meeting-share';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  buildConfirmedScheduleNoticeText,
   computeMeetingConfirmAnalysis,
   findMeetingJoinRequestForUser,
   formatPublicMeetingAgeSummary,
@@ -103,6 +104,7 @@ import {
   meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
+  shouldShowConfirmedScheduleNoticeBar,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
   webGuestDisplayNameFromMeeting
@@ -1849,13 +1851,24 @@ export default function MeetingDetailScreen() {
 
   const meetingDetailScheduleNoticeText = useMemo(() => {
     if (!meeting) return '';
-    if (meeting.scheduleConfirmed !== true) return '';
-    const place = meeting.placeName?.trim() || meeting.location?.trim();
-    const d = meeting.scheduleDate?.trim();
-    const t = meeting.scheduleTime?.trim();
-    const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
-    return parts.length ? `확정: ${parts.join(' · ')}` : '';
-  }, [meeting]);
+    void arrivalUiTick;
+    void meetingDetailListEndUiTick;
+    const now = Date.now();
+    if (
+      !shouldShowConfirmedScheduleNoticeBar(meeting, now, {
+        showArrivalVerifyBanner: showMeetingArrivalVerifyTopBanner,
+        showSettlementHostBanner: showSettlementHostBanner,
+      })
+    )
+      return '';
+    return buildConfirmedScheduleNoticeText(meeting);
+  }, [
+    meeting,
+    showMeetingArrivalVerifyTopBanner,
+    showSettlementHostBanner,
+    arrivalUiTick,
+    meetingDetailListEndUiTick,
+  ]);
 
   const meetingDetailTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     if (!meeting) return [];

@@ -1,8 +1,21 @@
-import { Alert } from 'react-native';
+import { Alert, DeviceEventEmitter } from 'react-native';
 
 import { alertBodyForArrivalRpc, type MeetingArrivalRpcResult } from '@/src/lib/meeting-arrival-verify';
 import { cancelMeetingArrivalReminderLocalNotifications } from '@/src/lib/meeting-arrival-verify-reminders';
 import type { Meeting } from '@/src/lib/meetings';
+
+/** 홈·채팅·상세 등에서 `장소 인증하기` 배너를 즉시 내리기 위한 브로드캐스트 */
+export const GINIT_MEETING_ARRIVAL_VERIFIED_EVENT = 'ginit_meeting_arrival_verified';
+
+export type GinitMeetingArrivalVerifiedPayload = {
+  meetingId: string;
+};
+
+function emitMeetingArrivalVerifiedForUi(meetingId: string): void {
+  const id = meetingId.trim();
+  if (!id) return;
+  DeviceEventEmitter.emit(GINIT_MEETING_ARRIVAL_VERIFIED_EVENT, { meetingId: id } satisfies GinitMeetingArrivalVerifiedPayload);
+}
 
 export type MeetingArrivalVerifyRpcUiPayload = {
   rpc: MeetingArrivalRpcResult | null;
@@ -32,6 +45,7 @@ export function presentMeetingArrivalVerifyRpcOutcome(
   }
   if (!rpc) return;
   if (rpc.ok) {
+    emitMeetingArrivalVerifiedForUi(m.id);
     void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
     Alert.alert(
       '인증 완료',
@@ -49,6 +63,7 @@ export function presentMeetingArrivalVerifyRpcOutcome(
     return;
   }
   if (rpc.ok === false && rpc.code === 'already_verified') {
+    emitMeetingArrivalVerifiedForUi(m.id);
     void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
     void ctx.refetchMeetingDetail();
     ctx.onAfterResolved();

@@ -29,6 +29,7 @@ import { FlashList } from '@shopify/flash-list';
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
 import {
+  MeetingDetailStaticNoticeRow,
   MeetingDetailTopNoticesPager,
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
@@ -85,9 +86,11 @@ import {
 import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { Meeting } from '@/src/lib/meetings';
 import {
+  buildConfirmedScheduleNoticeText,
   getMeetingRecruitmentPhase,
   isConfirmedMeetingPastListEndWindow,
   isConfirmedMeetingPastMyMeetingsRetentionWindow,
+  shouldShowConfirmedScheduleNoticeBar,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
@@ -96,6 +99,7 @@ import {
   shouldShowMeetingArrivalVerifyTopBanner,
 } from '@/src/lib/meeting-arrival-verify-banner';
 import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
+import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
 import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
@@ -267,6 +271,15 @@ export default function FeedScreen() {
   const isHomeMeetingsScreenFocused = useIsFocused();
   const [homeArrivalNoticeUiTick, setHomeArrivalNoticeUiTick] = useState(0);
   const [homeArrivalVerifiedMap, setHomeArrivalVerifiedMap] = useState<Record<string, boolean>>({});
+
+  /** 장소 인증 화면 등에서 돌아올 때 상단 공지의 인증 맵을 다시 읽습니다(`arrivalBannerCandidates` 참조가 같을 수 있음). */
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') return undefined;
+      setHomeArrivalNoticeUiTick((n) => n + 1);
+      return undefined;
+    }, []),
+  );
 
   useEffect(() => {
     if (!isHomeMeetingsScreenFocused || Platform.OS === 'web') return undefined;
@@ -673,14 +686,28 @@ export default function FeedScreen() {
         }),
       );
       if (cancelled) return;
-      const next: Record<string, boolean> = {};
-      for (const [id, v] of pairs) next[id] = v;
-      setHomeArrivalVerifiedMap(next);
+      setHomeArrivalVerifiedMap((prev) => {
+        const next: Record<string, boolean> = {};
+        for (const [id, v] of pairs) next[id] = v || prev[id] === true;
+        return next;
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [arrivalBannerCandidates, userId]);
+  }, [arrivalBannerCandidates, userId, homeArrivalNoticeUiTick]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(
+      GINIT_MEETING_ARRIVAL_VERIFIED_EVENT,
+      (e: { meetingId?: string }) => {
+        const id = typeof e?.meetingId === 'string' ? e.meetingId.trim() : '';
+        if (!id) return;
+        setHomeArrivalVerifiedMap((prev) => ({ ...prev, [id]: true }));
+      },
+    );
+    return () => sub.remove();
+  }, []);
 
   const arrivalEligibleMeetings = useMemo(() => {
     void homeArrivalNoticeUiTick;
@@ -734,7 +761,13 @@ export default function FeedScreen() {
     for (const m of myTabsMeetings) {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
       if (!id || seen.has(id)) continue;
-      if (!settlementNoticeIdSet.has(id) && !arrivalNoticeIdSet.has(id)) continue;
+      const hasSettlement = settlementNoticeIdSet.has(id);
+      const hasArrival = arrivalNoticeIdSet.has(id);
+      const hasScheduleLine = shouldShowConfirmedScheduleNoticeBar(m, Date.now(), {
+        showArrivalVerifyBanner: hasArrival,
+        showSettlementHostBanner: hasSettlement,
+      });
+      if (!hasSettlement && !hasArrival && !hasScheduleLine) continue;
       seen.add(id);
       out.push(m);
     }
@@ -743,7 +776,9 @@ export default function FeedScreen() {
   }, [myTabsMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick]);
 
   const homeTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
+    void homeArrivalNoticeUiTick;
     const slides: MeetingDetailTopNoticeSlide[] = [];
+    const now = Date.now();
     for (const m of homeNoticeOrderedMeetings) {
       const id = m.id.trim();
       if (settlementNoticeIdSet.has(id)) {
@@ -776,9 +811,29 @@ export default function FeedScreen() {
           ),
         });
       }
+      const scheduleLine = shouldShowConfirmedScheduleNoticeBar(m, now, {
+        showArrivalVerifyBanner: arrivalNoticeIdSet.has(id),
+        showSettlementHostBanner: settlementNoticeIdSet.has(id),
+      })
+        ? buildConfirmedScheduleNoticeText(m).trim()
+        : '';
+      if (scheduleLine) {
+        slides.push({
+          key: `schedule-${id}`,
+          element: (
+            <GinitPressable
+              onPress={() => router.push(`/meeting/${encodeURIComponent(id)}`)}
+              accessibilityRole="link"
+              accessibilityLabel="모임 상세"
+              style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+              <MeetingDetailStaticNoticeRow text={scheduleLine} slideTrackFullBleed />
+            </GinitPressable>
+          ),
+        });
+      }
     }
     return slides;
-  }, [homeNoticeOrderedMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, router]);
+  }, [homeNoticeOrderedMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, router, homeArrivalNoticeUiTick]);
 
   const goToHomeTab = useCallback(
     (t: HomeMeetingTopTab) => {
@@ -2187,9 +2242,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 12,
   },
-  /** 슬라이드 공지 트랙이 있을 때: 트랙 하단~모임 목록 간격 축소 */
+  /** 슬라이드 공지가 있을 때: 헤더 하단 여백 없이 목록과 맞닿음 */
   feedHeaderWhenNoticePager: {
-    marginBottom: 8,
+    marginBottom: 0,
   },
   feedHeaderTopRow: {
     flexDirection: 'row',
