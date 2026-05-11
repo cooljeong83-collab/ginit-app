@@ -15,4 +15,11 @@ module.exports = defineConfig([
       'import/namespace': 'off',
     },
   },
+  {
+    files: ['src/lib/meeting-chat-db.ts'],
+    rules: {
+      // `expo-sqlite`는 의존성에 있으나 import resolver가 package exports를 해석하지 못하는 경우가 있음
+      'import/no-unresolved': 'off',
+    },
+  },
 ]);

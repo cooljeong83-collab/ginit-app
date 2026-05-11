@@ -569,7 +569,24 @@ export default function ProfileAppSettingsScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.block}>
+          {isSignedIn ? (
+            <View style={styles.block}>
+              {sectionTitle('개인')}
+              <GinitPressable
+                onPress={() => router.push('/settlement/accounts')}
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="정산 계좌 관리">
+                <SettingsRowLeadIcon name="card-outline" />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>정산 계좌 관리</Text>
+                  <Text style={styles.rowSub}>입금 받을 계좌를 등록하고 대표 계좌를 지정해요.</Text>
+                </View>
+                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+              </GinitPressable>
+            </View>
+          ) : null}
+          <View style={[styles.block, isSignedIn ? styles.blockGap : null]}>
             {sectionTitle('알림')}
             <View style={styles.row}>
               <SettingsRowLeadIcon name="notifications-outline" />

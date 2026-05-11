@@ -106,6 +106,38 @@ export type ParticipantVoteSnapshot = {
 };
 
 /** 공개 모임 + 호스트 승인 방식일 때, 아직 참여자 목록에 오르기 전 신청 큐 */
+/** 정산 1단계 완료 시에만 설정(미설정 = 정산 전). */
+export type MeetingLifecycleStatus = 'SETTLED';
+
+/** 정산 화면에 표시·공유용으로 저장되는 영수증 썸네일(Supabase Storage URL). */
+export type MeetingSettlementReceiptItem = {
+  id: string;
+  imageUrl: string;
+  amountWon: number;
+};
+
+/** 원장 `extra_data.fs`에만 저장되는 정산 전용 부가 데이터(핵심 모임 필드와 분리). */
+export type MeetingSettlementInfo = {
+  draftTotalWon?: number | null;
+  hostAccountText?: string | null;
+  /** `SETTLEMENT_BANK_CHOICES`의 `id` (시중·인터넷·기타 은행 선택) */
+  hostBankCode?: string | null;
+  hostAccountNumber?: string | null;
+  hostAccountHolder?: string | null;
+  /** 임시 저장 시 서버에 올린 영수증 JPEG URL 목록(썸네일·금액). */
+  draftReceipts?: MeetingSettlementReceiptItem[] | null;
+  rawText?: string | null;
+  selectedParticipantIds?: string[] | null;
+  linkedPlaceChipId?: string | null;
+  finalizedAt?: string | null;
+};
+
+/** 후기 2단계 등에서 확정 장소와 연결하기 위한 얇은 스냅샷. */
+export type MeetingLocationData = {
+  confirmedPlaceChipId?: string | null;
+  placeNameSnapshot?: string | null;
+};
+
 export type MeetingJoinRequest = {
   userId: string;
   dateChipIds: string[];
@@ -216,6 +248,10 @@ export type Meeting = {
   joinRequests?: MeetingJoinRequest[] | null;
   /** 호스트 강제 퇴장된 app_user_id(정규화 PK). 재참여·재신청 차단용 */
   kickedParticipantIds?: string[] | null;
+  /** 정산 완료 등 생명주기 플래그(설정 시에만 존재). */
+  lifecycleStatus?: MeetingLifecycleStatus | null;
+  settlementInfo?: MeetingSettlementInfo | null;
+  locationData?: MeetingLocationData | null;
 };
 
 /**
@@ -905,6 +941,125 @@ function resolveFirestoreCandidatesField(
   );
 }
 
+function parseMeetingLifecycleStatusField(data: Record<string, unknown>): MeetingLifecycleStatus | null {
+  const raw = data.lifecycleStatus ?? data.lifecycle_status;
+  if (typeof raw !== 'string') return null;
+  const t = raw.trim().toUpperCase();
+  return t === 'SETTLED' ? 'SETTLED' : null;
+}
+
+function parseSettlementDraftReceiptAmountWon(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.trunc(raw);
+  if (typeof raw === 'string' && raw.trim()) {
+    const n = Number(raw.trim().replace(/,/g, ''));
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+  return null;
+}
+
+function parseSettlementDraftReceiptId(raw: unknown): string {
+  if (typeof raw === 'string') return raw.trim();
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(Math.trunc(raw));
+  return '';
+}
+
+/** Firestore/원장 JSON의 `draftReceipts` 배열을 검증해 정규화합니다. */
+export function parseMeetingSettlementDraftReceipts(drRaw: unknown): MeetingSettlementReceiptItem[] {
+  if (!Array.isArray(drRaw)) return [];
+  const xs: MeetingSettlementReceiptItem[] = [];
+  for (const item of drRaw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const q = item as Record<string, unknown>;
+    const id = parseSettlementDraftReceiptId(q.id);
+    const imageUrlRaw = q.imageUrl ?? q.image_url;
+    const imageUrl = typeof imageUrlRaw === 'string' ? imageUrlRaw.trim() : '';
+    const amountWon = parseSettlementDraftReceiptAmountWon(q.amountWon ?? q.amount_won);
+    if (!id || !imageUrl || amountWon == null || amountWon < 0) continue;
+    if (!/^https?:\/\//i.test(imageUrl)) continue;
+    xs.push({ id, imageUrl, amountWon });
+  }
+  return xs;
+}
+
+function parseMeetingSettlementInfoField(data: Record<string, unknown>): MeetingSettlementInfo | null {
+  const raw = data.settlementInfo ?? data.settlement_info;
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const draftRaw = o.draftTotalWon ?? o.draft_total_won;
+  const draftTotalWon = ((): number | null => {
+    if (typeof draftRaw === 'number' && Number.isFinite(draftRaw)) return Math.trunc(draftRaw);
+    if (typeof draftRaw === 'string' && draftRaw.trim()) {
+      const n = Number(draftRaw.trim().replace(/,/g, ''));
+      return Number.isFinite(n) ? Math.trunc(n) : null;
+    }
+    return null;
+  })();
+  const hostRaw = o.hostAccountText ?? o.host_account_text;
+  const hostAccountText = typeof hostRaw === 'string' && hostRaw.trim() ? hostRaw.trim() : null;
+  const bankRaw = o.hostBankCode ?? o.host_bank_code;
+  const hostBankCode = typeof bankRaw === 'string' && bankRaw.trim() ? bankRaw.trim() : null;
+  const numRaw = o.hostAccountNumber ?? o.host_account_number;
+  const hostAccountNumber = typeof numRaw === 'string' && numRaw.trim() ? numRaw.trim() : null;
+  const holderRaw = o.hostAccountHolder ?? o.host_account_holder;
+  const hostAccountHolder = typeof holderRaw === 'string' && holderRaw.trim() ? holderRaw.trim() : null;
+  const rawTextRaw = o.rawText ?? o.raw_text;
+  const rawText = typeof rawTextRaw === 'string' && rawTextRaw.trim() ? rawTextRaw.trim() : null;
+  const selRaw = o.selectedParticipantIds ?? o.selected_participant_ids;
+  let selectedParticipantIds: string[] | null = null;
+  if (Array.isArray(selRaw)) {
+    const xs = selRaw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim());
+    selectedParticipantIds = xs.length ? xs : null;
+  }
+  const linkRaw = o.linkedPlaceChipId ?? o.linked_place_chip_id;
+  const linkedPlaceChipId = typeof linkRaw === 'string' && linkRaw.trim() ? linkRaw.trim() : null;
+  const finRaw = o.finalizedAt ?? o.finalized_at;
+  const finalizedAt = typeof finRaw === 'string' && finRaw.trim() ? finRaw.trim() : null;
+  const drRaw = o.draftReceipts ?? o.draft_receipts;
+  const draftReceiptsParsed = Array.isArray(drRaw) ? parseMeetingSettlementDraftReceipts(drRaw) : [];
+  const hasDraftReceipts = draftReceiptsParsed.length > 0;
+  if (
+    draftTotalWon == null &&
+    !hostAccountText &&
+    !hostBankCode &&
+    !hostAccountNumber &&
+    !hostAccountHolder &&
+    !rawText &&
+    !selectedParticipantIds &&
+    !linkedPlaceChipId &&
+    !finalizedAt &&
+    !hasDraftReceipts
+  ) {
+    return null;
+  }
+  const out: MeetingSettlementInfo = {};
+  if (draftTotalWon != null) out.draftTotalWon = draftTotalWon;
+  if (hostAccountText) out.hostAccountText = hostAccountText;
+  if (hostBankCode) out.hostBankCode = hostBankCode;
+  if (hostAccountNumber) out.hostAccountNumber = hostAccountNumber;
+  if (hostAccountHolder) out.hostAccountHolder = hostAccountHolder;
+  if (Array.isArray(drRaw)) out.draftReceipts = draftReceiptsParsed;
+  if (rawText) out.rawText = rawText;
+  if (selectedParticipantIds) out.selectedParticipantIds = selectedParticipantIds;
+  if (linkedPlaceChipId) out.linkedPlaceChipId = linkedPlaceChipId;
+  if (finalizedAt) out.finalizedAt = finalizedAt;
+  return out;
+}
+
+function parseMeetingLocationDataField(data: Record<string, unknown>): MeetingLocationData | null {
+  const raw = data.locationData ?? data.location_data;
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const cp = o.confirmedPlaceChipId ?? o.confirmed_place_chip_id;
+  const confirmedPlaceChipId = typeof cp === 'string' && cp.trim() ? cp.trim() : null;
+  const pn = o.placeNameSnapshot ?? o.place_name_snapshot;
+  const placeNameSnapshot = typeof pn === 'string' && pn.trim() ? pn.trim() : null;
+  if (!confirmedPlaceChipId && !placeNameSnapshot) return null;
+  const out: MeetingLocationData = {};
+  if (confirmedPlaceChipId) out.confirmedPlaceChipId = confirmedPlaceChipId;
+  if (placeNameSnapshot) out.placeNameSnapshot = placeNameSnapshot;
+  return out;
+}
+
 export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
   const dateCandidatesRaw = resolveFirestoreCandidatesField(data, 'dateCandidates', 'date_candidates');
   const placeCandidatesRaw = resolveFirestoreCandidatesField(data, 'placeCandidates', 'place_candidates');
@@ -967,6 +1122,18 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
     kickedParticipantIds: (() => {
       const xs = parseKickedParticipantIdsField(data);
       return xs.length ? xs : null;
+    })(),
+    ...((): Partial<
+      Pick<Meeting, 'lifecycleStatus' | 'settlementInfo' | 'locationData'>
+    > => {
+      const ls = parseMeetingLifecycleStatusField(data);
+      const si = parseMeetingSettlementInfoField(data);
+      const ld = parseMeetingLocationDataField(data);
+      return {
+        ...(ls ? { lifecycleStatus: ls } : {}),
+        ...(si ? { settlementInfo: si } : {}),
+        ...(ld ? { locationData: ld } : {}),
+      };
     })(),
   };
 }

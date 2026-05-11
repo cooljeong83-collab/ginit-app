@@ -19,6 +19,10 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
     /** `0114_withdraw_rejoin_wait_policy.sql` 시드와 동일 — 탈퇴 후 재가입 가능 대기 기간(일) */
     withdraw_rejoin_wait_days: 0,
   },
+  /** `0117_settlement_show_cta_after_start_hours.sql` 시드와 동일 */
+  settlement: {
+    show_settle_cta_after_start_hours: 1,
+  },
   meeting: {
     overlap_hours: 3,
     /** `0109_meeting_home_list_ongoing_duration_hours.sql` 시드와 동일 — 내 모임·비공개 목록 "모임 중" 구간 길이(시간) */

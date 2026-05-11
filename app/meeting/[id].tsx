@@ -9,7 +9,7 @@ import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/n
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,8 +31,14 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
-import { MeetingArrivalVerifyMapModal } from '@/components/meeting/MeetingArrivalVerifyMapModal';
+import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
+import {
+  MeetingDetailStaticNoticeRow,
+  MeetingDetailTopNoticesPager,
+  type MeetingDetailTopNoticeSlide,
+} from '@/components/meeting/MeetingDetailTopNoticesPager';
+import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
@@ -53,18 +59,15 @@ import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import {
-  alertBodyForArrivalRpc,
-  getMeetingArrivalVerifyPolicy,
-  isWithinArrivalVerifyTimeWindow,
-  type MeetingArrivalRpcResult,
-} from '@/src/lib/meeting-arrival-verify';
+import { resolveConfirmedPlaceCoordsForMeeting } from '@/src/lib/meeting-confirmed-place-coords';
+import { getMeetingArrivalVerifyPolicy, isWithinArrivalVerifyTimeWindow } from '@/src/lib/meeting-arrival-verify';
 import {
   cancelMeetingArrivalReminderLocalNotifications,
   fetchLedgerMeetingArrivalVerifiedAppUserIds,
   hasLedgerArrivalVerified,
   syncMeetingArrivalReminderLocalNotifications,
 } from '@/src/lib/meeting-arrival-verify-reminders';
+import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
 import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
@@ -76,6 +79,7 @@ import {
   isHostScheduleUnconfirmHiddenByStartProximity,
   meetingScheduleStartMs,
 } from '@/src/lib/meeting-schedule-times';
+import { isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import {
   buildMeetingSharePageUrl,
   createMeetingShareLinkRpc,
@@ -429,7 +433,7 @@ export default function MeetingDetailScreen() {
   const { version: appPoliciesVersion } = useAppPolicies();
   const { syncMeetingAckFromMeeting } = useInAppAlarms();
   const isFocused = useIsFocused();
-  const { id: rawId } = useLocalSearchParams<{ id: string }>();
+  const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
   const queryClient = useQueryClient();
   const navigation = useNavigation();
@@ -449,8 +453,6 @@ export default function MeetingDetailScreen() {
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
   const [saveCalendarBusy, setSaveCalendarBusy] = useState(false);
-  /** Supabase 레저 모임 장소 도착 인증(RPC) — 서비스 이용 인증(프로필)과 별개 */
-  const [arrivalVerifyMapOpen, setArrivalVerifyMapOpen] = useState(false);
   /** `meeting_arrival_verifications`에 현재 사용자 행이 있으면 true */
   const [meetingArrivalVerifiedByMe, setMeetingArrivalVerifiedByMe] = useState(false);
   /** 레저 확정 모임: 장소 인증 완료한 참가자 PK(`normalizeParticipantId` 기준) */
@@ -565,33 +567,7 @@ export default function MeetingDetailScreen() {
     return placeChips.find((c) => c.id === id) ?? null;
   }, [isScheduleConfirmed, meeting?.confirmedPlaceChipId, placeChips]);
 
-  const confirmedPlaceCoords = useMemo(() => {
-    if (!isScheduleConfirmed || !meeting?.confirmedPlaceChipId?.trim()) return null;
-    const rawId = meeting.confirmedPlaceChipId.trim();
-    const cands = meeting.placeCandidates ?? [];
-    for (let i = 0; i < cands.length; i++) {
-      if (placeCandidateChipId(cands[i], i) === rawId) {
-        const lat = cands[i].latitude;
-        const lng = cands[i].longitude;
-        if (Number.isFinite(lat) && Number.isFinite(lng)) return { latitude: lat, longitude: lng };
-        return null;
-      }
-    }
-    if (rawId === 'legacy-place') {
-      const lat = meeting.latitude;
-      const lng = meeting.longitude;
-      if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
-        return { latitude: lat, longitude: lng };
-      }
-    }
-    return null;
-  }, [
-    isScheduleConfirmed,
-    meeting?.confirmedPlaceChipId,
-    meeting?.placeCandidates,
-    meeting?.latitude,
-    meeting?.longitude,
-  ]);
+  const confirmedPlaceCoords = useMemo(() => resolveConfirmedPlaceCoordsForMeeting(meeting), [meeting]);
 
   const singlePlaceCoords = useMemo(() => {
     if (!meeting || placeChips.length !== 1) return null;
@@ -1091,38 +1067,6 @@ export default function MeetingDetailScreen() {
     );
   }, [meetingArrivalVerifiedByMe, sessionPk]);
 
-  const handleArrivalVerifyRpcResult = useCallback(
-    ({ rpc, errorMessage }: { rpc: MeetingArrivalRpcResult | null; errorMessage: string | null }) => {
-      setArrivalVerifyMapOpen(false);
-      const m = meeting;
-      const uid = userId?.trim();
-      if (!m?.id?.trim() || !uid) return;
-      if (errorMessage && errorMessage !== 'mock_location' && errorMessage !== 'accuracy_too_low') {
-        Alert.alert('장소 인증', errorMessage);
-        return;
-      }
-      if (!rpc) return;
-      if (rpc.ok) {
-        void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
-        setMeetingArrivalVerifiedByMe(true);
-        Alert.alert(
-          '인증 완료',
-          `도착이 확인됐어요.\nXP +${rpc.xp_granted} · 신뢰 +${rpc.trust_granted}\n\n(gTrust·XP는 서버 정책에 따라만 반영됩니다.)`,
-        );
-        void refetchMeetingDetail();
-        return;
-      }
-      if (rpc.ok === false && rpc.code === 'already_verified') {
-        void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
-        setMeetingArrivalVerifiedByMe(true);
-        void refetchMeetingDetail();
-        return;
-      }
-      Alert.alert('장소 인증', alertBodyForArrivalRpc(rpc));
-    },
-    [meeting, userId, refetchMeetingDetail],
-  );
-
   const openArrivalVerifyMap = useCallback(() => {
     if (!meeting || !userId?.trim()) return;
     if (meetingArrivalVerifiedByMe) return;
@@ -1131,8 +1075,9 @@ export default function MeetingDetailScreen() {
       Alert.alert('장소 인증', '확정 장소 좌표가 없어 지도를 열 수 없어요.');
       return;
     }
-    setArrivalVerifyMapOpen(true);
-  }, [meeting, userId, meetingArrivalVerifiedByMe, confirmedPlaceCoords]);
+    router.push(`/arrival-verify/${encodeURIComponent(meeting.id)}` as Href);
+  }, [meeting, userId, meetingArrivalVerifiedByMe, confirmedPlaceCoords, router]);
+
 
   /** 레저 확정 모임: `meeting_arrival_verifications` INSERT 시 참여자 인증 배지 갱신, 호스트는 하단 토스트. */
   useEffect(() => {
@@ -1866,6 +1811,102 @@ export default function MeetingDetailScreen() {
     }
   }, [meeting, recruitmentPhase, meetingDetailListEndUiTick, arrivalUiTick, appPoliciesVersion]);
 
+  const showSettlementHostBanner = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!meeting || !uid) return false;
+    void appPoliciesVersion;
+    return isMeetingSettlementCtaEligibleForHost(meeting, uid, Date.now());
+  }, [meeting, userId, appPoliciesVersion]);
+
+  const showMeetingArrivalVerifyTopBanner = useMemo(() => {
+    void arrivalUiTick;
+    void appPoliciesVersion;
+    const canAccess = Boolean(alreadyJoinedMeeting || isHost);
+    return shouldShowMeetingArrivalVerifyTopBanner({
+      platformOs: Platform.OS,
+      meeting: meeting ?? undefined,
+      userId,
+      verifiedByMe: meetingArrivalVerifiedByMe,
+      nowMs: Date.now(),
+      pol: arrivalVerifyPol,
+      isMeetingEndedForArrivalUi: isConfirmedMeetingEndedForDetail,
+      canAccessArrivalFlow: canAccess,
+      ledgerArrivalSupported: Boolean(
+        meeting?.id && ledgerWritesToSupabase() && isLedgerMeetingId(meeting.id),
+      ),
+    });
+  }, [
+    arrivalUiTick,
+    appPoliciesVersion,
+    meeting,
+    userId,
+    meetingArrivalVerifiedByMe,
+    arrivalVerifyPol,
+    isConfirmedMeetingEndedForDetail,
+    alreadyJoinedMeeting,
+    isHost,
+  ]);
+
+  const meetingDetailScheduleNoticeText = useMemo(() => {
+    if (!meeting) return '';
+    if (meeting.scheduleConfirmed !== true) return '';
+    const place = meeting.placeName?.trim() || meeting.location?.trim();
+    const d = meeting.scheduleDate?.trim();
+    const t = meeting.scheduleTime?.trim();
+    const parts = [place, d && t ? `${d} ${t}` : d || t].filter(Boolean);
+    return parts.length ? `확정: ${parts.join(' · ')}` : '';
+  }, [meeting]);
+
+  const meetingDetailTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
+    if (!meeting) return [];
+    const slides: MeetingDetailTopNoticeSlide[] = [];
+    if (showSettlementHostBanner) {
+      slides.push({
+        key: 'settlement',
+        element: (
+          <SettlementHostBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={(meeting.title ?? '').trim() || '모임'}
+            ctaSuffix="정산하기"
+            onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
+          />
+        ),
+      });
+    }
+    if (showMeetingArrivalVerifyTopBanner) {
+      slides.push({
+        key: 'arrival',
+        element: (
+          <MeetingArrivalVerifyTopBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={(meeting.title ?? '').trim() || '모임'}
+            ctaSuffix="장소 인증하기"
+            onPress={() => void openArrivalVerifyMap()}
+          />
+        ),
+      });
+    }
+    const scheduleLine = meetingDetailScheduleNoticeText.trim();
+    if (scheduleLine) {
+      slides.push({
+        key: 'schedule',
+        element: <MeetingDetailStaticNoticeRow text={scheduleLine} slideTrackFullBleed />,
+      });
+    }
+    return slides;
+  }, [
+    meeting,
+    showSettlementHostBanner,
+    showMeetingArrivalVerifyTopBanner,
+    meetingDetailScheduleNoticeText,
+    router,
+    openArrivalVerifyMap,
+  ]);
+
   const hostArrivalBottomCtaEl = useMemo(() => {
     if (!showHostArrivalBottomSlot) return null;
     return (
@@ -2380,6 +2421,10 @@ export default function MeetingDetailScreen() {
           )}
         </View>
 
+        <View style={styles.detailTopNoticesPad}>
+          <MeetingDetailTopNoticesPager slides={meetingDetailTopNoticeSlides} />
+        </View>
+
         {loading ? (
           <View style={styles.centerFill}>
             <ActivityIndicator color={GinitTheme.colors.primary} />
@@ -2850,6 +2895,7 @@ export default function MeetingDetailScreen() {
                         longitude={confirmedPlaceCoords.longitude}
                         height={200}
                         borderRadius={12}
+                        suppressNativeMap={Platform.OS === 'android' && !isFocused}
                       />
                       <GinitPressable
                         onPress={() => void onOpenConfirmedPlaceInNaverMap()}
@@ -3389,6 +3435,7 @@ export default function MeetingDetailScreen() {
                         longitude={singlePlaceCoords.longitude}
                         height={200}
                         borderRadius={12}
+                        suppressNativeMap={Platform.OS === 'android' && !isFocused}
                       />
                       <GinitPressable
                         onPress={() => {
@@ -4550,26 +4597,6 @@ export default function MeetingDetailScreen() {
           }}
         />
 
-        {meeting && userId?.trim() && confirmedPlaceCoords ? (
-          <MeetingArrivalVerifyMapModal
-            visible={arrivalVerifyMapOpen}
-            onRequestClose={() => setArrivalVerifyMapOpen(false)}
-            placeCoords={confirmedPlaceCoords}
-            authRadiusM={arrivalVerifyPol.auth_radius_m}
-            minAccuracyM={arrivalVerifyPol.min_accuracy_m}
-            meetingId={meeting.id}
-            appUserId={userId.trim()}
-            pinMeeting={{
-              id: meeting.id,
-              categoryId: meeting.categoryId ?? null,
-              categoryLabel: meeting.categoryLabel ?? null,
-              title: meeting.title ?? '',
-            }}
-            mapViewRadiusM={70}
-            onRpcResult={handleArrivalVerifyRpcResult}
-          />
-        ) : null}
-
         <NaverPlaceWebViewModal
           visible={naverPlaceWebModal != null}
           url={naverPlaceWebModal?.url}
@@ -4626,6 +4653,8 @@ const styles = StyleSheet.create({
   },
   retryText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   scroll: { flex: 1 },
+  /** 상단 공지 트랙 — `scrollContent` 카드 영역과 동일 좌우 16 */
+  detailTopNoticesPad: { paddingHorizontal: 16 },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 12 },
   joinCtaBtn: {
     borderRadius: 999,

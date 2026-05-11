@@ -5,6 +5,7 @@ type Props = {
   longitude: number;
   height?: number;
   borderRadius?: number;
+  suppressNativeMap?: boolean;
 };
 
 /** 웹에서는 네이버 지도 네이티브 뷰 대신 안내 문구만 표시합니다. */

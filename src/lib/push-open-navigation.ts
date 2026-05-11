@@ -163,9 +163,19 @@ export function navigateFromPushData(
     navTo('/social/connections');
     return;
   }
-  const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
+  let meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
+  const meetingIdSnake = typeof (data as { meeting_id?: unknown }).meeting_id === 'string'
+    ? String((data as { meeting_id: string }).meeting_id).trim()
+    : '';
+  if (!meetingId && meetingIdSnake) meetingId = meetingIdSnake;
   const action = typeof data.action === 'string' ? data.action.trim() : '';
+  const typeRaw = typeof (data as { type?: unknown }).type === 'string' ? String((data as { type: string }).type).trim() : '';
   const urlRaw = typeof data.url === 'string' ? data.url.trim() : '';
+  if (meetingId && (action === 'settlement_share' || typeRaw === 'SETTLEMENT')) {
+    ginitNotifyDbg('push-open-nav', 'branch_settlement', { meetingIdLen: meetingId.length });
+    navTo(`/meeting/${meetingId}`);
+    return;
+  }
   if (meetingId && action === 'new_meeting_in_feed_region') {
     ginitNotifyDbg('push-open-nav', 'branch_new_meeting_feed', { meetingIdLen: meetingId.length });
     navTo(`/meeting/${meetingId}`);

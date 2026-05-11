@@ -104,7 +104,7 @@ export function ChatMeetingListRow({
   const showMetaRow = loadingPreview || hasMessage;
   const chatRel =
     hasMessage && latestMessage.createdAt ? formatRelativeFrom(latestMessage.createdAt) : '';
-  const metaBits = [place, chatRel].filter(Boolean);
+  const metaBits = [meeting.lifecycleStatus === 'SETTLED' ? '정산 완료' : '', place, chatRel].filter(Boolean);
   const metaText = metaBits.join(' · ');
 
   const subtitle = hasMessage

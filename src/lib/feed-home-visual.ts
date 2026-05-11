@@ -161,6 +161,7 @@ export function homeMeetingStatusBadgeLabel(
   m: Meeting,
   opts?: { listKind?: HomeMeetingStatusBadgeListKind },
 ): string {
+  if (m.lifecycleStatus === 'SETTLED') return '정산 완료';
   const listKind = opts?.listKind ?? 'explore';
   const now = Date.now();
   // 미확정 + 시간 경과(expired) 모임: 여기서 분기하지 않음 — 반드시 scheduleConfirmed === true 일 때만.

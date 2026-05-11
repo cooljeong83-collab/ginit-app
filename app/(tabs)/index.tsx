@@ -28,6 +28,12 @@ import { FlashList } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
+import {
+  MeetingDetailTopNoticesPager,
+  type MeetingDetailTopNoticeSlide,
+} from '@/components/meeting/MeetingDetailTopNoticesPager';
+import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
+import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -65,7 +71,7 @@ import {
   saveRegisteredFeedRegions,
   syncFeedRegionMapBootMemoryFromSelection,
 } from '@/src/lib/feed-registered-regions';
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
+import { ledgerWritesToSupabase, meetingListSource } from '@/src/lib/hybrid-data-source';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
@@ -78,7 +84,19 @@ import {
 } from '@/src/lib/meeting-schedule-overlap';
 import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, isConfirmedMeetingPastMyMeetingsRetentionWindow } from '@/src/lib/meetings';
+import {
+  getMeetingRecruitmentPhase,
+  isConfirmedMeetingPastListEndWindow,
+  isConfirmedMeetingPastMyMeetingsRetentionWindow,
+} from '@/src/lib/meetings';
+import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
+import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
+import {
+  isMeetingArrivalReminderBannerTimeEligible,
+  shouldShowMeetingArrivalVerifyTopBanner,
+} from '@/src/lib/meeting-arrival-verify-banner';
+import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
+import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
@@ -247,6 +265,14 @@ export default function FeedScreen() {
   const [feedCoords, setFeedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const isHomeMeetingsScreenFocused = useIsFocused();
+  const [homeArrivalNoticeUiTick, setHomeArrivalNoticeUiTick] = useState(0);
+  const [homeArrivalVerifiedMap, setHomeArrivalVerifiedMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!isHomeMeetingsScreenFocused || Platform.OS === 'web') return undefined;
+    const iv = setInterval(() => setHomeArrivalNoticeUiTick((n) => n + 1), 30_000);
+    return () => clearInterval(iv);
+  }, [isHomeMeetingsScreenFocused]);
 
   /** `useFocusEffect`만으로는 일부 기기(예: 구형 갤럭시)에서 모임 상세로 올라간 뒤에도 리스너가 남아 뒤로가기를 가로채는 경우가 있어 `isFocused`로 게이트합니다. */
   useEffect(() => {
@@ -580,6 +606,179 @@ export default function FeedScreen() {
     () => sortMeetingsForFeed(privateJoinedFilteredMeetings, listSortMode, feedCoords),
     [privateJoinedFilteredMeetings, listSortMode, feedCoords],
   );
+
+  const settlementBannerMeetings = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!uid) return [] as Meeting[];
+    void appPoliciesVersion;
+    const now = Date.now();
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of myTabsMeetings) {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      if (!isMeetingSettlementCtaEligibleForHost(m, uid, now)) continue;
+      seen.add(id);
+      out.push(m);
+    }
+    out.sort((a, b) => {
+      const ta = meetingScheduleStartMs(a) ?? 0;
+      const tb = meetingScheduleStartMs(b) ?? 0;
+      return ta - tb;
+    });
+    return out;
+  }, [myTabsMeetings, userId, appPoliciesVersion]);
+
+  const arrivalVerifyPol = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
+
+  const arrivalBannerCandidates = useMemo(() => {
+    void homeArrivalNoticeUiTick;
+    if (Platform.OS === 'web') return [] as Meeting[];
+    const uid = userId?.trim() ?? '';
+    if (!uid) return [] as Meeting[];
+    void appPoliciesVersion;
+    const now = Date.now();
+    const pol = arrivalVerifyPol;
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of myTabsMeetings) {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      if (!ledgerWritesToSupabase() || !isLedgerMeetingId(id)) continue;
+      if (m.scheduleConfirmed !== true) continue;
+      if (isConfirmedMeetingPastListEndWindow(m, now)) continue;
+      if (!isUserJoinedMeeting(m, uid) && !isMeetingHost(m, uid)) continue;
+      if (!isMeetingArrivalReminderBannerTimeEligible(m, now, pol)) continue;
+      seen.add(id);
+      out.push(m);
+    }
+    return out;
+  }, [myTabsMeetings, userId, appPoliciesVersion, arrivalVerifyPol, homeArrivalNoticeUiTick]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const uid = userId?.trim();
+    if (!uid) {
+      setHomeArrivalVerifiedMap({});
+      return;
+    }
+    const candidates = arrivalBannerCandidates;
+    let cancelled = false;
+    void (async () => {
+      const pairs = await Promise.all(
+        candidates.map(async (m) => {
+          const id = m.id.trim();
+          const v = await hasLedgerArrivalVerified(id, uid);
+          return [id, v] as const;
+        }),
+      );
+      if (cancelled) return;
+      const next: Record<string, boolean> = {};
+      for (const [id, v] of pairs) next[id] = v;
+      setHomeArrivalVerifiedMap(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [arrivalBannerCandidates, userId]);
+
+  const arrivalEligibleMeetings = useMemo(() => {
+    void homeArrivalNoticeUiTick;
+    const uid = userId?.trim() ?? '';
+    if (!uid) return [] as Meeting[];
+    return arrivalBannerCandidates.filter((m) =>
+      shouldShowMeetingArrivalVerifyTopBanner({
+        platformOs: Platform.OS,
+        meeting: m,
+        userId,
+        verifiedByMe: Boolean(homeArrivalVerifiedMap[m.id.trim()]),
+        nowMs: Date.now(),
+        pol: arrivalVerifyPol,
+        isMeetingEndedForArrivalUi: isConfirmedMeetingPastListEndWindow(m, Date.now()),
+        canAccessArrivalFlow: isUserJoinedMeeting(m, uid) || isMeetingHost(m, uid),
+        ledgerArrivalSupported: Boolean(ledgerWritesToSupabase() && isLedgerMeetingId(m.id)),
+      }),
+    );
+  }, [
+    arrivalBannerCandidates,
+    homeArrivalVerifiedMap,
+    userId,
+    arrivalVerifyPol,
+    homeArrivalNoticeUiTick,
+  ]);
+
+  const settlementNoticeIdSet = useMemo(
+    () =>
+      new Set(
+        settlementBannerMeetings
+          .map((m) => (typeof m.id === 'string' ? m.id.trim() : ''))
+          .filter((id) => id.length > 0),
+      ),
+    [settlementBannerMeetings],
+  );
+
+  const arrivalNoticeIdSet = useMemo(
+    () =>
+      new Set(
+        arrivalEligibleMeetings
+          .map((m) => (typeof m.id === 'string' ? m.id.trim() : ''))
+          .filter((id) => id.length > 0),
+      ),
+    [arrivalEligibleMeetings],
+  );
+
+  const homeNoticeOrderedMeetings = useMemo(() => {
+    void homeArrivalNoticeUiTick;
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of myTabsMeetings) {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      if (!settlementNoticeIdSet.has(id) && !arrivalNoticeIdSet.has(id)) continue;
+      seen.add(id);
+      out.push(m);
+    }
+    out.sort((a, b) => (meetingScheduleStartMs(a) ?? 0) - (meetingScheduleStartMs(b) ?? 0));
+    return out;
+  }, [myTabsMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick]);
+
+  const homeTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
+    const slides: MeetingDetailTopNoticeSlide[] = [];
+    for (const m of homeNoticeOrderedMeetings) {
+      const id = m.id.trim();
+      if (settlementNoticeIdSet.has(id)) {
+        slides.push({
+          key: `settlement-${id}`,
+          element: (
+            <SettlementHostBanner
+              hideTopBorder
+              pillCapsule
+              slideTrackFullBleed
+              quotedMeetingTitle={(m.title ?? '').trim() || '모임'}
+              ctaSuffix="정산하기"
+              onPress={() => router.push(`/settlement/${encodeURIComponent(id)}`)}
+            />
+          ),
+        });
+      }
+      if (arrivalNoticeIdSet.has(id)) {
+        slides.push({
+          key: `arrival-${id}`,
+          element: (
+            <MeetingArrivalVerifyTopBanner
+              hideTopBorder
+              pillCapsule
+              slideTrackFullBleed
+              quotedMeetingTitle={(m.title ?? '').trim() || '모임'}
+              ctaSuffix="장소 인증하기"
+              onPress={() => router.push(`/arrival-verify/${encodeURIComponent(id)}`)}
+            />
+          ),
+        });
+      }
+    }
+    return slides;
+  }, [homeNoticeOrderedMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, router]);
 
   const goToHomeTab = useCallback(
     (t: HomeMeetingTopTab) => {
@@ -1151,7 +1350,11 @@ export default function FeedScreen() {
   ]);
 
   const fixedFeedHeader = (
-    <View style={styles.feedHeader}>
+    <View
+      style={[
+        styles.feedHeader,
+        homeTopNoticeSlides.length > 0 && styles.feedHeaderWhenNoticePager,
+      ]}>
       <View style={styles.feedHeaderTopRow}>
         <View style={styles.locationCluster}>
           <GinitPressable
@@ -1273,6 +1476,9 @@ export default function FeedScreen() {
           <GinitSymbolicIcon name="chevron-down" size={18} color="#475569" />
         </GinitPressable>
       </View>
+      {homeTopNoticeSlides.length > 0 ? (
+        <MeetingDetailTopNoticesPager slides={homeTopNoticeSlides} hideTopTrackDivider />
+      ) : null}
     </View>
   );
 
@@ -1980,6 +2186,10 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingHorizontal: 20,
     gap: 12,
+  },
+  /** 슬라이드 공지 트랙이 있을 때: 트랙 하단~모임 목록 간격 축소 */
+  feedHeaderWhenNoticePager: {
+    marginBottom: 8,
   },
   feedHeaderTopRow: {
     flexDirection: 'row',

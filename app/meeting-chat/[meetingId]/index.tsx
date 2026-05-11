@@ -17,10 +17,13 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
 import { MeetingChatImageViewerGallery } from '@/components/chat/MeetingChatImageViewerGallery';
 import { MeetingChatMainColumn } from '@/components/chat/MeetingChatMainColumn';
+import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
+import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
 import { meetingImageViewerMeta, profileForSender } from '@/components/chat/meeting-chat-ui-helpers';
 import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
@@ -52,8 +55,17 @@ import {
     sendMeetingChatTextMessage,
     writeMeetingChatReadReceipt,
 } from '@/src/lib/meeting-chat';
+import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
+import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
+import {
+  hasLedgerArrivalVerified,
+  syncMeetingArrivalReminderLocalNotifications,
+} from '@/src/lib/meeting-arrival-verify-reminders';
+import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
 import type { Meeting } from '@/src/lib/meetings';
-import { meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
+import { isConfirmedMeetingPastListEndWindow, meetingParticipantCount, subscribeMeetingById } from '@/src/lib/meetings';
+import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
+import { isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -133,6 +145,7 @@ export default function MeetingChatRoomScreen() {
       ? params.meetingId.trim()
       : '';
   const { userId } = useUserSession();
+  const { version: appPoliciesVersion } = useAppPolicies();
   const queryClient = useQueryClient();
 
   const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
@@ -287,6 +300,92 @@ export default function MeetingChatRoomScreen() {
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
   }, [meeting, userId]);
+
+  const [meetingArrivalBannerVerified, setMeetingArrivalBannerVerified] = useState(false);
+  const [arrivalBannerUiTick, setArrivalBannerUiTick] = useState(0);
+
+  const arrivalVerifyPolForBanner = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
+
+  const showMeetingArrivalVerifyTopBanner = useMemo(() => {
+    void arrivalBannerUiTick;
+    if (allowed !== true) return false;
+    if (!meeting || meeting === undefined) return false;
+    return shouldShowMeetingArrivalVerifyTopBanner({
+      platformOs: Platform.OS,
+      meeting,
+      userId,
+      verifiedByMe: meetingArrivalBannerVerified,
+      nowMs: Date.now(),
+      pol: arrivalVerifyPolForBanner,
+      isMeetingEndedForArrivalUi: isConfirmedMeetingPastListEndWindow(meeting, Date.now()),
+      canAccessArrivalFlow: true,
+      ledgerArrivalSupported: Boolean(
+        meeting.id?.trim() && ledgerWritesToSupabase() && isLedgerMeetingId(meeting.id),
+      ),
+    });
+  }, [
+    arrivalBannerUiTick,
+    allowed,
+    meeting,
+    userId,
+    meetingArrivalBannerVerified,
+    arrivalVerifyPolForBanner,
+  ]);
+
+  useEffect(() => {
+    if (!isFocused || allowed !== true || !meetingId) return;
+    const m = meeting;
+    if (!m || m.scheduleConfirmed !== true) return;
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(m.id)) return;
+    if (Platform.OS === 'web') return;
+    const iv = setInterval(() => setArrivalBannerUiTick((n) => n + 1), 30_000);
+    return () => clearInterval(iv);
+  }, [isFocused, allowed, meetingId, meeting, meeting?.id, meeting?.scheduleConfirmed]);
+
+  useEffect(() => {
+    if (allowed !== true || !meetingId || !userId?.trim()) {
+      setMeetingArrivalBannerVerified(false);
+      return;
+    }
+    const m = meeting;
+    if (!m?.id?.trim()) {
+      setMeetingArrivalBannerVerified(false);
+      return;
+    }
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(m.id)) {
+      setMeetingArrivalBannerVerified(false);
+      return;
+    }
+    if (!isFocused) return;
+    let cancelled = false;
+    void (async () => {
+      const v = await hasLedgerArrivalVerified(m.id.trim(), userId.trim());
+      if (!cancelled) setMeetingArrivalBannerVerified(v);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [allowed, meetingId, userId, meeting, isFocused, arrivalBannerUiTick]);
+
+  useEffect(() => {
+    if (!isFocused || allowed !== true || !meeting || !userId?.trim()) return;
+    if (Platform.OS === 'web') return;
+    if (meeting.scheduleConfirmed !== true) return;
+    if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) return;
+    void syncMeetingArrivalReminderLocalNotifications({ meeting, appUserId: userId.trim() });
+  }, [
+    isFocused,
+    allowed,
+    meeting,
+    meeting?.id,
+    meeting?.scheduleConfirmed,
+    meeting?.scheduledAt,
+    meeting?.scheduleDate,
+    meeting?.scheduleTime,
+    meeting?.title,
+    userId,
+    appPoliciesVersion,
+  ]);
 
   const didHandleDirectShareRef = useRef(false);
   useEffect(() => {
@@ -986,6 +1085,13 @@ export default function MeetingChatRoomScreen() {
       chatSearchMode && chatSearchCommittedQuery.trim() ? chatSearchCommittedQuery : '',
   });
 
+  const showSettlementHostBanner = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!meeting) return false;
+    void appPoliciesVersion;
+    return isMeetingSettlementCtaEligibleForHost(meeting, uid, Date.now());
+  }, [meeting, userId, appPoliciesVersion]);
+
   if (!meetingId) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
@@ -1111,6 +1217,22 @@ export default function MeetingChatRoomScreen() {
             </View>
           ) : null}
         </View>
+
+        {showSettlementHostBanner ? (
+          <SettlementHostBanner
+            quotedMeetingTitle={title.trim() || '모임'}
+            ctaSuffix="정산하기"
+            onPress={() => router.push(`/settlement/${encodeURIComponent(meetingId)}`)}
+          />
+        ) : null}
+
+        {showMeetingArrivalVerifyTopBanner ? (
+          <MeetingArrivalVerifyTopBanner
+            quotedMeetingTitle={title.trim() || '모임'}
+            ctaSuffix="장소 인증하기"
+            onPress={() => router.push(`/arrival-verify/${encodeURIComponent(meetingId)}`)}
+          />
+        ) : null}
 
         {announcementText ? (
           <GinitPressable
@@ -1333,7 +1455,7 @@ const styles = StyleSheet.create({
   announcementBar: {
     paddingHorizontal: 8,
     paddingTop: 6,
-    backgroundColor: '#ECEFF1',
+    backgroundColor: GinitTheme.colors.noticeSurface,
   },
   announcementInner: {
     borderRadius: 14,

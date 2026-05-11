@@ -9,8 +9,8 @@ import {
 } from '@mj-studio/react-native-naver-map';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, Modal, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, InteractionManager, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,13 +24,12 @@ import { firstPlaceCandidatePreferredPhotoUri } from '@/src/lib/meeting-list-thu
 import type { Meeting } from '@/src/lib/meetings';
 import { centerRegionToNaverRegion, type CenterLatLngRegion } from '@/src/lib/naver-map-region';
 
-import type { MeetingArrivalVerifyMapModalProps } from './MeetingArrivalVerifyMapModal.types';
+import type { MeetingArrivalVerifyMapBodyProps } from './MeetingArrivalVerifyMapBody.types';
 
-export type { MeetingArrivalVerifyMapModalProps } from './MeetingArrivalVerifyMapModal.types';
+export type { MeetingArrivalVerifyMapBodyProps } from './MeetingArrivalVerifyMapBody.types';
 
 const DEFAULT_MAP_VIEW_RADIUS_M = 70;
 
-/** 인증 반경 물결 파동 레이어 수 */
 const RIPPLE_LAYER_COUNT = 4;
 
 function rippleColors(
@@ -58,7 +57,6 @@ function rippleColors(
   };
 }
 
-/** 중심+반경(미)에 맞는 위도·경도 델타 — `centerRegionToNaverRegion`용 */
 function latLngDeltasForRadiusM(latitude: number, radiusM: number): { latitudeDelta: number; longitudeDelta: number } {
   const pad = 2.2;
   const latitudeDelta = Math.max(0.0006, ((radiusM / 111_320) * pad * 2));
@@ -67,9 +65,8 @@ function latLngDeltasForRadiusM(latitude: number, radiusM: number): { latitudeDe
   return { latitudeDelta, longitudeDelta };
 }
 
-export function MeetingArrivalVerifyMapModal({
-  visible,
-  onRequestClose,
+export function MeetingArrivalVerifyMapBody({
+  active,
   placeCoords,
   authRadiusM,
   minAccuracyM,
@@ -78,7 +75,7 @@ export function MeetingArrivalVerifyMapModal({
   pinMeeting,
   mapViewRadiusM = DEFAULT_MAP_VIEW_RADIUS_M,
   onRpcResult,
-}: MeetingArrivalVerifyMapModalProps) {
+}: MeetingArrivalVerifyMapBodyProps) {
   const insets = useSafeAreaInsets();
   const { height: windowH } = useWindowDimensions();
   const mapHeight = Math.round(Math.min(420, Math.max(260, windowH * 0.42)));
@@ -91,11 +88,8 @@ export function MeetingArrivalVerifyMapModal({
   const [userMocked, setUserMocked] = useState(false);
   const [userHeadingDeg, setUserHeadingDeg] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  /** 0~1 루프 — 반경 물결 애니메이션 */
   const [ripplePhase, setRipplePhase] = useState(0);
-  const [renderVisible, setRenderVisible] = useState(visible);
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY = useRef(new Animated.Value(48)).current;
+  const [androidMapOverlaysReady, setAndroidMapOverlaysReady] = useState(Platform.OS !== 'android');
 
   const markerMeeting = pinMeeting as Meeting;
   const pinColor = useMemo(() => getMeetingMapPinAccentColor(markerMeeting, categories), [markerMeeting, categories]);
@@ -114,47 +108,33 @@ export function MeetingArrivalVerifyMapModal({
   }, [placeCoords.latitude, placeCoords.longitude, mapViewRadiusM]);
 
   useEffect(() => {
-    if (visible) {
-      setRenderVisible(true);
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(48);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(sheetTranslateY, {
-          toValue: 0,
-          duration: 240,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
+    if (!active) return;
+    if (Platform.OS !== 'android') {
+      setAndroidMapOverlaysReady(true);
       return;
     }
-
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 160,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(sheetTranslateY, {
-        toValue: 48,
-        duration: 180,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (finished) setRenderVisible(false);
+    setAndroidMapOverlaysReady(false);
+    let cancelled = false;
+    const handle = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!cancelled) setAndroidMapOverlaysReady(true);
+        });
+      });
     });
-  }, [visible, backdropOpacity, sheetTranslateY]);
+    return () => {
+      cancelled = true;
+      handle.cancel();
+    };
+  }, [active]);
 
   useEffect(() => {
-    if (!visible) {
+    if (active) return;
+    if (Platform.OS === 'android') setAndroidMapOverlaysReady(false);
+  }, [active]);
+
+  useEffect(() => {
+    if (!active) {
       setPermDenied(false);
       setLocError(null);
       setUserCoords(null);
@@ -241,10 +221,10 @@ export function MeetingArrivalVerifyMapModal({
         /* ignore */
       }
     };
-  }, [visible]);
+  }, [active]);
 
   useEffect(() => {
-    if (!visible) {
+    if (!active) {
       setRipplePhase(0);
       return;
     }
@@ -255,7 +235,7 @@ export function MeetingArrivalVerifyMapModal({
       });
     }, 56);
     return () => clearInterval(id);
-  }, [visible]);
+  }, [active]);
 
   const distanceM = useMemo(() => {
     if (!userCoords) return null;
@@ -269,7 +249,6 @@ export function MeetingArrivalVerifyMapModal({
     return distanceM <= authRadiusM;
   }, [userCoords, userMocked, submitting, userAccuracy, minAccuracyM, distanceM, authRadiusM]);
 
-  /** 거리만 기준(지도 반경 색). 위치 없으면 null → 중립 보라 */
   const userInsideRadiusGeom = useMemo(() => {
     if (!userCoords || distanceM == null || !Number.isFinite(distanceM)) return null;
     return distanceM <= authRadiusM;
@@ -312,6 +291,8 @@ export function MeetingArrivalVerifyMapModal({
     return '내 위치를 불러오는 중이에요…';
   }, [permDenied, locError, userMocked, userAccuracy, minAccuracyM, distanceM, authRadiusM]);
 
+  const showNaverMapOverlays = Platform.OS !== 'android' || androidMapOverlaysReady;
+
   const locationOverlay = useMemo(() => {
     if (!userCoords) return { isVisible: false as const };
     const inG = userInsideRadiusGeom === true;
@@ -328,172 +309,146 @@ export function MeetingArrivalVerifyMapModal({
   }, [userCoords, userHeadingDeg, userInsideRadiusGeom]);
 
   return (
-    <Modal visible={renderVisible} animationType="none" transparent onRequestClose={onRequestClose}>
-      <GestureHandlerRootView style={styles.gestureRoot}>
-        <Animated.View pointerEvents="none" style={[styles.backdrop, { opacity: backdropOpacity }]} />
-        <Animated.View style={[styles.sheet, { paddingBottom: 12 + insets.bottom, transform: [{ translateY: sheetTranslateY }] }]}>
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>장소 인증</Text>
-            <GinitPressable
-              onPress={onRequestClose}
-              style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.75 }]}
-              accessibilityRole="button"
-              accessibilityLabel="닫기">
-              <Text style={styles.closeBtnText}>닫기</Text>
-            </GinitPressable>
-          </View>
-
-          <View style={[styles.mapWrap, { height: mapHeight }]}>
-            {visible ? (
-              <NaverMapView
-                key={`arrival-naver-${meetingId}-${placeCoords.latitude}-${placeCoords.longitude}`}
-                style={StyleSheet.absoluteFill}
-                initialRegion={initialNaverRegion}
-                locationOverlay={locationOverlay}
-                isScrollGesturesEnabled
-                isZoomGesturesEnabled
-                isRotateGesturesEnabled={false}
-                isTiltGesturesEnabled={false}
-                isShowZoomControls={false}
-                isShowCompass={false}
-                isShowScaleBar={false}
-                isShowLocationButton={false}
-                isExtentBoundedInKorea
-                locale="ko"
-                {...(Platform.OS === 'android' ? { isUseTextureViewAndroid: true } : {})}
-                accessibilityLabel="장소 인증 지도 (네이버맵)">
-                <NaverMapCircleOverlay
-                  latitude={placeCoords.latitude}
-                  longitude={placeCoords.longitude}
-                  radius={authRadiusM}
-                  zIndex={8}
-                  color={
-                    userInsideRadiusGeom === true
-                      ? 'rgba(34, 197, 94, 0.05)'
-                      : userInsideRadiusGeom === false
-                        ? 'rgba(239, 68, 68, 0.03)'
-                        : 'rgba(103, 58, 183, 0.03)'
-                  }
-                  outlineWidth={1}
-                  outlineColor={
-                    userInsideRadiusGeom === true
-                      ? 'rgba(22, 163, 74, 0.2)'
-                      : userInsideRadiusGeom === false
-                        ? 'rgba(220, 38, 38, 0.2)'
-                        : 'rgba(103, 58, 183, 0.18)'
-                  }
-                />
-                {Array.from({ length: RIPPLE_LAYER_COUNT }).map((_, i) => {
-                  const stagger = i / RIPPLE_LAYER_COUNT;
-                  const localT = (ripplePhase + stagger) % 1;
-                  const radius = Math.max(6, authRadiusM * (0.05 + 0.95 * localT));
-                  const fade = 1 - localT;
-                  /** easeOut — 앞쪽은 옅고 끝으로 갈수록 살짝만 진해짐 */
-                  const fadeSoft = fade * fade * fade;
-                  const fillAlpha = 0.1 + 0.12 * fadeSoft;
-                  const outlineAlpha = 0.18 + 0.28 * fadeSoft;
-                  const { fill, outline } = rippleColors(userInsideRadiusGeom, fillAlpha, outlineAlpha);
-                  return (
-                    <NaverMapCircleOverlay
-                      key={`arrival-ripple-${i}`}
-                      latitude={placeCoords.latitude}
-                      longitude={placeCoords.longitude}
-                      radius={radius}
-                      zIndex={12 + i}
-                      color={fill}
-                      outlineWidth={0}
-                      outlineColor={outline}
-                    />
-                  );
-                })}
-                <NaverMapMarkerOverlay
-                  latitude={placeCoords.latitude}
-                  longitude={placeCoords.longitude}
-                  width={56}
-                  height={60}
-                  anchor={{ x: 0.5, y: 1 }}
-                  zIndex={600}>
-                  <View pointerEvents="none" collapsable={false} style={styles.naverMeetingPinRoot}>
-                    <MaterialCommunityIcons
-                      name="map-marker"
-                      size={60}
-                      color={pinColor}
-                      style={styles.naverMeetingPinGlyph}
-                    />
-                    <View style={styles.naverMeetingPinEmojiDisc} collapsable={false}>
-                      {pinPhotoUri ? (
-                        <Image
-                          source={{ uri: pinPhotoUri }}
-                          style={styles.naverMeetingPinPhoto}
-                          contentFit="cover"
-                          transition={120}
-                          cachePolicy="disk"
-                          recyclingKey={pinPhotoUri}
-                          accessibilityIgnoresInvertColors
-                        />
-                      ) : (
-                        <Text style={styles.naverMeetingPinEmojiText} allowFontScaling={false}>
-                          {pinEmoji}
-                        </Text>
-                      )}
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <View style={[styles.screen, { paddingBottom: 12 + insets.bottom }]}>
+        <View style={[styles.mapWrap, { height: mapHeight }]}>
+          {active ? (
+            <NaverMapView
+              key={`arrival-naver-${meetingId}`}
+              style={StyleSheet.absoluteFill}
+              initialRegion={initialNaverRegion}
+              locationOverlay={locationOverlay}
+              isScrollGesturesEnabled
+              isZoomGesturesEnabled
+              isRotateGesturesEnabled={false}
+              isTiltGesturesEnabled={false}
+              isShowZoomControls={false}
+              isShowCompass={false}
+              isShowScaleBar={false}
+              isShowLocationButton={false}
+              isExtentBoundedInKorea
+              locale="ko"
+              {...(Platform.OS === 'android' ? { isUseTextureViewAndroid: true } : {})}
+              accessibilityLabel="장소 인증 지도 (네이버맵)">
+              {showNaverMapOverlays ? (
+                <>
+                  <NaverMapCircleOverlay
+                    latitude={placeCoords.latitude}
+                    longitude={placeCoords.longitude}
+                    radius={authRadiusM}
+                    zIndex={8}
+                    color={
+                      userInsideRadiusGeom === true
+                        ? 'rgba(34, 197, 94, 0.05)'
+                        : userInsideRadiusGeom === false
+                          ? 'rgba(239, 68, 68, 0.03)'
+                          : 'rgba(103, 58, 183, 0.03)'
+                    }
+                    outlineWidth={1}
+                    outlineColor={
+                      userInsideRadiusGeom === true
+                        ? 'rgba(22, 163, 74, 0.2)'
+                        : userInsideRadiusGeom === false
+                          ? 'rgba(220, 38, 38, 0.2)'
+                          : 'rgba(103, 58, 183, 0.18)'
+                    }
+                  />
+                  {Array.from({ length: RIPPLE_LAYER_COUNT }).map((_, i) => {
+                    const stagger = i / RIPPLE_LAYER_COUNT;
+                    const localT = (ripplePhase + stagger) % 1;
+                    const radius = Math.max(6, authRadiusM * (0.05 + 0.95 * localT));
+                    const fade = 1 - localT;
+                    const fadeSoft = fade * fade * fade;
+                    const fillAlpha = 0.1 + 0.12 * fadeSoft;
+                    const outlineAlpha = 0.18 + 0.28 * fadeSoft;
+                    const { fill, outline } = rippleColors(userInsideRadiusGeom, fillAlpha, outlineAlpha);
+                    return (
+                      <NaverMapCircleOverlay
+                        key={`arrival-ripple-${i}`}
+                        latitude={placeCoords.latitude}
+                        longitude={placeCoords.longitude}
+                        radius={radius}
+                        zIndex={12 + i}
+                        color={fill}
+                        outlineWidth={0}
+                        outlineColor={outline}
+                      />
+                    );
+                  })}
+                  <NaverMapMarkerOverlay
+                    latitude={placeCoords.latitude}
+                    longitude={placeCoords.longitude}
+                    width={56}
+                    height={60}
+                    anchor={{ x: 0.5, y: 1 }}
+                    zIndex={600}>
+                    <View pointerEvents="none" collapsable={false} style={styles.naverMeetingPinRoot}>
+                      <MaterialCommunityIcons
+                        name="map-marker"
+                        size={60}
+                        color={pinColor}
+                        style={styles.naverMeetingPinGlyph}
+                      />
+                      <View style={styles.naverMeetingPinEmojiDisc} collapsable={false}>
+                        {pinPhotoUri ? (
+                          <Image
+                            source={{ uri: pinPhotoUri }}
+                            style={styles.naverMeetingPinPhoto}
+                            contentFit="cover"
+                            transition={120}
+                            cachePolicy="disk"
+                            recyclingKey={pinPhotoUri}
+                            accessibilityIgnoresInvertColors
+                          />
+                        ) : (
+                          <Text style={styles.naverMeetingPinEmojiText} allowFontScaling={false}>
+                            {pinEmoji}
+                          </Text>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                </NaverMapMarkerOverlay>
-              </NaverMapView>
-            ) : null}
-          </View>
+                  </NaverMapMarkerOverlay>
+                </>
+              ) : null}
+            </NaverMapView>
+          ) : null}
+        </View>
 
-          <Text style={styles.hint}>{footerHint}</Text>
+        <Text style={styles.hint}>{footerHint}</Text>
 
-          <GinitPressable
-            onPress={() => void onPressSubmit()}
-            disabled={!canSubmit}
-            style={({ pressed }) => [
-              styles.submitBtn,
-              !canSubmit && styles.submitBtnDisabled,
-              canSubmit && pressed && { opacity: 0.88 },
-            ]}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canSubmit }}
-            accessibilityLabel="인증하기">
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.submitBtnText}>인증하기</Text>
-            )}
-          </GinitPressable>
-        </Animated.View>
-      </GestureHandlerRootView>
-    </Modal>
+        <GinitPressable
+          onPress={() => void onPressSubmit()}
+          disabled={!canSubmit}
+          style={({ pressed }) => [
+            styles.submitBtn,
+            !canSubmit && styles.submitBtnDisabled,
+            canSubmit && pressed && { opacity: 0.88 },
+          ]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canSubmit }}
+          accessibilityLabel="인증하기">
+          {submitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitBtnText}>인증하기</Text>
+          )}
+        </GinitPressable>
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
   gestureRoot: {
     flex: 1,
-    backgroundColor: 'transparent',
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-  },
-  sheet: {
     backgroundColor: GinitTheme.colors.bg,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+  },
+  screen: {
+    flex: 1,
+    backgroundColor: GinitTheme.colors.bg,
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 4,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  title: { fontSize: 17, fontWeight: '700', color: GinitTheme.colors.text },
-  closeBtn: { paddingVertical: 6, paddingHorizontal: 10 },
-  closeBtnText: { fontSize: 15, fontWeight: '600', color: GinitTheme.colors.primary },
   mapWrap: {
     width: '100%',
     borderRadius: 12,
@@ -517,7 +472,6 @@ const styles = StyleSheet.create({
   },
   submitBtnDisabled: { opacity: 0.45 },
   submitBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  /** `MapScreen` 네이버 핀과 동일 레이아웃 */
   naverMeetingPinRoot: {
     width: 56,
     height: 60,

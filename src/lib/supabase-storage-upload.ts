@@ -7,6 +7,9 @@ export const SUPABASE_STORAGE_BUCKET_AVATARS = 'avatars';
 /** `0021_meeting_chat_storage.sql` */
 export const SUPABASE_STORAGE_BUCKET_MEETING_CHAT = 'meeting_chat';
 
+/** `0119_settlement_receipts_storage.sql` */
+export const SUPABASE_STORAGE_BUCKET_SETTLEMENT_RECEIPTS = 'settlement_receipts';
+
 function assertSupabaseStorageReady(): void {
   if (!publicEnv.supabaseUrl?.trim() || !publicEnv.supabaseAnonKey?.trim()) {
     throw new Error(

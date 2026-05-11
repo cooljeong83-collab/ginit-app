@@ -60,19 +60,22 @@ function shouldExpoFallbackAfterFcm(res: FcmPushInvokeResult): boolean {
 }
 
 /**
- * FCM → (필요 시) Expo. 실패는 삼키지 않고 상위에서 로그할 수 있게 throw할 수 있음 — 호출부에서 catch.
+ * FCM → (필요 시) Expo. 근사 전달 건수(FCM 성공 건수 또는 Expo로 실제 전송한 메시지 수)를 반환합니다.
+ * 수신자/제목 없음 등으로 스킵한 경우 0.
  */
-export async function dispatchRemotePushToRecipients(params: RemotePushHubPayload): Promise<void> {
+export async function dispatchRemotePushToRecipientsWithApproxDelivered(
+  params: RemotePushHubPayload,
+): Promise<number> {
   const toUserIds = [...new Set((params.toUserIds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean))];
   if (toUserIds.length === 0) {
     ginitNotifyDbg('remote-push-hub', 'skip_empty_recipients', {});
-    return;
+    return 0;
   }
   const title = String(params.title ?? '').trim();
   const body = String(params.body ?? '').trim();
   if (!title || !body) {
     ginitNotifyDbg('remote-push-hub', 'skip_missing_title_body', { recipientCount: toUserIds.length });
-    return;
+    return 0;
   }
   const data = params.data;
 
@@ -104,7 +107,7 @@ export async function dispatchRemotePushToRecipients(params: RemotePushHubPayloa
     willExpoFallback,
   });
 
-  if (!willExpoFallback) return;
+  if (!willExpoFallback) return fcmOk;
 
   ginitNotifyDbg('remote-push-hub', 'expo_fallback_start', {
     singleRecipient: toUserIds.length === 1,
@@ -115,7 +118,7 @@ export async function dispatchRemotePushToRecipients(params: RemotePushHubPayloa
     const token = await fetchExpoPushTokenForUser(toUserIds[0]!);
     if (!token) {
       ginitNotifyDbg('remote-push-hub', 'expo_fallback_no_token', { userIdSuffix: String(toUserIds[0]).slice(-6) });
-      return;
+      return fcmOk;
     }
     const msg: ExpoPushMessage = {
       to: token,
@@ -130,13 +133,13 @@ export async function dispatchRemotePushToRecipients(params: RemotePushHubPayloa
     };
     await sendExpoPushMessages([msg]);
     ginitNotifyDbg('remote-push-hub', 'expo_fallback_sent', { count: 1 });
-    return;
+    return Math.max(fcmOk, 1);
   }
 
   const tokens = await fetchExpoPushTokensForUsers(toUserIds);
   if (tokens.length === 0) {
     ginitNotifyDbg('remote-push-hub', 'expo_fallback_no_tokens_multi', { recipientCount: toUserIds.length });
-    return;
+    return fcmOk;
   }
   const messages: ExpoPushMessage[] = tokens.map((to) => ({
     to,
@@ -149,6 +152,14 @@ export async function dispatchRemotePushToRecipients(params: RemotePushHubPayloa
   }));
   await sendExpoPushMessages(messages);
   ginitNotifyDbg('remote-push-hub', 'expo_fallback_sent', { count: messages.length });
+  return Math.max(fcmOk, messages.length);
+}
+
+/**
+ * FCM → (필요 시) Expo. 실패는 삼키지 않고 상위에서 로그할 수 있게 throw할 수 있음 — 호출부에서 catch.
+ */
+export async function dispatchRemotePushToRecipients(params: RemotePushHubPayload): Promise<void> {
+  await dispatchRemotePushToRecipientsWithApproxDelivered(params);
 }
 
 export function dispatchRemotePushToRecipientsFireAndForget(params: RemotePushHubPayload): void {

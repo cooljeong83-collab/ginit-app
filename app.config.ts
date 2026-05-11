@@ -199,10 +199,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ios: {
             deploymentTarget: '15.1',
             /**
-             * FirebaseAuth (Swift) pods fail to integrate as static libraries unless modular headers are enabled.
-             * Using dynamic frameworks avoids the modular-headers requirement and makes `pod install` succeed.
+             * firebase-ios-sdk는 CocoaPods에서 `use_frameworks!`가 필요합니다.
+             * RN Firebase(Expo) 권장값은 `static`이며, `dynamic`은 ExpoModulesCore 등과
+             * 링크 방식이 어긋나 `pod install`이 실패할 수 있습니다(transitive static binaries).
+             * @see https://rnfirebase.io/#configure-react-native-firebase-modules
              */
-            useFrameworks: 'dynamic',
+            useFrameworks: 'static',
           },
           android: {
             extraMavenRepos: ['https://repository.map.naver.com/archive/maven'],

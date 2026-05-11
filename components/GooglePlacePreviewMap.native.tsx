@@ -11,11 +11,22 @@ type Props = {
   height?: number;
   /** 외곽·맵 모서리 라운드 (기본 15) */
   borderRadius?: number;
+  /**
+   * Android Fabric: 화면에 `NaverMapView`가 둘 이상이면 `RNCNaverMapViewManager.getChildAt` OOB 크래시가
+   * 재현될 수 있어, 다른 전체화면 맵(예: 장소 인증 모달)이 열릴 때 미리보기 네이티브 맵만 내립니다.
+   */
+  suppressNativeMap?: boolean;
 };
 
 const DEFAULT_DELTA = 0.007;
 
-export function GooglePlacePreviewMap({ latitude, longitude, height = 180, borderRadius = 15 }: Props) {
+export function GooglePlacePreviewMap({
+  latitude,
+  longitude,
+  height = 180,
+  borderRadius = 15,
+  suppressNativeMap,
+}: Props) {
   const initialRegion = useMemo((): Region => {
     const center: CenterLatLngRegion = {
       latitude,
@@ -25,6 +36,10 @@ export function GooglePlacePreviewMap({ latitude, longitude, height = 180, borde
     };
     return centerRegionToNaverRegion(center);
   }, [latitude, longitude]);
+
+  if (Platform.OS === 'android' && suppressNativeMap) {
+    return <View style={[styles.box, { height, borderRadius }]} collapsable={false} accessibilityLabel="선택한 장소 위치" />;
+  }
 
   return (
     <View style={[styles.box, { height, borderRadius }]} collapsable={false}>

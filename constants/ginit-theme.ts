@@ -35,6 +35,8 @@ export const GinitTheme = {
     /** Material Deep Purple 800 — 진한 보라 배경(밝은 텍스트 버튼 등) */
     deepPurple: '#4527A0',
     primarySoft: 'rgba(103, 58, 183, 0.1)',
+    /** 상단 공지·가로 페이저 트랙 등 연한 브랜드 퍼플 표면 */
+    noticeSurface: '#EDE7F6',
     accent: '#86D3B7',
     accent2: '#F4C84A',
     warning: '#F59E0B',

@@ -1,5 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {BlurView } from 'expo-blur';
+import { Image } from 'expo-image';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 

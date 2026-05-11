@@ -67,11 +67,10 @@ export function MeetingChatGinitImageCluster({
   onPressImage: (m: MeetingChatMessage) => void;
   alignEnd?: boolean;
 }) {
+  const [singleRatioById, setSingleRatioById] = useState<Record<string, number>>({});
   const imgs = imageMsgs(messages);
   const n = imgs.length;
   if (n === 0) return null;
-
-  const [singleRatioById, setSingleRatioById] = useState<Record<string, number>>({});
 
   const fitSingle: 'contain' | 'cover' = 'contain';
   const fitCollage: 'contain' | 'cover' = 'cover';
