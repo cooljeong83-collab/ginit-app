@@ -62,6 +62,14 @@ export type LocalChatRoomReadStateInput = {
   readStateLastAtMs?: number | null;
 };
 
+let chatRoomWriteQueue: Promise<void> = Promise.resolve();
+
+function enqueueChatRoomWrite(work: () => Promise<void>): Promise<void> {
+  const run = chatRoomWriteQueue.then(work, work);
+  chatRoomWriteQueue = run.catch(() => {});
+  return run;
+}
+
 function cleanString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
@@ -239,55 +247,57 @@ export async function upsertLocalChatRoomSummary(input: LocalChatRoomSummaryInpu
   const roomType = input.roomType === 'meeting' ? 'meeting' : input.roomType === 'social_dm' ? 'social_dm' : null;
   if (!roomId || !roomType) return;
 
-  await db.write(async () => {
-    const rooms = db.get('chat_rooms');
-    const existing = await rooms.query(Q.where('room_id', roomId), Q.where('room_type', roomType)).fetch();
-    const apply = (r: any) => {
-      const applyUnread = shouldApplyUnreadUpdate(r, input);
-      r.roomId = roomId;
-      r.roomType = roomType;
-      assignDefined(r, 'ownerUserId', input.ownerUserId === undefined ? undefined : cleanString(input.ownerUserId));
-      assignDefined(r, 'peerUserId', input.peerUserId === undefined ? undefined : cleanString(input.peerUserId));
-      assignDefined(r, 'isGroup', input.isGroup === undefined ? undefined : input.isGroup === true);
-      assignDefined(r, 'lastMessageId', input.lastMessageId === undefined ? undefined : cleanString(input.lastMessageId));
-      assignDefined(r, 'lastMessageAtMs', input.lastMessageAtMs === undefined ? undefined : cleanNumber(input.lastMessageAtMs));
-      assignDefined(r, 'lastMessagePreview', input.lastMessagePreview === undefined ? undefined : cleanString(input.lastMessagePreview));
-      assignDefined(r, 'lastMessageKind', input.lastMessageKind === undefined ? undefined : cleanString(input.lastMessageKind));
-      assignDefined(r, 'lastSenderId', input.lastSenderId === undefined ? undefined : cleanString(input.lastSenderId));
-      assignDefined(r, 'lastSenderName', input.lastSenderName === undefined ? undefined : cleanString(input.lastSenderName));
-      assignDefined(
-        r,
-        'lastSenderAvatarUrl',
-        input.lastSenderAvatarUrl === undefined ? undefined : cleanString(input.lastSenderAvatarUrl),
-      );
-      if (applyUnread) {
+  await enqueueChatRoomWrite(async () => {
+    await db.write(async () => {
+      const rooms = db.get('chat_rooms');
+      const existing = await rooms.query(Q.where('room_id', roomId), Q.where('room_type', roomType)).fetch();
+      const apply = (r: any) => {
+        const applyUnread = shouldApplyUnreadUpdate(r, input);
+        r.roomId = roomId;
+        r.roomType = roomType;
+        assignDefined(r, 'ownerUserId', input.ownerUserId === undefined ? undefined : cleanString(input.ownerUserId));
+        assignDefined(r, 'peerUserId', input.peerUserId === undefined ? undefined : cleanString(input.peerUserId));
+        assignDefined(r, 'isGroup', input.isGroup === undefined ? undefined : input.isGroup === true);
+        assignDefined(r, 'lastMessageId', input.lastMessageId === undefined ? undefined : cleanString(input.lastMessageId));
+        assignDefined(r, 'lastMessageAtMs', input.lastMessageAtMs === undefined ? undefined : cleanNumber(input.lastMessageAtMs));
+        assignDefined(r, 'lastMessagePreview', input.lastMessagePreview === undefined ? undefined : cleanString(input.lastMessagePreview));
+        assignDefined(r, 'lastMessageKind', input.lastMessageKind === undefined ? undefined : cleanString(input.lastMessageKind));
+        assignDefined(r, 'lastSenderId', input.lastSenderId === undefined ? undefined : cleanString(input.lastSenderId));
+        assignDefined(r, 'lastSenderName', input.lastSenderName === undefined ? undefined : cleanString(input.lastSenderName));
         assignDefined(
           r,
-          'unreadCount',
-          input.unreadCount === undefined
-            ? undefined
-            : typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount)
-              ? Math.max(0, Math.floor(input.unreadCount))
-              : null,
+          'lastSenderAvatarUrl',
+          input.lastSenderAvatarUrl === undefined ? undefined : cleanString(input.lastSenderAvatarUrl),
         );
+        if (applyUnread) {
+          assignDefined(
+            r,
+            'unreadCount',
+            input.unreadCount === undefined
+              ? undefined
+              : typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount)
+                ? Math.max(0, Math.floor(input.unreadCount))
+                : null,
+          );
+          assignDefined(
+            r,
+            'unreadLastAtMs',
+            input.unreadLastAtMs === undefined && input.remoteUpdatedAtMs === undefined ? undefined : resolveUnreadLastAtMs(input),
+          );
+          assignDefined(r, 'readMessageId', input.readMessageId === undefined ? undefined : cleanString(input.readMessageId));
+          assignDefined(r, 'readAtMs', input.readAtMs === undefined ? undefined : cleanNumber(input.readAtMs));
+        }
         assignDefined(
           r,
-          'unreadLastAtMs',
-          input.unreadLastAtMs === undefined && input.remoteUpdatedAtMs === undefined ? undefined : resolveUnreadLastAtMs(input),
+          'remoteUpdatedAtMs',
+          input.remoteUpdatedAtMs === undefined ? undefined : cleanNumber(input.remoteUpdatedAtMs) ?? Date.now(),
         );
-        assignDefined(r, 'readMessageId', input.readMessageId === undefined ? undefined : cleanString(input.readMessageId));
-        assignDefined(r, 'readAtMs', input.readAtMs === undefined ? undefined : cleanNumber(input.readAtMs));
-      }
-      assignDefined(
-        r,
-        'remoteUpdatedAtMs',
-        input.remoteUpdatedAtMs === undefined ? undefined : cleanNumber(input.remoteUpdatedAtMs) ?? Date.now(),
-      );
-      assignDefined(r, 'roomSearchText', input.roomSearchText === undefined ? defaultSearchText(input) : cleanString(input.roomSearchText));
-    };
-    const row = existing[0];
-    if (row) await row.update(apply);
-    else await rooms.create(apply);
+        assignDefined(r, 'roomSearchText', input.roomSearchText === undefined ? defaultSearchText(input) : cleanString(input.roomSearchText));
+      };
+      const row = existing[0];
+      if (row) await row.update(apply);
+      else await rooms.create(apply);
+    });
   });
 }
 
@@ -358,49 +368,51 @@ export async function upsertLocalChatRoomReadState(input: LocalChatRoomReadState
     Math.max(0, ...Object.values(incomingReadAts).filter((v) => Number.isFinite(v) && v > 0));
   if (Object.keys(incomingReadIds).length === 0 && Object.keys(incomingReadAts).length === 0) return;
 
-  await db.write(async () => {
-    const rooms = db.get('chat_rooms');
-    const existing = await rooms.query(Q.where('room_id', roomId), Q.where('room_type', roomType)).fetch();
-    const apply = (r: any) => {
-      r.roomId = roomId;
-      r.roomType = roomType;
-      assignDefined(r, 'ownerUserId', input.ownerUserId === undefined ? undefined : cleanString(input.ownerUserId));
-      assignDefined(r, 'peerUserId', input.peerUserId === undefined ? undefined : cleanString(input.peerUserId));
+  await enqueueChatRoomWrite(async () => {
+    await db.write(async () => {
+      const rooms = db.get('chat_rooms');
+      const existing = await rooms.query(Q.where('room_id', roomId), Q.where('room_type', roomType)).fetch();
+      const apply = (r: any) => {
+        r.roomId = roomId;
+        r.roomType = roomType;
+        assignDefined(r, 'ownerUserId', input.ownerUserId === undefined ? undefined : cleanString(input.ownerUserId));
+        assignDefined(r, 'peerUserId', input.peerUserId === undefined ? undefined : cleanString(input.peerUserId));
 
-      const nextIds = parseStringMapJson(r.messageReadMessageIdByJson);
-      const nextAts = parseNumberMapJson(r.messageReadAtByJson);
-      let changed = false;
-      const keys = new Set([...Object.keys(incomingReadIds), ...Object.keys(incomingReadAts)]);
-      for (const key of keys) {
-        const incomingAt = incomingReadAts[key] ?? incomingLastAt ?? 0;
-        const currentAt = nextAts[key] ?? 0;
-        const incomingId = incomingReadIds[key] ?? null;
-        if (incomingAt > 0 && currentAt > 0 && incomingAt < currentAt) continue;
-        if (incomingAt > currentAt) {
-          nextAts[key] = incomingAt;
-          changed = true;
-        }
-        if (incomingId && (incomingAt >= currentAt || !nextIds[key])) {
-          if (nextIds[key] !== incomingId) {
-            nextIds[key] = incomingId;
+        const nextIds = parseStringMapJson(r.messageReadMessageIdByJson);
+        const nextAts = parseNumberMapJson(r.messageReadAtByJson);
+        let changed = false;
+        const keys = new Set([...Object.keys(incomingReadIds), ...Object.keys(incomingReadAts)]);
+        for (const key of keys) {
+          const incomingAt = incomingReadAts[key] ?? incomingLastAt ?? 0;
+          const currentAt = nextAts[key] ?? 0;
+          const incomingId = incomingReadIds[key] ?? null;
+          if (incomingAt > 0 && currentAt > 0 && incomingAt < currentAt) continue;
+          if (incomingAt > currentAt) {
+            nextAts[key] = incomingAt;
             changed = true;
           }
+          if (incomingId && (incomingAt >= currentAt || !nextIds[key])) {
+            if (nextIds[key] !== incomingId) {
+              nextIds[key] = incomingId;
+              changed = true;
+            }
+          }
         }
-      }
-      if (!changed) return;
-      r.messageReadMessageIdByJson = encodeJsonMap(nextIds);
-      r.messageReadAtByJson = encodeJsonMap(nextAts);
-      r.messageReadStateLastAtMs = Math.max(
-        typeof r.messageReadStateLastAtMs === 'number' && Number.isFinite(r.messageReadStateLastAtMs)
-          ? r.messageReadStateLastAtMs
-          : 0,
-        incomingLastAt ?? 0,
-        ...Object.values(nextAts),
-      );
-    };
-    const row = existing[0];
-    if (row) await row.update(apply);
-    else await rooms.create(apply);
+        if (!changed) return;
+        r.messageReadMessageIdByJson = encodeJsonMap(nextIds);
+        r.messageReadAtByJson = encodeJsonMap(nextAts);
+        r.messageReadStateLastAtMs = Math.max(
+          typeof r.messageReadStateLastAtMs === 'number' && Number.isFinite(r.messageReadStateLastAtMs)
+            ? r.messageReadStateLastAtMs
+            : 0,
+          incomingLastAt ?? 0,
+          ...Object.values(nextAts),
+        );
+      };
+      const row = existing[0];
+      if (row) await row.update(apply);
+      else await rooms.create(apply);
+    });
   });
 }
 
