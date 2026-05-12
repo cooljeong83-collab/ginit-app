@@ -25,6 +25,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
 import {
   fetchFriendsAcceptedList,
   fetchFriendsPendingInbox,
@@ -81,7 +82,7 @@ function formatAlarmTime(sortMs: number): string {
   if (!sortMs) return '';
   try {
     const d = new Date(sortMs);
-    return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return formatDateTimeWithKoWeekday(d);
   } catch {
     return '';
   }

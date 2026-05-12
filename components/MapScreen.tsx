@@ -35,6 +35,7 @@ import { useFirestoreMeetingPatchesByIds } from '@/src/hooks/useFirestoreMeeting
 import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { Category } from '@/src/lib/categories';
+import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import {
   FEED_LOCATION_FALLBACK_SHORT,
   normalizeFeedRegionLabel,
@@ -139,15 +140,7 @@ function formatSchedulePretty(m: Pick<Meeting, 'scheduleDate' | 'scheduleTime'>)
     return parts.length > 0 ? parts.join(' · ') : null;
   }
 
-  // “서울 기준” 요일 표시를 위해 +09:00로 고정해 date 객체 생성
-  const iso = `${dm[1]}-${dm[2]}-${dm[3]}T${timeDisp || '00:00'}:00+09:00`;
-  const date = new Date(iso);
-  const weekday = Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat('ko-KR', { weekday: 'short', timeZone: 'Asia/Seoul' }).format(date)
-    : '';
-
-  const md = `${mo}/${da}${weekday ? `(${weekday})` : ''}`;
-  return [md, timeDisp].filter(Boolean).join(' · ');
+  return timeDisp ? formatYmdHmWithKoWeekday(d, timeDisp, ' · ') : formatYmdWithKoWeekday(d);
 }
 
 const LIST_CARD_HEIGHT = 118;

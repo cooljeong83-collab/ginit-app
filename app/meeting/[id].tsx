@@ -57,6 +57,7 @@ import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-ho
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
+import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import { isHighTrustPublicMeeting } from '@/src/lib/ginit-trust';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -161,14 +162,7 @@ function formatDateCandidateTitle(dc: DateCandidate): string {
   if (!raw) {
     return dc.textLabel?.trim() || '일정 후보';
   }
-  const parts = raw.split('-').map((n) => Number(n));
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-    return dc.textLabel?.trim() || raw;
-  }
-  const [y, mo, d] = parts;
-  const date = new Date(y, mo - 1, d);
-  const w = WEEK_KO[date.getDay()] ?? '';
-  return `${mo}월 ${d}일 (${w})`;
+  return formatYmdWithKoWeekday(raw);
 }
 
 type DateChip = { id: string; title: string; sub?: string };
@@ -316,8 +310,8 @@ function formatTopScheduleLine(m: Meeting): string | null {
   const t = m.scheduleTime?.trim();
   if (!d && !t) return null;
   const timeDisp = t ? normalizeTimeInput(t) || t : '';
-  if (d && timeDisp) return `대표 일정: ${d} · ${timeDisp}`;
-  if (d) return `대표 일정: ${d}`;
+  if (d && timeDisp) return `대표 일정: ${formatYmdHmWithKoWeekday(d, timeDisp, ' · ')}`;
+  if (d) return `대표 일정: ${formatYmdWithKoWeekday(d)}`;
   return `대표 시간: ${timeDisp}`;
 }
 
@@ -2204,7 +2198,7 @@ export default function MeetingDetailScreen() {
                           pressed && styles.calendarCellPressed,
                         ]}
                         accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
-                        accessibilityLabel={`${c.ymd}${has ? ` ${opts.length}개` : ''}`}>
+                        accessibilityLabel={`${formatYmdWithKoWeekday(c.ymd)}${has ? ` ${opts.length}개` : ''}`}>
                         
                         <Text
                           style={[
@@ -2328,6 +2322,7 @@ export default function MeetingDetailScreen() {
                           has && !isSelected && styles.calendarCellHas,
                           isSelected && styles.calendarCellConfirmedSelected,
                         ]}
+                        accessibilityLabel={has ? `${formatYmdWithKoWeekday(c.ymd)} ${opts.length}개` : undefined}
                         accessibilityElementsHidden={!has}
                         importantForAccessibility={has ? 'yes' : 'no-hide-descendants'}>
                         <Text
@@ -4416,7 +4411,7 @@ export default function MeetingDetailScreen() {
                   </View>
                   <View style={styles.proposeModalHeaderTextCol}>
                     <Text style={styles.proposeModalTitle}>시간 선택</Text>
-                    <Text style={styles.proposeModalSubDateCompact}>{dateVoteTimePick.ymd}</Text>
+                    <Text style={styles.proposeModalSubDateCompact}>{formatYmdWithKoWeekday(dateVoteTimePick.ymd)}</Text>
                   </View>
                 </View>
                 <FlatList

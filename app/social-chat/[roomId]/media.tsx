@@ -14,6 +14,7 @@ import { MeetingChatImageViewerZoomArea } from '@/components/chat/MeetingChatIma
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import {
     deleteSocialChatImageMessageBestEffort,
@@ -39,14 +40,7 @@ function profileForSender(map: Map<string, UserProfile>, senderId: string | null
 function formatSentAt(ts: Timestamp | null | undefined): string {
   if (!ts || typeof ts.toDate !== 'function') return '';
   try {
-    return ts.toDate().toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
+    return formatDateTimeWithKoWeekday(ts.toDate());
   } catch {
     return '';
   }

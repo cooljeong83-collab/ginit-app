@@ -9,6 +9,7 @@ import {
     buildArrivalVerifyPlaceChips,
     resolveArrivalVerifyConfirmedPlaceChip,
 } from '@/src/lib/meeting-arrival-verify-place-summary-data';
+import { formatDateTimeWithKoWeekday, formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingPrimaryStartMs } from '@/src/lib/meetings';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
@@ -24,19 +25,12 @@ export type MeetingArrivalVerifyTopSummaryProps = {
 function formatArrivalVerifyScheduleLine(m: Meeting): string {
   const date = m.scheduleDate?.trim() ?? '';
   const time = m.scheduleTime?.trim() ?? '';
-  if (date && time) return `${date} ${time}`;
-  if (date) return date;
+  if (date && time) return formatYmdHmWithKoWeekday(date, time);
+  if (date) return formatYmdWithKoWeekday(date);
   if (time) return time;
   const ms = meetingPrimaryStartMs(m);
   if (ms != null) {
-    return new Intl.DateTimeFormat('ko-KR', {
-      month: 'numeric',
-      day: 'numeric',
-      weekday: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    }).format(new Date(ms));
+    return formatDateTimeWithKoWeekday(new Date(ms));
   }
   return '';
 }

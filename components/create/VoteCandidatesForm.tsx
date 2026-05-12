@@ -41,9 +41,11 @@ import {
   maxSelectableScheduleDayStartLocal,
   maxSelectableScheduleYmdLocal,
   meetingCreateMinScheduleLeadDescription,
+  normalizeTimeInput,
   validateDateCandidate,
 } from '@/src/lib/date-candidate';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
+import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import {
   preloadPlaceSearchRowsCoordinates,
@@ -376,6 +378,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   /** 일정 달력 헤더 년·월 탭 → 네이티브 날짜 피커(년·월 반영 후 해당 월 1일로 정규화) */
   const [scheduleCalendarYmPick, setScheduleCalendarYmPick] = useState<{ draft: Date } | null>(null);
   const [timePick, setTimePick] = useState<{ ymd: string; draft: Date; source?: 'calendar' | 'ai' } | null>(null);
+  const [androidTimeDialogOpen, setAndroidTimeDialogOpen] = useState(false);
   /** FAB 자동 일정 — 탭한 날처럼 보이도록 달력 셀만 잠시 강조 */
   const [agentScheduleDemoHighlightYmd, setAgentScheduleDemoHighlightYmd] = useState<string | null>(null);
   const [dateDetailExpanded, setDateDetailExpanded] = useState<Record<string, boolean>>({});
@@ -776,17 +779,31 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       const mm = m ? Number(m[2]) : 0;
       const draft = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), hh, mm, 0, 0);
       setTimePick({ ymd, draft, source });
+      setAndroidTimeDialogOpen(false);
     },
     [],
   );
 
-  const confirmTimePick = useCallback(() => {
+  const addTimePickCandidate = useCallback(() => {
     const cur = timePick;
     if (!cur) return;
     const hm = fmtTime(cur.draft);
-    setTimePick(null);
     void commitPointCandidate(cur.ymd, hm);
   }, [commitPointCandidate, timePick]);
+
+  const timePickRows = useMemo(() => {
+    if (!timePick) return [];
+    return dateCandidates
+      .filter((d) => String(d.startDate ?? '').trim() === timePick.ymd)
+      .map((d) => {
+        const rawHm = String(d.startTime ?? '').trim();
+        return {
+          id: d.id,
+          hm: normalizeTimeInput(rawHm) || rawHm || '시간 미정',
+        };
+      })
+      .sort((a, b) => a.hm.localeCompare(b.hm));
+  }, [dateCandidates, timePick]);
 
   const confirmScheduleCalendarYmPick = useCallback(() => {
     const cur = scheduleCalendarYmPick;
@@ -1046,6 +1063,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const rows = placeCandidatesRef.current;
         const dates = dateCandidatesRef.current;
         const filledPlaces = rows.filter(isFilled);
+        if (dates.length === 0) {
+          return { ok: false, error: '일시 후보를 최소 1개 이상 등록해 주세요.' };
+        }
         if (filledPlaces.length === 0) {
           return { ok: false, error: '장소 후보를 한 곳 이상 검색 결과에서 골라 주세요.' };
         }
@@ -1127,6 +1147,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       },
       captureWizardPayloadAfterSchedule: (): VoteCandidatesBuildResult => {
         const dates = dateCandidatesRef.current;
+        if (dates.length === 0) {
+          return { ok: false, error: '일시 후보를 최소 1개 이상 등록해 주세요.' };
+        }
         for (let i = 0; i < dates.length; i += 1) {
           const err = validateDateCandidate(dates[i], i);
           if (err) return { ok: false, error: err };
@@ -1288,8 +1311,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const removeDateRow = useCallback((id: string) => {
     animate();
-    setDateCandidates((prev) => (prev.length <= 1 ? prev : prev.filter((d) => d.id !== id)));
+    setDateCandidates((prev) => prev.filter((d) => d.id !== id));
   }, []);
+
+  const removeTimePickCandidate = useCallback((id: string) => {
+    removeDateRow(id);
+  }, [removeDateRow]);
 
   const updateDateRow = useCallback((id: string, patch: Partial<DateCandidate>) => {
     setDateCandidates((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -1802,7 +1829,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                           pressed && !cellDisabled && styles.calendarCellPressed,
                         ]}
                         accessibilityRole="button"
-                        accessibilityLabel={`${c.ymd}${has ? ` ${times.length}개` : ''}`}>
+                        accessibilityLabel={`${formatYmdWithKoWeekday(c.ymd)}${has ? ` ${times.length}개` : ''}`}>
                         <Text
                           style={[
                             styles.calendarCellDay,
@@ -1912,9 +1939,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                       pressed && styles.aiPreviewScheduleChipPressed,
                     ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`일정 후보 추가 ${slot.ymd} ${slot.hm}`}>
+                    accessibilityLabel={`일정 후보 추가 ${formatYmdWithKoWeekday(slot.ymd)} ${slot.hm}`}>
                     <Text style={styles.aiPreviewScheduleChipLabel} numberOfLines={1} ellipsizeMode="tail">
-                      {`${slot.ymd} · ${slot.hm}`}
+                      {formatYmdHmWithKoWeekday(slot.ymd, slot.hm, ' · ')}
                     </Text>
                   </GinitPressable>
                 ))}
@@ -1934,7 +1961,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     const c = nlpParsed.candidate;
                     const sd = String(c.startDate ?? '').trim();
                     const st = String(c.startTime ?? '').trim();
-                    const datePart = sd ? sd : '날짜 미정';
+                    const datePart = sd ? formatYmdWithKoWeekday(sd) : '날짜 미정';
                     const timePart = st ? st : '시간 미정';
                     return `${datePart} · ${timePart}`;
                   })()}
@@ -2089,7 +2116,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               animate();
               setDateDetailExpanded((prev) => ({ ...prev, [d.id]: !prev[d.id] }));
             }}
-            canDelete={!scheduleListOnly && dateCandidates.length > 1}
+            canDelete={!scheduleListOnly}
             onRemove={() => removeDateRow(d.id)}
             onPatch={(patch: Partial<DateCandidate>) => updateDateRow(d.id, patch)}
             reduceHeavyEffects={reduceHeavyEffects}
@@ -2444,112 +2471,118 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </ScrollView>
       )}
 
-      {timePick && Platform.OS === 'android' ? (
-        <DateTimePicker
-          value={timePick.draft}
-          mode="time"
-          display="spinner"
-          is24Hour
-          {...({ accentColor: GinitTheme.colors.primary } as any)}
-          onChange={(event, d) => {
-            const t = (event as unknown as { type?: string } | null)?.type ?? '';
-            if (t === 'dismissed') {
-              setTimePick(null);
-              return;
-            }
-            if (t === 'set' && d) {
-              const ymd = timePick.ymd;
-              setTimePick(null);
-              void commitPointCandidate(ymd, fmtTime(d));
-              return;
-            }
-            if (!d) setTimePick(null);
-          }}
-        />
-      ) : null}
-
-      {timePick && Platform.OS === 'ios' ? (
+      {timePick ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
           <View style={GinitStyles.modalRoot}>
-            <GinitPressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
-            <View
-              pointerEvents="box-none"
-              style={{
-                position: 'absolute',
-                top: Math.max(insets.top, 8),
-                left: 0,
-                right: 0,
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                paddingHorizontal: 16,
-              }}>
-              <GinitPressable onPress={() => setTimePick(null)} hitSlop={10} accessibilityRole="button">
-                <Text style={GinitStyles.modalCancel}>취소</Text>
-              </GinitPressable>
-              <GinitPressable onPress={confirmTimePick} hitSlop={10} accessibilityRole="button">
-                <Text style={GinitStyles.modalDone}>완료</Text>
-              </GinitPressable>
+            <GinitPressable
+              style={GinitStyles.modalBackdrop}
+              onPress={() => {
+                setAndroidTimeDialogOpen(false);
+                setTimePick(null);
+              }}
+              accessibilityRole="button"
+            />
+            <View style={[GinitStyles.modalSheet, styles.timeManageSheet]}>
+              <View style={GinitStyles.modalHeader}>
+                <GinitPressable
+                  onPress={() => {
+                    setAndroidTimeDialogOpen(false);
+                    setTimePick(null);
+                  }}
+                  hitSlop={10}
+                  accessibilityRole="button">
+                  <Text style={GinitStyles.modalCancel}>닫기</Text>
+                </GinitPressable>
+                <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
+                  <Text style={GinitStyles.modalTitle}>시간 추가</Text>
+                  <Text style={styles.timePickHint} numberOfLines={1}>
+                    {formatYmdWithKoWeekday(timePick.ymd)}
+                  </Text>
+                </View>
+                <View style={styles.timeManageHeaderSpacer} />
+              </View>
+
+              <View style={styles.timeManageInputRow}>
+                {Platform.OS === 'android' ? (
+                  <GinitPressable
+                    onPress={() => setAndroidTimeDialogOpen(true)}
+                    style={({ pressed }) => [styles.timeManageAndroidTimeBtn, pressed && styles.timeManagePressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="추가할 시간 선택">
+                    <Text style={styles.timeManageAndroidTimeText}>{fmtTime(timePick.draft)}</Text>
+                  </GinitPressable>
+                ) : (
+                  <View style={styles.timeManagePickerWrap}>
+                    <DateTimePicker
+                      value={timePick.draft}
+                      mode="time"
+                      display="spinner"
+                      is24Hour
+                      themeVariant="light"
+                      locale="ko-KR"
+                      style={styles.timeManagePicker}
+                      onChange={(_event, d) => {
+                        if (!d) return;
+                        setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
+                      }}
+                    />
+                  </View>
+                )}
+                <GinitPressable
+                  onPress={addTimePickCandidate}
+                  style={({ pressed }) => [styles.timeManageAddBtn, pressed && styles.timeManagePressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="선택한 시간 추가">
+                  <Text style={styles.timeManageAddBtnText}>추가</Text>
+                </GinitPressable>
+              </View>
+
+              <Text style={styles.timeManageListTitle}>등록된 시간</Text>
+              <ScrollView
+                style={styles.timeManageListScroll}
+                contentContainerStyle={styles.timeManageListContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}>
+                {timePickRows.length > 0 ? (
+                  timePickRows.map((row) => (
+                    <View key={row.id} style={styles.timeManageListRow}>
+                      <Text style={styles.timeManageListTime} numberOfLines={1}>
+                        {row.hm}
+                      </Text>
+                      <GinitPressable
+                        onPress={() => removeTimePickCandidate(row.id)}
+                        style={({ pressed }) => [styles.timeManageDeleteBtn, pressed && styles.timeManagePressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${row.hm} 삭제`}>
+                        <Text style={styles.timeManageDeleteBtnText}>삭제</Text>
+                      </GinitPressable>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.timeManageEmptyText}>아직 이 일자에 등록된 시간이 없어요.</Text>
+                )}
+              </ScrollView>
             </View>
-            <View
-              pointerEvents="box-none"
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                paddingBottom: Math.max(insets.bottom, 12),
-                alignItems: 'center',
-                backgroundColor: 'transparent',
-              }}>
+            {Platform.OS === 'android' && androidTimeDialogOpen ? (
               <DateTimePicker
                 value={timePick.draft}
                 mode="time"
                 display="spinner"
                 is24Hour
-                themeVariant="light"
-                locale="ko-KR"
-                onChange={(_event, d) => {
-                  if (!d) return;
-                  setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
+                {...({ accentColor: GinitTheme.colors.primary } as any)}
+                onChange={(event, d) => {
+                  const t = (event as unknown as { type?: string } | null)?.type ?? '';
+                  if (t === 'dismissed') {
+                    setAndroidTimeDialogOpen(false);
+                    return;
+                  }
+                  if (d) {
+                    setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
+                  }
+                  setAndroidTimeDialogOpen(false);
                 }}
               />
-            </View>
-          </View>
-        </Modal>
-      ) : null}
-
-      {timePick && Platform.OS !== 'android' && Platform.OS !== 'ios' ? (
-        <Modal visible transparent animationType="fade" onRequestClose={() => setTimePick(null)}>
-          <View style={GinitStyles.modalRoot}>
-            <GinitPressable style={GinitStyles.modalBackdrop} onPress={() => setTimePick(null)} accessibilityRole="button" />
-            <View style={[GinitStyles.modalSheet, { maxHeight: 320 }]}>
-              <View style={GinitStyles.modalHeader}>
-                <GinitPressable onPress={() => setTimePick(null)} hitSlop={10}>
-                  <Text style={GinitStyles.modalCancel}>취소</Text>
-                </GinitPressable>
-                <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
-                  <Text style={GinitStyles.modalTitle}>시간 선택</Text>
-                  <Text style={styles.timePickHint} numberOfLines={1}>
-                    {timePick.ymd}
-                  </Text>
-                </View>
-                <GinitPressable onPress={confirmTimePick} hitSlop={10}>
-                  <Text style={GinitStyles.modalDone}>완료</Text>
-                </GinitPressable>
-              </View>
-              <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-                <DateTimePicker
-                  value={timePick.draft}
-                  mode="time"
-                  display="spinner"
-                  is24Hour
-                  onChange={(_event, d) => {
-                    if (!d) return;
-                    setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
-                  }}
-                />
-              </View>
-            </View>
+            ) : null}
           </View>
         </Modal>
       ) : null}

@@ -1,4 +1,5 @@
 import type { Category } from '@/src/lib/categories';
+import { formatYmdHmWithKoWeekday } from '@/src/lib/date-display';
 import type { MeetingCreateNluPlan } from '@/src/lib/meeting-create-nlu/types';
 
 /**
@@ -22,7 +23,7 @@ export function buildMeetingCreateNluConfirmSummary(plan: MeetingCreateNluPlan, 
     '',
     `· 제목: ${plan.title}`,
     `· 성격: ${catLabel}`,
-    `· 일시: ${plan.autoSchedule.ymd} ${plan.autoSchedule.hm}`,
+    `· 일시: ${formatYmdHmWithKoWeekday(plan.autoSchedule.ymd, plan.autoSchedule.hm)}`,
     `· 인원: 최소 ${plan.minParticipants}명 · 최대 ${plan.maxParticipants}명`,
     `· 장소 검색: ${placeLine}`,
     `· ${pubLine}`,

@@ -29,6 +29,7 @@ import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { LinkableChatText } from '@/components/ui/LinkableChatText';
+import { formatDateWithKoWeekday } from '@/src/lib/date-display';
 
 function rowIsSystemRow(row: MeetingChatListRow): boolean {
   return row.type === 'message' && row.message.kind === 'system';
@@ -187,7 +188,7 @@ export function useMeetingChatRenderItem({
           currDate.getFullYear() !== nextDate.getFullYear() ||
           currDate.getMonth() !== nextDate.getMonth() ||
           currDate.getDate() !== nextDate.getDate())
-          ? currDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+          ? formatDateWithKoWeekday(currDate)
           : '';
 
       if (item.type === 'message' && item.message.kind === 'system') {

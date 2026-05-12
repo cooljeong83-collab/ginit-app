@@ -6,6 +6,7 @@ import { StyleSheet, Text, View } from 'react-native'
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
+import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
 
@@ -25,8 +26,10 @@ export function JoinedMeetingDashboardCard({ meeting, showPhasePill = true }: Pr
   const orangePhase = phase === 'full';
   const schedule =
     meeting.scheduleDate && meeting.scheduleTime
-      ? `${meeting.scheduleDate} · ${meeting.scheduleTime}`
-      : meeting.scheduleDate?.trim() || null;
+      ? formatYmdHmWithKoWeekday(meeting.scheduleDate, meeting.scheduleTime, ' · ')
+      : meeting.scheduleDate?.trim()
+        ? formatYmdWithKoWeekday(meeting.scheduleDate)
+        : null;
 
   return (
     <GinitPressable

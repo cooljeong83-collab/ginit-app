@@ -2,6 +2,7 @@
  * 자연어 일정 입력 — 키워드·정규식 기반 (추후 AI API 연동 시 이 모듈만 교체·확장).
  */
 import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
+import { formatDateWithKoWeekday, formatYmdWithKoWeekday } from './date-display';
 
 export type ParsedSchedule =
   | { type: 'single'; at: Date; summary: string }
@@ -28,7 +29,7 @@ function setHhMm(d: Date, hh: number, mm: number): Date {
 }
 
 function fmtSummary(d: Date): string {
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${formatDateWithKoWeekday(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function fmtYmd(d: Date): string {
@@ -118,7 +119,7 @@ export function parseSmartNaturalSchedule(raw: string, now: Date = new Date()): 
     const { hour, minute } = extractTime(text, 19, 0);
     const d = setHhMm(baseDay, hour, minute);
     return {
-      summary: `매주 ${fmtYmd(baseDay)} ${fmtHm(d)}`,
+      summary: `매주 ${formatYmdWithKoWeekday(fmtYmd(baseDay))} ${fmtHm(d)}`,
       candidate: { type: 'recurring', subType: 'weekly', startDate: fmtYmd(baseDay), startTime: fmtHm(d) },
     };
   }
@@ -167,7 +168,7 @@ export function parseSmartNaturalSchedule(raw: string, now: Date = new Date()): 
     let b = cloneDate(d1);
     if (b < a) [a, b] = [b, a];
     return {
-      summary: `${fmtYmd(a)} ~ ${fmtYmd(b)}`,
+      summary: `${formatYmdWithKoWeekday(fmtYmd(a))} ~ ${formatYmdWithKoWeekday(fmtYmd(b))}`,
       candidate: { type: 'date-range', startDate: fmtYmd(a), endDate: fmtYmd(b) },
     };
   }
@@ -200,7 +201,7 @@ export function parseSmartNaturalSchedule(raw: string, now: Date = new Date()): 
       let y = cloneDate(d1);
       if (y < x) [x, y] = [y, x];
       return {
-        summary: `${fmtYmd(x)} ~ ${fmtYmd(y)}`,
+        summary: `${formatYmdWithKoWeekday(fmtYmd(x))} ~ ${formatYmdWithKoWeekday(fmtYmd(y))}`,
         candidate: { type: 'date-range', startDate: fmtYmd(x), endDate: fmtYmd(y) },
       };
     }

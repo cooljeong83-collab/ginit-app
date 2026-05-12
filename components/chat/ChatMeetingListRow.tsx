@@ -6,6 +6,7 @@ import {StyleSheet, Text, View} from 'react-native';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
 import type { Category } from '@/src/lib/categories';
+import { formatDateWithKoWeekday } from '@/src/lib/date-display';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
@@ -27,7 +28,7 @@ function formatRelativeFrom(ts: Timestamp | null | undefined): string {
     if (day < 7) return `${day}일 전`;
     const week = Math.floor(day / 7);
     if (week < 6) return `${week}주 전`;
-    return d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+    return formatDateWithKoWeekday(d);
   } catch {
     return '';
   }

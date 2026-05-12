@@ -19,6 +19,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { formatDateWithKoWeekday } from '@/src/lib/date-display';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import { meetingCreatedAtMs } from '@/src/lib/feed-meeting-utils';
@@ -119,7 +120,7 @@ function formatRelativeFromMs(ms: number): string {
   const week = Math.floor(day / 7);
   if (week < 6) return `${week}주 전`;
   const d = new Date(ms);
-  return d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+  return formatDateWithKoWeekday(d);
 }
 
 function formatRightTimeFromMs(ms: number): string {

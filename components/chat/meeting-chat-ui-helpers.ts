@@ -1,6 +1,7 @@
 import type { Timestamp } from 'firebase/firestore';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
@@ -31,14 +32,7 @@ export function formatChatTime(ts: Timestamp | null | undefined): string {
 export function formatImageViewerSentAt(ts: Timestamp | null | undefined): string {
   if (!ts || typeof ts.toDate !== 'function') return '';
   try {
-    return ts.toDate().toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
+    return formatDateTimeWithKoWeekday(ts.toDate());
   } catch {
     return '';
   }

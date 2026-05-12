@@ -4,6 +4,7 @@
 
 import { isPcGameMajorCode, isPlayAndVibeMajorCode, type SpecialtyKind } from './category-specialty';
 import { primaryScheduleFromDateCandidate } from './date-candidate';
+import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from './date-display';
 import type { DateCandidate } from './meeting-place-bridge';
 
 const FRIDAY_MOODS = ['불금', '드디어 금요일'];
@@ -532,7 +533,7 @@ function joinCandidatesWithMidParticle(items: readonly string[]): string {
   return arr.join(', ');
 }
 
-/** 후보 1건을 한국어 라벨로 — 'M월 D일 H시(분)' 기본, 마감/시간 미정/자유 서술 분기 */
+/** 후보 1건을 한국어 라벨로 — `YYYY-MM-DD(요일) H시(분)` 기본, 마감/시간 미정/자유 서술 분기 */
 function formatDateCandidateLabel(d: DateCandidate): string {
   if ((d.type === 'multi' || d.type === 'flexible') && d.textLabel?.trim()) {
     return d.textLabel.trim();
@@ -540,28 +541,27 @@ function formatDateCandidateLabel(d: DateCandidate): string {
   const { scheduleDate, scheduleTime } = primaryScheduleFromDateCandidate(d);
   const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(scheduleDate);
   if (!dm) return scheduleDate;
-  const month = Number(dm[2]);
-  const day = Number(dm[3]);
+  const dateLabel = formatYmdWithKoWeekday(scheduleDate);
   const tm = /^(\d{1,2}):(\d{2})$/.exec(scheduleTime);
   if (d.type === 'tbd' || !tm) {
-    return `${month}월 ${day}일`;
+    return dateLabel;
   }
   const hour = Number(tm[1]);
   const min = Number(tm[2]);
   const timeLabel = min === 0 ? `${hour}시` : `${hour}시 ${min}분`;
   if (d.type === 'deadline') {
-    return `${month}월 ${day}일 ${timeLabel}까지`;
+    return `${dateLabel} ${timeLabel}까지`;
   }
-  return `${month}월 ${day}일 ${timeLabel}`;
+  return `${dateLabel} ${timeLabel}`;
 }
 
-/** 일시 후보 ≥ 2 → 투표/조율 안내 문장. 같은 날짜면 'M월 D일 H1시와 H2시'로 압축. */
+/** 일시 후보 ≥ 2 → 투표/조율 안내 문장. 같은 날짜면 'YYYY-MM-DD(요일) H1시와 H2시'로 압축. */
 function formatVotingDateClause(cands?: readonly DateCandidate[]): string {
   if (!cands || cands.length < 2) return '';
   const labels = cands.map(formatDateCandidateLabel).map((s) => s.trim()).filter(Boolean);
   if (labels.length < 2) return '';
   const prefixOf = (s: string): string => {
-    const m = /^(\d+월 \d+일)\s+/.exec(s);
+    const m = /^(\d{4}-\d{2}-\d{2}\([^)]+\))\s+/.exec(s);
     return m ? m[1] : '';
   };
   const firstPrefix = prefixOf(labels[0]!);
@@ -672,7 +672,7 @@ export function generateAiMeetingDescription(input: {
   const label = input.categoryLabel.trim() || '모임';
   const title = input.meetingTitle.trim() || '모임';
   const where = input.placeName.trim() || '장소 미정';
-  const when = `${input.scheduleDate.trim()} ${input.scheduleTime.trim()}`.trim();
+  const when = formatYmdHmWithKoWeekday(input.scheduleDate.trim(), input.scheduleTime.trim());
   const vis = input.isPublic
     ? '공개 모임으로, 지역에서 함께할 분을 찾고 있어요.'
     : '비공개 모임으로, 초대를 통해 참여할 분을 모으고 있어요.';

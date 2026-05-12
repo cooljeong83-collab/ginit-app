@@ -7,6 +7,7 @@ import {
     Platform, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle} from 'react-native';
 
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
+import { formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -156,7 +157,7 @@ export function DateCandidateEditorCard({
         accessibilityLabel="일시 후보 날짜 선택">
         <View style={styles.chipClip}>
           <Text style={styles.chipLabel} numberOfLines={1}>
-            {d.startDate}
+            {formatYmdWithKoWeekday(d.startDate)}
           </Text>
         </View>
       </GinitPressable>

@@ -3,6 +3,7 @@ import {useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import { HighlightedText } from '@/components/ui/HighlightedText';
+import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
 import type { OfflineChatRoomKey } from '@/src/lib/offline-chat/offline-chat-types';
 import { listRecentSearches, recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 import { searchAllRoomsLocal, searchInRoomLocal, type OfflineChatSearchRow } from '@/src/lib/offline-chat/offline-chat-search';
@@ -179,7 +180,7 @@ export function OfflineChatSearchPanel({
             accessibilityRole="button"
             accessibilityLabel="검색 결과">
             <Text style={sStyle.meta} numberOfLines={1}>
-              {r.senderName ?? '회원'} · {new Date(r.createdAtMs || 0).toLocaleString('ko-KR')}
+              {r.senderName ?? '회원'} · {formatDateTimeWithKoWeekday(new Date(r.createdAtMs || 0))}
             </Text>
             {r.snippet?.trim() ? (
               renderFtsSnippet(r.snippet)

@@ -63,6 +63,7 @@ import {
   validateNewDateProposalCandidate,
   validatePrimaryScheduleForSave,
 } from './date-candidate';
+import { formatDateTimeWithKoWeekday, formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from './date-display';
 import {
   assertNoConfirmedScheduleOverlapHybrid,
   assertProposedStartsOverlapHybrid,
@@ -2975,12 +2976,12 @@ export function buildConfirmedScheduleNoticeTimeRight(
   if (m.scheduleConfirmed !== true) return '';
   const d = m.scheduleDate?.trim();
   const t = m.scheduleTime?.trim();
-  if (d && t) return `${d} ${t}`;
-  if (d || t) return (d || t) ?? '';
+  if (d && t) return formatYmdHmWithKoWeekday(d, t);
+  if (d) return formatYmdWithKoWeekday(d);
+  if (t) return t;
   const ms = meetingPrimaryStartMs(m);
   if (ms == null || !Number.isFinite(ms)) return '';
-  const date = new Date(ms);
-  return `${fmtDateYmd(date)} ${fmtTimeHm(date)}`;
+  return formatDateTimeWithKoWeekday(new Date(ms));
 }
 
 /** 정산·장소 인증 등 상단 공지 — `[카테고리] 제목`(대괄호 뒤 한 칸, 카테고리 없으면 제목만). `meetingCategoryDisplayLabel`과 동일 규칙. */
