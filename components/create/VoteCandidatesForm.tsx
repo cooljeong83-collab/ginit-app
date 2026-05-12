@@ -118,6 +118,39 @@ function hasResolvedPlaceSearchRowCoordinates(
   );
 }
 
+function isUsableRemoteImageUrl(raw: string | null | undefined): raw is string {
+  const t = raw?.trim();
+  if (!t) return false;
+  try {
+    const u = new URL(t);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function mergePinnedSelectedPlaceSearchRows(
+  prevRows: PlaceSearchRow[],
+  nextRows: PlaceSearchRow[],
+  selectedById: Record<string, { placeName: string; address: string }>,
+): PlaceSearchRow[] {
+  const out: PlaceSearchRow[] = [];
+  const seen = new Set<string>();
+  const appendOnce = (row: PlaceSearchRow) => {
+    const key = stableNaverLocalSearchDedupeKey(row);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(row);
+  };
+
+  prevRows.forEach((row) => {
+    if (selectedById[row.id]) appendOnce(row);
+  });
+  nextRows.forEach(appendOnce);
+
+  return out;
+}
+
 function animate() {
   layoutAnimateMeetingCreateWizard();
 }
@@ -416,6 +449,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const placeSearchActiveQueryTrimRef = useRef<string>('');
   const placeSearchRowsRef = useRef(placeSearchRows);
   placeSearchRowsRef.current = placeSearchRows;
+  const placeSelectedByIdRef = useRef(placeSelectedById);
+  placeSelectedByIdRef.current = placeSelectedById;
   const placeSearchErrRef = useRef(placeSearchErr);
   placeSearchErrRef.current = placeSearchErr;
   const placeSearchLoadingRef = useRef(placeSearchLoading);
@@ -964,7 +999,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         longitude: resolved.longitude,
         ...(cat ? { category: cat } : {}),
         ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
-        ...(thumb.startsWith('https://') ? { preferredPhotoMediaUrl: thumb } : {}),
+        ...(isUsableRemoteImageUrl(thumb) ? { preferredPhotoMediaUrl: thumb } : {}),
       };
       setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
       setPlaceCandidates((prev) => {
@@ -1089,7 +1124,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               longitude: Number(r.longitude),
               ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
-              ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
+              ...(isUsableRemoteImageUrl(r.preferredPhotoMediaUrl)
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
                 : {}),
             }) as PlaceCandidate,
@@ -1167,7 +1202,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               longitude: Number(r.longitude),
               ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
-              ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
+              ...(isUsableRemoteImageUrl(r.preferredPhotoMediaUrl)
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
                 : {}),
             }) as PlaceCandidate,
@@ -1197,7 +1232,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               longitude: Number(r.longitude),
               ...(r.category?.trim() ? { category: r.category.trim() } : {}),
               ...(r.naverPlaceLink?.trim() ? { naverPlaceLink: r.naverPlaceLink.trim() } : {}),
-              ...(r.preferredPhotoMediaUrl?.trim().startsWith('https://')
+              ...(isUsableRemoteImageUrl(r.preferredPhotoMediaUrl)
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
                 : {}),
             }) as PlaceCandidate,
@@ -1234,7 +1269,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   longitude: sel.longitude,
                   ...(sel.category?.trim() ? { category: sel.category.trim() } : {}),
                   ...(sel.naverPlaceLink?.trim() ? { naverPlaceLink: sel.naverPlaceLink.trim() } : {}),
-                  ...(sel.preferredPhotoMediaUrl?.trim().startsWith('https://')
+                  ...(isUsableRemoteImageUrl(sel.preferredPhotoMediaUrl)
                     ? { preferredPhotoMediaUrl: sel.preferredPhotoMediaUrl.trim() }
                     : {}),
                 }
@@ -1652,7 +1687,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         });
         const listWithCoords = await preloadPlaceSearchRowsCoordinates(list);
         if (!alive) return;
-        setPlaceSearchRows(listWithCoords);
+        setPlaceSearchRows((prev) =>
+          mergePinnedSelectedPlaceSearchRows(prev, listWithCoords, placeSelectedByIdRef.current),
+        );
         setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
         setPlaceThumbById({});
       } catch (e) {
@@ -1715,7 +1752,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           if (!alive) return;
           if (placeThumbById[row.id] !== undefined) continue;
           const pre = row.thumbnailUrl?.trim() ?? '';
-          if (pre.startsWith('https://')) {
+          if (isUsableRemoteImageUrl(pre)) {
             setPlaceThumbById((prev) => {
               if (prev[row.id] !== undefined) return prev;
               return { ...prev, [row.id]: pre };
@@ -1728,7 +1765,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               roadAddress: row.roadAddress,
               address: row.address,
               category: row.category,
-              preferredPhotoMediaUrl: row.thumbnailUrl ?? undefined,
+              preferredPhotoMediaUrl: undefined,
               kakaoPlaceDetailPageUrl: row.link ?? undefined,
             });
             if (!alive) return;
@@ -2323,9 +2360,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                   const placeName = resolved.title.trim() || title.trim();
                                   const linkFromApi =
                                     sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
-                                  const resolvedPhoto = (placeThumbById[item.id] ?? item.thumbnailUrl ?? '').trim();
-                                  const preferredPhotoMediaUrl = resolvedPhoto.startsWith('https://')
-                                    ? resolvedPhoto
+                                  const resolvedPhoto =
+                                    placeThumbById[item.id] !== undefined
+                                      ? placeThumbById[item.id]
+                                      : item.thumbnailUrl;
+                                  const preferredPhotoMediaUrl = isUsableRemoteImageUrl(resolvedPhoto)
+                                    ? resolvedPhoto.trim()
                                     : undefined;
                                   const catPick = (resolved.category ?? item.category ?? '').trim();
                                   const p: PlaceCandidate = {

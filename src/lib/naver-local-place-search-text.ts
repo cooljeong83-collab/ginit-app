@@ -181,13 +181,7 @@ export async function searchPlacesText(
         return { places: [], nextPageToken: null };
       }
       const slice = buf.rows.slice(virtOffBiz, virtOffBiz + pageSize);
-      // 체감 속도 우선: 상위 3개만 동기로 보강하고, 나머지는 백그라운드에서 채웁니다.
-      const sliceTop = slice.slice(0, 3);
-      const sliceRest = slice.slice(3);
-      await ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(sliceTop);
-      if (sliceRest.length > 0) {
-        void ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(sliceRest);
-      }
+      await ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(slice);
       if (__DEV__) {
         // eslint-disable-next-line no-console
         console.log('[NaverMobileBusinessScrape]', {
@@ -227,13 +221,7 @@ export async function searchPlacesText(
         if (scraped && scraped.length > 0) {
           scrapeBusinessInfiniteBuffer = { norm: qNorm, rows: scraped };
           const slice = scraped.slice(0, pageSize);
-          // 체감 속도 우선: 상위 3개만 동기로 보강하고, 나머지는 백그라운드에서 채웁니다.
-          const sliceTop = slice.slice(0, 3);
-          const sliceRest = slice.slice(3);
-          await ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(sliceTop);
-          if (sliceRest.length > 0) {
-            void ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(sliceRest);
-          }
+          await ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(slice);
           if (__DEV__) {
             // eslint-disable-next-line no-console
             console.log('[NaverMobileBusinessScrape]', {
