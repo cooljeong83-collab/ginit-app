@@ -115,6 +115,7 @@ export function ChatMeetingListRow({
   const rightTime = hasMessage ? formatRightTime(latestMessage.createdAt) : '';
 
   const categoryEmoji = categoryEmojiForMeeting(meeting, categories);
+  const isPrivateMeeting = meeting.isPublic === false;
 
   return (
     <GinitPressable
@@ -131,6 +132,13 @@ export function ChatMeetingListRow({
                 {categoryEmoji}
               </Text>
             </View>
+            {isPrivateMeeting ? (
+              <View style={styles.privateBadge} accessibilityLabel="비공개 모임">
+                <Text style={styles.privateBadgeText} numberOfLines={1}>
+                  비공개
+                </Text>
+              </View>
+            ) : null}
           </View>
           {showCapacityBar ? (
             <View style={styles.capRow} accessibilityLabel={`참여 인원 ${pCount}명, 최대 ${capacity}명`}>
@@ -146,9 +154,11 @@ export function ChatMeetingListRow({
         <View style={styles.zoneAMain}>
           <View style={styles.titleRow}>
             <View style={styles.titleBlock}>
-              <Text style={styles.heroTitle} numberOfLines={1}>
-                {title}
-              </Text>
+              <View style={styles.titleLine}>
+                <Text style={styles.heroTitle} numberOfLines={1}>
+                  {title}
+                </Text>
+              </View>
               {showMetaRow && metaText ? (
                 <Text style={styles.metaMuted} numberOfLines={1}>
                   {metaText}
@@ -272,6 +282,32 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: 1,
+  },
+  titleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+  },
+  privateBadge: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    zIndex: 5,
+    height: 18,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    borderWidth: 0,
+    backgroundColor: GinitTheme.colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  privateBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 12,
+    letterSpacing: -0.1,
+    color: GinitTheme.colors.texWhite,
   },
   heroTitle: {
     flexShrink: 1,

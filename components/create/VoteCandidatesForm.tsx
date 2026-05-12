@@ -386,6 +386,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   );
   const router = useRouter();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const timeManageSheetBottomLift = Platform.OS === 'android' ? Math.max(0, insets.bottom) : 0;
   const seedQ = seedPlaceQuery.trim();
   const seedDate = seedScheduleDate.trim() || fmtDate(new Date());
   const seedTime = seedScheduleTime.trim() || '15:00';
@@ -2522,7 +2523,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               }}
               accessibilityRole="button"
             />
-            <View style={[GinitStyles.modalSheet, styles.timeManageSheet]}>
+            <View
+              style={[
+                GinitStyles.modalSheet,
+                styles.timeManageSheet,
+                timeManageSheetBottomLift > 0 && { marginBottom: timeManageSheetBottomLift },
+              ]}>
               <View style={GinitStyles.modalHeader}>
                 <GinitPressable
                   onPress={() => {

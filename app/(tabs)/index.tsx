@@ -45,6 +45,7 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
+import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
@@ -194,7 +195,7 @@ export default function FeedScreen() {
   const [homeNoticesModalOpen, setHomeNoticesModalOpen] = useState(false);
   const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
   const [draftFeedSearch, setDraftFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
-  /** 홈 상단 탭: 공개 탐색 · 참여중(공개만) · 비공개만 */
+  /** 홈 상단 탭: 공개 탐색 · 내모임(공개+비공개) · 비공개만 */
   const [homeTab, setHomeTab] = useState<HomeMeetingTopTab>('explore');
   const tabPagerRef = useRef<ScrollView | null>(null);
   const homeTabRef = useRef(homeTab);
@@ -270,6 +271,15 @@ export default function FeedScreen() {
     });
     return () => sub.remove();
   }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]);
+
+  useSyncOnScreenFocus(
+    useCallback(async () => {
+      if (!feedLocationReady) return;
+      await Promise.all([refetchMeetingsFeed(), loadMyMeetings()]);
+    }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]),
+    [feedLocationReady],
+    { enabled: feedLocationReady },
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -623,15 +633,9 @@ export default function FeedScreen() {
     appPoliciesVersion,
   ]);
 
-  /** 참여중 탭: 명시 비공개(`isPublic === false`)는 비공개 탭 전용 */
-  const joinedFilteredMeetingsParticipatingTab = useMemo(
-    () => joinedFilteredMeetings.filter((m) => m.isPublic !== false),
-    [joinedFilteredMeetings],
-  );
-
   const sortedJoinedMeetings = useMemo(
-    () => sortMeetingsForFeed(joinedFilteredMeetingsParticipatingTab, listSortMode, feedCoords),
-    [joinedFilteredMeetingsParticipatingTab, listSortMode, feedCoords],
+    () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, feedCoords),
+    [joinedFilteredMeetings, listSortMode, feedCoords],
   );
 
   const privateJoinedFilteredMeetings = useMemo(
@@ -1626,13 +1630,9 @@ export default function FeedScreen() {
             accessibilityRole="tab"
             accessibilityState={{ selected: homeTab === 'private' }}
             accessibilityLabel="비공개 모임">
-            <GinitSymbolicIcon
-              name="lock-closed-outline"
-              size={20}
-              color={homeTab === 'private' ? '#fff' : '#475569'}
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-            />
+            <Text style={[styles.homeTopChipLabel, homeTab === 'private' && styles.homeTopChipLabelActive]} numberOfLines={1}>
+              비공개
+            </Text>
           </GinitPressable>
         </View>
         <GinitPressable
@@ -1696,7 +1696,7 @@ export default function FeedScreen() {
       sortedJoinedMeetings.length === 0
         ? feedListEmptyCentered(
             'albums-outline',
-            '참여중인 공개 모임이 없습니다.',
+            '참여중인 모임이 없습니다.',
             '+ 버튼으로 첫 모임을 만들어 보세요.',
           )
         : null}

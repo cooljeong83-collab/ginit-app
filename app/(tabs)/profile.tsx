@@ -1,5 +1,4 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -27,6 +26,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import {
   effectiveGLevel,
@@ -104,10 +104,13 @@ export default function ProfileTab() {
     };
   }, [profilePk, refreshProfile]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void refreshProfile();
+  useSyncOnScreenFocus(
+    useCallback(async () => {
+      await refreshProfile();
+      setProfileBodyRefreshTrigger((n) => n + 1);
     }, [refreshProfile]),
+    [profilePk],
+    { enabled: Boolean(profilePk) },
   );
 
   useEffect(() => {

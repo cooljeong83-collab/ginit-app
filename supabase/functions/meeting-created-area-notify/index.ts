@@ -207,6 +207,7 @@ serve(async (req) => {
         data: {
           action: FCM_ACTION,
           meetingId,
+          url: `ginitapp://meeting/${encodeURIComponent(meetingId)}`,
           meetingTitle: title,
           feedRegionNorm:
             meetingRow && typeof (meetingRow as { feed_region_norm?: unknown }).feed_region_norm === 'string'

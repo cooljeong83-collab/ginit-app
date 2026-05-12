@@ -147,6 +147,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       permissions: Array.from(
         new Set([
           ...(((config.android as { permissions?: string[] } | undefined)?.permissions ?? []) as string[]),
+          'ACCESS_COARSE_LOCATION',
+          'ACCESS_FINE_LOCATION',
           'WAKE_LOCK',
           'RECEIVE_BOOT_COMPLETED',
         ]),

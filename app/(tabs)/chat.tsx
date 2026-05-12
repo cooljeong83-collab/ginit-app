@@ -18,13 +18,14 @@ import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
+import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { formatDateWithKoWeekday } from '@/src/lib/date-display';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import { meetingCreatedAtMs } from '@/src/lib/feed-meeting-utils';
 import type { LatLng } from '@/src/lib/geo-distance';
-import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
   searchMeetingChatMessages,
@@ -261,6 +262,17 @@ export default function ChatTab() {
   const mergedMeetingsForChat = useMemo(() => {
     if (meetingListSource() !== 'supabase') return meetings;
     if (myMeetings.length === 0) return meetings;
+    const uid = userId?.trim() ?? '';
+    const myMeetingsForChat = uid
+      ? myMeetings.map((m) =>
+          isUserJoinedMeeting(m, uid)
+            ? m
+            : {
+                ...m,
+                participantIds: [...(m.participantIds ?? []), uid],
+              },
+        )
+      : myMeetings;
     const seen = new Set<string>();
     const out: Meeting[] = [];
     for (const m of meetings) {
@@ -269,14 +281,14 @@ export default function ChatTab() {
       seen.add(m.id);
       out.push(m);
     }
-    for (const m of myMeetings) {
+    for (const m of myMeetingsForChat) {
       if (!m?.id) continue;
       if (seen.has(m.id)) continue;
       seen.add(m.id);
       out.push(m);
     }
     return out;
-  }, [meetings, myMeetings]);
+  }, [meetings, myMeetings, userId]);
 
   const fetchNextMeetingsFeedPageGuarded = useCallback(async () => {
     if (!hasMoreMeetingsFeed || isFetchingMoreMeetingsFeed) return;
@@ -664,6 +676,32 @@ export default function ChatTab() {
       setRefreshing(false);
     }
   }, [chatKind, refetchSocialRooms, refetchMeetingsFeed, shouldLoadMyMeetingsForChat, userId]);
+
+  useSyncOnScreenFocus(
+    useCallback(async () => {
+      if (!signedIn) return;
+      const tasks: Promise<unknown>[] = [refetchMeetingsFeed(), refetchSocialRooms()];
+      if (shouldLoadMyMeetingsForChat && userId?.trim()) {
+        setMyMeetingsFetchDone(false);
+        tasks.push(
+          fetchMyMeetingsForFeedFromSupabase(userId.trim())
+            .then((res) => {
+              if (res.ok) setMyMeetings(res.meetings);
+              else setMyMeetings([]);
+            })
+            .catch(() => {
+              setMyMeetings([]);
+            })
+            .finally(() => {
+              setMyMeetingsFetchDone(true);
+            }),
+        );
+      }
+      await Promise.all(tasks);
+    }, [signedIn, refetchMeetingsFeed, refetchSocialRooms, shouldLoadMyMeetingsForChat, userId]),
+    [signedIn, shouldLoadMyMeetingsForChat, userId],
+    { enabled: signedIn },
+  );
 
   const openChatSearch = useCallback(() => {
     setDraftChatSearchQuery(chatKind === 'gather' ? appliedGatherTextQuery : appliedSocialTextQuery);

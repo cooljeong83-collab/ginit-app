@@ -466,6 +466,13 @@ export function HomeMeetingListItem({
             ) : !symbolBox ? (
               <GinitSymbolicIcon name={visual.icon} size={34} color={iconColor} style={s.symbolIcon} />
             ) : null}
+            {m.isPublic === false ? (
+              <View style={s.privateBadge} accessibilityLabel="비공개 모임">
+                <Text style={s.privateBadgeText} numberOfLines={1}>
+                  비공개
+                </Text>
+              </View>
+            ) : null}
           </View>
           {showCapacityBar ? (
             <>
@@ -492,10 +499,12 @@ export function HomeMeetingListItem({
 
           <View style={s.headRow}>
             <View style={s.titleCol}>
-              <Text style={s.title} numberOfLines={2}>
-                {categoryTitlePrefix ? <Text style={s.titleCat}>[{categoryTitlePrefix}] </Text> : null}
-                {m.title}
-              </Text>
+              <View style={s.titleLine}>
+                <Text style={s.title} numberOfLines={2}>
+                  {categoryTitlePrefix ? <Text style={s.titleCat}>[{categoryTitlePrefix}] </Text> : null}
+                  {m.title}
+                </Text>
+              </View>
             </View>
             <Text style={[s.status, statusStyle]} numberOfLines={2}>
               {statusCorner}
@@ -653,7 +662,34 @@ const s = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  titleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+  },
+  privateBadge: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    zIndex: 5,
+    height: 18,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    borderWidth: 0,
+    backgroundColor: GinitTheme.colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  privateBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 12,
+    letterSpacing: -0.1,
+    color: GinitTheme.colors.texWhite,
+  },
   title: {
+    flexShrink: 1,
     fontSize: 15,
     fontWeight: '600',
     letterSpacing: -0.2,

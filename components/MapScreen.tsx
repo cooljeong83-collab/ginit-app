@@ -5,7 +5,6 @@ import {NaverMapMarkerOverlay, NaverMapView, type NaverMapViewRef, type Region a
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Linking from 'expo-linking';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +19,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,6 +32,7 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useFirestoreMeetingPatchesByIds } from '@/src/hooks/useFirestoreMeetingPatchesByIds';
+import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { Category } from '@/src/lib/categories';
@@ -62,6 +63,7 @@ import { loadRegisteredFeedRegions, peekFeedRegionMapSelectionForMapBoot } from 
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
+import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
 import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
 import {
   MIXED_MEETING_CLUSTER_PIN_ACCENT,
@@ -498,8 +500,10 @@ export default function MapScreen() {
   const mapSnapCameraTighterThanQueryRef = useRef(false);
 
   const [selectedMeetingIndex, setSelectedMeetingIndex] = useState(0);
+  const [locatingUser, setLocatingUser] = useState(false);
   // 바텀시트는 기본으로 요약 영역이 펼쳐진 상태(핸들만이 아닌 전체 피크)로 시작합니다.
   const sheetShown = useSharedValue(1);
+  const locatingSpin = useSharedValue(0);
   const carouselDragStartIndexRef = useRef(0);
   const followSelectedRef = useRef(true);
   const lastMarkerTapAtRef = useRef(0);
@@ -559,6 +563,24 @@ export default function MapScreen() {
   const liftDelta = useMemo(() => sheetPeekHeight - sheetMiniPeekHeight, [sheetPeekHeight, sheetMiniPeekHeight]);
   const controlsLiftStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: -sheetShown.value * liftDelta }],
+  }));
+
+  useEffect(() => {
+    locatingSpin.value = locatingUser
+      ? withRepeat(
+          withTiming(1, {
+            duration: 820,
+            easing: Easing.linear,
+            reduceMotion: ReduceMotion.Never,
+          }),
+          -1,
+          false,
+        )
+      : withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never });
+  }, [locatingUser, locatingSpin]);
+
+  const locatingIconSpinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${locatingSpin.value * 360}deg` }],
   }));
 
   const sheetContentStyle = useAnimatedStyle(() => ({
@@ -628,6 +650,7 @@ export default function MapScreen() {
   const [meetingsBooted, setMeetingsBooted] = useState(false);
   /** 반경 RPC(fetchMeetingsWithinRadiusFromSupabase) 진행 중 — 하이브리드 부트 후에도 시트 빈 카피 깜빡임 방지 */
   const [mapGeoMeetingsLoading, setMapGeoMeetingsLoading] = useState(false);
+  const [mapGeoRefreshSeq, setMapGeoRefreshSeq] = useState(0);
   const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(() => mapBootInit.anchor);
   const [driftTooFar, setDriftTooFar] = useState(false);
   /** 마지막으로 조회한 지도 가시 영역(이 지역 재검색·초기 로드·내 위치) — RPC·목록·마커 기준 */
@@ -742,6 +765,15 @@ export default function MapScreen() {
         /* 스택(모임 상세 등)으로 가려질 때 네이티브 지도 freeze 이슈 완화: 포커스 해제 시 별도 처리 없음 */
       };
     }, [openSheet, setMapMovedSinceSearch]),
+  );
+
+  useSyncOnScreenFocus(
+    useCallback(() => {
+      if (!searchAnchor && !mapGeoQueryRegionRef.current) return;
+      setMapGeoRefreshSeq((n) => n + 1);
+    }, [searchAnchor]),
+    [searchAnchor],
+    { enabled: Boolean(searchAnchor || mapGeoQueryRegion) },
   );
 
   const driftThresholdM = mapRadiusKm * 1000;
@@ -1004,7 +1036,7 @@ export default function MapScreen() {
     return () => {
       alive = false;
     };
-  }, [searchAnchor, mapGeoQueryRegion, mapRadiusKm, selectedCategoryId]);
+  }, [searchAnchor, mapGeoQueryRegion, mapRadiusKm, selectedCategoryId, mapGeoRefreshSeq]);
 
   useEffect(() => {
     setDriftTooFar(false);
@@ -1420,47 +1452,46 @@ export default function MapScreen() {
 
   const onPressMyLocation = useCallback(() => {
     void (async () => {
+      if (locatingUser) return;
       if (Platform.OS === 'web') {
         Alert.alert('위치 권한', '웹에서는 내 위치 이동을 지원하지 않습니다.');
         return;
       }
 
-      let granted = (await Location.getForegroundPermissionsAsync().catch(() => null))?.status === 'granted';
-      if (!granted) {
-        const req = await Location.requestForegroundPermissionsAsync().catch(() => null);
-        granted = req?.status === 'granted';
-      }
-      if (granted) {
-        const ctx = await resolveFeedLocationWithGrantedPermission();
-        const c = ctx.coords;
-        if (!c) {
-          Alert.alert(
-            '위치를 가져올 수 없어요',
-            '권한은 허용되었지만 현재 위치 좌표를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.',
-          );
+      setLocatingUser(true);
+      try {
+        const perm = await ensureForegroundLocationPermissionWithSettingsFallback({
+          promptOnce: false,
+          title: '위치 권한이 필요해요',
+          message:
+            Platform.OS === 'ios'
+              ? '내 위치로 이동하려면 위치 권한이 필요합니다.\n\n설정 앱 → 개인정보 보호 및 보안 → 위치 서비스 → 지닛에서 «위치»를 «앱을 사용하는 동안» 또는 «항상»으로 바꿔 주세요.'
+              : '내 위치로 이동하려면 위치 권한이 필요합니다.\n\n설정 → 앱 → 지닛 → 권한 → 위치에서 «앱 사용 중에만 허용» 또는 «항상 허용»으로 바꿔 주세요.',
+        });
+        if (perm.granted) {
+          const ctx = await resolveFeedLocationWithGrantedPermission();
+          const c = ctx.coords;
+          if (!c) {
+            Alert.alert(
+              '위치를 가져올 수 없어요',
+              '권한은 허용되었지만 현재 위치 좌표를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.',
+            );
+            return;
+          }
+          userCoordsRef.current = c;
+          setUserCoords(c);
+          snapMapToUserCoords(c, MY_LOCATION_BUTTON_VIEW_RADIUS_KM);
           return;
         }
-        userCoordsRef.current = c;
-        setUserCoords(c);
-        snapMapToUserCoords(c, MY_LOCATION_BUTTON_VIEW_RADIUS_KM);
-        return;
+
+        if (perm.canAskAgain) {
+          Alert.alert('위치 권한이 필요해요', '내 위치로 이동하려면 위치 권한을 허용해 주세요.');
+        }
+      } finally {
+        setLocatingUser(false);
       }
-
-      const settingsHint =
-        Platform.OS === 'ios'
-          ? '설정 앱 → 개인정보 보호 및 보안 → 위치 서비스 → 지닛 에서 «위치»를 «앱을 사용하는 동안» 또는 «항상»으로 바꿔 주세요.'
-          : '설정 → 앱 → 지닛 → 권한 → 위치 에서 «앱 사용 중에만 허용» 또는 «항상 허용»으로 바꿔 주세요.';
-
-      Alert.alert(
-        '위치 권한이 필요해요',
-        `내 위치로 이동하려면 GPS(위치) 사용을 허용해야 합니다.\n\n${settingsHint}\n\n한 번 거절하셨다면 위 경로에서 다시 켤 수 있고, 아래 «설정 열기»로 바로 이동할 수도 있어요.`,
-        [
-          { text: '닫기', style: 'cancel' },
-          { text: '설정 열기', onPress: () => void Linking.openSettings() },
-        ],
-      );
     })();
-  }, [snapMapToUserCoords]);
+  }, [locatingUser, snapMapToUserCoords]);
 
   const onPressCreateFab = useCallback(() => {
     void (async () => {
@@ -2516,10 +2547,22 @@ export default function MapScreen() {
           </GinitPressable>
           <GinitPressable
             onPress={onPressMyLocation}
-            style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}
+            disabled={locatingUser}
+            style={({ pressed }) => [
+              styles.roundMapBtn,
+              locatingUser && styles.roundMapBtnLocating,
+              pressed && !locatingUser && { opacity: 0.9 },
+            ]}
             accessibilityRole="button"
-            accessibilityLabel="내 위치로 이동">
-            <GinitSymbolicIcon name="locate" size={22} color={GinitTheme.colors.deepPurple} />
+            accessibilityLabel={locatingUser ? '내 위치 검색 중' : '내 위치로 이동'}
+            accessibilityState={{ busy: locatingUser, disabled: locatingUser }}>
+            <Animated.View style={locatingUser ? locatingIconSpinStyle : undefined}>
+              <GinitSymbolicIcon
+                name="locate"
+                size={22}
+                color={locatingUser ? GinitTheme.colors.texWhite : GinitTheme.colors.deepPurple}
+              />
+            </Animated.View>
           </GinitPressable>
         </Animated.View>
       </View>
@@ -2931,6 +2974,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 6,
     elevation: 3,
+  },
+  roundMapBtnLocating: {
+    backgroundColor: GinitTheme.colors.deepPurple,
+    borderColor: GinitTheme.colors.primary,
+    shadowColor: GinitTheme.colors.primary,
+    shadowOpacity: 0.28,
+    elevation: 5,
   },
   // fab(약속 잡기) 버튼은 `roundMapBtn` 스타일을 재사용합니다.
   userDotOuter: {

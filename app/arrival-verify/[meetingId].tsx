@@ -18,6 +18,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 import { resolveConfirmedPlaceCoordsForMeeting } from '@/src/lib/meeting-confirmed-place-coords';
 import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
+import { notifyMeetingParticipantsOfArrivalVerifiedFireAndForget } from '@/src/lib/meeting-arrival-verify-push';
 import {
   presentMeetingArrivalVerifyRpcOutcome,
   type MeetingArrivalVerifyRpcUiPayload,
@@ -117,6 +118,9 @@ export default function ArrivalVerifyMeetingScreen() {
 
   const onRpcResult = useCallback(
     (payload: MeetingArrivalVerifyRpcUiPayload) => {
+      if (payload.rpc?.ok === true && meeting && userId?.trim()) {
+        notifyMeetingParticipantsOfArrivalVerifiedFireAndForget(meeting, userId.trim());
+      }
       presentMeetingArrivalVerifyRpcOutcome(payload, {
         meeting,
         userId: userId ?? '',

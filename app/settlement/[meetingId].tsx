@@ -37,6 +37,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import {
@@ -386,6 +387,16 @@ export default function SettlementMeetingScreen() {
       alive = false;
     };
   }, [meetingId]);
+
+  useSyncOnScreenFocus(
+    useCallback(async () => {
+      if (!meetingId) return;
+      if (settlementHasUnsavedUserChanges || saving || ocrBusy) return;
+      await reload();
+    }, [meetingId, settlementHasUnsavedUserChanges, saving, ocrBusy, reload]),
+    [meetingId, settlementHasUnsavedUserChanges, saving, ocrBusy],
+    { enabled: Boolean(meetingId) },
+  );
 
   const hostNorm = useMemo(() => {
     const u = (userId ?? '').trim();

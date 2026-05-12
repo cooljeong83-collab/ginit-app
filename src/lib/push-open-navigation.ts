@@ -36,7 +36,11 @@ function stripRouteQueryHash(path: string): string {
  */
 export function parseGinitAppChatDestination(
   url: string,
-): { type: 'social_dm'; roomId: string } | { type: 'meeting_chat'; meetingId: string } | null {
+):
+  | { type: 'social_dm'; roomId: string }
+  | { type: 'meeting_chat'; meetingId: string }
+  | { type: 'meeting_detail'; meetingId: string }
+  | null {
   const u = url.trim();
   if (!u.toLowerCase().startsWith('ginitapp://')) return null;
   const rest = (u.slice('ginitapp://'.length).split(/[?#]/)[0] ?? '').trim();
@@ -56,6 +60,13 @@ export function parseGinitAppChatDestination(
       return { type: 'meeting_chat', meetingId: segs[1] };
     }
   }
+  if (head === 'meeting' && segs[1]) {
+    try {
+      return { type: 'meeting_detail', meetingId: decodeURIComponent(segs[1]) };
+    } catch {
+      return { type: 'meeting_detail', meetingId: segs[1] };
+    }
+  }
   return null;
 }
 
@@ -71,8 +82,15 @@ function tryNavigateChatFromGinitPushUrl(
     navigateToChatRoomWithChatTabUnderneath(router, `/social-chat/${encodeURIComponent(d.roomId)}`, opts);
     return true;
   }
-  ginitNotifyDbg('push-open-nav', 'navigate_ginit_url_meeting_chat', { meetingId: d.meetingId });
-  navigateToChatRoomWithChatTabUnderneath(router, `/meeting-chat/${d.meetingId}`, opts);
+  if (d.type === 'meeting_chat') {
+    ginitNotifyDbg('push-open-nav', 'navigate_ginit_url_meeting_chat', { meetingId: d.meetingId });
+    navigateToChatRoomWithChatTabUnderneath(router, `/meeting-chat/${d.meetingId}`, opts);
+    return true;
+  }
+  ginitNotifyDbg('push-open-nav', 'navigate_ginit_url_meeting_detail', { meetingId: d.meetingId });
+  const path = `/meeting/${d.meetingId}`;
+  if (opts?.replace) router.replace(path as never);
+  else router.push(path as never);
   return true;
 }
 
