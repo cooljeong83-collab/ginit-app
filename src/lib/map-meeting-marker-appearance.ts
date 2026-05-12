@@ -8,6 +8,8 @@ type MapPinPaletteRow = {
   gradient: [string, string];
 };
 
+export const MIXED_MEETING_CLUSTER_PIN_ACCENT = '#7C3AED';
+
 const CATEGORY_PIN_PALETTE: readonly MapPinPaletteRow[] = [
   {
     keys: ['영화', '무비', '시네마', '시네', '극장', 'ott', '넷플', '왓챠', '디즈니', 'movie', 'film'],
@@ -131,7 +133,11 @@ export function getMeetingMapPinAccentColor(
 }
 
 const MAP_PIN_GRADIENT_COLORS: Record<string, [string, string]> = Object.fromEntries(
-  [...CATEGORY_PIN_PALETTE.map((row) => [row.accent, row.gradient] as const), ...FALLBACK_PIN_PALETTE],
+  [
+    ...CATEGORY_PIN_PALETTE.map((row) => [row.accent, row.gradient] as const),
+    ...FALLBACK_PIN_PALETTE,
+    [MIXED_MEETING_CLUSTER_PIN_ACCENT, ['#A78BFA', MIXED_MEETING_CLUSTER_PIN_ACCENT]],
+  ],
 );
 
 export function getMapPinGradientColors(accentColor: string): [string, string] {

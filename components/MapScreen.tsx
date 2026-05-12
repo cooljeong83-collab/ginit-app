@@ -63,7 +63,11 @@ import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
-import { getMapPinGradientColors, getMeetingMapPinAccentColor } from '@/src/lib/map-meeting-marker-appearance';
+import {
+  MIXED_MEETING_CLUSTER_PIN_ACCENT,
+  getMapPinGradientColors,
+  getMeetingMapPinAccentColor,
+} from '@/src/lib/map-meeting-marker-appearance';
 import {
   MAP_AVATAR_CLUSTERING_MAX_DELTA,
   groupMeetingsByCoordinateOverlap,
@@ -118,6 +122,9 @@ const MY_LOCATION_BUTTON_VIEW_RADIUS_KM = 1;
 /** 화면상 이 거리 안에 모임 핀이 모이면 숫자 클러스터로 합칩니다. */
 const MAP_MEETING_CLUSTER_RADIUS_PX = 68;
 const MAP_USER_LOCATION_Z_INDEX = 500;
+const MAP_MARKER_Z_BASE = 600;
+const MAP_MARKER_SELECTED_Z_BASE = 1600;
+const MAP_MARKER_DEPTH_Z_RANGE = 900;
 const MAP_MEETING_CLUSTER_Z_INDEX = 2100;
 /** 네이버 위치 오버레이 기본 globalZIndex(300000)보다 높게 둡니다. */
 const NAVER_MEETING_CLUSTER_GLOBAL_Z_INDEX = 310000;
@@ -312,12 +319,41 @@ function mapMarkerPointScreenPosition(
   width: number,
   height: number,
 ): { x: number; y: number } | null {
+  return latLngScreenPosition(point.coordinate, region, width, height);
+}
+
+function latLngScreenPosition(
+  coordinate: LatLng,
+  region: Region,
+  width: number,
+  height: number,
+): { x: number; y: number } | null {
   if (width <= 0 || height <= 0 || region.latitudeDelta <= 0 || region.longitudeDelta <= 0) return null;
   const b = regionToBounds(region);
-  const x = ((point.coordinate.longitude - b.lngMin) / region.longitudeDelta) * width;
-  const y = ((b.latMax - point.coordinate.latitude) / region.latitudeDelta) * height;
+  const x = ((coordinate.longitude - b.lngMin) / region.longitudeDelta) * width;
+  const y = ((b.latMax - coordinate.latitude) / region.latitudeDelta) * height;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return { x, y };
+}
+
+function mapMarkerDepthZIndex(
+  coordinate: LatLng,
+  region: Region,
+  height: number,
+  baseZIndex: number,
+): number {
+  const screen = latLngScreenPosition(coordinate, region, 1, height);
+  if (!screen || height <= 0) return baseZIndex;
+  const y01 = Math.max(0, Math.min(1, screen.y / height));
+  return baseZIndex + Math.round(y01 * MAP_MARKER_DEPTH_Z_RANGE);
+}
+
+function clusterPinAccentColor(
+  meetings: readonly Meeting[],
+  categories: readonly Category[] | null | undefined,
+): string {
+  const colors = new Set(meetings.map((meeting) => getMeetingMapPinAccentColor(meeting, categories)));
+  return colors.size === 1 ? [...colors][0]! : MIXED_MEETING_CLUSTER_PIN_ACCENT;
 }
 
 function buildClusteredMapMarkerRenderItems(
@@ -1931,6 +1967,12 @@ export default function MapScreen() {
                     latitude: m.latitude as number,
                     longitude: m.longitude as number,
                   };
+                  const pinZIndex = mapMarkerDepthZIndex(
+                    c,
+                    mapMarkerClusterRegion,
+                    windowHeight,
+                    selected ? MAP_MARKER_SELECTED_Z_BASE : MAP_MARKER_Z_BASE,
+                  );
                   const pinColor = getMeetingMapPinAccentColor(m, categories);
                   const pinGradientColors = getMapPinGradientColors(pinColor);
                   const emoji = categoryEmojiForMeeting(m, categories);
@@ -1942,7 +1984,7 @@ export default function MapScreen() {
                       width={72}
                       height={76}
                       anchor={{ x: 0.5, y: 1 }}
-                      zIndex={selected ? 1200 : 600}
+                      zIndex={pinZIndex}
                       onTap={() => onPeopleMarkerPress(m)}>
                       <View
                         key={`${m.id}:${pinColor}:${emoji}`}
@@ -2008,24 +2050,85 @@ export default function MapScreen() {
                 }
                 if (item.kind === 'cluster') {
                   const clusterSelected = item.meetings.some((x) => x.id === selectedMeetingId);
+                  const clusterZIndex = mapMarkerDepthZIndex(
+                    item.coordinate,
+                    mapMarkerClusterRegion,
+                    windowHeight,
+                    clusterSelected
+                      ? MAP_MEETING_CLUSTER_Z_INDEX + MAP_MARKER_DEPTH_Z_RANGE + 100
+                      : MAP_MEETING_CLUSTER_Z_INDEX,
+                  );
+                  const clusterPinColor = clusterPinAccentColor(item.meetings, categories);
+                  const clusterPinGradientColors = getMapPinGradientColors(clusterPinColor);
                   return (
                     <NaverMapMarkerOverlay
                       key={item.key}
                       latitude={item.coordinate.latitude}
                       longitude={item.coordinate.longitude}
-                      width={52}
-                      height={52}
-                      anchor={{ x: 0.5, y: 0.5 }}
-                      zIndex={clusterSelected ? MAP_MEETING_CLUSTER_Z_INDEX + 100 : MAP_MEETING_CLUSTER_Z_INDEX}
+                      width={72}
+                      height={76}
+                      anchor={{ x: 0.5, y: 1 }}
+                      zIndex={clusterZIndex}
                       globalZIndex={NAVER_MEETING_CLUSTER_GLOBAL_Z_INDEX}
                       onTap={() => onPeopleMarkerPress(item.lead)}>
                       <View
+                        key={`${item.key}:${clusterPinColor}:${item.count}`}
                         pointerEvents="none"
                         collapsable={false}
-                        style={[styles.mapStackCountBubble, styles.mapClusterCountBubble]}>
-                        <Text style={[styles.mapStackCountBubbleText, styles.mapClusterCountBubbleText]}>
-                          {item.count}
-                        </Text>
+                        style={styles.naverMeetingPinRoot}>
+                        <View pointerEvents="none" style={styles.naverMeetingPinGroundShadow}>
+                          <View style={styles.naverMeetingPinGroundShadowFeather} />
+                          <View style={styles.naverMeetingPinGroundShadowSoft} />
+                          <View style={styles.naverMeetingPinGroundShadowCore} />
+                        </View>
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color="rgba(15, 23, 42, 0.2)"
+                          style={styles.naverMeetingPinBodyShadow}
+                        />
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color="rgba(15, 23, 42, 0.3)"
+                          style={styles.naverMeetingPinOuterEdge}
+                        />
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={72}
+                          color={clusterPinGradientColors[1]}
+                          style={styles.naverMeetingPinGlyph}
+                        />
+                        <View pointerEvents="none" style={styles.naverMeetingPinLowerDepth}>
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={72}
+                            color="rgba(15, 23, 42, 0.16)"
+                            style={styles.naverMeetingPinLowerDepthGlyph}
+                          />
+                        </View>
+                        <View pointerEvents="none" style={styles.naverMeetingPinHighlightTop}>
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={72}
+                            color={clusterPinGradientColors[0]}
+                            style={styles.naverMeetingPinHighlightGlyphTop}
+                          />
+                        </View>
+                        <View pointerEvents="none" style={styles.naverMeetingPinHighlightMid}>
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={72}
+                            color={clusterPinGradientColors[0]}
+                            style={styles.naverMeetingPinHighlightGlyphMid}
+                          />
+                        </View>
+                        <View pointerEvents="none" style={styles.naverMeetingPinGloss} />
+                        <View style={styles.naverMeetingPinClusterCountDisc} collapsable={false}>
+                          <Text style={styles.naverMeetingPinClusterCountText} allowFontScaling={false}>
+                            {item.count}
+                          </Text>
+                        </View>
                       </View>
                     </NaverMapMarkerOverlay>
                   );
@@ -2036,6 +2139,12 @@ export default function MapScreen() {
                   latitude: lead.latitude as number,
                   longitude: lead.longitude as number,
                 };
+                const stackZIndex = mapMarkerDepthZIndex(
+                  c,
+                  mapMarkerClusterRegion,
+                  windowHeight,
+                  stackSelected ? MAP_MARKER_SELECTED_Z_BASE : MAP_MARKER_Z_BASE,
+                );
                 const stackEmoji = categoryEmojiForMeeting(lead, categories);
                 const stackPinColor = getMeetingMapPinAccentColor(lead, categories);
                 const stackPinGradientColors = getMapPinGradientColors(stackPinColor);
@@ -2047,7 +2156,7 @@ export default function MapScreen() {
                     width={72}
                     height={76}
                     anchor={{ x: 0.5, y: 1 }}
-                    zIndex={stackSelected ? 1200 : 600}
+                    zIndex={stackZIndex}
                     onTap={() => onPeopleMarkerPress(lead)}>
                     <View
                       key={`${lead.id}:stack:${stackPinColor}:${stackEmoji}:${item.count}`}
@@ -2142,6 +2251,12 @@ export default function MapScreen() {
                     latitude: m.latitude as number,
                     longitude: m.longitude as number,
                   };
+                  const pinZIndex = mapMarkerDepthZIndex(
+                    coord,
+                    mapMarkerClusterRegion,
+                    windowHeight,
+                    selected ? MAP_MARKER_SELECTED_Z_BASE : MAP_MARKER_Z_BASE,
+                  );
                   const iosPinAccent = getMeetingMapPinAccentColor(m, categories);
                   const iosPinGradientColors = getMapPinGradientColors(iosPinAccent);
                   return (
@@ -2155,7 +2270,7 @@ export default function MapScreen() {
                         (e as any)?.stopPropagation?.();
                         onPeopleMarkerPress(m);
                       }}
-                      zIndex={selected ? 1200 : 600}>
+                      zIndex={pinZIndex}>
                       <View
                         pointerEvents="none"
                         collapsable={false}
@@ -2179,6 +2294,16 @@ export default function MapScreen() {
                 }
                 if (item.kind === 'cluster') {
                   const clusterSelected = item.meetings.some((x) => x.id === selectedMeetingId);
+                  const clusterZIndex = mapMarkerDepthZIndex(
+                    item.coordinate,
+                    mapMarkerClusterRegion,
+                    windowHeight,
+                    clusterSelected
+                      ? MAP_MEETING_CLUSTER_Z_INDEX + MAP_MARKER_DEPTH_Z_RANGE + 100
+                      : MAP_MEETING_CLUSTER_Z_INDEX,
+                  );
+                  const clusterPinColor = clusterPinAccentColor(item.meetings, categories);
+                  const clusterPinGradientColors = getMapPinGradientColors(clusterPinColor);
                   return (
                     <Marker
                       key={item.key}
@@ -2190,13 +2315,26 @@ export default function MapScreen() {
                         (e as any)?.stopPropagation?.();
                         onPeopleMarkerPress(item.lead);
                       }}
-                      zIndex={clusterSelected ? MAP_MEETING_CLUSTER_Z_INDEX + 100 : MAP_MEETING_CLUSTER_Z_INDEX}>
+                      zIndex={clusterZIndex}>
                       <View
-                        style={[styles.mapStackCountBubble, styles.mapClusterCountBubble]}
+                        style={[
+                          styles.mapStackCountBubble,
+                          styles.mapClusterCountBubble,
+                          { backgroundColor: clusterPinColor, borderColor: GinitTheme.colors.surfaceStrong },
+                        ]}
                         collapsable={false}>
-                        <Text style={[styles.mapStackCountBubbleText, styles.mapClusterCountBubbleText]}>
-                          {item.count}
-                        </Text>
+                        <LinearGradient
+                          colors={clusterPinGradientColors}
+                          locations={[0, 1]}
+                          start={{ x: 0.2, y: 0 }}
+                          end={{ x: 0.85, y: 1 }}
+                          style={styles.mapClusterGradientFill}
+                        />
+                        <View style={styles.mapClusterCountDisc} pointerEvents="none">
+                          <Text style={styles.mapClusterCountDiscText} allowFontScaling={false}>
+                            {item.count}
+                          </Text>
+                        </View>
                       </View>
                     </Marker>
                   );
@@ -2207,6 +2345,12 @@ export default function MapScreen() {
                   latitude: lead.latitude as number,
                   longitude: lead.longitude as number,
                 };
+                const stackZIndex = mapMarkerDepthZIndex(
+                  coord,
+                  mapMarkerClusterRegion,
+                  windowHeight,
+                  stackSelected ? MAP_MARKER_SELECTED_Z_BASE : MAP_MARKER_Z_BASE,
+                );
                 const iosStackAccent = getMeetingMapPinAccentColor(lead, categories);
                 const iosStackGradientColors = getMapPinGradientColors(iosStackAccent);
                 return (
@@ -2220,7 +2364,7 @@ export default function MapScreen() {
                       (e as any)?.stopPropagation?.();
                       onPeopleMarkerPress(lead);
                     }}
-                    zIndex={stackSelected ? 1200 : 600}>
+                    zIndex={stackZIndex}>
                     <View
                       style={[
                         styles.mapStackCountBubble,
@@ -3600,6 +3744,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 6,
   },
+  naverMeetingPinClusterCountDisc: {
+    position: 'absolute',
+    top: 11,
+    alignSelf: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 6,
+  },
   naverMeetingPinEmojiText: {
     fontSize: 16,
     lineHeight: 18,
@@ -3624,6 +3782,17 @@ const styles = StyleSheet.create({
     color: GinitTheme.colors.text,
     marginTop: -2,
   },
+  naverMeetingPinClusterCountText: {
+    fontSize: 15,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
+  },
   mapCategoryEmojiMarker: {
     width: 34,
     height: 34,
@@ -3646,6 +3815,10 @@ const styles = StyleSheet.create({
   mapStackGradientFill: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 22,
+  },
+  mapClusterGradientFill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 26,
   },
   mapCategoryEmojiMarkerText: {
     fontSize: 20,
@@ -3682,6 +3855,17 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
+  mapClusterCountDisc: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: GinitTheme.colors.surfaceStrong,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
   mapStackCountBubbleEmoji: {
     fontSize: 18,
     lineHeight: 22,
@@ -3693,9 +3877,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     zIndex: 1,
   },
-  mapClusterCountBubbleText: {
-    fontSize: 18,
-    fontWeight: '700',
+  mapClusterCountDiscText: {
+    fontSize: 15,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
   },
 
 });
