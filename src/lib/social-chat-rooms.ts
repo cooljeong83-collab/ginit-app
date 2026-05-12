@@ -718,7 +718,7 @@ export async function sendSocialChatTextMessage(
   }
   const linkPreview = await buildLinkPreviewForChatText(text);
   const ref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  await addDoc(
+  const msgRef = await addDoc(
     ref,
     stripUndefinedDeep({
       senderId,
@@ -797,6 +797,10 @@ export async function sendSocialChatTextMessage(
           meetingTitle: titleNick,
           preview: text.slice(0, 500),
           fromUserId: senderPk,
+          roomType: 'social_dm',
+          lastMessageId: msgRef.id,
+          senderName: titleNick,
+          senderPhotoUrl: prof?.photoUrl ?? null,
         });
       } catch (e) {
         ginitNotifyDbg('social-chat', 'dm_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
@@ -818,7 +822,12 @@ export type SendSocialChatImageExtras = {
   suppressRemoteNotify?: boolean;
 };
 
-async function notifySocialDmImagePreview(rid: string, senderId: string, preview: string): Promise<void> {
+async function notifySocialDmImagePreview(
+  rid: string,
+  senderId: string,
+  preview: string,
+  lastMessageId?: string,
+): Promise<void> {
   if (Platform.OS === 'web') return;
   try {
     const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
@@ -852,6 +861,11 @@ async function notifySocialDmImagePreview(rid: string, senderId: string, preview
       meetingId: rid,
       meetingTitle: titleNick,
       preview,
+      fromUserId: senderPk,
+      roomType: 'social_dm',
+      lastMessageId,
+      senderName: titleNick,
+      senderPhotoUrl: prof?.photoUrl ?? null,
     });
   } catch (e) {
     ginitNotifyDbg('social-chat', 'dm_image_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
@@ -921,9 +935,9 @@ export async function sendSocialChatImageMessage(
     base64,
   );
 
-  const msgRef = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  await addDoc(
-    msgRef,
+  const msgColRef = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const msgRef = await addDoc(
+    msgColRef,
     stripUndefinedDeep({
       senderId,
       text: cap,
@@ -954,7 +968,7 @@ export async function sendSocialChatImageMessage(
 
   if (!suppressRemote) {
     const pv = cap ? `사진 · ${cap}` : '사진';
-    void notifySocialDmImagePreview(rid, senderId, pv);
+    void notifySocialDmImagePreview(rid, senderId, pv, msgRef.id);
   }
 }
 

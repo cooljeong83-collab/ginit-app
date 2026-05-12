@@ -1,5 +1,12 @@
-import notifee, { AndroidImportance } from '@notifee/react-native';
+import notifee, { AndroidImportance, AndroidStyle } from '@notifee/react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import {
+  CHAT_PUSH_ACTION_MARK_READ,
+  CHAT_PUSH_ACTION_REPLY,
+  parseChatPushDisplayData,
+  upsertChatPushNotificationState,
+  type ChatPushNotificationState,
+} from '@/src/lib/chat-push-notification-state';
 import { consumeNotifeeDisplayOnceGlobalSync } from '@/src/lib/fcm-foreground-message-dedupe';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { diagLogAfterEnsureFcmNotifeeChannels } from '@/src/lib/notification-sound-diag';
@@ -61,6 +68,77 @@ function titleBodyFromRemoteMessage(rm: FirebaseMessagingTypes.RemoteMessage): {
   return { title, body };
 }
 
+async function displayChatPushNotificationAndroid(
+  state: ChatPushNotificationState,
+  data: Record<string, string>,
+  channelId: string,
+): Promise<void> {
+  const latestMessage = state.messages[0];
+  const latestText = latestMessage?.text ?? '새 메시지';
+  const socialLargeIcon =
+    state.roomType === 'social_dm' && latestMessage?.senderPhotoUrl?.trim()
+      ? latestMessage.senderPhotoUrl.trim()
+      : undefined;
+  const collapsedBody =
+    state.roomType === 'meeting' && latestMessage?.senderName
+      ? `${latestMessage.senderName} : ${latestText}`
+      : latestText;
+  const expandedText = state.roomType === 'meeting' ? collapsedBody : latestText;
+  const notificationData = {
+    ...data,
+    roomType: state.roomType,
+    roomId: state.roomId,
+    meetingId: state.roomId,
+    recipientUserId: state.recipientUserId,
+    lastMessageId: state.lastMessageId,
+    senderPhotoUrl: socialLargeIcon ?? '',
+    url: state.url,
+  };
+  const actions = state.recipientUserId
+    ? [
+        ...(state.lastMessageId
+          ? [
+              {
+                title: '읽음',
+                pressAction: { id: CHAT_PUSH_ACTION_MARK_READ },
+              },
+            ]
+          : []),
+        {
+          title: '답장하기',
+          pressAction: { id: CHAT_PUSH_ACTION_REPLY },
+          input: {
+            allowFreeFormInput: true,
+            placeholder: '답장 입력',
+          },
+        },
+      ]
+    : [];
+  const androidOptions = {
+    channelId,
+    importance: AndroidImportance.HIGH,
+    smallIcon: 'notification_icon',
+    ...(socialLargeIcon ? { largeIcon: socialLargeIcon } : {}),
+    pressAction: { id: 'default' },
+    groupId: state.groupId,
+    showTimestamp: true,
+    timestamp: state.updatedAt,
+    style: {
+      type: AndroidStyle.BIGTEXT,
+      text: expandedText,
+    },
+    actions: actions as never,
+  } as never;
+
+  await notifee.displayNotification({
+    id: state.notificationId,
+    title: state.title,
+    body: collapsedBody,
+    data: notificationData,
+    android: androidOptions,
+  });
+}
+
 /** Android: FCM 수신(포그라운드·백그라운드 data-only 등) 시 시스템 알림과 동일하게 Notifee로 표시 */
 export async function displayFcmRemoteMessageWithNotifeeAndroid(
   rm: FirebaseMessagingTypes.RemoteMessage,
@@ -100,6 +178,7 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
   const channelId = await getGinitFcmDisplayNotifeeChannelId();
   const prefSnap = await loadProfileNotificationSoundId();
   const rawSnap = notifeeAndroidRawBaseName(prefSnap);
+  const chatInput = parseChatPushDisplayData(data, title, body);
   ginitNotifyDbg('fcm-notifee-display', 'display', {
     messageId: rm.messageId,
     action: action || undefined,
@@ -107,7 +186,13 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
     androidChannelId: channelId,
     notificationSoundPref: prefSnap,
     notifeeRawHint: rawSnap,
+    chatGrouped: Boolean(chatInput),
   });
+  if (chatInput) {
+    const state = await upsertChatPushNotificationState(chatInput);
+    await displayChatPushNotificationAndroid(state, data, channelId);
+    return;
+  }
   await notifee.displayNotification({
     title,
     body,

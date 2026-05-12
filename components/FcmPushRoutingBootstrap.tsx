@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { handleChatPushNotificationAction } from '@/src/lib/chat-push-notification-actions';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import {
   explainShouldDeferPushOpenNavigation,
@@ -122,6 +123,18 @@ export function FcmPushRoutingBootstrap() {
         type: ev.type,
         dataKeyCount: d ? Object.keys(d).length : 0,
       });
+      if (ev.type === EventType.ACTION_PRESS) {
+        const actionId = (ev.detail.pressAction as { id?: string } | undefined)?.id;
+        const input = (ev.detail as { input?: string }).input;
+        void handleChatPushNotificationAction(actionId, d, input).then((handled) => {
+          if (handled) {
+            ginitNotifyDbg('FcmPushRouting', 'notifee_fg_action_handled', { actionId });
+            return;
+          }
+          openFromData(d, 'notifee_foreground_action_press');
+        });
+        return;
+      }
       openFromData(d, 'notifee_foreground_press');
     });
 

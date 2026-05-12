@@ -65,6 +65,10 @@ export type SendInAppAlarmPushParams = {
    * 차단/스팸 방지 등 서버/클라이언트 필터에 사용됩니다.
    */
   fromUserId?: string;
+  roomType?: 'meeting' | 'social_dm';
+  lastMessageId?: string;
+  senderName?: string;
+  senderPhotoUrl?: string | null;
 };
 
 function buildHeadsUpContent(params: SendInAppAlarmPushParams): {
@@ -180,6 +184,7 @@ async function presentLocalHeadsUp(params: SendInAppAlarmPushParams): Promise<vo
  */
 export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Promise<boolean> {
   const c = buildHeadsUpContent(params);
+  const roomType = params.roomType ?? (params.kind === 'chat' ? 'meeting' : params.kind === 'social_dm' ? 'social_dm' : undefined);
   ginitNotifyDbg('in-app-alarm-push', 'remote_push_dispatch', {
     kind: params.kind,
     meetingId: c.meetingId,
@@ -198,7 +203,12 @@ export async function sendInAppAlarmPush(params: SendInAppAlarmPushParams): Prom
       url: c.url,
       title: c.title,
       body: c.body,
+      recipientUserId: params.userId,
       ...(params.fromUserId?.trim() ? { fromUserId: params.fromUserId.trim() } : {}),
+      ...(roomType ? { roomType } : {}),
+      ...(params.lastMessageId?.trim() ? { lastMessageId: params.lastMessageId.trim() } : {}),
+      ...(params.senderName?.trim() ? { senderName: params.senderName.trim() } : {}),
+      ...(params.senderPhotoUrl?.trim() ? { senderPhotoUrl: params.senderPhotoUrl.trim() } : {}),
     },
   });
   return true;

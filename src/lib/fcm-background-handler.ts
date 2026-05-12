@@ -2,6 +2,7 @@ import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebas
 import notifee, { EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
 
+import { handleChatPushNotificationAction } from '@/src/lib/chat-push-notification-actions';
 import { displayFcmRemoteMessageWithNotifeeAndroid } from '@/src/lib/fcm-notifee-display';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { setPendingPushOpenPayload } from '@/src/lib/pending-push-navigation';
@@ -39,7 +40,7 @@ setBackgroundMessageHandler(m, async (remoteMessage) => {
 notifee.onBackgroundEvent(async (event) => {
   if (Platform.OS !== 'android') return;
   try {
-    if (event.type !== EventType.PRESS) {
+    if (event.type !== EventType.PRESS && event.type !== EventType.ACTION_PRESS) {
       ginitNotifyDbg('fcm-background', 'notifee_bg_skip_type', { type: event.type });
       return;
     }
@@ -58,6 +59,14 @@ notifee.onBackgroundEvent(async (event) => {
     if (kc === 0) {
       ginitNotifyDbg('fcm-background', 'notifee_bg_press_empty_keys', {});
       return;
+    }
+    if (event.type === EventType.ACTION_PRESS) {
+      const actionId = (event.detail.pressAction as { id?: string } | undefined)?.id;
+      const input = (event.detail as { input?: string }).input;
+      if (await handleChatPushNotificationAction(actionId, data, input)) {
+        ginitNotifyDbg('fcm-background', 'notifee_bg_action_handled', { actionId });
+        return;
+      }
     }
     if (setPendingPushOpenPayload(data)) {
       ginitNotifyDbg('fcm-background', 'notifee_bg_press_deferred', {

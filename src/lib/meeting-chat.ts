@@ -814,6 +814,8 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
   meetingId: string;
   senderId: string;
   preview: string;
+  lastMessageId?: string;
+  senderName?: string | null;
 }): void {
   if (Platform.OS === 'web') return;
   void (async () => {
@@ -841,6 +843,9 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
           meetingId: mid,
           meetingTitle: title,
           preview: pv,
+          roomType: 'meeting',
+          lastMessageId: args.lastMessageId,
+          senderName: args.senderName ?? undefined,
         });
       }
       ginitNotifyDbg('meeting-chat', 'notify_participants', {
@@ -919,6 +924,8 @@ export async function sendMeetingChatTextMessage(
     meetingId: mid,
     senderId,
     preview: text,
+    lastMessageId: msgRef.id,
+    senderName: senderProfile?.nickname ?? senderProfile?.displayName ?? undefined,
   });
 }
 
@@ -1016,6 +1023,7 @@ export async function sendMeetingChatImageMessage(
       meetingId: mid,
       senderId,
       preview: imgPreview,
+      lastMessageId: docRef.id,
     });
   }
 }
