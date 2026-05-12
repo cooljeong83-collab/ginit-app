@@ -2,6 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
+import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -168,6 +169,35 @@ function splitSearchSnippet(full: string, needle: string): { head: string; mid: 
     mid: midRaw,
     tail: tailRaw + (end < f.length ? '…' : ''),
   };
+}
+
+function prefetchProfilePhotoUrls(profiles: Map<string, UserProfile>): void {
+  const urls = [
+    ...new Set(
+      [...profiles.values()]
+        .map((profile) => profile.photoUrl?.trim() ?? '')
+        .filter(Boolean),
+    ),
+  ];
+  if (urls.length === 0) return;
+  void Image.prefetch(urls, 'disk').catch(() => {
+    /* best-effort cache warmup */
+  });
+}
+
+function profilesFromCachedMessageSenderMeta(messages: readonly MeetingChatMessage[]): Map<string, UserProfile> {
+  const out = new Map<string, UserProfile>();
+  for (const message of messages) {
+    const senderId = message.senderId?.trim() ? normalizeParticipantId(message.senderId.trim()) : '';
+    if (!senderId) continue;
+    const photoUrl = message.senderAvatarUrl?.trim() || null;
+    const nickname = message.senderName?.trim() || '회원';
+    if (!photoUrl && nickname === '회원') continue;
+    const existing = out.get(senderId);
+    if (existing?.photoUrl || (existing && !photoUrl)) continue;
+    out.set(senderId, { nickname, photoUrl });
+  }
+  return out;
 }
 
 export default function MeetingChatRoomScreen() {
@@ -508,6 +538,35 @@ export default function MeetingChatRoomScreen() {
 
   messagesRef.current = messages;
 
+  useEffect(() => {
+    if (allowed !== true || messages.length === 0) return;
+    const cachedProfiles = profilesFromCachedMessageSenderMeta(messages);
+    if (cachedProfiles.size === 0) return;
+    setProfiles((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [senderId, cached] of cachedProfiles) {
+        const existing = profileForSender(next, senderId);
+        if (isUserProfileWithdrawn(existing)) continue;
+        const cachedNickname = cached.nickname?.trim() || '회원';
+        const cachedPhotoUrl = cached.photoUrl?.trim() || null;
+        const existingNickname = existing?.nickname?.trim() || '';
+        const existingPhotoUrl = existing?.photoUrl?.trim() || null;
+        const merged: UserProfile = {
+          ...(existing ?? { nickname: cachedNickname, photoUrl: cachedPhotoUrl }),
+          nickname: existingNickname && existingNickname !== '회원' ? existingNickname : cachedNickname,
+          photoUrl: existingPhotoUrl || cachedPhotoUrl,
+        };
+        if (!existing || existing.nickname !== merged.nickname || existing.photoUrl !== merged.photoUrl) {
+          next.set(senderId, merged);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    prefetchProfilePhotoUrls(cachedProfiles);
+  }, [allowed, messages]);
+
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
 
   /** 채팅방 이미지 뷰어: 시간순(오래된 것 → 최신)으로 슬라이드 */
@@ -598,9 +657,17 @@ export default function MeetingChatRoomScreen() {
 
   useEffect(() => {
     if (!meeting || allowed !== true) return;
+    let cancelled = false;
     const ids = [...(meeting.participantIds ?? [])];
     if (meeting.createdBy?.trim()) ids.push(meeting.createdBy);
-    void getUserProfilesForIds(ids).then(setProfiles);
+    void getUserProfilesForIds(ids).then((nextProfiles) => {
+      if (cancelled) return;
+      setProfiles(nextProfiles);
+      prefetchProfilePhotoUrls(nextProfiles);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [meeting, allowed]);
 
   useEffect(() => {
@@ -1296,7 +1363,7 @@ export default function MeetingChatRoomScreen() {
     );
   }
 
-  if (meeting === undefined) {
+  if (meeting === undefined && messages.length === 0) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <ActivityIndicator color={GinitTheme.colors.primary} />
@@ -1305,7 +1372,7 @@ export default function MeetingChatRoomScreen() {
     );
   }
 
-  if (!meeting || meetingError) {
+  if (meeting === null || meetingError) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <Text style={styles.errorText}>{meetingError ?? '모임을 찾을 수 없어요.'}</Text>
@@ -1327,8 +1394,9 @@ export default function MeetingChatRoomScreen() {
     );
   }
 
-  const title = meeting.title?.trim() || '모임 채팅';
-  const pCount = meetingParticipantCount(meeting);
+  const canUseMeetingActions = allowed === true;
+  const title = meeting?.title?.trim() || '모임 채팅';
+  const pCount = meeting ? meetingParticipantCount(meeting) : 0;
 
   const imageViewerEntry =
     imageViewer && imageViewer.gallery.length > 0
@@ -1388,7 +1456,7 @@ export default function MeetingChatRoomScreen() {
           )}
           {!chatSearchMode ? (
             <View style={styles.topBarRight}>
-              <Text style={styles.participantCount}>{pCount}</Text>
+              <Text style={styles.participantCount}>{meeting ? pCount : ''}</Text>
               <View style={styles.headerActions}>
                 <GinitPressable
                   onPress={openChatSearch}
@@ -1398,14 +1466,16 @@ export default function MeetingChatRoomScreen() {
                   style={styles.searchIconWrap}>
                   <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
                 </GinitPressable>
-                <GinitPressable
-                  onPress={() => router.push(`/meeting-chat/${meetingId}/settings`)}
-                  accessibilityRole="button"
-                  accessibilityLabel="채팅방 설정"
-                  hitSlop={10}
-                  style={styles.settingsIconWrap}>
-                  <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
-                </GinitPressable>
+                {canUseMeetingActions ? (
+                  <GinitPressable
+                    onPress={() => router.push(`/meeting-chat/${meetingId}/settings`)}
+                    accessibilityRole="button"
+                    accessibilityLabel="채팅방 설정"
+                    hitSlop={10}
+                    style={styles.settingsIconWrap}>
+                    <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />
+                  </GinitPressable>
+                ) : null}
               </View>
             </View>
           ) : null}
@@ -1444,8 +1514,9 @@ export default function MeetingChatRoomScreen() {
           draft={draft}
           setDraft={setDraft}
           sending={sending}
+          canSend={canUseMeetingActions}
           onSend={onSend}
-          onPressAttach={onPressAttach}
+          onPressAttach={canUseMeetingActions ? onPressAttach : undefined}
           bottomSearchNavigator={bottomSearchNavigator}
           hideComposer={chatSearchMode}
         />

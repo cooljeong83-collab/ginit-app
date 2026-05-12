@@ -65,8 +65,17 @@ export function chatPushNotificationId(roomType: ChatPushRoomType, roomId: strin
   return `chat_${roomType}_${stableHash(roomId.trim())}`;
 }
 
+export function chatPushMessageNotificationId(roomType: ChatPushRoomType, roomId: string, messageId: string): string {
+  const mid = messageId.trim() || roomId.trim();
+  return `chat_${roomType}_${stableHash(roomId.trim())}_${stableHash(mid)}`;
+}
+
 export function chatPushGroupId(roomType: ChatPushRoomType, roomId: string): string {
   return `ginit_chat_${roomType}_${stableHash(roomId.trim())}`;
+}
+
+export function chatPushGroupSummaryNotificationId(roomType: ChatPushRoomType, roomId: string): string {
+  return `chat_summary_${roomType}_${stableHash(roomId.trim())}`;
 }
 
 function stringValue(data: Record<string, string>, key: string): string {
@@ -147,6 +156,13 @@ async function readState(roomType: ChatPushRoomType, roomId: string): Promise<Ch
   } catch {
     return null;
   }
+}
+
+export async function getChatPushNotificationState(
+  roomType: ChatPushRoomType,
+  roomId: string,
+): Promise<ChatPushNotificationState | null> {
+  return readState(roomType, roomId);
 }
 
 export async function clearChatPushNotificationState(roomType: ChatPushRoomType, roomId: string): Promise<void> {

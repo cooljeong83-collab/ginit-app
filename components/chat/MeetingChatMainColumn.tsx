@@ -44,6 +44,7 @@ export type MeetingChatMainColumnProps = {
   draft: string;
   setDraft: (t: string) => void;
   sending: boolean;
+  canSend?: boolean;
   onSend: () => void;
   onPressAttach?: () => void;
   /** 기본: multiline. 소셜 DM처럼 엔터 즉시 전송이 필요하면 false */
@@ -81,6 +82,7 @@ export function MeetingChatMainColumn({
   draft,
   setDraft,
   sending,
+  canSend = true,
   onSend,
   onPressAttach,
   inputMultiline = true,
@@ -91,6 +93,7 @@ export function MeetingChatMainColumn({
     setListRef(r);
     setInnerFlashListRef(r);
   };
+  const sendDisabled = !canSend || sending || !draft.trim();
 
   return (
     <View style={styles.chatMainColumn}>
@@ -203,8 +206,7 @@ export function MeetingChatMainColumn({
                   blurOnSubmit={false}
                   returnKeyType="send"
                   onSubmitEditing={() => {
-                    if (sending) return;
-                    if (!draft.trim()) return;
+                    if (sendDisabled) return;
                     void onSend();
                   }}
                   maxLength={4000}
@@ -212,8 +214,8 @@ export function MeetingChatMainColumn({
               </View>
               <GinitPressable
                 onPress={() => void onSend()}
-                style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-                disabled={sending || !draft.trim()}
+                style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
+                disabled={sendDisabled}
                 accessibilityRole="button"
                 accessibilityLabel="보내기">
                 {sending ? (

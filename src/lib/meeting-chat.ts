@@ -73,6 +73,8 @@ export type MeetingChatLinkPreview = {
 export type MeetingChatMessage = {
   id: string;
   senderId: string | null;
+  senderName?: string | null;
+  senderAvatarUrl?: string | null;
   text: string;
   kind: MeetingChatMessageKind;
   /** `kind === 'image'`일 때 다운로드 URL */
@@ -160,6 +162,9 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
   const senderRaw = data.senderId;
   const senderId =
     typeof senderRaw === 'string' && senderRaw.trim() ? senderRaw.trim() : null;
+  const senderName = typeof data.senderName === 'string' && data.senderName.trim() ? data.senderName.trim() : null;
+  const senderAvatarUrl =
+    typeof data.senderAvatarUrl === 'string' && data.senderAvatarUrl.trim() ? data.senderAvatarUrl.trim() : null;
   const text = typeof data.text === 'string' ? data.text : '';
   const kindRaw = data.kind;
   const kind: MeetingChatMessageKind =
@@ -208,6 +213,8 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
   return {
     id,
     senderId,
+    senderName,
+    senderAvatarUrl,
     text,
     kind,
     imageUrl,
@@ -996,6 +1003,7 @@ export async function sendMeetingChatImageMessage(
   if (!uri) throw new Error('이미지를 선택해 주세요.');
 
   const senderId = normalizePhoneUserId(uid) ?? uid;
+  const senderProfile = await getUserProfile(senderId).catch(() => null);
   const cap = (extras?.caption ?? '').trim().slice(0, 500);
   const naturalWidth = extras?.naturalWidth;
   const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
@@ -1036,6 +1044,8 @@ export async function sendMeetingChatImageMessage(
     docRef,
     stripUndefinedDeep({
       senderId,
+      senderName: senderProfile?.nickname ?? null,
+      senderAvatarUrl: senderProfile?.photoUrl ?? null,
       text: cap,
       kind: 'image' as const,
       imageUrl,
@@ -1062,6 +1072,7 @@ export async function sendMeetingChatImageMessage(
       senderId,
       preview: imgPreview,
       lastMessageId: docRef.id,
+      senderName: senderProfile?.nickname ?? senderProfile?.displayName ?? undefined,
     });
   }
 }

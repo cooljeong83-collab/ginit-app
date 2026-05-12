@@ -23,6 +23,7 @@ import {
   consumeForegroundOnMessageOnceGlobalSync,
   fcmForegroundDedupeKey,
 } from '@/src/lib/fcm-foreground-message-dedupe';
+import { prewarmChatRoomMessagesFromPushData } from '@/src/lib/offline-chat/offline-chat-prewarm';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } {
@@ -128,6 +129,9 @@ export function FcmMessagingBootstrap() {
               return;
             }
           }
+        }
+        if (action === 'in_app_chat' || action === 'in_app_social_dm') {
+          prewarmChatRoomMessagesFromPushData(rm.data as Record<string, unknown> | undefined, 'fcm_foreground');
         }
         if (Platform.OS === 'android') {
           if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {

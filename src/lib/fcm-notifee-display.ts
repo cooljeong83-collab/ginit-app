@@ -1,8 +1,10 @@
-import notifee, { AndroidImportance, AndroidStyle } from '@notifee/react-native';
+import notifee, { AndroidGroupAlertBehavior, AndroidImportance, AndroidStyle } from '@notifee/react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import {
   CHAT_PUSH_ACTION_MARK_READ,
   CHAT_PUSH_ACTION_REPLY,
+  chatPushGroupSummaryNotificationId,
+  chatPushMessageNotificationId,
   parseChatPushDisplayData,
   upsertChatPushNotificationState,
   type ChatPushNotificationState,
@@ -18,6 +20,12 @@ import {
 } from '@/src/lib/profile-notification-sound-preference';
 import { isProfileFcmQuietHoursActive } from '@/src/lib/profile-settings-local';
 import { isSocialChatNotifyEnabled } from '@/src/lib/social-chat-notify-preference';
+import { prewarmChatRoomMessagesFromPushData } from '@/src/lib/offline-chat/offline-chat-prewarm';
+import {
+  GINIT_APP_NOTIFICATION_GROUP_ID,
+  ginitGroupedNotificationId,
+  registerGinitGroupedNotification,
+} from '@/src/lib/ginit-notifee-app-group';
 
 /** 레거시 FCM·서버 `channelId` 호환용 (항상 시스템 기본음) */
 export const GINIT_FCM_NOTIFEE_CHANNEL = 'ginit_fcm';
@@ -84,6 +92,11 @@ async function displayChatPushNotificationAndroid(
       ? `${latestMessage.senderName} : ${latestText}`
       : latestText;
   const expandedText = state.roomType === 'meeting' ? collapsedBody : latestText;
+  const childNotificationId = chatPushMessageNotificationId(
+    state.roomType,
+    state.roomId,
+    state.lastMessageId || latestMessage?.id || `${state.updatedAt}`,
+  );
   const notificationData = {
     ...data,
     roomType: state.roomType,
@@ -93,7 +106,18 @@ async function displayChatPushNotificationAndroid(
     lastMessageId: state.lastMessageId,
     senderPhotoUrl: senderLargeIcon ?? '',
     url: state.url,
+    ginitNotificationId: childNotificationId,
   };
+  const groupedCount = await registerGinitGroupedNotification(
+    {
+      id: childNotificationId,
+      title: state.title,
+      body: collapsedBody,
+      updatedAt: state.updatedAt,
+      data: notificationData,
+    },
+    channelId,
+  );
   const actions = state.recipientUserId
     ? [
         ...(state.lastMessageId
@@ -120,7 +144,9 @@ async function displayChatPushNotificationAndroid(
     smallIcon: 'notification_icon',
     ...(senderLargeIcon ? { largeIcon: senderLargeIcon, circularLargeIcon: true } : {}),
     pressAction: { id: 'default' },
-    groupId: state.groupId,
+    groupId: GINIT_APP_NOTIFICATION_GROUP_ID,
+    groupAlertBehavior: AndroidGroupAlertBehavior.CHILDREN,
+    badgeCount: groupedCount,
     showTimestamp: true,
     timestamp: state.updatedAt,
     style: {
@@ -131,12 +157,15 @@ async function displayChatPushNotificationAndroid(
   } as never;
 
   await notifee.displayNotification({
-    id: state.notificationId,
+    id: childNotificationId,
     title: state.title,
     body: collapsedBody,
     data: notificationData,
     android: androidOptions,
   });
+
+  await notifee.cancelNotification(state.notificationId);
+  await notifee.cancelNotification(chatPushGroupSummaryNotificationId(state.roomType, state.roomId));
 }
 
 /** Android: FCM 수신(포그라운드·백그라운드 data-only 등) 시 시스템 알림과 동일하게 Notifee로 표시 */
@@ -179,6 +208,7 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
   const prefSnap = await loadProfileNotificationSoundId();
   const rawSnap = notifeeAndroidRawBaseName(prefSnap);
   const chatInput = parseChatPushDisplayData(data, title, body);
+  if (chatInput) prewarmChatRoomMessagesFromPushData(data, 'fcm_notifee_display');
   ginitNotifyDbg('fcm-notifee-display', 'display', {
     messageId: rm.messageId,
     action: action || undefined,
@@ -193,15 +223,34 @@ export async function displayFcmRemoteMessageWithNotifeeAndroid(
     await displayChatPushNotificationAndroid(state, data, channelId);
     return;
   }
+  const notificationId = ginitGroupedNotificationId(
+    'ginit_fcm',
+    rm.messageId || data.messageId || data.url || `${action}:${meetingId}:${Date.now()}`,
+  );
+  const notificationData = { ...data, ginitNotificationId: notificationId };
+  const groupedCount = await registerGinitGroupedNotification(
+    {
+      id: notificationId,
+      title,
+      body,
+      updatedAt: Date.now(),
+      data: notificationData,
+    },
+    channelId,
+  );
   await notifee.displayNotification({
+    id: notificationId,
     title,
     body,
-    data,
+    data: notificationData,
     android: {
       channelId,
       importance: AndroidImportance.HIGH,
       smallIcon: 'notification_icon',
       pressAction: { id: 'default' },
+      groupId: GINIT_APP_NOTIFICATION_GROUP_ID,
+      groupAlertBehavior: AndroidGroupAlertBehavior.CHILDREN,
+      badgeCount: groupedCount,
     },
   });
 }

@@ -3,10 +3,14 @@ import notifee from '@notifee/react-native';
 import {
   CHAT_PUSH_ACTION_MARK_READ,
   CHAT_PUSH_ACTION_REPLY,
+  chatPushGroupSummaryNotificationId,
+  chatPushMessageNotificationId,
   chatPushNotificationId,
   clearChatPushNotificationState,
+  getChatPushNotificationState,
   type ChatPushRoomType,
 } from '@/src/lib/chat-push-notification-state';
+import { unregisterGinitGroupedNotifications } from '@/src/lib/ginit-notifee-app-group';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { sendMeetingChatTextMessage, writeMeetingChatReadReceipt } from '@/src/lib/meeting-chat';
 import { sendSocialChatTextMessage, updateSocialChatReadReceipt } from '@/src/lib/social-chat-rooms';
@@ -32,22 +36,32 @@ function parseActionData(data: Record<string, unknown>): {
   roomId: string;
   recipientUserId: string;
   lastMessageId: string;
+  notificationId: string;
 } | null {
   const roomType = normalizeRoomType(data);
   const roomId = stringValue(data, 'roomId') || stringValue(data, 'meetingId');
   const recipientUserId = stringValue(data, 'recipientUserId');
   const lastMessageId = stringValue(data, 'lastMessageId') || stringValue(data, 'messageId');
+  const notificationId = stringValue(data, 'ginitNotificationId');
   if (!roomType || !roomId || !recipientUserId) return null;
-  return { roomType, roomId, recipientUserId, lastMessageId };
+  return { roomType, roomId, recipientUserId, lastMessageId, notificationId };
 }
 
 export function isChatPushNotificationActionId(actionId: string | undefined): actionId is ChatPushNotificationActionId {
   return actionId === CHAT_PUSH_ACTION_MARK_READ || actionId === CHAT_PUSH_ACTION_REPLY;
 }
 
-async function clearRoomNotification(roomType: ChatPushRoomType, roomId: string): Promise<void> {
+async function clearRoomNotification(roomType: ChatPushRoomType, roomId: string, explicitNotificationId = ''): Promise<void> {
+  const prev = await getChatPushNotificationState(roomType, roomId);
+  const childIds = (prev?.messages ?? []).map((message) =>
+    chatPushMessageNotificationId(roomType, roomId, message.id),
+  );
+  const groupedIds = [...childIds, explicitNotificationId].map((x) => x.trim()).filter(Boolean);
   await clearChatPushNotificationState(roomType, roomId);
   await notifee.cancelNotification(chatPushNotificationId(roomType, roomId));
+  await notifee.cancelNotification(chatPushGroupSummaryNotificationId(roomType, roomId));
+  await Promise.all(groupedIds.map((id) => notifee.cancelNotification(id).catch(() => {})));
+  await unregisterGinitGroupedNotifications(groupedIds);
 }
 
 async function markChatPushRead(data: Record<string, unknown>): Promise<void> {
@@ -65,7 +79,7 @@ async function markChatPushRead(data: Record<string, unknown>): Promise<void> {
   } else {
     await updateSocialChatReadReceipt(parsed.roomId, parsed.recipientUserId, parsed.lastMessageId);
   }
-  await clearRoomNotification(parsed.roomType, parsed.roomId);
+  await clearRoomNotification(parsed.roomType, parsed.roomId, parsed.notificationId);
   ginitNotifyDbg('chat-push-action', 'read_done', { roomType: parsed.roomType, roomId: parsed.roomId });
 }
 
@@ -88,7 +102,7 @@ async function replyToChatPush(data: Record<string, unknown>, inputText: string 
   } else {
     await sendSocialChatTextMessage(parsed.roomId, parsed.recipientUserId, text, null);
   }
-  await clearRoomNotification(parsed.roomType, parsed.roomId);
+  await clearRoomNotification(parsed.roomType, parsed.roomId, parsed.notificationId);
   ginitNotifyDbg('chat-push-action', 'reply_done', { roomType: parsed.roomType, roomId: parsed.roomId });
 }
 

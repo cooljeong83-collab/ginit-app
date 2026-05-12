@@ -230,7 +230,17 @@ export function useMeetingChatRenderItem({
         sid &&
         (index === 0 || !next || rowIsSystemRow(next) || !sameSenderAsNext);
 
-      const prof = sid ? profileForSender(profiles, sid) : undefined;
+      const profFromMap = sid ? profileForSender(profiles, sid) : undefined;
+      const cachedSenderPhotoUrl = anchorMsg.senderAvatarUrl?.trim() || null;
+      const cachedSenderName = anchorMsg.senderName?.trim() || null;
+      const prof =
+        !isUserProfileWithdrawn(profFromMap) && (cachedSenderPhotoUrl || cachedSenderName)
+          ? ({
+              ...(profFromMap ?? { nickname: cachedSenderName ?? '회원', photoUrl: cachedSenderPhotoUrl }),
+              nickname: profFromMap?.nickname?.trim() || cachedSenderName || '회원',
+              photoUrl: profFromMap?.photoUrl?.trim() || cachedSenderPhotoUrl,
+            } satisfies UserProfile)
+          : profFromMap;
       const withdrawn = isUserProfileWithdrawn(prof);
       const nick = withdrawn ? WITHDRAWN_NICKNAME : (prof?.nickname ?? '회원');
       const isHost = Boolean(hostNorm && sid && sid === hostNorm);
@@ -399,7 +409,13 @@ export function useMeetingChatRenderItem({
                   <GinitSymbolicIcon name="person" size={18} color="#94a3b8" />
                 </View>
               ) : prof?.photoUrl ? (
-                <Image source={{ uri: prof.photoUrl }} style={styles.avatar} contentFit="cover" />
+                <Image
+                  source={{ uri: prof.photoUrl }}
+                  style={styles.avatar}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                  recyclingKey={prof.photoUrl}
+                />
               ) : (
                 <View style={styles.avatarFallback}>
                   <Text style={styles.avatarFallbackText}>{nick.slice(0, 1)}</Text>

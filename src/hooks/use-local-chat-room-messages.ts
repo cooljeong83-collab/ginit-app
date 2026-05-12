@@ -58,9 +58,24 @@ function parseReplyTo(raw: unknown, fallbackMessageId: unknown): MeetingChatMess
 }
 
 function localRowToMeetingMessage(row: any): MeetingChatMessage {
+  const rawPayload = parseJsonObject(row.rawPayloadJson);
+  const senderName =
+    typeof row.senderName === 'string' && row.senderName.trim()
+      ? row.senderName.trim()
+      : typeof rawPayload?.senderName === 'string' && rawPayload.senderName.trim()
+        ? rawPayload.senderName.trim()
+        : null;
+  const senderAvatarUrl =
+    typeof row.senderAvatarUrl === 'string' && row.senderAvatarUrl.trim()
+      ? row.senderAvatarUrl.trim()
+      : typeof rawPayload?.senderAvatarUrl === 'string' && rawPayload.senderAvatarUrl.trim()
+        ? rawPayload.senderAvatarUrl.trim()
+        : null;
   return {
     id: String(row.messageId ?? ''),
     senderId: typeof row.senderId === 'string' && row.senderId.trim() ? row.senderId.trim() : null,
+    senderName,
+    senderAvatarUrl,
     text: typeof row.text === 'string' ? row.text : '',
     kind: normalizeKind(row.kind),
     imageUrl: typeof row.imageUrl === 'string' && row.imageUrl.trim() ? row.imageUrl.trim() : null,

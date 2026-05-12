@@ -152,10 +152,24 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
 
   const queryKey = useMemo(() => socialChatMessagesQueryKey(roomId), [roomId]);
   const localMessages = useLocalSocialChatMessages({ roomId, enabled: Boolean(roomId.trim()) });
+  const [allowInitialRemoteFetch, setAllowInitialRemoteFetch] = useState(false);
+
+  useEffect(() => {
+    setAllowInitialRemoteFetch(false);
+    if (!enabled || !roomId.trim()) return;
+    const timer = setTimeout(() => {
+      setAllowInitialRemoteFetch(true);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [enabled, roomId]);
+
+  useEffect(() => {
+    if (localMessages.length > 0) setAllowInitialRemoteFetch(false);
+  }, [localMessages.length]);
 
   const query = useInfiniteQuery({
     queryKey,
-    enabled: Boolean(roomId.trim()) && enabled,
+    enabled: Boolean(roomId.trim()) && enabled && localMessages.length === 0 && allowInitialRemoteFetch,
     initialPageParam: null as string | null,
     staleTime: SOCIAL_CHAT_MESSAGES_STALE_MS,
     refetchOnWindowFocus: false,

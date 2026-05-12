@@ -79,6 +79,8 @@ function toLocalInputs(messages: readonly MeetingChatMessage[]): OfflineChatLoca
     updatedAtMs: messageTimeMs(m.updatedAt) || messageTimeMs(m.createdAt),
     deletedAtMs: messageTimeMs(m.deletedAt) || null,
     senderId: m.senderId,
+    senderName: m.senderName ?? null,
+    senderAvatarUrl: m.senderAvatarUrl ?? null,
     kind: m.kind,
     text: m.text,
     imageUrl: m.imageUrl,
@@ -165,10 +167,24 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
 
   const queryKey = useMemo(() => meetingChatMessagesQueryKey(meetingId), [meetingId]);
   const localMessages = useLocalMeetingChatMessages({ meetingId, enabled: Boolean(meetingId.trim()) });
+  const [allowInitialRemoteFetch, setAllowInitialRemoteFetch] = useState(false);
+
+  useEffect(() => {
+    setAllowInitialRemoteFetch(false);
+    if (!enabled || !meetingId.trim()) return;
+    const timer = setTimeout(() => {
+      setAllowInitialRemoteFetch(true);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [enabled, meetingId]);
+
+  useEffect(() => {
+    if (localMessages.length > 0) setAllowInitialRemoteFetch(false);
+  }, [localMessages.length]);
 
   const query = useInfiniteQuery({
     queryKey,
-    enabled: Boolean(meetingId.trim()) && enabled,
+    enabled: Boolean(meetingId.trim()) && enabled && localMessages.length === 0 && allowInitialRemoteFetch,
     initialPageParam: null as string | null,
     staleTime: CHAT_MESSAGES_STALE_MS,
     refetchOnWindowFocus: false,
@@ -178,7 +194,6 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
         return { messages: [], oldestMessageId: null, hasMore: false };
       }
       if (pageParam === null) {
-        // eslint-disable-next-line no-console
         console.log('📡 채팅방: 새 메시지 20개 동기화 중...');
         return fetchMeetingChatLatestPage(mid);
       }
@@ -207,7 +222,6 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
     if (didAnnounceCacheRef.current === mid) return;
     if (messages.length === 0 || !query.isSuccess) return;
     didAnnounceCacheRef.current = mid;
-    // eslint-disable-next-line no-console
     console.log('📂 채팅방: 캐시된 메시지 로드 완료');
   }, [enabled, meetingId, messages.length, query.isSuccess]);
 
@@ -244,14 +258,12 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
     if (!rqHasNextPage || rqIsFetchingNextPage || olderPrefetchLockRef.current) return;
     olderPrefetchLockRef.current = true;
     try {
-      // eslint-disable-next-line no-console
       console.log('⬆️ 채팅 상단 도달 전: 이전 메시지 20개 미리 가져오기 시작');
       await rqFetchNextPage();
       const data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(queryKey);
       const flat = meetingChatMessagesFromInfiniteData(data);
       void upsertLocalChatMessages({ roomType: 'meeting', roomId: meetingId }, toLocalInputs(flat));
       const n = countDistinctMessagesInInfiniteData(data);
-      // eslint-disable-next-line no-console
       console.log('✅ 현재 로드된 총 메시지 수: ' + n);
     } finally {
       olderPrefetchLockRef.current = false;
