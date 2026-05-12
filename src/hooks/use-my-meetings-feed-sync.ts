@@ -13,6 +13,8 @@ type MyMeetingsQueryData = {
   meetings: Meeting[];
 };
 
+const EMPTY_MEETINGS: Meeting[] = [];
+
 export function myMeetingsFeedQueryKey(appUserId: string) {
   return ['meetings', 'my-feed', meetingListSource(), normalizeParticipantId(appUserId)] as const;
 }
@@ -69,7 +71,7 @@ export function useMyMeetingsFeedSync({
   }, [clear, query, shouldRun]);
 
   return {
-    meetings: shouldRun ? (query.data?.meetings ?? []) : [],
+    meetings: shouldRun ? (query.data?.meetings ?? EMPTY_MEETINGS) : EMPTY_MEETINGS,
     isInitialLoading: shouldRun && query.isPending && !query.data,
     syncChangedMeetings,
     refetchFull,

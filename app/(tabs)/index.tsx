@@ -394,7 +394,7 @@ export default function FeedScreen() {
 
   useEffect(() => {
     if (feedHostIds.length === 0) {
-      setFeedHostProfileMap(new Map());
+      setFeedHostProfileMap((prev) => (prev.size === 0 ? prev : new Map()));
       return;
     }
     let alive = true;
