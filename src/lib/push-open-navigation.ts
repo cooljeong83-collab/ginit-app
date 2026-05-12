@@ -111,13 +111,16 @@ export function navigateToChatRoomWithChatTabUnderneath(
   const openRoom = () => {
     router.push(roomHref as never);
   };
+  const openRoomAfterTabSettles = () => {
+    setTimeout(openRoom, 120);
+  };
   if (replace) {
     router.replace('/(tabs)/chat' as never);
-    queueMicrotask(openRoom);
+    openRoomAfterTabSettles();
     return;
   }
   router.push('/(tabs)/chat' as never);
-  queueMicrotask(openRoom);
+  openRoomAfterTabSettles();
 }
 
 /**

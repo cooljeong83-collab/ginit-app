@@ -47,6 +47,8 @@ export type SocialDmChatRoomBodyProps = {
   peerReadMessageId: string | null;
   peerReadAt: unknown | null;
   peerReadStateReady?: boolean;
+  initialPeerName?: string | null;
+  initialPeerPhotoUrl?: string | null;
   searchNavigateLoading?: boolean;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
@@ -79,6 +81,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     peerReadMessageId,
     peerReadAt,
     peerReadStateReady = true,
+    initialPeerName = null,
+    initialPeerPhotoUrl = null,
     searchNavigateLoading,
     hasNextPage,
     isFetchingNextPage,
@@ -294,8 +298,20 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   useEffect(() => {
     const ids = [myUserId.trim(), peerId.trim()].filter(Boolean);
     if (ids.length < 2) return;
+    setProfiles((prev) => {
+      const next = new Map(prev);
+      const peerKey = peerId.trim();
+      if (peerKey && !next.has(peerKey) && (initialPeerName?.trim() || initialPeerPhotoUrl?.trim())) {
+        next.set(peerKey, {
+          id: peerKey,
+          nickname: initialPeerName?.trim() || '친구',
+          photoUrl: initialPeerPhotoUrl?.trim() || null,
+        } as UserProfile);
+      }
+      return next;
+    });
     void getUserProfilesForIds(ids).then(setProfiles);
-  }, [myUserId, peerId]);
+  }, [initialPeerName, initialPeerPhotoUrl, myUserId, peerId]);
 
   /** 모임 채팅과 동일: IME 표시 중 일부 기기에서 하단 inset이 키보드 오프셋과 중복될 수 있어 최소 패딩만 사용 */
   const composerBottomPad = useMemo(

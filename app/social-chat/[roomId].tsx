@@ -59,13 +59,17 @@ export default function SocialChatRoomScreen() {
   const queryClient = useQueryClient();
   const { userId } = useUserSession();
   const { markChatReadUpTo } = useInAppAlarms();
-  const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();
+  const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string; peerPhotoUrl?: string }>();
   const rawRoom = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const roomId = useMemo(() => decodeURIComponent(String(rawRoom ?? '').trim()), [rawRoom]);
   const peerName =
     typeof params.peerName === 'string' && params.peerName.trim()
       ? decodeURIComponent(params.peerName.trim())
       : '친구';
+  const initialPeerPhotoUrl =
+    typeof params.peerPhotoUrl === 'string' && params.peerPhotoUrl.trim()
+      ? decodeURIComponent(params.peerPhotoUrl.trim())
+      : null;
 
   const peerId = useMemo(() => {
     const me = userId?.trim() ?? '';
@@ -549,6 +553,8 @@ export default function SocialChatRoomScreen() {
             peerReadMessageId={effectivePeerReadState.readMessageId}
             peerReadAt={effectivePeerReadState.readAt}
             peerReadStateReady={(localSocialRoom?.messageReadStateLastAtMs ?? 0) > 0 || roomDoc !== undefined}
+            initialPeerName={peerName}
+            initialPeerPhotoUrl={initialPeerPhotoUrl}
             onPeerProfileOpen={(id) => {
               const t = id.trim();
               if (!t) return;

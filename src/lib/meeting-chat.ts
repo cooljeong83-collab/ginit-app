@@ -858,6 +858,10 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
       }
       const title = m.title?.trim() || '모임';
       const senderPk = normalizeParticipantId(args.senderId.trim()) || args.senderId.trim();
+      const senderProfile = senderPk ? await getUserProfile(senderPk).catch(() => null) : null;
+      const senderName =
+        args.senderName?.trim() || senderProfile?.nickname?.trim() || senderProfile?.displayName?.trim() || undefined;
+      const senderPhotoUrl = senderProfile?.photoUrl?.trim() || undefined;
       const ids = m.participantIds ?? [];
       const seen = new Set<string>();
       const pv = args.preview.trim().slice(0, 500);
@@ -874,7 +878,8 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
           preview: pv,
           roomType: 'meeting',
           lastMessageId: args.lastMessageId,
-          senderName: args.senderName ?? undefined,
+          senderName,
+          senderPhotoUrl,
         });
       }
       ginitNotifyDbg('meeting-chat', 'notify_participants', {

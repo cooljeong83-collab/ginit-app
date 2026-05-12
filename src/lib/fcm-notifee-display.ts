@@ -75,8 +75,8 @@ async function displayChatPushNotificationAndroid(
 ): Promise<void> {
   const latestMessage = state.messages[0];
   const latestText = latestMessage?.text ?? '새 메시지';
-  const socialLargeIcon =
-    state.roomType === 'social_dm' && latestMessage?.senderPhotoUrl?.trim()
+  const senderLargeIcon =
+    (state.roomType === 'social_dm' || state.roomType === 'meeting') && latestMessage?.senderPhotoUrl?.trim()
       ? latestMessage.senderPhotoUrl.trim()
       : undefined;
   const collapsedBody =
@@ -91,7 +91,7 @@ async function displayChatPushNotificationAndroid(
     meetingId: state.roomId,
     recipientUserId: state.recipientUserId,
     lastMessageId: state.lastMessageId,
-    senderPhotoUrl: socialLargeIcon ?? '',
+    senderPhotoUrl: senderLargeIcon ?? '',
     url: state.url,
   };
   const actions = state.recipientUserId
@@ -118,7 +118,7 @@ async function displayChatPushNotificationAndroid(
     channelId,
     importance: AndroidImportance.HIGH,
     smallIcon: 'notification_icon',
-    ...(socialLargeIcon ? { largeIcon: socialLargeIcon, circularLargeIcon: true } : {}),
+    ...(senderLargeIcon ? { largeIcon: senderLargeIcon, circularLargeIcon: true } : {}),
     pressAction: { id: 'default' },
     groupId: state.groupId,
     showTimestamp: true,

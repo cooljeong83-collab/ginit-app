@@ -1278,7 +1278,11 @@ export default function ChatTab() {
                             }
                             setDirectSharePickMode(false);
                           }
-                          router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
+                          router.push(
+                            `/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}${
+                              uri ? `&peerPhotoUrl=${encodeURIComponent(uri)}` : ''
+                            }`,
+                          );
                         }}
                         accessibilityRole="button"
                         accessibilityLabel={`${nick}와 채팅`}
