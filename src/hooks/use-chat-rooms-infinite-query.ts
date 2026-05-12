@@ -1,13 +1,14 @@
-import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
+import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
 import {
-  CHAT_ROOMS_LIST_PAGE_SIZE,
-  diffChatRoomSummaries,
-  fetchChatRoomsChangeSummariesFromSupabase,
+  upsertLocalChatRoomSummary,
+  type LocalChatRoomSummary,
+} from '@/src/lib/offline-chat/offline-chat-rooms';
+import {
   fetchChatRoomsListPageHybrid,
-  subscribeChatRoomsListInvalidate,
+  fetchChatRoomsChangeSummariesFromSupabase,
 } from '@/src/lib/supabase-chat-rooms-list';
 
 /** TanStack 캐시 키 — 사용자별로 분리(재로그인 시 섞이지 않게) */
@@ -15,123 +16,112 @@ export function chatRoomsQueryKey(userId: string) {
   return ['chat_rooms', userId.trim()] as const;
 }
 
-type Page = { rooms: SocialChatRoomSummary[]; hasMore: boolean };
-type ChatRoomsInfiniteData = InfiniteData<Page, number>;
+type ChatRoomListRow = SocialChatRoomSummary | LocalChatRoomSummary;
 
-function flattenPages(data: ChatRoomsInfiniteData | undefined): SocialChatRoomSummary[] {
-  const pages = data?.pages ?? [];
-  const seen = new Set<string>();
-  const out: SocialChatRoomSummary[] = [];
-  for (const p of pages) {
-    for (const r of p.rooms) {
-      if (seen.has(r.roomId)) continue;
-      seen.add(r.roomId);
-      out.push(r);
-    }
-  }
-  return out;
-}
+const attemptedEmptyRecoveryUserIds = new Set<string>();
 
-function buildPagesFromRooms(rooms: readonly SocialChatRoomSummary[], pageCount: number): Page[] {
-  const count = Math.max(1, pageCount);
-  return Array.from({ length: count }, (_, idx) => {
-    const from = idx * CHAT_ROOMS_LIST_PAGE_SIZE;
-    const slice = rooms.slice(from, from + CHAT_ROOMS_LIST_PAGE_SIZE);
-    return {
-      rooms: slice,
-      hasMore: rooms.length > from + slice.length,
-    };
-  }).filter((page, idx) => idx === 0 || page.rooms.length > 0);
+async function upsertSocialRoomsPageToLocal(
+  ownerUserId: string,
+  rooms: readonly ChatRoomListRow[],
+  remoteUpdatedAtMs: number = Date.now(),
+): Promise<void> {
+  const owner = ownerUserId.trim();
+  if (!owner || rooms.length === 0) return;
+  await Promise.all(
+    rooms.map((r) =>
+      upsertLocalChatRoomSummary({
+        roomType: 'social_dm',
+        roomId: r.roomId,
+        ownerUserId: owner,
+        peerUserId: r.peerAppUserId,
+        isGroup: false,
+        unreadLastAtMs: (r as LocalChatRoomSummary).unreadLastAtMs || (r as { changedAtMs?: number }).changedAtMs || remoteUpdatedAtMs,
+        remoteUpdatedAtMs: (r as LocalChatRoomSummary).remoteUpdatedAtMs || (r as { changedAtMs?: number }).changedAtMs || remoteUpdatedAtMs,
+      }),
+    ),
+  );
 }
 
 export function useChatRoomsInfiniteQuery(userId: string | null | undefined, enabled: boolean) {
-  const queryClient = useQueryClient();
   const uid = userId?.trim() ?? '';
-  const queryKey = useMemo(() => chatRoomsQueryKey(uid), [uid]);
   const didLogCacheRef = useRef(false);
+  const didAttemptEmptyRecoveryRef = useRef(false);
+  const [syncing, setSyncing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const localRooms = useLocalChatRoomSummaries({
+    roomType: 'social_dm',
+    ownerUserId: uid,
+    enabled: Boolean(uid) && enabled,
+  });
 
   useEffect(() => {
     didLogCacheRef.current = false;
+    didAttemptEmptyRecoveryRef.current = uid ? attemptedEmptyRecoveryUserIds.has(uid) : false;
+    setListError(null);
   }, [uid]);
 
-  const query = useInfiniteQuery({
-    queryKey,
-    enabled: Boolean(uid) && enabled,
-    initialPageParam: 0,
-    staleTime: 10 * 60 * 1000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    queryFn: async ({ pageParam }): Promise<Page> => {
-      // eslint-disable-next-line no-console
-      console.log('📡 채팅방 목록: 서버 동기화 중 (Page: ' + pageParam + ')');
-      return fetchChatRoomsListPageHybrid(uid, pageParam as number);
-    },
-    getNextPageParam: (lastPage, allPages) => (lastPage.hasMore ? allPages.length : undefined),
-  });
-
-  const rooms = useMemo(() => flattenPages(query.data as ChatRoomsInfiniteData | undefined), [query.data]);
+  const rooms = localRooms;
 
   const syncChangedRooms = useCallback(async () => {
     if (!enabled || !uid) return;
-    const summariesRes = await fetchChatRoomsChangeSummariesFromSupabase(uid);
-    if (!summariesRes.ok) {
-      await query.refetch();
-      return;
+    setSyncing(true);
+    setListError(null);
+    try {
+      const summariesRes = await fetchChatRoomsChangeSummariesFromSupabase(uid);
+      if (summariesRes.ok && summariesRes.summaries.length > 0) {
+        await upsertSocialRoomsPageToLocal(uid, summariesRes.summaries);
+        return;
+      }
+      const page = await fetchChatRoomsListPageHybrid(uid, 0);
+      if (page.rooms.length > 0) {
+        await upsertSocialRoomsPageToLocal(uid, page.rooms);
+        return;
+      }
+      if (!summariesRes.ok) {
+        setListError(summariesRes.message);
+      }
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
     }
-    const current = queryClient.getQueryData<ChatRoomsInfiniteData>(queryKey);
-    const cachedRooms = flattenPages(current);
-    if (summariesRes.summaries.length === 0) {
-      await query.refetch();
-      return;
-    }
-    if (!diffChatRoomSummaries(cachedRooms, summariesRes.summaries)) return;
-    queryClient.setQueryData<ChatRoomsInfiniteData>(queryKey, (prev) => {
-      const pageCount = prev?.pages.length ?? Math.max(1, Math.ceil(summariesRes.summaries.length / CHAT_ROOMS_LIST_PAGE_SIZE));
-      const pages = buildPagesFromRooms(summariesRes.summaries, pageCount);
-      return {
-        pages,
-        pageParams: pages.map((_, idx) => idx),
-      };
-    });
-  }, [enabled, query.refetch, queryClient, queryKey, uid]);
+  }, [enabled, uid]);
 
   useEffect(() => {
     if (!enabled || !uid) return;
-    if (rooms.length === 0 && !query.isSuccess) return;
+    if (rooms.length > 0) return;
+    if (syncing) return;
+    if (didAttemptEmptyRecoveryRef.current) return;
+
+    const timer = setTimeout(() => {
+      if (didAttemptEmptyRecoveryRef.current) return;
+      didAttemptEmptyRecoveryRef.current = true;
+      attemptedEmptyRecoveryUserIds.add(uid);
+      void syncChangedRooms();
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [enabled, rooms.length, syncing, syncChangedRooms, uid]);
+
+  useEffect(() => {
+    if (!enabled || !uid) return;
+    if (rooms.length === 0) return;
     if (didLogCacheRef.current) return;
     didLogCacheRef.current = true;
     // eslint-disable-next-line no-console
     console.log('📦 채팅방 목록: 로컬 캐시 로드 완료');
-  }, [enabled, uid, rooms.length, query.isSuccess]);
+  }, [enabled, uid, rooms.length]);
 
-  useEffect(() => {
-    if (!enabled || !uid) return;
-    return subscribeChatRoomsListInvalidate(
-      () => {
-        void syncChangedRooms();
-      },
-      () => {
-        /* Realtime 오류는 탭에서 별도 배너 없이 무시 가능 */
-      },
-    );
-  }, [enabled, uid, syncChangedRooms]);
-
-  const listError =
-    query.error instanceof Error ? query.error.message : query.error ? String(query.error) : null;
-
-  const fetchNextPageGuarded = useCallback(async () => {
-    if (!query.hasNextPage || query.isFetchingNextPage) return;
-    await query.fetchNextPage();
-  }, [query]);
+  const fetchNextPageGuarded = useCallback(async () => {}, []);
 
   return {
     rooms,
     listError,
-    refetch: query.refetch,
+    refetch: syncChangedRooms,
     syncChangedRooms,
     fetchNextPage: fetchNextPageGuarded,
-    hasNextPage: Boolean(query.hasNextPage),
-    isFetchingNextPage: query.isFetchingNextPage,
-    isInitialLoading: query.isPending && rooms.length === 0,
+    hasNextPage: false,
+    isFetchingNextPage: syncing,
+    isInitialLoading: false,
   };
 }

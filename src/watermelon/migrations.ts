@@ -1,4 +1,4 @@
-import { createTable, schemaMigrations } from '@nozbe/watermelondb/Schema/migrations';
+import { addColumns, createTable, schemaMigrations } from '@nozbe/watermelondb/Schema/migrations';
 
 /**
  * WatermelonDB는 스키마 version 증가 시 migrations가 필요합니다.
@@ -72,6 +72,77 @@ export const migrations = schemaMigrations({
             { name: 'emoji', type: 'string' },
             { name: 'sort_order', type: 'number', isIndexed: true },
             { name: 'major_code', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 4,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [
+            { name: 'last_synced_changed_at_ms', type: 'number', isOptional: true },
+            { name: 'backfill_cursor_created_at_ms', type: 'number', isOptional: true },
+            { name: 'last_pruned_at_ms', type: 'number', isOptional: true },
+            { name: 'local_message_count', type: 'number', isOptional: true },
+          ],
+        }),
+        addColumns({
+          table: 'chat_messages',
+          columns: [
+            { name: 'updated_at_ms', type: 'number', isOptional: true, isIndexed: true },
+            { name: 'deleted_at_ms', type: 'number', isOptional: true, isIndexed: true },
+            { name: 'image_album_batch_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'reply_to_json', type: 'string', isOptional: true },
+            { name: 'link_preview_json', type: 'string', isOptional: true },
+            { name: 'raw_payload_json', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 5,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [
+            { name: 'owner_user_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'is_group', type: 'boolean', isOptional: true },
+            { name: 'last_message_preview', type: 'string', isOptional: true },
+            { name: 'last_message_kind', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'last_sender_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'last_sender_name', type: 'string', isOptional: true },
+            { name: 'last_sender_avatar_url', type: 'string', isOptional: true },
+            { name: 'unread_count', type: 'number', isOptional: true },
+            { name: 'read_message_id', type: 'string', isOptional: true },
+            { name: 'read_at_ms', type: 'number', isOptional: true },
+            { name: 'remote_updated_at_ms', type: 'number', isOptional: true, isIndexed: true },
+            { name: 'room_search_text', type: 'string', isOptional: true, isIndexed: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 6,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [
+            { name: 'unread_last_at_ms', type: 'number', isOptional: true, isIndexed: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 7,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [
+            { name: 'message_read_message_id_by_json', type: 'string', isOptional: true },
+            { name: 'message_read_at_by_json', type: 'string', isOptional: true },
+            { name: 'message_read_state_last_at_ms', type: 'number', isOptional: true, isIndexed: true },
           ],
         }),
       ],

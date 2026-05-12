@@ -5,7 +5,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  * @see https://watermelondb.dev/docs/Schema
  */
 export const schema = appSchema({
-  version: 3,
+  version: 7,
   tables: [
     /**
      * 채팅방 메타(증분 동기화 커서/상태).
@@ -16,10 +16,30 @@ export const schema = appSchema({
       columns: [
         { name: 'room_id', type: 'string', isIndexed: true },
         { name: 'room_type', type: 'string', isIndexed: true }, // 'meeting' | 'social_dm'
+        { name: 'owner_user_id', type: 'string', isOptional: true, isIndexed: true },
         { name: 'peer_user_id', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'is_group', type: 'boolean', isOptional: true },
         { name: 'last_synced_at_ms', type: 'number', isOptional: true },
+        { name: 'last_synced_changed_at_ms', type: 'number', isOptional: true },
+        { name: 'backfill_cursor_created_at_ms', type: 'number', isOptional: true },
+        { name: 'last_pruned_at_ms', type: 'number', isOptional: true },
+        { name: 'local_message_count', type: 'number', isOptional: true },
         { name: 'last_message_at_ms', type: 'number', isOptional: true, isIndexed: true },
         { name: 'last_message_id', type: 'string', isOptional: true },
+        { name: 'last_message_preview', type: 'string', isOptional: true },
+        { name: 'last_message_kind', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'last_sender_id', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'last_sender_name', type: 'string', isOptional: true },
+        { name: 'last_sender_avatar_url', type: 'string', isOptional: true },
+        { name: 'unread_count', type: 'number', isOptional: true },
+        { name: 'unread_last_at_ms', type: 'number', isOptional: true, isIndexed: true },
+        { name: 'read_message_id', type: 'string', isOptional: true },
+        { name: 'read_at_ms', type: 'number', isOptional: true },
+        { name: 'message_read_message_id_by_json', type: 'string', isOptional: true },
+        { name: 'message_read_at_by_json', type: 'string', isOptional: true },
+        { name: 'message_read_state_last_at_ms', type: 'number', isOptional: true, isIndexed: true },
+        { name: 'remote_updated_at_ms', type: 'number', isOptional: true, isIndexed: true },
+        { name: 'room_search_text', type: 'string', isOptional: true, isIndexed: true },
       ],
     }),
 
@@ -35,13 +55,19 @@ export const schema = appSchema({
         { name: 'room_type', type: 'string', isIndexed: true },
         { name: 'message_id', type: 'string', isIndexed: true },
         { name: 'created_at_ms', type: 'number', isIndexed: true },
+        { name: 'updated_at_ms', type: 'number', isOptional: true, isIndexed: true },
+        { name: 'deleted_at_ms', type: 'number', isOptional: true, isIndexed: true },
         { name: 'sender_id', type: 'string', isOptional: true, isIndexed: true },
         { name: 'sender_name', type: 'string', isOptional: true },
         { name: 'sender_avatar_url', type: 'string', isOptional: true },
         { name: 'kind', type: 'string', isOptional: true, isIndexed: true }, // text | image | system
         { name: 'text', type: 'string', isOptional: true },
         { name: 'image_url', type: 'string', isOptional: true },
+        { name: 'image_album_batch_id', type: 'string', isOptional: true, isIndexed: true },
         { name: 'reply_to_message_id', type: 'string', isOptional: true },
+        { name: 'reply_to_json', type: 'string', isOptional: true },
+        { name: 'link_preview_json', type: 'string', isOptional: true },
+        { name: 'raw_payload_json', type: 'string', isOptional: true },
         { name: 'search_text', type: 'string', isOptional: true, isIndexed: true },
         { name: 'is_deleted', type: 'boolean', isOptional: true },
       ],

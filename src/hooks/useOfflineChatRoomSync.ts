@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 
 import type { OfflineChatRoomKey } from '@/src/lib/offline-chat/offline-chat-types';
 import { normalizeRoomKey, roomKeyToString } from '@/src/lib/offline-chat/offline-chat-types';
-import { incrementalSyncRoomMessagesToLocal } from '@/src/lib/offline-chat/offline-chat-sync';
+import { backfillOlderRoomMessagesToLocal, incrementalSyncRoomMessagesToLocal } from '@/src/lib/offline-chat/offline-chat-sync';
+import { pruneLocalChatRoomMessages } from '@/src/lib/offline-chat/offline-chat-pruning';
 
 /**
  * 채팅방 진입 시 로컬 DB를 최신으로 맞추는 "가벼운" 증분 동기화 훅.
@@ -28,7 +29,13 @@ export function useOfflineChatRoomSync(key: OfflineChatRoomKey | null | undefine
       initialSinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
       pageSize: 200,
       maxDocs: 1200,
-    }).finally(() => {
+      latestBlockSize: 80,
+      maxPagesPerRun: 2,
+      timeBudgetMs: 1800,
+    })
+      .then(() => backfillOlderRoomMessagesToLocal({ key: k, pageSize: 100, maxPages: 1, timeBudgetMs: 900 }))
+      .then(() => pruneLocalChatRoomMessages({ key: k }))
+      .finally(() => {
       inflightRef.current = null;
     });
   }, [enabled, key]);

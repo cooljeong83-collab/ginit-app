@@ -23,6 +23,7 @@ import {
   addDoc,
   collection,
   documentId,
+  FieldPath,
   getDoc,
   getDocs,
   limit,
@@ -89,11 +90,31 @@ export type MeetingChatMessage = {
     text: string;
   } | null;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
+  deletedAt?: Timestamp | null;
 };
 
 function shallowUnknownRecord(v: unknown): Record<string, unknown> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
   return { ...(v as Record<string, unknown>) };
+}
+
+function meetingReadReceiptUserKeys(userId: string): string[] {
+  const raw = String(userId ?? '').trim();
+  if (!raw) return [];
+  const phone = (normalizePhoneUserId(raw) ?? '').trim();
+  const pk = (normalizeParticipantId(raw) ?? '').trim();
+  const out: string[] = [];
+  const push = (v: string) => {
+    const s = v.trim();
+    if (!s || out.includes(s)) return;
+    out.push(s);
+  };
+  push(phone || pk || raw);
+  if (phone) push(phone);
+  if (pk) push(pk);
+  push(raw);
+  return out;
 }
 
 /**
@@ -124,10 +145,12 @@ export async function writeMeetingChatReadReceipt(meetingId: string, userId: str
   }
 
   const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  await updateDoc(ref, {
-    [`chatReadAtBy.${uid}`]: serverTimestamp(),
-    [`chatReadMessageIdBy.${uid}`]: lid,
-  });
+  const pairs: unknown[] = [];
+  for (const key of meetingReadReceiptUserKeys(uid)) {
+    pairs.push(new FieldPath('chatReadAtBy', key), serverTimestamp());
+    pairs.push(new FieldPath('chatReadMessageIdBy', key), lid);
+  }
+  if (pairs.length > 0) await updateDoc(ref, ...(pairs as [any, any, ...any[]]));
 }
 
 /** 실시간 tail + 과거 페이지 `getDocs`에서 공통으로 사용하는 페이지 크기 */
@@ -145,6 +168,8 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
   const imageUrl =
     typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
+  const updatedAt = (data.updatedAt as Timestamp | undefined) ?? createdAt;
+  const deletedAt = (data.deletedAt as Timestamp | undefined) ?? null;
   const albumRaw = data.imageAlbumBatchId;
   const imageAlbumBatchId =
     typeof albumRaw === 'string' && albumRaw.trim() ? albumRaw.trim() : null;
@@ -190,6 +215,8 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
     linkPreview,
     replyTo: replyTo?.messageId ? replyTo : null,
     createdAt,
+    updatedAt,
+    deletedAt,
   };
 }
 
@@ -296,6 +323,7 @@ export async function deleteMeetingChatImageMessageBestEffort(
     text: '사진이 삭제되었습니다.',
     imageUrl: null,
     deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   } as Record<string, unknown>);
 
   const objectPath = supabasePublicObjectPathFromUrl(url, SUPABASE_STORAGE_BUCKET_MEETING_CHAT);
@@ -326,6 +354,7 @@ export async function deleteMeetingChatTextMessageBestEffort(meetingId: string, 
     imageUrl: null,
     linkPreview: null,
     deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   } as Record<string, unknown>);
 }
 
@@ -880,12 +909,13 @@ export async function sendMeetingChatTextMessage(
   const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
   const msgRef = doc(ref);
   const batch = writeBatch(getFirestoreDb());
+  const now = Timestamp.now();
   batch.set(
     msgRef,
     stripUndefinedDeep({
       senderId,
       senderName: senderProfile?.nickname ?? null,
-      senderAvatarUrl: senderProfile?.profile_photo_url ?? null,
+      senderAvatarUrl: senderProfile?.photoUrl ?? null,
       text,
       linkPreview,
       replyTo:
@@ -904,7 +934,8 @@ export async function sendMeetingChatTextMessage(
        * 문서가 제외되는 케이스가 있어(전송해도 리스트에 안 뜨는 현상), 우선 클라이언트 타임으로 저장합니다.
        * 채팅 UI는 "즉시 보임"이 더 중요하고, 정렬이 필요한 경우에도 큰 문제 없이 동작합니다.
        */
-      createdAt: Timestamp.now(),
+      createdAt: now,
+      updatedAt: now,
     }) as Record<string, unknown>,
   );
   await batch.commit();
@@ -995,6 +1026,7 @@ export async function sendMeetingChatImageMessage(
   const msgRef = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
   const docRef = doc(msgRef);
   const batch = writeBatch(getFirestoreDb());
+  const now = Timestamp.now();
   batch.set(
     docRef,
     stripUndefinedDeep({
@@ -1003,7 +1035,8 @@ export async function sendMeetingChatImageMessage(
       kind: 'image' as const,
       imageUrl,
       imageAlbumBatchId: albumId || undefined,
-      createdAt: Timestamp.now(),
+      createdAt: now,
+      updatedAt: now,
     }) as Record<string, unknown>,
   );
   await batch.commit();

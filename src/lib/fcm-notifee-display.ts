@@ -118,7 +118,7 @@ async function displayChatPushNotificationAndroid(
     channelId,
     importance: AndroidImportance.HIGH,
     smallIcon: 'notification_icon',
-    ...(socialLargeIcon ? { largeIcon: socialLargeIcon } : {}),
+    ...(socialLargeIcon ? { largeIcon: socialLargeIcon, circularLargeIcon: true } : {}),
     pressAction: { id: 'default' },
     groupId: state.groupId,
     showTimestamp: true,

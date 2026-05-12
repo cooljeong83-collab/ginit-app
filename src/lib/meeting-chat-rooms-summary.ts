@@ -23,6 +23,7 @@ export type MeetingChatRoomSummaryDoc = {
   lastMessageAt?: unknown | null;
   lastMessagePreview?: string | null;
   lastSenderId?: string | null;
+  updatedAt?: unknown | null;
 };
 
 export function subscribeMeetingChatRoomSummary(
@@ -57,6 +58,7 @@ export function subscribeMeetingChatRoomSummary(
         lastMessageAt: (data.lastMessageAt as unknown) ?? null,
         lastMessagePreview: typeof data.lastMessagePreview === 'string' ? data.lastMessagePreview : data.lastMessagePreview == null ? null : String(data.lastMessagePreview ?? ''),
         lastSenderId: typeof data.lastSenderId === 'string' ? data.lastSenderId : data.lastSenderId == null ? null : String(data.lastSenderId ?? ''),
+        updatedAt: (data.updatedAt as unknown) ?? null,
       });
     },
     (err) => {
@@ -140,7 +142,7 @@ export async function bumpMeetingChatRoomSummaryOnSend(args: {
   pairs.push('lastSenderId', senderKey);
   pairs.push('updatedAt', serverTimestamp());
 
-  await updateDoc(ref, ...(pairs as any));
+  await updateDoc(ref, ...(pairs as [any, any, ...any[]]));
 }
 
 export async function clearMeetingChatUnreadForUser(meetingId: string, userId: string): Promise<void> {
@@ -154,11 +156,11 @@ export async function clearMeetingChatUnreadForUser(meetingId: string, userId: s
   }
   pairs.push('updatedAt', serverTimestamp());
   try {
-    await updateDoc(ref, ...(pairs as any));
+    await updateDoc(ref, ...(pairs as [any, any, ...any[]]));
   } catch {
     // 요약 문서가 아직 없을 수 있어 merge 생성 후 재시도
     await setDoc(ref, { meetingId: mid, updatedAt: serverTimestamp() } as Record<string, unknown>, { merge: true });
-    await updateDoc(ref, ...(pairs as any));
+    await updateDoc(ref, ...(pairs as [any, any, ...any[]]));
   }
 }
 

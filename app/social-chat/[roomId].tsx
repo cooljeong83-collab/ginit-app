@@ -19,6 +19,7 @@ import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfile
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
 import { useSocialChatMessagesInfiniteQuery } from '@/src/hooks/use-social-chat-messages-infinite-query';
 import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -44,6 +45,12 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
 import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
+import {
+  clearLocalChatRoomUnread,
+  firestoreTimeToMs,
+  markLocalChatRoomReadState,
+  upsertLocalChatRoomReadState,
+} from '@/src/lib/offline-chat/offline-chat-rooms';
 
 export default function SocialChatRoomScreen() {
   const router = useTransitionRouter();
@@ -65,18 +72,28 @@ export default function SocialChatRoomScreen() {
     if (!me || !roomId) return '';
     return parsePeerFromSocialRoomId(roomId, me) ?? '';
   }, [roomId, userId]);
+  const canRenderChatShell = Boolean(roomId && userId?.trim() && peerId);
 
   const [chatError, setChatError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const [roomDoc, setRoomDoc] = useState<SocialChatRoomDoc | null>(null);
+  const [roomDoc, setRoomDoc] = useState<SocialChatRoomDoc | null | undefined>(undefined);
   const dmBodyRef = useRef<SocialDmChatRoomBodyHandle | null>(null);
   const lastMarkedReadMessageIdRef = useRef<string>('');
   const [searchNavigateLoading, setSearchNavigateLoading] = useState(false);
 
-  const { messages, listError, fetchNextPage, hasNextPage, isFetchingNextPage, isInitialLoading, refetch } =
+  const { messages, listError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } =
     useSocialChatMessagesInfiniteQuery({ roomId, enabled: ready });
 
   useOfflineChatRoomSync({ roomType: 'social_dm', roomId }, ready);
+  const localSocialRoomSummaries = useLocalChatRoomSummaries({
+    roomType: 'social_dm',
+    ownerUserId: userId,
+    enabled: ready,
+  });
+  const localSocialRoom = useMemo(
+    () => localSocialRoomSummaries.find((row) => row.roomId === roomId) ?? null,
+    [localSocialRoomSummaries, roomId],
+  );
 
   const mergedChatError = chatError ?? listError;
 
@@ -116,9 +133,43 @@ export default function SocialChatRoomScreen() {
     [],
   );
 
+  const localPeerReadMessageId = useMemo(() => {
+    const v = pickPeerReadValue<unknown>(localSocialRoom?.messageReadMessageIdBy, peerId);
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }, [localSocialRoom?.messageReadMessageIdBy, peerId, pickPeerReadValue]);
+
+  const localPeerReadAt = useMemo(
+    () => pickPeerReadValue<number>(localSocialRoom?.messageReadAtMsBy, peerId),
+    [localSocialRoom?.messageReadAtMsBy, peerId, pickPeerReadValue],
+  );
+
+  const serverPeerReadMessageId = useMemo(() => {
+    const v = pickPeerReadValue<unknown>(
+      roomDoc?.readMessageIdBy as unknown as Record<string, unknown> | undefined,
+      peerId,
+    );
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }, [peerId, pickPeerReadValue, roomDoc?.readMessageIdBy]);
+
+  const serverPeerReadAt = useMemo(() => pickPeerReadValue<unknown>(roomDoc?.readAtBy, peerId), [
+    peerId,
+    pickPeerReadValue,
+    roomDoc?.readAtBy,
+  ]);
+
+  const effectivePeerReadState = useMemo(() => {
+    const localAtMs = typeof localPeerReadAt === 'number' && Number.isFinite(localPeerReadAt) ? localPeerReadAt : 0;
+    const serverAtMs = firestoreTimeToMs(serverPeerReadAt);
+    if (serverPeerReadMessageId && (!localPeerReadMessageId || serverAtMs >= localAtMs)) {
+      return { readMessageId: serverPeerReadMessageId, readAt: serverPeerReadAt ?? serverAtMs };
+    }
+    return { readMessageId: localPeerReadMessageId ?? serverPeerReadMessageId, readAt: localPeerReadAt ?? serverPeerReadAt };
+  }, [localPeerReadAt, localPeerReadMessageId, serverPeerReadAt, serverPeerReadMessageId]);
+
   useEffect(() => {
     if (!roomId || !userId?.trim() || !peerId) {
       setReady(false);
+      setRoomDoc(undefined);
       return;
     }
     let cancelled = false;
@@ -157,14 +208,32 @@ export default function SocialChatRoomScreen() {
     const lid = last?.id?.trim() ?? '';
     if (!lid || lastMarkedReadMessageIdRef.current === lid) return;
     lastMarkedReadMessageIdRef.current = lid;
+    const readAtMs = Date.now();
     markChatReadUpTo(roomId, lid);
+    void clearLocalChatRoomUnread({
+      roomType: 'social_dm',
+      roomId,
+      ownerUserId: userId?.trim() ?? null,
+      readMessageId: lid,
+      readAtMs,
+    });
+    void markLocalChatRoomReadState({
+      roomType: 'social_dm',
+      roomId,
+      ownerUserId: userId?.trim() ?? null,
+      peerUserId: peerId,
+      userId: userId?.trim() ?? '',
+      readMessageId: lid,
+      readAtMs,
+    });
     void updateSocialChatReadReceipt(roomId, userId?.trim() ?? '', lid).catch(() => {});
-  }, [roomId, messages, markChatReadUpTo, isFocused, userId]);
+  }, [roomId, messages, markChatReadUpTo, isFocused, userId, peerId]);
 
   // messages는 `useSocialChatMessagesInfiniteQuery`가 tail(20개) 구독 + 과거 페이징으로 유지합니다.
 
   useEffect(() => {
     if (!ready || !roomId) return () => {};
+    setRoomDoc(undefined);
     const unsub = subscribeSocialChatRoom(
       roomId,
       (d) => setRoomDoc(d),
@@ -172,6 +241,24 @@ export default function SocialChatRoomScreen() {
     );
     return unsub;
   }, [ready, roomId]);
+
+  useEffect(() => {
+    if (!ready || !roomId || !roomDoc) return;
+    const readAtBy = roomDoc.readAtBy ?? null;
+    const readStateLastAtMs = Math.max(
+      firestoreTimeToMs(roomDoc.updatedAt),
+      ...Object.values(readAtBy ?? {}).map((v) => firestoreTimeToMs(v)),
+    );
+    void upsertLocalChatRoomReadState({
+      roomType: 'social_dm',
+      roomId,
+      ownerUserId: userId?.trim() ?? null,
+      peerUserId: peerId,
+      readMessageIdBy: roomDoc.readMessageIdBy as Record<string, unknown> | null,
+      readAtBy: readAtBy as Record<string, unknown> | null,
+      readStateLastAtMs: readStateLastAtMs || undefined,
+    });
+  }, [ready, roomId, roomDoc, userId, peerId]);
 
   const closeSearch = useCallback(() => {
     setSearchMode(false);
@@ -431,7 +518,7 @@ export default function SocialChatRoomScreen() {
         </View>
       </SafeAreaView>
 
-      {!ready ? (
+      {!canRenderChatShell ? (
         <View style={s.loading}>
           <ActivityIndicator color={GinitTheme.colors.primary} />
         </View>
@@ -444,7 +531,7 @@ export default function SocialChatRoomScreen() {
             myUserId={userId.trim()}
             messages={messages}
             chatError={mergedChatError}
-            searchNavigateLoading={isInitialLoading || searchNavigateLoading}
+            searchNavigateLoading={searchNavigateLoading}
             hasNextPage={hasNextPage}
             isFetchingNextPage={isFetchingNextPage}
             onPrefetchOlderMessages={() => void fetchNextPage()}
@@ -459,14 +546,9 @@ export default function SocialChatRoomScreen() {
             searchSession={searchSession}
             onSearchPrev={goOlderMatchOrScan}
             onSearchNext={goNewerMatch}
-            peerReadMessageId={(() => {
-              const v = pickPeerReadValue<unknown>(
-                roomDoc?.readMessageIdBy as unknown as Record<string, unknown> | undefined,
-                peerId,
-              );
-              return typeof v === 'string' && v.trim() ? v.trim() : null;
-            })()}
-            peerReadAt={pickPeerReadValue<unknown>(roomDoc?.readAtBy, peerId)}
+            peerReadMessageId={effectivePeerReadState.readMessageId}
+            peerReadAt={effectivePeerReadState.readAt}
+            peerReadStateReady={(localSocialRoom?.messageReadStateLastAtMs ?? 0) > 0 || roomDoc !== undefined}
             onPeerProfileOpen={(id) => {
               const t = id.trim();
               if (!t) return;

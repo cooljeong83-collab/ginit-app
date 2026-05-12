@@ -17,6 +17,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
+import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
@@ -56,6 +57,15 @@ import {
   setPendingDirectSharePayload,
 } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import {
+  firestoreTimeToMs,
+  localSocialRoomDocFromSummary,
+  meetingMessageFromLocalRoom,
+  socialMessageFromLocalRoom,
+  upsertLocalChatRoomReadState,
+  upsertLocalChatRoomSummary,
+  type LocalChatRoomSummary,
+} from '@/src/lib/offline-chat/offline-chat-rooms';
 
 /** 친구 채팅 행 좌측 액센트 — 홈 카드 톤과 어울리는 블루·민트 그라데이션 */
 const SOCIAL_CHAT_LIST_ACCENT = ['rgba(0, 82, 204, 0.28)', 'rgba(134, 211, 183, 0.18)'] as const;
@@ -335,6 +345,18 @@ export default function ChatTab() {
     () => filterJoinedMeetings(mergedMeetingsForChat, userId),
     [mergedMeetingsForChat, userId],
   );
+  const localMeetingRoomSummaries = useLocalChatRoomSummaries({
+    roomType: 'meeting',
+    ownerUserId: userId,
+    enabled: signedIn,
+  });
+  const localMeetingRoomById = useMemo(() => {
+    const map = new Map<string, LocalChatRoomSummary>();
+    for (const row of localMeetingRoomSummaries) {
+      if (row.roomId.trim()) map.set(row.roomId, row);
+    }
+    return map;
+  }, [localMeetingRoomSummaries]);
 
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [chatSearchModalOpen, setChatSearchModalOpen] = useState(false);
@@ -371,11 +393,20 @@ export default function ChatTab() {
   }, [joinedMeetings, appliedGatherTextQuery, gatherMessageMatchIds]);
 
   /** 최근 메시지 시각 기준(없으면 모임 생성일) — 최신 대화가 위로 */
+  const effectiveLatestByMeetingId = useMemo(() => {
+    const out: Record<string, MeetingChatMessage | null | undefined> = {};
+    for (const row of localMeetingRoomSummaries) {
+      const m = meetingMessageFromLocalRoom(row);
+      if (m) out[row.roomId] = m;
+    }
+    return { ...out, ...latestByMeetingId };
+  }, [latestByMeetingId, localMeetingRoomSummaries]);
+
   const displayedGatherMeetings = useMemo(() => {
     const list = [...gatherMeetingsFiltered];
     list.sort((a, b) => {
-      const tb = latestMeetingChatMessageMs(latestByMeetingId[b.id]);
-      const ta = latestMeetingChatMessageMs(latestByMeetingId[a.id]);
+      const tb = latestMeetingChatMessageMs(effectiveLatestByMeetingId[b.id]);
+      const ta = latestMeetingChatMessageMs(effectiveLatestByMeetingId[a.id]);
       if (tb !== ta) return tb - ta;
       const cb = meetingCreatedAtMs(b);
       const ca = meetingCreatedAtMs(a);
@@ -383,14 +414,12 @@ export default function ChatTab() {
       return a.title.localeCompare(b.title, 'ko');
     });
     return list;
-  }, [gatherMeetingsFiltered, latestByMeetingId]);
+  }, [gatherMeetingsFiltered, effectiveLatestByMeetingId]);
 
   const {
     rooms: socialRooms,
     listError: socialListError,
     syncChangedRooms: syncChangedSocialRooms,
-    fetchNextPage: fetchNextSocialRoomsPage,
-    hasNextPage: hasMoreSocialRooms,
     isFetchingNextPage: isFetchingMoreSocialRooms,
     isInitialLoading: socialRoomsInitialLoading,
   } = useChatRoomsInfiniteQuery(userId, signedIn);
@@ -398,10 +427,10 @@ export default function ChatTab() {
   const handleEndReachedForKind = useCallback(
     (kind: ChatKind) => {
       if (chatKind !== kind) return;
-      if (kind === 'social' && hasMoreSocialRooms) void fetchNextSocialRoomsPage();
-      else if (kind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
+      if (kind === 'social') return;
+      if (kind === 'gather' && hasMoreMeetingsFeed) void fetchNextMeetingsFeedPageGuarded();
     },
-    [chatKind, hasMoreSocialRooms, hasMoreMeetingsFeed, fetchNextSocialRoomsPage, fetchNextMeetingsFeedPageGuarded],
+    [chatKind, hasMoreMeetingsFeed, fetchNextMeetingsFeedPageGuarded],
   );
 
   /** 친구 탭: `social_` 1:1 DM만 표시(그룹·기타 룸 제외) */
@@ -409,6 +438,37 @@ export default function ChatTab() {
     () => socialRooms.filter((r) => r.roomId.trim().startsWith('social_')),
     [socialRooms],
   );
+  const localSocialRoomById = useMemo(() => {
+    const map = new Map<string, LocalChatRoomSummary>();
+    for (const row of socialRooms) {
+      const local = row as Partial<LocalChatRoomSummary>;
+      if (typeof local.lastMessageAtMs === 'number' || typeof local.unreadCount === 'number') {
+        map.set(row.roomId, row as LocalChatRoomSummary);
+      }
+    }
+    return map;
+  }, [socialRooms]);
+  const effectiveLatestBySocialRoomId = useMemo(() => {
+    const out: Record<string, SocialChatMessage | null | undefined> = {};
+    for (const row of localSocialRoomById.values()) {
+      const m = socialMessageFromLocalRoom(row);
+      if (m) out[row.roomId] = m;
+    }
+    return { ...out, ...latestBySocialRoomId };
+  }, [latestBySocialRoomId, localSocialRoomById]);
+  const effectiveSocialRoomDocById = useMemo(() => {
+    const out: Record<string, SocialChatRoomDoc | null | undefined> = {};
+    for (const [roomId, doc] of Object.entries(socialRoomDocById)) {
+      out[roomId] = doc;
+    }
+    for (const row of localSocialRoomById.values()) {
+      out[row.roomId] = {
+        ...(out[row.roomId] ?? {}),
+        ...localSocialRoomDocFromSummary(row),
+      };
+    }
+    return out;
+  }, [localSocialRoomById, socialRoomDocById]);
 
   const joinedMeetingRowKey = useMemo(() => joinedMeetings.map((m) => m.id).join('\u0001'), [joinedMeetings]);
 
@@ -448,8 +508,8 @@ export default function ChatTab() {
     }
     const list = [...rows];
     list.sort((a, b) => {
-      const tb = latestSocialChatMessageMs(latestBySocialRoomId[b.roomId]);
-      const ta = latestSocialChatMessageMs(latestBySocialRoomId[a.roomId]);
+      const tb = latestSocialChatMessageMs(effectiveLatestBySocialRoomId[b.roomId]);
+      const ta = latestSocialChatMessageMs(effectiveLatestBySocialRoomId[a.roomId]);
       if (tb !== ta) return tb - ta;
       const nb = (socialProfiles.get(b.peerAppUserId)?.nickname ?? b.peerAppUserId ?? '').trim();
       const na = (socialProfiles.get(a.peerAppUserId)?.nickname ?? a.peerAppUserId ?? '').trim();
@@ -457,7 +517,7 @@ export default function ChatTab() {
       return a.roomId.localeCompare(b.roomId);
     });
     return list;
-  }, [socialFriendDmRooms, appliedSocialTextQuery, socialProfiles, socialMessageMatchRoomIds, latestBySocialRoomId]);
+  }, [socialFriendDmRooms, appliedSocialTextQuery, socialProfiles, socialMessageMatchRoomIds, effectiveLatestBySocialRoomId]);
 
   const chatSearchFiltersDot = useMemo(
     () =>
@@ -583,6 +643,20 @@ export default function ChatTab() {
         m.id,
         (msg) => {
           setLatestByMeetingId((p) => ({ ...p, [m.id]: msg }));
+          if (msg) {
+            void upsertLocalChatRoomSummary({
+              roomType: 'meeting',
+              roomId: m.id,
+              ownerUserId: userId?.trim() ?? null,
+              isGroup: true,
+              lastMessageId: msg.id,
+              lastMessageAtMs: latestMeetingChatMessageMs(msg),
+              lastMessagePreview: msg.text?.trim() || (msg.kind === 'image' ? '사진' : '알림'),
+              lastMessageKind: msg.kind,
+              lastSenderId: msg.senderId,
+              remoteUpdatedAtMs: latestMeetingChatMessageMs(msg),
+            });
+          }
         },
         () => {
           setLatestByMeetingId((p) => ({ ...p, [m.id]: null }));
@@ -592,7 +666,7 @@ export default function ChatTab() {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [joinedMeetingRowKey, signedIn]);
+  }, [joinedMeetingRowKey, signedIn, userId]);
 
   useEffect(() => {
     if (!signedIn || joinedMeetings.length === 0) {
@@ -602,12 +676,34 @@ export default function ChatTab() {
     const unsubs = joinedMeetings.map((m) =>
       subscribeMeetingChatRoomSummary(
         m.id,
-        (doc) => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: doc })),
+        (doc) => {
+          setMeetingChatSummaryById((p) => ({ ...p, [m.id]: doc }));
+          if (doc) {
+            const raw = userId?.trim() ?? '';
+            const pk = raw ? normalizeParticipantId(raw) : '';
+            const unread = coalesceUnreadCountByKeys(doc.unreadCountBy, [pk, raw]);
+            const summaryAtMs = firestoreTimeToMs(doc.updatedAt) || firestoreTimeToMs(doc.lastMessageAt);
+            void upsertLocalChatRoomSummary({
+              roomType: 'meeting',
+              roomId: m.id,
+              ownerUserId: raw || null,
+              isGroup: true,
+              lastMessageId: doc.lastMessageId ?? undefined,
+              lastMessageAtMs: firestoreTimeToMs(doc.lastMessageAt) || undefined,
+              lastMessagePreview: doc.lastMessagePreview ?? undefined,
+              lastMessageKind: doc.lastMessagePreview ? 'text' : undefined,
+              lastSenderId: doc.lastSenderId ?? undefined,
+              unreadCount: unread,
+              unreadLastAtMs: summaryAtMs || undefined,
+              remoteUpdatedAtMs: summaryAtMs || undefined,
+            });
+          }
+        },
         () => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: null })),
       ),
     );
     return () => unsubs.forEach((u) => u());
-  }, [joinedMeetingRowKey, signedIn, joinedMeetings]);
+  }, [joinedMeetingRowKey, signedIn, joinedMeetings, userId]);
 
   useEffect(() => {
     if (!signedIn || socialFriendDmRooms.length === 0) {
@@ -617,12 +713,29 @@ export default function ChatTab() {
     const unsubs = socialFriendDmRooms.map((r) =>
       subscribeSocialChatLatestMessage(
         r.roomId,
-        (msg) => setLatestBySocialRoomId((p) => ({ ...p, [r.roomId]: msg })),
+        (msg) => {
+          setLatestBySocialRoomId((p) => ({ ...p, [r.roomId]: msg }));
+          if (msg) {
+            void upsertLocalChatRoomSummary({
+              roomType: 'social_dm',
+              roomId: r.roomId,
+              ownerUserId: userId?.trim() ?? null,
+              peerUserId: r.peerAppUserId,
+              isGroup: false,
+              lastMessageId: msg.id,
+              lastMessageAtMs: latestSocialChatMessageMs(msg),
+              lastMessagePreview: socialDmPreviewLine(msg),
+              lastMessageKind: msg.kind ?? 'text',
+              lastSenderId: msg.senderId,
+              remoteUpdatedAtMs: latestSocialChatMessageMs(msg),
+            });
+          }
+        },
         () => setLatestBySocialRoomId((p) => ({ ...p, [r.roomId]: null })),
       ),
     );
     return () => unsubs.forEach((u) => u());
-  }, [signedIn, socialRoomKey]);
+  }, [signedIn, socialRoomKey, userId]);
 
   useEffect(() => {
     if (!signedIn || socialFriendDmRooms.length === 0) {
@@ -632,14 +745,50 @@ export default function ChatTab() {
     const unsubs = socialFriendDmRooms.map((r) =>
       subscribeSocialChatRoom(
         r.roomId,
-        (doc) => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: doc })),
+        (doc) => {
+          setSocialRoomDocById((p) => ({ ...p, [r.roomId]: doc }));
+          if (doc) {
+            const raw = userId?.trim() ?? '';
+            const mePhone = normalizePhoneUserId(raw) ?? raw;
+            const mePk = raw ? normalizeParticipantId(raw) : '';
+            const unread = coalesceUnreadCountByKeys(doc.unreadCountBy, [raw, mePhone, mePk]);
+            const readId = doc.readMessageIdBy?.[raw] ?? doc.readMessageIdBy?.[mePhone] ?? (mePk ? doc.readMessageIdBy?.[mePk] : undefined);
+            const readAt = doc.readAtBy?.[raw] ?? doc.readAtBy?.[mePhone] ?? (mePk ? doc.readAtBy?.[mePk] : undefined);
+            const summaryAtMs = firestoreTimeToMs(doc.updatedAt) || firestoreTimeToMs(readAt);
+            const readStateLastAtMs = Math.max(
+              firestoreTimeToMs(doc.updatedAt),
+              ...Object.values(doc.readAtBy ?? {}).map((v) => firestoreTimeToMs(v)),
+            );
+            void upsertLocalChatRoomSummary({
+              roomType: 'social_dm',
+              roomId: r.roomId,
+              ownerUserId: raw || null,
+              peerUserId: r.peerAppUserId,
+              isGroup: doc.isGroup ?? false,
+              unreadCount: unread,
+              readMessageId: typeof readId === 'string' ? readId : null,
+              readAtMs: firestoreTimeToMs(readAt) || undefined,
+              unreadLastAtMs: summaryAtMs || undefined,
+              remoteUpdatedAtMs: summaryAtMs || undefined,
+            });
+            void upsertLocalChatRoomReadState({
+              roomType: 'social_dm',
+              roomId: r.roomId,
+              ownerUserId: raw || null,
+              peerUserId: r.peerAppUserId,
+              readMessageIdBy: doc.readMessageIdBy as Record<string, unknown> | null,
+              readAtBy: doc.readAtBy as Record<string, unknown> | null,
+              readStateLastAtMs: readStateLastAtMs || undefined,
+            });
+          }
+        },
         () => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: null })),
       ),
     );
     return () => unsubs.forEach((u) => u());
-  }, [signedIn, socialRoomKey]);
+  }, [signedIn, socialRoomKey, userId]);
 
-  // NOTE: unread는 요약 문서(unreadCountBy) 기반으로만 표시합니다.
+  // NOTE: 목록 unread는 하단 탭과 동일하게 summary 문서(unreadCountBy) 기준으로 표시합니다.
 
   useEffect(() => {
     const hosts = [
@@ -678,8 +827,8 @@ export default function ChatTab() {
   useSyncOnScreenFocus(
     useCallback(async () => {
       if (!signedIn) return;
-      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings(), syncChangedSocialRooms()]);
-    }, [signedIn, syncChangedMeetingsFeed, syncChangedMyMeetings, syncChangedSocialRooms]),
+      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+    }, [signedIn, syncChangedMeetingsFeed, syncChangedMyMeetings]),
     [signedIn],
     { enabled: signedIn },
   );
@@ -980,7 +1129,7 @@ export default function ChatTab() {
                       appliedGatherTextQuery,
                       gatherSearchBusy,
                       gatherMsgHits: gatherMessageMatchIds.size,
-                      latestByMeetingId,
+                      latestByMeetingId: effectiveLatestByMeetingId,
                       hostProfiles,
                       meetingChatSummaryById,
                       meetingCategories,
@@ -1016,7 +1165,7 @@ export default function ChatTab() {
                           hostPhotoUrl={host?.photoUrl ?? null}
                           hostNickname={host?.nickname ?? '주관자'}
                           hostWithdrawn={isUserProfileWithdrawn(host)}
-                          latestMessage={latestByMeetingId[m.id]}
+                          latestMessage={effectiveLatestByMeetingId[m.id]}
                           unreadCount={unread}
                           categories={meetingCategories}
                           onPress={() => {
@@ -1063,6 +1212,8 @@ export default function ChatTab() {
                       socialSearchBusy,
                       socialMsgHits: socialMessageMatchRoomIds.size,
                       socialProfiles,
+                      latestBySocialRoomId: effectiveLatestBySocialRoomId,
+                      socialRoomDocById,
                     }}
                     keyExtractor={(row) => row.roomId}
                     style={styles.listFlex}
@@ -1089,7 +1240,7 @@ export default function ChatTab() {
                     const uri = prof?.photoUrl?.trim();
                     const nick = prof?.nickname ?? '친구';
                     const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
-                    const latest = latestBySocialRoomId[row.roomId];
+                    const latest = effectiveLatestBySocialRoomId[row.roomId];
                     const hasMessage = latest != null;
                     const loadingPreview = latest === undefined;
                     const preview = hasMessage ? socialDmPreviewLine(latest) : '대화를 시작해 보세요.';
@@ -1097,7 +1248,11 @@ export default function ChatTab() {
                     const raw = userId?.trim() ?? '';
                     const mePhone = normalizePhoneUserId(raw) ?? raw;
                     const mePk = raw ? normalizeParticipantId(raw) : '';
-                    const unread = coalesceUnreadCountByKeys(socialRoomDocById[row.roomId]?.unreadCountBy, [raw, mePhone, mePk]);
+                    const unread = coalesceUnreadCountByKeys(socialRoomDocById[row.roomId]?.unreadCountBy, [
+                      raw,
+                      mePhone,
+                      mePk,
+                    ]);
                     return (
                       <GinitPressable
                         onPress={() => {

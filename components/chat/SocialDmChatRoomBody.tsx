@@ -46,6 +46,7 @@ export type SocialDmChatRoomBodyProps = {
   chatError: string | null;
   peerReadMessageId: string | null;
   peerReadAt: unknown | null;
+  peerReadStateReady?: boolean;
   searchNavigateLoading?: boolean;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
@@ -77,6 +78,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     chatError,
     peerReadMessageId,
     peerReadAt,
+    peerReadStateReady = true,
     searchNavigateLoading,
     hasNextPage,
     isFetchingNextPage,
@@ -113,13 +115,23 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const pendingAutoScrollToLatestRef = useRef(false);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
+  const mountedRef = useRef(true);
   const setListRef = useCallback((r: unknown) => {
-    if (r) listRef.current = r;
+    listRef.current = r;
   }, []);
   const setInnerFlashListRef = useCallback((r: unknown) => {
-    if (r) innerFlashListRef.current = r;
+    innerFlashListRef.current = r;
   }, []);
   const messageInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      listRef.current = null;
+      innerFlashListRef.current = null;
+    };
+  }, []);
 
   const myId = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) : ''), [myUserId]);
   const hostNorm = '';
@@ -183,12 +195,28 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const resolveListScroller = useCallback(() => {
     const r = innerFlashListRef.current ?? listRef.current;
     if (!r) return null;
+    const node = (() => {
+      try {
+        return typeof (r as { getNode?: () => unknown }).getNode === 'function'
+          ? (r as { getNode: () => unknown }).getNode()
+          : null;
+      } catch {
+        return null;
+      }
+    })();
+    const responder = (() => {
+      try {
+        return typeof (r as { getScrollResponder?: () => unknown }).getScrollResponder === 'function'
+          ? (r as { getScrollResponder: () => unknown }).getScrollResponder()
+          : null;
+      } catch {
+        return null;
+      }
+    })();
     const candidates = [
       r,
-      typeof (r as { getNode?: () => unknown }).getNode === 'function' ? (r as { getNode: () => unknown }).getNode() : null,
-      typeof (r as { getScrollResponder?: () => unknown }).getScrollResponder === 'function'
-        ? (r as { getScrollResponder: () => unknown }).getScrollResponder()
-        : null,
+      node,
+      responder,
       (r as { _flatListRef?: unknown })._flatListRef ?? null,
       (r as { _flatList?: unknown })._flatList ?? null,
     ].filter(Boolean);
@@ -200,6 +228,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   }, []);
 
   const scrollToIndexSafe = useCallback((index: number, viewPosition = 0.35, animated = false) => {
+    if (!mountedRef.current) return false;
     const scroller = resolveListScroller();
     if (!scroller || typeof scroller.scrollToIndex !== 'function') return false;
     try {
@@ -211,6 +240,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   }, [resolveListScroller]);
 
   const scrollToOffsetSafe = useCallback((offset: number, animated = false) => {
+    if (!mountedRef.current) return false;
     const scroller = resolveListScroller();
     if (!scroller || typeof scroller.scrollToOffset !== 'function') return false;
     try {
@@ -233,8 +263,10 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       const index = Math.max(0, Math.floor(idx));
       InteractionManager.runAfterInteractions(() => {
         setTimeout(() => {
+          if (!mountedRef.current) return;
           scrollToIndexSafe(index, 0.35, animated);
           requestAnimationFrame(() => {
+            if (!mountedRef.current) return;
             scrollToIndexSafe(index, 0.35, animated);
           });
         }, 60);
@@ -328,6 +360,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const peerReadAtMs = useMemo(() => {
     const v = peerReadAt as unknown;
     if (!v) return 0;
+    if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.floor(v));
     if (typeof v === 'object') {
       const o = v as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
       if (typeof o.toMillis === 'function') {
@@ -348,6 +381,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const unreadCountForMessage = useCallback(
     (message: MeetingChatMessage, messageIndex: number): number => {
       // 1:1: 상대가 안 읽었으면 1, 읽었으면 0
+      if (!peerReadStateReady) return 0;
       const msgMs = message.createdAt && typeof message.createdAt.toMillis === 'function' ? message.createdAt.toMillis() : 0;
       if (!msgMs) return 0;
 
@@ -363,7 +397,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       if (ms > 0 && ms >= msgMs) return 0;
       return 1;
     },
-    [peerReadMessageId, peerReadAtMs, messageIndexById],
+    [peerReadStateReady, peerReadMessageId, peerReadAtMs, messageIndexById],
   );
 
   const jumpToRepliedMessage = useCallback(

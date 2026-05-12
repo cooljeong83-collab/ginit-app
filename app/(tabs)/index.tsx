@@ -1,7 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
-import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -26,6 +25,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
@@ -1764,7 +1764,7 @@ export default function FeedScreen() {
                     : sortedEndedMeetings;
               return (
                 <View key={tab} style={[styles.tabPage, { width: tabPagerWidth }]}>
-                  <FlashList
+                  <FlashList<Meeting>
                     data={tabData}
                     keyExtractor={(m) => m.id}
                     extraData={{
@@ -1789,6 +1789,7 @@ export default function FeedScreen() {
                     style={styles.listFlex}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    maintainVisibleContentPosition={{ disabled: true }}
                     nestedScrollEnabled
                     onScroll={onMainScroll}
                     scrollEventThrottle={16}

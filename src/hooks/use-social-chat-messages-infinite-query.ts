@@ -8,6 +8,8 @@ import {
   SOCIAL_CHAT_PAGE_SIZE,
   subscribeSocialChatLiveTail,
 } from '@/src/lib/social-chat-rooms';
+import { upsertLocalChatMessages, type OfflineChatLocalMessageInput } from '@/src/lib/offline-chat/offline-chat-sync';
+import { useLocalSocialChatMessages } from '@/src/hooks/use-local-chat-room-messages';
 
 const SOCIAL_CHAT_MESSAGES_STALE_MS = 5 * 60 * 1000;
 
@@ -40,6 +42,35 @@ function mergeLiveTailIntoInfiniteData(
   return { pageParams: old.pageParams, pages: [newP0, ...old.pages.slice(1)] };
 }
 
+function messageTimeMs(v: unknown): number {
+  if (v && typeof (v as { toMillis?: () => number }).toMillis === 'function') {
+    try {
+      return (v as { toMillis: () => number }).toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+function toLocalInputs(messages: readonly SocialChatMessage[]): OfflineChatLocalMessageInput[] {
+  return messages.map((m) => ({
+    messageId: m.id,
+    createdAtMs: messageTimeMs(m.createdAt),
+    updatedAtMs: messageTimeMs(m.updatedAt) || messageTimeMs(m.createdAt),
+    deletedAtMs: messageTimeMs(m.deletedAt) || null,
+    senderId: m.senderId,
+    kind: m.kind ?? 'text',
+    text: m.text,
+    imageUrl: m.imageUrl ?? null,
+    imageAlbumBatchId: m.imageAlbumBatchId ?? null,
+    replyToMessageId: m.replyTo?.messageId ?? null,
+    replyToJson: m.replyTo ? JSON.stringify(m.replyTo) : null,
+    linkPreviewJson: m.linkPreview ? JSON.stringify(m.linkPreview) : null,
+    rawPayloadJson: null,
+  }));
+}
+
 /** infinite 캐시를 chrono(오래된→최신) 순서로 평탄화 */
 export function flattenSocialChatInfinitePages(
   data: InfiniteData<SocialChatFetchedMessagesPage> | undefined,
@@ -57,6 +88,38 @@ export function flattenSocialChatInfinitePages(
     }
   }
   return out;
+}
+
+function socialMessageCreatedAtMs(m: SocialChatMessage): number {
+  if (m.createdAt && typeof m.createdAt.toMillis === 'function') {
+    try {
+      return m.createdAt.toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+function mergeSocialMessagesChrono(
+  localMessages: readonly SocialChatMessage[],
+  remoteMessages: readonly SocialChatMessage[],
+): SocialChatMessage[] {
+  if (localMessages.length === 0) return [...remoteMessages];
+  if (remoteMessages.length === 0) return [...localMessages];
+  const byId = new Map<string, SocialChatMessage>();
+  for (const m of remoteMessages) {
+    if (m.id) byId.set(m.id, m);
+  }
+  for (const m of localMessages) {
+    if (m.id) byId.set(m.id, m);
+  }
+  return [...byId.values()].sort((a, b) => {
+    const ta = socialMessageCreatedAtMs(a);
+    const tb = socialMessageCreatedAtMs(b);
+    if (ta !== tb) return ta - tb;
+    return a.id.localeCompare(b.id);
+  });
 }
 
 /** 검색 점프 등으로 가져온 과거 페이지들을 infinite 캐시 끝(더 과거)에 붙입니다. */
@@ -88,6 +151,7 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
   const [liveError, setLiveError] = useState<string | null>(null);
 
   const queryKey = useMemo(() => socialChatMessagesQueryKey(roomId), [roomId]);
+  const localMessages = useLocalSocialChatMessages({ roomId, enabled: Boolean(roomId.trim()) });
 
   const query = useInfiniteQuery({
     queryKey,
@@ -105,7 +169,8 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
       lastPage.hasMore && lastPage.oldestMessageId ? lastPage.oldestMessageId : undefined,
   });
 
-  const messages = useMemo(() => flattenSocialChatInfinitePages(query.data), [query.data]);
+  const remoteMessages = useMemo(() => flattenSocialChatInfinitePages(query.data), [query.data]);
+  const messages = useMemo(() => mergeSocialMessagesChrono(localMessages, remoteMessages), [localMessages, remoteMessages]);
 
   useEffect(() => {
     setLiveError(null);
@@ -113,7 +178,7 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
   }, [roomId]);
 
   useEffect(() => {
-    if (!enabled || !roomId.trim() || !query.isSuccess) return;
+    if (!enabled || !roomId.trim()) return;
     const rid = roomId.trim();
     const unsub = subscribeSocialChatLiveTail(
       rid,
@@ -123,11 +188,12 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
           socialChatMessagesQueryKey(rid),
           (old: InfiniteData<SocialChatFetchedMessagesPage> | undefined) => mergeLiveTailIntoInfiniteData(old, e),
         );
+        void upsertLocalChatMessages({ roomType: 'social_dm', roomId: rid }, toLocalInputs([...e.tailDesc, ...e.evictedFromTailDesc]));
       },
       (msg) => setLiveError(msg),
     );
     return unsub;
-  }, [enabled, roomId, query.isSuccess, queryClient]);
+  }, [enabled, roomId, queryClient]);
 
   const listError =
     liveError ?? (query.error instanceof Error ? query.error.message : query.error ? String(query.error) : null);
@@ -139,10 +205,12 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
     olderPrefetchLockRef.current = true;
     try {
       await query.fetchNextPage();
+      const data = queryClient.getQueryData<InfiniteData<SocialChatFetchedMessagesPage>>(queryKey);
+      void upsertLocalChatMessages({ roomType: 'social_dm', roomId }, toLocalInputs(flattenSocialChatInfinitePages(data)));
     } finally {
       olderPrefetchLockRef.current = false;
     }
-  }, [query]);
+  }, [query, queryClient, queryKey, roomId]);
 
   return {
     messages,
@@ -151,7 +219,7 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
     fetchNextPage: fetchNextPagePrefetched,
     hasNextPage: Boolean(query.hasNextPage),
     isFetchingNextPage: query.isFetchingNextPage,
-    isInitialLoading: query.isPending && messages.length === 0,
+    isInitialLoading: false,
     refetch: query.refetch,
   };
 }

@@ -1,25 +1,12 @@
 import { useMemo } from 'react';
 import { useRouter, type Href, type Router } from 'expo-router';
-import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { useScreenTransition, type ScreenTransitionRunOptions } from '@/src/context/ScreenTransitionContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getMeetingById } from '@/src/lib/meetings';
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
-import {
-  fetchMeetingChatLatestPage,
-  fetchMeetingChatOlderPageAfterMessageId,
-  type MeetingChatFetchedMessagesPage,
-} from '@/src/lib/meeting-chat';
-import { meetingChatMessagesQueryKey } from '@/src/hooks/use-meeting-chat-messages-infinite-query';
-import {
-  ensureSocialChatRoomDoc,
-  fetchSocialChatLatestPage,
-  fetchSocialChatOlderPageAfterMessageId,
-  parsePeerFromSocialRoomId,
-  type SocialChatFetchedMessagesPage,
-} from '@/src/lib/social-chat-rooms';
-import { socialChatMessagesQueryKey } from '@/src/hooks/use-social-chat-messages-infinite-query';
+import { ensureSocialChatRoomDoc, parsePeerFromSocialRoomId } from '@/src/lib/social-chat-rooms';
 import { getUserProfile } from '@/src/lib/user-profile';
 
 type TransitionNavMethod = 'push' | 'replace';
@@ -72,26 +59,6 @@ async function preloadMeetingDetail(meetingId: string, queryClient: QueryClient)
   });
 }
 
-async function preloadMeetingChat(meetingId: string, queryClient: QueryClient): Promise<void> {
-  const id = meetingId.trim();
-  if (!id) return;
-  await queryClient.prefetchInfiniteQuery<
-    MeetingChatFetchedMessagesPage,
-    Error,
-    InfiniteData<MeetingChatFetchedMessagesPage>,
-    ReturnType<typeof meetingChatMessagesQueryKey>,
-    string | null
-  >({
-    queryKey: meetingChatMessagesQueryKey(id),
-    initialPageParam: null,
-    staleTime: 5 * 60 * 1000,
-    queryFn: ({ pageParam }) =>
-      pageParam == null ? fetchMeetingChatLatestPage(id) : fetchMeetingChatOlderPageAfterMessageId(id, pageParam),
-    getNextPageParam: (lastPage: MeetingChatFetchedMessagesPage) =>
-      lastPage.hasMore && lastPage.oldestMessageId ? lastPage.oldestMessageId : undefined,
-  });
-}
-
 async function preloadSocialChat(roomId: string, ctx: TransitionContext): Promise<void> {
   const rid = roomId.trim();
   if (!rid) return;
@@ -100,21 +67,6 @@ async function preloadSocialChat(roomId: string, ctx: TransitionContext): Promis
   if (uid && peerId) {
     await ensureSocialChatRoomDoc(rid, uid, peerId).catch(() => {});
   }
-  await ctx.queryClient.prefetchInfiniteQuery<
-    SocialChatFetchedMessagesPage,
-    Error,
-    InfiniteData<SocialChatFetchedMessagesPage>,
-    ReturnType<typeof socialChatMessagesQueryKey>,
-    string | null
-  >({
-    queryKey: socialChatMessagesQueryKey(rid),
-    initialPageParam: null,
-    staleTime: 5 * 60 * 1000,
-    queryFn: ({ pageParam }) =>
-      pageParam == null ? fetchSocialChatLatestPage(rid) : fetchSocialChatOlderPageAfterMessageId(rid, pageParam),
-    getNextPageParam: (lastPage: SocialChatFetchedMessagesPage) =>
-      lastPage.hasMore && lastPage.oldestMessageId ? lastPage.oldestMessageId : undefined,
-  });
 }
 
 const routePreloaders: TransitionPreloader[] = [
@@ -127,8 +79,8 @@ const routePreloaders: TransitionPreloader[] = [
   async (href, ctx) => {
     const [first, second, third] = pathSegments(hrefPathname(href));
     if (first === 'meeting-chat' && second && !third) {
-      await preloadMeetingChat(second, ctx.queryClient);
-      await preloadMeetingDetail(second, ctx.queryClient).catch(() => {});
+      // 채팅은 WatermelonDB local-first 렌더가 우선이므로 이동 전 Firestore prefetch로 전역 스플래시를 잡아두지 않습니다.
+      void preloadMeetingDetail(second, ctx.queryClient).catch(() => {});
     }
   },
   async (href, ctx) => {
@@ -158,6 +110,23 @@ function transitionLabelForHref(href: TransitionHref): string {
   return '화면을 불러오는 중…';
 }
 
+function isLocalFirstChatHref(href: TransitionHref): boolean {
+  const [first, second, third] = pathSegments(hrefPathname(href));
+  return (first === 'meeting-chat' || first === 'social-chat') && Boolean(second) && !third;
+}
+
+function warmUpLocalFirstChatHref(href: TransitionHref, ctx: TransitionContext): void {
+  const [first, second] = pathSegments(hrefPathname(href));
+  if (!second) return;
+  if (first === 'meeting-chat') {
+    void preloadMeetingDetail(second, ctx.queryClient).catch(() => {});
+    return;
+  }
+  if (first === 'social-chat') {
+    void preloadSocialChat(second, ctx).catch(() => {});
+  }
+}
+
 export async function navigateWithTransition(
   router: Router,
   method: TransitionNavMethod,
@@ -165,6 +134,13 @@ export async function navigateWithTransition(
   ctx: TransitionContext,
   runWithTransition: <T>(task: () => Promise<T> | T, opts?: ScreenTransitionRunOptions) => Promise<T>,
 ): Promise<void> {
+  if (isLocalFirstChatHref(href)) {
+    warmUpLocalFirstChatHref(href, ctx);
+    if (method === 'replace') router.replace(href as Href);
+    else router.push(href as Href);
+    return;
+  }
+
   await runWithTransition(
     async () => {
       await preloadTransitionTarget(href, ctx);

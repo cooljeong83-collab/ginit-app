@@ -23,6 +23,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
+import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -44,7 +45,7 @@ import {
   stableSortedParticipantLine,
 } from '@/src/lib/in-app-alarms';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
-import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
+import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
 import { clearMeetingChatUnreadForUser, subscribeMeetingChatRoomSummary, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
@@ -319,6 +320,39 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       },
     );
   }, [userId]);
+
+  const { meetings: myMeetingsForChatUnread } = useMyMeetingsFeedSync({
+    enabled: persistReady,
+    userId,
+  });
+
+  const meetingsForChatUnread = useMemo(() => {
+    if (myMeetingsForChatUnread.length === 0) return meetings;
+    const uid = userId?.trim() ?? '';
+    const normalizedMyMeetings = uid
+      ? myMeetingsForChatUnread.map((m) =>
+          isUserJoinedMeeting(m, uid)
+            ? m
+            : {
+                ...m,
+                participantIds: [...(m.participantIds ?? []), uid],
+              },
+        )
+      : myMeetingsForChatUnread;
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of meetings) {
+      if (!m?.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+    }
+    for (const m of normalizedMyMeetings) {
+      if (!m?.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+    }
+    return out;
+  }, [meetings, myMeetingsForChatUnread, userId]);
 
 
   /**
@@ -1069,7 +1103,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       setMeetingChatSummaryById({});
       return () => {};
     }
-    const joined = filterJoinedMeetings(meetings, uid);
+    const joined = filterJoinedMeetings(meetingsForChatUnread, uid);
     if (joined.length === 0) {
       setMeetingChatSummaryById({});
       return () => {};
@@ -1082,7 +1116,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       ),
     );
     return () => unsubs.forEach((u) => u());
-  }, [persistReady, userId, meetings]);
+  }, [persistReady, userId, meetingsForChatUnread]);
 
   // social chat room docs (unreadCountBy)
   useEffect(() => {
@@ -1111,7 +1145,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const pk = normalizeParticipantId(uid) ?? uid;
     const phone = uid.includes('+') ? uid : (uid.trim() || '');
     let sum = 0;
-    const joined = filterJoinedMeetings(meetings, uid);
+    const joined = filterJoinedMeetings(meetingsForChatUnread, uid);
     for (const m of joined) {
       const doc = meetingChatSummaryById[m.id];
       const map = doc?.unreadCountBy ?? {};
@@ -1125,7 +1159,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       if (typeof v === 'number' && Number.isFinite(v) && v > 0) sum += v;
     }
     setChatTabUnreadTotal(sum);
-  }, [persistReady, userId, meetings, socialRooms, meetingChatSummaryById, socialRoomDocById]);
+  }, [persistReady, userId, meetingsForChatUnread, socialRooms, meetingChatSummaryById, socialRoomDocById]);
 
   const markChatReadUpTo = useCallback((meetingId: string, messageId: string | undefined) => {
     const mid = meetingId.trim();

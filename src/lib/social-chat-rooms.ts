@@ -58,6 +58,7 @@ export type SocialChatRoomDoc = {
   readAtBy?: Record<string, unknown>;
   /** 각 사용자별 읽지 않은 메시지 수(목록 배지용). */
   unreadCountBy?: Record<string, number | null | undefined>;
+  updatedAt?: unknown | null;
 };
 
 export type SocialChatReplyTo = {
@@ -78,6 +79,8 @@ export type SocialChatMessage = {
   linkPreview?: MeetingChatLinkPreview | null;
   replyTo?: SocialChatReplyTo | null;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
+  deletedAt?: Timestamp | null;
 };
 
 /** 모임 채팅(`MEETING_CHAT_PAGE_SIZE`)과 동일하게 소셜 DM도 최신 N개만 tail 구독 + 과거 페이징 */
@@ -113,6 +116,8 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
   const imageUrl =
     typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
   const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
+  const updatedAt = (data.updatedAt as Timestamp | undefined) ?? createdAt;
+  const deletedAt = (data.deletedAt as Timestamp | undefined) ?? null;
   const albumRaw = data.imageAlbumBatchId;
   const imageAlbumBatchId =
     typeof albumRaw === 'string' && albumRaw.trim() ? albumRaw.trim() : null;
@@ -158,6 +163,8 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
     linkPreview,
     replyTo: replyTo?.messageId ? replyTo : null,
     createdAt,
+    updatedAt,
+    deletedAt,
   };
 }
 
@@ -181,6 +188,8 @@ export function socialMessageToMeetingMessage(m: SocialChatMessage): MeetingChat
         }
       : null,
     createdAt: m.createdAt,
+    updatedAt: m.updatedAt ?? null,
+    deletedAt: m.deletedAt ?? null,
   };
 }
 
@@ -273,6 +282,7 @@ export function subscribeSocialChatRoom(
             ? (data.readAtBy as Record<string, unknown>)
             : undefined,
         unreadCountBy,
+        updatedAt: (data.updatedAt as unknown) ?? null,
       });
     },
     (err) => {
@@ -306,7 +316,7 @@ export async function updateSocialChatReadReceipt(roomId: string, myAppUserId: s
   if (uidPk && uidPk !== uid && uidPk !== uidPhone) pushKey(uidPk);
   if (raw && raw !== uid && raw !== uidPhone && raw !== uidPk) pushKey(raw);
   pairs.push('updatedAt', serverTimestamp());
-  await updateDoc(dRef, ...(pairs as [unknown, ...unknown[]]));
+  await updateDoc(dRef, ...(pairs as [any, any, ...any[]]));
 }
 
 const SOCIAL_SEARCH_PAGE = 80;
@@ -716,14 +726,18 @@ export async function sendSocialChatTextMessage(
   if (blockedByMe) {
     throw new Error('차단한 사용자에게는 메시지를 보낼 수 없어요.');
   }
+  if (peerPk) {
+    await ensureSocialChatRoomDoc(rid, senderId, peerPk);
+  }
   const linkPreview = await buildLinkPreviewForChatText(text);
   const ref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const now = Timestamp.now();
   const msgRef = await addDoc(
     ref,
     stripUndefinedDeep({
       senderId,
       senderName: senderProfile?.nickname ?? null,
-      senderAvatarUrl: senderProfile?.profile_photo_url ?? null,
+      senderAvatarUrl: senderProfile?.photoUrl ?? null,
       text,
       linkPreview,
       kind: 'text' as const,
@@ -737,7 +751,8 @@ export async function sendSocialChatTextMessage(
               text: String(replyTo.text ?? '').trim().slice(0, 280),
             }
           : null,
-      createdAt: Timestamp.now(),
+      createdAt: now,
+      updatedAt: now,
     }) as Record<string, unknown>,
   );
 
@@ -755,7 +770,7 @@ export async function sendSocialChatTextMessage(
     if (peerPhone !== peerPk) pushKey(peerPhone);
     if (peerNormPk !== peerPk && peerNormPk !== peerPhone) pushKey(peerNormPk);
     pairs.push('updatedAt', serverTimestamp());
-    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any)).catch(() => {});
+    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as [any, any, ...any[]])).catch(() => {});
   }
 
   if (Platform.OS !== 'web') {
@@ -903,6 +918,10 @@ export async function sendSocialChatImageMessage(
 
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const senderPk = normalizeParticipantId(senderId) || senderId;
+  const peerPkImg = parsePeerFromSocialRoomId(rid, senderPk);
+  if (peerPkImg) {
+    await ensureSocialChatRoomDoc(rid, senderId, peerPkImg);
+  }
   const cap = (extras?.caption ?? '').trim().slice(0, 500);
   const naturalWidth = extras?.naturalWidth;
   const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
@@ -936,6 +955,7 @@ export async function sendSocialChatImageMessage(
   );
 
   const msgColRef = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  const now = Timestamp.now();
   const msgRef = await addDoc(
     msgColRef,
     stripUndefinedDeep({
@@ -944,12 +964,12 @@ export async function sendSocialChatImageMessage(
       kind: 'image' as const,
       imageUrl,
       imageAlbumBatchId: albumId || undefined,
-      createdAt: Timestamp.now(),
+      createdAt: now,
+      updatedAt: now,
     }) as Record<string, unknown>,
   );
 
   // 이미지도 unread 요약: 텍스트 전송과 동일하게 전송 완료를 막지 않음
-  const peerPkImg = parsePeerFromSocialRoomId(rid, senderPk);
   if (peerPkImg) {
     const pairs: unknown[] = [];
     const pushKey = (k: string) => {
@@ -963,7 +983,7 @@ export async function sendSocialChatImageMessage(
     if (peerPhone !== peerPkImg) pushKey(peerPhone);
     if (peerNormPk !== peerPkImg && peerNormPk !== peerPhone) pushKey(peerNormPk);
     pairs.push('updatedAt', serverTimestamp());
-    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as any)).catch(() => {});
+    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as [any, any, ...any[]])).catch(() => {});
   }
 
   if (!suppressRemote) {
@@ -1028,6 +1048,7 @@ export async function deleteSocialChatImageMessageBestEffort(
     text: '사진이 삭제되었습니다.',
     imageUrl: null,
     deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   } as Record<string, unknown>);
 
   const objectPath = supabasePublicObjectPathFromUrl(url, SUPABASE_STORAGE_BUCKET_MEETING_CHAT);
@@ -1055,5 +1076,6 @@ export async function deleteSocialChatTextMessageBestEffort(roomId: string, mess
     imageUrl: null,
     linkPreview: null,
     deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   } as Record<string, unknown>);
 }
