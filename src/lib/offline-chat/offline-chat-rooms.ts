@@ -60,7 +60,6 @@ export type LocalChatRoomReadStateInput = {
   readAtBy?: Record<string, unknown> | null;
   readAtMsBy?: Record<string, number | null | undefined> | null;
   readStateLastAtMs?: number | null;
-  force?: boolean;
 };
 
 function cleanString(v: unknown): string | null {
@@ -371,18 +370,17 @@ export async function upsertLocalChatRoomReadState(input: LocalChatRoomReadState
       const nextIds = parseStringMapJson(r.messageReadMessageIdByJson);
       const nextAts = parseNumberMapJson(r.messageReadAtByJson);
       let changed = false;
-      const force = input.force === true;
       const keys = new Set([...Object.keys(incomingReadIds), ...Object.keys(incomingReadAts)]);
       for (const key of keys) {
         const incomingAt = incomingReadAts[key] ?? incomingLastAt ?? 0;
         const currentAt = nextAts[key] ?? 0;
         const incomingId = incomingReadIds[key] ?? null;
-        if (!force && incomingAt > 0 && currentAt > 0 && incomingAt < currentAt) continue;
+        if (incomingAt > 0 && currentAt > 0 && incomingAt < currentAt) continue;
         if (incomingAt > currentAt) {
           nextAts[key] = incomingAt;
           changed = true;
         }
-        if (incomingId && (force || incomingAt >= currentAt || !nextIds[key])) {
+        if (incomingId && (incomingAt >= currentAt || !nextIds[key])) {
           if (nextIds[key] !== incomingId) {
             nextIds[key] = incomingId;
             changed = true;
@@ -427,7 +425,6 @@ export async function markLocalChatRoomReadState(args: {
     readMessageIdBy: { [userKey]: messageId },
     readAtMsBy: { [userKey]: readAtMs },
     readStateLastAtMs: readAtMs,
-    force: true,
   });
 }
 
