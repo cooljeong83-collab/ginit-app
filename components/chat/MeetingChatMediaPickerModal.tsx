@@ -5,7 +5,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+  ActivityIndicator, Alert, Modal, Platform, StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
@@ -24,6 +24,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 
 const MAX_SELECT = 20;
 const PAGE_SIZE = 60;
+const MAX_PICKER_GRID_CELL = 132;
 
 /**
  * `getAssetsAsync`는 `sortBy`에 `[키, DESC여부]` 튜플을 넣을 때 **한 겹 더 배열**로 감싸야 합니다.
@@ -107,6 +108,7 @@ export function MeetingChatMediaPickerModal({
   const [photoTotalCount, setPhotoTotalCount] = useState(0);
   /** 전체보기 기준 사진 총장(드롭다운 첫 줄 표시용) */
   const [allLibraryPhotoCount, setAllLibraryPhotoCount] = useState(0);
+  const [gridWidth, setGridWidth] = useState(() => Math.max(1, Math.floor(winW)));
 
   useEffect(() => {
     windowH.value = winH;
@@ -196,8 +198,16 @@ export function MeetingChatMediaPickerModal({
 
   const gap = 2;
   const pad = 10;
-  const cols = 3;
-  const cell = Math.floor((winW - pad * 2 - gap * (cols - 1)) / cols);
+  const gridMetrics = useMemo(() => {
+    const inner = Math.max(1, gridWidth - pad * 2);
+    const columns = Math.max(3, Math.ceil((inner + gap) / (MAX_PICKER_GRID_CELL + gap)));
+    const cell = Math.max(96, Math.floor((inner - gap * (columns - 1)) / columns));
+    return { cell, columns };
+  }, [gap, gridWidth, pad]);
+  const onGridLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.max(1, Math.floor(e.nativeEvent.layout.width));
+    setGridWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
   const albumMenuMaxH = Math.min(Math.round(winH * 0.38), 320);
 
   const loadInitial = useCallback(async () => {
@@ -496,7 +506,7 @@ export function MeetingChatMediaPickerModal({
                   </>
                 ) : null}
 
-              <View style={styles.sheetBody}>
+              <View style={styles.sheetBody} onLayout={onGridLayout}>
             {loading ? (
               <View style={styles.centerFill}>
                 <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
@@ -515,10 +525,11 @@ export function MeetingChatMediaPickerModal({
               </View>
             ) : (
               <FlashList
+                key={`picker-media-grid-${gridMetrics.columns}`}
                 style={styles.gridList}
                 data={assets}
                 keyExtractor={(item) => item.id}
-                numColumns={cols}
+                numColumns={gridMetrics.columns}
                 contentContainerStyle={[styles.listContent, { paddingHorizontal: pad }]}
                 onEndReached={() => void loadMore()}
                 onEndReachedThreshold={0.35}
@@ -531,14 +542,14 @@ export function MeetingChatMediaPickerModal({
                 }
                 renderItem={({ item, index }) => {
                   const selected = selectedOrder.includes(item.id);
-                  const col = index % cols;
+                  const col = index % gridMetrics.columns;
                   return (
                     <GinitPressable
                       onPress={() => toggleSelect(item.id)}
                       style={({ pressed }) => [
                         styles.cell,
-                        { width: cell, height: cell },
-                        col < cols - 1 ? { marginRight: gap } : null,
+                        { width: gridMetrics.cell, height: gridMetrics.cell },
+                        col < gridMetrics.columns - 1 ? { marginRight: gap } : null,
                         { marginBottom: gap },
                         pressed && meetingChatBodyStyles.pressed,
                       ]}

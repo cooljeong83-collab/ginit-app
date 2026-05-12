@@ -4,7 +4,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   Alert,
@@ -218,6 +218,7 @@ export default function FeedScreen() {
   /** 홈 상단 탭: 공개 탐색 · 참여중(공개+비공개) · 종료 */
   const [homeTab, setHomeTab] = useState<HomeMeetingTopTab>('explore');
   const tabPagerRef = useRef<ScrollView | null>(null);
+  const [tabPagerWidth, setTabPagerWidth] = useState(() => Math.max(1, Math.floor(windowWidth)));
   const homeTabRef = useRef(homeTab);
   homeTabRef.current = homeTab;
   /** Android: 모임 탭 포커스 시 하드웨어 뒤로가기 이중 탭으로만 종료 */
@@ -941,22 +942,28 @@ export default function FeedScreen() {
       setHomeTab(t);
       const idx = homeMeetingTopTabIndex(t);
       requestAnimationFrame(() => {
-        tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: true });
+        tabPagerRef.current?.scrollTo({ x: idx * tabPagerWidth, animated: true });
       });
     },
-    [windowWidth],
+    [tabPagerWidth],
   );
 
   const onTabPagerMomentumEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const x = e.nativeEvent.contentOffset.x;
-      const w = Math.max(1, windowWidth);
+      const w = Math.max(1, tabPagerWidth);
       const idx = Math.round(x / w);
       const next: HomeMeetingTopTab = idx <= 0 ? 'explore' : idx === 1 ? 'my' : 'private';
       setHomeTab(next);
     },
-    [windowWidth],
+    [tabPagerWidth],
   );
+
+  const onTabPagerLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.floor(e.nativeEvent.layout.width);
+    if (next <= 1) return;
+    setTabPagerWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
 
   const handleEndReachedForTab = useCallback(
     (tab: HomeMeetingTopTab) => {
@@ -1730,15 +1737,15 @@ export default function FeedScreen() {
   useEffect(() => {
     const t = homeTabRef.current;
     const idx = homeMeetingTopTabIndex(t);
-    tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: false });
-  }, [windowWidth]);
+    tabPagerRef.current?.scrollTo({ x: idx * tabPagerWidth, animated: false });
+  }, [tabPagerWidth]);
 
   return (
     <ScreenShell padded={false} style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.feedColumn}>
           {fixedFeedHeader}
-          <View style={styles.tabPagerWrap}>
+          <View style={styles.tabPagerWrap} onLayout={onTabPagerLayout}>
             <ScrollView
               ref={tabPagerRef}
               horizontal
@@ -1756,7 +1763,7 @@ export default function FeedScreen() {
                     ? sortedJoinedMeetings
                     : sortedEndedMeetings;
               return (
-                <View key={tab} style={[styles.tabPage, { width: windowWidth }]}>
+                <View key={tab} style={[styles.tabPage, { width: tabPagerWidth }]}>
                   <FlashList
                     data={tabData}
                     keyExtractor={(m) => m.id}

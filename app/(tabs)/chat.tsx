@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {ActivityIndicator, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
@@ -167,6 +167,7 @@ export default function ChatTab() {
   );
   const [chatKind, setChatKind] = useState<ChatKind>('gather');
   const tabPagerRef = useRef<ScrollView | null>(null);
+  const [tabPagerWidth, setTabPagerWidth] = useState(() => Math.max(1, Math.floor(windowWidth)));
   const gatherListRef = useRef<FlashListRef<Meeting> | null>(null);
   const socialListRef = useRef<FlashListRef<SocialChatRoomSummary> | null>(null);
   const didInitialFocusTopResetRef = useRef(false);
@@ -296,27 +297,33 @@ export default function ChatTab() {
       setChatKind(k);
       const idx = k === 'gather' ? 0 : 1;
       requestAnimationFrame(() => {
-        tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: true });
+        tabPagerRef.current?.scrollTo({ x: idx * tabPagerWidth, animated: true });
       });
     },
-    [windowWidth],
+    [tabPagerWidth],
   );
 
   const onTabPagerMomentumEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const x = e.nativeEvent.contentOffset.x;
-      const w = Math.max(1, windowWidth);
+      const w = Math.max(1, tabPagerWidth);
       const idx = Math.round(x / w);
       setChatKind(idx <= 0 ? 'gather' : 'social');
     },
-    [windowWidth],
+    [tabPagerWidth],
   );
+
+  const onTabPagerLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.floor(e.nativeEvent.layout.width);
+    if (next <= 1) return;
+    setTabPagerWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
 
   useEffect(() => {
     const k = chatKindRef.current;
     const idx = k === 'gather' ? 0 : 1;
-    tabPagerRef.current?.scrollTo({ x: idx * windowWidth, animated: false });
-  }, [windowWidth]);
+    tabPagerRef.current?.scrollTo({ x: idx * tabPagerWidth, animated: false });
+  }, [tabPagerWidth]);
 
   useEffect(() => {
     const uid = userId?.trim();
@@ -951,132 +958,133 @@ export default function ChatTab() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.feedColumn}>
           {fixedChatHeader}
-          <ScrollView
-            ref={tabPagerRef}
-            horizontal
-            pagingEnabled
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={onTabPagerMomentumEnd}
-            style={styles.tabPager}>
-            <View style={[styles.tabPage, { width: windowWidth }]}>
-              {showGatherInitialSkeleton ? (
-                <ScreenTransitionSkeleton variant="chat" rows={6} />
-              ) : (
-                <FlashList<Meeting>
-                  ref={gatherListRef}
-                  data={displayedGatherMeetings}
-                  extraData={{
-                    chatKind,
-                    appliedGatherTextQuery,
-                    gatherSearchBusy,
-                    gatherMsgHits: gatherMessageMatchIds.size,
-                    latestByMeetingId,
-                    hostProfiles,
-                    meetingChatSummaryById,
-                    meetingCategories,
-                  }}
-                  keyExtractor={(m) => m.id}
-                  style={styles.listFlex}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.scroll}
-                  maintainVisibleContentPosition={{ disabled: true }}
-                  nestedScrollEnabled
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={refreshing}
-                      onRefresh={onPullRefresh}
-                      tintColor={GinitTheme.colors.primary}
-                      colors={[GinitTheme.colors.primary]}
-                    />
-                  }
-                  ListHeaderComponent={chatTabListAlerts('gather')}
-                  ListFooterComponent={chatKind === 'gather' ? gatherListFooter : null}
-                  onEndReached={() => handleEndReachedForKind('gather')}
-                  onEndReachedThreshold={0.6}
-                  onLoad={scrollGatherListToTop}
-                  renderItem={({ item: m }) => {
-                    const host = profileForCreatedBy(hostProfiles, m.createdBy);
-                    const raw = userId?.trim() ?? '';
-                    const pk = raw ? normalizeParticipantId(raw) : '';
-                    const unread = coalesceUnreadCountByKeys(meetingChatSummaryById[m.id]?.unreadCountBy, [pk, raw]);
-                    return (
-                      <ChatMeetingListRow
-                        meeting={m}
-                        hostPhotoUrl={host?.photoUrl ?? null}
-                        hostNickname={host?.nickname ?? '주관자'}
-                        hostWithdrawn={isUserProfileWithdrawn(host)}
-                        latestMessage={latestByMeetingId[m.id]}
-                        unreadCount={unread}
-                        categories={meetingCategories}
-                        onPress={() => {
-                          if (directSharePickMode) {
-                            const incoming = consumeIncomingDirectSharePayload();
-                            if (incoming) {
-                              if (incoming.kind === 'image') {
-                                setPendingDirectSharePayload({
-                                  kind: 'image',
-                                  imageUri: incoming.imageUri,
-                                  text: incoming.text,
-                                  targetType: 'meeting',
-                                  targetId: m.id,
-                                });
-                              } else {
-                                setPendingDirectSharePayload({
-                                  kind: 'text',
-                                  text: incoming.text,
-                                  targetType: 'meeting',
-                                  targetId: m.id,
-                                });
-                              }
-                            }
-                            setDirectSharePickMode(false);
-                          }
-                          router.push(`/meeting-chat/${m.id}`);
-                        }}
+          <View style={styles.tabPagerWrap} onLayout={onTabPagerLayout}>
+            <ScrollView
+              ref={tabPagerRef}
+              horizontal
+              pagingEnabled
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={onTabPagerMomentumEnd}
+              style={styles.tabPager}>
+              <View style={[styles.tabPage, { width: tabPagerWidth }]}>
+                {showGatherInitialSkeleton ? (
+                  <ScreenTransitionSkeleton variant="chat" rows={6} />
+                ) : (
+                  <FlashList<Meeting>
+                    ref={gatherListRef}
+                    data={displayedGatherMeetings}
+                    extraData={{
+                      chatKind,
+                      appliedGatherTextQuery,
+                      gatherSearchBusy,
+                      gatherMsgHits: gatherMessageMatchIds.size,
+                      latestByMeetingId,
+                      hostProfiles,
+                      meetingChatSummaryById,
+                      meetingCategories,
+                    }}
+                    keyExtractor={(m) => m.id}
+                    style={styles.listFlex}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.scroll}
+                    maintainVisibleContentPosition={{ disabled: true }}
+                    nestedScrollEnabled
+                    refreshControl={
+                      <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onPullRefresh}
+                        tintColor={GinitTheme.colors.primary}
+                        colors={[GinitTheme.colors.primary]}
                       />
-                    );
-                  }}
-                />
-              )}
-            </View>
-            <View style={[styles.tabPage, { width: windowWidth }]}>
-              {showSocialInitialSkeleton ? (
-                <ScreenTransitionSkeleton variant="chat" rows={6} />
-              ) : (
-                <FlashList<SocialChatRoomSummary>
-                  ref={socialListRef}
-                  data={displayedSocialRooms}
-                  extraData={{
-                    chatKind,
-                    appliedSocialTextQuery,
-                    socialSearchBusy,
-                    socialMsgHits: socialMessageMatchRoomIds.size,
-                    socialProfiles,
-                  }}
-                  keyExtractor={(row) => row.roomId}
-                  style={styles.listFlex}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.scroll}
-                  maintainVisibleContentPosition={{ disabled: true }}
-                  nestedScrollEnabled
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={refreshing}
-                      onRefresh={onPullRefresh}
-                      tintColor={GinitTheme.colors.primary}
-                      colors={[GinitTheme.colors.primary]}
-                    />
-                  }
-                  ListHeaderComponent={chatTabListAlerts('social')}
-                  ListFooterComponent={chatKind === 'social' ? socialListFooter : null}
-                  onEndReached={() => handleEndReachedForKind('social')}
-                  onEndReachedThreshold={0.6}
-                  onLoad={scrollSocialListToTop}
-                  renderItem={({ item: row }) => {
+                    }
+                    ListHeaderComponent={chatTabListAlerts('gather')}
+                    ListFooterComponent={chatKind === 'gather' ? gatherListFooter : null}
+                    onEndReached={() => handleEndReachedForKind('gather')}
+                    onEndReachedThreshold={0.6}
+                    onLoad={scrollGatherListToTop}
+                    renderItem={({ item: m }) => {
+                      const host = profileForCreatedBy(hostProfiles, m.createdBy);
+                      const raw = userId?.trim() ?? '';
+                      const pk = raw ? normalizeParticipantId(raw) : '';
+                      const unread = coalesceUnreadCountByKeys(meetingChatSummaryById[m.id]?.unreadCountBy, [pk, raw]);
+                      return (
+                        <ChatMeetingListRow
+                          meeting={m}
+                          hostPhotoUrl={host?.photoUrl ?? null}
+                          hostNickname={host?.nickname ?? '주관자'}
+                          hostWithdrawn={isUserProfileWithdrawn(host)}
+                          latestMessage={latestByMeetingId[m.id]}
+                          unreadCount={unread}
+                          categories={meetingCategories}
+                          onPress={() => {
+                            if (directSharePickMode) {
+                              const incoming = consumeIncomingDirectSharePayload();
+                              if (incoming) {
+                                if (incoming.kind === 'image') {
+                                  setPendingDirectSharePayload({
+                                    kind: 'image',
+                                    imageUri: incoming.imageUri,
+                                    text: incoming.text,
+                                    targetType: 'meeting',
+                                    targetId: m.id,
+                                  });
+                                } else {
+                                  setPendingDirectSharePayload({
+                                    kind: 'text',
+                                    text: incoming.text,
+                                    targetType: 'meeting',
+                                    targetId: m.id,
+                                  });
+                                }
+                              }
+                              setDirectSharePickMode(false);
+                            }
+                            router.push(`/meeting-chat/${m.id}`);
+                          }}
+                        />
+                      );
+                    }}
+                  />
+                )}
+              </View>
+              <View style={[styles.tabPage, { width: tabPagerWidth }]}>
+                {showSocialInitialSkeleton ? (
+                  <ScreenTransitionSkeleton variant="chat" rows={6} />
+                ) : (
+                  <FlashList<SocialChatRoomSummary>
+                    ref={socialListRef}
+                    data={displayedSocialRooms}
+                    extraData={{
+                      chatKind,
+                      appliedSocialTextQuery,
+                      socialSearchBusy,
+                      socialMsgHits: socialMessageMatchRoomIds.size,
+                      socialProfiles,
+                    }}
+                    keyExtractor={(row) => row.roomId}
+                    style={styles.listFlex}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.scroll}
+                    maintainVisibleContentPosition={{ disabled: true }}
+                    nestedScrollEnabled
+                    refreshControl={
+                      <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onPullRefresh}
+                        tintColor={GinitTheme.colors.primary}
+                        colors={[GinitTheme.colors.primary]}
+                      />
+                    }
+                    ListHeaderComponent={chatTabListAlerts('social')}
+                    ListFooterComponent={chatKind === 'social' ? socialListFooter : null}
+                    onEndReached={() => handleEndReachedForKind('social')}
+                    onEndReachedThreshold={0.6}
+                    onLoad={scrollSocialListToTop}
+                    renderItem={({ item: row }) => {
                     const prof = socialProfiles.get(row.peerAppUserId);
                     const uri = prof?.photoUrl?.trim();
                     const nick = prof?.nickname ?? '친구';
@@ -1168,11 +1176,12 @@ export default function ChatTab() {
                         </View>
                       </GinitPressable>
                     );
-                  }}
-                />
-              )}
-            </View>
-          </ScrollView>
+                    }}
+                  />
+                )}
+              </View>
+            </ScrollView>
+          </View>
         </View>
 
         <Modal
@@ -1245,6 +1254,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
   feedColumn: { flex: 1 },
+  tabPagerWrap: { flex: 1, position: 'relative' },
   tabPager: { flex: 1 },
   tabPage: { flex: 1 },
   listFlex: { flex: 1 },

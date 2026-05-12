@@ -80,6 +80,10 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
     }
     const current = queryClient.getQueryData<ChatRoomsInfiniteData>(queryKey);
     const cachedRooms = flattenPages(current);
+    if (summariesRes.summaries.length === 0) {
+      await query.refetch();
+      return;
+    }
     if (!diffChatRoomSummaries(cachedRooms, summariesRes.summaries)) return;
     queryClient.setQueryData<ChatRoomsInfiniteData>(queryKey, (prev) => {
       const pageCount = prev?.pages.length ?? Math.max(1, Math.ceil(summariesRes.summaries.length / CHAT_ROOMS_LIST_PAGE_SIZE));

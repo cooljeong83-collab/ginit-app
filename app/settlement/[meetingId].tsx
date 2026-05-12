@@ -1752,7 +1752,7 @@ export default function SettlementMeetingScreen() {
                           style={({ pressed }) => [styles.receiptReadonlyImagePressable, pressed && { opacity: 0.88 }]}
                           accessibilityRole="imagebutton"
                           accessibilityLabel="영수증 확대 보기">
-                          <Image source={{ uri: it.previewUri }} style={styles.receiptReadonlyImg} contentFit="cover" />
+                          <Image source={{ uri: it.previewUri }} style={styles.receiptReadonlyImg} contentFit="contain" />
                         </GinitPressable>
                         <View style={styles.receiptReadonlyInfo}>
                           <View style={styles.receiptReadonlyTopRow}>
@@ -1791,7 +1791,7 @@ export default function SettlementMeetingScreen() {
                           style={({ pressed }) => [styles.receiptThumbImagePressable, pressed && { opacity: 0.88 }]}
                           accessibilityRole="imagebutton"
                           accessibilityLabel="영수증 확대 보기">
-                          <Image source={{ uri: it.previewUri }} style={styles.receiptThumbImg} contentFit="cover" />
+                          <Image source={{ uri: it.previewUri }} style={styles.receiptThumbImg} contentFit="contain" />
                         </GinitPressable>
                         <GinitPressable
                           onPress={() => removeReceiptItem(it.id)}

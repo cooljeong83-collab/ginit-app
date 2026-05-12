@@ -6,7 +6,7 @@ import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-    ActivityIndicator, Alert, Modal, RefreshControl, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+    ActivityIndicator, Alert, Modal, RefreshControl, StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -49,11 +49,13 @@ function formatSentAt(ts: Timestamp | null | undefined): string {
 
 const GRID_GAP = 4;
 const H_PAD = 12;
+const MAX_GRID_CELL = 164;
 
 export default function SocialChatMediaScreen() {
   const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
+  const [gridWidth, setGridWidth] = useState(() => Math.max(1, Math.floor(winW)));
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();
   const roomId = Array.isArray(params.roomId)
     ? (params.roomId[0] ?? '').trim()
@@ -87,10 +89,17 @@ export default function SocialChatMediaScreen() {
     void getUserProfilesForIds(ids).then(setProfiles);
   }, [userId, peerId]);
 
-  const cell = useMemo(() => {
-    const inner = winW - H_PAD * 2 - GRID_GAP * 2;
-    return Math.max(96, Math.floor(inner / 3));
-  }, [winW]);
+  const gridMetrics = useMemo(() => {
+    const inner = Math.max(1, gridWidth - H_PAD * 2);
+    const columns = Math.max(3, Math.ceil((inner + GRID_GAP) / (MAX_GRID_CELL + GRID_GAP)));
+    const cell = Math.max(96, Math.floor((inner - GRID_GAP * (columns - 1)) / columns));
+    return { cell, columns };
+  }, [gridWidth]);
+
+  const onGridLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.max(1, Math.floor(e.nativeEvent.layout.width));
+    setGridWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
 
   useEffect(() => {
     if (!roomId) return;
@@ -178,41 +187,45 @@ export default function SocialChatMediaScreen() {
           <Text style={styles.muted}>불러오는 중…</Text>
         </View>
       ) : (
-        <FlashList
-          data={rows}
-          keyExtractor={(it) => it.id}
-          numColumns={3}
-          contentContainerStyle={{
-            paddingHorizontal: H_PAD,
-            paddingTop: 10,
-            paddingBottom: Math.max(insets.bottom, 12) + 16,
-            gap: GRID_GAP,
-          }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={triggerRefresh} />}
-          renderItem={({ item, index }) => {
-            const u = item.imageUrl?.trim() ?? '';
-            const col = index % 3;
-            return (
-              <GinitPressable
-                onPress={() => u && setViewer(item)}
-                style={({ pressed }) => [
-                  styles.cell,
-                  { width: cell, height: cell },
-                  col < 2 ? { marginRight: GRID_GAP } : null,
-                  { marginBottom: GRID_GAP },
-                  pressed && { opacity: 0.88 },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="사진 보기"
-              >
-                <View style={styles.cellInner}>
-                  {u ? <Image source={{ uri: u }} style={StyleSheet.absoluteFill} contentFit="cover" /> : <View style={styles.thumbFallback} />}
-                </View>
-              </GinitPressable>
-            );
-          }}
-          ListEmptyComponent={<Text style={styles.empty}>아직 사진이 없어요.</Text>}
-        />
+        <View style={styles.listWrap} onLayout={onGridLayout}>
+          <FlashList
+            key={`social-media-grid-${gridMetrics.columns}`}
+            data={rows}
+            keyExtractor={(it) => it.id}
+            numColumns={gridMetrics.columns}
+            style={styles.list}
+            contentContainerStyle={{
+              paddingHorizontal: H_PAD,
+              paddingTop: 10,
+              paddingBottom: Math.max(insets.bottom, 12) + 16,
+              gap: GRID_GAP,
+            }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={triggerRefresh} />}
+            renderItem={({ item, index }) => {
+              const u = item.imageUrl?.trim() ?? '';
+              const col = index % gridMetrics.columns;
+              return (
+                <GinitPressable
+                  onPress={() => u && setViewer(item)}
+                  style={({ pressed }) => [
+                    styles.cell,
+                    { width: gridMetrics.cell, height: gridMetrics.cell },
+                    col < gridMetrics.columns - 1 ? { marginRight: GRID_GAP } : null,
+                    { marginBottom: GRID_GAP },
+                    pressed && { opacity: 0.88 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="사진 보기"
+                >
+                  <View style={styles.cellInner}>
+                    {u ? <Image source={{ uri: u }} style={StyleSheet.absoluteFill} contentFit="cover" /> : <View style={styles.thumbFallback} />}
+                  </View>
+                </GinitPressable>
+              );
+            }}
+            ListEmptyComponent={<Text style={styles.empty}>아직 사진이 없어요.</Text>}
+          />
+        </View>
       )}
 
       <Modal visible={viewer != null} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
@@ -373,6 +386,8 @@ const styles = StyleSheet.create({
   retryBtn: { paddingVertical: 8, paddingHorizontal: 12 },
   retryBtnText: { color: GinitTheme.colors.primary, fontWeight: '600' },
   empty: { marginTop: 48, textAlign: 'center', fontSize: 15, color: '#94a3b8', fontWeight: '700' },
+  listWrap: { flex: 1 },
+  list: { flex: 1 },
   cell: { borderRadius: 12, overflow: 'hidden' },
   cellInner: { flex: 1, backgroundColor: '#fff', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(15, 23, 42, 0.06)' },
   thumbFallback: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.06)' },

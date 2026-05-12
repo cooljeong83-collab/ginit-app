@@ -6,7 +6,7 @@ import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
-    ActivityIndicator, Alert, Modal, Platform, RefreshControl, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+    ActivityIndicator, Alert, Modal, Platform, RefreshControl, StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -58,11 +58,13 @@ function formatSentAt(ts: Timestamp | null | undefined): string {
 
 const GRID_GAP = 4;
 const H_PAD = 12;
+const MAX_GRID_CELL = 164;
 
 export default function MeetingChatMediaScreen() {
   const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
+  const [gridWidth, setGridWidth] = useState(() => Math.max(1, Math.floor(winW)));
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()
@@ -109,10 +111,17 @@ export default function MeetingChatMediaScreen() {
     void getUserProfilesForIds(ids).then(setProfiles);
   }, [meeting, allowed]);
 
-  const cell = useMemo(() => {
-    const inner = winW - H_PAD * 2 - GRID_GAP * 2;
-    return Math.max(96, Math.floor(inner / 3));
-  }, [winW]);
+  const gridMetrics = useMemo(() => {
+    const inner = Math.max(1, gridWidth - H_PAD * 2);
+    const columns = Math.max(3, Math.ceil((inner + GRID_GAP) / (MAX_GRID_CELL + GRID_GAP)));
+    const cell = Math.max(96, Math.floor((inner - GRID_GAP * (columns - 1)) / columns));
+    return { cell, columns };
+  }, [gridWidth]);
+
+  const onGridLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.max(1, Math.floor(e.nativeEvent.layout.width));
+    setGridWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
 
   const loadFirstPage = useCallback(
     async (opts?: { isRefresh?: boolean }) => {
@@ -265,59 +274,62 @@ export default function MeetingChatMediaScreen() {
           <Text style={styles.muted}>불러오는 중…</Text>
         </View>
       ) : (
-        <FlashList
-          data={rows}
-          keyExtractor={(item) => item.id}
-          numColumns={3}
-          style={styles.listBg}
-          contentContainerStyle={[styles.gridContent, rows.length === 0 && styles.gridContentEmpty]}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => void loadFirstPage({ isRefresh: true })}
-              tintColor={GinitTheme.colors.primary}
-              colors={[GinitTheme.colors.primary]}
-            />
-          }
-          onEndReached={() => {
-            void loadMore();
-          }}
-          onEndReachedThreshold={0.35}
-          ListEmptyComponent={
-            !busy ? (
-              <Text style={styles.emptyText}>이 채팅방에서 주고받은 사진이 아직 없어요.</Text>
-            ) : null
-          }
-          ListFooterComponent={
-            loadingMore && hasMore ? (
-              <View style={styles.footerBusy}>
-                <ActivityIndicator color={GinitTheme.colors.primary} />
-              </View>
-            ) : null
-          }
-          renderItem={({ item, index }) => {
-            const u = item.imageUrl?.trim() ?? '';
-            if (!u) return <View style={{ width: cell, height: 0 }} />;
-            const col = index % 3;
-            return (
-              <GinitPressable
-                onPress={() => {
-                  const ix = rows.findIndex((r) => r.id === item.id);
-                  setImageViewer({ index: ix >= 0 ? ix : 0 });
-                }}
-                style={[
-                  styles.thumbCell,
-                  { width: cell, height: cell },
-                  col < 2 ? { marginRight: GRID_GAP } : null,
-                  { marginBottom: GRID_GAP },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="사진 크게 보기">
-                <Image source={{ uri: u }} style={styles.thumbImg} contentFit="cover" />
-              </GinitPressable>
-            );
-          }}
-        />
+        <View style={styles.listWrap} onLayout={onGridLayout}>
+          <FlashList
+            key={`meeting-media-grid-${gridMetrics.columns}`}
+            data={rows}
+            keyExtractor={(item) => item.id}
+            numColumns={gridMetrics.columns}
+            style={styles.listBg}
+            contentContainerStyle={[styles.gridContent, rows.length === 0 && styles.gridContentEmpty]}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => void loadFirstPage({ isRefresh: true })}
+                tintColor={GinitTheme.colors.primary}
+                colors={[GinitTheme.colors.primary]}
+              />
+            }
+            onEndReached={() => {
+              void loadMore();
+            }}
+            onEndReachedThreshold={0.35}
+            ListEmptyComponent={
+              !busy ? (
+                <Text style={styles.emptyText}>이 채팅방에서 주고받은 사진이 아직 없어요.</Text>
+              ) : null
+            }
+            ListFooterComponent={
+              loadingMore && hasMore ? (
+                <View style={styles.footerBusy}>
+                  <ActivityIndicator color={GinitTheme.colors.primary} />
+                </View>
+              ) : null
+            }
+            renderItem={({ item, index }) => {
+              const u = item.imageUrl?.trim() ?? '';
+              if (!u) return <View style={{ width: gridMetrics.cell, height: 0 }} />;
+              const col = index % gridMetrics.columns;
+              return (
+                <GinitPressable
+                  onPress={() => {
+                    const ix = rows.findIndex((r) => r.id === item.id);
+                    setImageViewer({ index: ix >= 0 ? ix : 0 });
+                  }}
+                  style={[
+                    styles.thumbCell,
+                    { width: gridMetrics.cell, height: gridMetrics.cell },
+                    col < gridMetrics.columns - 1 ? { marginRight: GRID_GAP } : null,
+                    { marginBottom: GRID_GAP },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="사진 크게 보기">
+                  <Image source={{ uri: u }} style={styles.thumbImg} contentFit="cover" />
+                </GinitPressable>
+              );
+            }}
+          />
+        </View>
       )}
 
       <Modal visible={imageViewer !== null} transparent animationType="fade" onRequestClose={() => setImageViewer(null)}>
@@ -481,7 +493,8 @@ const styles = StyleSheet.create({
     backgroundColor: GinitTheme.colors.bg,
   },
   headerTitle: { fontSize: 17, fontWeight: '600', color: GinitTheme.colors.text, letterSpacing: -0.3 },
-  listBg: { backgroundColor: GinitTheme.colors.bg },
+  listWrap: { flex: 1 },
+  listBg: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   errorBanner: {
     marginHorizontal: 16,
     marginBottom: 8,

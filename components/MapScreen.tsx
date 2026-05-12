@@ -9,7 +9,7 @@ import * as Location from 'expo-location';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Dimensions, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, UIManager, View, useWindowDimensions, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent} from 'react-native';
+  ActivityIndicator, Alert, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, UIManager, View, useWindowDimensions, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import MapView from 'react-native-map-clustering';
 import { Marker, type Region } from 'react-native-maps';
@@ -98,8 +98,6 @@ import {
   syncMeetingsWithinRadiusFromSupabase,
 } from '@/src/lib/supabase-meetings-geo-search';
 import { getUserProfile, getUserProfilesForIds, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
-
-const { height: WINDOW_H } = Dimensions.get('window');
 
 // RN New Architecture(Fabric)에서는 setLayoutAnimationEnabledExperimental이 no-op이며
 // "currently a no-op in the New Architecture" 워닝을 발생시킵니다. (기능엔 영향 없음)
@@ -481,6 +479,7 @@ export default function MapScreen() {
   const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [sheetLayoutWidth, setSheetLayoutWidth] = useState(() => Math.max(1, Math.floor(windowWidth)));
   const { addCleanup } = useUnmountCleanup();
   const mapBootInit = useMemo(() => mapBootAnchorAndRegionFromInterestMemory(MAP_BOOT_POLICY_RADIUS_KM), []);
   // `react-native-map-clustering`의 ref 타입은 내부적으로 콜백 ref를 쓰므로 any로 둡니다.
@@ -590,6 +589,13 @@ export default function MapScreen() {
     opacity: sheetShown.value,
     transform: [{ translateY: (1 - sheetShown.value) * 10 }],
   }));
+
+  const carouselWidth = useMemo(() => Math.max(1, sheetLayoutWidth - 32), [sheetLayoutWidth]);
+
+  const onSheetLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.max(1, Math.floor(e.nativeEvent.layout.width));
+    setSheetLayoutWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
 
   const dragStartShown = useSharedValue(0);
   const sheetHandlePanGesture = useMemo(
@@ -1733,7 +1739,7 @@ export default function MapScreen() {
 
   const onSheetCarouselMomentumEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const stride = Dimensions.get('window').width - 32;
+      const stride = carouselWidth;
       const raw = Math.round(e.nativeEvent.contentOffset.x / Math.max(1, stride));
       const start = carouselDragStartIndexRef.current;
       const clamped = Math.max(0, Math.min(sheetMeetings.length - 1, Math.max(start - 1, Math.min(start + 1, raw))));
@@ -1748,7 +1754,7 @@ export default function MapScreen() {
       const m = sheetMeetings[clamped];
       if (m?.id) setSelectedMeetingId(m.id);
     },
-    [sheetMeetings],
+    [carouselWidth, sheetMeetings],
   );
 
   useEffect(() => {
@@ -1966,11 +1972,9 @@ export default function MapScreen() {
     [categories, selectedMeetingId, userCoords, moveMapToMeetingPin, genderByUserId],
   );
 
-  const carouselWidth = useMemo(() => Dimensions.get('window').width - 32, []);
-
   const rescanTop = useMemo(
-    () => Math.max(insets.top + 66, Math.round(WINDOW_H * 0.12) + 10),
-    [insets.top],
+    () => Math.max(insets.top + 66, Math.round(windowHeight * 0.12) + 10),
+    [insets.top, windowHeight],
   );
 
   return (
@@ -2292,7 +2296,7 @@ export default function MapScreen() {
               clusterColor={GinitTheme.colors.primary}
               clusterTextColor="#FFFFFF"
               minPoints={2}
-              radius={Dimensions.get('window').width * 0.08}
+              radius={windowWidth * 0.08}
               accessibilityLabel="모임 지도">
               {mapMarkerRenderItems.map((item) => {
                 if (item.kind === 'single') {
@@ -2593,7 +2597,8 @@ export default function MapScreen() {
           styles.sheet,
           { height: sheetPeekHeight, paddingBottom: Math.max(insets.bottom, 10) },
           sheetRevealStyle,
-        ]}>
+        ]}
+        onLayout={onSheetLayout}>
         <GestureDetector gesture={sheetHandlePanGesture}>
           <View style={styles.sheetHandleHit} accessibilityRole="adjustable" accessibilityLabel="모임 요약 패널">
             <View style={styles.sheetHandle} />
