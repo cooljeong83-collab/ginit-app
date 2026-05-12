@@ -2,7 +2,6 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -45,6 +44,7 @@ import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfile, getUserProfilesForIds, readShareActivityStatusEnabled } from '@/src/lib/user-profile';
@@ -261,7 +261,7 @@ function FriendListRow({
  * [친구] 탭 — 스냅형 프리즌스 스트립 + 디스코드 밀도 리스트.
  */
 export function FriendsHomeScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const searchInputRef = useRef<TextInput>(null);

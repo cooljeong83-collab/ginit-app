@@ -14,11 +14,13 @@ import { FcmPushRoutingBootstrap } from '@/components/FcmPushRoutingBootstrap';
 import { PendingPushNavigationFlush } from '@/components/PendingPushNavigationFlush';
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { ShareShortcutsWatermelonBootstrap } from '@/components/ShareShortcutsWatermelonBootstrap';
+import { ScreenTransitionOverlay } from '@/components/ui';
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { MeetingCategoriesProvider } from '@/src/context/MeetingCategoriesContext';
 import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
+import { ScreenTransitionProvider } from '@/src/context/ScreenTransitionContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 import { ensureChatMessageFtsReady } from '@/src/watermelon/fts';
 
@@ -62,27 +64,30 @@ export default function RootLayout() {
         <QueryClientPersistProvider>
           <MeetingCategoriesProvider>
             <UserSessionProvider>
-              <ShareShortcutsWatermelonBootstrap />
-              <InAppAlarmsProvider>
-                <DevMemoryDebug />
-                <BackgroundExecutionBootstrap />
-                <FcmMessagingBootstrap />
-                <FcmPushRoutingBootstrap />
-                <PendingPushNavigationFlush />
-                <PushNotificationBootstrap />
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: { backgroundColor: '#FFFFFF' },
-                    freezeOnBlur: true,
-                    animation: 'slide_from_right',
-                    gestureEnabled: true,
-                    fullScreenGestureEnabled: true,
-                    ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
-                  }}
-                />
-                <TransientBottomMessageHost />
-              </InAppAlarmsProvider>
+              <ScreenTransitionProvider>
+                <ShareShortcutsWatermelonBootstrap />
+                <InAppAlarmsProvider>
+                  <DevMemoryDebug />
+                  <BackgroundExecutionBootstrap />
+                  <FcmMessagingBootstrap />
+                  <FcmPushRoutingBootstrap />
+                  <PendingPushNavigationFlush />
+                  <PushNotificationBootstrap />
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: '#FFFFFF' },
+                      freezeOnBlur: true,
+                      animation: 'slide_from_right',
+                      gestureEnabled: true,
+                      fullScreenGestureEnabled: true,
+                      ...(Platform.OS === 'android' ? { animationMatchesGesture: true } : {}),
+                    }}
+                  />
+                  <TransientBottomMessageHost />
+                </InAppAlarmsProvider>
+                <ScreenTransitionOverlay />
+              </ScreenTransitionProvider>
             </UserSessionProvider>
           </MeetingCategoriesProvider>
         </QueryClientPersistProvider>

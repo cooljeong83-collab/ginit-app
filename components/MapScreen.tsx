@@ -6,7 +6,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Dimensions, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, UIManager, View, useWindowDimensions, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent} from 'react-native';
@@ -93,7 +93,10 @@ import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { centerRegionToNaverRegion } from '@/src/lib/naver-map-region';
 import { applyNearbySearchBiasFromMapNavigation } from '@/src/lib/nearby-search-bias';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { fetchMeetingsWithinRadiusFromSupabase } from '@/src/lib/supabase-meetings-geo-search';
+import {
+  fetchMeetingsWithinRadiusFromSupabase,
+  syncMeetingsWithinRadiusFromSupabase,
+} from '@/src/lib/supabase-meetings-geo-search';
 import { getUserProfile, getUserProfilesForIds, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
 
 const { height: WINDOW_H } = Dimensions.get('window');
@@ -474,7 +477,7 @@ function naverRegionToCenter(r: NaverRegion): Region {
 }
 
 export default function MapScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -647,6 +650,8 @@ export default function MapScreen() {
   const categories: Category[] = useMemo(() => (Array.isArray(categoriesRaw) ? categoriesRaw : []), [categoriesRaw]);
   const [hybridMeetings, setHybridMeetings] = useState<Meeting[]>([]);
   const [rpcMeetings, setRpcMeetings] = useState<Meeting[]>([]);
+  const rpcMeetingsRef = useRef<Meeting[]>([]);
+  const lastMapGeoQueryKeyRef = useRef<string>('');
   const [meetingsBooted, setMeetingsBooted] = useState(false);
   /** 반경 RPC(fetchMeetingsWithinRadiusFromSupabase) 진행 중 — 하이브리드 부트 후에도 시트 빈 카피 깜빡임 방지 */
   const [mapGeoMeetingsLoading, setMapGeoMeetingsLoading] = useState(false);
@@ -985,6 +990,10 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
+    rpcMeetingsRef.current = rpcMeetings;
+  }, [rpcMeetings]);
+
+  useEffect(() => {
     const unsub = subscribeMeetingsHybrid(
       (list) => {
         setHybridMeetings(list);
@@ -1016,14 +1025,25 @@ export default function MapScreen() {
             ? { latitude: mapGeoQueryRegion.latitude, longitude: mapGeoQueryRegion.longitude }
             : searchAnchor!;
         const radiusKm = mapGeoQueryRegion ? regionCoverageRadiusKm(mapGeoQueryRegion, 80) : mapRadiusKm;
-        const res = await fetchMeetingsWithinRadiusFromSupabase(
-          anchor.latitude,
-          anchor.longitude,
-          radiusKm,
-          selectedCategoryId,
-        );
+        const queryKey = [
+          anchor.latitude.toFixed(5),
+          anchor.longitude.toFixed(5),
+          radiusKm.toFixed(2),
+          selectedCategoryId ?? '',
+        ].join('|');
+        const forceFull = lastMapGeoQueryKeyRef.current !== queryKey;
+        const res = forceFull
+          ? await fetchMeetingsWithinRadiusFromSupabase(anchor.latitude, anchor.longitude, radiusKm, selectedCategoryId)
+          : await syncMeetingsWithinRadiusFromSupabase(
+              rpcMeetingsRef.current,
+              anchor.latitude,
+              anchor.longitude,
+              radiusKm,
+              selectedCategoryId,
+            );
         if (!alive) return;
         if (res.ok) {
+          lastMapGeoQueryKeyRef.current = queryKey;
           setRpcMeetings(res.meetings);
           setDriftTooFar(false);
         } else {

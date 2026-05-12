@@ -1,5 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useLocalSearchParams, useRouter } from 'expo-router';
+import {useLocalSearchParams } from 'expo-router';
 import { serverTimestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -11,6 +11,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 
@@ -20,7 +21,7 @@ function paramToString(v: string | string[] | undefined): string {
 }
 
 export default function ProfilePhoneVerifyOtpScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ verificationId?: string | string[]; phoneE164?: string | string[] }>();
   const verificationId = useMemo(() => paramToString(params.verificationId), [params.verificationId]);
   const phoneE164Param = useMemo(() => paramToString(params.phoneE164), [params.phoneE164]);

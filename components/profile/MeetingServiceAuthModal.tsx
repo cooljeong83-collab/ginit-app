@@ -1,5 +1,4 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useRouter } from 'expo-router';
 import { serverTimestamp, Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -19,6 +18,7 @@ import { addGooglePeopleScopesAndGetAccessToken, REDIRECT_STARTED, signInWithGoo
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { requestPhoneNumberHint } from '@/src/lib/phone-number-hint';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { syncMeetingComplianceToSupabase, syncMeetingDemographicsToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
   buildGooglePeopleDemographicsMetadataPatch,
@@ -60,7 +60,7 @@ export function MeetingServiceAuthModal({
   profilePk,
   onAfterComplianceSuccess,
 }: MeetingServiceAuthModalProps) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 

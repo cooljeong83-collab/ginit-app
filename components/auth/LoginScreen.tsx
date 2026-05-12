@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -39,6 +39,7 @@ import {
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import {
@@ -114,7 +115,7 @@ type LogoDest = { x: number; y: number; width: number; height: number };
 type LoginMemberStatus = 'unknown' | 'checking' | 'registered' | 'guest';
 
 export default function LoginScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ phone?: string | string[] }>();
   const initialPhone = useMemo(() => paramToString(params.phone), [params.phone]);
   const win = useWindowDimensions();

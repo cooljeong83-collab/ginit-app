@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import {useLocalSearchParams, useRouter } from 'expo-router';
+import {useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
     ensureUserProfile,
@@ -38,7 +39,7 @@ function paramToString(v: string | string[] | undefined): string {
 }
 
 export default function OtpVerifyScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ verificationId?: string | string[]; phoneE164?: string | string[] }>();
   const verificationId = useMemo(() => paramToString(params.verificationId), [params.verificationId]);
   const phoneE164 = useMemo(() => paramToString(params.phoneE164), [params.phoneE164]);

@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -27,9 +27,10 @@ import {
   type UserSettlementAccountsState,
 } from '@/src/lib/user-settlement-accounts';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 export default function SettlementAccountsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const [loading, setLoading] = useState(true);

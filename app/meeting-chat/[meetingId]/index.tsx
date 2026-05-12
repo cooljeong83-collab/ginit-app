@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
@@ -57,6 +57,7 @@ import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-
 import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
@@ -164,7 +165,7 @@ function splitSearchSnippet(full: string, needle: string): { head: string; mid: 
 }
 
 export default function MeetingChatRoomScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();

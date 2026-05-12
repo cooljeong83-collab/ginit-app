@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +18,7 @@ import {
   subscribeMeetingById,
   webGuestDisplayNameFromMeeting,
 } from '@/src/lib/meetings';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
@@ -42,7 +43,7 @@ function uniqueParticipantPids(m: Meeting | null | undefined): string[] {
 }
 
 export default function MeetingChatMembersScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()

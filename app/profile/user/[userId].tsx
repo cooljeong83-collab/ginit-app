@@ -1,5 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useLocalSearchParams, useRouter } from 'expo-router';
+import {useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,12 +10,13 @@ import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessa
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 const TOP_BAR_HEIGHT = 45;
 const MORE_MENU_GAP = 0;
 
 export default function UserProfileStackScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const [moreOpen, setMoreOpen] = useState(false);

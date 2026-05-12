@@ -1,5 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import {useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Keyboard, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View} from 'react-native';
@@ -32,6 +32,7 @@ import {
 } from '@/src/lib/friends-privacy-local';
 import { blockPeerServerSynced } from '@/src/lib/user-blocks';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getUserProfile, isUserProfileWithdrawn, WITHDRAWN_NICKNAME, type UserProfile } from '@/src/lib/user-profile';
 
 const MEMO_MAX_LEN = 2000;
@@ -77,7 +78,7 @@ function memoPreviewLine(memo: string): string {
 }
 
 export default function FriendSettingsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const editSheetScrollMaxH = useMemo(

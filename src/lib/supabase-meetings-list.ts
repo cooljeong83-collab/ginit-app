@@ -8,7 +8,7 @@ import type { Unsubscribe } from 'firebase/firestore';
 import { Timestamp } from 'firebase/firestore';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { mapFirestoreMeetingDoc, type Meeting } from '@/src/lib/meetings';
+import { mapFirestoreMeetingDoc, meetingParticipantCount, type Meeting } from '@/src/lib/meetings';
 import { supabase } from '@/src/lib/supabase';
 
 function parseCreatedAt(v: unknown): Timestamp | null {
@@ -18,6 +18,15 @@ function parseCreatedAt(v: unknown): Timestamp | null {
     return Number.isFinite(d.getTime()) ? Timestamp.fromDate(d) : null;
   }
   return null;
+}
+
+function timestampMs(v: Timestamp | null | undefined): number {
+  if (!v) return 0;
+  try {
+    return v.toMillis();
+  } catch {
+    return 0;
+  }
 }
 
 export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
@@ -51,11 +60,13 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
       sqlPlaceKey && !withSqlCategories.placeKey?.trim()
         ? { ...withSqlCategories, placeKey: sqlPlaceKey }
         : withSqlCategories;
-    if (!withPlaceKey.createdAt && row.created_at != null) {
-      const c = parseCreatedAt(row.created_at);
-      if (c) return { ...withPlaceKey, createdAt: c };
-    }
-    return withPlaceKey;
+    const createdAt = withPlaceKey.createdAt ?? parseCreatedAt(row.created_at);
+    const updatedAt = parseCreatedAt(row.updated_at);
+    return {
+      ...withPlaceKey,
+      ...(createdAt ? { createdAt } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    };
   }
 
   return {
@@ -96,10 +107,190 @@ export function mapSupabaseMeetingRow(row: Record<string, unknown>): Meeting {
     confirmedMovieChipId: typeof row.confirmed_movie_chip_id === 'string' ? row.confirmed_movie_chip_id : null,
     meetingConfig: null,
     placeKey: typeof row.place_key === 'string' && row.place_key.trim() ? row.place_key.trim() : null,
+    updatedAt: parseCreatedAt(row.updated_at),
   };
 }
 
 export const PUBLIC_MEETINGS_PAGE_SIZE = 10;
+
+export type MeetingChangeSummary = {
+  meetingId: string;
+  rowId: string;
+  updatedAtMs: number;
+  participantCount: number;
+  createdAtMs: number;
+};
+
+export type MeetingSummaryDiff = {
+  changedIds: string[];
+  deletedIds: string[];
+};
+
+function mapMeetingChangeSummaryRow(row: Record<string, unknown>): MeetingChangeSummary | null {
+  const meetingId = typeof row.meeting_id === 'string' ? row.meeting_id.trim() : '';
+  if (!meetingId) return null;
+  const rowId = typeof row.row_id === 'string' ? row.row_id.trim() : '';
+  const updatedAt = parseCreatedAt(row.updated_at);
+  const createdAt = parseCreatedAt(row.created_at);
+  const pc = row.participant_count;
+  return {
+    meetingId,
+    rowId,
+    updatedAtMs: timestampMs(updatedAt),
+    participantCount: typeof pc === 'number' && Number.isFinite(pc) ? Math.trunc(pc) : 0,
+    createdAtMs: timestampMs(createdAt),
+  };
+}
+
+function summaryFromMeeting(m: Meeting): MeetingChangeSummary {
+  return {
+    meetingId: m.id,
+    rowId: m.id,
+    updatedAtMs: timestampMs(m.updatedAt),
+    participantCount: meetingParticipantCount(m),
+    createdAtMs: timestampMs(m.createdAt),
+  };
+}
+
+export function diffMeetingSummaries(
+  cachedMeetings: readonly Meeting[],
+  remoteSummaries: readonly MeetingChangeSummary[],
+): MeetingSummaryDiff {
+  const remoteById = new Map(remoteSummaries.map((s) => [s.meetingId, s]));
+  const cachedById = new Map(cachedMeetings.map((m) => [m.id, summaryFromMeeting(m)]));
+  const changedIds: string[] = [];
+  const deletedIds: string[] = [];
+
+  for (const remote of remoteSummaries) {
+    const cached = cachedById.get(remote.meetingId);
+    if (!cached) {
+      changedIds.push(remote.meetingId);
+      continue;
+    }
+    if (cached.updatedAtMs !== remote.updatedAtMs || cached.participantCount !== remote.participantCount) {
+      changedIds.push(remote.meetingId);
+    }
+  }
+
+  for (const cached of cachedMeetings) {
+    if (!remoteById.has(cached.id)) deletedIds.push(cached.id);
+  }
+
+  return { changedIds, deletedIds };
+}
+
+export function mergeMeetingsBySummaries(
+  cachedMeetings: readonly Meeting[],
+  remoteSummaries: readonly MeetingChangeSummary[],
+  changedMeetings: readonly Meeting[],
+): Meeting[] {
+  const cachedById = new Map(cachedMeetings.map((m) => [m.id, m]));
+  const changedById = new Map(changedMeetings.map((m) => [m.id, m]));
+  const next: Meeting[] = [];
+  const seen = new Set<string>();
+
+  for (const summary of remoteSummaries) {
+    const m = changedById.get(summary.meetingId) ?? cachedById.get(summary.meetingId);
+    if (!m || seen.has(m.id)) continue;
+    seen.add(m.id);
+    next.push(m);
+  }
+
+  return next;
+}
+
+export function replaceMeetingsById(cachedMeetings: readonly Meeting[], changedMeetings: readonly Meeting[]): Meeting[] {
+  if (changedMeetings.length === 0) return [...cachedMeetings];
+  const changedById = new Map(changedMeetings.map((m) => [m.id, m]));
+  return cachedMeetings.map((m) => changedById.get(m.id) ?? m);
+}
+
+export async function fetchPublicMeetingChangeSummaries(
+  limit = 400,
+): Promise<{ ok: true; summaries: MeetingChangeSummary[] } | { ok: false; message: string }> {
+  const { data, error } = await supabase.rpc('list_public_meeting_change_summaries', {
+    p_limit: Math.max(1, Math.min(400, Math.trunc(limit))),
+  });
+  if (error) return { ok: false, message: error.message };
+  const summaries = ((data ?? []) as unknown[])
+    .map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? mapMeetingChangeSummaryRow(r as Record<string, unknown>) : null))
+    .filter((r): r is MeetingChangeSummary => Boolean(r));
+  return { ok: true, summaries };
+}
+
+export async function fetchMyMeetingChangeSummaries(
+  appUserId: string,
+): Promise<{ ok: true; summaries: MeetingChangeSummary[] } | { ok: false; message: string }> {
+  const uid = normalizeParticipantId(appUserId);
+  if (!uid) return { ok: true, summaries: [] };
+  const { data, error } = await supabase.rpc('list_my_meeting_change_summaries', {
+    p_app_user_id: uid,
+  });
+  if (error) return { ok: false, message: error.message };
+  const summaries = ((data ?? []) as unknown[])
+    .map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? mapMeetingChangeSummaryRow(r as Record<string, unknown>) : null))
+    .filter((r): r is MeetingChangeSummary => Boolean(r));
+  return { ok: true, summaries };
+}
+
+export async function fetchMeetingsForSyncByIds(
+  meetingIds: readonly string[],
+  viewerAppUserId?: string | null,
+): Promise<{ ok: true; meetings: Meeting[] } | { ok: false; message: string }> {
+  const ids = [...new Set(meetingIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return { ok: true, meetings: [] };
+  const { data, error } = await supabase.rpc('get_meetings_for_sync_by_ids', {
+    p_meeting_ids: ids,
+    p_viewer_app_user_id: viewerAppUserId?.trim() || null,
+  });
+  if (error) return { ok: false, message: error.message };
+  const rows = (data ?? []) as unknown[];
+  const meetings = rows
+    .map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : null))
+    .filter((r): r is Record<string, unknown> => Boolean(r))
+    .map((r) => mapSupabaseMeetingRow(r));
+  return { ok: true, meetings };
+}
+
+export async function syncPublicMeetingsFromSummaries(
+  cachedMeetings: readonly Meeting[],
+  opts?: { limit?: number },
+): Promise<{ ok: true; meetings: Meeting[]; changed: boolean } | { ok: false; message: string }> {
+  const summariesRes = await fetchPublicMeetingChangeSummaries(opts?.limit ?? 400);
+  if (!summariesRes.ok) return summariesRes;
+  const summaries = summariesRes.summaries;
+  const { changedIds, deletedIds } = diffMeetingSummaries(cachedMeetings, summaries);
+  if (changedIds.length === 0 && deletedIds.length === 0) {
+    return { ok: true, meetings: [...cachedMeetings], changed: false };
+  }
+  const changedRes = await fetchMeetingsForSyncByIds(changedIds);
+  if (!changedRes.ok) return changedRes;
+  return {
+    ok: true,
+    meetings: mergeMeetingsBySummaries(cachedMeetings, summaries, changedRes.meetings),
+    changed: true,
+  };
+}
+
+export async function syncMyMeetingsFromSummaries(
+  cachedMeetings: readonly Meeting[],
+  appUserId: string,
+): Promise<{ ok: true; meetings: Meeting[]; changed: boolean } | { ok: false; message: string }> {
+  const summariesRes = await fetchMyMeetingChangeSummaries(appUserId);
+  if (!summariesRes.ok) return summariesRes;
+  const summaries = summariesRes.summaries;
+  const { changedIds, deletedIds } = diffMeetingSummaries(cachedMeetings, summaries);
+  if (changedIds.length === 0 && deletedIds.length === 0) {
+    return { ok: true, meetings: [...cachedMeetings], changed: false };
+  }
+  const changedRes = await fetchMeetingsForSyncByIds(changedIds, appUserId);
+  if (!changedRes.ok) return changedRes;
+  return {
+    ok: true,
+    meetings: mergeMeetingsBySummaries(cachedMeetings, summaries, changedRes.meetings),
+    changed: true,
+  };
+}
 
 export async function fetchPublicMeetingsFromSupabaseOnce(): Promise<
   { ok: true; meetings: Meeting[] } | { ok: false; message: string }
@@ -188,13 +379,34 @@ export function subscribeMeetingsFromSupabase(
   onError?: (message: string) => void,
 ): Unsubscribe {
   let cancelled = false;
+  let lastMeetings: Meeting[] = [];
 
-  const pull = () => {
+  const pullFull = () => {
     if (cancelled) return;
     void fetchPublicMeetingsFromSupabaseOnce().then((res) => {
       if (cancelled) return;
-      if (res.ok) onData(res.meetings);
+      if (res.ok) {
+        lastMeetings = res.meetings;
+        onData(res.meetings);
+      }
       else onError?.(res.message);
+    });
+  };
+
+  const syncChanged = () => {
+    if (cancelled) return;
+    if (lastMeetings.length === 0) {
+      pullFull();
+      return;
+    }
+    void syncPublicMeetingsFromSummaries(lastMeetings).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        lastMeetings = res.meetings;
+        onData(res.meetings);
+      } else {
+        onError?.(res.message);
+      }
     });
   };
 
@@ -205,19 +417,19 @@ export function subscribeMeetingsFromSupabase(
   const channel = supabase
     .channel(`realtime:public-meetings:${Date.now()}:${Math.random().toString(36).slice(2)}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings' }, () => {
-      pull();
+      syncChanged();
     })
     .subscribe((status) => {
       if (status === 'CHANNEL_ERROR') {
         onError?.('Supabase Realtime 연결 오류');
         if (!fallbackPollId) {
           // Realtime 없이도 새로고침이 되도록 30초 폴백 폴링.
-          fallbackPollId = setInterval(pull, 30_000);
+          fallbackPollId = setInterval(syncChanged, 30_000);
         }
       }
     });
 
-  pull();
+  pullFull();
 
   return () => {
     cancelled = true;

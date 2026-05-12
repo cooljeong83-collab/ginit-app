@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +17,7 @@ import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-me
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 import { resolveConfirmedPlaceCoordsForMeeting } from '@/src/lib/meeting-confirmed-place-coords';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
 import { notifyMeetingParticipantsOfArrivalVerifiedFireAndForget } from '@/src/lib/meeting-arrival-verify-push';
 import {
@@ -55,7 +56,7 @@ function isMeetingHostLocal(sessionUserId: string | null, createdBy: string | nu
 }
 
 export default function ArrivalVerifyMeetingScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const queryClient = useQueryClient();
   const { userId } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();

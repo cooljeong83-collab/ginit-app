@@ -1,10 +1,11 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { GinitTabBar } from '@/components/ginit';
 import { ScreenTransitionSkeleton } from '@/components/ui';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { ensureUserProfile } from '@/src/lib/user-profile';
 
 /*
@@ -19,7 +20,7 @@ import { ensureUserProfile } from '@/src/lib/user-profile';
  */
 
 export default function TabsLayout() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId, authProfile, isHydrated } = useUserSession();
   const hasSession = Boolean(userId?.trim() || authProfile?.firebaseUid?.trim());
   const hasSessionRef = useRef(hasSession);

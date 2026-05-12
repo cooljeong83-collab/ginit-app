@@ -1,7 +1,79 @@
-import { mapSupabaseMeetingRow } from '@/src/lib/supabase-meetings-list';
+import {
+  diffMeetingSummaries,
+  fetchMeetingsForSyncByIds,
+  mapSupabaseMeetingRow,
+  mergeMeetingsBySummaries,
+  type MeetingChangeSummary,
+} from '@/src/lib/supabase-meetings-list';
 import type { Meeting } from '@/src/lib/meetings';
 import { supabase } from '@/src/lib/supabase';
 import { haversineDistanceMeters } from '@/src/lib/geo-distance';
+
+function summaryTimestampMs(v: unknown): number {
+  if (typeof v !== 'string') return 0;
+  const d = new Date(v);
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function mapGeoSummaryRow(row: Record<string, unknown>): MeetingChangeSummary | null {
+  const meetingId = typeof row.meeting_id === 'string' ? row.meeting_id.trim() : '';
+  if (!meetingId) return null;
+  const pc = row.participant_count;
+  return {
+    meetingId,
+    rowId: typeof row.row_id === 'string' ? row.row_id.trim() : '',
+    updatedAtMs: summaryTimestampMs(row.updated_at),
+    participantCount: typeof pc === 'number' && Number.isFinite(pc) ? Math.trunc(pc) : 0,
+    createdAtMs: summaryTimestampMs(row.created_at),
+  };
+}
+
+export async function fetchMeetingGeoChangeSummariesFromSupabase(
+  latitude: number,
+  longitude: number,
+  radiusKm: number,
+  categoryId: string | null,
+): Promise<{ ok: true; summaries: MeetingChangeSummary[] } | { ok: false; message: string }> {
+  const rpc = await supabase.rpc('list_public_meeting_geo_change_summaries', {
+    p_lat: latitude,
+    p_lng: longitude,
+    p_radius_km: radiusKm,
+    p_category_id: categoryId?.trim() ? categoryId.trim() : null,
+  });
+  if (rpc.error) return { ok: false, message: rpc.error.message };
+  const summaries = ((rpc.data ?? []) as unknown[])
+    .map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? mapGeoSummaryRow(r as Record<string, unknown>) : null))
+    .filter((r): r is MeetingChangeSummary => Boolean(r));
+  return { ok: true, summaries };
+}
+
+export async function syncMeetingsWithinRadiusFromSupabase(
+  cachedMeetings: readonly Meeting[],
+  latitude: number,
+  longitude: number,
+  radiusKm: number,
+  categoryId: string | null,
+): Promise<{ ok: true; meetings: Meeting[]; changed: boolean } | { ok: false; message: string }> {
+  if (cachedMeetings.length === 0) {
+    const full = await fetchMeetingsWithinRadiusFromSupabase(latitude, longitude, radiusKm, categoryId);
+    return full.ok ? { ok: true, meetings: full.meetings, changed: true } : full;
+  }
+  const summariesRes = await fetchMeetingGeoChangeSummariesFromSupabase(latitude, longitude, radiusKm, categoryId);
+  if (!summariesRes.ok) return summariesRes;
+  const summaries = summariesRes.summaries;
+  const { changedIds, deletedIds } = diffMeetingSummaries(cachedMeetings, summaries);
+  if (changedIds.length === 0 && deletedIds.length === 0) {
+    return { ok: true, meetings: [...cachedMeetings], changed: false };
+  }
+  const changedRes = await fetchMeetingsForSyncByIds(changedIds);
+  if (!changedRes.ok) return changedRes;
+  return {
+    ok: true,
+    meetings: mergeMeetingsBySummaries(cachedMeetings, summaries, changedRes.meetings),
+    changed: true,
+  };
+}
 
 export async function fetchMeetingsWithinRadiusFromSupabase(
   latitude: number,

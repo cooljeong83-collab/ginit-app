@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
@@ -21,6 +21,7 @@ import {
   setMeetingChatNotifyEnabledForUser,
 } from '@/src/lib/meeting-chat-notify-preference';
 import { meetingParticipantCount, subscribeMeetingById, type Meeting } from '@/src/lib/meetings';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
@@ -77,7 +78,7 @@ function ChevronRow({
 }
 
 export default function MeetingChatSettingsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()

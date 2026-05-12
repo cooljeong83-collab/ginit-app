@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
@@ -22,6 +22,7 @@ import {
     subscribeSocialChatMessages,
     type SocialChatMessage,
 } from '@/src/lib/social-chat-rooms';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -50,7 +51,7 @@ const GRID_GAP = 4;
 const H_PAD = 12;
 
 export default function SocialChatMediaScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();

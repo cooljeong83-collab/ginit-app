@@ -1,4 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,7 +9,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { safeRouterBack } from '@/src/lib/router-safe';
 
 export default function ArrivalVerifyMeetingScreenWeb() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ meetingId: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()

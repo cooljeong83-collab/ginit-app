@@ -2,7 +2,6 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Notifications from 'expo-notifications';
 import { useQueryClient } from '@tanstack/react-query';
-import {useRouter } from 'expo-router';
 import {
   createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, } from 'react';
 import {
@@ -26,6 +25,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import {
   fetchFriendsAcceptedList,
   fetchFriendsPendingInbox,
@@ -143,7 +143,7 @@ export function useInAppAlarms(): InAppAlarmsContextValue {
 
 export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { userId } = useUserSession();

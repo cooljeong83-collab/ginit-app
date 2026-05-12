@@ -4,7 +4,7 @@ import {useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -41,6 +41,7 @@ import {
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { isProfileRegisterInfoParamOn, PROFILE_REGISTER_INFO_QUERY } from '@/src/lib/profile-register-info';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { ensureGinitFcmNotifeeChannel } from '@/src/lib/fcm-notifee-display';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
 import {
@@ -123,7 +124,7 @@ function formatDndTimeLabel(min: number): string {
 type DndTimePick = { kind: 'start' | 'end'; draft: Date };
 
 export default function ProfileAppSettingsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { registerInfo: registerInfoParam } = useLocalSearchParams<{ registerInfo?: string | string[] }>();
   const { userId, authProfile, signOutSession } = useUserSession();

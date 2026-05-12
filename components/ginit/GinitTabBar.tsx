@@ -4,7 +4,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
 import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { usePathname, useRouter } from 'expo-router';
+import { usePathname } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Alert, Platform, StyleSheet, Text, View} from 'react-native';
@@ -48,6 +48,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import { getUserProfile, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
 
@@ -87,7 +88,7 @@ function iconFor(routeName: string, focused: boolean): SymbolicIconName {
  * 하단 탭 + 모임 탭 전용 모임 생성 FAB(딥퍼플 그라데이션·로고·상승·바닥 그림자 — 생성 화면 에이전트 FAB와 동일 패턴).
  */
 export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const pathname = usePathname();
   const { userId } = useUserSession();
   const { chatTabUnreadTotal, friendsTabPendingRequestBadge } = useInAppAlarms();

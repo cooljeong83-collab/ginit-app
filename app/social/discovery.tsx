@@ -1,6 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,6 +11,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-notify';
 import { sendGinitRequest } from '@/src/lib/friends';
 import { friendsAllowRecommendationsStorageKey, loadFriendBoolPref } from '@/src/lib/friends-privacy-local';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 const DEMO: DiscoveryCardProfile[] = [
   {
@@ -35,7 +35,7 @@ const DEMO: DiscoveryCardProfile[] = [
 ];
 
 export default function SocialDiscoveryScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId } = useUserSession();
   const me = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
   const [deck, setDeck] = useState(DEMO);

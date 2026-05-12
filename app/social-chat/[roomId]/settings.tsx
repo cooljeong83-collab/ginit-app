@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
@@ -13,6 +13,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getSocialChatImageUploadQuality, setSocialChatImageUploadQuality } from '@/src/lib/social-chat-image-quality-preference';
 import { getSocialChatNotifyEnabledForUser, setSocialChatNotifyEnabledForUser } from '@/src/lib/social-chat-notify-preference';
 import { parsePeerFromSocialRoomId } from '@/src/lib/social-chat-rooms';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -70,7 +71,7 @@ function profileFor(map: Map<string, UserProfile>, appUserId: string): UserProfi
 }
 
 export default function SocialChatSettingsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string }>();
   const roomId = Array.isArray(params.roomId)
     ? (params.roomId[0] ?? '').trim()

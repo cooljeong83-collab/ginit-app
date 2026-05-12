@@ -1,7 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, StyleSheet, Text, View} from 'react-native';
 
@@ -17,6 +16,7 @@ import {
     type FriendRelationStatusRow,
 } from '@/src/lib/friends';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
   WITHDRAWN_NICKNAME,
@@ -44,7 +44,7 @@ export type MeetingPeerProfileModalProps = {
  * 모임 상세의 참여자 프로필 모달과 동일한 동작을 유지합니다.
  */
 export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: MeetingPeerProfileModalProps) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId } = useUserSession();
   const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined);
   const [friendRelation, setFriendRelation] = useState<FriendRelationStatusRow>({

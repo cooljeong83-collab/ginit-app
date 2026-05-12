@@ -1,7 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -27,6 +26,7 @@ import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBod
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeUserId } from '@/src/lib/app-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import {
   effectiveGLevel,
   effectiveGTrust,
@@ -41,7 +41,7 @@ import { ensureUserProfile, updateUserProfile, type UserProfile } from '@/src/li
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function ProfileTab() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId, authProfile } = useUserSession();
   const scrollRef = useRef<ScrollView>(null);
   const profilePk = useMemo(() => {
@@ -183,6 +183,7 @@ export default function ProfileTab() {
             if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
             await refreshProfile();
+            setProfileBodyRefreshTrigger((n) => n + 1);
           } catch (e) {
             const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
             Alert.alert('업로드 실패', msg);
@@ -233,6 +234,7 @@ export default function ProfileTab() {
           });
           setPhotoUrl(url);
           await refreshProfile();
+          setProfileBodyRefreshTrigger((n) => n + 1);
         } catch (e) {
           const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
           Alert.alert('업로드 실패', msg);
@@ -313,7 +315,6 @@ export default function ProfileTab() {
             <ScreenTransitionSkeleton variant="profile" rows={5} />
           ) : profilePk ? (
             <UserProfilePublicBody
-              key={photoUrl || 'no-photo'}
               targetUserId={profilePk}
               layout="tab"
               onPressMyAvatar={() => void onPickHeaderProfilePhoto()}

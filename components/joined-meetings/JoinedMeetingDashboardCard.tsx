@@ -1,6 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {BlurView } from 'expo-blur';
-import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native'
 
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
@@ -9,6 +8,7 @@ import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur }
 import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import type { Meeting } from '@/src/lib/meetings';
 import { getMeetingRecruitmentPhase } from '@/src/lib/meetings';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 type Props = {
   meeting: Meeting;
@@ -19,7 +19,7 @@ type Props = {
  * 프로필 탭 — 홈 피드와 같은 톤의 풀블리드 이미지 + 글래스 레이어 카드
  */
 export function JoinedMeetingDashboardCard({ meeting, showPhasePill = true }: Props) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const phase = getMeetingRecruitmentPhase(meeting);
   const phaseLabel =
     phase === 'confirmed' ? '확정' : phase === 'full' ? '모집 완료' : '모집중';

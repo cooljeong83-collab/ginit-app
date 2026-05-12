@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getSettlementBankById } from '@/src/lib/korean-banks-settlement';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import {
   getUserSettlementAccountById,
   loadUserSettlementAccounts,
@@ -20,7 +21,7 @@ import {
 } from '@/src/lib/user-settlement-accounts';
 
 export default function SettlementAccountEditScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const params = useLocalSearchParams<{ id?: string | string[] }>();

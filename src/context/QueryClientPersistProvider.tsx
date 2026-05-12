@@ -59,6 +59,7 @@ export function QueryClientPersistProvider({ children }: { children: ReactNode }
             defaultShouldDehydrateQuery(query) &&
             Array.isArray(query.queryKey) &&
             ((query.queryKey[0] === 'meetings' && query.queryKey[1] === 'feed') ||
+              (query.queryKey[0] === 'meetings' && query.queryKey[1] === 'my-feed') ||
               (query.queryKey[0] === 'meeting-chat' && query.queryKey[1] === 'messages') ||
               query.queryKey[0] === 'chat_rooms' ||
               (query.queryKey[0] === 'meeting' &&

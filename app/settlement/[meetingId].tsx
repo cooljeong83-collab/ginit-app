@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -38,6 +38,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import {
@@ -289,7 +290,7 @@ function sameSettlementStringList(a: readonly string[], b: readonly string[]): b
 }
 
 export default function SettlementMeetingScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { userId, authProfile } = useUserSession();

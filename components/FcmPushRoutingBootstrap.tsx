@@ -4,7 +4,7 @@ import {
   onNotificationOpenedApp,
 } from '@react-native-firebase/messaging';
 import notifee, { EventType } from '@notifee/react-native';
-import { usePathname, useRouter } from 'expo-router';
+import { usePathname } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
@@ -18,6 +18,7 @@ import {
   shouldDeferPushOpenNavigation,
 } from '@/src/lib/pending-push-navigation';
 import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 function notifeePayloadToData(
   data: { [key: string]: string | number | object } | undefined,
@@ -64,7 +65,7 @@ function hasActionableFcmOpenData(data: Record<string, unknown> | undefined): bo
  * - `notifee.getInitialNotification` / `onForegroundEvent`(PRESS)
  */
 export function FcmPushRoutingBootstrap() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const pathname = usePathname();
   const { userId, isHydrated } = useUserSession();
   const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =

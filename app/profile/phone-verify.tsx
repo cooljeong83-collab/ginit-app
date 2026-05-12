@@ -1,5 +1,4 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,6 +9,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getUserProfile, isUserPhoneVerified, type UserProfile } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 
@@ -18,7 +18,7 @@ function digitsOnly(s: string): string {
 }
 
 export default function ProfilePhoneVerifyEntryScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId, authProfile } = useUserSession();
   const [phoneDigits, setPhoneDigits] = useState('');
   const [busy, setBusy] = useState(false);

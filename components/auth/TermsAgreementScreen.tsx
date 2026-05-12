@@ -1,12 +1,13 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import {useLocalSearchParams, useRouter } from 'expo-router';
+import {useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { consumePendingConsentAction } from '@/src/lib/terms-consent-flow';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
@@ -31,7 +32,7 @@ function termBody(key: TermKey): string {
 }
 
 export default function TermsAgreementScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ next?: string | string[] }>();
   const next = useMemo(() => {
     const raw = params.next;

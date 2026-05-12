@@ -200,6 +200,8 @@ export type Meeting = {
   minParticipants?: number | null;
   /** Firestore 서버 타임스탬프 */
   createdAt?: Timestamp | null;
+  /** Supabase `meetings.updated_at` 기반 증분 동기화 기준 시각 */
+  updatedAt?: Timestamp | null;
   createdBy?: string | null;
   imageUrl?: string | null;
   categoryId?: string | null;
@@ -254,6 +256,8 @@ export type Meeting = {
   lifecycleStatus?: MeetingLifecycleStatus | null;
   settlementInfo?: MeetingSettlementInfo | null;
   locationData?: MeetingLocationData | null;
+  /** Supabase/Naver 장소 정규화 키 */
+  placeKey?: string | null;
 };
 
 /**

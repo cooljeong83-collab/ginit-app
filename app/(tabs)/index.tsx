@@ -3,7 +3,6 @@ import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
@@ -45,9 +44,11 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
+import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { Category } from '@/src/lib/categories';
 import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
@@ -108,7 +109,6 @@ import {
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
-import { fetchMyMeetingsForFeedFromSupabase } from '@/src/lib/supabase-meetings-list';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
   ensureUserProfile,
@@ -177,7 +177,7 @@ function sortHomeEndedMeetingsLatestFirst(meetings: Meeting[]): Meeting[] {
 }
 
 export default function FeedScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId, authProfile } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -233,7 +233,7 @@ export default function FeedScreen() {
   const {
     meetings,
     listError,
-    refetch: refetchMeetingsFeed,
+    syncChangedMeetings: syncChangedMeetingsFeed,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -241,62 +241,27 @@ export default function FeedScreen() {
     isInitialListLoading,
   } = useMeetingsFeedInfiniteQuery({ enabled: feedLocationReady });
 
-  const [myMeetings, setMyMeetings] = useState<Meeting[]>([]);
-  const loadMyMeetings = useCallback(async () => {
-    const uid = userId?.trim() ?? '';
-    if (!feedLocationReady || !uid) {
-      setMyMeetings([]);
-      return;
-    }
-    if (meetingListSource() !== 'supabase') {
-      setMyMeetings([]);
-      return;
-    }
-    const res = await fetchMyMeetingsForFeedFromSupabase(uid);
-    if (!res.ok) {
-      setMyMeetings([]);
-      return;
-    }
-    setMyMeetings(res.meetings);
-  }, [feedLocationReady, userId]);
-  const shouldLoadMyMeetings = useMemo(() => {
-    if (!feedLocationReady) return false;
-    if (!userId?.trim()) return false;
-    return meetingListSource() === 'supabase';
-  }, [feedLocationReady, userId]);
-  useEffect(() => {
-    let cancelled = false;
-    if (!shouldLoadMyMeetings) {
-      setMyMeetings([]);
-      return;
-    }
-    void (async () => {
-      const res = await fetchMyMeetingsForFeedFromSupabase(userId!.trim());
-      if (cancelled) return;
-      if (!res.ok) {
-        setMyMeetings([]);
-        return;
-      }
-      setMyMeetings(res.meetings);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [shouldLoadMyMeetings, userId]);
+  const {
+    meetings: myMeetings,
+    syncChangedMeetings: syncChangedMyMeetings,
+  } = useMyMeetingsFeedSync({
+    enabled: feedLocationReady,
+    userId,
+  });
 
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('ginit_home_meetings_refetch', () => {
       if (!feedLocationReady) return;
-      void Promise.all([refetchMeetingsFeed(), loadMyMeetings()]);
+      void Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
     });
     return () => sub.remove();
-  }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]);
+  }, [feedLocationReady, syncChangedMeetingsFeed, syncChangedMyMeetings]);
 
   useSyncOnScreenFocus(
     useCallback(async () => {
       if (!feedLocationReady) return;
-      await Promise.all([refetchMeetingsFeed(), loadMyMeetings()]);
-    }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]),
+      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+    }, [feedLocationReady, syncChangedMeetingsFeed, syncChangedMyMeetings]),
     [feedLocationReady],
     { enabled: feedLocationReady },
   );
@@ -1327,11 +1292,11 @@ export default function FeedScreen() {
     if (!feedLocationReady) return;
     setRefreshing(true);
     try {
-      await Promise.all([refetchMeetingsFeed(), loadMyMeetings()]);
+      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
     } finally {
       setRefreshing(false);
     }
-  }, [feedLocationReady, refetchMeetingsFeed, loadMyMeetings]);
+  }, [feedLocationReady, syncChangedMeetingsFeed, syncChangedMyMeetings]);
 
   useEffect(() => {
     if (!feedLocationReady) return;

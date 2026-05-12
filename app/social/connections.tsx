@@ -1,11 +1,9 @@
-import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { FollowManager } from '@/components/social/FollowManager';
 import { useUserSession } from '@/src/context/UserSessionContext';
 
 export default function SocialConnectionsScreen() {
-  const router = useRouter();
   const { userId } = useUserSession();
 
   return (

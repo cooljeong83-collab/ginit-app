@@ -1,6 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +16,7 @@ import {
   replaceMeetingAreaNotifyMatrix,
 } from '@/src/lib/meeting-area-notify-rules';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { supabase } from '@/src/lib/supabase';
 
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
@@ -55,7 +55,7 @@ function matrixFromRefs(regionOnRef: { current: Set<string> }, catOnRef: { curre
 }
 
 export default function MeetingNotifySettingsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const navigation = useNavigation();
   const { userId, authProfile } = useUserSession();
   const profilePk = useMemo(() => {

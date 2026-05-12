@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 
@@ -11,6 +11,7 @@ import {
   type PendingDirectSharePayload,
 } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 function normalizeTargetType(v: unknown): DirectShareTargetType | null {
   const raw = typeof v === 'string' ? v.trim() : '';
@@ -25,7 +26,7 @@ function normalizeTargetId(v: unknown): string {
 }
 
 export default function DirectShareEntryScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{
     targetType?: string | string[];
     targetId?: string | string[];

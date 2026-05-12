@@ -9,7 +9,7 @@ import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/n
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -55,6 +55,7 @@ import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
 import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
 import { formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
@@ -427,7 +428,7 @@ function isMeetingHost(sessionUserId: string | null, createdBy: string | null | 
 }
 
 export default function MeetingDetailScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();

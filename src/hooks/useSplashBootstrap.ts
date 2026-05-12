@@ -1,9 +1,9 @@
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { notifySplashReplacedToTabs } from '@/src/lib/splash-to-tabs-navigation';
 import { normalizeUserId, readStoredUserId } from '@/src/lib/app-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getFirebaseAuth } from '@/src/lib/firebase';
 import { isPhoneRegistered } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -35,7 +35,7 @@ async function tryEnsureProfileDuringBoot(pk: string): Promise<void> {
  * 온보딩은 스플래시 경로에 포함하지 않습니다(회원가입 완료 후에만 표시).
  */
 export function useSplashBootstrap() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { isHydrated, setUserId, clearStoredUserSession, setAuthProfile } = useUserSession();
   const [statusLabel, setStatusLabel] = useState('시작하는 중…');
   const [hintMessage, setHintMessage] = useState<string | null>(null);

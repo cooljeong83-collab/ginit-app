@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
     Animated, Dimensions, type ListRenderItem, type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet, Text, View} from 'react-native';
@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { writeAppIntroComplete } from '@/src/lib/onboarding-storage';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -123,7 +124,7 @@ function SlidePage({
 }
 
 export default function OnboardingScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ next?: string | string[]; phone?: string | string[] }>();
   const nextRaw = paramToString(params.next);
   const next = nextRaw === 'tabs' ? 'tabs' : 'login';

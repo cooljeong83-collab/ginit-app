@@ -2,7 +2,6 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import {useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator, Alert, Platform, ScrollView, Switch, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
@@ -29,6 +28,7 @@ import {
 } from '@/src/lib/profile-photo-cover';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
     ensureUserProfile,
@@ -51,7 +51,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 
 export default function ProfileEditScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId, authProfile, signOutSession } = useUserSession();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();

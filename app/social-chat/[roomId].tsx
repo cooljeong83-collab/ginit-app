@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useIsFocused, useNavigation } from '@react-navigation/native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Modal, StyleSheet, Text, TextInput, View} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
@@ -24,6 +24,7 @@ import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { SocialChatFetchedMessagesPage, SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import {
   ensureSocialChatRoomDoc,
@@ -45,7 +46,7 @@ import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/off
 import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 
 export default function SocialChatRoomScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   const queryClient = useQueryClient();

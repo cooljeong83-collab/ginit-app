@@ -3,7 +3,7 @@ import {useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { FlashList } from '@shopify/flash-list';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, InteractionManager, Keyboard, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -26,6 +26,7 @@ import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meetin
 import { setCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 const PLACE_PAGE = 5;
 
@@ -58,7 +59,7 @@ function PlaceSearchScreenInner({
   voteRowId,
   createAutopilot,
 }: PlaceSearchScreenProps) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const searchInputRef = useRef<TextInput>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   /** 첫 프레임은 BlurView 없이 정적 레이어로 그려 전환 직후 프레임 드랍을 줄입니다. */

@@ -1,5 +1,5 @@
 import * as Device from 'expo-device';
-import { usePathname, useRouter } from 'expo-router';
+import { usePathname } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
@@ -21,6 +21,7 @@ import {
   markAlarmReadFromPushData,
   navigateFromPushData,
 } from '@/src/lib/push-open-navigation';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 Notifications.setNotificationHandler({
   handleNotification: async (n) => {
@@ -74,7 +75,7 @@ Notifications.setNotificationHandler({
  * 푸시 권한·Expo 토큰 등록, 알림 탭 시 모임 상세(또는 삭제 시 홈)로 이동.
  */
 export function PushNotificationBootstrap() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const pathname = usePathname();
   const { userId, isHydrated } = useUserSession();
   const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =

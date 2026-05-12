@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     AccessibilityInfo, ActivityIndicator, Alert, Animated, findNodeHandle, InteractionManager, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, type TextInput as TextInputRefType, UIManager, View} from 'react-native';
@@ -20,6 +20,7 @@ import { useSignUpFlow } from '@/src/hooks/useSignUpFlow';
 import { hintKoreanImeForFocusedInput } from '@/src/lib/ko-ime-hint';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-up-input-sanitize';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
@@ -32,7 +33,7 @@ function paramToString(v: string | string[] | undefined): string {
 }
 
 export default function SignUpScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const params = useLocalSearchParams<{ phone?: string | string[]; consented?: string | string[] }>();
   const initialPhone = useMemo(() => paramToString(params.phone), [params.phone]);
   const consented = useMemo(() => {

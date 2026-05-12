@@ -1,5 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useRouter } from 'expo-router';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ function digitsOnly(s: string): string {
 }
 
 export default function PhoneEntryScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const [dial, setDial] = useState('+82');
   const [countryOpen, setCountryOpen] = useState(false);
   const [phoneDigits, setPhoneDigits] = useState('');

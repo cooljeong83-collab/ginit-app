@@ -5,6 +5,7 @@ export {
   type ScreenTransitionSkeletonProps,
   type ScreenTransitionSkeletonVariant,
 } from './ScreenTransitionSkeleton';
+export { ScreenTransitionOverlay } from './ScreenTransitionOverlay';
 export { KeyboardAwareScreenScroll, type KeyboardAwareScreenScrollProps } from './KeyboardAwareScreenScroll';
 export { GinitSymbolicIcon, type SymbolicIconName } from './GinitSymbolicIcon';
 

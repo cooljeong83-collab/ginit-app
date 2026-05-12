@@ -1,6 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import {useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,10 +13,11 @@ import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { isConfirmedMeetingPastListEndWindow, type Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function ProfileMeetingHistoryScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId } = useUserSession();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);

@@ -10,7 +10,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import {useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
   useCallback, useEffect, useMemo, useRef, useState, type ComponentProps
@@ -159,6 +159,7 @@ import { fetchTitleWeatherMood } from '@/src/lib/meeting-title-weather';
 import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, type PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import {
   getUserProfile,
   isMeetingServiceComplianceComplete,
@@ -254,7 +255,7 @@ function waitAgentStep1FabUnlocked(isAlive?: () => boolean): Promise<void> {
 }
 
 export default function CreateDetailsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();

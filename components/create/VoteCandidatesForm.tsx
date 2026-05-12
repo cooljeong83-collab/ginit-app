@@ -8,7 +8,6 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
   forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, } from 'react';
@@ -89,6 +88,7 @@ import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import {
   buildDefaultPlaceSearchQuery,
   buildPlaceSuggestedSearchQueries,
@@ -384,7 +384,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     },
     [voiceRecognizing, voiceTarget],
   );
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const timeManageSheetBottomLift = Platform.OS === 'android' ? Math.max(0, insets.bottom) : 0;
   const seedQ = seedPlaceQuery.trim();

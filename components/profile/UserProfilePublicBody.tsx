@@ -2,7 +2,6 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as Haptics from 'expo-haptics';
 import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Modal, Platform, StyleSheet, Text, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -43,6 +42,7 @@ import {
 } from '@/src/lib/profile-photo-history';
 import { PROFILE_META_PHOTO_COVER, parseProfilePhotoCover } from '@/src/lib/profile-photo-cover';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
   ensureUserProfile,
@@ -88,7 +88,7 @@ export function UserProfilePublicBody({
   /** 부모(탭 등)에서 당겨서 새로고침 시 증가시키면 `getUserProfile`을 다시 호출합니다. */
   refreshTrigger?: number;
 }) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const insets = useSafeAreaInsets();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { userId } = useUserSession();
@@ -102,6 +102,7 @@ export function UserProfilePublicBody({
   const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined);
   const [history, setHistory] = useState<ProfilePhotoHistoryItem[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const lastProfileTargetRef = useRef<string>('');
 
   const [profileImageViewer, setProfileImageViewer] = useState<{ index: number } | null>(null);
   const [profilePhotoDeleteBusy, setProfilePhotoDeleteBusy] = useState(false);
@@ -114,11 +115,14 @@ export function UserProfilePublicBody({
 
   useEffect(() => {
     if (!targetNorm) {
+      lastProfileTargetRef.current = '';
       setProfile(null);
       return;
     }
     let alive = true;
-    setProfile(undefined);
+    const targetChanged = lastProfileTargetRef.current !== targetNorm;
+    lastProfileTargetRef.current = targetNorm;
+    if (targetChanged) setProfile(undefined);
     void getUserProfile(targetNorm).then((p) => {
       if (!alive) return;
       setProfile(p ?? null);

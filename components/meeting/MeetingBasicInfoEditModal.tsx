@@ -10,9 +10,9 @@ import type { Meeting, PublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import {
   DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGenderToHostSnapshot, parsePublicMeetingDetailsConfig, updateMeetingBasicFieldsByHost, } from '@/src/lib/meetings';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { type ElementRef, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
@@ -127,7 +127,7 @@ export function MeetingBasicInfoEditModal({
   onClose,
   onSaved,
 }: MeetingBasicInfoEditModalProps) {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   /** 시트 상·하에 남길 최소 여백(px) — 노치·홈 인디케이터 제외 후 최대 높이 */

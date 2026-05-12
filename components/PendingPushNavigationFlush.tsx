@@ -1,4 +1,4 @@
-import { usePathname, useRouter, useSegments } from 'expo-router';
+import { usePathname, useSegments } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 import { DeviceEventEmitter, Platform } from 'react-native';
 
@@ -11,6 +11,7 @@ import {
   peekPendingPushOpenPayload,
 } from '@/src/lib/pending-push-navigation';
 import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { GINIT_SPLASH_REPLACED_TO_TABS } from '@/src/lib/splash-to-tabs-navigation';
 
 /**
@@ -20,7 +21,7 @@ import { GINIT_SPLASH_REPLACED_TO_TABS } from '@/src/lib/splash-to-tabs-navigati
  * - `getInitialNotification` 비동기보다 탭이 먼저 그려지면 pending 이 늦게 들어오므로, 전환 직후 몇 번 재시도합니다.
  */
 export function PendingPushNavigationFlush() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const pathname = usePathname();
   const segments = useSegments();
   const { userId, isHydrated } = useUserSession();

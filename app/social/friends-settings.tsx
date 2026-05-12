@@ -1,7 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,6 +9,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import {
     friendsAllowRecommendationsStorageKey,
     friendsAutoAddContactsStorageKey,
@@ -27,7 +27,7 @@ function RowSep() {
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 
 export default function FriendsSettingsScreen() {
-  const router = useRouter();
+  const router = useTransitionRouter();
   const { userId } = useUserSession();
   const me = userId?.trim() ? normalizeParticipantId(userId.trim()) : '';
 
