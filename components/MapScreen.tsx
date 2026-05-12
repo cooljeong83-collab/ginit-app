@@ -115,6 +115,12 @@ const SHEET_VELOCITY_CLOSE = 520;
 const MY_LOCATION_CENTER_EXTRA_BOTTOM_PX = 84;
 /** 내 위치 버튼 탭 시 지도 가시 줌 — 중심 기준 반경 2km */
 const MY_LOCATION_BUTTON_VIEW_RADIUS_KM = 1;
+/** 화면상 이 거리 안에 모임 핀이 모이면 숫자 클러스터로 합칩니다. */
+const MAP_MEETING_CLUSTER_RADIUS_PX = 68;
+const MAP_USER_LOCATION_Z_INDEX = 500;
+const MAP_MEETING_CLUSTER_Z_INDEX = 2100;
+/** 네이버 위치 오버레이 기본 globalZIndex(300000)보다 높게 둡니다. */
+const NAVER_MEETING_CLUSTER_GLOBAL_Z_INDEX = 310000;
 
 function formatSchedulePretty(m: Pick<Meeting, 'scheduleDate' | 'scheduleTime'>): string | null {
   const d = (m.scheduleDate ?? '').trim();
@@ -225,7 +231,16 @@ function meetingCreatedAtMillis(m: Meeting): number {
 
 type MapMarkerRenderItem =
   | { kind: 'single'; meeting: Meeting; key: string }
-  | { kind: 'stack'; meetings: Meeting[]; count: number; key: string; lead: Meeting };
+  | { kind: 'stack'; meetings: Meeting[]; count: number; key: string; lead: Meeting }
+  | { kind: 'cluster'; meetings: Meeting[]; count: number; key: string; lead: Meeting; coordinate: LatLng };
+
+type MapMarkerPoint = {
+  meetings: Meeting[];
+  count: number;
+  key: string;
+  lead: Meeting;
+  coordinate: LatLng;
+};
 
 function regionCenteredOnUserRadius(lat: number, lng: number, radiusKm: number): Region {
   const radiusM = radiusKm * 1000;
@@ -278,6 +293,111 @@ function meetingInBounds(m: Meeting, r: Region): boolean {
   return lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax;
 }
 
+function mapMarkerPointToRenderItem(point: MapMarkerPoint): MapMarkerRenderItem {
+  if (point.meetings.length === 1) {
+    return { kind: 'single', meeting: point.lead, key: point.key };
+  }
+  return {
+    kind: 'stack',
+    meetings: point.meetings,
+    count: point.count,
+    key: point.key,
+    lead: point.lead,
+  };
+}
+
+function mapMarkerPointScreenPosition(
+  point: MapMarkerPoint,
+  region: Region,
+  width: number,
+  height: number,
+): { x: number; y: number } | null {
+  if (width <= 0 || height <= 0 || region.latitudeDelta <= 0 || region.longitudeDelta <= 0) return null;
+  const b = regionToBounds(region);
+  const x = ((point.coordinate.longitude - b.lngMin) / region.longitudeDelta) * width;
+  const y = ((b.latMax - point.coordinate.latitude) / region.latitudeDelta) * height;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function buildClusteredMapMarkerRenderItems(
+  points: readonly MapMarkerPoint[],
+  region: Region,
+  width: number,
+  height: number,
+  enabled: boolean,
+): MapMarkerRenderItem[] {
+  if (!enabled || points.length < 2 || width <= 0 || height <= 0) {
+    return points.map(mapMarkerPointToRenderItem);
+  }
+
+  const projected = points.map((point) => ({
+    point,
+    screen: mapMarkerPointScreenPosition(point, region, width, height),
+  }));
+  const used = new Set<number>();
+  const out: MapMarkerRenderItem[] = [];
+
+  for (let i = 0; i < projected.length; i += 1) {
+    if (used.has(i)) continue;
+    const base = projected[i];
+    if (!base?.screen) {
+      used.add(i);
+      out.push(mapMarkerPointToRenderItem(base.point));
+      continue;
+    }
+
+    const members = [base.point];
+    used.add(i);
+    let centerX = base.screen.x;
+    let centerY = base.screen.y;
+
+    for (let j = i + 1; j < projected.length; j += 1) {
+      if (used.has(j)) continue;
+      const candidate = projected[j];
+      if (!candidate?.screen) continue;
+      const dx = candidate.screen.x - centerX;
+      const dy = candidate.screen.y - centerY;
+      if (Math.hypot(dx, dy) > MAP_MEETING_CLUSTER_RADIUS_PX) continue;
+      members.push(candidate.point);
+      used.add(j);
+      centerX = (centerX * (members.length - 1) + candidate.screen.x) / members.length;
+      centerY = (centerY * (members.length - 1) + candidate.screen.y) / members.length;
+    }
+
+    if (members.length === 1) {
+      out.push(mapMarkerPointToRenderItem(base.point));
+      continue;
+    }
+
+    const meetings = members
+      .flatMap((member) => member.meetings)
+      .sort((a, b) => meetingCreatedAtMillis(a) - meetingCreatedAtMillis(b));
+    const lead = meetings[0] ?? members[0]!.lead;
+    const count = members.reduce((sum, member) => sum + member.count, 0);
+    const coordinate = members.reduce(
+      (acc, member) => {
+        acc.latitude += member.coordinate.latitude * member.count;
+        acc.longitude += member.coordinate.longitude * member.count;
+        return acc;
+      },
+      { latitude: 0, longitude: 0 },
+    );
+    coordinate.latitude /= count;
+    coordinate.longitude /= count;
+    out.push({
+      kind: 'cluster',
+      meetings,
+      count,
+      key: `cluster:${members.map((member) => member.lead.id).join(',')}:${count}`,
+      lead,
+      coordinate,
+    });
+  }
+
+  return out;
+}
+
 /** 지도 가시 박스를 원형 RPC에 넣기 위한 반경(km): 중심~코너, 상한 `maxKm` */
 function regionCoverageRadiusKm(r: Region, maxKm: number): number {
   const center: LatLng = { latitude: r.latitude, longitude: r.longitude };
@@ -319,7 +439,7 @@ export default function MapScreen() {
   const router = useRouter();
   const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { addCleanup } = useUnmountCleanup();
   const mapBootInit = useMemo(() => mapBootAnchorAndRegionFromInterestMemory(MAP_BOOT_POLICY_RADIUS_KM), []);
   // `react-native-map-clustering`의 ref 타입은 내부적으로 콜백 ref를 쓰므로 any로 둡니다.
@@ -938,8 +1058,8 @@ export default function MapScreen() {
    * 동일 좌표 다건: 지도에는 숫자 마커 1개만 두고, 좌표는 공유(나선 분리 없음).
    * 바텀시트·카메라 추적은 `createdAt`이 가장 이른 모임을 대표로 맞춥니다.
    */
-  const mapMarkerCoordsByMeetingId = useMemo(() => {
-    const out = new Map<string, LatLng>();
+  const mapMarkerPoints = useMemo((): MapMarkerPoint[] => {
+    const points: MapMarkerPoint[] = [];
     const groups = groupMeetingsByCoordinateOverlap(meetingsOnMap);
     for (const group of groups.values()) {
       const sorted = [...group].sort((a, b) => meetingCreatedAtMillis(a) - meetingCreatedAtMillis(b));
@@ -947,31 +1067,47 @@ export default function MapScreen() {
       if (!base) continue;
       const lat = base.latitude as number;
       const lng = base.longitude as number;
-      for (const m of sorted) {
-        out.set(m.id, { latitude: lat, longitude: lng });
+      const key = sorted.length === 1 ? base.id : `stack:${meetingCoordinateKey(lat, lng)}`;
+      points.push({
+        meetings: sorted,
+        count: sorted.length,
+        key,
+        lead: base,
+        coordinate: { latitude: lat, longitude: lng },
+      });
+    }
+    return points;
+  }, [meetingsOnMap]);
+
+  const mapMarkerCoordsByMeetingId = useMemo(() => {
+    const out = new Map<string, LatLng>();
+    for (const point of mapMarkerPoints) {
+      for (const m of point.meetings) {
+        out.set(m.id, point.coordinate);
       }
     }
     return out;
-  }, [meetingsOnMap]);
+  }, [mapMarkerPoints]);
 
-  const mapMarkerRenderItems = useMemo((): MapMarkerRenderItem[] => {
-    const groups = groupMeetingsByCoordinateOverlap(meetingsOnMap);
-    const items: MapMarkerRenderItem[] = [];
-    for (const group of groups.values()) {
-      const sorted = [...group].sort((a, b) => meetingCreatedAtMillis(a) - meetingCreatedAtMillis(b));
-      const first = sorted[0];
-      if (!first) continue;
-      if (sorted.length === 1) {
-        items.push({ kind: 'single', meeting: first, key: first.id });
-      } else {
-        const lat = first.latitude as number;
-        const lng = first.longitude as number;
-        const key = `stack:${meetingCoordinateKey(lat, lng)}`;
-        items.push({ kind: 'stack', meetings: sorted, count: sorted.length, key, lead: first });
-      }
-    }
-    return items;
-  }, [meetingsOnMap]);
+  const mapMarkerClusterRegion = pendingRegion ?? mapGeoQueryRegion ?? lastCompleteRegionRef.current ?? mapBootInit.region;
+
+  const mapMarkerRenderItems = useMemo(
+    (): MapMarkerRenderItem[] =>
+      buildClusteredMapMarkerRenderItems(
+        mapMarkerPoints,
+        mapMarkerClusterRegion,
+        windowWidth,
+        windowHeight,
+        clusteringEnabled,
+      ),
+    [
+      mapMarkerPoints,
+      mapMarkerClusterRegion,
+      windowWidth,
+      windowHeight,
+      clusteringEnabled,
+    ],
+  );
 
   // (겹침(spider) 확장 기능 제거됨)
 
@@ -1870,6 +2006,30 @@ export default function MapScreen() {
                     </NaverMapMarkerOverlay>
                   );
                 }
+                if (item.kind === 'cluster') {
+                  const clusterSelected = item.meetings.some((x) => x.id === selectedMeetingId);
+                  return (
+                    <NaverMapMarkerOverlay
+                      key={item.key}
+                      latitude={item.coordinate.latitude}
+                      longitude={item.coordinate.longitude}
+                      width={52}
+                      height={52}
+                      anchor={{ x: 0.5, y: 0.5 }}
+                      zIndex={clusterSelected ? MAP_MEETING_CLUSTER_Z_INDEX + 100 : MAP_MEETING_CLUSTER_Z_INDEX}
+                      globalZIndex={NAVER_MEETING_CLUSTER_GLOBAL_Z_INDEX}
+                      onTap={() => onPeopleMarkerPress(item.lead)}>
+                      <View
+                        pointerEvents="none"
+                        collapsable={false}
+                        style={[styles.mapStackCountBubble, styles.mapClusterCountBubble]}>
+                        <Text style={[styles.mapStackCountBubbleText, styles.mapClusterCountBubbleText]}>
+                          {item.count}
+                        </Text>
+                      </View>
+                    </NaverMapMarkerOverlay>
+                  );
+                }
                 const lead = item.lead;
                 const stackSelected = item.meetings.some((x) => x.id === selectedMeetingId);
                 const c = mapMarkerCoordsByMeetingId.get(lead.id) ?? {
@@ -1965,9 +2125,9 @@ export default function MapScreen() {
               onPanDrag={onUserMapGesture}
               onRegionChangeComplete={onRegionChangeComplete}
               onPress={onMapPress}
-              // 클러스터 탭 시 spiderfier(방사형 펼침)
+              // 모임 수 클러스터는 직접 렌더링하므로 기본 클러스터링은 비활성화합니다.
               onClusterPress={onClusterPress}
-              clusteringEnabled={clusteringEnabled}
+              clusteringEnabled={false}
               spiralEnabled={false}
               clusterColor={GinitTheme.colors.primary}
               clusterTextColor="#FFFFFF"
@@ -2012,6 +2172,30 @@ export default function MapScreen() {
                         />
                         <Text style={styles.mapCategoryEmojiMarkerText} allowFontScaling={false}>
                           {categoryEmojiForMeeting(m, categories)}
+                        </Text>
+                      </View>
+                    </Marker>
+                  );
+                }
+                if (item.kind === 'cluster') {
+                  const clusterSelected = item.meetings.some((x) => x.id === selectedMeetingId);
+                  return (
+                    <Marker
+                      key={item.key}
+                      identifier={item.key}
+                      coordinate={item.coordinate}
+                      tracksViewChanges={false}
+                      anchor={{ x: 0.5, y: 0.5 }}
+                      onPress={(e) => {
+                        (e as any)?.stopPropagation?.();
+                        onPeopleMarkerPress(item.lead);
+                      }}
+                      zIndex={clusterSelected ? MAP_MEETING_CLUSTER_Z_INDEX + 100 : MAP_MEETING_CLUSTER_Z_INDEX}>
+                      <View
+                        style={[styles.mapStackCountBubble, styles.mapClusterCountBubble]}
+                        collapsable={false}>
+                        <Text style={[styles.mapStackCountBubbleText, styles.mapClusterCountBubbleText]}>
+                          {item.count}
                         </Text>
                       </View>
                     </Marker>
@@ -2066,6 +2250,7 @@ export default function MapScreen() {
                   anchor={{ x: 0.5, y: 0.5 }}
                   // react-native-map-clustering에서 내 위치가 클러스터에 포함되지 않도록
                   cluster={false}
+                  zIndex={MAP_USER_LOCATION_Z_INDEX}
                   tracksViewChanges={false}>
                   <View pointerEvents="none" collapsable={false} style={styles.userMarkerWrap}>
                     <View style={styles.userAccuracyHalo} />
@@ -3486,6 +3671,17 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     overflow: 'hidden',
   },
+  mapClusterCountBubble: {
+    minWidth: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: GinitTheme.colors.primary,
+    shadowColor: 'rgba(15, 23, 42, 0.24)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 8,
+  },
   mapStackCountBubbleEmoji: {
     fontSize: 18,
     lineHeight: 22,
@@ -3496,6 +3692,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
     zIndex: 1,
+  },
+  mapClusterCountBubbleText: {
+    fontSize: 18,
+    fontWeight: '700',
   },
 
 });
