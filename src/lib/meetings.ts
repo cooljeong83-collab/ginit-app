@@ -3051,7 +3051,7 @@ export function isConfirmedMeetingPastListEndWindow(
   if (m.scheduleConfirmed !== true) return false;
   const startMs = meetingPrimaryStartMs(m);
   if (startMs == null || !Number.isFinite(startMs)) return false;
-  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 3);
+  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 6);
   const windowMs = Math.max(1, hours) * 60 * 60 * 1000;
   return nowMs >= startMs + windowMs;
 }
@@ -3066,7 +3066,7 @@ export function isConfirmedMeetingPastMyMeetingsRetentionWindow(
   if (m.scheduleConfirmed !== true) return false;
   const startMs = meetingPrimaryStartMs(m);
   if (startMs == null || !Number.isFinite(startMs)) return false;
-  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 3);
+  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 6);
   const endMs = startMs + Math.max(1, hours) * 60 * 60 * 1000;
   return nowMs >= endMs + 24 * 60 * 60 * 1000;
 }

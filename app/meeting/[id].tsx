@@ -39,7 +39,7 @@ import {
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
-import { KeyboardAwareScreenScroll, ScreenShell } from '@/components/ui';
+import { KeyboardAwareScreenScroll, ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitStyles } from '@/constants/GinitStyles';
@@ -2520,10 +2520,7 @@ export default function MeetingDetailScreen() {
         </View>
 
         {loading ? (
-          <View style={styles.centerFill}>
-            <ActivityIndicator color={GinitTheme.colors.primary} />
-            <Text style={styles.muted}>불러오는 중…</Text>
-          </View>
+          <ScreenTransitionSkeleton variant="detail" rows={4} />
         ) : null}
 
         {loadError ? (

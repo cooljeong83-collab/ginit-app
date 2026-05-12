@@ -38,7 +38,7 @@ import {
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
-import { ScreenShell } from '@/components/ui';
+import { ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
@@ -67,6 +67,7 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
+import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import {
   FEED_REGISTERED_REGIONS_MAX,
   loadActiveFeedRegion,
@@ -102,7 +103,6 @@ import {
   buildMeetingTopNoticeTitleLeft,
   getMeetingRecruitmentPhase,
   isConfirmedMeetingPastListEndWindow,
-  isConfirmedMeetingPastMyMeetingsRetentionWindow,
   shouldShowConfirmedScheduleNoticeBar,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
@@ -156,13 +156,33 @@ function homeMeetingTopTabIndex(t: HomeMeetingTopTab): number {
   return 2;
 }
 
+function homeMeetingOngoingWindowMs(): number {
+  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 6);
+  return Math.max(1, hours) * 60 * 60 * 1000;
+}
+
+function isEndedForHomeEndedTab(m: Meeting, nowMs: number, windowMs: number): boolean {
+  const startMs = meetingScheduleStartMs(m);
+  if (startMs == null || !Number.isFinite(startMs)) return false;
+  return startMs < nowMs - windowMs;
+}
+
+function sortHomeEndedMeetingsLatestFirst(meetings: Meeting[]): Meeting[] {
+  return [...meetings].sort((a, b) => {
+    const tb = meetingScheduleStartMs(b) ?? Number.NEGATIVE_INFINITY;
+    const ta = meetingScheduleStartMs(a) ?? Number.NEGATIVE_INFINITY;
+    if (tb !== ta) return tb - ta;
+    return a.title.localeCompare(b.title, 'ko');
+  });
+}
+
 export default function FeedScreen() {
   const router = useRouter();
   const { userId, authProfile } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
-  /** 탐색·내 모임 칩 — 우측 카테고리 드롭다운(maxWidth 150)과 폭 기준을 맞춤 */
+  /** 탐색·참여중 칩 — 우측 카테고리 드롭다운(maxWidth 150)과 폭 기준을 맞춤 */
   const tabChipMaxWidth = 150;
   /** 전역 모임 없음 안내를 리스트 영역 세로 중앙에 두기 위한 최소 높이 */
   const globalEmptyMinHeight = useMemo(
@@ -195,7 +215,7 @@ export default function FeedScreen() {
   const [homeNoticesModalOpen, setHomeNoticesModalOpen] = useState(false);
   const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
   const [draftFeedSearch, setDraftFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
-  /** 홈 상단 탭: 공개 탐색 · 내모임(공개+비공개) · 비공개만 */
+  /** 홈 상단 탭: 공개 탐색 · 참여중(공개+비공개) · 종료 */
   const [homeTab, setHomeTab] = useState<HomeMeetingTopTab>('explore');
   const tabPagerRef = useRef<ScrollView | null>(null);
   const homeTabRef = useRef(homeTab);
@@ -607,12 +627,10 @@ export default function FeedScreen() {
   }, [myMeetings]);
 
   const joinedFilteredMeetings = useMemo(() => {
-    // 내 모임 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
-    const now = Date.now();
+    // 참여중·종료 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
     const base = myTabsMeetings.filter((m) => {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
       if (!id) return false;
-      if (isConfirmedMeetingPastMyMeetingsRetentionWindow(m, now)) return false;
       if (rpcMyMeetingIdSet?.has(id)) return true;
       return isUserJoinedMeeting(m, userId);
     });
@@ -630,22 +648,32 @@ export default function FeedScreen() {
     feedBarVisibleCategoryIds,
     categories,
     appliedFeedSearch,
-    appPoliciesVersion,
   ]);
 
+  const activeJoinedFilteredMeetings = useMemo(() => {
+    void appPoliciesVersion;
+    void homeArrivalNoticeUiTick;
+    const now = Date.now();
+    const windowMs = homeMeetingOngoingWindowMs();
+    return joinedFilteredMeetings.filter((m) => !isEndedForHomeEndedTab(m, now, windowMs));
+  }, [joinedFilteredMeetings, appPoliciesVersion, homeArrivalNoticeUiTick]);
+
+  const endedJoinedFilteredMeetings = useMemo(() => {
+    void appPoliciesVersion;
+    void homeArrivalNoticeUiTick;
+    const now = Date.now();
+    const windowMs = homeMeetingOngoingWindowMs();
+    return joinedFilteredMeetings.filter((m) => isEndedForHomeEndedTab(m, now, windowMs));
+  }, [joinedFilteredMeetings, appPoliciesVersion, homeArrivalNoticeUiTick]);
+
   const sortedJoinedMeetings = useMemo(
-    () => sortMeetingsForFeed(joinedFilteredMeetings, listSortMode, feedCoords),
-    [joinedFilteredMeetings, listSortMode, feedCoords],
+    () => sortMeetingsForFeed(activeJoinedFilteredMeetings, listSortMode, feedCoords),
+    [activeJoinedFilteredMeetings, listSortMode, feedCoords],
   );
 
-  const privateJoinedFilteredMeetings = useMemo(
-    () => joinedFilteredMeetings.filter((m) => m.isPublic === false),
-    [joinedFilteredMeetings],
-  );
-
-  const sortedPrivateMeetings = useMemo(
-    () => sortMeetingsForFeed(privateJoinedFilteredMeetings, listSortMode, feedCoords),
-    [privateJoinedFilteredMeetings, listSortMode, feedCoords],
+  const sortedEndedMeetings = useMemo(
+    () => sortHomeEndedMeetingsLatestFirst(endedJoinedFilteredMeetings),
+    [endedJoinedFilteredMeetings],
   );
 
   const settlementBannerMeetings = useMemo(() => {
@@ -1614,9 +1642,9 @@ export default function FeedScreen() {
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: homeTab === 'my' }}
-            accessibilityLabel="내 모임">
+            accessibilityLabel="참여중 모임">
             <Text style={[styles.homeTopChipLabel, homeTab === 'my' && styles.homeTopChipLabelActive]} numberOfLines={1}>
-              내모임
+              참여중
             </Text>
           </GinitPressable>
           <GinitPressable
@@ -1629,9 +1657,9 @@ export default function FeedScreen() {
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: homeTab === 'private' }}
-            accessibilityLabel="비공개 모임">
+            accessibilityLabel="종료 모임">
             <Text style={[styles.homeTopChipLabel, homeTab === 'private' && styles.homeTopChipLabelActive]} numberOfLines={1}>
-              비공개
+              종료
             </Text>
           </GinitPressable>
         </View>
@@ -1656,6 +1684,11 @@ export default function FeedScreen() {
 
   const tabListAlerts = (tab: HomeMeetingTopTab): ReactElement => (
     <>
+      {(tab === 'explore' && (!feedLocationReady || (isInitialListLoading && exploreFeedMeetings.length === 0))) ||
+      (tab !== 'explore' && !feedLocationReady) ? (
+        <ScreenTransitionSkeleton variant="list" rows={6} />
+      ) : null}
+
       {listError ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorTitle}>목록을 불러오지 못했어요</Text>
@@ -1705,11 +1738,11 @@ export default function FeedScreen() {
       !isInitialListLoading &&
       !listError &&
       tab === 'private' &&
-      sortedPrivateMeetings.length === 0
+      sortedEndedMeetings.length === 0
         ? feedListEmptyCentered(
-            'lock-closed-outline',
-            '참여중인 비공개 모임이 없습니다.',
-            '+ 버튼으로 첫 모임을 만들어 보세요.',
+            'checkmark-done-outline',
+            '종료된 모임이 없습니다.',
+            '모임 시간이 지난 참여 모임이 여기에 표시됩니다.',
           )
         : null}
 
@@ -1756,7 +1789,7 @@ export default function FeedScreen() {
                   ? exploreFeedMeetings
                   : tab === 'my'
                     ? sortedJoinedMeetings
-                    : sortedPrivateMeetings;
+                    : sortedEndedMeetings;
               return (
                 <View key={tab} style={[styles.tabPage, { width: windowWidth }]}>
                   <FlashList
@@ -1771,7 +1804,7 @@ export default function FeedScreen() {
                       feedBarVisibleCategoryIds,
                       appliedFeedSearch,
                       exploreLen: exploreFeedMeetings.length,
-                      privateLen: sortedPrivateMeetings.length,
+                      endedLen: sortedEndedMeetings.length,
                       feedLocationReady,
                       registeredRegionsLen: registeredRegions.length,
                       exploreActiveRegionNorm,
@@ -1927,7 +1960,7 @@ export default function FeedScreen() {
                 <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
                   <Text style={styles.modalRowLabel}>모집중만 보기</Text>
                   <Text style={styles.mapCategoryBarModalSubHint} numberOfLines={2}>
-                    탐색 탭에서만 정원 미달·일정 미확정 모임만 표시합니다. 내 모임·비공개 탭에는 적용되지 않아요.
+                    탐색 탭에서만 정원 미달·일정 미확정 모임만 표시합니다. 참여중·종료 탭에는 적용되지 않아요.
                   </Text>
                 </View>
                 <View style={styles.mapCategoryBarModalCheckCol}>

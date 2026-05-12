@@ -5,12 +5,12 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+  Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
 import { GinitButton } from '@/components/ginit';
-import { ScreenShell } from '@/components/ui';
+import { ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
@@ -337,16 +337,27 @@ export function FriendsHomeScreen() {
     }
   }, [me]);
 
+  const loadMeProfile = useCallback(async () => {
+    if (!me.trim()) {
+      setMeProfile(null);
+      return;
+    }
+    const p = await getUserProfile(me);
+    setMeProfile(p);
+  }, [me]);
+
   useFocusEffect(
     useCallback(() => {
       if (!me) {
         setLoading(false);
+        setMeProfile(null);
         setHiddenPeerIds(new Set());
         setBlockedPeerIds(new Set());
         setFavoritePeerKeys(new Set());
         return;
       }
       void reload();
+      void loadMeProfile();
       void (async () => {
         try {
           const [h, b, al, fav] = await Promise.all([
@@ -363,7 +374,7 @@ export function FriendsHomeScreen() {
           /* ignore */
         }
       })();
-    }, [me, reload]),
+    }, [me, reload, loadMeProfile]),
   );
 
   useEffect(() => {
@@ -381,19 +392,14 @@ export function FriendsHomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (!me.trim()) {
-      setMeProfile(null);
-      return;
-    }
     let alive = true;
-    void getUserProfile(me).then((p) => {
-      if (!alive) return;
-      setMeProfile(p);
+    void loadMeProfile().catch(() => {
+      if (alive) setMeProfile(null);
     });
     return () => {
       alive = false;
     };
-  }, [me]);
+  }, [loadMeProfile]);
 
   const persistHidden = useCallback(
     async (next: Set<string>) => {
@@ -409,8 +415,8 @@ export function FriendsHomeScreen() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void reload();
-  }, [reload]);
+    void Promise.all([reload(), loadMeProfile()]).finally(() => setRefreshing(false));
+  }, [reload, loadMeProfile]);
 
   const enrichedFriends = useMemo((): EnrichedFriend[] => {
     const out: EnrichedFriend[] = [];
@@ -663,7 +669,7 @@ export function FriendsHomeScreen() {
           accessibilityLabel="내 프로필">
           <View style={s.rowAvatarWrap}>
             {myPhoto ? (
-              <Image source={{ uri: myPhoto }} style={s.rowAvatarImg} contentFit="cover" />
+              <Image key={myPhoto} source={{ uri: myPhoto }} style={s.rowAvatarImg} contentFit="cover" cachePolicy="none" />
             ) : (
               <View style={s.rowAvatarFallback}>
                 <Text style={s.rowAvatarLetter}>{myInitial}</Text>
@@ -859,9 +865,7 @@ export function FriendsHomeScreen() {
     <ScreenShell padded={false} style={s.root}>
       <SafeAreaView style={s.safe} edges={['top']}>
         {loading && accepted.length === 0 && pending.length === 0 && pendingOut.length === 0 ? (
-          <View style={s.loadingOverlay}>
-            <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
-          </View>
+          <ScreenTransitionSkeleton variant="list" rows={7} />
         ) : null}
 
         {err ? (

@@ -10,7 +10,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 
 import { ChatMeetingListRow } from '@/components/chat/ChatMeetingListRow';
-import { ScreenShell } from '@/components/ui';
+import { ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
@@ -737,13 +737,13 @@ export default function ChatTab() {
   }, [showMeetingsFeedFooterSpinner, refreshing]);
 
   const socialListFooter = useMemo(() => {
-    if (!isFetchingMoreSocialRooms && !(socialRoomsInitialLoading && socialRooms.length === 0)) return null;
+    if (!isFetchingMoreSocialRooms) return null;
     return (
       <View style={styles.listFooterSpinner} accessibilityLabel="채팅방 목록 로딩">
         <ActivityIndicator color={GinitTheme.colors.primary} />
       </View>
     );
-  }, [isFetchingMoreSocialRooms, socialRoomsInitialLoading, socialRooms.length]);
+  }, [isFetchingMoreSocialRooms]);
 
   const chatListEmptyCentered = useCallback(
     (
@@ -858,10 +858,11 @@ export default function ChatTab() {
   const chatTabListAlerts = (kind: ChatKind): ReactElement => (
     <>
       {kind === 'gather' && gatherListStillLoading ? (
-        <View style={styles.centerRow}>
-          <ActivityIndicator color={GinitTheme.colors.primary} />
-          <Text style={styles.muted}>불러오는 중…</Text>
-        </View>
+        <ScreenTransitionSkeleton variant="chat" rows={6} />
+      ) : null}
+
+      {kind === 'social' && socialRoomsInitialLoading && socialRooms.length === 0 ? (
+        <ScreenTransitionSkeleton variant="chat" rows={6} />
       ) : null}
 
       {kind === 'gather' && gatherListError ? (

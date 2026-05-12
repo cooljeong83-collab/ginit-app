@@ -2,6 +2,7 @@ import { Tabs, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { GinitTabBar } from '@/components/ginit';
+import { ScreenTransitionSkeleton } from '@/components/ui';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { ensureUserProfile } from '@/src/lib/user-profile';
@@ -60,7 +61,7 @@ export default function TabsLayout() {
   }, [isHydrated, hasSession]);
 
   if (!isHydrated || !hasSession) {
-    return null;
+    return <ScreenTransitionSkeleton variant="list" />;
   }
 
   return (

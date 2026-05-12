@@ -26,8 +26,8 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
   meeting: {
     /** `0121_meeting_overlap_hours_policy_2.sql` 시드와 동일 — 생성/참여 겹침 방지 기준 시간 */
     overlap_hours: 2,
-    /** `0109_meeting_home_list_ongoing_duration_hours.sql` 시드와 동일 — 내 모임·비공개 목록 "모임 중" 구간 길이(시간) */
-    list_ongoing_duration_hours: 3,
+    /** `0128_meeting_home_list_ongoing_duration_hours_6.sql` 시드와 동일 — 참여중·종료 탭 분리 기준 시간 */
+    list_ongoing_duration_hours: 6,
     map_radius_km: 5,
     /** `0102_meeting_arrival_verify.sql` 시드와 동일 의미 */
     arrival_verify: {

@@ -4,7 +4,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   Easing,
@@ -21,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitCard } from '@/components/ginit';
 import { ProfilePhotoCropModal } from '@/components/profile/ProfilePhotoCropModal';
-import { ScreenShell } from '@/components/ui';
+import { ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
@@ -69,6 +68,7 @@ export default function ProfileTab() {
   const [trustSectionY, setTrustSectionY] = useState<number | null>(null);
   const [profileBodyRefreshTrigger, setProfileBodyRefreshTrigger] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
+  const [profileInitialLoading, setProfileInitialLoading] = useState(Boolean(profilePk));
   const isSignedIn = !!profilePk;
 
   const refreshProfile = useCallback(async () => {
@@ -92,11 +92,16 @@ export default function ProfileTab() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!profilePk) return;
+      if (!profilePk) {
+        setProfileInitialLoading(false);
+        return;
+      }
+      setProfileInitialLoading(true);
       try {
         await refreshProfile();
       } finally {
         if (cancelled) return;
+        setProfileInitialLoading(false);
       }
     })();
     return () => {
@@ -304,7 +309,9 @@ export default function ProfileTab() {
               <RefreshControl refreshing={pullRefreshing} onRefresh={() => void onPullRefreshProfile()} />
             ) : undefined
           }>
-          {profilePk ? (
+          {profileInitialLoading ? (
+            <ScreenTransitionSkeleton variant="profile" rows={5} />
+          ) : profilePk ? (
             <UserProfilePublicBody
               key={photoUrl || 'no-photo'}
               targetUserId={profilePk}
