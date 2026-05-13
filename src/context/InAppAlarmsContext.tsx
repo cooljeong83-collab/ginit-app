@@ -405,7 +405,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       });
     };
     load();
-    const unsubRt = subscribeFriendsTableChanges(load);
+    const unsubRt = subscribeFriendsTableChanges(uid, load);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') load();
     });

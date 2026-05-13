@@ -82,27 +82,7 @@ export function AppPoliciesProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
-  /** Supabase Realtime: 관리자가 정책 테이블을 수정하면 즉시 재로드 */
-  useEffect(() => {
-    if (!publicEnv.supabaseUrl?.trim() || !publicEnv.supabaseAnonKey?.trim()) return;
-
-    const channel = supabase
-      .channel(`app_policies:${Date.now()}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'app_policies' },
-        () => {
-          void refresh();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [refresh]);
-
-  /** 주기적 재검증(Realtime 누락·네트워크 복구 대비) */
+  /** 주기적 재검증(관리자 정책 변경·네트워크 복구 대비) */
   useEffect(() => {
     if (!publicEnv.supabaseUrl?.trim() || !publicEnv.supabaseAnonKey?.trim()) return;
     const id = setInterval(() => {

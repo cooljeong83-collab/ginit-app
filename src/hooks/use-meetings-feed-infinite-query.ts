@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce } from '@/src/lib/meetings';
+import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-feed-deferred-sync';
 import {
   diffMeetingSummaries,
   fetchMeetingsForSyncByIds,
@@ -11,7 +12,6 @@ import {
   fetchPublicMeetingsPageFromSupabase,
   mergeMeetingsBySummaries,
   PUBLIC_MEETINGS_PAGE_SIZE,
-  subscribePublicMeetingsListInvalidate,
 } from '@/src/lib/supabase-meetings-list';
 
 type Page = { meetings: Meeting[]; hasMore: boolean };
@@ -63,6 +63,7 @@ async function fetchMeetingsFeedPage(pageParam: number): Promise<Page> {
     if (pageParam !== 0) return { meetings: [], hasMore: false };
     const r = await fetchMeetingsOnce();
     if (!r.ok) throw new Error(r.message);
+    recordMeetingsListPageFetchedFromNetwork();
     return { meetings: r.meetings, hasMore: false };
   }
 
@@ -70,6 +71,7 @@ async function fetchMeetingsFeedPage(pageParam: number): Promise<Page> {
   console.log('📡 모임 목록: 서버 데이터 10개 가져오기 (Page: ' + pageParam + ')');
   const res = await fetchPublicMeetingsPageFromSupabase(pageParam);
   if (!res.ok) throw new Error(res.message);
+  recordMeetingsListPageFetchedFromNetwork();
   return { meetings: res.meetings, hasMore: res.hasMore };
 }
 
@@ -96,7 +98,7 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
     staleTime: staleTimeOpt ?? 10 * 60 * 1000,
     /** 화면 진입 시에는 persisted cache를 먼저 그리고, 별도 summary sync로 필요한 ID만 갱신합니다. */
     refetchOnMount: false,
-    ...(refetchOnWindowFocusOpt !== undefined ? { refetchOnWindowFocus: refetchOnWindowFocusOpt } : {}),
+    refetchOnWindowFocus: refetchOnWindowFocusOpt ?? false,
     queryFn: ({ pageParam }) => fetchMeetingsFeedPage(pageParam as number),
     getNextPageParam: (lastPage: Page, allPages: Page[]) => (lastPage.hasMore ? allPages.length : undefined),
   });
@@ -104,13 +106,13 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
   const syncChangedMeetings = useCallback(async () => {
     if (!enabled) return;
     if (meetingListSource() !== 'supabase') {
-      await query.refetch();
+      await queryClient.refetchQueries({ queryKey });
       return;
     }
     const current = queryClient.getQueryData<FeedInfiniteData>(queryKey);
     const cachedMeetings = flattenPages(current);
     if (cachedMeetings.length === 0) {
-      await query.refetch();
+      await queryClient.refetchQueries({ queryKey });
       return;
     }
 
@@ -136,23 +138,7 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
         pages: buildPagesFromMeetings(nextMeetings, prev.pages.length, summaries.length),
       };
     });
-  }, [enabled, query, queryClient, queryKey]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    if (meetingListSource() !== 'supabase') return;
-    const unsub = subscribePublicMeetingsListInvalidate(
-      () => {
-        void syncChangedMeetings();
-      },
-      () => {
-        /* Realtime 오류는 피드에서 별도 배너 없이 무시 가능 */
-      },
-    );
-    return () => {
-      unsub();
-    };
-  }, [enabled, syncChangedMeetings]);
+  }, [enabled, queryClient, queryKey]);
 
   const meetings = useMemo(() => flattenPages(query.data as FeedInfiniteData | undefined), [query.data]);
 

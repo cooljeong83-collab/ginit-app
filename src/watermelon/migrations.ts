@@ -1,8 +1,13 @@
-import { addColumns, createTable, schemaMigrations } from '@nozbe/watermelondb/Schema/migrations';
+import {
+  addColumns,
+  createTable,
+  schemaMigrations,
+  unsafeExecuteSql,
+} from '@nozbe/watermelondb/Schema/migrations';
 
 /**
  * WatermelonDB는 스키마 version 증가 시 migrations가 필요합니다.
- * v1 -> v2(채팅 오프라인), v2 -> v3(`cached_meeting_categories`).
+ * v1 -> v2(채팅 오프라인), v2 -> v3(`cached_meeting_categories`), v7 -> v8(로컬 문자열 NUL 정리).
  */
 export const migrations = schemaMigrations({
   migrations: [
@@ -145,6 +150,42 @@ export const migrations = schemaMigrations({
             { name: 'message_read_state_last_at_ms', type: 'number', isOptional: true, isIndexed: true },
           ],
         }),
+      ],
+    },
+    {
+      toVersion: 8,
+      steps: [
+        unsafeExecuteSql(
+          "update chat_rooms set last_message_preview = replace(last_message_preview, char(0), '') where last_message_preview is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_rooms set room_search_text = replace(room_search_text, char(0), '') where room_search_text is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_rooms set message_read_message_id_by_json = replace(message_read_message_id_by_json, char(0), '') where message_read_message_id_by_json is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_rooms set message_read_at_by_json = replace(message_read_at_by_json, char(0), '') where message_read_at_by_json is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_messages set text = replace(text, char(0), '') where text is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_messages set search_text = replace(search_text, char(0), '') where search_text is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_messages set reply_to_json = replace(reply_to_json, char(0), '') where reply_to_json is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_messages set link_preview_json = replace(link_preview_json, char(0), '') where link_preview_json is not null;",
+        ),
+        unsafeExecuteSql(
+          "update chat_messages set raw_payload_json = replace(raw_payload_json, char(0), '') where raw_payload_json is not null;",
+        ),
+        unsafeExecuteSql("update recent_searches set query = replace(query, char(0), '') where query is not null;"),
+        unsafeExecuteSql(
+          "update chat_search_index_chunks set chunk_text = replace(chunk_text, char(0), '') where chunk_text is not null;",
+        ),
       ],
     },
   ],

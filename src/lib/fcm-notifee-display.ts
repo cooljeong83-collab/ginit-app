@@ -25,6 +25,7 @@ import {
   GINIT_APP_NOTIFICATION_GROUP_ID,
   ginitGroupedNotificationId,
   registerGinitGroupedNotification,
+  unregisterGinitGroupedNotifications,
 } from '@/src/lib/ginit-notifee-app-group';
 
 /** 레거시 FCM·서버 `channelId` 호환용 (항상 시스템 기본음) */
@@ -92,11 +93,10 @@ async function displayChatPushNotificationAndroid(
       ? `${latestMessage.senderName} : ${latestText}`
       : latestText;
   const expandedText = state.roomType === 'meeting' ? collapsedBody : latestText;
-  const childNotificationId = chatPushMessageNotificationId(
-    state.roomType,
-    state.roomId,
-    state.lastMessageId || latestMessage?.id || `${state.updatedAt}`,
-  );
+  const childNotificationId = state.notificationId;
+  const staleMessageNotificationIds = state.messages
+    .map((message) => chatPushMessageNotificationId(state.roomType, state.roomId, message.id))
+    .filter((id) => id !== childNotificationId);
   const notificationData = {
     ...data,
     roomType: state.roomType,
@@ -164,8 +164,9 @@ async function displayChatPushNotificationAndroid(
     android: androidOptions,
   });
 
-  await notifee.cancelNotification(state.notificationId);
   await notifee.cancelNotification(chatPushGroupSummaryNotificationId(state.roomType, state.roomId));
+  await Promise.all(staleMessageNotificationIds.map((id) => notifee.cancelNotification(id).catch(() => {})));
+  await unregisterGinitGroupedNotifications(staleMessageNotificationIds, channelId);
 }
 
 /** Android: FCM 수신(포그라운드·백그라운드 data-only 등) 시 시스템 알림과 동일하게 Notifee로 표시 */

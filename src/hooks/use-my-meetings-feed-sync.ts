@@ -3,6 +3,7 @@ import { useCallback, useMemo } from 'react';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { meetingListSource } from '@/src/lib/hybrid-data-source';
+import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-feed-deferred-sync';
 import type { Meeting } from '@/src/lib/meetings';
 import {
   fetchMyMeetingsForFeedFromSupabase,
@@ -22,6 +23,7 @@ export function myMeetingsFeedQueryKey(appUserId: string) {
 async function fetchMyMeetingsFull(appUserId: string): Promise<MyMeetingsQueryData> {
   const res = await fetchMyMeetingsForFeedFromSupabase(appUserId);
   if (!res.ok) throw new Error(res.message);
+  recordMeetingsListPageFetchedFromNetwork();
   return { meetings: res.meetings };
 }
 
@@ -43,6 +45,7 @@ export function useMyMeetingsFeedSync({
     queryFn: () => fetchMyMeetingsFull(normalizedUserId),
     staleTime: 10 * 60 * 1000,
     refetchOnMount: false,
+    refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
   });
 

@@ -56,9 +56,10 @@ async function clearRoomNotification(roomType: ChatPushRoomType, roomId: string,
   const childIds = (prev?.messages ?? []).map((message) =>
     chatPushMessageNotificationId(roomType, roomId, message.id),
   );
-  const groupedIds = [...childIds, explicitNotificationId].map((x) => x.trim()).filter(Boolean);
+  const roomNotificationId = chatPushNotificationId(roomType, roomId);
+  const groupedIds = [...childIds, roomNotificationId, explicitNotificationId].map((x) => x.trim()).filter(Boolean);
   await clearChatPushNotificationState(roomType, roomId);
-  await notifee.cancelNotification(chatPushNotificationId(roomType, roomId));
+  await notifee.cancelNotification(roomNotificationId);
   await notifee.cancelNotification(chatPushGroupSummaryNotificationId(roomType, roomId));
   await Promise.all(groupedIds.map((id) => notifee.cancelNotification(id).catch(() => {})));
   await unregisterGinitGroupedNotifications(groupedIds);

@@ -19,7 +19,6 @@ import {
 } from '@/src/lib/categories-watermelon-cache';
 import { categoriesSource } from '@/src/lib/hybrid-data-source';
 import { MEETING_CATEGORIES_QUERY_KEY } from '@/src/lib/meeting-categories-query-key';
-import { supabase } from '@/src/lib/supabase';
 
 type MeetingCategoriesContextValue = {
   /** 항상 배열 — `map` 등에서 undefined 방지 */
@@ -80,30 +79,6 @@ export function MeetingCategoriesProvider({ children }: { children: ReactNode })
   useEffect(() => {
     if (!supabaseMode) return;
     void queryClient.invalidateQueries({ queryKey: MEETING_CATEGORIES_QUERY_KEY });
-  }, [queryClient, supabaseMode]);
-
-  useEffect(() => {
-    if (!supabaseMode) return;
-    let cancelled = false;
-    const channelTopic = `meeting_categories:${Date.now()}:${Math.random().toString(36).slice(2, 11)}`;
-    const channel = supabase
-      .channel(channelTopic)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'meeting_categories' },
-        () => {
-          void queryClient.invalidateQueries({ queryKey: MEETING_CATEGORIES_QUERY_KEY });
-        },
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' && !cancelled) {
-          void queryClient.invalidateQueries({ queryKey: MEETING_CATEGORIES_QUERY_KEY });
-        }
-      });
-    return () => {
-      cancelled = true;
-      void supabase.removeChannel(channel);
-    };
   }, [queryClient, supabaseMode]);
 
   useEffect(() => {

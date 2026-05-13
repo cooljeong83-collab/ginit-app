@@ -379,7 +379,7 @@ export function FriendsHomeScreen() {
 
   useEffect(() => {
     if (!me) return;
-    return subscribeFriendsTableChanges(() => {
+    return subscribeFriendsTableChanges(me, () => {
       void reload();
     });
   }, [me, reload]);

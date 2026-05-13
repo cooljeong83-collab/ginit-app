@@ -6,7 +6,7 @@ import { fetchMeetingsOnce, subscribeMeetings } from '@/src/lib/meetings';
 import { fetchPublicMeetingsFromSupabaseOnce, subscribeMeetingsFromSupabase } from '@/src/lib/supabase-meetings-list';
 
 /**
- * 피드·지도·채팅 목록 등 — `EXPO_PUBLIC_MEETING_LIST_SOURCE=supabase` 이면 Supabase 공개 모임만 구독.
+ * 피드·지도·채팅 목록 등 — `EXPO_PUBLIC_MEETING_LIST_SOURCE=supabase` 이면 Supabase 공개 모임만 주기 요약 동기화(Realtime 미사용).
  * 기본은 Firestore `subscribeMeetings`.
  */
 export function subscribeMeetingsHybrid(

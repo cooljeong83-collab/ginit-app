@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
+import { sanitizeUnicodeForSqliteStorage } from '@/src/lib/offline-chat/offline-chat-utils';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { getFirebaseFirestore } from '@/src/lib/firebase';
@@ -100,7 +101,10 @@ export function socialMessageTimeMs(m: SocialChatMessage | null | undefined): nu
 
 export function socialDmPreviewLine(m: SocialChatMessage | null | undefined): string {
   const t = m?.text?.trim();
-  if (t) return t.length > 100 ? `${t.slice(0, 100)}…` : t;
+  if (t) {
+    const clipped = t.length > 100 ? `${t.slice(0, 100)}…` : t;
+    return sanitizeUnicodeForSqliteStorage(clipped);
+  }
   return '새 메시지';
 }
 

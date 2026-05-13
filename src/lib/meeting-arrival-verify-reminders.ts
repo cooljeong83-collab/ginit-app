@@ -144,6 +144,36 @@ export async function hasLedgerArrivalVerified(meetingId: string, appUserId: str
   return data === true;
 }
 
+/** 현재 사용자가 장소 도착 인증을 완료한 모임 ID 집합 — 여러 후보를 단일 RPC로 조회. */
+export async function fetchLedgerArrivalVerifiedMeetingIdSet(
+  meetingIds: readonly string[],
+  appUserId: string,
+): Promise<Set<string>> {
+  try {
+    assertSupabasePublicReady();
+  } catch {
+    return new Set();
+  }
+  const ids = [...new Set(meetingIds.map((id) => id.trim()).filter(Boolean))];
+  const uid = appUserId.trim();
+  if (ids.length === 0 || !uid) return new Set();
+  const { data, error } = await supabase.rpc('list_meeting_arrival_verified_meeting_ids_for_app_user', {
+    p_meeting_ids: ids,
+    p_app_user_id: uid,
+  });
+  if (error) {
+    if (__DEV__) console.warn('[arrival] list_meeting_arrival_verified_meeting_ids_for_app_user', error.message);
+    return new Set();
+  }
+  if (!Array.isArray(data)) return new Set();
+  return new Set(
+    data
+      .filter((x): x is string => typeof x === 'string')
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0),
+  );
+}
+
 /**
  * 조건을 만족하면 로컬 알림을 최대 `reminder_max_count`개까지 예약합니다(간격 `reminder_interval_min`, 기본 1회면 간격 무의미).
  * 예정 시작(`scheduled_at`)이 지난 뒤(`reminder_after_scheduled_min` 반영)이고, 인증 마감(`window_after`) 전이며, 아직 미인증일 때만.

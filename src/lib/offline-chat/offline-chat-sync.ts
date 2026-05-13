@@ -19,7 +19,7 @@ import { MEETING_MESSAGES_SUBCOLLECTION } from '@/src/lib/meeting-chat';
 import { MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import type { OfflineChatRoomKey, OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
 import { normalizeRoomKey, roomKeyToString } from '@/src/lib/offline-chat/offline-chat-types';
-import { buildSearchText, tsToMs } from '@/src/lib/offline-chat/offline-chat-utils';
+import { buildSearchText, sanitizeUnicodeForSqliteStorage, tsToMs } from '@/src/lib/offline-chat/offline-chat-utils';
 import { localRoomPreviewForMessage } from '@/src/lib/offline-chat/offline-chat-rooms';
 
 /**
@@ -85,17 +85,25 @@ async function getOrCreateLocalRoom(key: OfflineChatRoomKey) {
 function safeJson(value: unknown): string | null {
   if (value == null) return null;
   try {
-    return JSON.stringify(value);
+    const j = JSON.stringify(value);
+    return j ? sanitizeUnicodeForSqliteStorage(j) : null;
   } catch {
     return null;
   }
 }
 
+function sanitizeStoredText(s: string | null | undefined): string | null {
+  if (s == null || typeof s !== 'string') return null;
+  const t = s.trim();
+  if (!t) return null;
+  const out = sanitizeUnicodeForSqliteStorage(t);
+  return out.trim() ? out.trim() : null;
+}
+
 function extractSenderDenorm(data: Record<string, unknown>): { senderName: string | null; senderAvatarUrl: string | null } {
   // 서버 스키마에 실제 필드가 없을 수 있어, 안전하게 읽고 없으면 null.
-  const senderName = typeof data.senderName === 'string' && data.senderName.trim() ? data.senderName.trim() : null;
-  const senderAvatarUrl =
-    typeof data.senderAvatarUrl === 'string' && data.senderAvatarUrl.trim() ? data.senderAvatarUrl.trim() : null;
+  const senderName = sanitizeStoredText(typeof data.senderName === 'string' ? data.senderName : null);
+  const senderAvatarUrl = sanitizeStoredText(typeof data.senderAvatarUrl === 'string' ? data.senderAvatarUrl : null);
   return { senderName, senderAvatarUrl };
 }
 
@@ -126,18 +134,19 @@ function mapFirestoreMessageToLocal(args: {
   updatedAtMs: number;
 } {
   const { roomType, roomId, messageId, data } = args;
-  const senderId = typeof data.senderId === 'string' && data.senderId.trim() ? data.senderId.trim() : null;
+  const senderId = sanitizeStoredText(typeof data.senderId === 'string' ? data.senderId : null);
   const kindRaw = data.kind;
   const kind =
     kindRaw === 'image' || kindRaw === 'text' || kindRaw === 'system' ? (kindRaw as string) : typeof kindRaw === 'string' ? kindRaw : null;
 
-  const text = typeof data.text === 'string' ? data.text : null;
-  const imageUrl = typeof data.imageUrl === 'string' ? data.imageUrl : null;
-  const imageAlbumBatchId =
-    typeof data.imageAlbumBatchId === 'string' && data.imageAlbumBatchId.trim() ? data.imageAlbumBatchId.trim() : null;
+  const text = sanitizeStoredText(typeof data.text === 'string' ? data.text : null);
+  const imageUrl = sanitizeStoredText(typeof data.imageUrl === 'string' ? data.imageUrl : null);
+  const imageAlbumBatchId = sanitizeStoredText(typeof data.imageAlbumBatchId === 'string' ? data.imageAlbumBatchId : null);
   const replyToMessageId =
     data.replyTo && typeof data.replyTo === 'object' && !Array.isArray(data.replyTo)
-      ? (typeof (data.replyTo as any).messageId === 'string' ? String((data.replyTo as any).messageId).trim() : null)
+      ? sanitizeStoredText(
+          typeof (data.replyTo as any).messageId === 'string' ? String((data.replyTo as any).messageId) : null,
+        )
       : null;
 
   const createdAtMs = tsToMs(data.createdAt);
@@ -147,10 +156,11 @@ function mapFirestoreMessageToLocal(args: {
   const searchText = buildSearchText([text, kind === 'image' ? '사진' : '', senderName]);
   const isDeleted = deletedAtMs || Boolean((data as any).deletedAt) ? true : null;
 
+  const messageIdSafe = sanitizeStoredText(messageId) ?? messageId.trim();
   return {
     roomId,
     roomType,
-    messageId,
+    messageId: messageIdSafe,
     createdAtMs,
     senderId,
     senderName,
@@ -312,12 +322,12 @@ export async function upsertLocalChatMessages(
   if (!localRoom) return;
   const rows = messages
     .map((m) => {
-      const messageId = String(m.messageId ?? '').trim();
+      const messageId = sanitizeStoredText(String(m.messageId ?? '')) ?? String(m.messageId ?? '').trim();
       const createdAtMs = typeof m.createdAtMs === 'number' && Number.isFinite(m.createdAtMs) ? m.createdAtMs : 0;
       if (!messageId || createdAtMs <= 0) return null;
       const kind = m.kind === 'image' || m.kind === 'text' || m.kind === 'system' ? m.kind : m.kind ?? null;
-      const text = typeof m.text === 'string' ? m.text : null;
-      const senderName = typeof m.senderName === 'string' && m.senderName.trim() ? m.senderName.trim() : null;
+      const text = sanitizeStoredText(typeof m.text === 'string' ? m.text : null);
+      const senderName = sanitizeStoredText(typeof m.senderName === 'string' ? m.senderName : null);
       return {
         roomId: k.roomId,
         roomType: k.roomType,
@@ -329,18 +339,17 @@ export async function upsertLocalChatMessages(
             : createdAtMs,
         deletedAtMs:
           typeof m.deletedAtMs === 'number' && Number.isFinite(m.deletedAtMs) && m.deletedAtMs > 0 ? m.deletedAtMs : null,
-        senderId: typeof m.senderId === 'string' && m.senderId.trim() ? m.senderId.trim() : null,
+        senderId: sanitizeStoredText(typeof m.senderId === 'string' ? m.senderId : null),
         senderName,
-        senderAvatarUrl: typeof m.senderAvatarUrl === 'string' && m.senderAvatarUrl.trim() ? m.senderAvatarUrl.trim() : null,
+        senderAvatarUrl: sanitizeStoredText(typeof m.senderAvatarUrl === 'string' ? m.senderAvatarUrl : null),
         kind,
         text,
-        imageUrl: typeof m.imageUrl === 'string' && m.imageUrl.trim() ? m.imageUrl.trim() : null,
-        imageAlbumBatchId:
-          typeof m.imageAlbumBatchId === 'string' && m.imageAlbumBatchId.trim() ? m.imageAlbumBatchId.trim() : null,
-        replyToMessageId: typeof m.replyToMessageId === 'string' && m.replyToMessageId.trim() ? m.replyToMessageId.trim() : null,
-        replyToJson: m.replyToJson ?? null,
-        linkPreviewJson: m.linkPreviewJson ?? null,
-        rawPayloadJson: m.rawPayloadJson ?? null,
+        imageUrl: sanitizeStoredText(typeof m.imageUrl === 'string' ? m.imageUrl : null),
+        imageAlbumBatchId: sanitizeStoredText(typeof m.imageAlbumBatchId === 'string' ? m.imageAlbumBatchId : null),
+        replyToMessageId: sanitizeStoredText(typeof m.replyToMessageId === 'string' ? m.replyToMessageId : null),
+        replyToJson: m.replyToJson == null ? null : sanitizeStoredText(String(m.replyToJson)),
+        linkPreviewJson: m.linkPreviewJson == null ? null : sanitizeStoredText(String(m.linkPreviewJson)),
+        rawPayloadJson: m.rawPayloadJson == null ? null : sanitizeStoredText(String(m.rawPayloadJson)),
         searchText: buildSearchText([text, kind === 'image' ? '사진' : '', senderName]),
         isDeleted:
           typeof m.deletedAtMs === 'number' && Number.isFinite(m.deletedAtMs) && m.deletedAtMs > 0 ? true : null,

@@ -9,6 +9,7 @@ import {
 import {
   fetchChatRoomsListPageHybrid,
   fetchChatRoomsChangeSummariesFromSupabase,
+  subscribeChatRoomsListInvalidate,
 } from '@/src/lib/supabase-chat-rooms-list';
 
 /** TanStack 캐시 키 — 사용자별로 분리(재로그인 시 섞이지 않게) */
@@ -111,6 +112,13 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
     // eslint-disable-next-line no-console
     console.log('📦 채팅방 목록: 로컬 캐시 로드 완료');
   }, [enabled, uid, rooms.length]);
+
+  useEffect(() => {
+    if (!enabled || !uid) return undefined;
+    return subscribeChatRoomsListInvalidate(uid, () => {
+      void syncChangedRooms();
+    });
+  }, [enabled, uid, syncChangedRooms]);
 
   const fetchNextPageGuarded = useCallback(async () => {}, []);
 

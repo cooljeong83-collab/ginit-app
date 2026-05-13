@@ -2,7 +2,7 @@ import { Q } from '@nozbe/watermelondb';
 
 import { database } from '@/src/watermelon';
 import type { OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
-import { buildSearchText } from '@/src/lib/offline-chat/offline-chat-utils';
+import { buildSearchText, sanitizeUnicodeForSqliteStorage } from '@/src/lib/offline-chat/offline-chat-utils';
 import type { SocialChatMessage, SocialChatRoomDoc, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -71,7 +71,11 @@ function enqueueChatRoomWrite(work: () => Promise<void>): Promise<void> {
 }
 
 function cleanString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  if (!t) return null;
+  const s = sanitizeUnicodeForSqliteStorage(t);
+  return s.trim() ? s.trim() : null;
 }
 
 function cleanNumber(v: unknown): number | null {
@@ -119,7 +123,14 @@ function parseNumberMapJson(v: unknown): Record<string, number> {
 }
 
 function encodeJsonMap(v: Record<string, string | number>): string | null {
-  return Object.keys(v).length ? JSON.stringify(v) : null;
+  const safe: Record<string, string | number> = {};
+  for (const [k, val] of Object.entries(v)) {
+    const sk = sanitizeUnicodeForSqliteStorage(k).trim();
+    if (!sk) continue;
+    if (typeof val === 'number' && Number.isFinite(val)) safe[sk] = val;
+    else safe[sk] = sanitizeUnicodeForSqliteStorage(String(val));
+  }
+  return Object.keys(safe).length ? JSON.stringify(safe) : null;
 }
 
 function normalizeReadMessageIdMap(map: Record<string, unknown> | null | undefined): Record<string, string> {

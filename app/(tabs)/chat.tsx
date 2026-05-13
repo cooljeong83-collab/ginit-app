@@ -19,6 +19,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useChatRoomsInfiniteQuery } from '@/src/hooks/use-chat-rooms-infinite-query';
 import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
+import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -27,6 +28,7 @@ import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/fee
 import { meetingCreatedAtMs } from '@/src/lib/feed-meeting-utils';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
+import { flushMeetingsFeedPendingServerProbe } from '@/src/lib/meetings-feed-deferred-sync';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
@@ -254,6 +256,18 @@ export default function ChatTab() {
     enabled: signedIn,
     userId,
   });
+
+  useMeetingsTableRealtimeDeferred({ enabled: signedIn, viewerUserId: userId });
+
+  const runMeetingsListsServerReconcile = useCallback(async () => {
+    await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+  }, [syncChangedMeetingsFeed, syncChangedMyMeetings]);
+
+  const flushChatMeetingsLists = useCallback(
+    (mode: 'manual' | 'explicit' | 'focus_auto') =>
+      flushMeetingsFeedPendingServerProbe({ mode, runSync: runMeetingsListsServerReconcile }),
+    [runMeetingsListsServerReconcile],
+  );
 
   /** 공개 피드가 비어 있을 때는 내 모임 RPC까지 끝나야 빈 화면 판단(비공개만 참여 중인 경우) */
   const gatherListStillLoading = useMemo(
@@ -817,18 +831,18 @@ export default function ChatTab() {
       if (chatKind === 'social') {
         await syncChangedSocialRooms();
       } else {
-        await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+        await flushChatMeetingsLists('manual');
       }
     } finally {
       setRefreshing(false);
     }
-  }, [chatKind, syncChangedSocialRooms, syncChangedMeetingsFeed, syncChangedMyMeetings]);
+  }, [chatKind, syncChangedSocialRooms, flushChatMeetingsLists]);
 
   useSyncOnScreenFocus(
-    useCallback(async () => {
+    useCallback(() => {
       if (!signedIn) return;
-      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
-    }, [signedIn, syncChangedMeetingsFeed, syncChangedMyMeetings]),
+      void flushChatMeetingsLists('focus_auto');
+    }, [signedIn, flushChatMeetingsLists]),
     [signedIn],
     { enabled: signedIn },
   );

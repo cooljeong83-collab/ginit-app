@@ -5,7 +5,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  * @see https://watermelondb.dev/docs/Schema
  */
 export const schema = appSchema({
-  version: 7,
+  version: 8,
   tables: [
     /**
      * 채팅방 메타(증분 동기화 커서/상태).

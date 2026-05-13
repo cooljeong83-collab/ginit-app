@@ -190,21 +190,37 @@ export async function fetchChatRoomsListPageHybrid(
   return { rooms, hasMore: res.hasMore };
 }
 
+/**
+ * DM(`is_group=false`) 채팅방 요약 변경 시 콜백.
+ * - RLS(`chat_rooms_select_participant`, migration 0133)로 "내 participant_ids 포함 행"만 서버에서 전달됩니다.
+ * - `event: '*'` 대신 INSERT/UPDATE/DELETE만 구독합니다.
+ */
 export function subscribeChatRoomsListInvalidate(
+  viewerAppUserId: string,
   onInvalidate: () => void,
   onError?: (message: string) => void,
 ): () => void {
+  const me = viewerAppUserId.trim();
+  if (!me) return () => {};
+
   let cancelled = false;
-  const channel = supabase
-    .channel(`realtime:chat-rooms-list:${Date.now()}:${Math.random().toString(36).slice(2)}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms' }, () => {
-      if (!cancelled) onInvalidate();
-    })
-    .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') {
-        onError?.('Supabase Realtime(chat_rooms) 연결 오류');
-      }
-    });
+  const channel = supabase.channel(`realtime:chat-rooms-list:${me}:${Date.now()}:${Math.random().toString(36).slice(2)}`);
+
+  const fire = () => {
+    if (!cancelled) onInvalidate();
+  };
+
+  const dmOnly = 'is_group=eq.false';
+  for (const event of ['INSERT', 'UPDATE', 'DELETE'] as const) {
+    channel.on('postgres_changes', { event, schema: 'public', table: 'chat_rooms', filter: dmOnly }, fire);
+  }
+
+  void channel.subscribe((status) => {
+    if (status === 'CHANNEL_ERROR') {
+      onError?.('Supabase Realtime(chat_rooms) 연결 오류');
+    }
+  });
+
   return () => {
     cancelled = true;
     void supabase.removeChannel(channel);

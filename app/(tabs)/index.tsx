@@ -44,6 +44,7 @@ import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
+import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
@@ -78,6 +79,7 @@ import {
   syncFeedRegionMapBootMemoryFromSelection,
 } from '@/src/lib/feed-registered-regions';
 import { ledgerWritesToSupabase, meetingListSource } from '@/src/lib/hybrid-data-source';
+import { flushMeetingsFeedPendingServerProbe } from '@/src/lib/meetings-feed-deferred-sync';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
@@ -86,7 +88,7 @@ import {
   isMeetingArrivalNoticeBannerTimeEligible,
   shouldShowMeetingArrivalVerifyTopBanner,
 } from '@/src/lib/meeting-arrival-verify-banner';
-import { hasLedgerArrivalVerified } from '@/src/lib/meeting-arrival-verify-reminders';
+import { fetchLedgerArrivalVerifiedMeetingIdSet } from '@/src/lib/meeting-arrival-verify-reminders';
 import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
@@ -250,19 +252,30 @@ export default function FeedScreen() {
     userId,
   });
 
+  useMeetingsTableRealtimeDeferred({ enabled: feedLocationReady, viewerUserId: userId });
+
+  const runMeetingsListsServerReconcile = useCallback(async () => {
+    await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+  }, [syncChangedMeetingsFeed, syncChangedMyMeetings]);
+
+  const flushHomeMeetingsLists = useCallback(
+    (mode: 'manual' | 'explicit' | 'focus_auto') =>
+      flushMeetingsFeedPendingServerProbe({ mode, runSync: runMeetingsListsServerReconcile }),
+    [runMeetingsListsServerReconcile],
+  );
+
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('ginit_home_meetings_refetch', () => {
       if (!feedLocationReady) return;
-      void Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+      void flushHomeMeetingsLists('explicit');
     });
     return () => sub.remove();
-  }, [feedLocationReady, syncChangedMeetingsFeed, syncChangedMyMeetings]);
+  }, [feedLocationReady, flushHomeMeetingsLists]);
 
   useSyncOnScreenFocus(
-    useCallback(async () => {
-      if (!feedLocationReady) return;
-      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
-    }, [feedLocationReady, syncChangedMeetingsFeed, syncChangedMyMeetings]),
+    useCallback(() => {
+      void flushHomeMeetingsLists('focus_auto');
+    }, [flushHomeMeetingsLists]),
     [feedLocationReady],
     { enabled: feedLocationReady },
   );
@@ -290,20 +303,23 @@ export default function FeedScreen() {
 
   const isHomeMeetingsScreenFocused = useIsFocused();
   const [homeArrivalNoticeUiTick, setHomeArrivalNoticeUiTick] = useState(0);
+  const [homeArrivalVerifiedCheckNonce, setHomeArrivalVerifiedCheckNonce] = useState(0);
   const [homeArrivalVerifiedMap, setHomeArrivalVerifiedMap] = useState<Record<string, boolean>>({});
+  const homeArrivalVerifiedLookupKeyRef = useRef('');
 
   /** 장소 인증 화면 등에서 돌아올 때 상단 공지의 인증 맵을 다시 읽습니다(`arrivalBannerCandidates` 참조가 같을 수 있음). */
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS === 'web') return undefined;
       setHomeArrivalNoticeUiTick((n) => n + 1);
+      setHomeArrivalVerifiedCheckNonce((n) => n + 1);
       return undefined;
     }, []),
   );
 
   useEffect(() => {
     if (!isHomeMeetingsScreenFocused || Platform.OS === 'web') return undefined;
-    const iv = setInterval(() => setHomeArrivalNoticeUiTick((n) => n + 1), 30_000);
+    const iv = setInterval(() => setHomeArrivalNoticeUiTick((n) => n + 1), 60_000);
     return () => clearInterval(iv);
   }, [isHomeMeetingsScreenFocused]);
 
@@ -690,34 +706,43 @@ export default function FeedScreen() {
     return out;
   }, [myTabsMeetings, userId, appPoliciesVersion, arrivalVerifyPol, homeArrivalNoticeUiTick]);
 
+  const arrivalBannerCandidateIdsKey = useMemo(
+    () => arrivalBannerCandidates.map((m) => m.id.trim()).filter(Boolean).join('\u0001'),
+    [arrivalBannerCandidates],
+  );
+
   useEffect(() => {
+    void homeArrivalVerifiedCheckNonce;
     if (Platform.OS === 'web') return;
     const uid = userId?.trim();
     if (!uid) {
       setHomeArrivalVerifiedMap({});
+      homeArrivalVerifiedLookupKeyRef.current = '';
       return;
     }
-    const candidates = arrivalBannerCandidates;
+    const candidateIds = arrivalBannerCandidateIdsKey.split('\u0001').filter(Boolean);
+    if (candidateIds.length === 0) {
+      setHomeArrivalVerifiedMap({});
+      homeArrivalVerifiedLookupKeyRef.current = `${uid}\u0002`;
+      return;
+    }
+    const lookupKey = `${uid}\u0002${arrivalBannerCandidateIdsKey}`;
+    if (homeArrivalVerifiedLookupKeyRef.current === lookupKey) return;
+    homeArrivalVerifiedLookupKeyRef.current = lookupKey;
     let cancelled = false;
     void (async () => {
-      const pairs = await Promise.all(
-        candidates.map(async (m) => {
-          const id = m.id.trim();
-          const v = await hasLedgerArrivalVerified(id, uid);
-          return [id, v] as const;
-        }),
-      );
+      const verifiedIds = await fetchLedgerArrivalVerifiedMeetingIdSet(candidateIds, uid);
       if (cancelled) return;
       setHomeArrivalVerifiedMap((prev) => {
         const next: Record<string, boolean> = {};
-        for (const [id, v] of pairs) next[id] = v || prev[id] === true;
+        for (const id of candidateIds) next[id] = verifiedIds.has(id) || prev[id] === true;
         return next;
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [arrivalBannerCandidates, userId, homeArrivalNoticeUiTick]);
+  }, [arrivalBannerCandidateIdsKey, userId, homeArrivalVerifiedCheckNonce]);
 
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(
@@ -1299,11 +1324,11 @@ export default function FeedScreen() {
     if (!feedLocationReady) return;
     setRefreshing(true);
     try {
-      await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
+      await flushHomeMeetingsLists('manual');
     } finally {
       setRefreshing(false);
     }
-  }, [feedLocationReady, syncChangedMeetingsFeed, syncChangedMyMeetings]);
+  }, [feedLocationReady, flushHomeMeetingsLists]);
 
   useEffect(() => {
     if (!feedLocationReady) return;

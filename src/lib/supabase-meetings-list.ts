@@ -342,38 +342,35 @@ export async function fetchPublicMeetingsPageFromSupabase(
   return { ok: true, meetings, hasMore };
 }
 
-/** `postgres_changes` 페이로드 — 목록 무효화 정책(INSERT/DELETE vs UPDATE) 분기용 */
+/** `postgres_changes` 페이로드 — 로컬 캐시 패치·지연 동기화 분기용 */
 export type MeetingsTableRealtimePayload = {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  newRecord: Record<string, unknown> | null;
+  oldRecord: Record<string, unknown> | null;
 };
 
-/** Realtime 변경 시 목록 쿼리 무효화용 콜백(이벤트 종류 포함) */
+/**
+ * 공개 `meetings` 테이블 전체 Realtime 구독은 Realtime 메시지 폭증·비용 이슈로 비활성화했습니다.
+ * 피드는 `list_public_meeting_change_summaries` RPC + 화면 포커스/당김 동기화 경로를 사용합니다.
+ *
+ * 타입·캐시 패치 헬퍼(`meetings-feed-realtime-cache-patch`)는 하위 호환용으로 유지합니다.
+ */
+export function subscribeMeetingsTableRealtimeHub(
+  _onPayload: (payload: MeetingsTableRealtimePayload) => void,
+  _onError?: (message: string) => void,
+): Unsubscribe {
+  return () => {};
+}
+
+/** `subscribeMeetingsTableRealtimeHub`와 동일(하위 호환 별칭). */
 export function subscribePublicMeetingsListInvalidate(
   onInvalidate: (payload: MeetingsTableRealtimePayload) => void,
   onError?: (message: string) => void,
 ): Unsubscribe {
-  let cancelled = false;
-  const channel = supabase
-    .channel(`realtime:public-meetings-invalidate:${Date.now()}:${Math.random().toString(36).slice(2)}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings' }, (payload) => {
-      if (cancelled) return;
-      const et = (payload as { eventType?: string }).eventType;
-      if (et === 'INSERT' || et === 'UPDATE' || et === 'DELETE') {
-        onInvalidate({ eventType: et });
-      }
-    })
-    .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') {
-        onError?.('Supabase Realtime 연결 오류');
-      }
-    });
-  return () => {
-    cancelled = true;
-    void supabase.removeChannel(channel);
-  };
+  return subscribeMeetingsTableRealtimeHub(onInvalidate, onError);
 }
 
-/** Firestore `subscribeMeetings` 와 동일 시그니처 — 공개 행만 Supabase에서 구독 */
+/** Firestore `subscribeMeetings` 와 동일 시그니처 — 공개 행만 Supabase에서 주기 요약 동기화(Realtime 미사용) */
 export function subscribeMeetingsFromSupabase(
   onData: (meetings: Meeting[]) => void,
   onError?: (message: string) => void,
@@ -388,8 +385,7 @@ export function subscribeMeetingsFromSupabase(
       if (res.ok) {
         lastMeetings = res.meetings;
         onData(res.meetings);
-      }
-      else onError?.(res.message);
+      } else onError?.(res.message);
     });
   };
 
@@ -410,30 +406,11 @@ export function subscribeMeetingsFromSupabase(
     });
   };
 
-  // Realtime 연결이 실패해도, 목록 자체는 polling으로라도 유지합니다(최초 pull은 항상 수행).
-  // 보통 이 에러는 publication 누락 / 네트워크 / Supabase Realtime 비활성 등 환경 이슈입니다.
-  let fallbackPollId: ReturnType<typeof setInterval> | null = null;
-
-  const channel = supabase
-    .channel(`realtime:public-meetings:${Date.now()}:${Math.random().toString(36).slice(2)}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings' }, () => {
-      syncChanged();
-    })
-    .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') {
-        onError?.('Supabase Realtime 연결 오류');
-        if (!fallbackPollId) {
-          // Realtime 없이도 새로고침이 되도록 30초 폴백 폴링.
-          fallbackPollId = setInterval(syncChanged, 30_000);
-        }
-      }
-    });
-
   pullFull();
+  const pollId = setInterval(syncChanged, 60_000);
 
   return () => {
     cancelled = true;
-    if (fallbackPollId) clearInterval(fallbackPollId);
-    void supabase.removeChannel(channel);
+    clearInterval(pollId);
   };
 }
