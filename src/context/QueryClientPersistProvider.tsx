@@ -28,6 +28,11 @@ function getOrCreateQueryClient() {
   return appQueryClient;
 }
 
+/** FCM 백그라운드 핸들러 등 React 트리 밖에서 동일 QueryClient 인스턴스를 참조할 때 사용 */
+export function getAppQueryClient(): QueryClient {
+  return getOrCreateQueryClient();
+}
+
 const persister = createAsyncStoragePersister({
   storage: AsyncStorage,
   key: 'ginit-react-query-meetings-v1',
@@ -35,7 +40,7 @@ const persister = createAsyncStoragePersister({
 });
 
 export function QueryClientPersistProvider({ children }: { children: ReactNode }) {
-  const client = useMemo(() => getOrCreateQueryClient(), []);
+  const client = useMemo(() => getAppQueryClient(), []);
 
   useEffect(() => {
     focusManager.setFocused(AppState.currentState === 'active');

@@ -12,7 +12,7 @@ const STALE_MS = 1000 * 60 * 5;
 const GC_MS = 24 * 60 * 60 * 1000;
 
 /**
- * 모임 상세: TanStack Query + AsyncStorage 영구 캐시, 실시간 구독으로 캐시 동기화.
+ * 모임 상세: TanStack Query + AsyncStorage 영구 캐시, Firestore onSnapshot 또는 레저 주기 폴링으로 캐시 동기화.
  */
 export function useMeetingDetailQuery(meetingId: string, retryNonce: number) {
   const queryClient = useQueryClient();

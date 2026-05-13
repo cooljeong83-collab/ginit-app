@@ -7,8 +7,8 @@ import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-fee
 import type { Meeting } from '@/src/lib/meetings';
 import {
   fetchMyMeetingsForFeedFromSupabase,
-  syncMyMeetingsFromSummaries,
 } from '@/src/lib/supabase-meetings-list';
+import { applyMyMeetingsFeedSummarySync } from '@/src/lib/meetings-feed-incremental-sync-core';
 
 type MyMeetingsQueryData = {
   meetings: Meeting[];
@@ -58,12 +58,8 @@ export function useMyMeetingsFeedSync({
       clear();
       return;
     }
-    const current = queryClient.getQueryData<MyMeetingsQueryData>(queryKey);
-    const cachedMeetings = current?.meetings ?? [];
-    const res = await syncMyMeetingsFromSummaries(cachedMeetings, normalizedUserId);
-    if (!res.ok || !res.changed) return;
-    queryClient.setQueryData<MyMeetingsQueryData>(queryKey, { meetings: res.meetings });
-  }, [clear, normalizedUserId, queryClient, queryKey, shouldRun]);
+    await applyMyMeetingsFeedSummarySync(queryClient, normalizedUserId);
+  }, [clear, normalizedUserId, queryClient, shouldRun]);
 
   const refetchFull = useCallback(async () => {
     if (!shouldRun) {

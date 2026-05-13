@@ -1,11 +1,14 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 
 import type { Meeting } from '@/src/lib/meetings';
-import {
-  mapSupabaseMeetingRow,
-  PUBLIC_MEETINGS_PAGE_SIZE,
-  type MeetingsTableRealtimePayload,
-} from '@/src/lib/supabase-meetings-list';
+import { mapSupabaseMeetingRow, PUBLIC_MEETINGS_PAGE_SIZE } from '@/src/lib/supabase-meetings-list';
+
+/** (레거시) Realtime `postgres_changes` 페이로드 — 캐시 패치 유틸이 참조하는 형태 */
+export type MeetingsTableRealtimePayload = {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  newRecord: Record<string, unknown> | null;
+  oldRecord: Record<string, unknown> | null;
+};
 
 export type MeetingsFeedPage = { meetings: Meeting[]; hasMore: boolean };
 export type FeedInfiniteData = InfiniteData<MeetingsFeedPage, number>;

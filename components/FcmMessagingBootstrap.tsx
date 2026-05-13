@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { getMessaging, onMessage, onTokenRefresh, type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -24,6 +25,7 @@ import {
   fcmForegroundDedupeKey,
 } from '@/src/lib/fcm-foreground-message-dedupe';
 import { prewarmChatRoomMessagesFromPushData } from '@/src/lib/offline-chat/offline-chat-prewarm';
+import { applyMeetingPushTargetedRefresh, normalizeFcmStringMap } from '@/src/lib/meeting-push-cache-refresh';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 function formatForegroundAlert(message: FirebaseMessagingTypes.RemoteMessage): { title: string; body: string } {
@@ -60,6 +62,7 @@ function teardownForegroundFcmMessaging(): void {
  */
 export function FcmMessagingBootstrap() {
   const { userId } = useUserSession();
+  const queryClient = useQueryClient();
   const lastSavedTokenRef = useRef<string>('');
   const userIdRef = useRef<string | null>(null);
   const lastForegroundSyncAtRef = useRef<number>(0);
@@ -94,6 +97,7 @@ export function FcmMessagingBootstrap() {
           });
           return;
         }
+        applyMeetingPushTargetedRefresh(queryClient, normalizeFcmStringMap(rm.data), 'fcm_foreground', userIdRef.current);
         const action = String(rm?.data?.action ?? '').trim();
         const meetingId = String(rm?.data?.meetingId ?? '').trim();
         ginitNotifyDbg('FcmMessaging', 'on_message', {

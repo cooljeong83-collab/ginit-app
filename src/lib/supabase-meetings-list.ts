@@ -1,5 +1,5 @@
 /**
- * 공개 모임 목록 — Supabase `public.meetings` + Realtime.
+ * 공개 모임 목록 — Supabase `public.meetings` (REST/RPC). Realtime 구독 없음.
  * `legacy_firestore_id`가 채워져 있어야 채팅·상세(Firestore)와 동일 모임을 가리킵니다.
  *
  * RLS: `0004_hybrid_outbox_ranking_realtime.sql` 의 `meetings_select_public_anon` 필요.
@@ -340,34 +340,6 @@ export async function fetchPublicMeetingsPageFromSupabase(
   const meetings = rows.map((r) => mapSupabaseMeetingRow(r as Record<string, unknown>));
   const hasMore = rows.length === PUBLIC_MEETINGS_PAGE_SIZE;
   return { ok: true, meetings, hasMore };
-}
-
-/** `postgres_changes` 페이로드 — 로컬 캐시 패치·지연 동기화 분기용 */
-export type MeetingsTableRealtimePayload = {
-  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-  newRecord: Record<string, unknown> | null;
-  oldRecord: Record<string, unknown> | null;
-};
-
-/**
- * 공개 `meetings` 테이블 전체 Realtime 구독은 Realtime 메시지 폭증·비용 이슈로 비활성화했습니다.
- * 피드는 `list_public_meeting_change_summaries` RPC + 화면 포커스/당김 동기화 경로를 사용합니다.
- *
- * 타입·캐시 패치 헬퍼(`meetings-feed-realtime-cache-patch`)는 하위 호환용으로 유지합니다.
- */
-export function subscribeMeetingsTableRealtimeHub(
-  _onPayload: (payload: MeetingsTableRealtimePayload) => void,
-  _onError?: (message: string) => void,
-): Unsubscribe {
-  return () => {};
-}
-
-/** `subscribeMeetingsTableRealtimeHub`와 동일(하위 호환 별칭). */
-export function subscribePublicMeetingsListInvalidate(
-  onInvalidate: (payload: MeetingsTableRealtimePayload) => void,
-  onError?: (message: string) => void,
-): Unsubscribe {
-  return subscribeMeetingsTableRealtimeHub(onInvalidate, onError);
 }
 
 /** Firestore `subscribeMeetings` 와 동일 시그니처 — 공개 행만 Supabase에서 주기 요약 동기화(Realtime 미사용) */

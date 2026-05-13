@@ -5,14 +5,8 @@ import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import type { Meeting } from '@/src/lib/meetings';
 import { fetchMeetingsOnce } from '@/src/lib/meetings';
 import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-feed-deferred-sync';
-import {
-  diffMeetingSummaries,
-  fetchMeetingsForSyncByIds,
-  fetchPublicMeetingChangeSummaries,
-  fetchPublicMeetingsPageFromSupabase,
-  mergeMeetingsBySummaries,
-  PUBLIC_MEETINGS_PAGE_SIZE,
-} from '@/src/lib/supabase-meetings-list';
+import { applyPublicMeetingsFeedSummarySync } from '@/src/lib/meetings-feed-incremental-sync-core';
+import { fetchPublicMeetingsPageFromSupabase, PUBLIC_MEETINGS_PAGE_SIZE } from '@/src/lib/supabase-meetings-list';
 
 type Page = { meetings: Meeting[]; hasMore: boolean };
 type FeedInfiniteData = InfiniteData<Page, number>;
@@ -105,40 +99,8 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
 
   const syncChangedMeetings = useCallback(async () => {
     if (!enabled) return;
-    if (meetingListSource() !== 'supabase') {
-      await queryClient.refetchQueries({ queryKey });
-      return;
-    }
-    const current = queryClient.getQueryData<FeedInfiniteData>(queryKey);
-    const cachedMeetings = flattenPages(current);
-    if (cachedMeetings.length === 0) {
-      await queryClient.refetchQueries({ queryKey });
-      return;
-    }
-
-    const summaryLimit = Math.min(400, Math.max(PUBLIC_MEETINGS_PAGE_SIZE, cachedMeetings.length + PUBLIC_MEETINGS_PAGE_SIZE));
-    const summariesRes = await fetchPublicMeetingChangeSummaries(summaryLimit);
-    if (!summariesRes.ok) return;
-    const summaries = summariesRes.summaries;
-    const relevantSummaries = summaries.slice(0, summaryLimit);
-    const { changedIds, deletedIds } = diffMeetingSummaries(cachedMeetings, relevantSummaries);
-    if (changedIds.length === 0 && deletedIds.length === 0) return;
-
-    const changedRes = await fetchMeetingsForSyncByIds(changedIds);
-    if (!changedRes.ok) return;
-    const nextMeetings = mergeMeetingsBySummaries(cachedMeetings, relevantSummaries, changedRes.meetings).slice(
-      0,
-      Math.max(cachedMeetings.length, PUBLIC_MEETINGS_PAGE_SIZE),
-    );
-
-    queryClient.setQueryData<FeedInfiniteData>(queryKey, (prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        pages: buildPagesFromMeetings(nextMeetings, prev.pages.length, summaries.length),
-      };
-    });
-  }, [enabled, queryClient, queryKey]);
+    await applyPublicMeetingsFeedSummarySync(queryClient);
+  }, [enabled, queryClient]);
 
   const meetings = useMemo(() => flattenPages(query.data as FeedInfiniteData | undefined), [query.data]);
 

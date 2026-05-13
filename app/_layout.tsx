@@ -20,6 +20,7 @@ import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
 import { MeetingCategoriesProvider } from '@/src/context/MeetingCategoriesContext';
 import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
+import { AppForegroundMeetingsRefreshHost } from '@/src/hooks/use-app-foreground-refresh';
 import { ScreenTransitionProvider } from '@/src/context/ScreenTransitionContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 import { ensureChatMessageFtsReady } from '@/src/watermelon/fts';
@@ -64,6 +65,7 @@ export default function RootLayout() {
         <QueryClientPersistProvider>
           <MeetingCategoriesProvider>
             <UserSessionProvider>
+              <AppForegroundMeetingsRefreshHost />
               <ScreenTransitionProvider>
                 <ShareShortcutsWatermelonBootstrap />
                 <InAppAlarmsProvider>

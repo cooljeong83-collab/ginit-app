@@ -1,6 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -80,6 +81,7 @@ import {
 } from '@/src/lib/feed-registered-regions';
 import { ledgerWritesToSupabase, meetingListSource } from '@/src/lib/hybrid-data-source';
 import { flushMeetingsFeedPendingServerProbe } from '@/src/lib/meetings-feed-deferred-sync';
+import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
@@ -180,6 +182,7 @@ function sortHomeEndedMeetingsLatestFirst(meetings: Meeting[]): Meeting[] {
 
 export default function FeedScreen() {
   const router = useTransitionRouter();
+  const queryClient = useQueryClient();
   const { userId, authProfile } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -236,7 +239,6 @@ export default function FeedScreen() {
   const {
     meetings,
     listError,
-    syncChangedMeetings: syncChangedMeetingsFeed,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -246,7 +248,6 @@ export default function FeedScreen() {
 
   const {
     meetings: myMeetings,
-    syncChangedMeetings: syncChangedMyMeetings,
   } = useMyMeetingsFeedSync({
     enabled: feedLocationReady,
     userId,
@@ -255,22 +256,14 @@ export default function FeedScreen() {
   useMeetingsTableRealtimeDeferred({ enabled: feedLocationReady, viewerUserId: userId });
 
   const runMeetingsListsServerReconcile = useCallback(async () => {
-    await Promise.all([syncChangedMeetingsFeed(), syncChangedMyMeetings()]);
-  }, [syncChangedMeetingsFeed, syncChangedMyMeetings]);
+    await runMeetingsListIncrementalReconcile(queryClient, userId?.trim() ?? null);
+  }, [queryClient, userId]);
 
   const flushHomeMeetingsLists = useCallback(
     (mode: 'manual' | 'explicit' | 'focus_auto') =>
       flushMeetingsFeedPendingServerProbe({ mode, runSync: runMeetingsListsServerReconcile }),
     [runMeetingsListsServerReconcile],
   );
-
-  useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('ginit_home_meetings_refetch', () => {
-      if (!feedLocationReady) return;
-      void flushHomeMeetingsLists('explicit');
-    });
-    return () => sub.remove();
-  }, [feedLocationReady, flushHomeMeetingsLists]);
 
   useSyncOnScreenFocus(
     useCallback(() => {

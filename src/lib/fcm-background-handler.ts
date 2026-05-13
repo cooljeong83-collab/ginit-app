@@ -2,20 +2,33 @@ import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebas
 import notifee, { EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
 
+import { getAppQueryClient } from '@/src/context/QueryClientPersistProvider';
 import { handleChatPushNotificationAction } from '@/src/lib/chat-push-notification-actions';
 import { displayFcmRemoteMessageWithNotifeeAndroid } from '@/src/lib/fcm-notifee-display';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { applyMeetingPushTargetedRefresh, normalizeFcmStringMap } from '@/src/lib/meeting-push-cache-refresh';
 import { setPendingPushOpenPayload } from '@/src/lib/pending-push-navigation';
 
 /**
- * FCM Background/Quit 핸들러 (Android).
+ * FCM Background/Quit 핸들러.
  *
  * - 이 파일은 모듈 평가 시점에 등록되어야 합니다. (`app/_layout.tsx`에서 최상단 import)
- * - `notification` payload만 있는 메시지는 백그라운드에서 보통 이 핸들러가 아니라 트레이로 직접 전달됩니다.
- * - **data-only**는 OS가 자동 표시하지 않으므로 Notifee로 시스템 알림을 띄웁니다.
+ * - 모든 플랫폼: `meeting_id`/`meetingId`가 있으면 TanStack 캐시 타깃 갱신(백그라운드는 상세 `prefetchQuery`).
+ * - Android 추가: `notification` payload만 있는 메시지는 보통 트레이로 직접 전달됩니다.
+ * - Android **data-only**는 OS가 자동 표시하지 않으므로 Notifee로 시스템 알림을 띄웁니다.
  */
 const m = getMessaging();
 setBackgroundMessageHandler(m, async (remoteMessage) => {
+  try {
+    const qc = getAppQueryClient();
+    const d = normalizeFcmStringMap(remoteMessage?.data);
+    applyMeetingPushTargetedRefresh(qc, d, 'fcm_background', undefined);
+  } catch (e) {
+    ginitNotifyDbg('fcm-background', 'meeting_cache_refresh_error', {
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+
   if (Platform.OS !== 'android') return;
   try {
     const d = remoteMessage?.data;

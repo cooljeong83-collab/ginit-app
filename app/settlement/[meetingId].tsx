@@ -3,11 +3,11 @@ import type { ImagePickerAsset } from 'expo-image-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  DeviceEventEmitter,
   Modal,
   Platform,
   ScrollView,
@@ -59,6 +59,7 @@ import {
   type Meeting,
   type MeetingSettlementReceiptItem,
 } from '@/src/lib/meetings';
+import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
 import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
@@ -291,6 +292,7 @@ function sameSettlementStringList(a: readonly string[], b: readonly string[]): b
 
 export default function SettlementMeetingScreen() {
   const router = useTransitionRouter();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { userId, authProfile } = useUserSession();
@@ -1000,7 +1002,7 @@ export default function SettlementMeetingScreen() {
       }
       await markMeetingLifecycleSettled(meetingId);
       setSettlementHasUnsavedUserChanges(false);
-      DeviceEventEmitter.emit('ginit_home_meetings_refetch');
+      void runMeetingsListIncrementalReconcile(queryClient, userId?.trim() ?? null);
       const fresh = await getMeetingById(meetingId);
       if (fresh) setMeeting(fresh);
       Alert.alert('완료', '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.', [
@@ -1028,6 +1030,7 @@ export default function SettlementMeetingScreen() {
     settlementPaymentMethod,
     persistSettlementDraftToServer,
     router,
+    queryClient,
   ]);
 
   const sharePayload = useCallback(() => {

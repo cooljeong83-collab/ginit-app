@@ -7,7 +7,6 @@ import {
 import {
   AppState,
   type AppStateStatus,
-  DeviceEventEmitter,
   FlatList,
   InteractionManager,
   Modal,
@@ -57,6 +56,7 @@ import {
   webGuestDisplayNameFromMeeting,
 } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
+import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
@@ -1231,16 +1231,15 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const openAlarmPanel = useCallback(() => setPanelOpen(true), []);
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
-  /** 홈 탐색 피드·내 모임 목록·모임 상세 캐시 갱신(알람 탭 후 목록/상세 불일치 방지) */
+  /** 홈 탐색 피드·내 모임 목록은 증분(summary→변경 ID만 fetch), 해당 모임 상세만 invalidate */
   const requestHomeMeetingsAndDetailRefresh = useCallback(
     (meetingId: string) => {
       const mid = meetingId.trim();
       if (!mid) return;
-      void queryClient.invalidateQueries({ queryKey: ['meetings', 'feed'] });
+      void runMeetingsListIncrementalReconcile(queryClient, userId?.trim() ?? null);
       void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(mid) });
-      DeviceEventEmitter.emit('ginit_home_meetings_refetch');
     },
-    [queryClient],
+    [queryClient, userId],
   );
 
   const markAllAlarmsAsRead = useCallback(() => {

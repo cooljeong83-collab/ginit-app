@@ -31,7 +31,6 @@ import {
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { feedRegionNormFromAddressHaystack } from './feed-display-location';
 import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
@@ -1170,11 +1169,10 @@ export async function getMeetingById(meetingId: string): Promise<Meeting | null>
   return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
 }
 
-/** __DEV__: 동일 모임에 대한 Realtime CHANNEL_ERROR 로그가 연속으로 쌓이지 않도록 */
-const subscribeMeetingByIdLastChannelErrorLogAtMs = new Map<string, number>();
-const SUBSCRIBE_MEETING_CHANNEL_ERROR_LOG_COOLDOWN_MS = 8000;
+/** 레저(Supabase UUID) 모임 폴링 주기 — Realtime 미사용, FCM 타깃 갱신·수동 새로고침과 병행 */
+const SUBSCRIBE_LEDGER_MEETING_POLL_MS = 45_000;
 
-/** 단일 모임 문서 실시간 구독(참여자 목록 갱신 등) */
+/** 단일 모임 문서 구독 — Firestore는 onSnapshot, Supabase 레저 UUID는 주기 폴링(Realtime 없음) */
 export function subscribeMeetingById(
   meetingId: string,
   onMeeting: (meeting: Meeting | null) => void,
@@ -1187,10 +1185,6 @@ export function subscribeMeetingById(
   }
   if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
     let cancelled = false;
-    let channel: RealtimeChannel | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let channelErrorRetries = 0;
-    const maxChannelErrorRetries = 12;
 
     const emit = () => {
       if (cancelled) return;
@@ -1202,65 +1196,12 @@ export function subscribeMeetingById(
       });
     };
 
-    const dropChannel = () => {
-      if (channel) {
-        void supabase.removeChannel(channel);
-        channel = null;
-      }
-    };
-
-    const connect = () => {
-      if (cancelled) return;
-      dropChannel();
-      const topic = `meetings-ledger:${id}:${Math.random().toString(36).slice(2)}`;
-      channel = supabase
-        .channel(topic)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings', filter: `id=eq.${id}` }, () => {
-          emit();
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            channelErrorRetries = 0;
-            return;
-          }
-          if (status !== 'CHANNEL_ERROR') return;
-          if (__DEV__) {
-            const now = Date.now();
-            const prev = subscribeMeetingByIdLastChannelErrorLogAtMs.get(id) ?? 0;
-            if (now - prev >= SUBSCRIBE_MEETING_CHANNEL_ERROR_LOG_COOLDOWN_MS) {
-              subscribeMeetingByIdLastChannelErrorLogAtMs.set(id, now);
-              console.warn('[subscribeMeetingById] ledger realtime CHANNEL_ERROR (reconnecting)', id);
-            }
-          }
-          emit();
-          dropChannel();
-          if (cancelled) return;
-          channelErrorRetries += 1;
-          if (channelErrorRetries > maxChannelErrorRetries) {
-            if (__DEV__) {
-              console.warn('[subscribeMeetingById] ledger realtime: max reconnect attempts', id);
-            }
-            return;
-          }
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            connect();
-          }, 600);
-        });
-    };
-
     emit();
-    connect();
+    const pollId = setInterval(emit, SUBSCRIBE_LEDGER_MEETING_POLL_MS);
 
     return () => {
       cancelled = true;
-      subscribeMeetingByIdLastChannelErrorLogAtMs.delete(id);
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      dropChannel();
+      clearInterval(pollId);
     };
   }
   const dRef = doc(getFirestoreDb(), MEETINGS_COLLECTION, id);
