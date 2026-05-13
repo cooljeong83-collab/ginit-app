@@ -1169,10 +1169,11 @@ export async function getMeetingById(meetingId: string): Promise<Meeting | null>
   return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
 }
 
-/** 레저(Supabase UUID) 모임 폴링 주기 — Realtime 미사용, FCM 타깃 갱신·수동 새로고침과 병행 */
-const SUBSCRIBE_LEDGER_MEETING_POLL_MS = 45_000;
-
-/** 단일 모임 문서 구독 — Firestore는 onSnapshot, Supabase 레저 UUID는 주기 폴링(Realtime 없음) */
+/**
+ * 단일 모임 문서 구독 — Firestore `onSnapshot`.
+ * 원장(UUID) 모임은 Supabase가 원본이며, `ledgerMeetingPutRawDoc` 가 Firestore `meetings/{id}` 에 미러한 뒤
+ * 동일 리스너로 실시간 반영됩니다. 최초 1회는 `ledger_meeting_get_doc` 로 부트스트랩합니다.
+ */
 export function subscribeMeetingById(
   meetingId: string,
   onMeeting: (meeting: Meeting | null) => void,
@@ -1186,7 +1187,7 @@ export function subscribeMeetingById(
   if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
     let cancelled = false;
 
-    const emit = () => {
+    const emitFromRpc = () => {
       if (cancelled) return;
       void ledgerGetMeetingDocOutcome(id).then((outcome) => {
         if (cancelled) return;
@@ -1196,12 +1197,24 @@ export function subscribeMeetingById(
       });
     };
 
-    emit();
-    const pollId = setInterval(emit, SUBSCRIBE_LEDGER_MEETING_POLL_MS);
+    emitFromRpc();
+
+    const dRef = doc(getFirestoreDb(), MEETINGS_COLLECTION, id);
+    const unsub = onSnapshot(
+      dRef,
+      (snap) => {
+        if (cancelled) return;
+        if (!snap.exists()) return;
+        onMeeting(mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>));
+      },
+      (err) => {
+        onError?.(err.message ?? 'Firestore 구독 오류');
+      },
+    );
 
     return () => {
       cancelled = true;
-      clearInterval(pollId);
+      unsub();
     };
   }
   const dRef = doc(getFirestoreDb(), MEETINGS_COLLECTION, id);

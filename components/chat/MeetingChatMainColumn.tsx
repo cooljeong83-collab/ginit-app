@@ -53,6 +53,11 @@ export type MeetingChatMainColumnProps = {
   bottomSearchNavigator?: ReactNode;
   /** 검색 모드에서는 입력 컴포저를 숨깁니다 */
   hideComposer?: boolean;
+  /**
+   * `data`(chatListRows)와 별도로 바뀌는 값 — 읽음 등으로 `renderItem`만 갱신돼야 할 때 FlashList가
+   * 가시 행을 다시 그리도록 합니다.
+   */
+  listExtraData?: unknown;
 };
 
 export function MeetingChatMainColumn({
@@ -88,6 +93,7 @@ export function MeetingChatMainColumn({
   inputMultiline = true,
   bottomSearchNavigator,
   hideComposer = false,
+  listExtraData,
 }: MeetingChatMainColumnProps) {
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
     setListRef(r);
@@ -116,6 +122,7 @@ export function MeetingChatMainColumn({
           <FlashList
             ref={setBothRefs as any}
             data={chatListRows}
+            extraData={listExtraData}
             keyExtractor={(row) => {
               if (row.type === 'message') return row.message.id;
               return `album:${row.batchId}:${row.messages.map((m: MeetingChatMessage) => m.id).join(':')}`;

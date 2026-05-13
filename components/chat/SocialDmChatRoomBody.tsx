@@ -394,6 +394,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     return 0;
   }, [peerReadAt]);
 
+  const socialDmListExtraData = useMemo(
+    () => `${peerReadMessageId ?? ''}|${peerReadAtMs}|${peerReadStateReady ? 1 : 0}`,
+    [peerReadMessageId, peerReadAtMs, peerReadStateReady],
+  );
+
   const unreadCountForMessage = useCallback(
     (message: MeetingChatMessage, messageIndex: number): number => {
       // 1:1: 상대가 안 읽었으면 1, 읽었으면 0
@@ -740,6 +745,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           inputMultiline={false}
           bottomSearchNavigator={bottomSearchNavigator}
           hideComposer={Boolean(searchMode)}
+          listExtraData={socialDmListExtraData}
         />
 
         <MeetingChatMediaPickerModal

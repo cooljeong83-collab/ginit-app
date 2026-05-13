@@ -1,11 +1,37 @@
-import { Timestamp } from 'firebase/firestore';
+import { deleteDoc, doc as fsDoc, setDoc, Timestamp } from 'firebase/firestore';
 
+import { ensureFirestoreReadAuth, getFirebaseFirestore } from '@/src/lib/firebase';
+import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { invokeMeetingCreatedAreaNotifyFireAndForget } from '@/src/lib/meeting-created-area-notify-client';
 import { supabase } from '@/src/lib/supabase';
 
 /** Ledger 모임 ID: Supabase `meetings.id` (UUID v4). Firestore 자동 ID와 구분. */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** `subscribeMeetingById` onSnapshot 경로 — `MEETINGS_COLLECTION` 과 동일 문자열 */
+const LEDGER_MEETING_FIRESTORE_COLLECTION = 'meetings';
+
+/**
+ * 원장 모임 문서를 Firestore `meetings/{uuid}` 에 best-effort 동기화합니다.
+ * 다른 클라이언트의 `ledgerMeetingPutRawDoc` 이 Supabase에만 반영돼도, 구독자는 onSnapshot 으로 동일 스냅샷을 받을 수 있습니다.
+ */
+export async function mirrorLedgerMeetingDocToFirestoreBestEffort(
+  meetingId: string,
+  doc: Record<string, unknown>,
+): Promise<void> {
+  const mid = meetingId.trim();
+  if (!mid || !ledgerWritesToSupabase() || !isLedgerMeetingId(mid)) return;
+  try {
+    await ensureFirestoreReadAuth();
+    const cleaned = stripUndefinedDeep({ ...doc, id: mid }) as Record<string, unknown>;
+    await setDoc(fsDoc(getFirebaseFirestore(), LEDGER_MEETING_FIRESTORE_COLLECTION, mid), cleaned, {
+      merge: true,
+    });
+  } catch (e) {
+    if (__DEV__) console.warn('[ledger] mirrorFirestore', mid, e);
+  }
+}
 
 export function isLedgerMeetingId(meetingId: string): boolean {
   if (!ledgerWritesToSupabase()) return false;
@@ -90,6 +116,7 @@ export async function ledgerMeetingPutRawDoc(meetingId: string, doc: Record<stri
     p_doc: payload,
   });
   if (error) throw new Error(error.message);
+  await mirrorLedgerMeetingDocToFirestoreBestEffort(meetingId.trim(), doc);
 }
 
 export async function ledgerMeetingCreate(hostAppUserId: string, doc: Record<string, unknown>): Promise<string> {
@@ -104,10 +131,22 @@ export async function ledgerMeetingCreate(hostAppUserId: string, doc: Record<str
   if (doc.isPublic === true) {
     invokeMeetingCreatedAreaNotifyFireAndForget(id, hostAppUserId);
   }
+  const loaded = await ledgerTryLoadMeetingDoc(id);
+  if (loaded) {
+    await mirrorLedgerMeetingDocToFirestoreBestEffort(id, loaded);
+  }
   return id;
 }
 
 export async function ledgerMeetingDelete(meetingId: string): Promise<void> {
-  const { error } = await supabase.rpc('ledger_meeting_delete', { p_meeting_id: meetingId.trim() });
+  const mid = meetingId.trim();
+  const { error } = await supabase.rpc('ledger_meeting_delete', { p_meeting_id: mid });
   if (error) throw new Error(error.message);
+  if (!mid || !ledgerWritesToSupabase() || !isLedgerMeetingId(mid)) return;
+  try {
+    await ensureFirestoreReadAuth();
+    await deleteDoc(fsDoc(getFirebaseFirestore(), LEDGER_MEETING_FIRESTORE_COLLECTION, mid));
+  } catch (e) {
+    if (__DEV__) console.warn('[ledger] deleteFirestore', mid, e);
+  }
 }

@@ -146,6 +146,46 @@ function lastReadMessageIdForParticipant(readBy: Meeting['chatReadMessageIdBy'],
   return '';
 }
 
+/** FlashList `extraData`: `chatListRows` 참조가 그대로여도 읽음 스냅샷이 바뀌면 행을 다시 그립니다. */
+function meetingChatUnreadUiExtraFingerprint(args: {
+  chatReadMessageIdBy: Meeting['chatReadMessageIdBy'];
+  chatReadAtBy: Meeting['chatReadAtBy'];
+  localReadMsgIdBy: Record<string, string> | null | undefined;
+  localReadAtMsBy: Record<string, number> | null | undefined;
+}): string {
+  const strMap = (o: Meeting['chatReadMessageIdBy']) => {
+    if (!o || typeof o !== 'object') return '';
+    return Object.entries(o as Record<string, unknown>)
+      .map(([k, v]) => `${String(k)}=${typeof v === 'string' ? v : String(v ?? '')}`)
+      .sort()
+      .join('|');
+  };
+  const atMap = (o: Meeting['chatReadAtBy']) => {
+    if (!o || typeof o !== 'object') return '';
+    return Object.entries(o as Record<string, unknown>)
+      .map(([k, v]) => `${String(k)}=${coalesceFirestoreTimeMs(v)}`)
+      .sort()
+      .join('|');
+  };
+  const localId = (o: Record<string, string> | null | undefined) => {
+    if (!o) return '';
+    return Object.entries(o)
+      .map(([k, v]) => `${k}=${v}`)
+      .sort()
+      .join('|');
+  };
+  const localMs = (o: Record<string, number> | null | undefined) => {
+    if (!o) return '';
+    return Object.entries(o)
+      .map(([k, v]) => `${k}=${v}`)
+      .sort()
+      .join('|');
+  };
+  return [strMap(args.chatReadMessageIdBy), atMap(args.chatReadAtBy), localId(args.localReadMsgIdBy), localMs(args.localReadAtMsBy)].join(
+    '#',
+  );
+}
+
 /** 검색 결과 한 줄 미리보기 — 검색어 주변만 잘라 표시 */
 function splitSearchSnippet(full: string, needle: string): { head: string; mid: string; tail: string } {
   const f = full;
@@ -353,14 +393,10 @@ export default function MeetingChatRoomScreen() {
       setMeeting(null);
       return;
     }
-    const unsub = subscribeMeetingById(
-      meetingId,
-      (m) => {
-        setMeeting(m);
-        setMeetingError(null);
-      },
-      (msg) => setMeetingError(msg),
-    );
+    const unsub = subscribeMeetingById(meetingId, (m) => {
+      setMeeting(m);
+      setMeetingError(null);
+    }, (msg) => setMeetingError(msg));
     return unsub;
   }, [meetingId]);
 
@@ -1109,6 +1145,22 @@ export default function MeetingChatRoomScreen() {
     return out;
   }, [meeting?.chatReadMessageIdBy, localMeetingRoom?.messageReadAtMsBy, localMeetingRoom?.messageReadMessageIdBy, readAtMsByUser]);
 
+  const meetingChatListExtraData = useMemo(
+    () =>
+      meetingChatUnreadUiExtraFingerprint({
+        chatReadMessageIdBy: meeting?.chatReadMessageIdBy ?? null,
+        chatReadAtBy: meeting?.chatReadAtBy ?? null,
+        localReadMsgIdBy: localMeetingRoom?.messageReadMessageIdBy,
+        localReadAtMsBy: localMeetingRoom?.messageReadAtMsBy,
+      }),
+    [
+      meeting?.chatReadMessageIdBy,
+      meeting?.chatReadAtBy,
+      localMeetingRoom?.messageReadMessageIdBy,
+      localMeetingRoom?.messageReadAtMsBy,
+    ],
+  );
+
   const messageIndexById = useMemo(() => {
     const m = new Map<string, number>();
     messages.forEach((msg, i) => {
@@ -1519,6 +1571,7 @@ export default function MeetingChatRoomScreen() {
           onPressAttach={canUseMeetingActions ? onPressAttach : undefined}
           bottomSearchNavigator={bottomSearchNavigator}
           hideComposer={chatSearchMode}
+          listExtraData={meetingChatListExtraData}
         />
 
         <MeetingChatMediaPickerModal
