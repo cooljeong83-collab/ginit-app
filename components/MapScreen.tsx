@@ -31,7 +31,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { useFirestoreMeetingPatchesByIds } from '@/src/hooks/useFirestoreMeetingPatchesByIds';
+import { useSupabaseMeetingPatchesByIds } from '@/src/hooks/useSupabaseMeetingPatchesByIds';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
@@ -62,7 +62,6 @@ import {
 import { loadRegisteredFeedRegions, peekFeedRegionMapSelectionForMapBoot } from '@/src/lib/feed-registered-regions';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
 import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
 import {
@@ -1000,15 +999,12 @@ export default function MapScreen() {
   }, [rpcMeetings]);
 
   useEffect(() => {
-    const unsub = subscribeMeetingsHybrid(
-      (list) => {
-        setHybridMeetings(list);
-        setMeetingsBooted(true);
-      },
-      () => {},
-    );
+    const unsub = subscribeMeetingsHybrid((list) => {
+      setHybridMeetings(list);
+      setMeetingsBooted(true);
+    }, () => {});
     return unsub;
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (selectedCategoryId == null) return;
@@ -1085,24 +1081,21 @@ export default function MapScreen() {
     return [...mapById.values()];
   }, [rpcMeetings, hybridInMapQueryArea, mapGeoQueryRegion]);
 
-  const firestorePatches = useFirestoreMeetingPatchesByIds(
-    mergedMeetingsBase.map((m) => m.id),
-    meetingListSource() === 'supabase',
-  );
+  const supabasePatches = useSupabaseMeetingPatchesByIds(mergedMeetingsBase.map((m) => m.id), true, userId);
 
   const mergedMeetings = useMemo(() => {
-    if (firestorePatches.size === 0) return mergedMeetingsBase;
+    if (supabasePatches.size === 0) return mergedMeetingsBase;
     return mergedMeetingsBase.map((m) => {
-      const fs = firestorePatches.get(m.id);
-      if (!fs) return m;
+      const row = supabasePatches.get(m.id);
+      if (!row) return m;
       return {
         ...m,
-        participantIds: fs.participantIds ?? m.participantIds,
-        participantVoteLog: fs.participantVoteLog ?? m.participantVoteLog,
-        voteTallies: fs.voteTallies ?? m.voteTallies,
+        participantIds: row.participantIds ?? m.participantIds,
+        participantVoteLog: row.participantVoteLog ?? m.participantVoteLog,
+        voteTallies: row.voteTallies ?? m.voteTallies,
       };
     });
-  }, [mergedMeetingsBase, firestorePatches]);
+  }, [mergedMeetingsBase, supabasePatches]);
 
   const textFilteredMeetings = useMemo(() => {
     if (!meetingMatchesFeedSearch) return mergedMeetings;

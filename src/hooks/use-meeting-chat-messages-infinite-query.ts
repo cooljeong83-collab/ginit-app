@@ -10,6 +10,7 @@ import {
   subscribeMeetingChatLiveTail,
 } from '@/src/lib/meeting-chat';
 import { upsertLocalChatMessages, type OfflineChatLocalMessageInput } from '@/src/lib/offline-chat/offline-chat-sync';
+import { voidSafe } from '@/src/lib/void-safe';
 import { useLocalMeetingChatMessages } from '@/src/hooks/use-local-chat-room-messages';
 
 const CHAT_MESSAGES_STALE_MS = 5 * 60 * 1000;
@@ -233,12 +234,20 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
     const unsub = subscribeMeetingChatLiveTail(
       mid,
       (e) => {
-        setLiveError(null);
-        queryClient.setQueryData(
-          meetingChatMessagesQueryKey(mid),
-          (old: InfiniteData<MeetingChatFetchedMessagesPage> | undefined) => mergeLiveTailIntoInfiniteData(old, e),
+        voidSafe(
+          (async () => {
+            try {
+              await upsertLocalChatMessages({ roomType: 'meeting', roomId: mid }, toLocalInputs([...e.tail, ...e.evictedFromTail]));
+              setLiveError(null);
+              queryClient.setQueryData(
+                meetingChatMessagesQueryKey(mid),
+                (old: InfiniteData<MeetingChatFetchedMessagesPage> | undefined) => mergeLiveTailIntoInfiniteData(old, e),
+              );
+            } catch (err) {
+              if (__DEV__) console.warn('[useMeetingChatMessagesInfiniteQuery] live tail → local persist failed', err);
+            }
+          })(),
         );
-        void upsertLocalChatMessages({ roomType: 'meeting', roomId: mid }, toLocalInputs([...e.tail, ...e.evictedFromTail]));
       },
       (msg) => setLiveError(msg),
     );
@@ -262,7 +271,9 @@ export function useMeetingChatMessagesInfiniteQuery({ meetingId, enabled }: UseM
       await rqFetchNextPage();
       const data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(queryKey);
       const flat = meetingChatMessagesFromInfiniteData(data);
-      void upsertLocalChatMessages({ roomType: 'meeting', roomId: meetingId }, toLocalInputs(flat));
+      voidSafe(
+        upsertLocalChatMessages({ roomType: 'meeting', roomId: meetingId }, toLocalInputs(flat)),
+      );
       const n = countDistinctMessagesInInfiniteData(data);
       console.log('✅ 현재 로드된 총 메시지 수: ' + n);
     } finally {

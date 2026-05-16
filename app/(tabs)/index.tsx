@@ -47,7 +47,6 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
-import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -79,9 +78,8 @@ import {
   saveRegisteredFeedRegions,
   syncFeedRegionMapBootMemoryFromSelection,
 } from '@/src/lib/feed-registered-regions';
-import { ledgerWritesToSupabase, meetingListSource } from '@/src/lib/hybrid-data-source';
-import { flushMeetingsFeedPendingServerProbe } from '@/src/lib/meetings-feed-deferred-sync';
-import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
+import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
+import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
@@ -254,24 +252,6 @@ export default function FeedScreen() {
   });
 
   useMeetingsTableRealtimeDeferred({ enabled: feedLocationReady, viewerUserId: userId });
-
-  const runMeetingsListsServerReconcile = useCallback(async () => {
-    await runMeetingsListIncrementalReconcile(queryClient, userId?.trim() ?? null);
-  }, [queryClient, userId]);
-
-  const flushHomeMeetingsLists = useCallback(
-    (mode: 'manual' | 'explicit' | 'focus_auto') =>
-      flushMeetingsFeedPendingServerProbe({ mode, runSync: runMeetingsListsServerReconcile }),
-    [runMeetingsListsServerReconcile],
-  );
-
-  useSyncOnScreenFocus(
-    useCallback(() => {
-      void flushHomeMeetingsLists('focus_auto');
-    }, [flushHomeMeetingsLists]),
-    [feedLocationReady],
-    { enabled: feedLocationReady },
-  );
 
   useFocusEffect(
     useCallback(() => {
@@ -446,7 +426,9 @@ export default function FeedScreen() {
         }
         if (!cancelled) setActiveRegionNorm(nextActive);
       } finally {
-        if (!cancelled) setFeedLocationReady(true);
+        // `cancelled`와 무관하게 피드를 연다 — cleanup(언마운트·StrictMode 등) 직전에 완료되면
+        // `if (!cancelled)`만 쓰면 이후 리마운트 없이 `feedLocationReady`가 영구 false → 목록 무한 스켈레톤.
+        setFeedLocationReady(true);
       }
     })();
     return () => {
@@ -571,7 +553,6 @@ export default function FeedScreen() {
   );
 
   const myTabsMeetings = useMemo(() => {
-    if (meetingListSource() !== 'supabase') return meetings;
     if (myMeetings.length === 0) return meetings;
     const seen = new Set<string>();
     const out: Meeting[] = [];
@@ -592,7 +573,6 @@ export default function FeedScreen() {
 
   /** Supabase RPC `ledger_list_my_meetings_for_feed` 결과 ID — 서버가 이미 호스트·참여로 거름 */
   const rpcMyMeetingIdSet = useMemo(() => {
-    if (meetingListSource() !== 'supabase') return null as Set<string> | null;
     const s = new Set<string>();
     for (const m of myMeetings) {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
@@ -1180,8 +1160,8 @@ export default function FeedScreen() {
   }, [userId, authProfile?.email]);
 
   const isSignedIn = useMemo(
-    () => Boolean(userId?.trim() || authProfile?.firebaseUid?.trim()),
-    [userId, authProfile?.firebaseUid],
+    () => Boolean(userId?.trim() || authProfile?.supabaseUserId?.trim()),
+    [userId, authProfile?.supabaseUserId],
   );
 
   const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
@@ -1317,11 +1297,11 @@ export default function FeedScreen() {
     if (!feedLocationReady) return;
     setRefreshing(true);
     try {
-      await flushHomeMeetingsLists('manual');
+      await runMeetingsUserActionDeltaSync(queryClient, userId?.trim() ?? null, 'pull_refresh');
     } finally {
       setRefreshing(false);
     }
-  }, [feedLocationReady, flushHomeMeetingsLists]);
+  }, [feedLocationReady, queryClient, userId]);
 
   useEffect(() => {
     if (!feedLocationReady) return;

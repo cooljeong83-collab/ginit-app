@@ -45,7 +45,7 @@ import type { Meeting } from '@/src/lib/meetings';
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
-import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
+import { subscribeFriendsPostgresChanged } from '@/src/lib/friends-postgres-sync-bus';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfile, getUserProfilesForIds, readShareActivityStatusEnabled } from '@/src/lib/user-profile';
 
@@ -379,17 +379,14 @@ export function FriendsHomeScreen() {
 
   useEffect(() => {
     if (!me) return;
-    return subscribeFriendsTableChanges(me, () => {
+    return subscribeFriendsPostgresChanged(() => {
       void reload();
     });
   }, [me, reload]);
 
   useEffect(() => {
-    return subscribeMeetingsHybrid(
-      (list) => setMeetings(list),
-      () => {},
-    );
-  }, []);
+    return subscribeMeetingsHybrid((list) => setMeetings(list), () => {});
+  }, [me]);
 
   useEffect(() => {
     let alive = true;

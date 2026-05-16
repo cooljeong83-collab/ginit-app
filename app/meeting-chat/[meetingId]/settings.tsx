@@ -20,7 +20,8 @@ import {
   getMeetingChatNotifyEnabledForUser,
   setMeetingChatNotifyEnabledForUser,
 } from '@/src/lib/meeting-chat-notify-preference';
-import { meetingParticipantCount, subscribeMeetingById, type Meeting } from '@/src/lib/meetings';
+import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
+import { meetingParticipantCount } from '@/src/lib/meetings';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
@@ -87,7 +88,9 @@ export default function MeetingChatSettingsScreen() {
       : '';
   const { userId } = useUserSession();
 
-  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
+  const { meeting, meetingReady, loading: meetingLoading } = useMeetingDetailQuery(meetingId, {
+    refetchOnMount: 'always',
+  });
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [notifyOn, setNotifyOn] = useState(true);
   const [notifyLoaded, setNotifyLoaded] = useState(false);
@@ -102,23 +105,11 @@ export default function MeetingChatSettingsScreen() {
     [router],
   );
 
-  useEffect(() => {
-    if (!meetingId) {
-      setMeeting(null);
-      return;
-    }
-    return subscribeMeetingById(
-      meetingId,
-      (m) => setMeeting(m),
-      () => {},
-    );
-  }, [meetingId]);
-
   const allowed = useMemo(() => {
-    if (meeting === undefined) return null;
+    if (!meetingReady) return null;
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
-  }, [meeting, userId]);
+  }, [meeting, userId, meetingReady]);
 
   useEffect(() => {
     if (!meeting || allowed !== true) return;
@@ -228,7 +219,7 @@ export default function MeetingChatSettingsScreen() {
     );
   }
 
-  if (meeting === undefined) {
+  if (!meetingReady || meetingLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={['bottom']}>
         <View style={styles.emptyWrap}>
@@ -283,7 +274,13 @@ export default function MeetingChatSettingsScreen() {
                   accessibilityLabel={canOpen ? `${nick} 프로필` : nick}>
                   <View style={styles.avatarRing}>
                     {p?.photoUrl ? (
-                      <Image source={{ uri: p.photoUrl }} style={styles.avatarImg} contentFit="cover" />
+                      <Image
+                        source={{ uri: p.photoUrl }}
+                        style={styles.avatarImg}
+                        contentFit="cover"
+                        cachePolicy="disk"
+                        recyclingKey={`${pid}:${p.photoUrl}`}
+                      />
                     ) : (
                       <Text style={styles.avatarLetter}>{nick.slice(0, 1)}</Text>
                     )}

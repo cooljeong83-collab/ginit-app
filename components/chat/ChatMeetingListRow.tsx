@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/src/lib/ginit-timestamp';
 import {StyleSheet, Text, View} from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';

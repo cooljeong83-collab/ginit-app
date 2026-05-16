@@ -12,6 +12,7 @@ import {
   type HomeMeetingStatusBadgeListKind,
 } from '@/src/lib/feed-home-visual';
 import { firstKakaoPlaceDetailPageUrlFromMeeting, type FeedMeetingSymbolBox } from '@/src/lib/feed-meeting-utils';
+import { MEETING_LIST_IMAGE_BLURHASH } from '@/src/lib/expo-image-meeting-placeholder';
 import { formatDistanceForList, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import {
   GINIT_HIGH_TRUST_HOST_MIN,
@@ -369,6 +370,7 @@ export function HomeMeetingListItem({
                   transition={140}
                   cachePolicy="disk"
                   recyclingKey={symbolBox.url}
+                  placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
                   accessibilityIgnoresInvertColors
                 />
                 <View
@@ -393,6 +395,7 @@ export function HomeMeetingListItem({
                   transition={140}
                   cachePolicy="disk"
                   recyclingKey={symbolBox.url}
+                  placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
                   accessibilityIgnoresInvertColors
                 />
                 <View
@@ -418,6 +421,7 @@ export function HomeMeetingListItem({
                     transition={140}
                     cachePolicy="disk"
                     recyclingKey={placeListMainUri}
+                    placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
                     accessibilityIgnoresInvertColors
                   />
                 ) : (
@@ -448,6 +452,7 @@ export function HomeMeetingListItem({
                   transition={140}
                   cachePolicy="disk"
                   recyclingKey={meetingImageThumbUri}
+                  placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
                   accessibilityIgnoresInvertColors
                 />
                 <View

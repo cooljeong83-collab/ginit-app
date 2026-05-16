@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useLocalSearchParams } from 'expo-router';
-import { serverTimestamp } from 'firebase/firestore';
+import { serverTimestamp } from '@/src/lib/ginit-timestamp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -56,7 +56,7 @@ export default function ProfilePhoneVerifyOtpScreen() {
     setBusy(true);
     try {
       const cred = await AuthService.linkPhoneWithCode(verificationId, code);
-      const e164 = cred.user.phoneNumber ?? phoneE164Param;
+      const e164 = cred.phoneNumber ?? phoneE164Param;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
         Alert.alert('인증 실패', '전화번호를 확인할 수 없습니다. 다시 시도해 주세요.');

@@ -2,14 +2,16 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { type RefObject, useCallback, useMemo, useState } from 'react';
-import { Alert, Share, Text, View} from 'react-native';
+import { type RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Share, Text, View, useWindowDimensions } from 'react-native';
 
 import { MeetingChatGinitImageCluster } from '@/components/chat/MeetingChatGinitImageCluster';
 import { MeetingChatBubbleActionMenu } from '@/components/chat/MeetingChatBubbleActionMenu';
 import type { MeetingChatBubbleActionMenuAction } from '@/components/chat/MeetingChatBubbleActionMenu';
 import { MeetingChatLinkPreviewCard } from '@/components/chat/MeetingChatLinkPreviewCard';
+import { MessageReadCount } from '@/components/chat/MessageReadCount';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
+import { MeetingChatObservableMessageRow } from '@/components/chat/MeetingChatObservableMessageRow';
 import { MeetingChatSwipeToReply } from '@/components/chat/meeting-chat-swipe-to-reply';
 import {
   formatChatTime,
@@ -64,7 +66,6 @@ export type MeetingChatRenderItemDeps = {
   myId: string;
   hostNorm: string;
   profiles: Map<string, UserProfile>;
-  unreadCountForMessage: (message: MeetingChatMessage, messageIndex: number) => number;
   jumpToRepliedMessage: (replyMessageId: string) => void | Promise<void>;
   setReplyTo: (v: MeetingChatMessage['replyTo']) => void;
   /** 소프트 삭제(best-effort). meeting/social 컨텍스트에 맞게 호출부에서 주입 */
@@ -74,6 +75,15 @@ export type MeetingChatRenderItemDeps = {
   listRef: RefObject<unknown>;
   /** 검색 확정어: 텍스트 말풍선(및 이미지 캡션) 내 일치 구간 하이라이트 */
   messageSearchHighlightQuery?: string;
+  roomId?: string;
+  roomType?: 'meeting' | 'social_dm';
+  chatRenderMode?: 'meeting_group' | 'social_dm';
+  /** Watermelon `chat_rooms.room_id` 후보 — 읽음 숫자용(말풍선 내부 구독). */
+  wmChatRoomIds?: readonly string[];
+  participantIdsForUnread?: readonly string[];
+  peerId?: string;
+  peerReadStateReady?: boolean;
+  readMapsRevision?: number;
 };
 
 export function useMeetingChatRenderItem({
@@ -82,7 +92,6 @@ export function useMeetingChatRenderItem({
   myId,
   hostNorm,
   profiles,
-  unreadCountForMessage,
   jumpToRepliedMessage,
   setReplyTo,
   deleteMessageBestEffort,
@@ -90,7 +99,23 @@ export function useMeetingChatRenderItem({
   openMeetingChatImageViewer,
   listRef,
   messageSearchHighlightQuery = '',
+  roomId = '',
+  roomType,
+  chatRenderMode = 'meeting_group',
+  wmChatRoomIds = [],
+  participantIdsForUnread = [],
+  peerId = '',
+  peerReadStateReady = false,
+  readMapsRevision = 0,
 }: MeetingChatRenderItemDeps) {
+  const listRowsRef = useRef(listRows);
+  const messageIndexByIdRef = useRef(messageIndexById);
+  const profilesRef = useRef(profiles);
+  useLayoutEffect(() => {
+    listRowsRef.current = listRows;
+    messageIndexByIdRef.current = messageIndexById;
+    profilesRef.current = profiles;
+  }, [listRows, messageIndexById, profiles]);
   const [menu, setMenu] = useState<{ visible: boolean; x: number; y: number; row: MeetingChatListRow | null }>({
     visible: false,
     x: 0,
@@ -166,6 +191,20 @@ export function useMeetingChatRenderItem({
     ] satisfies MeetingChatBubbleActionMenuAction[];
   }, [menu.row, setReplyTo, deleteMessageBestEffort, myId]);
 
+  const { width: windowWidth } = useWindowDimensions();
+  /** FlashList 행에서 `maxWidth: '78%'` 기준이 무너져 한 글자 줄바꿈·클립이 나는 경우 방지 */
+  const chatBubbleMaxWidthStyle = useMemo(() => {
+    const inner = Math.max(0, windowWidth - 24); // listContent paddingHorizontal 12×2
+    return { maxWidth: Math.max(120, Math.floor(inner * 0.78)) };
+  }, [windowWidth]);
+
+  const wmIdsForRead = useMemo(() => {
+    const trimmed = [...wmChatRoomIds].map((x) => String(x ?? '').trim()).filter(Boolean);
+    if (trimmed.length > 0) return [...new Set(trimmed)] as readonly string[];
+    const r = roomId.trim();
+    return r ? ([r] as const) : ([] as const);
+  }, [wmChatRoomIds, roomId]);
+
   return useCallback(
     ({ item, index }: { item: MeetingChatListRow; index: number }) => {
       const highlightQ = String(messageSearchHighlightQuery ?? '').trim();
@@ -179,7 +218,8 @@ export function useMeetingChatRenderItem({
         />
       );
       /** inverted + 최신순 data: index 작을수록 화면 아래(최신). `next` = 더 과거(위쪽) 이웃 */
-      const next = index + 1 < listRows.length ? listRows[index + 1]! : null;
+      const rowsNow = listRowsRef.current;
+      const next = index + 1 < rowsNow.length ? rowsNow[index + 1]! : null;
       const currDate = rowAnchorDate(item);
       const nextDate = next ? rowAnchorDate(next) : null;
       const dateLabel =
@@ -194,7 +234,7 @@ export function useMeetingChatRenderItem({
       if (item.type === 'message' && item.message.kind === 'system') {
         const sys = item.message;
         return (
-          <View>
+          <View style={styles.listRowRoot}>
             {dateLabel ? (
               <View style={styles.dateChipRow}>
                 <View style={styles.dateChip}>
@@ -206,6 +246,37 @@ export function useMeetingChatRenderItem({
               <LinkableChatText text={sys.text} style={styles.systemText} />
             </View>
           </View>
+        );
+      }
+
+      if (item.type === 'message' && item.message.kind !== 'system' && roomId.trim() && roomType) {
+        return (
+          <MeetingChatObservableMessageRow
+            roomId={roomId.trim()}
+            roomType={roomType}
+            wmChatRoomIds={wmIdsForRead}
+            messageId={item.message.id}
+            chatRenderMode={chatRenderMode}
+            item={item}
+            listRowsRef={listRowsRef}
+            messageIndexByIdRef={messageIndexByIdRef}
+            listRowIndex={index}
+            myId={myId}
+            hostNorm={hostNorm}
+            profilesRef={profilesRef}
+            participantIdsForUnread={participantIdsForUnread}
+            peerId={peerId}
+            peerReadStateReady={peerReadStateReady}
+            readMapsRevision={readMapsRevision}
+            jumpToRepliedMessage={jumpToRepliedMessage}
+            setReplyTo={setReplyTo}
+            deleteMessageBestEffort={deleteMessageBestEffort}
+            onOpenUserProfile={onOpenUserProfile}
+            openMeetingChatImageViewer={openMeetingChatImageViewer}
+            listRef={listRef}
+            messageSearchHighlightQuery={messageSearchHighlightQuery}
+            chatBubbleMaxWidthStyle={chatBubbleMaxWidthStyle}
+          />
         );
       }
 
@@ -230,7 +301,7 @@ export function useMeetingChatRenderItem({
         sid &&
         (index === 0 || !next || rowIsSystemRow(next) || !sameSenderAsNext);
 
-      const profFromMap = sid ? profileForSender(profiles, sid) : undefined;
+      const profFromMap = sid ? profileForSender(profilesRef.current, sid) : undefined;
       const cachedSenderPhotoUrl = anchorMsg.senderAvatarUrl?.trim() || null;
       const cachedSenderName = anchorMsg.senderName?.trim() || null;
       const prof =
@@ -248,6 +319,13 @@ export function useMeetingChatRenderItem({
 
       const singleMsg = item.type === 'message' ? item.message : null;
       const isImage = Boolean(singleMsg && singleMsg.kind === 'image');
+      const hasServerAck =
+        typeof singleMsg?.serverSeq === 'number' && Number.isFinite(singleMsg.serverSeq) && singleMsg.serverSeq > 0;
+      const isOutboundPending =
+        isMine &&
+        !isAlbum &&
+        Boolean(singleMsg && typeof singleMsg.id === 'string' && singleMsg.id.startsWith('local:')) &&
+        !hasServerAck;
       const caption = singleMsg?.text?.trim();
       const isLinkOnlyText =
         Boolean(singleMsg && singleMsg.kind === 'text' && singleMsg.linkPreview?.url) &&
@@ -277,7 +355,7 @@ export function useMeetingChatRenderItem({
               accessibilityLabel="원글로 이동">
               <View style={styles.replyQuoteTopRow}>
                 <View style={styles.replyQuoteTextCol}>
-                  <Text style={lab}>{replyTargetLabel(anchorMsg.replyTo, profiles)}에게 답장</Text>
+                  <Text style={lab}>{replyTargetLabel(anchorMsg.replyTo, profilesRef.current)}에게 답장</Text>
                   <Text style={txt} numberOfLines={2}>
                     {replyPreviewText(anchorMsg.replyTo)}
                   </Text>
@@ -287,6 +365,12 @@ export function useMeetingChatRenderItem({
                     source={{ uri: anchorMsg.replyTo.imageUrl.trim() }}
                     style={styles.replyQuoteThumb}
                     contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={
+                      anchorMsg.replyTo.messageId
+                        ? `${anchorMsg.replyTo.messageId}:${anchorMsg.replyTo.imageUrl.trim()}`
+                        : anchorMsg.replyTo.imageUrl.trim()
+                    }
                   />
                 ) : null}
               </View>
@@ -297,12 +381,13 @@ export function useMeetingChatRenderItem({
 
       if (isMine) {
         const unreadIdx = isAlbum
-          ? flatUnreadIndex(messageIndexById, item.messages)
+          ? flatUnreadIndex(messageIndexByIdRef.current, item.messages)
           : singleMsg
-            ? (messageIndexById.get(singleMsg.id) ?? index)
+            ? (messageIndexByIdRef.current.get(singleMsg.id) ?? index)
             : index;
         const unreadMsg = isAlbum ? meetingChatAlbumAnchorMessage(item) : singleMsg!;
-        const unread = unreadCountForMessage(unreadMsg, unreadIdx);
+        const unreadCreatedMs =
+          unreadMsg.createdAt && typeof unreadMsg.createdAt.toMillis === 'function' ? unreadMsg.createdAt.toMillis() : 0;
         const timeSource = anchorMsg.createdAt;
         const imageClusterMine = isAlbum ? (
           <MeetingChatGinitImageCluster messages={albumChrono} onPressImage={openMeetingChatImageViewer} alignEnd />
@@ -316,7 +401,10 @@ export function useMeetingChatRenderItem({
             onLongPress={(e) => openMenuForRow(item, e)}
             delayLongPress={420}
             accessibilityLabel="말풍선 옵션"
-            style={({ pressed }) => [[styles.bubbleMineWrap, styles.ginitPlainMineWrap], pressed && styles.pressed]}>
+            style={({ pressed }) => [
+              [styles.bubbleMineWrap, styles.ginitPlainMineWrap, chatBubbleMaxWidthStyle],
+              pressed && styles.pressed,
+            ]}>
             {renderReply('mine')}
             {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
             {imageClusterMine}
@@ -329,7 +417,10 @@ export function useMeetingChatRenderItem({
             onLongPress={(e) => openMenuForRow(item, e)}
             delayLongPress={420}
             accessibilityLabel="말풍선 옵션"
-            style={({ pressed }) => [[styles.bubbleMineWrap, styles.ginitPlainMineWrap], pressed && styles.pressed]}>
+            style={({ pressed }) => [
+              [styles.bubbleMineWrap, styles.ginitPlainMineWrap, chatBubbleMaxWidthStyle],
+              pressed && styles.pressed,
+            ]}>
             <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={singleMsg.text} standalone />
           </GinitPressable>
         ) : (
@@ -337,7 +428,7 @@ export function useMeetingChatRenderItem({
             onLongPress={(e) => openMenuForRow(item, e)}
             delayLongPress={420}
             accessibilityLabel="말풍선 옵션"
-            style={({ pressed }) => [styles.bubbleMineWrap, pressed && styles.pressed]}>
+            style={({ pressed }) => [styles.bubbleMineWrap, chatBubbleMaxWidthStyle, pressed && styles.pressed]}>
             <BlurView tint="light" intensity={60} style={styles.bubbleMine}>
               {renderReply('mine')}
               {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
@@ -351,18 +442,32 @@ export function useMeetingChatRenderItem({
         const bubble = (
           <View style={styles.rowMine}>
             <View style={styles.timeMineCol}>
-              {unread > 0 ? (
-                <Text style={styles.unreadBubbleCount} accessibilityLabel={`안 읽은 사람 ${unread}명`}>
-                  {unread}
-                </Text>
+              {roomId.trim() && roomType && wmIdsForRead.length > 0 ? (
+                <MessageReadCount
+                  roomType={roomType}
+                  wmChatRoomIds={wmIdsForRead}
+                  messageId={unreadMsg.id}
+                  messageCreatedAtMs={unreadCreatedMs}
+                  serverSeq={unreadMsg.serverSeq ?? null}
+                  chatRenderMode={chatRenderMode}
+                  myId={myId}
+                  participantIds={participantIdsForUnread}
+                  peerId={peerId}
+                  peerReadStateReady={peerReadStateReady}
+                  readMapsRevision={readMapsRevision}
+                  messageIndex={unreadIdx}
+                  messageIndexByIdRef={messageIndexByIdRef}
+                />
               ) : null}
               <Text style={styles.timeMine}>{formatChatTime(timeSource)}</Text>
             </View>
-            {bubbleMainMine}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
+              <View style={isOutboundPending ? { opacity: 0.86 } : undefined}>{bubbleMainMine}</View>
+            </View>
           </View>
         );
         return (
-          <View>
+          <View style={styles.listRowRoot}>
             {dateLabel ? (
               <View style={styles.dateChipRow}>
                 <View style={styles.dateChip}>
@@ -445,7 +550,10 @@ export function useMeetingChatRenderItem({
                   onLongPress={(e) => openMenuForRow(item, e)}
                   delayLongPress={420}
                   accessibilityLabel="말풍선 옵션"
-                  style={({ pressed }) => [[styles.bubbleOtherOuter, styles.ginitPlainOtherOuter], pressed && styles.pressed]}>
+                  style={({ pressed }) => [
+                    [styles.bubbleOtherOuter, styles.ginitPlainOtherOuter, chatBubbleMaxWidthStyle],
+                    pressed && styles.pressed,
+                  ]}>
                   {renderReply('other')}
                   {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                   {imageClusterOther}
@@ -459,11 +567,11 @@ export function useMeetingChatRenderItem({
                   onLongPress={(e) => openMenuForRow(item, e)}
                   delayLongPress={420}
                   accessibilityLabel="말풍선 옵션"
-                  style={({ pressed }) => [styles.bubbleOtherOuter, pressed && styles.pressed]}>
+                  style={({ pressed }) => [styles.bubbleOtherOuter, chatBubbleMaxWidthStyle, pressed && styles.pressed]}>
                   <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={singleMsg.text} standalone />
                 </GinitPressable>
               ) : (
-                <View style={styles.bubbleOtherOuter}>
+                <View style={[styles.bubbleOtherOuter, chatBubbleMaxWidthStyle]}>
                   <GinitPressable
                     onLongPress={(e) => openMenuForRow(item, e)}
                     delayLongPress={420}
@@ -487,7 +595,7 @@ export function useMeetingChatRenderItem({
         </View>
       );
       return (
-        <View>
+        <View style={styles.listRowRoot}>
           <MeetingChatBubbleActionMenu
             visible={menu.visible}
             anchor={menu.visible ? { x: menu.x, y: menu.y } : null}
@@ -518,12 +626,8 @@ export function useMeetingChatRenderItem({
       );
     },
     [
-      listRows,
-      messageIndexById,
       myId,
       hostNorm,
-      profiles,
-      unreadCountForMessage,
       jumpToRepliedMessage,
       setReplyTo,
       onOpenUserProfile,
@@ -536,6 +640,16 @@ export function useMeetingChatRenderItem({
       menuActions,
       closeMenu,
       openMenuForRow,
+      chatBubbleMaxWidthStyle,
+      roomId,
+      roomType,
+      chatRenderMode,
+      wmIdsForRead,
+      participantIdsForUnread,
+      peerId,
+      peerReadStateReady,
+      readMapsRevision,
+      deleteMessageBestEffort,
     ],
   );
 }

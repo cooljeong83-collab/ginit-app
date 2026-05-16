@@ -197,9 +197,13 @@ async function removeAllAvatarObjectsInUserFolder(appUserId: string): Promise<nu
   const folder = `users/${storageSafeUserFolderSegment(id)}`;
   const bucket = supabase.storage.from(SUPABASE_STORAGE_BUCKET_AVATARS);
   const paths: string[] = [];
+  const pathsSeen = new Set<string>();
   const pageSize = 100;
+  /** Storage `offset` 미적용·중복 페이지 등으로 끝나지 않는 루프 방지 */
+  const maxPages = 500;
 
-  for (let offset = 0; ; offset += pageSize) {
+  for (let page = 0; page < maxPages; page += 1) {
+    const offset = page * pageSize;
     const { data, error } = await bucket.list(folder, {
       limit: pageSize,
       offset,
@@ -209,12 +213,29 @@ async function removeAllAvatarObjectsInUserFolder(appUserId: string): Promise<nu
       throw new Error(error.message || '프로필 사진 목록을 불러오지 못했습니다.');
     }
     const files = Array.isArray(data) ? data : [];
+    if (files.length === 0) break;
+
+    let addedNew = 0;
     for (const file of files) {
       const name = typeof file?.name === 'string' ? file.name.trim() : '';
       if (!name || name === '.emptyFolderPlaceholder') continue;
-      paths.push(`${folder}/${name}`);
+      const full = `${folder}/${name}`;
+      if (pathsSeen.has(full)) continue;
+      pathsSeen.add(full);
+      paths.push(full);
+      addedNew += 1;
     }
+
     if (files.length < pageSize) break;
+    if (addedNew === 0) {
+      logDeleteDebug('fail', {
+        phase: 'storage_list_stuck_guard',
+        folder,
+        offset,
+        fileCount: files.length,
+      });
+      break;
+    }
   }
 
   for (let i = 0; i < paths.length; i += pageSize) {

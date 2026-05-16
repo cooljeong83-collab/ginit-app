@@ -19,7 +19,7 @@ import {
     recordTermsAgreement,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
-import { getAuth } from '@react-native-firebase/auth';
+import { supabase } from '@/src/lib/supabase';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 type TermKey = 'tos' | 'privacy' | 'safety';
@@ -80,7 +80,7 @@ export default function OtpVerifyScreen() {
     setBusy(true);
     try {
       const cred = await AuthService.confirmCode(verificationId, code);
-      const e164 = cred.user.phoneNumber ?? phoneE164;
+      const e164 = cred.phoneNumber ?? phoneE164;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
         Alert.alert('인증 실패', '전화번호를 확인할 수 없습니다. 다시 시도해 주세요.');
@@ -112,7 +112,10 @@ export default function OtpVerifyScreen() {
     if (!allRequiredChecked || busy) return;
     setBusy(true);
     try {
-      const e164 = getAuth().currentUser?.phoneNumber ?? phoneE164;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const e164 = session?.user?.phone?.trim() ?? phoneE164;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
         Alert.alert('오류', '전화번호 세션을 확인할 수 없습니다.');

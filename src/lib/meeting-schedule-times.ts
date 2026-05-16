@@ -1,4 +1,4 @@
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 
 /** `YYYY-MM-DD` + `H:mm` 또는 `HH:mm` → Firestore Timestamp (파싱 실패 시 null). */
 export function parseScheduleToTimestamp(dateStr: string, timeStr: string): Timestamp | null {

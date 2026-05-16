@@ -1,16 +1,9 @@
 import Constants from 'expo-constants';
-import {
-  GoogleAuthProvider,
-  getAdditionalUserInfo,
-  signInWithCredential,
-  signOut,
-  type User,
-  type UserCredential,
-} from 'firebase/auth';
+import type { User } from '@supabase/supabase-js';
 
 import { publicEnv } from '@/src/config/public-env';
+import { signOutSupabase, supabase } from '@/src/lib/supabase';
 
-import { getFirebaseAuth } from './firebase';
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
 import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 
@@ -45,27 +38,11 @@ function pickErr(e: unknown): { code?: string; message: string } {
   return { message: e instanceof Error ? e.message : String(e) };
 }
 
-function logCurrentAuth(prefix: string) {
-  try {
-    const a = getFirebaseAuth();
-    const u = a.currentUser;
-    log(`${prefix} auth.currentUser`, {
-      hasCurrentUser: !!u,
-      uid: u?.uid ?? null,
-      email: u?.email ?? null,
-      isAnonymous: u?.isAnonymous ?? null,
-    });
-  } catch (e) {
-    log(`${prefix} auth.currentUser (read failed)`, { ...pickErr(e) });
-  }
-}
-
 /** 상단에서 `import` 하면 Expo Go에서 모듈 로드 시점에 RNGoogleSignin을 찾다가 크래시합니다. */
 type GoogleSigninApi = typeof import('@react-native-google-signin/google-signin').GoogleSignin;
 
 let googleSignin: GoogleSigninApi | null = null;
 let configureSignature = '';
-
 
 function requireGoogleSignin(): GoogleSigninApi {
   if (googleSignin) return googleSignin;
@@ -122,7 +99,7 @@ const GOOGLE_PEOPLE_SCOPES = [
 ] as const;
 
 /**
- * 이미 Google+Firebase 로그인된 상태에서 People API용 스코프만 추가 동의(전체 계정 선택 UI 없이 진행되는 것이 일반적).
+ * 이미 Google+Supabase 로그인된 상태에서 People API용 스코프만 추가 동의.
  */
 export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
   log('addGooglePeopleScopesAndGetAccessToken → start', { expoGo: isExpoGo() });
@@ -163,8 +140,7 @@ export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string |
 }
 
 export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promise<GoogleSignInResult> {
-  log('signInWithGoogle → start (handleLogin equivalent on native)', { expoGo: isExpoGo() });
-  logCurrentAuth('signInWithGoogle:start');
+  log('signInWithGoogle → start (native)', { expoGo: isExpoGo() });
 
   if (isExpoGo()) {
     const err = new Error(
@@ -177,26 +153,30 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
   log('Auth Step 1 → require GoogleSignin module & configure');
   const GoogleSignin = requireGoogleSignin();
   ensureConfigured(GoogleSignin, options);
-  logCurrentAuth('signInWithGoogle:after configure');
 
-  // 로그아웃 직후에도 Android는 `getLastSignedInAccount`가 남는 경우가 있어, 계정 선택 UI를 위해 잔여 세션을 끊습니다.
   try {
     const hasPrev = GoogleSignin.hasPreviousSignIn?.() === true;
     const cur = GoogleSignin.getCurrentUser?.();
     if (hasPrev || cur) {
+      /**
+       * `revokeAccess()`는 Play 서비스·네트워크에서 수 분까지 걸리는 사례가 있어(재로그인 시 인증 화면이 멈춘 것처럼 보임) 쓰지 않습니다.
+       * 계정 선택은 `signIn()` UI로 충분한 경우가 많고, 필요하면 사용자가 OS 설정에서 연결을 끊을 수 있습니다.
+       */
+      const SIGN_OUT_MS = 5000;
+      let tid: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_, reject) => {
+        tid = setTimeout(() => reject(new Error('GoogleSignin.signOut timeout (pre-signIn)')), SIGN_OUT_MS);
+      });
       try {
-        await GoogleSignin.revokeAccess();
-      } catch {
-        /* 세션 없음 등 */
-      }
-      try {
-        await GoogleSignin.signOut();
-      } catch {
-        /* noop */
+        await Promise.race([GoogleSignin.signOut(), deadline]);
+      } catch (e) {
+        log('Warn:preSignIn signOut', pickErr(e));
+      } finally {
+        if (tid) clearTimeout(tid);
       }
     }
   } catch {
-    /* hasPreviousSignIn 미지원 등 */
+    /* noop */
   }
 
   try {
@@ -205,25 +185,21 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
   } catch (e) {
     const { code, message } = pickErr(e);
     log('Error:hasPlayServices', { code: code ?? '(no code)', message });
-    logCurrentAuth('signInWithGoogle:after hasPlayServices error');
     throw new Error(`Google Play 서비스 확인 실패: ${message}`);
   }
 
   let res: Awaited<ReturnType<GoogleSigninApi['signIn']>>;
   try {
-    log('Auth Step 1 → opening Google sign-in UI (signIn)', {
-      hadUser: !!getFirebaseAuth().currentUser,
-    });
+    log('Auth Step 1 → opening Google sign-in UI (signIn)', {});
     res = await GoogleSignin.signIn();
   } catch (e) {
     const { code, message } = pickErr(e);
     log('Error:GoogleSignin.signIn', { code: code ?? '(no code)', message });
-    logCurrentAuth('signInWithGoogle:after signIn error');
     const isDeveloperError =
       message.includes('DEVELOPER_ERROR') || code === '10' || code === 'DEVELOPER_ERROR';
     if (isDeveloperError) {
       throw new Error(
-        'Google Android 로그인 설정 오류(DEVELOPER_ERROR). 다음을 확인하세요: (1) Firebase 콘솔 → 프로젝트 설정 → 내 Android 앱에 디버그·릴리스 SHA-1 등록 (2) 등록 후 `google-services.json`을 다시 내려받아 `env/google-services.json`과 `android/app/google-services.json`에 반영 — `oauth_client` 배열이 비어 있으면 아직 SHA가 반영되지 않은 것입니다 (3) `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`는 이 Firebase 프로젝트와 연결된 Google Cloud의 「OAuth 2.0 웹 클라이언트」ID여야 합니다(다른 GCP 프로젝트의 클라이언트 ID면 실패합니다). SHA 확인: `cd android && ./gradlew signingReport`',
+        'Google Android 로그인 설정 오류(DEVELOPER_ERROR). SHA-1 등록·google-services.json·`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`(웹 클라이언트)를 확인하세요.',
       );
     }
     throw new Error(`Google 로그인 UI 실패: ${message}`);
@@ -236,86 +212,100 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
   const idToken = res.data.idToken;
   if (!idToken) {
     const err = new Error(
-      'Google idToken이 없습니다. Firebase·Google Cloud에서 Android SHA-1과 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID를 확인하세요.',
+      'Google idToken이 없습니다. Google Cloud OAuth 클라이언트·Android 설정을 확인하세요.',
     );
     log('Error:no-idToken', { message: err.message });
     throw err;
   }
-  /** People API용 OAuth 액세스 토큰은 Firebase 연동 전에 받는 편이 안정적입니다(연동 후 getTokens가 빈 값이 되는 기기 대응). */
+
   let googleAccessToken: string | null = null;
   try {
     const tPre = await GoogleSignin.getTokens();
     googleAccessToken = (tPre.accessToken ?? '').trim() || null;
   } catch (e) {
     const { message } = pickErr(e);
-    log('Warn:getTokens before Firebase credential', { message });
+    log('Warn:getTokens before Supabase', { message });
   }
+
   try {
-    log('Auth Step 2 → signInWithCredential (Firebase)', { idTokenLength: idToken.length });
-    const credential = GoogleAuthProvider.credential(idToken);
-    const userCred = (await signInWithCredential(getFirebaseAuth(), credential)) as UserCredential;
-    const user = userCred.user;
-    const addInfo = getAdditionalUserInfo(userCred);
-    const isNewUser = addInfo?.isNewUser === true;
-    log('Auth Step 2: Result Received (native credential success)', {
-      uid: user.uid,
-      email: user.email ?? null,
-      isNewUser,
+    log('Auth Step 2 → supabase.auth.signInWithIdToken', { idTokenLength: idToken.length });
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: idToken,
     });
-    logCurrentAuth('signInWithGoogle:after credential success');
+    if (error) throw error;
+    const user = data.user;
+    if (!user) throw new Error('Supabase 세션 사용자를 확인할 수 없습니다.');
+    const supabaseAccessToken = data.session?.access_token?.trim() ?? '';
+    if (!supabaseAccessToken) {
+      throw new Error('Supabase access_token을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    log('Auth Step 2: Result Received', { uid: user.id, email: user.email ?? null });
     if (!googleAccessToken) {
       try {
         const tPost = await GoogleSignin.getTokens();
         googleAccessToken = (tPost.accessToken ?? '').trim() || null;
       } catch (e) {
         const { message } = pickErr(e);
-        log('Warn:getTokens after Firebase credential', { message });
+        log('Warn:getTokens after Supabase', { message });
       }
     }
-    return { user, googleAccessToken, isNewUser };
+    return { user, googleAccessToken, supabaseAccessToken };
   } catch (e) {
     const { code, message } = pickErr(e);
-    log('Error:signInWithCredential', { code: code ?? '(no code)', message });
-    logCurrentAuth('signInWithGoogle:after credential error');
-    throw new Error(`Firebase 로그인 연동 실패: ${message}`);
+    log('Error:signInWithIdToken', { code: code ?? '(no code)', message });
+    let detail = message;
+    if (code === 'provider_disabled' || /provider.*not enabled|not enabled/i.test(message)) {
+      detail =
+        'Supabase 대시보드(Authentication → Providers)에서 Google 제공자를 켜고, Web Client ID·시크릿을 저장한 뒤 다시 시도해 주세요.';
+    }
+    const err = new Error(`Supabase 로그인 연동 실패: ${detail}`) as Error & { code?: string };
+    if (code) err.code = code;
+    throw err;
   }
 }
 
+const GOOGLE_NATIVE_SIGN_OUT_MS = 5000;
+
 export async function signOutGoogle(): Promise<void> {
   log('signOutGoogle → start', { expoGo: isExpoGo() });
-  logCurrentAuth('signOutGoogle:before');
   if (isExpoGo()) {
-    try {
-      await signOut(getFirebaseAuth());
-    } catch {
-      // noop
-    }
-    log('signOutGoogle → expo-go path done (Firebase only)');
-    logCurrentAuth('signOutGoogle:after expo-go');
+    await signOutSupabase();
+    log('signOutGoogle → expo-go path done (Supabase)');
     return;
   }
+  /**
+   * 로그아웃은 빠르게 끝나야 합니다.
+   * - `configure()`는 일부 기기에서 Play 서비스와 맞물려 오래 걸리거나 멈출 수 있어 호출하지 않습니다.
+   *   (이미 로그인 시 configure가 호출된 상태라면 `signOut()`만으로 충분합니다.)
+   * - 현재 Google 계정이 없으면 RNGS를 건드리지 않습니다.
+   */
   try {
+    log('signOutGoogle → require module');
     const GoogleSignin = requireGoogleSignin();
-    // configure 없이 signOut만 호출되면 Android RNGoogleSigninModule의 _apiClient가 null이라
-    // 네이티브 Google 세션이 안 지워지고 다음 로그인에서 마지막 계정으로 바로 이어질 수 있습니다.
-    ensureConfigured(GoogleSignin, { forRegistration: false });
-    try {
-      await GoogleSignin.revokeAccess();
-    } catch {
-      /* 이미 끊김 등 */
+    const cur = GoogleSignin.getCurrentUser?.();
+    if (!cur) {
+      log('signOutGoogle → skip (no GoogleSignin current user)');
+      return;
     }
+    log('signOutGoogle → GoogleSignin.signOut (with timeout)', { ms: GOOGLE_NATIVE_SIGN_OUT_MS });
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error(`GoogleSignin.signOut timeout (${GOOGLE_NATIVE_SIGN_OUT_MS}ms)`)),
+        GOOGLE_NATIVE_SIGN_OUT_MS,
+      );
+    });
     try {
-      await GoogleSignin.signOut();
-    } catch {
-      /* noop */
+      await Promise.race([GoogleSignin.signOut(), timeoutPromise]);
+      log('signOutGoogle → GoogleSignin.signOut done');
+    } catch (e) {
+      log('signOutGoogle → GoogleSignin.signOut failed or timeout', pickErr(e));
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
-  } catch {
-    // noop (Expo Go 외에도 모듈/설정 오류 시 Firebase만이라도 아래에서 정리)
-  }
-  try {
-    await signOut(getFirebaseAuth());
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`로그아웃 실패: ${msg}`);
+    log('signOutGoogle → outer catch', pickErr(e));
   }
+  /** Supabase 세션은 `UserSessionContext` → `AuthService.signOut`에서 끊습니다(중복·예외 방지). */
 }

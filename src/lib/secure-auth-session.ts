@@ -1,7 +1,7 @@
 import { compatDeleteItemAsync, compatGetItemAsync, compatSetItemAsync } from '@/src/lib/secure-store-compat';
 
 export type SecureAuthSession = {
-  /** Firebase Auth uid */
+  /** Supabase Auth `auth.users.id` */
   uid: string;
   /** 앱 사용자 PK — 신규는 정규화 이메일, 레거시는 전화 E.164(+82…) */
   userId: string;

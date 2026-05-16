@@ -3,18 +3,22 @@
  * - 신규: 정규화 이메일(`normalizeUserId`). `phone` 필드에 E.164(+82…)를 둡니다.
  * - 레거시: 문서 ID가 전화 PK인 계정(OTP 전용 가입 등)도 그대로 읽습니다.
  */
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
-
-import { getFirebaseFirestore } from '@/src/lib/firebase';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { profilesSource } from '@/src/lib/hybrid-data-source';
+import {
+  mergeUserProfilePatch,
+  patchUserProfileInWatermelon,
+  readUserProfileFromWatermelon,
+  restoreUserProfileInWatermelon,
+  upsertUserProfileToWatermelon,
+} from '@/src/lib/user-profile-watermelon-cache';
 import { supabase } from '@/src/lib/supabase';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from './meeting-phone-verification-ui';
 
 export const USERS_COLLECTION = 'users';
+
+/** 프로필 RPC 전용 — `getSession()` 락을 피할 때 임시 클라이언트를 넘깁니다. */
+export type SupabaseRpcForProfile = Pick<SupabaseClient, 'rpc'>;
 
 /** 탈퇴(익명화) 후 UI·Firestore에 고정되는 표시 닉네임 */
 export const WITHDRAWN_NICKNAME = '(탈퇴한 회원)';
@@ -777,14 +781,17 @@ type SupabasePublicProfileFetch =
   | { ok: false; message: string };
 
 /** `get_profile_public_by_app_user_id` — 스키마 캐시 지연·빈 응답 시 재시도 */
-async function fetchUserProfileFromSupabaseRpcDetailed(appUserId: string): Promise<SupabasePublicProfileFetch> {
+async function fetchUserProfileFromSupabaseRpcDetailed(
+  appUserId: string,
+  client: SupabaseRpcForProfile = supabase,
+): Promise<SupabasePublicProfileFetch> {
   const id = appUserId.trim();
   if (!id) return { ok: false, message: '사용자 ID가 없습니다.' };
   let lastMessage = '';
   for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
     const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    const { data, error } = await supabase.rpc('get_profile_public_by_app_user_id', {
+    const { data, error } = await client.rpc('get_profile_public_by_app_user_id', {
       p_app_user_id: id,
     });
     if (!error) {
@@ -841,7 +848,8 @@ async function fetchUserProfilesFromSupabaseRpcBatchDetailed(
   return { ok: false, message: lastMessage || '프로필을 불러올 수 없습니다.' };
 }
 
-export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
+/** Supabase RPC만 조회(캐시 우회). `fetchUserProfileAndPersist` 등 서버 동기화용. */
+export async function fetchUserProfileFromServer(phoneUserId: string): Promise<UserProfile | null> {
   const id = phoneUserId.trim();
   if (!id) return null;
   if (profilesSource() !== 'supabase') {
@@ -851,13 +859,27 @@ export async function getUserProfile(phoneUserId: string): Promise<UserProfile |
   return r.ok ? r.profile : null;
 }
 
+/** Watermelon 캐시 우선 → 미스 시 서버 Pull 후 upsert. */
+export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
+  const id = phoneUserId.trim();
+  if (!id) return null;
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
+  }
+  const local = await readUserProfileFromWatermelon(id);
+  if (local) return local;
+  const profile = await fetchUserProfileFromServer(id);
+  if (profile) await upsertUserProfileToWatermelon(id, profile);
+  return profile;
+}
+
 /** `ensure_profile_minimal` — PostgREST 스키마 캐시 지연 시 여러 번 재시도 */
-async function rpcEnsureProfileMinimalWithRetry(id: string): Promise<void> {
+async function rpcEnsureProfileMinimalWithRetry(id: string, client: SupabaseRpcForProfile = supabase): Promise<void> {
   let lastMessage = '';
   for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
     const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    const { error } = await supabase.rpc('ensure_profile_minimal', { p_app_user_id: id });
+    const { error } = await client.rpc('ensure_profile_minimal', { p_app_user_id: id });
     if (!error) return;
     lastMessage = error.message?.trim() || 'ensure_profile_minimal failed';
     const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
@@ -882,14 +904,18 @@ function sanitizeFcmTokenFieldForRpc(fields: Record<string, unknown>): void {
 }
 
 /** `upsert_profile_payload` — 탈퇴·프로필 수정, 스키마 캐시 지연 시 재시도 */
-async function rpcUpsertProfilePayloadWithRetry(id: string, fields: Record<string, unknown>): Promise<void> {
+async function rpcUpsertProfilePayloadWithRetry(
+  id: string,
+  fields: Record<string, unknown>,
+  client: SupabaseRpcForProfile = supabase,
+): Promise<void> {
   let lastMessage = '';
   for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
     const wait = RPC_SCHEMA_CACHE_RETRY_WAITS_MS[i]!;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     const payload = { ...fields };
     sanitizeFcmTokenFieldForRpc(payload);
-    const { error } = await supabase.rpc('upsert_profile_payload', {
+    const { error } = await client.rpc('upsert_profile_payload', {
       p_app_user_id: id,
       p_fields: payload,
     });
@@ -926,6 +952,7 @@ async function rpcWithdrawAnonymizeProfileWithRetry(id: string): Promise<void> {
 async function rpcReactivateWithdrawnProfileForSignupWithRetry(
   id: string,
   fields: Record<string, unknown>,
+  client: SupabaseRpcForProfile = supabase,
 ): Promise<void> {
   let lastMessage = '';
   for (let i = 0; i < RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length; i += 1) {
@@ -933,7 +960,7 @@ async function rpcReactivateWithdrawnProfileForSignupWithRetry(
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     const payload = { ...fields };
     sanitizeFcmTokenFieldForRpc(payload);
-    const { error } = await supabase.rpc('reactivate_withdrawn_profile_for_signup', {
+    const { error } = await client.rpc('reactivate_withdrawn_profile_for_signup', {
       p_app_user_id: id,
       p_fields: payload,
     });
@@ -950,15 +977,19 @@ async function rpcReactivateWithdrawnProfileForSignupWithRetry(
 /**
  * 로그인 직후 등: 프로필이 없으면 랜덤 닉네임으로 생성합니다.
  */
-export async function ensureUserProfile(phoneUserId: string): Promise<UserProfile> {
+export async function ensureUserProfile(
+  phoneUserId: string,
+  rpcClient: SupabaseRpcForProfile = supabase,
+): Promise<UserProfile> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  await rpcEnsureProfileMinimalWithRetry(id);
-  const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  await rpcEnsureProfileMinimalWithRetry(id, rpcClient);
+  const r = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
   if (!r.ok) throw new Error(r.message);
+  await upsertUserProfileToWatermelon(id, r.profile);
   return r.profile;
 }
 
@@ -1018,6 +1049,7 @@ export async function applyGoogleSignupProfile(
     appVersion?: string | null;
     metadata?: Record<string, unknown> | null;
   },
+  rpcClient: SupabaseRpcForProfile = supabase,
 ): Promise<UserProfile> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
@@ -1025,7 +1057,7 @@ export async function applyGoogleSignupProfile(
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
 
-  await rpcEnsureProfileMinimalWithRetry(id);
+  await rpcEnsureProfileMinimalWithRetry(id, rpcClient);
   const fields = profilePatchToSupabaseJsonb({
     nickname: patch.nickname,
     photoUrl: patch.photoUrl,
@@ -1043,14 +1075,14 @@ export async function applyGoogleSignupProfile(
     signupProvider: patch.signupProvider ?? undefined,
     metadata: patch.metadata ?? undefined,
   });
-  const existing = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  const existing = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
   if (existing.ok && existing.profile.isWithdrawn === true) {
-    await rpcReactivateWithdrawnProfileForSignupWithRetry(id, fields);
+    await rpcReactivateWithdrawnProfileForSignupWithRetry(id, fields, rpcClient);
   } else {
-    await rpcUpsertProfilePayloadWithRetry(id, fields);
+    await rpcUpsertProfilePayloadWithRetry(id, fields, rpcClient);
   }
 
-  const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+  const r = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
   if (!r.ok) throw new Error(r.message);
   return r.profile;
 }
@@ -1103,20 +1135,34 @@ export async function updateUserProfile(
     isWithdrawn?: boolean | null;
     withdrawnAt?: unknown | null;
   },
+  rpcClient: SupabaseRpcForProfile = supabase,
 ): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
-  const mapped = await getUserProfile(id);
+  const profileFetch = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
+  const mapped = profileFetch.ok ? profileFetch.profile : null;
   if (mapped?.isWithdrawn === true && patch.isWithdrawn !== false) {
     throw new Error('탈퇴 처리된 계정은 프로필을 수정할 수 없습니다.');
   }
   const fields = profilePatchToSupabaseJsonb(patch);
   if (Object.keys(fields).length === 0) return;
-  await rpcUpsertProfilePayloadWithRetry(id, fields);
-  return;
+
+  const previous = await readUserProfileFromWatermelon(id);
+  if (previous) {
+    await patchUserProfileInWatermelon(id, (p) => mergeUserProfilePatch(p, patch as Record<string, unknown>));
+  }
+
+  try {
+    await rpcUpsertProfilePayloadWithRetry(id, fields, rpcClient);
+    const refreshed = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
+    if (refreshed.ok) await upsertUserProfileToWatermelon(id, refreshed.profile);
+  } catch (e) {
+    await restoreUserProfileInWatermelon(id, previous);
+    throw e;
+  }
 }
 
 /** 탈퇴: 채팅·투표·모임 참여 기록은 유지하고, `users` 문서의 식별 정보를 비웁니다. */
@@ -1142,10 +1188,17 @@ export async function withdrawAnonymizeUserProfileByFirebaseUid(firebaseUid: str
 }
 
 /** 약관 동의 기록(서버 시각 기준). */
-export async function recordTermsAgreement(phoneUserId: string): Promise<void> {
+export async function recordTermsAgreement(
+  phoneUserId: string,
+  rpcClient: SupabaseRpcForProfile = supabase,
+): Promise<void> {
   const id = phoneUserId.trim();
   if (!id) throw new Error('사용자 ID가 없습니다.');
-  await rpcUpsertProfilePayloadWithRetry(id, profilePatchToSupabaseJsonb({ termsAgreedAt: serverTimestamp() }));
+  await rpcUpsertProfilePayloadWithRetry(
+    id,
+    profilePatchToSupabaseJsonb({ termsAgreedAt: new Date() }),
+    rpcClient,
+  );
 }
 
 /** Firestore `users/{사용자 PK}` 문서를 삭제합니다(탈퇴 마지막 단계). */
@@ -1162,19 +1215,32 @@ export async function getUserProfilesForIds(phoneUserIds: string[]): Promise<Map
   const unique = [...new Set(phoneUserIds.map((x) => x.trim()).filter(Boolean))];
   const out = new Map<string, UserProfile>();
   if (unique.length === 0) return out;
+
+  const missing: string[] = [];
+  for (const uid of unique) {
+    const local = await readUserProfileFromWatermelon(uid);
+    if (local) out.set(uid, local);
+    else missing.push(uid);
+  }
+  if (missing.length === 0) return out;
+
   try {
-    const r = await fetchUserProfilesFromSupabaseRpcBatchDetailed(unique);
+    const r = await fetchUserProfilesFromSupabaseRpcBatchDetailed(missing);
     if (!r.ok) {
-      for (const uid of unique) out.set(uid, fallbackProfileLabel(uid));
+      for (const uid of missing) out.set(uid, fallbackProfileLabel(uid));
       return out;
     }
-    for (const uid of unique) {
+    for (const uid of missing) {
       const p = r.byId.get(uid) ?? null;
-      out.set(uid, p ?? fallbackProfileLabel(uid));
+      const profile = p ?? fallbackProfileLabel(uid);
+      out.set(uid, profile);
+      if (p) void upsertUserProfileToWatermelon(uid, p);
     }
     return out;
   } catch {
-    for (const uid of unique) out.set(uid, fallbackProfileLabel(uid));
+    for (const uid of missing) {
+      if (!out.has(uid)) out.set(uid, fallbackProfileLabel(uid));
+    }
     return out;
   }
 }

@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
+  ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
@@ -19,6 +19,7 @@ import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { buildChatMessageIndexById } from '@/src/lib/chat-message-index-by-id';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
   deleteSocialChatImageMessageBestEffort,
@@ -44,9 +45,11 @@ export type SocialDmChatRoomBodyProps = {
   myUserId: string;
   messages: SocialChatMessage[];
   chatError: string | null;
+  chatReconnecting?: boolean;
   peerReadMessageId: string | null;
   peerReadAt: unknown | null;
   peerReadStateReady?: boolean;
+  readMapsRevision?: number;
   initialPeerName?: string | null;
   initialPeerPhotoUrl?: string | null;
   searchNavigateLoading?: boolean;
@@ -69,6 +72,9 @@ export type SocialDmChatRoomBodyProps = {
   onSearchPrev?: () => void;
   /** ▼(아래): 더 최신 결과로 */
   onSearchNext?: () => void;
+
+  /** 텍스트 전송을 상위 엔진(예: `useChatEngine`)으로 위임 — 설정 시 `sendSocialChatTextMessage` 미호출 */
+  sendTextOverride?: (args: { body: string; replyTo: MeetingChatMessage['replyTo'] }) => Promise<void>;
 };
 
 export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, SocialDmChatRoomBodyProps>(function SocialDmChatRoomBody(
@@ -78,9 +84,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     myUserId,
     messages: rawMessages,
     chatError,
-    peerReadMessageId,
-    peerReadAt,
+    chatReconnecting = false,
+    peerReadMessageId: _peerReadMessageId,
+    peerReadAt: _peerReadAt,
     peerReadStateReady = true,
+    readMapsRevision = 0,
     initialPeerName = null,
     initialPeerPhotoUrl = null,
     searchNavigateLoading,
@@ -97,9 +105,12 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     searchSession,
     onSearchPrev,
     onSearchNext,
+    sendTextOverride,
   },
   ref,
 ) {
+  void _peerReadMessageId;
+  void _peerReadAt;
   const insets = useSafeAreaInsets();
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [draft, setDraft] = useState('');
@@ -116,6 +127,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const lastAutoScrolledMessageIdRef = useRef<string>('');
+  const latestAutoScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stickToLatestScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingAutoScrollToLatestRef = useRef(false);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
@@ -132,6 +145,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
+      if (stickToLatestScrollDebounceRef.current) clearTimeout(stickToLatestScrollDebounceRef.current);
       listRef.current = null;
       innerFlashListRef.current = null;
     };
@@ -173,7 +188,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
         } else {
           const text = payload.text.trim();
           if (text) {
-            await sendSocialChatTextMessage(rid, uid, text, null);
+            if (sendTextOverride) {
+              await sendTextOverride({ body: text, replyTo: null });
+            } else {
+              await sendSocialChatTextMessage(rid, uid, text, null);
+            }
           }
         }
       } catch (e) {
@@ -186,7 +205,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
         setSending(false);
       }
     })();
-  }, [roomId, myUserId]);
+  }, [roomId, myUserId, sendTextOverride]);
 
   const messages = useMemo(() => socialMessagesToMeetingNewestFirst(rawMessages), [rawMessages]);
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
@@ -254,6 +273,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       return false;
     }
   }, [resolveListScroller]);
+
+  const scheduleStickToLatestScroll = useCallback(() => {
+    if (stickToLatestScrollDebounceRef.current) clearTimeout(stickToLatestScrollDebounceRef.current);
+    stickToLatestScrollDebounceRef.current = setTimeout(() => {
+      stickToLatestScrollDebounceRef.current = null;
+      if (!mountedRef.current) return;
+      scrollToOffsetSafe(0, false);
+    }, 90);
+  }, [scrollToOffsetSafe]);
 
   const jumpToLatest = useCallback(() => {
     setShowJumpToBottomFab(false);
@@ -347,74 +375,22 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     if (!latest?.id) return;
     if (lastAutoScrolledMessageIdRef.current === latest.id) return;
 
-    // 키보드가 열려 있거나(입력 중) 현재 최신 영역에 머무는 경우엔 새 메시지 도착 시 최신 유지
     const shouldAutoScroll = keyboardHeight > 0 || pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
     if (!shouldAutoScroll) return;
 
     lastAutoScrolledMessageIdRef.current = latest.id;
     pendingAutoScrollToLatestRef.current = false;
-    // 모임 채팅과 동일: inverted 리스트에서 패딩/키보드 레이아웃이 한 프레임에 안 잡히면 최신 말풍선이 가려질 수 있어 2~3회 재시도합니다.
-    requestAnimationFrame(() => {
+    if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
+    latestAutoScrollDebounceRef.current = setTimeout(() => {
+      latestAutoScrollDebounceRef.current = null;
       scrollToOffsetSafe(0, false);
-      requestAnimationFrame(() => {
-        scrollToOffsetSafe(0, false);
-      });
-      setTimeout(() => {
-        scrollToOffsetSafe(0, false);
-      }, 60);
-    });
+    }, 90);
+    return () => {
+      if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
+    };
   }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
-  const messageIndexById = useMemo(() => {
-    const m = new Map<string, number>();
-    messages.forEach((msg, i) => {
-      if (msg.id) m.set(msg.id, i);
-    });
-    return m;
-  }, [messages]);
-
-  const peerReadAtMs = useMemo(() => {
-    const v = peerReadAt as unknown;
-    if (!v) return 0;
-    if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.floor(v));
-    if (typeof v === 'object') {
-      const o = v as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
-      if (typeof o.toMillis === 'function') {
-        try {
-          return o.toMillis();
-        } catch {
-          return 0;
-        }
-      }
-      if (typeof o.seconds === 'number') {
-        const ns = typeof o.nanoseconds === 'number' ? o.nanoseconds : 0;
-        return Math.max(0, Math.floor(o.seconds * 1000 + ns / 1e6));
-      }
-    }
-    return 0;
-  }, [peerReadAt]);
-
-  const unreadCountForMessage = useCallback(
-    (message: MeetingChatMessage, messageIndex: number): number => {
-      // 1:1: 상대가 안 읽었으면 1, 읽었으면 0
-      if (!peerReadStateReady) return 0;
-      const msgMs = message.createdAt && typeof message.createdAt.toMillis === 'function' ? message.createdAt.toMillis() : 0;
-      if (!msgMs) return 0;
-
-      const lastId = (peerReadMessageId ?? '').trim();
-      if (lastId) {
-        const readIdx = messageIndexById.get(lastId);
-        // inverted + 최신순 배열: 인덱스가 작을수록 더 최신.
-        // 상대의 마지막 읽음이 이 메시지보다 최신(또는 동일)이면 읽음(0).
-        if (readIdx != null && readIdx <= messageIndex) return 0;
-      }
-
-      const ms = peerReadAtMs;
-      if (ms > 0 && ms >= msgMs) return 0;
-      return 1;
-    },
-    [peerReadStateReady, peerReadMessageId, peerReadAtMs, messageIndexById],
-  );
+  const messageIndexById = useMemo(() => buildChatMessageIndexById(messages as MeetingChatMessage[]), [messages]);
 
   const jumpToRepliedMessage = useCallback(
     async (replyMessageId: string) => {
@@ -459,7 +435,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     myId,
     hostNorm,
     profiles,
-    unreadCountForMessage,
     jumpToRepliedMessage,
     setReplyTo,
     deleteMessageBestEffort: async (msg) => {
@@ -475,6 +450,14 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     openMeetingChatImageViewer,
     listRef,
     messageSearchHighlightQuery,
+    roomId: roomId.trim(),
+    roomType: 'social_dm',
+    chatRenderMode: 'social_dm',
+    wmChatRoomIds: roomId.trim() ? [roomId.trim()] : [],
+    participantIdsForUnread: peerId.trim() ? [normalizeParticipantId(peerId.trim()) ?? peerId.trim()] : [],
+    peerId,
+    peerReadStateReady,
+    readMapsRevision,
   });
 
   const onPressAttach = useCallback(() => {
@@ -501,17 +484,10 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       } finally {
         setSending(false);
         pendingAutoScrollToLatestRef.current = true;
-        InteractionManager.runAfterInteractions(() => {
-          requestAnimationFrame(() => {
-            scrollToOffsetSafe(0, false);
-            setTimeout(() => {
-              scrollToOffsetSafe(0, false);
-            }, 120);
-          });
-        });
+        scheduleStickToLatestScroll();
       }
     },
-    [roomId, myUserId, sending, scrollToOffsetSafe],
+    [roomId, myUserId, sending, scheduleStickToLatestScroll],
   );
 
   const onSend = useCallback(async () => {
@@ -521,7 +497,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     setSending(true);
     pendingAutoScrollToLatestRef.current = true;
     try {
-      await sendSocialChatTextMessage(roomId, uid, body, replyTo?.messageId ? replyTo : null);
+      if (sendTextOverride) {
+        await sendTextOverride({ body, replyTo: replyTo?.messageId ? replyTo : null });
+      } else {
+        await sendSocialChatTextMessage(roomId, uid, body, replyTo?.messageId ? replyTo : null);
+      }
       setDraft('');
       setReplyTo(null);
     } catch (e) {
@@ -530,16 +510,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       setSending(false);
       // Firestore tail 반영이 한 틱 늦을 때 shouldAutoScroll이 잠깐 false로 떨어져 첫 메시지가 가려지는 경우 방지
       pendingAutoScrollToLatestRef.current = true;
-      InteractionManager.runAfterInteractions(() => {
-        requestAnimationFrame(() => {
-          scrollToOffsetSafe(0, false);
-          setTimeout(() => {
-            scrollToOffsetSafe(0, false);
-          }, 120);
-        });
-      });
+      scheduleStickToLatestScroll();
     }
-  }, [roomId, myUserId, draft, sending, replyTo, scrollToOffsetSafe]);
+  }, [roomId, myUserId, draft, sending, replyTo, scheduleStickToLatestScroll, sendTextOverride]);
 
   const chatListContentStyle = useMemo(
     () => [
@@ -577,16 +550,15 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   // 최신 영역에 머무는 중이면(offset=0) 한 번 더 최신으로 붙여 가려짐을 방지합니다.
   useEffect(() => {
     if (showJumpToBottomFab) return;
-    requestAnimationFrame(() => {
-      scrollToOffsetSafe(0, false);
-      requestAnimationFrame(() => {
-        scrollToOffsetSafe(0, false);
-      });
-      setTimeout(() => {
-        scrollToOffsetSafe(0, false);
-      }, 60);
-    });
-  }, [showJumpToBottomFab, composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight, scrollToOffsetSafe]);
+    scheduleStickToLatestScroll();
+  }, [
+    showJumpToBottomFab,
+    composerDockBlockHeight,
+    composerInputBarHeight,
+    composerBottomPad,
+    keyboardHeight,
+    scheduleStickToLatestScroll,
+  ]);
 
   const listFooterLoading = useMemo(
     () => (
@@ -710,6 +682,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       <View style={{ flex: 1 }}>
         <MeetingChatMainColumn
           chatError={chatError}
+          chatReconnecting={chatReconnecting}
           searchNavigateLoading={searchNavigateLoading === true}
           setListRef={setListRef}
           setInnerFlashListRef={setInnerFlashListRef}

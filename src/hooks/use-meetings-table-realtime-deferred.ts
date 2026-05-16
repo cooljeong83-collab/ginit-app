@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
+import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { markMeetingsFeedPendingServerProbe } from '@/src/lib/meetings-feed-deferred-sync';
 
 const MEETINGS_FEED_PROBE_TICK_MS = 3 * 60 * 1000;
@@ -13,7 +13,7 @@ export function useMeetingsTableRealtimeDeferred(opts: { enabled: boolean; viewe
   const { enabled } = opts;
 
   useEffect(() => {
-    if (!enabled || meetingListSource() !== 'supabase') return undefined;
+    if (!enabled || !ledgerWritesToSupabase()) return undefined;
     const id = setInterval(() => {
       markMeetingsFeedPendingServerProbe();
     }, MEETINGS_FEED_PROBE_TICK_MS);

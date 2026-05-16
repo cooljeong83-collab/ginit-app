@@ -1,0 +1,38 @@
+---
+description: WatermelonDB — UI가 로컬 DB와 어긋나지 않게 query.observe vs observeWithColumns
+alwaysApply: true
+---
+
+# WatermelonDB: 목록·채팅 UI 구독은 `observeWithColumns`
+
+## 문제 (재발 방지)
+
+`Collection#query(...).observe()`는 **결과 배열에 남아 있는 동일 레코드 집합**에서, `unread_count`, `last_message_*`, `server_seq` 등 **컬럼 값만 바뀌는 경우** 새 이벤트를 내지 **않을 수 있다**. SQLite에는 반영됐는데 React 상태·FlashList가 안 바뀌는 현상으로 이어진다.
+
+공식 API: `observeWithColumns(columnNames)` — 목록에 올라온 행 중 **지정 컬럼**이 바뀔 때도 emit한다.
+
+## 규칙
+
+1. **`chat_rooms`를 구독해 목록·미읽음·미리보기·탭 배지 합계를 그릴 때**  
+   `observe()` 단독 사용 금지. 반드시 `observeWithColumns([...])`에 **DB 컬럼명 snake_case**로, 화면에 쓰는 필드를 모두 넣는다.
+
+2. **`chat_messages`를 구독해 대화 버블·로컬 타임라인을 그릴 때**  
+   동일하게 `observeWithColumns` — 낙관적 행이 서버 `server_seq` 등으로만 갱신되는 경우 특히 필요하다.
+
+3. **공유 상수**  
+   프로젝트에 `src/lib/watermelon-observe-columns.ts`의 `WM_CHAT_ROOM_LIST_OBSERVE_COLUMNS`, `WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS`가 있다. 새 UI 컬럼을 쓰면 **여기 배열에 컬럼을 추가**하고 구독부는 이 배열을 spread해 쓴다.
+
+4. **예외적으로 `observe()`만 써도 되는 경우**  
+   emit 조건이 “행 추가·삭제·쿼리 매칭 변화”만이면 된다. (대부분의 채팅 목록·메시지 UI는 해당 안 됨.)
+
+## 금지 예 · 권장 예
+
+```typescript
+// ❌ 목록/미읽음 UI — 필드만 바뀌면 구독이 안 울 수 있음
+query.observe().subscribe(setRows);
+
+// ✅
+query.observeWithColumns([...WM_CHAT_ROOM_LIST_OBSERVE_COLUMNS]).subscribe(setRows);
+```
+
+새 훅·서비스에서 Watermelon `query`를 `subscribe`하기 전에 위를 확인한다.

@@ -2,22 +2,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createContext,
   useContext,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
   type ReactNode,
 } from 'react';
 import { Platform } from 'react-native';
 
 import type { Category } from '@/src/lib/categories';
-import { fetchMeetingCategoriesFromSupabase, subscribeFirestoreCategories } from '@/src/lib/categories';
+import { fetchMeetingCategoriesFromSupabase } from '@/src/lib/categories';
 import {
   readCachedMeetingCategoriesFromWatermelon,
   replaceWatermelonMeetingCategoriesCache,
 } from '@/src/lib/categories-watermelon-cache';
-import { categoriesSource } from '@/src/lib/hybrid-data-source';
 import { MEETING_CATEGORIES_QUERY_KEY } from '@/src/lib/meeting-categories-query-key';
 
 type MeetingCategoriesContextValue = {
@@ -45,7 +42,6 @@ async function meetingCategoriesSupabaseQueryFn(): Promise<Category[]> {
 export function MeetingCategoriesProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const didWmHydrateRef = useRef(false);
-  const [firestoreCategoriesReady, setFirestoreCategoriesReady] = useState(() => categoriesSource() === 'supabase');
 
   useLayoutEffect(() => {
     if (Platform.OS === 'web') return;
@@ -64,56 +60,22 @@ export function MeetingCategoriesProvider({ children }: { children: ReactNode })
     };
   }, [queryClient]);
 
-  const supabaseMode = categoriesSource() === 'supabase';
-
   const query = useQuery({
     queryKey: MEETING_CATEGORIES_QUERY_KEY,
     queryFn: meetingCategoriesSupabaseQueryFn,
-    enabled: supabaseMode,
     staleTime: Infinity,
     gcTime: Infinity,
     placeholderData: (previousData) => previousData,
     retry: 1,
   });
 
-  useEffect(() => {
-    if (!supabaseMode) return;
-    void queryClient.invalidateQueries({ queryKey: MEETING_CATEGORIES_QUERY_KEY });
-  }, [queryClient, supabaseMode]);
-
-  useEffect(() => {
-    if (supabaseMode) return;
-    const unsub = subscribeFirestoreCategories(
-      (list) => {
-        setFirestoreCategoriesReady(true);
-        const safe = Array.isArray(list) ? list.filter(Boolean) : [];
-        queryClient.setQueryData(MEETING_CATEGORIES_QUERY_KEY, safe);
-        void replaceWatermelonMeetingCategoriesCache(safe);
-      },
-      () => {
-        setFirestoreCategoriesReady(true);
-        /* Firestore 일시 오류: 기존 React Query 캐시 유지 */
-      },
-    );
-    return unsub;
-  }, [queryClient, supabaseMode]);
-
   const value = useMemo((): MeetingCategoriesContextValue => {
     const rows = Array.isArray(query.data) ? query.data.filter(Boolean) : [];
-    const categoriesLoading = supabaseMode
-      ? query.isPending && rows.length === 0
-      : !firestoreCategoriesReady && rows.length === 0;
+    const categoriesLoading = query.isPending && rows.length === 0;
     const categoriesError =
       query.isError && rows.length === 0 && query.error instanceof Error ? query.error.message : null;
     return { categories: rows, categoriesLoading, categoriesError };
-  }, [
-    query.data,
-    query.isPending,
-    query.isError,
-    query.error,
-    supabaseMode,
-    firestoreCategoriesReady,
-  ]);
+  }, [query.data, query.isPending, query.isError, query.error]);
 
   return <MeetingCategoriesContext.Provider value={value}>{children}</MeetingCategoriesContext.Provider>;
 }

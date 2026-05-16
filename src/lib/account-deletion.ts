@@ -6,17 +6,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
-import { deleteUser } from 'firebase/auth';
-import { getAuth } from '@react-native-firebase/auth';
 
-import { getFirebaseAuth } from '@/src/lib/firebase';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
-import { fetchMeetingsOnceHybrid } from '@/src/lib/meetings-hybrid';
+import { signOutSupabase, supabase } from '@/src/lib/supabase';
+import { fetchMeetingsForAccountDeletionHybrid } from '@/src/lib/meetings-hybrid';
 import type { Meeting } from '@/src/lib/meetings';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import { deleteMeetingDocumentByHostForce, leaveMeeting, transferMeetingHost } from '@/src/lib/meetings';
 import { purgeAllFollowRelations } from '@/src/lib/follow';
-import { withdrawAnonymizeUserProfile, withdrawAnonymizeUserProfileByFirebaseUid } from '@/src/lib/user-profile';
+import {
+  getUserProfile,
+  withdrawAnonymizeUserProfile,
+  withdrawAnonymizeUserProfileByFirebaseUid,
+} from '@/src/lib/user-profile';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import { purgeProfilePhotosForWithdrawal } from '@/src/lib/profile-photo-history';
@@ -31,6 +33,12 @@ export type AccountDeletionResult =
   | { ok: true }
   | { ok: false; message: string };
 
+/** 탈퇴 버튼 직전 검증 — 정상 탈퇴 또는 서버 탈퇴 후 앱만 어긋난 로컬 정리 */
+export type AccountDeletionPreflight =
+  | { ok: true; mode: 'full_deletion' }
+  | { ok: true; mode: 'local_session_cleanup_only' }
+  | { ok: false; message: string };
+
 const RECENT_LOGIN_MAX_AGE_MS = 4 * 60 * 1000;
 
 export function accountDeletionRejoinPolicyNotice(): string {
@@ -42,27 +50,25 @@ export function accountDeletionRejoinPolicyNotice(): string {
   return `• 재가입 정책: 탈퇴 후 ${days}일 동안 같은 계정으로 재가입할 수 없습니다.`;
 }
 
-function currentAuthDeletionSnapshot(): {
+type AuthDeletionSnap = {
   uid: string;
   email: string;
   phone: string;
   lastSignInMs: number | null;
-} | null {
-  const jsUser = getFirebaseAuth().currentUser;
-  const rnUser = getAuth().currentUser;
-  const uid = (jsUser?.uid ?? rnUser?.uid ?? '').trim();
-  const email = (jsUser?.email ?? rnUser?.email ?? '').trim();
-  const phone = (jsUser?.phoneNumber ?? rnUser?.phoneNumber ?? '').trim();
-  const lastSignInRaw =
-    jsUser?.metadata?.lastSignInTime ??
-    (rnUser?.metadata as unknown as { lastSignInTime?: string | number | null } | undefined)?.lastSignInTime ??
-    null;
+};
+
+async function currentAuthDeletionSnapshot(): Promise<AuthDeletionSnap | null> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const u = session?.user;
+  if (!u) return null;
+  const uid = (u.id ?? '').trim();
+  const email = (u.email ?? '').trim();
+  const phone = (u.phone ?? '').trim();
+  const lastRaw = u.last_sign_in_at;
   const lastSignInMs =
-    typeof lastSignInRaw === 'number'
-      ? lastSignInRaw
-      : typeof lastSignInRaw === 'string'
-        ? Date.parse(lastSignInRaw)
-        : null;
+    typeof lastRaw === 'string' && lastRaw ? Date.parse(lastRaw) : typeof lastRaw === 'number' ? lastRaw : null;
   if (!uid && !email && !phone) return null;
   return {
     uid,
@@ -72,13 +78,9 @@ function currentAuthDeletionSnapshot(): {
   };
 }
 
-function authSnapshotMatchesDeletionTarget(
-  snap: NonNullable<ReturnType<typeof currentAuthDeletionSnapshot>>,
-  sessionUserId: string,
-  fallbackFirebaseUid: string,
-): boolean {
+function authSnapshotMatchesDeletionTarget(snap: AuthDeletionSnap, sessionUserId: string, fallbackAuthUid: string): boolean {
   const target = sessionUserId.trim();
-  const fallbackUid = fallbackFirebaseUid.trim();
+  const fallbackUid = fallbackAuthUid.trim();
   if (fallbackUid && snap.uid && snap.uid !== fallbackUid) return false;
   if (!target && fallbackUid && snap.uid === fallbackUid) return true;
   if (!target) return false;
@@ -93,15 +95,32 @@ function authSnapshotMatchesDeletionTarget(
 }
 
 /**
- * 원격 익명화 전에 현재 Firebase Auth 사용자와 앱 세션 대상이 같은 계정인지, 최근 로그인 상태인지 확인합니다.
- * 실패하면 서버 프로필/모임 정리를 시작하지 않아 부분 탈퇴를 방지합니다.
+ * 원격 익명화 전에 현재 Supabase Auth 사용자와 앱 세션 대상이 같은 계정인지, 최근 로그인 상태인지 확인합니다.
+ *
+ * Auth 세션이 없어도 `get_profile_public_by_app_user_id`로 서버 프로필이 이미 탈퇴(`isWithdrawn`)이면
+ * `local_session_cleanup_only` — 원격 탈퇴는 건너뛰고 로컬·세션만 정리합니다(탈퇴 중 앱 강제 종료 등).
  */
-export function validateAccountDeletionPreflight(sessionUserId: string, fallbackFirebaseUid: string): AccountDeletionResult {
-  const snap = currentAuthDeletionSnapshot();
+export async function validateAccountDeletionPreflight(
+  sessionUserId: string,
+  fallbackAuthUid: string,
+): Promise<AccountDeletionPreflight> {
+  const snap = await currentAuthDeletionSnapshot();
   if (!snap) {
+    const pk = sessionUserId.trim() || fallbackAuthUid.trim();
+    if (!pk) {
+      return { ok: false, message: '현재 로그인 인증 정보를 확인하지 못했습니다. 다시 로그인한 뒤 탈퇴를 시도해 주세요.' };
+    }
+    try {
+      const prof = await getUserProfile(pk);
+      if (prof?.isWithdrawn === true) {
+        return { ok: true, mode: 'local_session_cleanup_only' };
+      }
+    } catch {
+      /* 공개 프로필 조회 실패 시 아래 일반 안내 */
+    }
     return { ok: false, message: '현재 로그인 인증 정보를 확인하지 못했습니다. 다시 로그인한 뒤 탈퇴를 시도해 주세요.' };
   }
-  if (!authSnapshotMatchesDeletionTarget(snap, sessionUserId, fallbackFirebaseUid)) {
+  if (!authSnapshotMatchesDeletionTarget(snap, sessionUserId, fallbackAuthUid)) {
     return {
       ok: false,
       message:
@@ -114,7 +133,7 @@ export function validateAccountDeletionPreflight(sessionUserId: string, fallback
       message: '보안을 위해 최근 로그인 확인이 필요합니다.\n로그아웃 후 다시 로그인한 뒤, 회원 탈퇴를 다시 시도해 주세요.',
     };
   }
-  return { ok: true };
+  return { ok: true, mode: 'full_deletion' };
 }
 
 function pickNextHostFromParticipants(m: Meeting, nsHost: string): string | null {
@@ -162,7 +181,7 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
   if (!raw) return { ok: false, message: '로그인 정보가 없습니다.' };
   const ns = normalizeParticipantId(raw);
 
-  const listRes = await fetchMeetingsOnceHybrid();
+  const listRes = await fetchMeetingsForAccountDeletionHybrid(raw);
   if (!listRes.ok) {
     return { ok: false, message: listRes.message };
   }
@@ -246,7 +265,7 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
   const uid = firebaseUid.trim();
   if (!uid) return { ok: false, message: '로그인 정보가 없습니다.' };
 
-  const listRes = await fetchMeetingsOnceHybrid();
+  const listRes = await fetchMeetingsForAccountDeletionHybrid(uid);
   if (!listRes.ok) {
     return { ok: false, message: listRes.message };
   }
@@ -323,41 +342,23 @@ function humanizeAuthDeleteError(e: unknown): string {
   if (hay.includes('requires-recent-login')) {
     return '보안을 위해 최근 로그인 확인이 필요합니다.\n로그아웃 후 다시 로그인한 뒤, 회원 탈퇴를 다시 시도해 주세요.';
   }
-  return message || 'Firebase 인증 계정 삭제에 실패했습니다.';
+  return message || '인증 세션 종료에 실패했습니다.';
 }
 
 /**
- * Firebase Auth 인증 정보를 삭제합니다.
- * - JS(firebase/auth)와 RN Firebase(@react-native-firebase/auth) 세션이 공존할 수 있어 둘 다 시도합니다.
- * - 실패 시 ok:false 로 반환해서 호출부에서 탈퇴를 중단할 수 있게 합니다.
+ * 클라이언트에서 로그아웃해 로컬 세션을 정리합니다.
+ * `auth.users` 행 삭제는 서비스 롤(Edge 등)이 필요해 이 단계에서는 수행하지 않습니다.
  */
 export async function deleteFirebaseAuthUserStrict(): Promise<AccountDeletionResult> {
-  let lastErr: unknown = null;
-
   try {
-    const jsUser = getFirebaseAuth().currentUser;
-    if (jsUser) {
-      await deleteUser(jsUser);
-    }
+    await signOutSupabase();
+    return { ok: true };
   } catch (e) {
-    lastErr = e;
+    return { ok: false, message: humanizeAuthDeleteError(e) };
   }
-
-  try {
-    const rnUser = getAuth().currentUser;
-    if (rnUser) {
-      await (rnUser as unknown as { delete: () => Promise<void> }).delete();
-    }
-  } catch (e) {
-    lastErr = lastErr ?? e;
-  }
-
-  if (lastErr) return { ok: false, message: humanizeAuthDeleteError(lastErr) };
-  // 세션이 없으면 서버 익명화 후 signOut으로 충분합니다.
-  return { ok: true };
 }
 
-/** Firebase Auth 현재 사용자가 있으면 삭제합니다(익명·일반). 실패는 무시합니다. */
+/** Supabase 세션이 있으면 종료합니다(실패는 무시). */
 export async function deleteFirebaseAuthUserBestEffort(): Promise<void> {
   void (await deleteFirebaseAuthUserStrict());
 }

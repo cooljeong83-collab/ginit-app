@@ -11,8 +11,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
   forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, } from 'react';
+import { Image } from 'expo-image';
 import {
-  ActivityIndicator, Alert, Animated, Easing, Image, InteractionManager, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type ViewStyle} from 'react-native';
+  ActivityIndicator, Alert, Animated, Easing, InteractionManager, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type ViewStyle} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
@@ -2402,7 +2403,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             <View style={styles.placeResultProposalPressInner}>
                               <View style={styles.placeResultImageWrap}>
                                 {thumb ? (
-                                  <Image source={{ uri: thumb }} style={styles.placeResultImage} resizeMode="cover" />
+                                  <Image
+                                    source={{ uri: thumb }}
+                                    style={styles.placeResultImage}
+                                    contentFit="cover"
+                                    cachePolicy="disk"
+                                    recyclingKey={thumb}
+                                  />
                                 ) : (
                                   <View style={styles.placeResultImageFallback} />
                                 )}

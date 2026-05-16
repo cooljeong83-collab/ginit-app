@@ -1,20 +1,10 @@
-import {
-  getAdditionalUserInfo,
-  GoogleAuthProvider,
-  getRedirectResult,
-  OAuthCredential,
-  signInWithPopup,
-  signInWithRedirect,
-  signOut,
-  type User,
-  type UserCredential,
-} from 'firebase/auth';
+import { signOutSupabase, supabase } from '@/src/lib/supabase';
 
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
 import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
-import { getFirebaseAuth } from './firebase';
 
-const REDIRECT_STARTED = 'auth/redirect-started';
+export const REDIRECT_STARTED = 'auth/redirect-started';
+
 const LOG = '[GinitAuth:Web]';
 
 function ts() {
@@ -49,21 +39,6 @@ function attachCode(err: Error, code?: string) {
   return err;
 }
 
-function logCurrentAuth(prefix: string) {
-  try {
-    const a = getFirebaseAuth();
-    const u = a.currentUser;
-    log(`${prefix} auth.currentUser`, {
-      hasCurrentUser: !!u,
-      uid: u?.uid ?? null,
-      email: u?.email ?? null,
-      isAnonymous: u?.isAnonymous ?? null,
-    });
-  } catch (e) {
-    log(`${prefix} auth.currentUser (read failed)`, { ...pickErr(e) });
-  }
-}
-
 function isBrowser(): boolean {
   try {
     return typeof globalThis !== 'undefined' && 'window' in globalThis && typeof (globalThis as { window?: unknown }).window !== 'undefined';
@@ -83,50 +58,68 @@ function isMobileUserAgent(): boolean {
   }
 }
 
-/** 리다이렉트 로그인으로 돌아온 뒤(같은 탭) 한 번 호출해 세션을 복구합니다. */
+function googleScopes(options?: SignInWithGoogleOptions): string {
+  const base = 'email profile';
+  if (!options?.forRegistration) return base;
+  return `${base} https://www.googleapis.com/auth/user.birthday.read https://www.googleapis.com/auth/user.gender.read`;
+}
+
+async function waitForSessionFromOAuthPopup(maxMs: number): Promise<import('@supabase/supabase-js').Session | null> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.user) return session;
+    await new Promise((r) => setTimeout(r, 420));
+  }
+  return null;
+}
+
+/** OAuth 복귀 후(같은 출처·팝업 포함) 세션을 한 번 동기화합니다. */
 export async function consumeGoogleRedirectResultWithMeta(): Promise<RedirectConsumeMeta> {
   log('consumeGoogleRedirectResultWithMeta → start');
   if (!isBrowser()) {
     log('consumeGoogleRedirectResultWithMeta → noop (not-browser)');
     return { status: 'noop', reason: 'not-browser' };
   }
-  logCurrentAuth('consumeGoogleRedirectResultWithMeta:before getRedirectResult');
-  const auth = getFirebaseAuth();
   try {
-    log('consumeGoogleRedirectResultWithMeta → calling getRedirectResult (Auth Step 2: redirect result)');
-    const result = await getRedirectResult(auth);
-    if (result?.user) {
-      log('consumeGoogleRedirectResultWithMeta → Auth Step 2: Result Received (success)', {
-        uid: result.user.uid,
-        email: result.user.email ?? null,
-      });
-      logCurrentAuth('consumeGoogleRedirectResultWithMeta:after success');
-      return { status: 'success', user: result.user };
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+    if (error) {
+      const { code, message } = pickErr(error);
+      return { status: 'error', code, message, raw: error };
     }
-    log('consumeGoogleRedirectResultWithMeta → empty (no pending redirect credential)', {
-      hasCredential: !!result,
-    });
-    return { status: 'empty' };
+    const user = session?.user;
+    if (!user) {
+      log('consumeGoogleRedirectResultWithMeta → empty');
+      return { status: 'empty' };
+    }
+    const hasGoogle = user.identities?.some((i) => i.provider === 'google');
+    if (!hasGoogle) {
+      return { status: 'empty' };
+    }
+    log('consumeGoogleRedirectResultWithMeta → success', { id: user.id });
+    return { status: 'success', user };
   } catch (e) {
     const { code, message } = pickErr(e);
-    log('consumeGoogleRedirectResultWithMeta → Error', { code: code ?? '(no code)', message, raw: String(e) });
-    logCurrentAuth('consumeGoogleRedirectResultWithMeta:after error');
     return { status: 'error', code, message, raw: e };
   }
 }
 
-export async function consumeGoogleRedirectResult(): Promise<User | null> {
+export async function consumeGoogleRedirectResult(): Promise<import('@supabase/supabase-js').User | null> {
   const m = await consumeGoogleRedirectResultWithMeta();
   if (m.status === 'success') return m.user;
   return null;
 }
 
 export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promise<GoogleSignInResult> {
-  log('signInWithGoogle → start (handleLogin equivalent on web)', {
+  log('signInWithGoogle → start (web)', {
     isBrowser: isBrowser(),
     isMobileUserAgent: isMobileUserAgent(),
   });
-  logCurrentAuth('signInWithGoogle:start');
 
   if (!isBrowser()) {
     const err = new Error('Google 로그인(웹)은 브라우저 환경에서만 사용할 수 있습니다.');
@@ -134,83 +127,71 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
     throw err;
   }
 
-  const auth = getFirebaseAuth();
-  const provider = new GoogleAuthProvider();
-  if (options?.promptSelectAccount === false) {
-    provider.setCustomParameters({ prompt: 'consent' });
-  } else {
-    provider.setCustomParameters({ prompt: 'select_account' });
-  }
-  const includePeopleScopes = Boolean(options?.forRegistration);
-  if (includePeopleScopes) {
-    provider.addScope('https://www.googleapis.com/auth/user.birthday.read');
-    provider.addScope('https://www.googleapis.com/auth/user.gender.read');
-  }
+  const redirectTo = `${window.location.origin}/login`;
+  const scopes = googleScopes(options);
+  const queryParams: Record<string, string> = {
+    prompt: options?.promptSelectAccount === false ? 'consent' : 'select_account',
+    access_type: 'offline',
+  };
+
+  const oauthBase = async () => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        scopes,
+        queryParams,
+        skipBrowserRedirect: true,
+      },
+    });
+    if (error) throw attachCode(new Error(error.message), error.code);
+    if (!data.url) throw new Error('OAuth URL을 받지 못했습니다.');
+    return data.url;
+  };
 
   if (isMobileUserAgent()) {
-    log('Auth Step 1 → about to open redirect flow (signInWithRedirect)', {
-      providerId: provider.providerId,
-    });
-    logCurrentAuth('signInWithGoogle:before signInWithRedirect');
-    try {
-      await signInWithRedirect(auth, provider);
-      log('signInWithGoogle → signInWithRedirect returned (unexpected if redirect leaves page)');
-    } catch (e) {
-      const { code, message } = pickErr(e);
-      log('Error:signInWithRedirect', { code: code ?? '(no code)', message });
-      logCurrentAuth('signInWithGoogle:after signInWithRedirect error');
-      throw attachCode(new Error(`Google 리다이렉트 로그인을 시작할 수 없습니다: ${message}`), code);
-    }
+    log('Auth Step 1 → full redirect OAuth (mobile web)');
+    const url = await oauthBase();
+    window.location.assign(url);
     const err = new Error('리다이렉트 로그인을 시작했습니다. 잠시 후 이 페이지로 돌아오면 로그인이 완료됩니다.');
     (err as Error & { code?: string }).code = REDIRECT_STARTED;
-    log('signInWithGoogle → Auth Step 1 done; throwing REDIRECT_STARTED (page should navigate away)', {
-      code: REDIRECT_STARTED,
-    });
     throw err;
   }
 
-  log('Auth Step 1 → about to open popup (signInWithPopup)');
-  logCurrentAuth('signInWithGoogle:before signInWithPopup');
-  try {
-    const result = (await signInWithPopup(auth, provider)) as UserCredential;
-    const { user } = result;
-    const oauth = GoogleAuthProvider.credentialFromResult(result) as OAuthCredential | null;
-    const googleAccessToken = oauth?.accessToken ?? null;
-    const addInfo = getAdditionalUserInfo(result);
-    const isNewUser = addInfo?.isNewUser === true;
-    log('Auth Step 2: Result Received (popup success)', {
-      uid: user.uid,
-      email: user.email ?? null,
-      isNewUser,
-    });
-    logCurrentAuth('signInWithGoogle:after popup success');
-    return { user, googleAccessToken, isNewUser };
-  } catch (e) {
-    const { code, message } = pickErr(e);
-    log('Error:signInWithPopup', { code: code ?? '(no code)', message });
-    logCurrentAuth('signInWithGoogle:after popup error');
-    throw attachCode(new Error(`Google 팝업 로그인 실패: ${message}`), code);
+  log('Auth Step 1 → popup OAuth (desktop web)');
+  const url = await oauthBase();
+  const pop = window.open(url, 'ginit_google_oauth', 'width=520,height=700,scrollbars=yes');
+  if (!pop) {
+    throw new Error('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.');
   }
+  const session = await waitForSessionFromOAuthPopup(180_000);
+  try {
+    pop.close();
+  } catch {
+    /* noop */
+  }
+  if (!session?.user) {
+    throw new Error('Google 로그인 시간이 초과되었거나 취소되었습니다.');
+  }
+  const googleAccessToken = session.provider_token ?? null;
+  const supabaseAccessToken = session.access_token?.trim() ?? '';
+  if (!supabaseAccessToken) {
+    throw new Error('Supabase access_token을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+  log('Auth Step 2: Result Received (popup)', { uid: session.user.id });
+  return { user: session.user, googleAccessToken, supabaseAccessToken };
 }
 
-/** 네이티브 전용 API와 시그니처를 맞추기 위한 웹 스텁(웹은 `signInWithPopup`으로 추가 스코프 요청). */
+/** 네이티브 전용 API와 시그니처를 맞추기 위한 웹 스텁 */
 export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
-  return null;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return session?.provider_token ?? null;
 }
 
 export async function signOutGoogle(): Promise<void> {
-  const auth = getFirebaseAuth();
   log('signOutGoogle → start');
-  logCurrentAuth('signOutGoogle:before');
-  try {
-    await signOut(auth);
-    log('signOutGoogle → success');
-    logCurrentAuth('signOutGoogle:after');
-  } catch (e) {
-    const { code, message } = pickErr(e);
-    log('Error:signOutGoogle', { code: code ?? '(no code)', message });
-    throw attachCode(new Error(`로그아웃 실패: ${message}`), code);
-  }
+  await signOutSupabase();
+  log('signOutGoogle → success');
 }
-
-export { REDIRECT_STARTED };

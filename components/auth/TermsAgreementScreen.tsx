@@ -1,8 +1,8 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import {useLocalSearchParams } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Modal, ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -33,6 +33,7 @@ function termBody(key: TermKey): string {
 
 export default function TermsAgreementScreen() {
   const router = useTransitionRouter();
+  const expoRouter = useRouter();
   const params = useLocalSearchParams<{ next?: string | string[] }>();
   const next = useMemo(() => {
     const raw = params.next;
@@ -43,6 +44,7 @@ export default function TermsAgreementScreen() {
   const [checked, setChecked] = useState<Record<TermKey, boolean>>({ tos: false, privacy: false });
   const [detailKey, setDetailKey] = useState<TermKey | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitLockRef = useRef(false);
 
   const allRequiredChecked = checked.tos && checked.privacy;
   const allChecked = allRequiredChecked;
@@ -64,34 +66,48 @@ export default function TermsAgreementScreen() {
     try {
       router.back();
     } catch {
-      router.replace('/login');
+      expoRouter.replace('/login');
     }
-  }, [detailKey, router]);
+  }, [detailKey, router, expoRouter]);
 
   const onNext = useCallback(async () => {
     if (!allRequiredChecked || busy) return;
-    const fn = consumePendingConsentAction();
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
     setBusy(true);
     try {
+      const fn = consumePendingConsentAction();
+      if (!fn && !next) {
+        Alert.alert(
+          '진행이 중단됐어요',
+          '로그인 화면에서 [Google로 시작하기]를 다시 눌러 약관 동의 후 진행해 주세요.',
+          [{ text: '확인', onPress: () => expoRouter.replace('/login') }],
+        );
+        return;
+      }
       if (fn) {
-        await fn();
-        // LoginScreen 등: 약관 동의 후 목적지가 명확하면 여기서 replace로 마무리합니다.
-        // SignUpScreen 등: pending action이 자체적으로 라우팅(가입 완료 후 이동)을 책임질 수 있으므로
-        // next가 없으면 추가 내비게이션을 하지 않습니다.
+        try {
+          await fn();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          Alert.alert('로그인 처리 실패', msg);
+          return;
+        }
         if (next) {
-          router.replace(next as any);
+          expoRouter.replace(next as any);
         }
         return;
       }
       if (next) {
-        router.replace(next as any);
+        expoRouter.replace(next as any);
         return;
       }
       close();
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
-  }, [allRequiredChecked, busy, close, next, router]);
+  }, [allRequiredChecked, busy, close, next, expoRouter]);
 
   const detailTitle = useMemo(() => (detailKey ? TERM_LABELS[detailKey].title : ''), [detailKey]);
   const detailText = useMemo(() => (detailKey ? termBody(detailKey) : ''), [detailKey]);

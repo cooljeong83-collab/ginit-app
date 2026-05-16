@@ -1,12 +1,9 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
-import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
-import type { Timestamp } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlashList } from '@shopify/flash-list';
 import {
     ActivityIndicator,
     Alert,
@@ -42,20 +39,22 @@ import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-style
 import { meetingImageViewerMeta, profileForSender } from '@/components/chat/meeting-chat-ui-helpers';
 import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { getAppQueryClient } from '@/src/context/QueryClientPersistProvider';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
+import { syncServerParticipantUnreadForRoom } from '@/src/lib/chat-local-unread-sync';
+import { useChatMarkReadOnFocus } from '@/src/hooks/use-chat-mark-read-on-focus';
+import { useChatRealtimeConnectionBanner } from '@/src/hooks/use-chat-realtime-connection-banner';
+import { useChatEngine, type ChatEngineSendMeetingImageBatchInput, type ChatEngineSendMessageInput } from '@/src/hooks/useChatEngine';
+import { useFocusedDelayedSubscription } from '@/src/hooks/use-focused-delayed-subscription';
 import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
-import {
-    flattenMeetingChatInfinitePages,
-    meetingChatMessagesQueryKey,
-    mergeMeetingChatInfiniteAppendPages,
-    useMeetingChatMessagesInfiniteQuery,
-} from '@/src/hooks/use-meeting-chat-messages-infinite-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-search-navigator';
+import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
+import { chatEngineSnapshotsToMeetingMessagesNewestFirst } from '@/src/lib/chat-engine-snapshot-to-meeting';
 import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
@@ -63,25 +62,25 @@ import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
+import { optimisticZeroUnreadLocalChatRoomOnMount } from '@/src/lib/offline-chat/offline-chat-rooms';
 import {
-  clearLocalChatRoomUnread,
-  markLocalChatRoomReadState,
-  upsertLocalChatRoomReadState,
-} from '@/src/lib/offline-chat/offline-chat-rooms';
+  backfillOlderRoomMessagesToLocal,
+  offlineInputsFromMeetingChatMessages,
+  upsertLocalChatMessages,
+} from '@/src/lib/offline-chat/offline-chat-sync';
 import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 import { resolveFeedLocationContextWithoutPermissionPrompt } from '@/src/lib/feed-display-location';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import type { MeetingChatFetchedMessagesPage, MeetingChatMessage } from '@/src/lib/meeting-chat';
+import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
-    deleteMeetingChatImageMessageBestEffort,
-    deleteMeetingChatTextMessageBestEffort,
-    fetchOlderMeetingChatPagesUntilTargetMessageId,
-    searchMeetingChatMessages,
-    sendMeetingChatImageMessagesBatch,
-    sendMeetingChatTextMessage,
-    writeMeetingChatReadReceipt,
+  deleteMeetingChatImageMessageBestEffort,
+  deleteMeetingChatTextMessageBestEffort,
+  subscribeMeetingChatLiveTail,
 } from '@/src/lib/meeting-chat';
+import { buildChatMessageIndexById } from '@/src/lib/chat-message-index-by-id';
+import { scheduleChatBubbleReadPointersPull } from '@/src/lib/chat-bubble-read-pointers-pull';
+import { subscribeMeetingChatReadPointersRealtime } from '@/src/lib/meeting-chat-rooms-summary';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 import {
@@ -91,7 +90,7 @@ import {
 import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
 import { GINIT_MEETING_ARRIVAL_VERIFIED_EVENT } from '@/src/lib/meeting-arrival-verify-rpc-ui';
 import type { Category } from '@/src/lib/categories';
-import type { Meeting } from '@/src/lib/meetings';
+import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import {
   buildConfirmedScheduleNoticeAccessibilityLabel,
   buildConfirmedScheduleNoticeTimeRight,
@@ -100,51 +99,12 @@ import {
   isConfirmedMeetingPastListEndWindow,
   meetingParticipantCount,
   shouldShowConfirmedScheduleNoticeBar,
-  subscribeMeetingById,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { WITHDRAWN_NICKNAME, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { WITHDRAWN_NICKNAME, getUserProfile, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
-
-/** Firestore Timestamp · `{ seconds }` · Ledger ISO 문자열 → ms */
-function coalesceFirestoreTimeMs(v: unknown): number {
-  if (v == null) return 0;
-  if (typeof v === 'string' && v.trim()) {
-    const t = Date.parse(v);
-    return Number.isFinite(t) ? t : 0;
-  }
-  if (typeof (v as Timestamp).toMillis === 'function') {
-    try {
-      return (v as Timestamp).toMillis();
-    } catch {
-      return 0;
-    }
-  }
-  if (typeof v === 'object' && v !== null && 'seconds' in v) {
-    const s = Number((v as { seconds: unknown }).seconds);
-    if (!Number.isFinite(s)) return 0;
-    const n = Number((v as { nanoseconds?: unknown }).nanoseconds);
-    return s * 1000 + (Number.isFinite(n) ? Math.floor(n / 1e6) : 0);
-  }
-  return 0;
-}
-
-/** `chatReadMessageIdBy` 키가 이메일/전화 등 여러 형태여도 정규화된 pid로 마지막 읽은 메시지 id */
-function lastReadMessageIdForParticipant(readBy: Meeting['chatReadMessageIdBy'], pid: string): string {
-  if (!readBy || typeof readBy !== 'object') return '';
-  const pick = (val: unknown) => (typeof val === 'string' ? val.trim() : String(val ?? '').trim());
-  const direct = pick((readBy as Record<string, unknown>)[pid]);
-  if (direct) return direct;
-  for (const [k, v] of Object.entries(readBy)) {
-    const id = pick(v);
-    if (!id) continue;
-    const nk = normalizeParticipantId(k) ?? k.trim();
-    if (nk === pid) return id;
-  }
-  return '';
-}
 
 /** 검색 결과 한 줄 미리보기 — 검색어 주변만 잘라 표시 */
 function splitSearchSnippet(full: string, needle: string): { head: string; mid: string; tail: string } {
@@ -215,10 +175,14 @@ export default function MeetingChatRoomScreen() {
   const { version: appPoliciesVersion } = useAppPolicies();
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
-  const queryClient = useQueryClient();
 
-  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
-  const [meetingError, setMeetingError] = useState<string | null>(null);
+  const {
+    meeting,
+    loading: meetingLoading,
+    loadError: meetingError,
+    refetch: refetchMeetingDetail,
+    meetingReady,
+  } = useMeetingDetailQuery(meetingId, { refetchOnMount: 'always' });
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const openUserProfile = useCallback(
     (id: string) => {
@@ -239,6 +203,7 @@ export default function MeetingChatRoomScreen() {
   } | null>(null);
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   /** 맨 아래에서 조금이라도 위로 올라왔을 때만「최신으로」FAB 표시 */
+  const [bubbleReadMapsRevision, setBubbleReadMapsRevision] = useState(0);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const [chatSearchMode, setChatSearchMode] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
@@ -248,6 +213,9 @@ export default function MeetingChatRoomScreen() {
   const [chatSearchBusy, setChatSearchBusy] = useState(false);
   /** 검색 결과 점프 시 과거 메시지를 한꺼번에 불러오는 동안 */
   const [searchNavigateLoading, setSearchNavigateLoading] = useState(false);
+  const realtimeBanner = useChatRealtimeConnectionBanner(true, isFocused);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [olderPrefetchBusy, setOlderPrefetchBusy] = useState(false);
   /** 퀵 메뉴·닫기 레이어를 입력창(composerDock) 바로 위에 붙이기 위한 높이 */
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
@@ -263,11 +231,18 @@ export default function MeetingChatRoomScreen() {
   }, []);
   const messageInputRef = useRef<TextInput>(null);
   const messagesRef = useRef<MeetingChatMessage[]>([]);
-  const lastMarkedReadRef = useRef<{ meetingId: string; messageId: string } | null>(null);
+  const meetingEngineSendRef = useRef<{
+    sendMessage: (input: ChatEngineSendMessageInput) => Promise<void>;
+    sendBatch: (input: ChatEngineSendMeetingImageBatchInput) => Promise<void>;
+  }>({
+    sendMessage: async () => {},
+    sendBatch: async () => {},
+  });
   const { markChatReadUpTo } = useInAppAlarms();
   const lastScrollOffsetRef = useRef(0);
   const pendingAutoScrollToLatestRef = useRef(false);
   const lastAutoScrolledMessageIdRef = useRef<string>('');
+  const latestAutoScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resolveListScroller = useCallback(() => {
     const r = innerFlashListRef.current ?? listRef.current;
@@ -348,27 +323,22 @@ export default function MeetingChatRoomScreen() {
     }, [meetingId]),
   );
 
-  useEffect(() => {
-    if (!meetingId) {
-      setMeeting(null);
-      return;
-    }
-    const unsub = subscribeMeetingById(
-      meetingId,
-      (m) => {
-        setMeeting(m);
-        setMeetingError(null);
-      },
-      (msg) => setMeetingError(msg),
-    );
-    return unsub;
-  }, [meetingId]);
-
   const allowed = useMemo(() => {
-    if (meeting === undefined) return null;
+    if (!meetingReady) return null;
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
-  }, [meeting, userId]);
+  }, [meeting, userId, meetingReady]);
+
+  useEffect(() => {
+    if (!meetingId?.trim() || !userId?.trim()) return;
+    const ownerNorm = normalizeParticipantId(userId.trim()) || userId.trim();
+    void optimisticZeroUnreadLocalChatRoomOnMount({
+      roomType: 'meeting',
+      roomId: meetingId.trim(),
+      ownerUserId: ownerNorm,
+      isGroup: true,
+    });
+  }, [meetingId, userId]);
 
   const [meetingArrivalBannerVerified, setMeetingArrivalBannerVerified] = useState(false);
   const [arrivalBannerUiTick, setArrivalBannerUiTick] = useState(0);
@@ -378,7 +348,7 @@ export default function MeetingChatRoomScreen() {
   const showMeetingArrivalVerifyTopBanner = useMemo(() => {
     void arrivalBannerUiTick;
     if (allowed !== true) return false;
-    if (!meeting || meeting === undefined) return false;
+    if (!meeting) return false;
     return shouldShowMeetingArrivalVerifyTopBanner({
       platformOs: Platform.OS,
       meeting,
@@ -493,12 +463,33 @@ export default function MeetingChatRoomScreen() {
         if (payload.kind === 'image') {
           const uri = payload.imageUri.trim();
           if (uri) {
-            await sendMeetingChatImageMessagesBatch(meetingId, userId, [uri], { naturalWidths: [undefined] });
+            const uid = userId.trim();
+            const senderPhone = normalizePhoneUserId(uid) ?? uid;
+            const prof = await getUserProfile(senderPhone).catch(() => null);
+            await meetingEngineSendRef.current.sendBatch({
+              uris: [uri],
+              naturalWidths: [undefined],
+              senderId: senderPhone,
+              senderName: prof?.nickname ?? prof?.displayName ?? null,
+              senderAvatarUrl: prof?.photoUrl ?? null,
+            });
           }
         } else {
           const text = payload.text.trim();
           if (text) {
-            await sendMeetingChatTextMessage(meetingId, userId, text, null);
+            const uid = userId.trim();
+            const senderPhone = normalizePhoneUserId(uid) ?? uid;
+            const linkPreview = await buildLinkPreviewForChatText(text);
+            const prof = await getUserProfile(senderPhone).catch(() => null);
+            await meetingEngineSendRef.current.sendMessage({
+              kind: 'text',
+              bodyText: text,
+              senderId: senderPhone,
+              senderName: prof?.nickname ?? prof?.displayName ?? null,
+              senderAvatarUrl: prof?.photoUrl ?? null,
+              replyTo: null,
+              linkPreview: linkPreview ? (linkPreview as unknown as Record<string, unknown>) : null,
+            });
           }
         }
       } catch (e) {
@@ -513,30 +504,73 @@ export default function MeetingChatRoomScreen() {
     })();
   }, [allowed, meetingId, userId]);
 
-  useOfflineChatRoomSync({ roomType: 'meeting', roomId: meetingId }, allowed === true);
-  const localMeetingRoomSummaries = useLocalChatRoomSummaries({
-    roomType: 'meeting',
-    ownerUserId: userId,
-    enabled: allowed === true,
-  });
-  const localMeetingRoom = useMemo(
-    () => localMeetingRoomSummaries.find((row) => row.roomId === meetingId) ?? null,
-    [localMeetingRoomSummaries, meetingId],
+  useOfflineChatRoomSync({ roomType: 'meeting', roomId: meetingId }, allowed === true, userId);
+
+  const meetingReadRoomIds = useMemo(
+    () => [...new Set([meetingId.trim(), meeting?.id?.trim() ?? ''].filter(Boolean))],
+    [meetingId, meeting?.id],
   );
 
-  const {
-    messages,
-    listError: chatError,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    refetch: refetchChatMessages,
-  } = useMeetingChatMessagesInfiniteQuery({
-    meetingId,
-    enabled: allowed === true,
+  const chatEngineEnabled = Boolean(meetingId.trim() && userId?.trim()) && allowed !== false;
+
+  const { messages: engineSnapshots, sendMessage, sendMeetingImageUrisBatch } = useChatEngine({
+    roomKind: 'meeting',
+    roomId: meetingId,
+    meAppUserId: myId || userId?.trim() || '',
+    enabled: chatEngineEnabled,
+    observeLimit: 5000,
   });
 
+  meetingEngineSendRef.current = { sendMessage, sendBatch: sendMeetingImageUrisBatch };
+
+  const messages = useMemo(
+    () => chatEngineSnapshotsToMeetingMessagesNewestFirst(engineSnapshots),
+    [engineSnapshots],
+  );
+
+  const maxMessageServerSeq = useMemo(() => {
+    let max = 0;
+    for (const m of messages) {
+      const s = m.serverSeq;
+      if (typeof s === 'number' && Number.isFinite(s) && s > max) max = Math.floor(s);
+    }
+    return max;
+  }, [messages]);
+
+  const chatReconnecting = realtimeBanner.bannerTone === 'reconnecting';
+  const chatError = realtimeBanner.bannerTone === 'error' ? realtimeBanner.bannerText : null;
+
   messagesRef.current = messages;
+
+  useFocusedDelayedSubscription(
+    isFocused && allowed === true && Boolean(meetingId.trim()),
+    () => {
+      const mid = meetingId.trim();
+      const { handlers } = realtimeBanner;
+      return subscribeMeetingChatLiveTail(
+        mid,
+        (e) => {
+          void (async () => {
+            try {
+              await upsertLocalChatMessages(
+                { roomType: 'meeting', roomId: mid },
+                offlineInputsFromMeetingChatMessages([...e.tail, ...e.evictedFromTail]),
+              );
+              handlers.onReconnected();
+            } catch (err) {
+              if (__DEV__) console.warn('[MeetingChatRoom] live tail → local persist failed', err);
+            }
+          })();
+        },
+        handlers,
+      );
+    },
+    [allowed, meetingId, isFocused, realtimeBanner.handlers],
+  );
+
+  useEffect(() => {
+    setHasMoreOlder(true);
+  }, [meetingId]);
 
   useEffect(() => {
     if (allowed !== true || messages.length === 0) return;
@@ -569,82 +603,70 @@ export default function MeetingChatRoomScreen() {
 
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
 
+  const markReadMessages = useMemo(
+    () =>
+      messages.map((m) => ({
+        id: m.id,
+        serverSeq: m.serverSeq,
+        createdAtMs: m.createdAt?.toMillis?.() ?? 0,
+      })),
+    [messages],
+  );
+
+  const pickLatestMeetingMessage = useCallback(
+    (msgs: readonly { id: string; serverSeq?: number | null; createdAtMs?: number }[]) => msgs[0] ?? null,
+    [],
+  );
+
+  useChatMarkReadOnFocus({
+    roomKind: 'meeting',
+    roomId: meetingId,
+    meAppUserId: myId || userId?.trim() || '',
+    ownerUserId: userId?.trim() ?? null,
+    isFocused,
+    enabled: allowed === true && Boolean(meetingId && (myId || userId?.trim())),
+    pickLatest: pickLatestMeetingMessage,
+    messages: markReadMessages,
+    markChatReadUpTo,
+    markOnBlur: true,
+  });
+
+  useEffect(() => {
+    if (allowed !== true || !isFocused || !meetingId.trim()) return;
+    const me = myId || normalizeParticipantId(userId?.trim() ?? '') || userId?.trim() || '';
+    if (!me) return;
+    void syncServerParticipantUnreadForRoom(me, 'meeting', meetingId.trim(), {
+      queryClient: getAppQueryClient(),
+    });
+  }, [allowed, isFocused, meetingId, myId, userId]);
+
   /** 채팅방 이미지 뷰어: 시간순(오래된 것 → 최신)으로 슬라이드 */
   const chatImageGalleryChrono = useMemo(() => {
     const imgs = messages.filter((m) => m.kind === 'image' && m.imageUrl?.trim());
     return [...imgs].reverse();
   }, [messages]);
 
-  useEffect(() => {
-    lastMarkedReadRef.current = null;
-  }, [meetingId]);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (allowed !== true) {
-        return () => {};
-      }
-      return () => {
-        if (!meetingId) return;
-        const list = messagesRef.current;
-        const latest = list[0];
-        if (!latest?.id) return;
-        const readAtMs = Date.now();
-        markChatReadUpTo(meetingId, latest.id);
-        void clearLocalChatRoomUnread({
-          roomType: 'meeting',
-          roomId: meetingId,
-          ownerUserId: userId?.trim() ?? null,
-          readMessageId: latest.id,
-          readAtMs,
-        });
-        void markLocalChatRoomReadState({
-          roomType: 'meeting',
-          roomId: meetingId,
-          ownerUserId: userId?.trim() ?? null,
-          userId: myId || userId?.trim() || '',
-          readMessageId: latest.id,
-          readAtMs,
-        });
-      };
-    }, [allowed, meetingId, markChatReadUpTo, myId, userId]),
-  );
-
-  useEffect(() => {
-    if (allowed !== true || !meetingId || !isFocused) return;
-    const latest = messages[0];
-    if (!latest?.id) return;
-    const prev = lastMarkedReadRef.current;
-    if (prev && prev.meetingId === meetingId && prev.messageId === latest.id) return;
-    lastMarkedReadRef.current = { meetingId, messageId: latest.id };
-    const readAtMs = Date.now();
-    markChatReadUpTo(meetingId, latest.id);
-    void clearLocalChatRoomUnread({
-      roomType: 'meeting',
-      roomId: meetingId,
-      ownerUserId: userId?.trim() ?? null,
-      readMessageId: latest.id,
-      readAtMs,
-    });
-    void markLocalChatRoomReadState({
-      roomType: 'meeting',
-      roomId: meetingId,
-      ownerUserId: userId?.trim() ?? null,
-      userId: myId || userId?.trim() || '',
-      readMessageId: latest.id,
-      readAtMs,
-    });
-    if (myId) {
-      void writeMeetingChatReadReceipt(meetingId, myId, latest.id).catch(() => {
-        /* best-effort */
-      });
-    }
-  }, [allowed, meetingId, messages, markChatReadUpTo, myId, isFocused, userId]);
-
-  /** inverted 리스트에서 상단(과거) 근접 시 훅 내부에서 중복 요청 방지 + 미리 불러오기 */
+  /** inverted 리스트에서 상단(과거) 근접 시 로컬 DB 백필로 이전 메시지를 가져옵니다. */
   const onPrefetchOlderMessages = useCallback(() => {
-    void fetchNextPage();
-  }, [fetchNextPage]);
+    const uid = userId?.trim();
+    const mid = meetingId.trim();
+    if (!uid || !mid || olderPrefetchBusy || !hasMoreOlder) return;
+    setOlderPrefetchBusy(true);
+    void (async () => {
+      try {
+        const r = await backfillOlderRoomMessagesToLocal({
+          key: { roomType: 'meeting', roomId: mid },
+          appUserId: uid,
+          pageSize: 120,
+          maxPages: 2,
+          timeBudgetMs: 2200,
+        });
+        if (r.pulledDocs <= 0) setHasMoreOlder(false);
+      } finally {
+        setOlderPrefetchBusy(false);
+      }
+    })();
+  }, [meetingId, userId, olderPrefetchBusy, hasMoreOlder]);
 
   const listFooterLoading = useMemo(
     () => (
@@ -670,24 +692,34 @@ export default function MeetingChatRoomScreen() {
     };
   }, [meeting, allowed]);
 
+  /** Supabase `chat_read_pointers` Realtime → 로컬 읽음 맵(말풍선 미읽음). */
+  useFocusedDelayedSubscription(
+    isFocused && allowed === true && Boolean(meetingId.trim()) && Boolean(myId),
+    () =>
+      subscribeMeetingChatReadPointersRealtime({
+        meetingId: meetingId.trim(),
+        myAppUserId: myId,
+        ownerUserId: userId?.trim() ?? null,
+        realtimeCallbacks: realtimeBanner.handlers,
+        onReadPointersMerged: () => setBubbleReadMapsRevision((v) => v + 1),
+      }),
+    [allowed, meetingId, isFocused, myId, userId, realtimeBanner.handlers],
+  );
+
+  const latestMessageId = messages[0]?.id ?? '';
+  const latestServerSeq = messages[0]?.serverSeq;
+
+  /** Realtime이 막혀 있어도 최신 메시지·seq 변화 시 읽음 맵을 한 번 더 맞춤(방당 debounce·in-flight 합침). */
   useEffect(() => {
-    if (!meeting || allowed !== true || !meetingId) return;
-    const readIdBy = meeting.chatReadMessageIdBy ?? null;
-    const readAtBy = meeting.chatReadAtBy ?? null;
-    if (!readIdBy && !readAtBy) return;
-    const readStateLastAtMs = Math.max(
-      0,
-      ...Object.values(readAtBy ?? {}).map((v) => coalesceFirestoreTimeMs(v)),
-    );
-    void upsertLocalChatRoomReadState({
-      roomType: 'meeting',
-      roomId: meetingId,
+    if (allowed !== true || !meetingId.trim() || !isFocused || !myId) return;
+    if (!latestMessageId.trim()) return;
+    scheduleChatBubbleReadPointersPull({
+      roomKind: 'meeting',
+      roomId: meetingId.trim(),
+      myAppUserId: myId,
       ownerUserId: userId?.trim() ?? null,
-      readMessageIdBy: readIdBy as Record<string, unknown> | null,
-      readAtBy: readAtBy as Record<string, unknown> | null,
-      readStateLastAtMs: readStateLastAtMs || undefined,
     });
-  }, [allowed, meeting, meetingId, userId]);
+  }, [allowed, meetingId, isFocused, myId, userId, latestMessageId, latestServerSeq, maxMessageServerSeq]);
 
   // inverted 리스트: offset=0 이 "최신(하단)" 이므로 별도 scrollToEnd 로직이 필요 없습니다.
 
@@ -724,19 +756,16 @@ export default function MeetingChatRoomScreen() {
     const shouldAutoScroll = keyboardHeight > 0 || pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
     if (!shouldAutoScroll) return;
 
-    // 내가 보낸 메시지나, 현재 최신 영역에 머무르고 있는 상태라면 최신을 유지
     lastAutoScrolledMessageIdRef.current = latest.id;
     pendingAutoScrollToLatestRef.current = false;
-    // 레이아웃(콘텐츠 높이/입력 독 패딩) 반영 타이밍에 따라 1프레임만으로는 가려질 수 있어 2~3회 재시도합니다.
-    requestAnimationFrame(() => {
+    if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
+    latestAutoScrollDebounceRef.current = setTimeout(() => {
+      latestAutoScrollDebounceRef.current = null;
       scrollToOffsetSafe(0, false);
-      requestAnimationFrame(() => {
-        scrollToOffsetSafe(0, false);
-      });
-      setTimeout(() => {
-        scrollToOffsetSafe(0, false);
-      }, 60);
-    });
+    }, 90);
+    return () => {
+      if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
+    };
   }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
   useEffect(() => {
@@ -814,14 +843,29 @@ export default function MeetingChatRoomScreen() {
         return true;
       };
       if (tryScroll()) return;
-      for (let i = 0; i < 3; i += 1) {
-        if (!hasNextPage) break;
-        await fetchNextPage();
+      const uid = userId?.trim() ?? '';
+      const rid = meetingId.trim();
+      if (!uid || !rid) {
+        Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
+        return;
+      }
+      for (let i = 0; i < 10; i += 1) {
+        const r = await backfillOlderRoomMessagesToLocal({
+          key: { roomType: 'meeting', roomId: rid },
+          appUserId: uid,
+          pageSize: 150,
+          maxPages: 3,
+          timeBudgetMs: 2800,
+        });
         if (tryScroll()) return;
+        if (r.pulledDocs <= 0) {
+          setHasMoreOlder(false);
+          break;
+        }
       }
       Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
     },
-    [fetchNextPage, hasNextPage, scrollToMessageIndexBestEffort],
+    [meetingId, userId, scrollToMessageIndexBestEffort],
   );
 
   const runMeetingLocalSearch = useCallback(async () => {
@@ -990,8 +1034,15 @@ export default function MeetingChatRoomScreen() {
       setSending(true);
       pendingAutoScrollToLatestRef.current = true;
       try {
-        await sendMeetingChatImageMessagesBatch(meetingId, userId, uris, {
+        const uid = userId.trim();
+        const senderPhone = normalizePhoneUserId(uid) ?? uid;
+        const prof = await getUserProfile(senderPhone).catch(() => null);
+        await sendMeetingImageUrisBatch({
+          uris,
           naturalWidths: widths,
+          senderId: senderPhone,
+          senderName: prof?.nickname ?? prof?.displayName ?? null,
+          senderAvatarUrl: prof?.photoUrl ?? null,
         });
         setMediaPickerOpen(false);
       } catch (e) {
@@ -1000,7 +1051,7 @@ export default function MeetingChatRoomScreen() {
         setSending(false);
       }
     },
-    [meetingId, userId, sending],
+    [meetingId, userId, sending, sendMeetingImageUrisBatch],
   );
 
   const onSend = useCallback(async () => {
@@ -1013,7 +1064,27 @@ export default function MeetingChatRoomScreen() {
     setSending(true);
     pendingAutoScrollToLatestRef.current = true;
     try {
-      await sendMeetingChatTextMessage(meetingId, userId, body, replyTo?.messageId ? replyTo : null);
+      const uid = userId.trim();
+      const senderPhone = normalizePhoneUserId(uid) ?? uid;
+      const linkPreview = await buildLinkPreviewForChatText(body);
+      const prof = await getUserProfile(senderPhone).catch(() => null);
+      await sendMessage({
+        kind: 'text',
+        bodyText: body,
+        senderId: senderPhone,
+        senderName: prof?.nickname ?? prof?.displayName ?? null,
+        senderAvatarUrl: prof?.photoUrl ?? null,
+        replyTo: replyTo?.messageId
+          ? {
+              messageId: replyTo.messageId,
+              senderId: replyTo.senderId,
+              kind: replyTo.kind,
+              imageUrl: replyTo.imageUrl,
+              text: replyTo.text,
+            }
+          : null,
+        linkPreview: linkPreview ? (linkPreview as unknown as Record<string, unknown>) : null,
+      });
       setDraft('');
       setReplyTo(null);
     } catch (e) {
@@ -1021,7 +1092,7 @@ export default function MeetingChatRoomScreen() {
     } finally {
       setSending(false);
     }
-  }, [meetingId, userId, draft, sending, replyTo]);
+  }, [meetingId, userId, draft, sending, replyTo, sendMessage]);
 
   const chatListContentStyle = useMemo(
     () => [
@@ -1074,48 +1145,7 @@ export default function MeetingChatRoomScreen() {
     return [...new Set(ids.map((x) => normalizeParticipantId(String(x)) ?? String(x).trim()).filter(Boolean))];
   }, [meeting]);
 
-  const readAtMsByUser = useMemo(() => {
-    const map: Record<string, number> = {};
-    const raw = meeting?.chatReadAtBy ?? null;
-    if (raw) {
-      for (const [k, v] of Object.entries(raw)) {
-        const uid = normalizeParticipantId(k) ?? k.trim();
-        if (!uid) continue;
-        const ms = coalesceFirestoreTimeMs(v);
-        if (ms > 0) map[uid] = Math.max(map[uid] ?? 0, ms);
-      }
-    }
-    for (const [uid, ms] of Object.entries(localMeetingRoom?.messageReadAtMsBy ?? {})) {
-      if (ms > 0) map[uid] = Math.max(map[uid] ?? 0, ms);
-    }
-    return map;
-  }, [meeting?.chatReadAtBy, localMeetingRoom?.messageReadAtMsBy]);
-
-  const readMessageIdByUser = useMemo(() => {
-    const out: Record<string, string> = {};
-    const raw = meeting?.chatReadMessageIdBy ?? null;
-    if (raw) {
-      for (const [k, v] of Object.entries(raw)) {
-        const uid = normalizeParticipantId(k) ?? k.trim();
-        const id = typeof v === 'string' && v.trim() ? v.trim() : '';
-        if (uid && id) out[uid] = id;
-      }
-    }
-    for (const [uid, id] of Object.entries(localMeetingRoom?.messageReadMessageIdBy ?? {})) {
-      const localAt = localMeetingRoom?.messageReadAtMsBy?.[uid] ?? 0;
-      const serverAt = readAtMsByUser[uid] ?? 0;
-      if (id && (!out[uid] || localAt >= serverAt)) out[uid] = id;
-    }
-    return out;
-  }, [meeting?.chatReadMessageIdBy, localMeetingRoom?.messageReadAtMsBy, localMeetingRoom?.messageReadMessageIdBy, readAtMsByUser]);
-
-  const messageIndexById = useMemo(() => {
-    const m = new Map<string, number>();
-    messages.forEach((msg, i) => {
-      if (msg.id) m.set(msg.id, i);
-    });
-    return m;
-  }, [messages]);
+  const messageIndexById = useMemo(() => buildChatMessageIndexById(messages), [messages]);
 
   const jumpToRepliedMessage = useCallback(
     async (replyMessageId: string) => {
@@ -1123,110 +1153,51 @@ export default function MeetingChatRoomScreen() {
       const rid = String(replyMessageId ?? '').trim();
       if (!mid || !rid) return;
 
-      const cacheKey = meetingChatMessagesQueryKey(mid);
-      /** React Query 캐시와 동일 순서(`meetingChatMessagesFromInfiniteData`) — 라이브 tail 반영 후 렌더 전에도 맞춤 */
-      const indexFromRQ = (): number => {
-        const data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
-        return flattenMeetingChatInfinitePages(data).findIndex((m) => m.id === rid);
-      };
-
-      let idx = indexFromRQ();
-      if (idx < 0) idx = messageIndexById.get(rid) ?? -1;
-      if (__DEV__) {
-        const fromMap = messageIndexById.get(rid) ?? -1;
-        const fromCache = indexFromRQ();
-        if (fromMap >= 0 && fromCache >= 0 && fromMap !== fromCache) {
-          console.warn('[meeting-chat:jump] messageIndex vs cache index mismatch (scroll uses cache)', {
-            meetingId: mid,
-            replyToId: rid,
-            indexFromHookMap: fromMap,
-            indexFromQueryCache: fromCache,
-          });
-        }
-      }
-
-      if (idx < 0) {
-        setSearchNavigateLoading(true);
-        try {
-          let data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
-          if (!data?.pages?.length) {
-            await refetchChatMessages();
-            data = queryClient.getQueryData<InfiniteData<MeetingChatFetchedMessagesPage>>(cacheKey);
-          }
-          const anchor = data?.pages?.[data.pages.length - 1]?.oldestMessageId?.trim() ?? '';
-          if (anchor) {
-            const { newPages, found } = await fetchOlderMeetingChatPagesUntilTargetMessageId(mid, anchor, rid, {
-              pageSize: 100,
-              maxPages: 200,
-            });
-            if (found && newPages.length) {
-              queryClient.setQueryData(
-                cacheKey,
-                (prev: InfiniteData<MeetingChatFetchedMessagesPage> | undefined) =>
-                  mergeMeetingChatInfiniteAppendPages(prev, newPages),
-              );
-            }
-          }
-          idx = indexFromRQ();
-          if (idx < 0) {
-            await refetchChatMessages();
-            idx = indexFromRQ();
-          }
-        } finally {
-          setSearchNavigateLoading(false);
-        }
-      }
-
-      if (idx >= 0) {
-        const rowIdx = findMeetingChatListRowIndexByMessageId(chatListRows, rid);
+      const scrollIfVisible = (): boolean => {
+        const list = messagesRef.current;
+        const idx = list.findIndex((m) => m.id === rid);
+        if (idx < 0) return false;
+        const rows = buildMeetingChatListRows(list);
+        const rowIdx = findMeetingChatListRowIndexByMessageId(rows, rid);
         const toScroll = rowIdx >= 0 ? rowIdx : idx;
         InteractionManager.runAfterInteractions(() => {
           requestAnimationFrame(() => {
             scrollToMessageIndexBestEffort(toScroll);
           });
         });
+        return true;
+      };
+
+      if (scrollIfVisible()) return;
+
+      const uid = userId?.trim() ?? '';
+      if (!uid) {
+        Alert.alert('원글 위치', '로그인이 필요합니다.');
         return;
       }
 
-      Alert.alert('원글 위치', '불러올 수 있는 범위 안에서 원글을 찾지 못했어요.');
-    },
-    [
-      meetingId,
-      queryClient,
-      messageIndexById,
-      chatListRows,
-      refetchChatMessages,
-      scrollToMessageIndexBestEffort,
-      fetchOlderMeetingChatPagesUntilTargetMessageId,
-      flattenMeetingChatInfinitePages,
-      mergeMeetingChatInfiniteAppendPages,
-    ],
-  );
-
-  const unreadCountForMessage = useCallback(
-    (message: MeetingChatMessage, messageIndex: number): number => {
-      if (allowed !== true) return 0;
-      if (!meeting) return 0;
-      const messageMs =
-        message.createdAt && typeof message.createdAt.toMillis === 'function' ? message.createdAt.toMillis() : 0;
-      if (!messageMs) return 0;
-      let unread = 0;
-      const idxMsg = messageIndex;
-      for (const pid of participantIdsForReadCount) {
-        if (myId && pid === myId) continue;
-        const lastId = lastReadMessageIdForParticipant(readMessageIdByUser, pid);
-        if (lastId) {
-          const readIdx = messageIndexById.get(lastId);
-          // inverted + 최신순 배열: 인덱스가 작을수록 더 최신.
-          // 참여자의 마지막 읽음이 이 메시지보다 최신(또는 동일)이면 이미 읽음 처리.
-          if (readIdx != null && readIdx <= idxMsg) continue;
+      setSearchNavigateLoading(true);
+      try {
+        for (let i = 0; i < 12; i += 1) {
+          const r = await backfillOlderRoomMessagesToLocal({
+            key: { roomType: 'meeting', roomId: mid },
+            appUserId: uid,
+            pageSize: 150,
+            maxPages: 3,
+            timeBudgetMs: 2800,
+          });
+          if (scrollIfVisible()) return;
+          if (r.pulledDocs <= 0) {
+            setHasMoreOlder(false);
+            break;
+          }
         }
-        const ms = readAtMsByUser[pid] ?? 0;
-        if (!ms || ms < messageMs) unread += 1;
+        Alert.alert('원글 위치', '불러올 수 있는 범위 안에서 원글을 찾지 못했어요.');
+      } finally {
+        setSearchNavigateLoading(false);
       }
-      return unread;
     },
-    [allowed, meeting, participantIdsForReadCount, readAtMsByUser, readMessageIdByUser, myId, messageIndexById],
+    [meetingId, userId, scrollToMessageIndexBestEffort],
   );
 
   const openMeetingChatImageViewer = useCallback(
@@ -1252,7 +1223,6 @@ export default function MeetingChatRoomScreen() {
     myId,
     hostNorm,
     profiles,
-    unreadCountForMessage,
     jumpToRepliedMessage,
     setReplyTo,
     deleteMessageBestEffort: async (msg) => {
@@ -1269,6 +1239,12 @@ export default function MeetingChatRoomScreen() {
     listRef,
     messageSearchHighlightQuery:
       chatSearchMode && chatSearchCommittedQuery.trim() ? chatSearchCommittedQuery : '',
+    roomId: meetingId.trim(),
+    roomType: 'meeting',
+    chatRenderMode: 'meeting_group',
+    wmChatRoomIds: meetingReadRoomIds,
+    participantIdsForUnread: participantIdsForReadCount,
+    readMapsRevision: bubbleReadMapsRevision,
   });
 
   const showSettlementHostBanner = useMemo(() => {
@@ -1363,7 +1339,7 @@ export default function MeetingChatRoomScreen() {
     );
   }
 
-  if (meeting === undefined && messages.length === 0) {
+  if (!meetingReady || meetingLoading) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
         <ActivityIndicator color={GinitTheme.colors.primary} />
@@ -1372,10 +1348,28 @@ export default function MeetingChatRoomScreen() {
     );
   }
 
-  if (meeting === null || meetingError) {
+  if (meetingError && !meeting) {
     return (
       <SafeAreaView style={styles.centerFill} edges={['top']}>
-        <Text style={styles.errorText}>{meetingError ?? '모임을 찾을 수 없어요.'}</Text>
+        <Text style={styles.errorText}>{meetingError}</Text>
+        <GinitPressable
+          onPress={() => {
+            void refetchMeetingDetail();
+          }}
+          style={styles.backLink}>
+          <Text style={styles.backLinkText}>다시 시도</Text>
+        </GinitPressable>
+        <GinitPressable onPress={exitChatRoom} style={styles.backLink}>
+          <Text style={styles.backLinkText}>돌아가기</Text>
+        </GinitPressable>
+      </SafeAreaView>
+    );
+  }
+
+  if (meeting === null) {
+    return (
+      <SafeAreaView style={styles.centerFill} edges={['top']}>
+        <Text style={styles.errorText}>모임을 찾을 수 없어요.</Text>
         <GinitPressable onPress={exitChatRoom} style={styles.backLink}>
           <Text style={styles.backLinkText}>돌아가기</Text>
         </GinitPressable>
@@ -1489,6 +1483,7 @@ export default function MeetingChatRoomScreen() {
 
         <MeetingChatMainColumn
           chatError={chatError}
+          chatReconnecting={chatReconnecting}
           searchNavigateLoading={searchNavigateLoading}
           setListRef={setListRef}
           setInnerFlashListRef={setInnerFlashListRef}
@@ -1497,9 +1492,9 @@ export default function MeetingChatRoomScreen() {
           chatListContentStyle={chatListContentStyle}
           onChatScroll={onChatScroll}
           listFooterLoading={listFooterLoading}
-          hasNextPage={hasNextPage}
-          isFetchingNextPage={isFetchingNextPage}
-          onPrefetchOlderMessages={hasNextPage ? onPrefetchOlderMessages : undefined}
+          hasNextPage={hasMoreOlder}
+          isFetchingNextPage={olderPrefetchBusy}
+          onPrefetchOlderMessages={hasMoreOlder ? onPrefetchOlderMessages : undefined}
           showJumpToBottomFab={showJumpToBottomFab}
           composerDockBlockHeight={composerDockBlockHeight}
           keyboardHeight={keyboardHeight}

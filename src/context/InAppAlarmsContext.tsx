@@ -1,9 +1,18 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import * as Notifications from 'expo-notifications';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, } from 'react';
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AppState,
   type AppStateStatus,
@@ -21,6 +30,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useWatermelonChatUnreadTotal } from '@/src/hooks/use-watermelon-chat-unread-total';
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -46,8 +56,7 @@ import {
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
-import { subscribeMeetingChatLatestMessage } from '@/src/lib/meeting-chat';
-import { clearMeetingChatUnreadForUser, subscribeMeetingChatRoomSummary, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
+import { clearMeetingChatUnreadForUser, candidateUserKeys, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import {
   type Meeting,
@@ -58,15 +67,15 @@ import {
 import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
 import { sweepStaleSelfMeetingChanges, wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
-import type { SocialChatMessage, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
+import type { SocialChatMessage, SocialChatRoomDoc, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import {
+  fetchSocialChatRoomDocOnce,
   socialDmPreviewLine,
   socialMessageTimeMs,
   subscribeMySocialChatRooms,
-  subscribeSocialChatRoom,
-  subscribeSocialChatLatestMessage,
 } from '@/src/lib/social-chat-rooms';
-import { subscribeFriendsTableChanges } from '@/src/lib/supabase-friends-realtime';
+import { subscribeUserUnreadBroadcast } from '@/src/lib/user-unread-broadcast-bus';
+import { subscribeFriendsPostgresChanged } from '@/src/lib/friends-postgres-sync-bus';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
 
 function previewLine(m: MeetingChatMessage): string {
@@ -159,7 +168,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [hostParticipantEventLog, setHostParticipantEventLog] = useState<
     Record<string, { id: string; subtitle: string; sortMs: number }[]>
   >({});
-  const [chatTabUnreadTotal, setChatTabUnreadTotal] = useState(0);
   const [friendInbox, setFriendInbox] = useState<FriendInboxRow[]>([]);
   const [friendAcceptQueue, setFriendAcceptQueue] = useState<FriendAcceptQueueItem[]>([]);
   const [friendRequesterNickById, setFriendRequesterNickById] = useState<Map<string, string>>(() => new Map());
@@ -196,6 +204,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   readStateRef.current = readState;
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
+
+  const chatOwnerIdForUnreadBadge = useMemo(() => {
+    const u = userId?.trim() ?? '';
+    if (!u) return '';
+    return normalizeParticipantId(u) || u;
+  }, [userId]);
+
+  const chatTabUnreadTotal = useWatermelonChatUnreadTotal({
+    ownerUserId: chatOwnerIdForUnreadBadge,
+    enabled: Boolean(persistReady && userId?.trim()),
+  });
 
   /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
   const pushDedupeRef = useRef<Set<string>>(new Set());
@@ -250,6 +269,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       setSocialRooms([]);
       setSocialLatestByRoomId({});
       setSocialPeerNickByRoomId(new Map());
+      setMeetingChatSummaryById({});
+      setSocialRoomDocById({});
       friendHeadsUpNotifiedIdsRef.current = new Set();
       friendAcceptHeadsUpNotifiedIdsRef.current = new Set();
       prevOutboxFriendshipIdsRef.current = new Set();
@@ -303,6 +324,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     prevParticipantSetRef.current = nextBaseline;
   }, [persistReady, meetings, userId]);
 
+  const { meetings: myMeetingsForChatUnread } = useMyMeetingsFeedSync({
+    enabled: persistReady,
+    userId,
+  });
+
   useEffect(() => {
     if (!userId?.trim()) return;
     return subscribeMeetingsHybrid(
@@ -320,11 +346,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       },
     );
   }, [userId]);
-
-  const { meetings: myMeetingsForChatUnread } = useMyMeetingsFeedSync({
-    enabled: persistReady,
-    userId,
-  });
 
   const meetingsForChatUnread = useMemo(() => {
     if (myMeetingsForChatUnread.length === 0) return meetings;
@@ -354,6 +375,92 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return out;
   }, [meetings, myMeetingsForChatUnread, userId]);
 
+  const meetingsForChatUnreadRef = useRef(meetingsForChatUnread);
+  meetingsForChatUnreadRef.current = meetingsForChatUnread;
+
+  /** `user_notifications:{profiles.id}` → 모임/소셜 요약·최신 메시지 스텁(배지 베이스라인)만 갱신. 목록용 per-room Realtime은 사용하지 않습니다. */
+  useEffect(() => {
+    if (!persistReady) return;
+    return subscribeUserUnreadBroadcast((p) => {
+      const uid = userIdRef.current?.trim() ?? '';
+      if (!uid) return;
+      const pk = normalizeParticipantId(uid) ?? uid;
+      const nowTs = Timestamp.now();
+      const keys = candidateUserKeys(uid);
+      const unreadMap: Record<string, number> = {};
+      for (const k of keys) unreadMap[k] = p.unreadCount;
+
+      if (p.roomKind === 'meeting') {
+        const canonical = p.canonicalRoomId.trim();
+        const joined = filterJoinedMeetings(meetingsForChatUnreadRef.current, uid);
+        const hit = joined.find((m) => m.id === canonical);
+        const mid = (hit?.id ?? canonical).trim();
+
+        setMeetingChatSummaryById((prev) => ({
+          ...prev,
+          [mid]: {
+            id: mid,
+            meetingId: mid,
+            unreadCountBy: { ...(prev[mid]?.unreadCountBy ?? {}), ...unreadMap },
+            lastMessageId: p.lastMessageId || prev[mid]?.lastMessageId || null,
+            lastMessagePreview: p.lastMessage || prev[mid]?.lastMessagePreview || null,
+            lastMessageAt: nowTs,
+            lastSenderId: prev[mid]?.lastSenderId ?? null,
+            updatedAt: nowTs,
+          },
+        }));
+
+        if (p.lastMessageId) {
+          setLatestById((prev) => ({
+            ...prev,
+            [mid]: {
+              id: p.lastMessageId,
+              senderId: null,
+              senderName: null,
+              senderAvatarUrl: null,
+              text: p.lastMessage,
+              kind: p.messageKind,
+              imageUrl: null,
+              createdAt: nowTs,
+              updatedAt: nowTs,
+              deletedAt: null,
+            },
+          }));
+        }
+      } else {
+        const rid = p.canonicalRoomId.trim();
+
+        setSocialRoomDocById((prev) => ({
+          ...prev,
+          [rid]: {
+            id: rid,
+            isGroup: false,
+            unreadCountBy: { ...(prev[rid]?.unreadCountBy ?? {}), ...unreadMap, [uid]: p.unreadCount, [pk]: p.unreadCount },
+            updatedAt: nowTs,
+            readMessageIdBy: prev[rid]?.readMessageIdBy,
+            readAtBy: prev[rid]?.readAtBy,
+            participantIds: prev[rid]?.participantIds,
+          },
+        }));
+
+        if (p.lastMessageId) {
+          setSocialLatestByRoomId((prev) => ({
+            ...prev,
+            [rid]: {
+              id: p.lastMessageId,
+              senderId: null,
+              text: p.lastMessage,
+              kind: p.messageKind,
+              imageUrl: null,
+              createdAt: nowTs,
+              updatedAt: nowTs,
+              deletedAt: null,
+            },
+          }));
+        }
+      }
+    });
+  }, [persistReady]);
 
   /**
    * 친구 수신 인박스·발신 대기·수락 목록은 `persistReady`와 무관하게 로드합니다.
@@ -405,7 +512,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       });
     };
     load();
-    const unsubRt = subscribeFriendsTableChanges(uid, load);
+    const unsubRt = subscribeFriendsPostgresChanged(load);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') load();
     });
@@ -603,28 +710,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   }, [userId, persistReady]);
 
   useEffect(() => {
-    if (!userId?.trim() || !persistReady) return;
-    if (socialRooms.length === 0) {
-      setSocialLatestByRoomId({});
-      return;
-    }
-    const unsubs = socialRooms.map((r) =>
-      subscribeSocialChatLatestMessage(
-        r.roomId,
-        (msg) => {
-          setSocialLatestByRoomId((prev) => ({ ...prev, [r.roomId]: msg }));
-        },
-        () => {
-          setSocialLatestByRoomId((prev) => ({ ...prev, [r.roomId]: null }));
-        },
-      ),
-    );
-    return () => {
-      unsubs.forEach((u) => u());
-    };
-  }, [userId, persistReady, socialRoomsKey, socialRooms]);
-
-  useEffect(() => {
     if (socialRooms.length === 0) {
       setSocialPeerNickByRoomId(new Map());
       return;
@@ -669,26 +754,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       return { ...prev, chatReadMessageId };
     });
   }, [persistReady, userId, socialRooms, socialLatestByRoomId]);
-
-  useEffect(() => {
-    if (!userId?.trim() || !persistReady) return;
-    const joined = filterJoinedMeetings(meetings, userId);
-    if (joined.length === 0) return;
-    const unsubs = joined.map((m) =>
-      subscribeMeetingChatLatestMessage(
-        m.id,
-        (msg) => {
-          setLatestById((p) => ({ ...p, [m.id]: msg }));
-        },
-        () => {
-          setLatestById((p) => ({ ...p, [m.id]: null }));
-        },
-      ),
-    );
-    return () => {
-      unsubs.forEach((u) => u());
-    };
-  }, [userId, persistReady, joinedKey, meetings]);
 
   useEffect(() => {
     if (!persistReady || !userId?.trim()) return;
@@ -1073,18 +1138,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     return { cardMaxHeight, listHeight, listOverflow };
   }, [windowHeight, insets.top, insets.bottom, alarms.length]);
 
-  /** 홈 상단 종 알람 패널과 동일한 건수 — iOS·지원 Android 런처의 앱 아이콘 배지 */
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    if (!userId?.trim()) {
-      void Notifications.setBadgeCountAsync(0).catch(() => {});
-      return;
-    }
-    const n = persistReady ? alarms.length : 0;
-    const badge = n > 0 ? Math.min(n, 999) : 0;
-    void Notifications.setBadgeCountAsync(badge).catch(() => {});
-  }, [persistReady, userId, alarms.length]);
-
   const friendsTabPendingRequestBadge = useMemo(() => {
     if (friendInbox.length === 0) return 0;
     const dismissed = readState.friendRequestDismissedIds;
@@ -1094,72 +1147,61 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     }).length;
   }, [friendInbox, readState.friendRequestDismissedIds]);
 
-  // NOTE: chat tab unread total은 요약 문서(unreadCountBy) 기반으로만 계산합니다.
-
-  // meeting chat room summaries (unreadCountBy)
+  /** 채팅 미읽음(Watermelon·서버 동기화) + 친구 요청 대기 — 런처 배지 */
   useEffect(() => {
-    const uid = userId?.trim() ?? '';
-    if (!persistReady || !uid) {
-      setMeetingChatSummaryById({});
-      return () => {};
-    }
-    const joined = filterJoinedMeetings(meetingsForChatUnread, uid);
-    if (joined.length === 0) {
-      setMeetingChatSummaryById({});
-      return () => {};
-    }
-    const unsubs = joined.map((m) =>
-      subscribeMeetingChatRoomSummary(
-        m.id,
-        (doc) => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: doc })),
-        () => setMeetingChatSummaryById((p) => ({ ...p, [m.id]: null })),
-      ),
-    );
-    return () => unsubs.forEach((u) => u());
-  }, [persistReady, userId, meetingsForChatUnread]);
-
-  // social chat room docs (unreadCountBy)
-  useEffect(() => {
-    const uid = userId?.trim() ?? '';
-    if (!persistReady || !uid || socialRooms.length === 0) {
-      setSocialRoomDocById({});
-      return () => {};
-    }
-    const unsubs = socialRooms.map((r) =>
-      subscribeSocialChatRoom(
-        r.roomId,
-        (doc) => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: doc })),
-        () => setSocialRoomDocById((p) => ({ ...p, [r.roomId]: null })),
-      ),
-    );
-    return () => unsubs.forEach((u) => u());
-  }, [persistReady, userId, socialRooms]);
-
-  // chat tab unread total: use summaries instead of message scans
-  useEffect(() => {
-    const uid = userId?.trim() ?? '';
-    if (!persistReady || !uid) {
-      setChatTabUnreadTotal(0);
+    if (Platform.OS === 'web') return;
+    if (!userId?.trim()) {
+      void Notifications.setBadgeCountAsync(0).catch(() => {});
       return;
     }
-    const pk = normalizeParticipantId(uid) ?? uid;
-    const phone = uid.includes('+') ? uid : (uid.trim() || '');
-    let sum = 0;
-    const joined = filterJoinedMeetings(meetingsForChatUnread, uid);
-    for (const m of joined) {
-      const doc = meetingChatSummaryById[m.id];
-      const map = doc?.unreadCountBy ?? {};
-      const v = (map[pk] ?? map[uid] ?? map[phone] ?? 0) as number;
-      if (typeof v === 'number' && Number.isFinite(v) && v > 0) sum += v;
+    if (!persistReady) {
+      void Notifications.setBadgeCountAsync(0).catch(() => {});
+      return;
     }
-    for (const r of socialRooms) {
-      const doc = socialRoomDocById[r.roomId];
-      const map = doc?.unreadCountBy ?? {};
-      const v = (map[uid] ?? map[pk] ?? 0) as number;
-      if (typeof v === 'number' && Number.isFinite(v) && v > 0) sum += v;
+    const n = chatTabUnreadTotal + friendsTabPendingRequestBadge;
+    const badge = n > 0 ? Math.min(n, 999) : 0;
+    void Notifications.setBadgeCountAsync(badge).catch(() => {});
+  }, [persistReady, userId, chatTabUnreadTotal, friendsTabPendingRequestBadge]);
+
+  // NOTE: 채팅 탭 배지 합계는 Watermelon `chat_rooms.unread_count` 합(`useWatermelonChatUnreadTotal`)이며,
+  // `ownerUserId`는 `normalizeParticipantId`로 DB `owner_user_id`와 맞춘 뒤 `candidateUserKeys`로 조회합니다.
+
+  // social chat room docs — 초기 스냅샷만 RPC. 이후 최신 메시지 스텁은 `user_notifications` 브로드캐스트.
+  useEffect(() => {
+    const uid = userId?.trim() ?? '';
+    if (!persistReady || !uid) {
+      setSocialRoomDocById({});
+      return;
     }
-    setChatTabUnreadTotal(sum);
-  }, [persistReady, userId, meetingsForChatUnread, socialRooms, meetingChatSummaryById, socialRoomDocById]);
+    if (socialRooms.length === 0) {
+      setSocialRoomDocById({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, SocialChatRoomDoc> = {};
+      for (const r of socialRooms) {
+        if (cancelled) return;
+        const doc = await fetchSocialChatRoomDocOnce(r.roomId, uid);
+        if (cancelled) return;
+        if (doc) next[r.roomId] = doc;
+      }
+      if (cancelled) return;
+      setSocialRoomDocById((prev) => {
+        const out: Record<string, SocialChatRoomDoc | null | undefined> = { ...prev };
+        for (const k of Object.keys(out)) {
+          if (!socialRooms.some((x) => x.roomId === k)) delete out[k];
+        }
+        for (const [k, v] of Object.entries(next)) {
+          out[k] = v;
+        }
+        return out;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [persistReady, userId, socialRoomsKey, socialRooms]);
 
   const markChatReadUpTo = useCallback((meetingId: string, messageId: string | undefined) => {
     const mid = meetingId.trim();

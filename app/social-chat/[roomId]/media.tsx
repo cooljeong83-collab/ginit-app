@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/src/lib/ginit-timestamp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
@@ -218,7 +218,17 @@ export default function SocialChatMediaScreen() {
                   accessibilityLabel="사진 보기"
                 >
                   <View style={styles.cellInner}>
-                    {u ? <Image source={{ uri: u }} style={StyleSheet.absoluteFill} contentFit="cover" /> : <View style={styles.thumbFallback} />}
+                    {u ? (
+                      <Image
+                        source={{ uri: u }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                        cachePolicy="disk"
+                        recyclingKey={`${item.id}:${u}`}
+                      />
+                    ) : (
+                      <View style={styles.thumbFallback} />
+                    )}
                   </View>
                 </GinitPressable>
               );

@@ -1,15 +1,19 @@
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import type { Meeting } from '@/src/lib/meetings';
-import { fetchMeetingsOnce } from '@/src/lib/meetings';
 import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-feed-deferred-sync';
 import { applyPublicMeetingsFeedSummarySync } from '@/src/lib/meetings-feed-incremental-sync-core';
-import { fetchPublicMeetingsPageFromSupabase, PUBLIC_MEETINGS_PAGE_SIZE } from '@/src/lib/supabase-meetings-list';
+import { slimMeetingForFeedList } from '@/src/lib/meetings-feed-list-slim';
+import type { MeetingsFeedPageSlice } from '@/src/lib/meetings-feed-page-utils';
+import { meetingsFeedInfiniteQueryKey } from '@/src/lib/meetings-query-keys';
+import {
+  fetchPublicMeetingsPageFromSupabase,
+  type PublicMeetingsFeedCursor,
+} from '@/src/lib/supabase-meetings-list';
 
-type Page = { meetings: Meeting[]; hasMore: boolean };
-type FeedInfiniteData = InfiniteData<Page, number>;
+type Page = MeetingsFeedPageSlice;
+type FeedInfiniteData = InfiniteData<Page, PublicMeetingsFeedCursor | undefined>;
 
 export type UseMeetingsFeedInfiniteQueryOptions = {
   /** false면 fetch·Realtime 구독 안 함(채팅 탭 친구 전용일 때 등). 기본 true */
@@ -22,9 +26,7 @@ export type UseMeetingsFeedInfiniteQueryOptions = {
   refetchOnWindowFocus?: boolean;
 };
 
-export function meetingsFeedInfiniteQueryKey() {
-  return ['meetings', 'feed', meetingListSource()] as const;
-}
+export { meetingsFeedInfiniteQueryKey };
 
 function flattenPages(data: FeedInfiniteData | undefined): Meeting[] {
   const pages = data?.pages ?? [];
@@ -32,41 +34,22 @@ function flattenPages(data: FeedInfiniteData | undefined): Meeting[] {
   const out: Meeting[] = [];
   for (const p of pages) {
     for (const m of p.meetings) {
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
+      const id = typeof m.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
       out.push(m);
     }
   }
   return out;
 }
 
-function buildPagesFromMeetings(meetings: readonly Meeting[], pageCount: number, remoteSummaryCount: number): Page[] {
-  const count = Math.max(1, pageCount);
-  return Array.from({ length: count }, (_, idx) => {
-    const from = idx * PUBLIC_MEETINGS_PAGE_SIZE;
-    const slice = meetings.slice(from, from + PUBLIC_MEETINGS_PAGE_SIZE);
-    return {
-      meetings: slice,
-      hasMore: remoteSummaryCount > from + slice.length,
-    };
-  }).filter((page, idx) => idx === 0 || page.meetings.length > 0);
-}
-
-async function fetchMeetingsFeedPage(pageParam: number): Promise<Page> {
-  if (meetingListSource() === 'firestore') {
-    if (pageParam !== 0) return { meetings: [], hasMore: false };
-    const r = await fetchMeetingsOnce();
-    if (!r.ok) throw new Error(r.message);
-    recordMeetingsListPageFetchedFromNetwork();
-    return { meetings: r.meetings, hasMore: false };
-  }
-
-  // eslint-disable-next-line no-console
-  console.log('📡 모임 목록: 서버 데이터 10개 가져오기 (Page: ' + pageParam + ')');
-  const res = await fetchPublicMeetingsPageFromSupabase(pageParam);
+async function fetchMeetingsFeedPage(pageParam: PublicMeetingsFeedCursor | undefined): Promise<Page> {
+  const res = await fetchPublicMeetingsPageFromSupabase(pageParam ?? null);
   if (!res.ok) throw new Error(res.message);
   recordMeetingsListPageFetchedFromNetwork();
-  return { meetings: res.meetings, hasMore: res.hasMore };
+  const page: Page = { meetings: res.meetings, hasMore: res.hasMore };
+  if (res.tailCursor) page.tailCursor = res.tailCursor;
+  return page;
 }
 
 export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQueryOptions) {
@@ -75,26 +58,31 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
   const refetchOnWindowFocusOpt = options?.refetchOnWindowFocus;
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('📦 모임 목록: 로컬 캐시 로드 시도');
-  }, []);
-
-  const feedSource = meetingListSource();
-  const queryKey = useMemo(() => meetingsFeedInfiniteQueryKey(), [feedSource]);
+  const queryKey = useMemo(() => meetingsFeedInfiniteQueryKey(), []);
 
   const query = useInfiniteQuery({
     queryKey,
     enabled,
-    initialPageParam: 0,
+    initialPageParam: undefined as PublicMeetingsFeedCursor | undefined,
     /** 당겨서 새로고침(refetch) 직후 `data`가 잠깐 비는 동안 목록이 통째로 사라지는 것을 막습니다. */
     placeholderData: (previousData) => previousData,
-    staleTime: staleTimeOpt ?? 10 * 60 * 1000,
+    /** 미지정 시 0 — Persist 복원 직후·탈퇴 재가입 등 빈 캐시가 staleTime(전역 10분)에 묶여 첫 fetch가 생략되는 것을 막음 */
+    staleTime: staleTimeOpt ?? 0,
     /** 화면 진입 시에는 persisted cache를 먼저 그리고, 별도 summary sync로 필요한 ID만 갱신합니다. */
     refetchOnMount: false,
     refetchOnWindowFocus: refetchOnWindowFocusOpt ?? false,
-    queryFn: ({ pageParam }) => fetchMeetingsFeedPage(pageParam as number),
-    getNextPageParam: (lastPage: Page, allPages: Page[]) => (lastPage.hasMore ? allPages.length : undefined),
+    queryFn: ({ pageParam }) => fetchMeetingsFeedPage(pageParam),
+    getNextPageParam: (lastPage: Page) => {
+      if (!lastPage.hasMore) return undefined;
+      return lastPage.tailCursor;
+    },
+    select: (data: FeedInfiniteData) => ({
+      pageParams: data.pageParams,
+      pages: data.pages.map((p) => ({
+        ...p,
+        meetings: p.meetings.map(slimMeetingForFeedList),
+      })),
+    }),
   });
 
   const syncChangedMeetings = useCallback(async () => {

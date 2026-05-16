@@ -555,7 +555,13 @@ export function MeetingChatMediaPickerModal({
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel={selected ? '선택 해제' : '선택'}>
-                      <Image source={{ uri: item.uri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+                      <Image
+                        source={{ uri: item.uri }}
+                        style={StyleSheet.absoluteFillObject}
+                        contentFit="cover"
+                        cachePolicy="memory"
+                        recyclingKey={item.id}
+                      />
                       {selected ? (
                         <View style={styles.selectedOverlay}>
                           <View style={styles.checkCircle}>

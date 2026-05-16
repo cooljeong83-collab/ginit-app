@@ -1,5 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import { serverTimestamp, Timestamp } from 'firebase/firestore';
+import { serverTimestamp, Timestamp } from '@/src/lib/ginit-timestamp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
@@ -12,7 +12,6 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { type SignUpGenderCode } from '@/src/hooks/useSignUpFlow';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { getFirebaseAuth } from '@/src/lib/firebase';
 import { fetchGooglePeopleExtras, mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
 import { addGooglePeopleScopesAndGetAccessToken, REDIRECT_STARTED, signInWithGoogle } from '@/src/lib/google-sign-in';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
@@ -33,6 +32,7 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
+import { supabase } from '@/src/lib/supabase';
 
 export type MeetingServiceAuthModalProps = {
   visible: boolean;
@@ -40,16 +40,6 @@ export type MeetingServiceAuthModalProps = {
   profilePk: string;
   onAfterComplianceSuccess?: () => void | Promise<void>;
 };
-
-function isFirebaseGoogleLinked(): boolean {
-  try {
-    const u = getFirebaseAuth().currentUser;
-    if (!u || u.isAnonymous) return false;
-    return u.providerData.some((p) => p.providerId === 'google.com');
-  } catch {
-    return false;
-  }
-}
 
 /**
  * 프로필·설정 등에서 공통으로 쓰는「서비스 이용 인증」전체 화면 모달.
@@ -88,6 +78,31 @@ export function MeetingServiceAuthModal({
   const [googleDemoBirthLocked, setGoogleDemoBirthLocked] = useState(false);
   const [profileHasStoredGender, setProfileHasStoredGender] = useState(false);
   const [profileHasStoredBirth, setProfileHasStoredBirth] = useState(false);
+  const [supabaseGoogleLinked, setSupabaseGoogleLinked] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setSupabaseGoogleLinked(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      const u = data.session?.user;
+      setSupabaseGoogleLinked(u?.identities?.some((i) => i.provider === 'google') ?? false);
+    })();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_e, s) => {
+      const u = s?.user;
+      setSupabaseGoogleLinked(u?.identities?.some((i) => i.provider === 'google') ?? false);
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [visible]);
 
   const authSheetLayout = useMemo(() => {
     const panelMax = Math.floor(windowHeight * 0.96);
@@ -130,7 +145,10 @@ export function MeetingServiceAuthModal({
         const complete = isMeetingServiceComplianceComplete(p, pk);
         setMeetingAuthComplete(complete);
 
-        const authPhone = getFirebaseAuth().currentUser?.phoneNumber?.trim() ?? '';
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const authPhone = session?.user?.phone?.trim() ?? '';
         const phone = p.phone?.trim() || authPhone;
         setIsPhoneVerified(isUserPhoneVerified(p) || !!authPhone);
         const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
@@ -216,11 +234,11 @@ export function MeetingServiceAuthModal({
   const showGoogleDemographicsCta = useMemo(() => {
     return (
       !meetingAuthComplete &&
-      isFirebaseGoogleLinked() &&
+      supabaseGoogleLinked &&
       hydratedProfile != null &&
       isDemographicsIncomplete(hydratedProfile)
     );
-  }, [meetingAuthComplete, hydratedProfile]);
+  }, [meetingAuthComplete, supabaseGoogleLinked, hydratedProfile]);
 
   const persistMeetingComplianceCore = useCallback(
     async (args: {
@@ -348,7 +366,11 @@ export function MeetingServiceAuthModal({
       Alert.alert('안내', '로그인 후 진행할 수 있어요.');
       return;
     }
-    if (!isFirebaseGoogleLinked()) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const hasGoogle = session?.user?.identities?.some((i) => i.provider === 'google') ?? false;
+    if (!hasGoogle) {
       Alert.alert('안내', 'Google로 로그인한 계정에서만 사용할 수 있어요.');
       return;
     }
@@ -363,7 +385,7 @@ export function MeetingServiceAuthModal({
       if (Platform.OS !== 'web') {
         googleAccessToken = await addGooglePeopleScopesAndGetAccessToken();
       } else {
-        const { user, googleAccessToken: at } = await signInWithGoogle({
+        const { user, googleAccessToken: at, supabaseAccessToken: _sbAt } = await signInWithGoogle({
           forRegistration: true,
           promptSelectAccount: false,
         });
@@ -379,8 +401,7 @@ export function MeetingServiceAuthModal({
         }
       }
       if (Platform.OS !== 'web') {
-        const u = getFirebaseAuth().currentUser;
-        const email = u?.email?.trim() ?? '';
+        const email = session?.user?.email?.trim() ?? '';
         const emailPk = email ? normalizeUserId(email) : null;
         if (!emailPk || emailPk !== pk) {
           Alert.alert(
@@ -593,7 +614,7 @@ export function MeetingServiceAuthModal({
                 {!meetingAuthComplete &&
                 hydratedProfile &&
                 isDemographicsIncomplete(hydratedProfile) &&
-                !isFirebaseGoogleLinked() ? (
+                !supabaseGoogleLinked ? (
                   <View style={{ marginBottom: 12 }}>
                     <Text style={styles.googleCtaHint}>
                       성별·생년월일은 프로필 편집에서 입력한 뒤, 아래에서 저장을 진행해 주세요.

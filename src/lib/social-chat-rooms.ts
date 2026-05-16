@@ -1,50 +1,58 @@
 /**
- * 1:1 소셜 채팅 — Firestore `chat_rooms/{roomId}` + `messages` 서브컬렉션.
- * `isGroup: false` 로 모임 채팅(`meetings/.../messages`)과 구분합니다.
+ * 1:1 소셜 DM — Supabase `chat_messages` + RPC(`chat_pull_tail`, `chat_send_message` 등).
+ * `room_kind: 'social_dm'` 로 모임 채팅과 구분합니다.
  */
 import * as ImageManipulator from 'expo-image-manipulator';
 import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
-import {
-  addDoc,
-  collection,
-  doc,
-  FieldPath,
-  increment,
-  getDoc,
-  getDocs,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  startAfter,
-  updateDoc,
-  where,
-  type DocumentSnapshot,
-  Timestamp,
-  type Unsubscribe,
-} from 'firebase/firestore';
+import { Timestamp, type Unsubscribe } from '@/src/lib/ginit-timestamp';
 import { Platform } from 'react-native';
 
-import { sanitizeUnicodeForSqliteStorage } from '@/src/lib/offline-chat/offline-chat-utils';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
+import { normalizeParticipantId, readStoredUserId } from '@/src/lib/app-user-id';
+import { candidateUserKeys } from '@/src/lib/meeting-chat-rooms-summary';
+import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
+import {
+  chatEnsureSocialDmRoomRpc,
+  chatMarkReadRpc,
+  chatPullHistoryBeforeSeqRpc,
+  chatPullTailRpc,
+  chatSearchMessagesForMeRpc,
+  chatSendMessageRpc,
+  chatSocialRoomSnapshotForMeRpc,
+  chatSoftDeleteMessageRpc,
+  newChatClientMutationId,
+  type ChatDeltaRow,
+} from '@/src/lib/chat-supabase-delta';
+import { chatReadPointersPostgresFilter } from '@/src/lib/chat-bubble-read-pointers-realtime';
+import { applyChatReadPointerRealtimeToLocal } from '@/src/lib/chat-read-pointer-realtime-local';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
-import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
+import {
+  pullSocialChatReadPointersToLocal,
+  scheduleDebouncedPullSocialChatReadPointers,
+} from '@/src/lib/social-chat-read-pointers';
+import {
+  ensureSupabaseRealtimeAuthFromSession,
+  getSupabaseAuthUserIdForRealtimeTopic,
+} from '@/src/lib/supabase-realtime-resilience';
 import type { MeetingChatLinkPreview, MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { getSocialChatNotifyEnabledForUser } from '@/src/lib/social-chat-notify-preference';
+import { fetchChatRoomsListPageFromSupabase } from '@/src/lib/supabase-chat-rooms-list';
+import { subscribeChatListRefresh } from '@/src/lib/user-chat-list-refresh-bus';
 import { supabase } from '@/src/lib/supabase';
+import {
+  normalizeChatRealtimeSubscribeCallbacks,
+  postgresRealtimeHandlersFromChatCallbacks,
+  type ChatRealtimeSubscribeCallbacks,
+} from '@/src/lib/chat-realtime-subscribe-callbacks';
+import { voidSafe } from '@/src/lib/void-safe';
+import { startPostgresRealtimeSubscription } from '@/src/lib/supabase-realtime-resilience';
 import { getSocialChatImageUploadQuality } from '@/src/lib/social-chat-image-quality-preference';
 import {
   SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
+import { sanitizeUnicodeForSqliteStorage } from '@/src/lib/offline-chat/offline-chat-utils';
+import { fetchBlockedPeerIds, isPeerBlockedByMe } from '@/src/lib/user-blocks';
 import { getUserProfile } from '@/src/lib/user-profile';
-import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
-import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
 export const CHAT_ROOMS_COLLECTION = 'chat_rooms';
 export const SOCIAL_CHAT_MESSAGES_SUBCOLLECTION = 'messages';
@@ -53,11 +61,8 @@ export type SocialChatRoomDoc = {
   id: string;
   isGroup?: boolean;
   participantIds?: string[];
-  /** 각 사용자별 마지막 읽음 메시지 id(클라이언트 기준). */
   readMessageIdBy?: Record<string, string | null | undefined>;
-  /** 각 사용자별 마지막 읽음 시각(serverTimestamp). */
   readAtBy?: Record<string, unknown>;
-  /** 각 사용자별 읽지 않은 메시지 수(목록 배지용). */
   unreadCountBy?: Record<string, number | null | undefined>;
   updatedAt?: unknown | null;
 };
@@ -72,6 +77,8 @@ export type SocialChatReplyTo = {
 
 export type SocialChatMessage = {
   id: string;
+  serverSeq?: number;
+  clientMutationId?: string | null;
   senderId: string | null;
   text: string;
   kind?: MeetingChatMessageKind;
@@ -84,48 +91,34 @@ export type SocialChatMessage = {
   deletedAt?: Timestamp | null;
 };
 
-/** 모임 채팅(`MEETING_CHAT_PAGE_SIZE`)과 동일하게 소셜 DM도 최신 N개만 tail 구독 + 과거 페이징 */
 export const SOCIAL_CHAT_PAGE_SIZE = 20;
-
 const SOCIAL_LATEST_PREVIEW_LIMIT = 1;
+const SOCIAL_CHAT_UNREAD_LIST_CAP = 999;
 
-export function socialMessageTimeMs(m: SocialChatMessage | null | undefined): number {
-  const ts = m?.createdAt as Timestamp | null | undefined;
-  if (!ts || typeof ts.toMillis !== 'function') return 0;
-  try {
-    return ts.toMillis();
-  } catch {
-    return 0;
-  }
+function isoStringToSocialTimestamp(iso: string | null | undefined): Timestamp {
+  const t = typeof iso === 'string' && iso.trim() ? Date.parse(iso.trim()) : NaN;
+  return Timestamp.fromMillis(Number.isFinite(t) ? t : Date.now());
 }
 
-export function socialDmPreviewLine(m: SocialChatMessage | null | undefined): string {
-  const t = m?.text?.trim();
-  if (t) {
-    const clipped = t.length > 100 ? `${t.slice(0, 100)}…` : t;
-    return sanitizeUnicodeForSqliteStorage(clipped);
-  }
-  return '새 메시지';
-}
-
-function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChatMessage {
-  const senderRaw = data.senderId;
-  const senderId =
-    typeof senderRaw === 'string' && senderRaw.trim() ? senderRaw.trim() : null;
-  const text = typeof data.text === 'string' ? data.text : '';
-  const kindRaw = data.kind;
+function mapChatDeltaRowToSocialMessage(row: ChatDeltaRow): SocialChatMessage {
+  const id = String(row.id ?? '').trim();
+  const createdAt = isoStringToSocialTimestamp(row.created_at);
+  const updatedAt = row.updated_at ? isoStringToSocialTimestamp(row.updated_at) : createdAt;
+  const deletedAt = row.deleted_at ? isoStringToSocialTimestamp(row.deleted_at) : null;
+  const kindRaw = row.kind;
   const kind: MeetingChatMessageKind | undefined =
     kindRaw === 'system' ? 'system' : kindRaw === 'image' ? 'image' : kindRaw === 'text' ? 'text' : undefined;
-  const imageRaw = data.imageUrl;
-  const imageUrl =
-    typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
-  const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
-  const updatedAt = (data.updatedAt as Timestamp | undefined) ?? createdAt;
-  const deletedAt = (data.deletedAt as Timestamp | undefined) ?? null;
-  const albumRaw = data.imageAlbumBatchId;
+  const text = typeof row.body_text === 'string' ? row.body_text : '';
+  const imageUrl = typeof row.image_url === 'string' && row.image_url.trim() ? row.image_url.trim() : null;
   const imageAlbumBatchId =
-    typeof albumRaw === 'string' && albumRaw.trim() ? albumRaw.trim() : null;
-  const rt = data.replyTo;
+    typeof row.image_album_batch_id === 'string' && row.image_album_batch_id.trim()
+      ? row.image_album_batch_id.trim()
+      : null;
+  const senderId =
+    typeof row.sender_app_user_id === 'string' && row.sender_app_user_id.trim()
+      ? row.sender_app_user_id.trim()
+      : null;
+  const rt = row.reply_to;
   let replyTo: SocialChatReplyTo | null = null;
   if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
     const r = rt as Record<string, unknown>;
@@ -142,8 +135,8 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
       text: typeof r.text === 'string' ? String(r.text) : '',
     };
   }
-  let linkPreview: SocialChatMessage['linkPreview'] = null;
-  const lpRaw = data.linkPreview;
+  let linkPreview: MeetingChatLinkPreview | null = null;
+  const lpRaw = row.link_preview;
   if (lpRaw && typeof lpRaw === 'object' && !Array.isArray(lpRaw)) {
     const o = lpRaw as Record<string, unknown>;
     const u = typeof o.url === 'string' ? o.url.trim() : '';
@@ -172,7 +165,25 @@ function mapSocialMessage(id: string, data: Record<string, unknown>): SocialChat
   };
 }
 
-/** 소셜 메시지를 모임 채팅 UI(`MeetingChatMessage`)와 동일 필드로 맵핑합니다. */
+export function socialMessageTimeMs(m: SocialChatMessage | null | undefined): number {
+  const ts = m?.createdAt as Timestamp | null | undefined;
+  if (!ts || typeof ts.toMillis !== 'function') return 0;
+  try {
+    return ts.toMillis();
+  } catch {
+    return 0;
+  }
+}
+
+export function socialDmPreviewLine(m: SocialChatMessage | null | undefined): string {
+  const t = m?.text?.trim();
+  if (t) {
+    const clipped = t.length > 100 ? `${t.slice(0, 100)}…` : t;
+    return sanitizeUnicodeForSqliteStorage(clipped);
+  }
+  return '새 메시지';
+}
+
 export function socialMessageToMeetingMessage(m: SocialChatMessage): MeetingChatMessage {
   return {
     id: m.id,
@@ -197,14 +208,12 @@ export function socialMessageToMeetingMessage(m: SocialChatMessage): MeetingChat
   };
 }
 
-/** 구독 배열(오래된→최신)을 모임 채팅과 동일하게 최신이 index 0이 되도록 뒤집어 반환합니다. */
 export function socialMessagesToMeetingNewestFirst(rows: SocialChatMessage[]): MeetingChatMessage[] {
   const copy = [...rows];
   copy.reverse();
   return copy.map(socialMessageToMeetingMessage);
 }
 
-/** 두 앱 사용자 PK로 결정적인 DM 룸 ID */
 export function socialDmRoomId(userA: string, userB: string): string {
   const x = (normalizePhoneUserId(userA) ?? userA).trim();
   const y = (normalizePhoneUserId(userB) ?? userB).trim();
@@ -213,7 +222,6 @@ export function socialDmRoomId(userA: string, userB: string): string {
   return `social_${a}__${b}`;
 }
 
-/** `social_{a}__{b}` 형식에서 내가 아닌 상대 PK를 꺼냅니다. */
 export function parsePeerFromSocialRoomId(roomId: string, meAppUserId: string): string | null {
   const rid = roomId.trim();
   const me = (normalizePhoneUserId(meAppUserId) ?? meAppUserId).trim();
@@ -228,106 +236,232 @@ export function parsePeerFromSocialRoomId(roomId: string, meAppUserId: string): 
   return null;
 }
 
+function socialSnapshotIsoToTimestamp(iso: string | null | undefined): Timestamp | null {
+  if (!iso || typeof iso !== 'string') return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return Timestamp.fromMillis(t);
+}
+
 export async function ensureSocialChatRoomDoc(roomId: string, participantA: string, participantB: string): Promise<void> {
   const rid = roomId.trim();
   const a = (normalizePhoneUserId(participantA) ?? participantA).trim();
   const b = (normalizePhoneUserId(participantB) ?? participantB).trim();
   if (!rid || !a || !b) return;
-  const dRef = doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid);
-  const snap = await getDoc(dRef);
-  if (snap.exists()) return;
-  await setDoc(
-    dRef,
-    stripUndefinedDeep({
+  const raw = (await readStoredUserId())?.trim();
+  if (!raw) return;
+  const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+  if (!me) return;
+  try {
+    const res = await chatEnsureSocialDmRoomRpc({
+      meAppUserId: me,
+      roomId: rid,
+      peerA: a,
+      peerB: b,
+    });
+    if (!res.ok && __DEV__ && res.error) {
+      console.warn('[social-chat] chat_ensure_social_dm_room', res.error);
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[social-chat] chat_ensure_social_dm_room', e);
+  }
+}
+
+export async function fetchSocialChatRoomDocOnce(
+  roomId: string,
+  rawMe: string,
+  onError?: (message: string) => void,
+): Promise<SocialChatRoomDoc | null> {
+  const rid = roomId.trim();
+  const me = (normalizeParticipantId(rawMe) || normalizePhoneUserId(rawMe) || rawMe).trim();
+  if (!rid || !me) return null;
+  try {
+    const s = await chatSocialRoomSnapshotForMeRpc({ meAppUserId: me, roomId: rid });
+    if (s.error) {
+      onError?.(s.error);
+      return null;
+    }
+    const unreadCountBy: Record<string, number | null | undefined> = {};
+    for (const k of candidateUserKeys(me)) {
+      unreadCountBy[k] = s.unread_count;
+    }
+    const readMessageIdBy: Record<string, string | null | undefined> = {};
+    const readAtBy: Record<string, unknown> = {};
+    const readId = s.read_last_message_id?.trim() ? s.read_last_message_id.trim() : '';
+    if (readId) {
+      const ts = socialSnapshotIsoToTimestamp(s.updated_at) ?? Timestamp.now();
+      for (const k of candidateUserKeys(me)) {
+        readMessageIdBy[k] = readId;
+        readAtBy[k] = ts;
+      }
+    }
+    const updatedAt =
+      socialSnapshotIsoToTimestamp(s.room_last_message_at ?? s.last_message_at ?? s.updated_at) ??
+      socialSnapshotIsoToTimestamp(s.updated_at) ??
+      Timestamp.now();
+    return {
+      id: rid,
       isGroup: false,
-      participantIds: [a, b],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }) as Record<string, unknown>,
-  );
+      participantIds: s.participant_ids.length ? s.participant_ids : undefined,
+      readMessageIdBy: Object.keys(readMessageIdBy).length ? readMessageIdBy : undefined,
+      readAtBy: Object.keys(readAtBy).length ? readAtBy : undefined,
+      unreadCountBy,
+      updatedAt,
+    };
+  } catch (e) {
+    onError?.(e instanceof Error ? e.message : String(e));
+    return null;
+  }
 }
 
 export function subscribeSocialChatRoom(
   roomId: string,
   onRoom: (room: SocialChatRoomDoc | null) => void,
-  onError?: (message: string) => void,
+  callbacks?: ChatRealtimeSubscribeCallbacks | ((message: string) => void),
 ): Unsubscribe {
+  const rt = normalizeChatRealtimeSubscribeCallbacks(callbacks);
   const rid = roomId.trim();
   if (!rid) {
     onRoom(null);
     return () => {};
   }
-  const dRef = doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid);
-  return onSnapshot(
-    dRef,
-    (snap) => {
-      if (!snap.exists()) {
-        onRoom(null);
-        return;
-      }
-      const data = snap.data() as Record<string, unknown>;
-      const unreadRaw = data.unreadCountBy ?? null;
-      const unreadCountBy =
-        unreadRaw && typeof unreadRaw === 'object' && !Array.isArray(unreadRaw)
-          ? (unreadRaw as Record<string, number | null | undefined>)
-          : undefined;
-      onRoom({
-        id: snap.id,
-        isGroup: data.isGroup as boolean | undefined,
-        participantIds: Array.isArray(data.participantIds)
-          ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-          : undefined,
-        readMessageIdBy:
-          data.readMessageIdBy && typeof data.readMessageIdBy === 'object' && !Array.isArray(data.readMessageIdBy)
-            ? (data.readMessageIdBy as Record<string, string | null | undefined>)
-            : undefined,
-        readAtBy:
-          data.readAtBy && typeof data.readAtBy === 'object' && !Array.isArray(data.readAtBy)
-            ? (data.readAtBy as Record<string, unknown>)
-            : undefined,
-        unreadCountBy,
-        updatedAt: (data.updatedAt as unknown) ?? null,
+  let alive = true;
+  let stopRealtime: (() => void) | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const schedulePull = () => {
+    if (!alive) return;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      voidSafe(pull());
+    }, 200);
+  };
+
+  const scheduleReadPointersPull = () => {
+    if (!alive) return;
+    voidSafe(async () => {
+      const raw = (await readStoredUserId())?.trim();
+      if (!alive || !raw) return;
+      const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+      if (!me) return;
+      scheduleDebouncedPullSocialChatReadPointers({ roomId: rid, myAppUserId: me });
+    });
+  };
+
+  const onReadPointersPostgresChange = (payload: { new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+    if (!alive) return;
+    voidSafe(async () => {
+      const raw = (await readStoredUserId())?.trim();
+      if (!alive || !raw) return;
+      const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+      if (!me) return;
+      await applyChatReadPointerRealtimeToLocal({
+        roomKind: 'social_dm',
+        localRoomIds: [rid],
+        payload,
       });
-    },
-    (err) => {
-      onError?.(err.message ?? '채팅방 정보를 불러오지 못했어요.');
-    },
+      scheduleDebouncedPullSocialChatReadPointers({ roomId: rid, myAppUserId: me });
+    });
+  };
+
+  const pull = async () => {
+    try {
+      const raw = (await readStoredUserId())?.trim();
+      if (!alive || !raw) return;
+      const doc = await fetchSocialChatRoomDocOnce(rid, raw, rt.onGiveUp);
+      if (doc && alive) onRoom(doc);
+    } catch (e) {
+      rt.onGiveUp?.(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  voidSafe(
+    (async () => {
+    await pull();
+    if (!alive) return;
+    await ensureSupabaseRealtimeAuthFromSession();
+    const authUserIdForTopic = await getSupabaseAuthUserIdForRealtimeTopic();
+    const channelUniqueKey = authUserIdForTopic ? `${rid}:${authUserIdForTopic}` : rid;
+    const msgFilter = `room_id=eq.${rid}`;
+    const roomFilter = `id=eq.${rid}`;
+    const readPointersFilter = chatReadPointersPostgresFilter('social_dm', rid);
+    stopRealtime = startPostgresRealtimeSubscription({
+      channelBaseName: 'social-chat-room',
+      uniqueKey: channelUniqueKey,
+      configure: (ch) => {
+        ch.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_messages', filter: msgFilter },
+          () => {
+            schedulePull();
+            scheduleReadPointersPull();
+          },
+        );
+        ch.on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms', filter: roomFilter }, schedulePull);
+        ch.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_read_pointers', filter: readPointersFilter },
+          onReadPointersPostgresChange,
+        );
+      },
+      shouldStop: () => !alive,
+      logLabel: 'social-chat-room',
+      onTransientFailure: () => {
+        schedulePull();
+        scheduleReadPointersPull();
+      },
+      ...postgresRealtimeHandlersFromChatCallbacks(rt, '채팅방 정보를 불러오지 못했어요.'),
+    });
+    })(),
   );
+
+  /** 이탈 시 `startPostgresRealtimeSubscription` → `removeChannel`로 방 전용 Realtime 정리. */
+  return () => {
+    alive = false;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    stopRealtime?.();
+  };
 }
 
 export async function updateSocialChatReadReceipt(roomId: string, myAppUserId: string, lastReadMessageId: string): Promise<void> {
   const rid = roomId.trim();
   const raw = String(myAppUserId ?? '').trim();
-  const uidPhone = (normalizePhoneUserId(raw) ?? '').trim();
-  const uidPk = (normalizeParticipantId(raw) ?? '').trim();
-  const uid = (uidPhone || uidPk || raw).trim();
   const msgId = String(lastReadMessageId ?? '').trim();
-  if (!rid || !uid || !msgId) return;
-  const dRef = doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid);
-  // NOTE: userId가 이메일인 경우 `.`이 포함될 수 있어, string field path(`a.b`)로 업데이트하면 키가 깨집니다.
-  // FieldPath를 사용해 map key를 정확히 유지합니다.
-  const pairs: unknown[] = [];
-  const pushKey = (k: string) => {
-    const key = k.trim();
-    if (!key) return;
-    pairs.push(new FieldPath('readMessageIdBy', key), msgId);
-    pairs.push(new FieldPath('readAtBy', key), serverTimestamp());
-    pairs.push(new FieldPath('unreadCountBy', key), 0);
-  };
-  pushKey(uid);
-  // 기기/버전별 userId 포맷 차이를 흡수하기 위해 가능한 키를 함께 기록합니다.
-  if (uidPhone && uidPhone !== uid) pushKey(uidPhone);
-  if (uidPk && uidPk !== uid && uidPk !== uidPhone) pushKey(uidPk);
-  if (raw && raw !== uid && raw !== uidPhone && raw !== uidPk) pushKey(raw);
-  pairs.push('updatedAt', serverTimestamp());
-  await updateDoc(dRef, ...(pairs as [any, any, ...any[]]));
+  if (!rid || !raw || !msgId || msgId.startsWith('local:')) return;
+  const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+  if (!me) return;
+  const { data: row, error } = await supabase
+    .from('chat_messages')
+    .select('seq')
+    .eq('id', msgId)
+    .eq('room_kind', 'social_dm')
+    .eq('room_id', rid)
+    .maybeSingle();
+  if (error) {
+    ginitNotifyDbg('BubbleRead', 'mark_read_seq_lookup_error', { roomId: rid, message: error.message });
+    return;
+  }
+  if (!row) {
+    ginitNotifyDbg('BubbleRead', 'mark_read_seq_lookup_miss', { roomId: rid, msgSuffix: msgId.slice(-8) });
+    return;
+  }
+  const seqRaw = (row as { seq?: unknown }).seq;
+  const seq = typeof seqRaw === 'number' && Number.isFinite(seqRaw) ? seqRaw : Number(seqRaw);
+  if (!Number.isFinite(seq) || seq <= 0) {
+    ginitNotifyDbg('BubbleRead', 'mark_read_invalid_seq', { roomId: rid, seq: String(seqRaw) });
+    return;
+  }
+  const res = await chatMarkReadRpc({ meAppUserId: me, roomKind: 'social_dm', roomId: rid, lastReadSeq: Math.floor(seq) });
+  if (!res.ok) {
+    ginitNotifyDbg('BubbleRead', 'chat_mark_read_fail', { roomId: rid, error: res.error ?? 'unknown' });
+    if (__DEV__) console.warn('[social-chat] chat_mark_read', res.error);
+    return;
+  }
+  ginitNotifyDbg('BubbleRead', 'chat_mark_read_ok', { roomId: rid, lastReadSeq: Math.floor(seq) });
+  scheduleDebouncedPullSocialChatReadPointers({ roomId: rid, myAppUserId: me });
 }
 
-const SOCIAL_SEARCH_PAGE = 80;
-
-/**
- * 1:1 채팅에서 `needle`이 본문에 포함된 메시지를 과거 방향으로 스캔합니다(클라이언트 부분 문자열).
- */
 export async function searchSocialChatMessages(
   roomId: string,
   needle: string,
@@ -337,45 +471,30 @@ export async function searchSocialChatMessages(
   const raw = typeof needle === 'string' ? needle.trim() : '';
   if (!rid || !raw) return [];
 
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return [];
   const maxDocs = Math.min(Math.max(100, opts?.maxDocsScanned ?? 2000), 6000);
   const norm = raw.toLowerCase();
-
-  const matches: SocialChatMessage[] = [];
-  const seen = new Set<string>();
-  let lastSnap: DocumentSnapshot | undefined;
-  let scanned = 0;
-
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-
-  while (scanned < maxDocs) {
-    const q = lastSnap
-      ? query(cref, orderBy('createdAt', 'desc'), startAfter(lastSnap), limit(SOCIAL_SEARCH_PAGE))
-      : query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_SEARCH_PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) break;
-    for (const d of snap.docs) {
-      scanned++;
-      const m = mapSocialMessage(d.id, d.data() as Record<string, unknown>);
-      const hay = (m.text ?? '').trim().toLowerCase();
-      if (hay.includes(norm) && !seen.has(m.id)) {
-        seen.add(m.id);
-        matches.push(m);
-      }
-    }
-    lastSnap = snap.docs[snap.docs.length - 1]!;
-    if (snap.size < SOCIAL_SEARCH_PAGE) break;
-  }
-
-  matches.sort((a, b) => {
+  const { rows, error } = await chatSearchMessagesForMeRpc({
+    meAppUserId: me,
+    roomKind: 'social_dm',
+    roomId: rid,
+    needle: raw,
+    maxScan: maxDocs,
+    matchLimit: 200,
+  });
+  if (error) return [];
+  const mapped = rows.map(mapChatDeltaRowToSocialMessage);
+  const filtered = mapped.filter((m) => (m.text ?? '').trim().toLowerCase().includes(norm));
+  filtered.sort((a, b) => {
     const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
     const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
     if (ta !== tb) return ta - tb;
     return a.id.localeCompare(b.id);
   });
-  return matches;
+  return filtered;
 }
 
-/** 최신 1건 미리보기(모임 채팅 `subscribeMeetingChatLatestMessage`와 동일 패턴). */
 export function subscribeSocialChatLatestMessage(
   roomId: string,
   onLatest: (message: SocialChatMessage | null) => void,
@@ -386,132 +505,244 @@ export function subscribeSocialChatLatestMessage(
     onLatest(null);
     return () => {};
   }
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_LATEST_PREVIEW_LIMIT));
-  return onSnapshot(
-    q,
-    (snap) => {
-      if (snap.empty) {
-        onLatest(null);
+  let alive = true;
+  const pull = async () => {
+    const raw = (await readStoredUserId())?.trim();
+    if (!alive || !raw) return;
+    const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+    if (!me) return;
+    try {
+      const res = await chatPullTailRpc({ meAppUserId: me, roomKind: 'social_dm', roomId: rid, limit: SOCIAL_LATEST_PREVIEW_LIMIT });
+      if (res.error) {
+        onError?.(res.error);
         return;
       }
-      const d = snap.docs[0]!;
-      onLatest(mapSocialMessage(d.id, d.data() as Record<string, unknown>));
-    },
-    (err) => {
-      onError?.(err.message ?? '채팅 미리보기를 불러오지 못했어요.');
-    },
-  );
+      const first = res.rows[0];
+      onLatest(first ? mapChatDeltaRowToSocialMessage(first) : null);
+    } catch (e) {
+      onError?.(e instanceof Error ? e.message : String(e));
+    }
+  };
+  voidSafe(pull());
+  return () => {
+    alive = false;
+  };
 }
 
 export function subscribeSocialChatMessages(
   roomId: string,
   onMessages: (messages: SocialChatMessage[]) => void,
-  onError?: (message: string) => void,
+  callbacks?: ChatRealtimeSubscribeCallbacks | ((message: string) => void),
 ): Unsubscribe {
+  const rt = normalizeChatRealtimeSubscribeCallbacks(callbacks);
   const rid = roomId.trim();
   if (!rid) {
     onMessages([]);
     return () => {};
   }
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  // NOTE: 전체 구독은 메시지 수가 커질수록 성능/비용이 급증합니다. 모임 채팅과 동일하게 tail 20개만 구독합니다.
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_CHAT_PAGE_SIZE));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const rows = snap.docs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
-      rows.reverse();
-      onMessages(rows);
-    },
-    (err) => {
-      onError?.(err.message ?? '채팅을 불러오지 못했어요.');
-    },
+  let alive = true;
+  let stopRealtime: (() => void) | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const pull = async () => {
+    const raw = (await readStoredUserId())?.trim();
+    if (!alive || !raw) return;
+    const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+    if (!me) return;
+    try {
+      const res = await chatPullTailRpc({ meAppUserId: me, roomKind: 'social_dm', roomId: rid, limit: SOCIAL_CHAT_PAGE_SIZE });
+      if (res.error) {
+        rt.onGiveUp?.(res.error);
+        return;
+      }
+      const desc = res.rows.map(mapChatDeltaRowToSocialMessage);
+      const chrono = [...desc].reverse();
+      onMessages(chrono);
+    } catch (e) {
+      rt.onGiveUp?.(e instanceof Error ? e.message : String(e));
+    }
+  };
+  voidSafe(
+    (async () => {
+      await pull();
+      if (!alive) return;
+      const raw = (await readStoredUserId())?.trim();
+      if (!raw) return;
+      const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+      if (!me) return;
+      let canonical = rid;
+      try {
+        const peek = await chatPullTailRpc({ meAppUserId: me, roomKind: 'social_dm', roomId: rid, limit: 1 });
+        if (peek.canonical_room_id?.trim()) canonical = peek.canonical_room_id.trim();
+      } catch {
+        /* noop */
+      }
+      const filter = `room_id=eq.${canonical}`;
+      stopRealtime = startPostgresRealtimeSubscription({
+        channelBaseName: 'social-chat-messages',
+        uniqueKey: canonical,
+        configure: (ch) => {
+          ch.on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'chat_messages', filter },
+            () => {
+              if (!alive) return;
+              if (debounceTimer) clearTimeout(debounceTimer);
+              debounceTimer = setTimeout(() => {
+                debounceTimer = null;
+                voidSafe(pull());
+              }, 200);
+            },
+          );
+        },
+        shouldStop: () => !alive,
+        logLabel: 'social-chat-messages',
+        onTransientFailure: () => voidSafe(pull()),
+        ...postgresRealtimeHandlersFromChatCallbacks(rt, '채팅을 불러오지 못했어요.'),
+      });
+    })(),
   );
+  return () => {
+    alive = false;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    stopRealtime?.();
+  };
 }
 
 export type SocialChatLiveTailEvent = {
-  /** 최신순(가장 최신이 index 0). 최대 SOCIAL_CHAT_PAGE_SIZE건 */
   tailDesc: SocialChatMessage[];
-  /** tail 구간에서 가장 과거(정렬상 마지막) 문서 */
-  tailOldestDoc: DocumentSnapshot | null;
-  /** tail 밖으로 밀려난 메시지(실시간 tail 갱신 시). */
+  /** 호환 필드 — 항상 null(Supabase tail에는 문서 스냅샷 없음) */
+  tailOldestDoc: null;
   evictedFromTailDesc: SocialChatMessage[];
 };
 
-/**
- * 소셜 DM: 최신 `SOCIAL_CHAT_PAGE_SIZE`건만 `onSnapshot`으로 구독합니다.
- * 모임 채팅 `subscribeMeetingChatLiveTail`과 같은 패턴(단, message shape은 SocialChatMessage).
- */
-export function subscribeSocialChatLiveTail(
+function subscribeSocialChatLiveTailSupabase(
   roomId: string,
   onEvent: (event: SocialChatLiveTailEvent) => void,
-  onError?: (message: string) => void,
+  callbacks?: ChatRealtimeSubscribeCallbacks | ((message: string) => void),
 ): Unsubscribe {
-  const rid = roomId.trim();
+  const rt = normalizeChatRealtimeSubscribeCallbacks(callbacks);
+  const rid = typeof roomId === 'string' ? roomId.trim() : String(roomId ?? '').trim();
   if (!rid) {
     onEvent({ tailDesc: [], tailOldestDoc: null, evictedFromTailDesc: [] });
     return () => {};
   }
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_CHAT_PAGE_SIZE));
+  let alive = true;
+  let stopRealtime: (() => void) | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let prevTail: SocialChatMessage[] = [];
 
-  let prevDocs: DocumentSnapshot[] = [];
-  return onSnapshot(
-    q,
-    (snap) => {
-      const currDocs = snap.docs;
-      const currIds = new Set(currDocs.map((d) => d.id));
-      const evictedSnaps: DocumentSnapshot[] = [];
-      for (const d of prevDocs) {
-        if (!currIds.has(d.id)) evictedSnaps.push(d);
+  const emitFromRpcRows = (rows: ChatDeltaRow[]) => {
+    if (!alive) return;
+    const curr = rows.map(mapChatDeltaRowToSocialMessage);
+    const currIds = new Set(curr.map((m) => m.id));
+    const evictedFromTailDesc = prevTail.filter((m) => !currIds.has(m.id));
+    prevTail = curr;
+    onEvent({ tailDesc: curr, tailOldestDoc: null, evictedFromTailDesc });
+  };
+
+  const pullAndEmit = async () => {
+    const me = (await readStoredUserId())?.trim();
+    if (!alive || !me) return;
+    try {
+      const res = await chatPullTailRpc({
+        meAppUserId: me,
+        roomKind: 'social_dm',
+        roomId: rid,
+        limit: SOCIAL_CHAT_PAGE_SIZE,
+      });
+      if (res.error) {
+        rt.onGiveUp?.(res.error);
+        return;
       }
-      prevDocs = currDocs;
+      emitFromRpcRows(res.rows);
+    } catch (e) {
+      rt.onGiveUp?.(e instanceof Error ? e.message : String(e));
+    }
+  };
 
-      const evictedFromTailDesc = evictedSnaps.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
-      const tailDesc = currDocs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
-      const tailOldestDoc = currDocs.length ? currDocs[currDocs.length - 1]! : null;
-      onEvent({ tailDesc, tailOldestDoc, evictedFromTailDesc });
-    },
-    (err) => {
-      onError?.(err.message ?? '채팅을 불러오지 못했어요.');
-    },
+  voidSafe(
+    (async () => {
+      await pullAndEmit();
+      if (!alive) return;
+      const me = (await readStoredUserId())?.trim();
+      if (!me) return;
+      let canonical = rid;
+      try {
+        const peek = await chatPullTailRpc({ meAppUserId: me, roomKind: 'social_dm', roomId: rid, limit: 1 });
+        if (peek.canonical_room_id?.trim()) canonical = peek.canonical_room_id.trim();
+      } catch {
+        /* noop */
+      }
+      const filter = `room_id=eq.${canonical}`;
+      stopRealtime = startPostgresRealtimeSubscription({
+        channelBaseName: 'social-chat-live',
+        uniqueKey: canonical,
+        configure: (ch) => {
+          ch.on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'chat_messages', filter },
+            () => {
+              if (!alive) return;
+              if (debounceTimer) clearTimeout(debounceTimer);
+              debounceTimer = setTimeout(() => {
+                debounceTimer = null;
+                voidSafe(pullAndEmit());
+              }, 150);
+            },
+          );
+        },
+        shouldStop: () => !alive,
+        logLabel: 'social-chat-live',
+        onTransientFailure: () => voidSafe(pullAndEmit()),
+        ...postgresRealtimeHandlersFromChatCallbacks(rt, '채팅 실시간 연결에 실패했어요.'),
+      });
+    })(),
   );
+
+  return () => {
+    alive = false;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    stopRealtime?.();
+  };
 }
 
+export function subscribeSocialChatLiveTail(
+  roomId: string,
+  onEvent: (event: SocialChatLiveTailEvent) => void,
+  callbacks?: ChatRealtimeSubscribeCallbacks | ((message: string) => void),
+): Unsubscribe {
+  return subscribeSocialChatLiveTailSupabase(roomId, onEvent, callbacks);
+}
+
+export type { ChatRealtimeSubscribeCallbacks } from '@/src/lib/chat-realtime-subscribe-callbacks';
+
 export type SocialChatFetchedMessagesPage = {
-  /**
-   * UI 편의를 위해 **오래된→최신(chrono)** 순서로 담습니다.
-   * (모임 채팅 infinite 페이지는 최신→과거 desc이지만, 소셜 DM UI는 기존 형태(chrono)를 유지합니다.)
-   */
   messages: SocialChatMessage[];
-  /** 이 페이지에서 가장 과거(chrono 기준 첫 번째) 메시지 id — 다음 페이지 `startAfter` 앵커 */
   oldestMessageId: string | null;
   hasMore: boolean;
 };
 
-/** 소셜 DM: 최신 `SOCIAL_CHAT_PAGE_SIZE`건을 한 번 `getDocs`로 가져옵니다. */
 export async function fetchSocialChatLatestPage(roomId: string): Promise<SocialChatFetchedMessagesPage> {
   const rid = roomId.trim();
   if (!rid) return { messages: [], oldestMessageId: null, hasMore: false };
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(SOCIAL_CHAT_PAGE_SIZE));
-  const snap = await getDocs(q);
-  if (snap.empty) return { messages: [], oldestMessageId: null, hasMore: false };
-  const desc = snap.docs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
-  desc.reverse(); // chrono
-  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
-  return {
-    messages: desc,
-    oldestMessageId,
-    hasMore: snap.size >= SOCIAL_CHAT_PAGE_SIZE,
-  };
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return { messages: [], oldestMessageId: null, hasMore: false };
+  try {
+    const res = await chatPullTailRpc({ meAppUserId: me, roomKind: 'social_dm', roomId: rid, limit: SOCIAL_CHAT_PAGE_SIZE });
+    if (res.error) {
+      if (__DEV__) console.warn('[social-chat] chat_pull_tail', res.error);
+      return { messages: [], oldestMessageId: null, hasMore: false };
+    }
+    const desc = res.rows.map(mapChatDeltaRowToSocialMessage);
+    const messages = [...desc].reverse();
+    const oldestMessageId = messages.length ? messages[0]!.id : null;
+    return { messages, oldestMessageId, hasMore: res.has_more };
+  } catch (e) {
+    if (__DEV__) console.warn('[social-chat] fetchSocialChatLatestPage', e);
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
 }
 
-/**
- * `afterMessageId` 문서 직후(더 과거)부터 `pageSize`건(기본 SOCIAL_CHAT_PAGE_SIZE).
- * 반환 메시지는 chrono(오래된→최신) 순서입니다.
- */
 export async function fetchSocialChatOlderPageAfterMessageId(
   roomId: string,
   afterMessageId: string,
@@ -520,38 +751,45 @@ export async function fetchSocialChatOlderPageAfterMessageId(
   const rid = roomId.trim();
   const aid = afterMessageId.trim();
   if (!rid || !aid) return { messages: [], oldestMessageId: null, hasMore: false };
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const anchorRef = doc(cref, aid);
-  const anchorSnap = await getDoc(anchorRef);
-  if (!anchorSnap.exists()) return { messages: [], oldestMessageId: null, hasMore: false };
-  const q = query(cref, orderBy('createdAt', 'desc'), startAfter(anchorSnap), limit(pageSize));
-  const snap = await getDocs(q);
-  if (snap.empty) return { messages: [], oldestMessageId: null, hasMore: false };
-  const desc = snap.docs.map((d) => mapSocialMessage(d.id, d.data() as Record<string, unknown>));
-  desc.reverse(); // chrono
-  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
-  return {
-    messages: desc,
-    oldestMessageId,
-    hasMore: snap.size >= pageSize,
-  };
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return { messages: [], oldestMessageId: null, hasMore: false };
+  try {
+    const { data: anchorRow, error: anchorErr } = await supabase.from('chat_messages').select('seq').eq('id', aid).maybeSingle();
+    if (anchorErr || !anchorRow) return { messages: [], oldestMessageId: null, hasMore: false };
+    const seqRaw = (anchorRow as { seq?: unknown }).seq;
+    const anchorSeq = typeof seqRaw === 'number' && Number.isFinite(seqRaw) ? seqRaw : Number(seqRaw);
+    if (!Number.isFinite(anchorSeq) || anchorSeq <= 0) {
+      return { messages: [], oldestMessageId: null, hasMore: false };
+    }
+    const res = await chatPullHistoryBeforeSeqRpc({
+      meAppUserId: me,
+      roomKind: 'social_dm',
+      roomId: rid,
+      beforeSeq: Math.floor(anchorSeq),
+      limit: pageSize,
+    });
+    if (res.error) {
+      if (__DEV__) console.warn('[social-chat] chat_pull_history_before_seq', res.error);
+      return { messages: [], oldestMessageId: null, hasMore: false };
+    }
+    const desc = res.rows.map(mapChatDeltaRowToSocialMessage);
+    const messages = [...desc].reverse();
+    const oldestMessageId = messages.length ? messages[0]!.id : null;
+    return { messages, oldestMessageId, hasMore: res.has_more };
+  } catch (e) {
+    if (__DEV__) console.warn('[social-chat] fetchSocialChatOlderPageAfterMessageId', e);
+    return { messages: [], oldestMessageId: null, hasMore: false };
+  }
 }
 
 const PREFETCH_OLDER_SOCIAL_DEFAULT_PAGE = 100;
 const PREFETCH_OLDER_SOCIAL_MAX_PAGES = 200;
 
 export type SocialChatOlderPrefetchUntilTargetResult = {
-  /** 기존 infinite 캐시의 마지막 페이지 **이후**(더 과거) 구간만 담은 페이지 배열 */
   newPages: SocialChatFetchedMessagesPage[];
-  /** `newPages` 안에 `targetMessageId`가 포함되었는지 */
   found: boolean;
 };
 
-/**
- * 검색 점프 등으로 특정 메시지로 이동할 때, 현재 캐시보다 과거에만 있는 경우
- * `anchorOldestMessageId`(이미 로드된 구간 중 가장 과거 메시지 id) 다음부터
- * `targetMessageId`가 나올 때까지(또는 더 불러올 문서 없음) 과거 페이지를 이어 받습니다.
- */
 export async function fetchOlderSocialChatPagesUntilTargetMessageId(
   roomId: string,
   anchorOldestMessageId: string,
@@ -582,29 +820,6 @@ export async function fetchOlderSocialChatPagesUntilTargetMessageId(
   return { newPages, found: false };
 }
 
-function coalesceFirestoreTimeMs(v: unknown): number {
-  if (!v) return 0;
-  if (typeof v === 'object') {
-    const o = v as { toMillis?: () => number; seconds?: number; nanoseconds?: number };
-    if (typeof o.toMillis === 'function') {
-      try {
-        return o.toMillis();
-      } catch {
-        return 0;
-      }
-    }
-    if (typeof o.seconds === 'number') {
-      const ns = typeof o.nanoseconds === 'number' ? o.nanoseconds : 0;
-      return Math.max(0, Math.floor(o.seconds * 1000 + ns / 1e6));
-    }
-  }
-  return 0;
-}
-
-/**
- * `chat_rooms/{roomId}` 문서의 읽음 포인터 — `app/(tabs)/chat.tsx` 미읽음 집계와 동일한 키( raw / 전화정규화 / PK ) 규칙.
- * 탭 배지(`InAppAlarmsContext`)는 AsyncStorage만 보면 서버 읽음과 어긋날 수 있어, 합산 시 이 값을 우선합니다.
- */
 export async function fetchSocialChatReadPointersForUser(
   roomId: string,
   myAppUserId: string,
@@ -612,17 +827,17 @@ export async function fetchSocialChatReadPointersForUser(
   const rid = roomId.trim();
   const raw = String(myAppUserId ?? '').trim();
   if (!rid || !raw) return { readId: null, readAt: null };
-  const mePhone = normalizePhoneUserId(raw) ?? raw;
-  const mePk = normalizeParticipantId(raw) ?? raw;
-  const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
-  if (!roomSnap.exists()) return { readId: null, readAt: null };
-  const data = roomSnap.data() as Record<string, unknown>;
-  const readMap = (data.readMessageIdBy ?? {}) as Record<string, string | null | undefined>;
-  const atMap = (data.readAtBy ?? {}) as Record<string, unknown>;
-  const ridFromMap = readMap[raw] ?? readMap[mePhone] ?? (mePk ? readMap[mePk] : undefined);
-  const readId = typeof ridFromMap === 'string' && ridFromMap.trim() ? ridFromMap.trim() : null;
-  const readAt = (atMap[raw] ?? atMap[mePhone] ?? (mePk ? atMap[mePk] : null)) ?? null;
-  return { readId, readAt };
+  const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+  if (!me) return { readId: null, readAt: null };
+  try {
+    const s = await chatSocialRoomSnapshotForMeRpc({ meAppUserId: me, roomId: rid });
+    if (s.error) return { readId: null, readAt: null };
+    const readId = s.read_last_message_id?.trim() ? s.read_last_message_id.trim() : null;
+    const readAt = socialSnapshotIsoToTimestamp(s.updated_at ?? null) ?? null;
+    return { readId, readAt };
+  } catch {
+    return { readId: null, readAt: null };
+  }
 }
 
 export async function fetchSocialChatUnreadCount(
@@ -635,42 +850,42 @@ export async function fetchSocialChatUnreadCount(
   const rid = roomId.trim();
   const raw = String(myAppUserId ?? '').trim();
   if (!rid || !raw) return 0;
-  const mePhone = normalizePhoneUserId(raw) ?? raw;
-  const mePk = normalizeParticipantId(raw) ?? raw;
-
-  const readId = String(myLastReadMessageId ?? '').trim();
-  const readAtMs = coalesceFirestoreTimeMs(myLastReadAt);
-  const maxDocs = Math.min(Math.max(50, opts?.maxDocsScanned ?? 400), 2000);
-
-  const cref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(maxDocs));
-  const snap = await getDocs(q);
-  if (snap.empty) return 0;
-
-  let count = 0;
-  for (const d of snap.docs) {
-    const m = mapSocialMessage(d.id, d.data() as Record<string, unknown>);
-    const sidRaw = (m.senderId ?? '').trim();
-    const sidPhone = sidRaw ? (normalizePhoneUserId(sidRaw) ?? sidRaw) : '';
-    const sidPk = sidRaw ? (normalizeParticipantId(sidRaw) ?? sidRaw) : '';
-    const isMine = Boolean(sidRaw && ((sidPhone && sidPhone === mePhone) || (sidPk && sidPk === mePk)));
-    // 읽음 포인터가 내가 보낸 최신 메시지일 때: 내 메시지를 먼저 continue 하면 readId에 도달하지 못해
-    // 과거 상대 메시지를 전부 미읽음으로 세는 버그가 납니다. 커서 id 일치는 발신자와 무관하게 먼저 처리합니다.
-    if (readId && m.id === readId) break;
-    if (isMine) continue;
-
-    const ms = socialMessageTimeMs(m);
-    if (readAtMs > 0 && ms > 0 && ms <= readAtMs) break;
-    // 읽음 포인터가 없다면(0) 전체를 새 메시지로 본다.
-    count += 1;
+  void myLastReadMessageId;
+  void myLastReadAt;
+  void opts;
+  const me = (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+  if (!me) return 0;
+  try {
+    const s = await chatSocialRoomSnapshotForMeRpc({ meAppUserId: me, roomId: rid });
+    if (s.error) return 0;
+    const n = typeof s.unread_count === 'number' && Number.isFinite(s.unread_count) ? s.unread_count : 0;
+    return Math.min(Math.max(0, n), SOCIAL_CHAT_UNREAD_LIST_CAP);
+  } catch {
+    return 0;
   }
-  return count;
 }
 
 export type SocialChatRoomSummary = {
   roomId: string;
   peerAppUserId: string;
 };
+
+async function fetchAllSocialRoomsForUser(me: string): Promise<SocialChatRoomSummary[]> {
+  const blocked = await fetchBlockedPeerIds(me).catch(() => new Set<string>());
+  const seen = new Set<string>();
+  const out: SocialChatRoomSummary[] = [];
+  for (let page = 0; page < 200; page += 1) {
+    const { rooms, hasMore } = await fetchChatRoomsListPageFromSupabase(me, page);
+    for (const r of rooms) {
+      if (blocked.has(r.peerAppUserId.trim())) continue;
+      if (seen.has(r.roomId)) continue;
+      seen.add(r.roomId);
+      out.push(r);
+    }
+    if (!hasMore) break;
+  }
+  return out;
+}
 
 export function subscribeMySocialChatRooms(
   myAppUserId: string,
@@ -682,29 +897,38 @@ export function subscribeMySocialChatRooms(
     onRooms([]);
     return () => {};
   }
-  const q = query(
-    collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION),
-    where('participantIds', 'array-contains', me),
-  );
-  return onSnapshot(
-    q,
-    (snap) => {
-      const out: SocialChatRoomSummary[] = [];
-      for (const d of snap.docs) {
-        const data = d.data() as Record<string, unknown>;
-        if (data.isGroup === true) continue;
-        const ids = Array.isArray(data.participantIds)
-          ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-          : [];
-        const peer = ids.find((x) => (normalizePhoneUserId(x) ?? x) !== me) ?? '';
-        if (peer) out.push({ roomId: d.id, peerAppUserId: normalizePhoneUserId(peer) ?? peer });
-      }
-      onRooms(out);
-    },
-    (err) => {
-      onError?.(err.message ?? '소셜 채팅 목록을 불러오지 못했어요.');
-    },
-  );
+  let cancelled = false;
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+
+  const schedule = () => {
+    if (cancelled) return;
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      debounce = null;
+      voidSafe(pull());
+    }, 250);
+  };
+
+  const pull = async () => {
+    if (cancelled) return;
+    try {
+      const rooms = await fetchAllSocialRoomsForUser(me);
+      if (!cancelled) onRooms(rooms);
+    } catch (e) {
+      onError?.(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  voidSafe(pull());
+  const unsubRt = subscribeChatListRefresh(() => {
+    schedule();
+  });
+
+  return () => {
+    cancelled = true;
+    if (debounce) clearTimeout(debounce);
+    unsubRt();
+  };
 }
 
 export async function sendSocialChatTextMessage(
@@ -722,7 +946,6 @@ export async function sendSocialChatTextMessage(
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const senderPk = normalizeParticipantId(senderId) || senderId;
   const peerPk = parsePeerFromSocialRoomId(rid, senderPk);
-  // Denormalization + 차단 확인: 모임 텍스트 전송과 같이 선행 네트워크는 병렬로 묶습니다.
   const [senderProfile, blockedByMe] = await Promise.all([
     getUserProfile(senderId).catch(() => null),
     peerPk ? isPeerBlockedByMe(senderPk, peerPk).catch(() => false) : Promise.resolve(false),
@@ -733,100 +956,33 @@ export async function sendSocialChatTextMessage(
   if (peerPk) {
     await ensureSocialChatRoomDoc(rid, senderId, peerPk);
   }
+  const meAppUserId = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
   const linkPreview = await buildLinkPreviewForChatText(text);
-  const ref = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const now = Timestamp.now();
-  const msgRef = await addDoc(
-    ref,
-    stripUndefinedDeep({
-      senderId,
-      senderName: senderProfile?.nickname ?? null,
-      senderAvatarUrl: senderProfile?.photoUrl ?? null,
-      text,
-      linkPreview,
-      kind: 'text' as const,
-      replyTo:
-        replyTo && replyTo.messageId?.trim()
-          ? {
-              messageId: replyTo.messageId.trim(),
-              senderId: replyTo.senderId ?? null,
-              kind: replyTo.kind ?? 'text',
-              imageUrl: replyTo.imageUrl ?? null,
-              text: String(replyTo.text ?? '').trim().slice(0, 280),
-            }
-          : null,
-      createdAt: now,
-      updatedAt: now,
-    }) as Record<string, unknown>,
-  );
-
-  // 목록 배지(unreadCountBy): 모임 `bumpMeetingChatRoomSummaryOnSend`와 같이 전송 완료를 막지 않고 백그라운드로 갱신합니다.
-  if (peerPk) {
-    const pairs: unknown[] = [];
-    const pushKey = (k: string) => {
-      const key = k.trim();
-      if (!key) return;
-      pairs.push(new FieldPath('unreadCountBy', key), increment(1));
-    };
-    const peerPhone = normalizePhoneUserId(peerPk) ?? peerPk;
-    const peerNormPk = normalizeParticipantId(peerPhone) || peerPhone;
-    pushKey(peerPk);
-    if (peerPhone !== peerPk) pushKey(peerPhone);
-    if (peerNormPk !== peerPk && peerNormPk !== peerPhone) pushKey(peerNormPk);
-    pairs.push('updatedAt', serverTimestamp());
-    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as [any, any, ...any[]])).catch(() => {});
+  const clientMutationId = newChatClientMutationId();
+  const replyToRpc =
+    replyTo && replyTo.messageId?.trim()
+      ? {
+          messageId: replyTo.messageId.trim(),
+          senderId: replyTo.senderId ?? null,
+          kind: replyTo.kind ?? 'text',
+          imageUrl: replyTo.imageUrl ?? null,
+          text: String(replyTo.text ?? '').trim().slice(0, 280),
+        }
+      : null;
+  const res = await chatSendMessageRpc({
+    meAppUserId,
+    roomKind: 'social_dm',
+    roomId: rid,
+    clientMutationId,
+    kind: 'text',
+    bodyText: text,
+    replyTo: replyToRpc,
+    linkPreview: linkPreview ? (linkPreview as unknown as Record<string, unknown>) : null,
+  });
+  if (!res.ok && !res.duplicate) {
+    throw new Error(res.error?.trim() || '메시지를 보내지 못했습니다.');
   }
-
-  if (Platform.OS !== 'web') {
-    void (async () => {
-      try {
-        const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
-        const pdata = roomSnap.data() as Record<string, unknown> | undefined;
-        const rawIds = Array.isArray(pdata?.participantIds)
-          ? (pdata!.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-          : [];
-        const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
-        const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
-        if (!peerRaw?.trim()) {
-          ginitNotifyDbg('social-chat', 'dm_push_skip_no_peer', { rid, rawIdsLen: rawIds.length });
-          return;
-        }
-        const peerPk =
-          normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
-        if (!peerPk || peerPk === senderPk) {
-          ginitNotifyDbg('social-chat', 'dm_push_skip_peer_same_or_empty', { rid, hasPeerPk: Boolean(peerPk) });
-          return;
-        }
-        const blockedByMe = await isPeerBlockedByMe(senderPk, peerPk).catch(() => false);
-        if (blockedByMe) {
-          ginitNotifyDbg('social-chat', 'dm_push_skip_blocked_by_me', { rid });
-          return;
-        }
-        const prof = await getUserProfile(senderPk).catch(() => null);
-        const titleNick = prof?.nickname?.trim() || '친구';
-        const peerNotify = await getSocialChatNotifyEnabledForUser(rid, peerPk).catch(() => true);
-        if (!peerNotify) {
-          ginitNotifyDbg('social-chat', 'dm_push_skip_peer_notify_off', { rid });
-          return;
-        }
-        ginitNotifyDbg('social-chat', 'dm_push_fire', { rid, kind: 'text' });
-        sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
-          kind: 'social_dm',
-          meetingId: rid,
-          meetingTitle: titleNick,
-          preview: text.slice(0, 500),
-          fromUserId: senderPk,
-          roomType: 'social_dm',
-          lastMessageId: msgRef.id,
-          senderName: titleNick,
-          senderPhotoUrl: prof?.photoUrl ?? null,
-        });
-      } catch (e) {
-        ginitNotifyDbg('social-chat', 'dm_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
-        /* ignore */
-      }
-    })();
-  }
+  const messageId = (res.id?.trim() || clientMutationId).trim();
 }
 
 const CHAT_IMAGE_MAX_WIDTH_LOW = 1280;
@@ -842,53 +998,12 @@ export type SendSocialChatImageExtras = {
 };
 
 async function notifySocialDmImagePreview(
-  rid: string,
-  senderId: string,
-  preview: string,
-  lastMessageId?: string,
+  _rid: string,
+  _senderId: string,
+  _preview: string,
+  _lastMessageId?: string,
 ): Promise<void> {
-  if (Platform.OS === 'web') return;
-  try {
-    const roomSnap = await getDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid));
-    const pdata = roomSnap.data() as Record<string, unknown> | undefined;
-    const rawIds = Array.isArray(pdata?.participantIds)
-      ? (pdata!.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-      : [];
-    const meKey = normalizePhoneUserId(senderId) ?? senderId.trim();
-    const peerRaw = rawIds.find((x) => (normalizePhoneUserId(x) ?? x.trim()) !== meKey);
-    if (!peerRaw?.trim()) {
-      ginitNotifyDbg('social-chat', 'dm_image_push_skip_no_peer', { rid, rawIdsLen: rawIds.length });
-      return;
-    }
-    const peerPk =
-      normalizeParticipantId(normalizePhoneUserId(peerRaw.trim()) ?? peerRaw.trim()) || peerRaw.trim();
-    const senderPk = normalizeParticipantId(senderId) || senderId;
-    if (!peerPk || peerPk === senderPk) {
-      ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_same_or_empty', { rid });
-      return;
-    }
-    const prof = await getUserProfile(senderPk).catch(() => null);
-    const titleNick = prof?.nickname?.trim() || '친구';
-    const peerNotify = await getSocialChatNotifyEnabledForUser(rid, peerPk).catch(() => true);
-    if (!peerNotify) {
-      ginitNotifyDbg('social-chat', 'dm_image_push_skip_peer_notify_off', { rid });
-      return;
-    }
-    ginitNotifyDbg('social-chat', 'dm_push_fire', { rid, kind: 'image' });
-    sendInAppAlarmRemotePushToUserFireAndForget(peerPk, {
-      kind: 'social_dm',
-      meetingId: rid,
-      meetingTitle: titleNick,
-      preview,
-      fromUserId: senderPk,
-      roomType: 'social_dm',
-      lastMessageId,
-      senderName: titleNick,
-      senderPhotoUrl: prof?.photoUrl ?? null,
-    });
-  } catch (e) {
-    ginitNotifyDbg('social-chat', 'dm_image_push_error', { rid, message: e instanceof Error ? e.message : String(e) });
-  }
+  /** FCM은 DB Webhook → `chat-user-notifications-broadcast` → `fcm-push-send` 경로가 담당 */
 }
 
 function supabasePublicObjectPathFromUrl(url: string, bucket: string): string {
@@ -958,41 +1073,26 @@ export async function sendSocialChatImageMessage(
     base64,
   );
 
-  const msgColRef = collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
-  const now = Timestamp.now();
-  const msgRef = await addDoc(
-    msgColRef,
-    stripUndefinedDeep({
-      senderId,
-      text: cap,
-      kind: 'image' as const,
-      imageUrl,
-      imageAlbumBatchId: albumId || undefined,
-      createdAt: now,
-      updatedAt: now,
-    }) as Record<string, unknown>,
-  );
-
-  // 이미지도 unread 요약: 텍스트 전송과 동일하게 전송 완료를 막지 않음
-  if (peerPkImg) {
-    const pairs: unknown[] = [];
-    const pushKey = (k: string) => {
-      const key = k.trim();
-      if (!key) return;
-      pairs.push(new FieldPath('unreadCountBy', key), increment(1));
-    };
-    const peerPhone = normalizePhoneUserId(peerPkImg) ?? peerPkImg;
-    const peerNormPk = normalizeParticipantId(peerPhone) || peerPhone;
-    pushKey(peerPkImg);
-    if (peerPhone !== peerPkImg) pushKey(peerPhone);
-    if (peerNormPk !== peerPkImg && peerNormPk !== peerPhone) pushKey(peerNormPk);
-    pairs.push('updatedAt', serverTimestamp());
-    void updateDoc(doc(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION, rid), ...(pairs as [any, any, ...any[]])).catch(() => {});
+  const meAppUserId = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
+  const clientMutationId = newChatClientMutationId();
+  const res = await chatSendMessageRpc({
+    meAppUserId,
+    roomKind: 'social_dm',
+    roomId: rid,
+    clientMutationId,
+    kind: 'image',
+    bodyText: cap || null,
+    imageUrl,
+    imageAlbumBatchId: albumId || null,
+  });
+  if (!res.ok && !res.duplicate) {
+    throw new Error(res.error?.trim() || '사진을 보내지 못했습니다.');
   }
+  const messageId = (res.id?.trim() || clientMutationId).trim();
 
   if (!suppressRemote) {
     const pv = cap ? `사진 · ${cap}` : '사진';
-    void notifySocialDmImagePreview(rid, senderId, pv, msgRef.id);
+    void notifySocialDmImagePreview(rid, senderId, pv, messageId);
   }
 }
 
@@ -1044,17 +1144,19 @@ export async function deleteSocialChatImageMessageBestEffort(
   if (!rid) throw new Error('채팅방 정보가 없습니다.');
   if (!msgId) throw new Error('메시지 정보가 없습니다.');
 
-  const db = getFirebaseFirestore();
-  const msgRef = doc(db, CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION, msgId);
-  await updateDoc(msgRef, {
-    kind: 'system',
-    senderId: null,
-    text: '사진이 삭제되었습니다.',
-    imageUrl: null,
-    deletedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  } as Record<string, unknown>);
-
+  const me = (await readStoredUserId())?.trim();
+  if (!me) throw new Error('로그인이 필요합니다.');
+  const res = await chatSoftDeleteMessageRpc({
+    meAppUserId: me,
+    roomKind: 'social_dm',
+    roomId: rid,
+    messageId: msgId,
+    mode: 'image',
+  });
+  if (!res.ok) {
+    const err = res.error?.trim();
+    if (err) throw new Error(err);
+  }
   const objectPath = supabasePublicObjectPathFromUrl(url, SUPABASE_STORAGE_BUCKET_MEETING_CHAT);
   if (!objectPath) return;
   try {
@@ -1064,22 +1166,23 @@ export async function deleteSocialChatImageMessageBestEffort(
   }
 }
 
-/** 소셜 DM 텍스트 메시지 1건 삭제(소프트 삭제). */
 export async function deleteSocialChatTextMessageBestEffort(roomId: string, messageId: string): Promise<void> {
   const rid = typeof roomId === 'string' ? roomId.trim() : String(roomId ?? '').trim();
   const msgId = typeof messageId === 'string' ? messageId.trim() : String(messageId ?? '').trim();
   if (!rid) throw new Error('채팅방 정보가 없습니다.');
   if (!msgId) throw new Error('메시지 정보가 없습니다.');
 
-  const db = getFirebaseFirestore();
-  const msgRef = doc(db, CHAT_ROOMS_COLLECTION, rid, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION, msgId);
-  await updateDoc(msgRef, {
-    kind: 'system',
-    senderId: null,
-    text: '메시지가 삭제되었습니다.',
-    imageUrl: null,
-    linkPreview: null,
-    deletedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  } as Record<string, unknown>);
+  const me = (await readStoredUserId())?.trim();
+  if (!me) throw new Error('로그인이 필요합니다.');
+  const res = await chatSoftDeleteMessageRpc({
+    meAppUserId: me,
+    roomKind: 'social_dm',
+    roomId: rid,
+    messageId: msgId,
+    mode: 'text',
+  });
+  if (!res.ok) {
+    const err = res.error?.trim();
+    if (err) throw new Error(err);
+  }
 }

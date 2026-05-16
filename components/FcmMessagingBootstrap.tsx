@@ -11,6 +11,7 @@ import { displayFcmRemoteMessageWithNotifeeAndroid, ensureGinitFcmNotifeeChannel
 import { extractFirebaseLikeCode, hintForNativeFcmTokenError } from '@/src/lib/firebase-credential-hints';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
+import { supabase } from '@/src/lib/supabase';
 import {
   ensureAndroidPostNotificationsForFcm,
   persistFcmTokenAndVerify,
@@ -135,7 +136,7 @@ export function FcmMessagingBootstrap() {
           }
         }
         if (action === 'in_app_chat' || action === 'in_app_social_dm') {
-          prewarmChatRoomMessagesFromPushData(rm.data as Record<string, unknown> | undefined, 'fcm_foreground');
+          prewarmChatRoomMessagesFromPushData(rm.data as Record<string, unknown> | undefined, 'fcm_foreground', uid);
         }
         if (Platform.OS === 'android') {
           if ((action === 'in_app_chat' || action === 'in_app_social_dm') && meetingId) {
@@ -164,9 +165,10 @@ export function FcmMessagingBootstrap() {
       unsubToken = onTokenRefresh(m, (t) => {
         const next = String(t ?? '').trim();
         if (!next || next === lastSavedTokenRef.current) return;
+        if (userIdRef.current !== uid) return;
         fcmDebugSetToken(next || null);
-        void persistFcmTokenAndVerify(uid, next)
-          .then(() => {
+        void persistFcmTokenAndVerify(uid, next).then((persisted) => {
+            if (!persisted) return;
             lastSavedTokenRef.current = next;
             fcmDebugSetSaveOk(true);
           })
@@ -199,7 +201,9 @@ export function FcmMessagingBootstrap() {
     /**
      * @param dedupeMemory — false면 메모리상 동일 토큰이어도 DB에 다시 반영(서버에서 비운 뒤 복구 등)
      */
-    const tryGetTokenAndPersist = async (dedupeMemory: boolean): Promise<'saved' | 'noop' | 'no_token' | 'error'> => {
+    const tryGetTokenAndPersist = async (
+      dedupeMemory: boolean,
+    ): Promise<'saved' | 'noop' | 'no_token' | 'error' | 'no_session'> => {
       try {
         assertSupabasePublicReady();
       } catch (e) {
@@ -209,8 +213,15 @@ export function FcmMessagingBootstrap() {
         return 'error';
       }
       try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.user) {
+          ginitNotifyDbg('FcmMessaging', 'register_skip_no_supabase_session', { uidSuffix: uid.slice(-6) });
+          return 'no_session';
+        }
         const t = await registerFcmDeviceAndGetToken(m);
-        if (!alive) return 'noop';
+        if (!alive || userIdRef.current !== uid) return 'noop';
         ginitNotifyDbg('FcmMessaging', 'getToken', {
           uidSuffix: uid.slice(-6),
           tokenLen: t.length,
@@ -222,7 +233,9 @@ export function FcmMessagingBootstrap() {
         fcmDebugSetToken(t || null);
         if (!t) return 'no_token';
         if (dedupeMemory && t === lastSavedTokenRef.current) return 'noop';
-        await persistFcmTokenAndVerify(uid, t);
+        if (!alive || userIdRef.current !== uid) return 'noop';
+        const persisted = await persistFcmTokenAndVerify(uid, t);
+        if (!persisted) return 'noop';
         lastSavedTokenRef.current = t;
         fcmDebugSetSaveOk(true);
         return 'saved';
@@ -290,6 +303,7 @@ export function FcmMessagingBootstrap() {
       }
 
       let tokenPersistOk = false;
+      let lastRegisterOutcome: 'saved' | 'noop' | 'no_token' | 'error' | 'no_session' = 'noop';
       for (let attempt = 0; attempt < FCM_REGISTER_RETRY_DELAYS_MS.length; attempt += 1) {
         if (!alive) return;
         const delay = FCM_REGISTER_RETRY_DELAYS_MS[attempt]!;
@@ -297,12 +311,16 @@ export function FcmMessagingBootstrap() {
         if (!alive) return;
         const dedupe = attempt === 0;
         const outcome = await tryGetTokenAndPersist(dedupe);
+        lastRegisterOutcome = outcome;
         if (outcome === 'saved') {
           tokenPersistOk = true;
           break;
         }
+        if (outcome === 'no_session') {
+          break;
+        }
       }
-      if (!tokenPersistOk) {
+      if (!tokenPersistOk && lastRegisterOutcome !== 'no_session') {
         ginitNotifyDbg('FcmMessaging', 'register_retries_exhausted', { uidSuffix: uid.slice(-6) });
       }
     })();

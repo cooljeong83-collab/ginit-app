@@ -13,7 +13,7 @@ import {
   hasLoginableUserForPhoneE164,
   recordTermsAgreement,
 } from '@/src/lib/user-profile';
-import { Timestamp, serverTimestamp } from 'firebase/firestore';
+import { Timestamp, serverTimestamp } from '@/src/lib/ginit-timestamp';
 
 /** 전화번호 입력이 멈춘 뒤 짧게 기다렸다가 회원 조회(과도한 호출·레이스 완화) */
 const PHONE_MEMBER_CHECK_DEBOUNCE_MS = 220;
@@ -114,10 +114,10 @@ export function useSignUpFlow(initialPhone: string) {
   }, []);
 
   const runSignUp = useCallback(
-    async (firebaseUid: string, onComplete: () => void) => {
+    async (authUserId: string, onComplete: () => void) => {
       const name = displayName.trim();
       const n = normalizedPhone;
-      const uid = firebaseUid.trim();
+      const uid = authUserId.trim();
       const emailTrim = emailField.trim();
       const emailPk = normalizeUserId(emailTrim);
       if (!emailPk) {
@@ -169,7 +169,7 @@ export function useSignUpFlow(initialPhone: string) {
           displayName: name.slice(0, 64),
           email: emailTrim || null,
           photoUrl: null,
-          firebaseUid: uid,
+          supabaseUserId: uid,
           gender: genderCode,
           birthYear: birthdate.year,
         };

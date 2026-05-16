@@ -1,8 +1,6 @@
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { useCallback, useMemo, useState } from 'react';
 
 import { supabase } from '@/src/lib/supabase';
-import { getFirestoreDb, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 
 export const MEETING_REALTIME_SIGNALS_SUBCOLLECTION = 'realtimeSignals';
 
@@ -41,8 +39,6 @@ export type UseMeetingUpdateOptions = {
   supabaseEqColumn?: string;
   /** table 모드에서 where 값으로 사용할 사용자 키(기본: `userId`) */
   supabaseEqValue?: string;
-  /** Firestore 신호 문서 재시도 */
-  firestoreRetries?: number;
 };
 
 export type VoteCompletedPayload = {
@@ -58,32 +54,8 @@ export type VoteCompletedPayload = {
   dedupeKey?: string;
 };
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
-async function withRetries<T>(fn: () => Promise<T>, retries: number, label: string): Promise<T> {
-  let last: unknown;
-  const max = Math.max(0, retries);
-  for (let i = 0; i <= max; i += 1) {
-    try {
-      return await fn();
-    } catch (e) {
-      last = e;
-      if (i === max) break;
-      const backoff = 120 * 2 ** i;
-      // eslint-disable-next-line no-console
-      console.warn(`[useMeetingUpdate] ${label} retry ${i + 1}/${max} after ${backoff}ms`, e);
-      await sleep(backoff);
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last));
-}
-
 /**
- * 지침(하이브리드):
- * - Write: Supabase(정본/원장) 먼저 성공
- * - Then: Firestore에는 실시간 UI용 "신호"만 기록
+ * 투표 완료 시 Supabase만 갱신합니다. (레거시 Firestore `realtimeSignals` 기록 제거)
  */
 export function useMeetingUpdate(opts: UseMeetingUpdateOptions = {}) {
   const {
@@ -92,7 +64,6 @@ export function useMeetingUpdate(opts: UseMeetingUpdateOptions = {}) {
     supabaseTable = 'profiles',
     supabaseEqColumn = 'id',
     supabaseEqValue,
-    firestoreRetries = 2,
   } = opts;
 
   const [busy, setBusy] = useState(false);
@@ -121,31 +92,11 @@ export function useMeetingUpdate(opts: UseMeetingUpdateOptions = {}) {
         ...(p.tableExtraPatch ?? {}),
       };
 
-      // NOTE: `table` 모드는 "원자적 증가"를 보장하지 못합니다.
-      // 운영 환경에서는 반드시 `rpc` 모드(서버 함수)로 XP/레벨을 처리하세요.
       const { data, error: upError } = await supabase.from(supabaseTable).update(patch).eq(supabaseEqColumn, eqValue).select();
       if (upError) throw upError;
       return { mode: 'table' as const, table: supabaseTable, data };
     },
     [supabaseEqColumn, supabaseEqValue, supabaseRpcName, supabaseTable, supabaseXpMode],
-  );
-
-  const writeVoteCompletedSignal = useCallback(
-    async (p: VoteCompletedPayload, supabaseMeta: MeetingRealtimeSignalDoc['supabase']) => {
-      const db = getFirestoreDb();
-      const ref = collection(db, MEETINGS_COLLECTION, p.meetingId, MEETING_REALTIME_SIGNALS_SUBCOLLECTION);
-      const payload: Omit<MeetingRealtimeSignalDoc, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> } = {
-        kind: 'vote_completed',
-        userId: p.userId.trim(),
-        meetingId: p.meetingId.trim(),
-        dedupeKey: p.dedupeKey ? String(p.dedupeKey) : null,
-        supabase: supabaseMeta,
-        createdAt: serverTimestamp(),
-      };
-
-      await withRetries(async () => addDoc(ref, payload), firestoreRetries, 'firestore.addDoc(realtimeSignals)');
-    },
-    [firestoreRetries],
   );
 
   const onVoteCompleted = useCallback(
@@ -158,17 +109,7 @@ export function useMeetingUpdate(opts: UseMeetingUpdateOptions = {}) {
         if (!mid) throw new Error('meetingId가 비어있습니다.');
         if (!uid) throw new Error('userId가 비어있습니다.');
 
-        // 1) Supabase 먼저
-        const sb = await applyVoteXpInSupabase(p);
-        const supabaseMeta: NonNullable<MeetingRealtimeSignalDoc['supabase']> = {
-          ok: true,
-          mode: sb.mode,
-          rpcName: sb.mode === 'rpc' ? sb.rpcName : undefined,
-          table: sb.mode === 'table' ? sb.table : undefined,
-        };
-
-        // 2) Firestore 신호
-        await writeVoteCompletedSignal(p, supabaseMeta);
+        await applyVoteXpInSupabase(p);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
@@ -177,7 +118,7 @@ export function useMeetingUpdate(opts: UseMeetingUpdateOptions = {}) {
         setBusy(false);
       }
     },
-    [applyVoteXpInSupabase, writeVoteCompletedSignal],
+    [applyVoteXpInSupabase],
   );
 
   return useMemo(

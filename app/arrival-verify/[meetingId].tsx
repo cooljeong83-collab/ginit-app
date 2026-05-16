@@ -67,7 +67,7 @@ export default function ArrivalVerifyMeetingScreen() {
       ? params.meetingId.trim()
       : '';
 
-  const { meeting, loading, loadError, refetch } = useMeetingDetailQuery(meetingId, 0);
+  const { meeting, loading, loadError, refetch } = useMeetingDetailQuery(meetingId);
   const arrivalVerifyPol = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
   const placeCoords = useMemo(() => resolveConfirmedPlaceCoordsForMeeting(meeting), [meeting]);
 

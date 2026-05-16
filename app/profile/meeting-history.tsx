@@ -19,12 +19,12 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 export default function ProfileMeetingHistoryScreen() {
   const router = useTransitionRouter();
   const { userId } = useUserSession();
+
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
     const unsub = subscribeMeetingsHybrid(
       (list) => {
         setMeetings(list);

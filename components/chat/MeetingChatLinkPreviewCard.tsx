@@ -60,6 +60,8 @@ function MeetingChatLinkPreviewCardInner({
           style={styles.linkPreviewThumb}
           contentFit="cover"
           contentPosition="center"
+          cachePolicy="disk"
+          recyclingKey={img}
           accessibilityIgnoresInvertColors
         />
       ) : (

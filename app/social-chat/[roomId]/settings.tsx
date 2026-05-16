@@ -222,7 +222,13 @@ export default function SocialChatSettingsScreen() {
             <View style={styles.avatarItem} accessibilityRole="text" accessibilityLabel={myNick}>
               <View style={styles.avatarRing}>
                 {myProfile?.photoUrl ? (
-                  <Image source={{ uri: myProfile.photoUrl }} style={styles.avatarImg} contentFit="cover" />
+                  <Image
+                    source={{ uri: myProfile.photoUrl }}
+                    style={styles.avatarImg}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={`${myNorm || 'me'}:${myProfile.photoUrl}`}
+                  />
                 ) : (
                   <Text style={styles.avatarLetter}>{myNick.slice(0, 1)}</Text>
                 )}
@@ -239,7 +245,13 @@ export default function SocialChatSettingsScreen() {
               accessibilityLabel={peerNick}>
               <View style={styles.avatarRing}>
                 {peerProfile?.photoUrl ? (
-                  <Image source={{ uri: peerProfile.photoUrl }} style={styles.avatarImg} contentFit="cover" />
+                  <Image
+                    source={{ uri: peerProfile.photoUrl }}
+                    style={styles.avatarImg}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={`${peerId.trim()}:${peerProfile.photoUrl}`}
+                  />
                 ) : (
                   <Text style={styles.avatarLetter}>{peerNick.slice(0, 1)}</Text>
                 )}

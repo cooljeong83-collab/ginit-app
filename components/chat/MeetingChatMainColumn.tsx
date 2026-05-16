@@ -3,6 +3,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import type { ReactNode, RefObject } from 'react';
+import { memo } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
 import {ActivityIndicator, Text, TextInput, View} from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
@@ -13,11 +14,14 @@ import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-ch
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { MeetingChatListRow } from '@/src/lib/meeting-chat-list-rows';
+import { meetingChatFlashListItemType } from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
 
 export type MeetingChatMainColumnProps = {
   chatError: string | null;
+  /** transport 끊김 등 — 에러(빨강) 대신 재연결(보라) 배너 */
+  chatReconnecting?: boolean;
   searchNavigateLoading: boolean;
   setListRef: (r: unknown) => void;
   setInnerFlashListRef: (r: unknown) => void;
@@ -53,10 +57,16 @@ export type MeetingChatMainColumnProps = {
   bottomSearchNavigator?: ReactNode;
   /** 검색 모드에서는 입력 컴포저를 숨깁니다 */
   hideComposer?: boolean;
+  /**
+   * `data`(chatListRows)와 별도로 바뀌는 값 — 읽음 등으로 `renderItem`만 갱신돼야 할 때 FlashList가
+   * 가시 행을 다시 그리도록 합니다.
+   */
+  listExtraData?: unknown;
 };
 
-export function MeetingChatMainColumn({
+export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
   chatError,
+  chatReconnecting = false,
   searchNavigateLoading,
   setListRef,
   setInnerFlashListRef,
@@ -88,6 +98,7 @@ export function MeetingChatMainColumn({
   inputMultiline = true,
   bottomSearchNavigator,
   hideComposer = false,
+  listExtraData,
 }: MeetingChatMainColumnProps) {
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
     setListRef(r);
@@ -98,7 +109,11 @@ export function MeetingChatMainColumn({
   return (
     <View style={styles.chatMainColumn}>
       <View style={styles.listWrap}>
-        {chatError ? (
+        {chatReconnecting ? (
+          <View style={styles.chatReconnectBanner}>
+            <Text style={styles.chatReconnectText}>실시간 연결을 다시 맞추는 중…</Text>
+          </View>
+        ) : chatError ? (
           <View style={styles.chatErrorBanner}>
             <Text style={styles.chatErrorText}>{chatError}</Text>
           </View>
@@ -115,7 +130,10 @@ export function MeetingChatMainColumn({
         <View style={{ flex: 1 }}>
           <FlashList
             ref={setBothRefs as any}
+            style={{ flex: 1, minHeight: 0 }}
             data={chatListRows}
+            extraData={listExtraData}
+            getItemType={(row) => meetingChatFlashListItemType(row)}
             keyExtractor={(row) => {
               if (row.type === 'message') return row.message.id;
               return `album:${row.batchId}:${row.messages.map((m: MeetingChatMessage) => m.id).join(':')}`;
@@ -161,7 +179,13 @@ export function MeetingChatMainColumn({
               </View>
               {replyTo.kind === 'image' && replyTo.imageUrl?.trim() ? (
                 <View style={styles.replyPreviewThumbOuter} pointerEvents="none" accessibilityElementsHidden>
-                  <Image source={{ uri: replyTo.imageUrl.trim() }} style={styles.replyPreviewThumb} contentFit="cover" />
+                  <Image
+                    source={{ uri: replyTo.imageUrl.trim() }}
+                    style={styles.replyPreviewThumb}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={replyTo.messageId ? `${replyTo.messageId}:${replyTo.imageUrl.trim()}` : replyTo.imageUrl.trim()}
+                  />
                 </View>
               ) : null}
               <GinitPressable
@@ -231,4 +255,4 @@ export function MeetingChatMainColumn({
       </KeyboardStickyView>
     </View>
   );
-}
+});

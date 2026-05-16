@@ -1,7 +1,9 @@
 import { Image } from 'expo-image';
 import { useMemo } from 'react';
-import type { StyleProp, ImageStyle } from 'react-native';
+import type { StyleProp, ImageStyle, ViewStyle } from 'react-native';
+import { View } from 'react-native';
 
+import { MEETING_LIST_IMAGE_BLURHASH } from '@/src/lib/expo-image-meeting-placeholder';
 import { firstKakaoPlaceDetailPageUrlFromMeeting } from '@/src/lib/feed-meeting-utils';
 import {
   firstPlaceCandidatePreferredPhotoUri,
@@ -10,6 +12,7 @@ import {
 } from '@/src/lib/meeting-list-thumbnail';
 import type { Meeting } from '@/src/lib/meetings';
 import { useKakaoPlaceListThumbnail } from '@/src/lib/use-kakao-place-list-thumbnail';
+import { withSupabaseStorageListThumbnail } from '@/src/lib/supabase-public-image-thumbnail';
 
 type Props = {
   meeting: Meeting;
@@ -32,8 +35,16 @@ export function MeetingListThumbnailImage({ meeting, style, recyclingKey }: Prop
     [meeting],
   );
   const { uri: kakaoUri } = useKakaoPlaceListThumbnail(kakaoPage);
-  const uri = preferredPlacePhoto ?? kakaoUri ?? baseUri;
+  const rawUri = preferredPlacePhoto ?? kakaoUri ?? baseUri;
+  const uri = useMemo(() => {
+    const u = typeof rawUri === 'string' ? rawUri.trim() : '';
+    if (!u) return '';
+    return withSupabaseStorageListThumbnail(u, 280) ?? u;
+  }, [rawUri]);
 
+  if (!uri) {
+    return <View style={style as StyleProp<ViewStyle>} accessibilityElementsHidden />;
+  }
   return (
     <Image
       source={{ uri }}
@@ -41,6 +52,7 @@ export function MeetingListThumbnailImage({ meeting, style, recyclingKey }: Prop
       contentFit="cover"
       cachePolicy="disk"
       recyclingKey={recyclingKey ?? meeting.id}
+      placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
       accessibilityIgnoresInvertColors
     />
   );

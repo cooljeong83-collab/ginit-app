@@ -52,7 +52,8 @@ import { useMeetingHost } from '@/src/hooks/meeting/useMeetingHost';
 import { useMeetingJoin } from '@/src/hooks/meeting/useMeetingJoin';
 import { useMeetingSocial } from '@/src/hooks/meeting/useMeetingSocial';
 import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
-import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
+import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
+import { patchMeetingDetailLocal, refreshMeetingDetailCaches } from '@/src/lib/meeting-detail-cache-mutations';
 import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -125,6 +126,7 @@ import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { saveConfirmedMeetingToDeviceCalendar } from '@/src/lib/save-confirmed-meeting-device-calendar';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { supabase } from '@/src/lib/supabase';
+import { formatRealtimeSubscribeDetail } from '@/src/lib/supabase-realtime-resilience';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -450,8 +452,7 @@ export default function MeetingDetailScreen() {
   );
   const mainScrollRef = useRef<ScrollView>(null);
 
-  const [retryNonce, setRetryNonce] = useState(0);
-  const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, retryNonce);
+  const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id);
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
@@ -1091,8 +1092,10 @@ export default function MeetingDetailScreen() {
     if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) return;
     if (meeting.scheduleConfirmed !== true) return;
     if (!(alreadyJoinedMeeting || isHost)) return;
+    const arrivalTopic = `meeting-arrival-verifs-${meeting.id}`;
+    if (__DEV__) console.log(`[meeting-arrival-verifs] realtime: channel created topic=${arrivalTopic}`);
     const ch = supabase
-      .channel(`meeting-arrival-verifs-${meeting.id}`)
+      .channel(arrivalTopic)
       .on(
         'postgres_changes',
         {
@@ -1108,8 +1111,13 @@ export default function MeetingDetailScreen() {
           void reloadLedgerArrivalVerifiedParticipantIds();
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (__DEV__) {
+          console.log(`[meeting-arrival-verifs] realtime: ${formatRealtimeSubscribeDetail(status, err)} topic=${arrivalTopic}`);
+        }
+      });
     return () => {
+      if (__DEV__) console.log(`[meeting-arrival-verifs] realtime: teardown → removeChannel topic=${arrivalTopic}`);
       void supabase.removeChannel(ch);
     };
   }, [
@@ -1438,14 +1446,14 @@ export default function MeetingDetailScreen() {
         refreshed?.dateCandidates != null && refreshed.dateCandidates.length > 0
           ? refreshed.dateCandidates
           : merged;
-      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
-        if (!prev) return prev;
-        if (refreshed) {
-          return { ...refreshed, dateCandidates: dates.map((d) => ({ ...d })) };
-        }
-        return { ...prev, dateCandidates: dates.map((d) => ({ ...d })) };
-      });
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+      if (refreshed) {
+        await refreshMeetingDetailCaches(queryClient, meeting.id);
+      } else {
+        await patchMeetingDetailLocal(meeting.id, (prev) => ({
+          ...prev,
+          dateCandidates: dates.map((d) => ({ ...d })),
+        }));
+      }
       setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
       setProposeOpen(false);
     } catch (e) {
@@ -1486,14 +1494,14 @@ export default function MeetingDetailScreen() {
         refreshed?.placeCandidates != null && refreshed.placeCandidates.length > 0
           ? refreshed.placeCandidates
           : merged;
-      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
-        if (!prev) return prev;
-        if (refreshed) {
-          return { ...refreshed, placeCandidates: places.map((p) => ({ ...p })) };
-        }
-        return { ...prev, placeCandidates: places.map((p) => ({ ...p })) };
-      });
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+      if (refreshed) {
+        await refreshMeetingDetailCaches(queryClient, meeting.id);
+      } else {
+        await patchMeetingDetailLocal(meeting.id, (prev) => ({
+          ...prev,
+          placeCandidates: places.map((p) => ({ ...p })),
+        }));
+      }
       setSelectedPlaceIds(additions.map((p, j) => placeCandidateChipId(p, existing.length + j)));
       setPlaceProposeOpen(false);
     } catch (e) {
@@ -2530,7 +2538,6 @@ export default function MeetingDetailScreen() {
             <Text style={styles.muted}>{loadError}</Text>
             <GinitPressable
               onPress={() => {
-                setRetryNonce((n) => n + 1);
                 void refetchMeetingDetail();
               }}
               style={styles.retryBtn}

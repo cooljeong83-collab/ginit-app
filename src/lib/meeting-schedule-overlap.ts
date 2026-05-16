@@ -137,7 +137,7 @@ export function proposalOverlapsLoadedScans(
   return false;
 }
 
-function scanFromFirestoreMeeting(m: {
+function scanMeetingForScheduleOverlap(m: {
   id: string;
   scheduleConfirmed?: boolean | null;
   scheduledAt?: unknown;
@@ -195,7 +195,7 @@ function ledgerOverlapRowToScan(row: Record<string, unknown>): OverlapMeetingSca
   };
 }
 
-/** 참여 중 모임 스냅샷 — 레저 모드에서는 Supabase RPC, 그 외 Firestore 전체 목록 */
+/** 참여 중 모임 스냅샷 — Supabase `ledger_list_my_meetings_for_overlap` RPC; 실패 시 공개 모임 일회 조회로 폴백 */
 export async function loadOverlapMeetingScans(appUserId: string): Promise<OverlapMeetingScan[]> {
   const uid = appUserId.trim();
   if (!uid) return [];
@@ -209,14 +209,14 @@ export async function loadOverlapMeetingScans(appUserId: string): Promise<Overla
       if (isSupabaseRpcMissingOrStaleSchema(error.message)) {
         if (__DEV__) {
           console.warn(
-            '[meeting-schedule-overlap] ledger_list_my_meetings_for_overlap unavailable; falling back to Firestore list.',
+            '[meeting-schedule-overlap] ledger_list_my_meetings_for_overlap unavailable; falling back to public meetings fetch.',
             error.message,
           );
         }
         const { fetchMeetingsOnce } = await import('@/src/lib/meetings');
         const fr = await fetchMeetingsOnce();
         if (!fr.ok) return [];
-        return fr.meetings.map((m) => scanFromFirestoreMeeting(m));
+        return fr.meetings.map((m) => scanMeetingForScheduleOverlap(m));
       }
       throw new Error(error.message);
     }
@@ -234,7 +234,7 @@ export async function loadOverlapMeetingScans(appUserId: string): Promise<Overla
   const { fetchMeetingsOnce } = await import('@/src/lib/meetings');
   const fr = await fetchMeetingsOnce();
   if (!fr.ok) return [];
-  return fr.meetings.map((m) => scanFromFirestoreMeeting(m));
+  return fr.meetings.map((m) => scanMeetingForScheduleOverlap(m));
 }
 
 export function collectScheduleInstantMsFromDateCandidates(candidates: readonly DateCandidate[]): number[] {
@@ -316,9 +316,10 @@ export async function assertProposedStartsOverlapHybrid(opts: {
 }
 
 /**
- * Firestore 전체 모임 스캔 — 레저(SQL)에만 있는 모임은 `skipLedgerIds`로 제외(RPC가 담당).
+ * 클라이언트에 적재된 모임 문서 목록에서 확정 일정 겹침 여부를 검사합니다.
+ * 레저(SQL)에만 있는 모임은 `skipLedgerIds`로 제외(RPC가 담당).
  */
-export function findFirestoreConfirmedOverlap(
+export function findConfirmedScheduleOverlapAmongMeetings(
   meetings: readonly MeetingScheduleOverlapDoc[],
   appUserId: string,
   proposedStartMs: number,

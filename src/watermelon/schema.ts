@@ -5,7 +5,7 @@ import { appSchema, tableSchema } from '@nozbe/watermelondb';
  * @see https://watermelondb.dev/docs/Schema
  */
 export const schema = appSchema({
-  version: 8,
+  version: 16,
   tables: [
     /**
      * 채팅방 메타(증분 동기화 커서/상태).
@@ -37,9 +37,20 @@ export const schema = appSchema({
         { name: 'read_at_ms', type: 'number', isOptional: true },
         { name: 'message_read_message_id_by_json', type: 'string', isOptional: true },
         { name: 'message_read_at_by_json', type: 'string', isOptional: true },
+        { name: 'message_read_last_seq_by_json', type: 'string', isOptional: true },
         { name: 'message_read_state_last_at_ms', type: 'number', isOptional: true, isIndexed: true },
         { name: 'remote_updated_at_ms', type: 'number', isOptional: true, isIndexed: true },
         { name: 'room_search_text', type: 'string', isOptional: true, isIndexed: true },
+        /** Supabase `chat_pull_deltas` 커서 (0135). Firestore 경로에서는 미사용 */
+        { name: 'last_server_seq', type: 'number', isOptional: true, isIndexed: true },
+        /** Supabase 백필: 다음 `chat_pull_history_before_seq` 의 p_before_seq */
+        { name: 'backfill_before_server_seq', type: 'number', isOptional: true, isIndexed: true },
+        /** 내가 마지막으로 읽은 `chat_messages.server_seq` (미읽음 = last_server_seq - last_read_server_seq) */
+        { name: 'last_read_server_seq', type: 'number', isOptional: true, isIndexed: true },
+        /** 오프라인 읽음 — 서버 `chat_mark_read` 재시도 대기 seq */
+        { name: 'pending_read_last_seq', type: 'number', isOptional: true, isIndexed: true },
+        { name: 'pending_read_message_id', type: 'string', isOptional: true },
+        { name: 'pending_read_at_ms', type: 'number', isOptional: true },
       ],
     }),
 
@@ -70,6 +81,14 @@ export const schema = appSchema({
         { name: 'raw_payload_json', type: 'string', isOptional: true },
         { name: 'search_text', type: 'string', isOptional: true, isIndexed: true },
         { name: 'is_deleted', type: 'boolean', isOptional: true },
+        /** Supabase `chat_messages.seq` (델타·백필 커서) */
+        { name: 'server_seq', type: 'number', isOptional: true, isIndexed: true },
+        /** Supabase `chat_messages.client_mutation_id` — RPC 멱등·낙관적 전송 매칭 */
+        { name: 'client_mutation_id', type: 'string', isOptional: true, isIndexed: true },
+        /** Watermelon `chat_rooms.id` FK — @children / 파티션 무관 로컬 관계 */
+        { name: 'chat_room_id', type: 'string', isOptional: true, isIndexed: true },
+        /** 내가 해당 메시지까지 읽음(방 진입·읽음 처리 시 로컬 즉시 반영) */
+        { name: 'is_read', type: 'boolean', isOptional: true, isIndexed: true },
       ],
     }),
 
@@ -113,6 +132,24 @@ export const schema = appSchema({
         { name: 'emoji', type: 'string' },
         { name: 'sort_order', type: 'number', isIndexed: true },
         { name: 'major_code', type: 'string', isOptional: true },
+      ],
+    }),
+
+    /** 모임 상세 단건 스냅샷(`Meeting` JSON). id = 앱 meeting id. */
+    tableSchema({
+      name: 'cached_meeting_details',
+      columns: [
+        { name: 'meeting_json', type: 'string' },
+        { name: 'synced_at_ms', type: 'number', isIndexed: true },
+      ],
+    }),
+
+    /** 사용자 프로필 스냅샷(`UserProfile` JSON). id = `app_user_id`. */
+    tableSchema({
+      name: 'cached_user_profiles',
+      columns: [
+        { name: 'profile_json', type: 'string' },
+        { name: 'synced_at_ms', type: 'number', isIndexed: true },
       ],
     }),
   ],

@@ -35,7 +35,7 @@ export function getAppQueryClient(): QueryClient {
 
 const persister = createAsyncStoragePersister({
   storage: AsyncStorage,
-  key: 'ginit-react-query-meetings-v1',
+  key: 'ginit-react-query-meetings-v2',
   throttleTime: 2000,
 });
 
@@ -67,7 +67,7 @@ export function QueryClientPersistProvider({ children }: { children: ReactNode }
               (query.queryKey[0] === 'meetings' && query.queryKey[1] === 'my-feed') ||
               (query.queryKey[0] === 'meeting-chat' && query.queryKey[1] === 'messages') ||
               (query.queryKey[0] === 'social-chat' && query.queryKey[1] === 'messages') ||
-              query.queryKey[0] === 'chat_rooms' ||
+              (query.queryKey[0] === 'chat' && query.queryKey[1] === 'rooms') ||
               (query.queryKey[0] === 'meeting' &&
                 typeof query.queryKey[1] === 'string' &&
                 query.queryKey[1] !== '__none')),

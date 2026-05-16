@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { readLocalChatRoomUnreadCount } from '@/src/lib/offline-chat/offline-chat-rooms';
+
 export type ChatPushRoomType = 'meeting' | 'social_dm';
 
 export const CHAT_PUSH_ACTION_MARK_READ = 'chat_mark_read';
@@ -37,6 +39,8 @@ export type ChatPushDisplayData = {
   lastMessageId: string;
   senderName: string;
   senderPhotoUrl: string;
+  /** FCM `data` — `unread_count`(Edge·DB 트리거) → `serverUnreadCount` 최우선, 없으면 Watermelon */
+  serverUnreadCount?: number;
 };
 
 const STORAGE_PREFIX = 'ginit.chat_push_notification.room.v1:';
@@ -80,6 +84,22 @@ export function chatPushGroupSummaryNotificationId(roomType: ChatPushRoomType, r
 
 function stringValue(data: Record<string, string>, key: string): string {
   return String(data[key] ?? '').trim();
+}
+
+/**
+ * Edge `chat-user-notifications-broadcast`가 FCM `data`에 넣는 값과 동일 키 우선순위.
+ * 1) `unread_count` (DB `chat_room_participants` 트리거 반영 후 Edge가 조회)
+ * 2) `serverUnreadCount` 3) `unreadCount` (레거시)
+ */
+function parseServerUnreadCountFromFcmData(data: Record<string, string>): number | undefined {
+  const orderedKeys = ['unread_count', 'serverUnreadCount', 'unreadCount'] as const;
+  for (const key of orderedKeys) {
+    const raw = stringValue(data, key);
+    if (!raw) continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+  }
+  return undefined;
 }
 
 function normalizeMeetingChatNotificationTitle(raw: string): string {
@@ -126,6 +146,7 @@ export function parseChatPushDisplayData(
     lastMessageId,
     senderName,
     senderPhotoUrl,
+    serverUnreadCount: parseServerUnreadCountFromFcmData(data),
   };
 }
 
@@ -176,7 +197,6 @@ export async function upsertChatPushNotificationState(input: ChatPushDisplayData
   const now = Date.now();
   const prev = await readState(input.roomType, input.roomId);
   const messageId = input.lastMessageId || `local_${now}_${stableHash(input.body)}`;
-  const alreadyCounted = Boolean(prev?.messages.some((m) => m.id === messageId));
   const nextMessages = [
     {
       id: messageId,
@@ -188,6 +208,13 @@ export async function upsertChatPushNotificationState(input: ChatPushDisplayData
     ...(prev?.messages ?? []).filter((m) => m.id !== messageId),
   ].slice(0, MAX_MESSAGES_PER_ROOM);
 
+  let resolvedUnread = 0;
+  if (typeof input.serverUnreadCount === 'number' && Number.isFinite(input.serverUnreadCount)) {
+    resolvedUnread = Math.max(0, Math.floor(input.serverUnreadCount));
+  } else {
+    resolvedUnread = await readLocalChatRoomUnreadCount({ roomType: input.roomType, roomId: input.roomId });
+  }
+
   const next: ChatPushNotificationState = {
     roomType: input.roomType,
     roomId: input.roomId,
@@ -197,7 +224,7 @@ export async function upsertChatPushNotificationState(input: ChatPushDisplayData
     url: input.url,
     recipientUserId: input.recipientUserId || prev?.recipientUserId || '',
     lastMessageId: input.lastMessageId || prev?.lastMessageId || '',
-    unreadCount: Math.max(1, (prev?.unreadCount ?? 0) + (alreadyCounted ? 0 : 1)),
+    unreadCount: resolvedUnread,
     messages: nextMessages,
     updatedAt: now,
   };

@@ -1,20 +1,8 @@
 /**
- * 카테고리 마스터.
- * - 기본: Supabase `public.meeting_categories` + Realtime (`MeetingCategoriesProvider`)
- * - `EXPO_PUBLIC_CATEGORIES_SOURCE=firestore`: Firestore `categories` (레거시)
- *
- * Firestore 문서 필드 권장:
- *   label, emoji, order
- *
+ * 카테고리 마스터 — Supabase `public.meeting_categories` 단일 소스.
  * Supabase 컬럼: id, label, emoji, sort_order, major_code (`0006` + `0061`)
  */
-import { collection, onSnapshot, type Unsubscribe } from 'firebase/firestore';
-
 import { supabase } from '@/src/lib/supabase';
-
-import { getFirebaseFirestore } from './firebase';
-
-export const CATEGORIES_COLLECTION = 'categories';
 
 export type Category = {
   id: string;
@@ -63,27 +51,4 @@ export async function fetchMeetingCategoriesFromSupabase(): Promise<
     .map((r: unknown) => mapSupabaseCategoryRow(r as Record<string, unknown>))
     .filter((c: Category) => c.id);
   return { ok: true, list: sortCategories(list) };
-}
-
-/**
- * Firestore `categories` 구독(레거시 소스 전용).
- * - UI는 `MeetingCategoriesProvider` / `useMeetingCategories` 사용.
- */
-export function subscribeFirestoreCategories(
-  onData: (categories: Category[]) => void,
-  onError?: (message: string) => void,
-): Unsubscribe {
-  const ref = collection(getFirebaseFirestore(), CATEGORIES_COLLECTION);
-  return onSnapshot(
-    ref,
-    (snap) => {
-      const list = snap.docs
-        .map((d) => normalizeCategory(d.id, d.data() as Record<string, unknown>))
-        .sort((a, b) => (a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko')));
-      onData(list);
-    },
-    (err) => {
-      onError?.(err.message ?? '카테고리 구독 오류');
-    },
-  );
 }

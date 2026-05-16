@@ -71,9 +71,14 @@ export function FcmPushRoutingBootstrap() {
   const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =
     useInAppAlarms();
   const coldOpenHandledRef = useRef(false);
+  /** `pathname`·`userId` 등으로 effect가 여러 번 돌아도 `getInitialNotification` 조회·로그는 1회만 */
+  const coldInitialProbeScheduledRef = useRef(false);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
+
+    const runColdInitialOnce = !coldInitialProbeScheduledRef.current;
+    if (runColdInitialOnce) coldInitialProbeScheduledRef.current = true;
 
     const openFromData = (data: Record<string, unknown> | undefined, source: string) => {
       const deferReason = explainShouldDeferPushOpenNavigation({ isHydrated, userId, pathname });
@@ -139,35 +144,37 @@ export function FcmPushRoutingBootstrap() {
       openFromData(d, 'notifee_foreground_press');
     });
 
-    void (async () => {
-      if (coldOpenHandledRef.current) return;
-      const initial = await notifee.getInitialNotification();
-      if (initial?.notification) {
-        const d = notifeePayloadToData(initial.notification.data);
-        const n = d ? Object.keys(d).length : 0;
-        ginitNotifyDbg('FcmPushRouting', 'cold_notifee_getInitial', { hasNotification: true, dataKeyCount: n });
-        if (d && Object.keys(d).length > 0) {
-          coldOpenHandledRef.current = true;
-          openFromData(d, 'notifee_initial');
-          return;
+    if (runColdInitialOnce) {
+      void (async () => {
+        if (coldOpenHandledRef.current) return;
+        const initial = await notifee.getInitialNotification();
+        if (initial?.notification) {
+          const d = notifeePayloadToData(initial.notification.data);
+          const n = d ? Object.keys(d).length : 0;
+          ginitNotifyDbg('FcmPushRouting', 'cold_notifee_getInitial', { hasNotification: true, dataKeyCount: n });
+          if (d && Object.keys(d).length > 0) {
+            coldOpenHandledRef.current = true;
+            openFromData(d, 'notifee_initial');
+            return;
+          }
+          ginitNotifyDbg('FcmPushRouting', 'cold_notifee_skip_empty_data', {});
+        } else {
+          ginitNotifyDbg('FcmPushRouting', 'cold_notifee_getInitial_null', {});
         }
-        ginitNotifyDbg('FcmPushRouting', 'cold_notifee_skip_empty_data', {});
-      } else {
-        ginitNotifyDbg('FcmPushRouting', 'cold_notifee_getInitial_null', {});
-      }
-      const rm = await getInitialNotification(m);
-      const fcmRec = fcmDataToRecord(rm?.data);
-      const rawKeys = rm?.data && typeof rm.data === 'object' ? Object.keys(rm.data).length : 0;
-      ginitNotifyDbg('FcmPushRouting', 'cold_messaging_getInitial', {
-        hasRemoteMessage: Boolean(rm),
-        dataKeyCount: rawKeys,
-        actionable: Boolean(fcmRec && hasActionableFcmOpenData(fcmRec)),
-      });
-      if (fcmRec && hasActionableFcmOpenData(fcmRec)) {
-        coldOpenHandledRef.current = true;
-        openFromData(fcmRec, 'messaging_initial');
-      }
-    })();
+        const rm = await getInitialNotification(m);
+        const fcmRec = fcmDataToRecord(rm?.data);
+        const rawKeys = rm?.data && typeof rm.data === 'object' ? Object.keys(rm.data).length : 0;
+        ginitNotifyDbg('FcmPushRouting', 'cold_messaging_getInitial', {
+          hasRemoteMessage: Boolean(rm),
+          dataKeyCount: rawKeys,
+          actionable: Boolean(fcmRec && hasActionableFcmOpenData(fcmRec)),
+        });
+        if (fcmRec && hasActionableFcmOpenData(fcmRec)) {
+          coldOpenHandledRef.current = true;
+          openFromData(fcmRec, 'messaging_initial');
+        }
+      })();
+    }
 
     return () => {
       unsubOpened();

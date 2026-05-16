@@ -1,7 +1,10 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 
 import type { Meeting } from '@/src/lib/meetings';
+import { buildMeetingsFeedInfinitePagesAndPageParams } from '@/src/lib/meetings-feed-page-utils';
+import type { MeetingsFeedPageSlice } from '@/src/lib/meetings-feed-page-utils';
 import { mapSupabaseMeetingRow, PUBLIC_MEETINGS_PAGE_SIZE } from '@/src/lib/supabase-meetings-list';
+import type { PublicMeetingsFeedCursor } from '@/src/lib/supabase-meetings-list';
 
 /** (레거시) Realtime `postgres_changes` 페이로드 — 캐시 패치 유틸이 참조하는 형태 */
 export type MeetingsTableRealtimePayload = {
@@ -10,8 +13,7 @@ export type MeetingsTableRealtimePayload = {
   oldRecord: Record<string, unknown> | null;
 };
 
-export type MeetingsFeedPage = { meetings: Meeting[]; hasMore: boolean };
-export type FeedInfiniteData = InfiniteData<MeetingsFeedPage, number>;
+export type FeedInfiniteData = InfiniteData<MeetingsFeedPageSlice, PublicMeetingsFeedCursor | undefined>;
 
 function flattenFeedPages(data: FeedInfiniteData | undefined): Meeting[] {
   const pages = data?.pages ?? [];
@@ -19,28 +21,13 @@ function flattenFeedPages(data: FeedInfiniteData | undefined): Meeting[] {
   const out: Meeting[] = [];
   for (const p of pages) {
     for (const m of p.meetings) {
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
+      const id = typeof m.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
       out.push(m);
     }
   }
   return out;
-}
-
-function buildPagesFromMeetings(
-  meetings: readonly Meeting[],
-  pageCount: number,
-  remoteSummaryCount: number,
-): MeetingsFeedPage[] {
-  const count = Math.max(1, pageCount);
-  return Array.from({ length: count }, (_, idx) => {
-    const from = idx * PUBLIC_MEETINGS_PAGE_SIZE;
-    const slice = meetings.slice(from, from + PUBLIC_MEETINGS_PAGE_SIZE);
-    return {
-      meetings: slice,
-      hasMore: remoteSummaryCount > from + slice.length,
-    };
-  }).filter((page, idx) => idx === 0 || page.meetings.length > 0);
 }
 
 function meetingIdFromRealtimeRow(row: Record<string, unknown>): string {
@@ -68,9 +55,15 @@ export function applyMeetingsTableRealtimePayloadToQueryCaches(
     qc.setQueryData<FeedInfiniteData>(feedKey, (prev) => {
       if (!prev) return prev;
       const flat = flattenFeedPages(prev).filter((m) => m.id !== id);
+      const { pages, pageParams } = buildMeetingsFeedInfinitePagesAndPageParams(
+        flat,
+        prev.pages.length,
+        Math.max(PUBLIC_MEETINGS_PAGE_SIZE, flat.length),
+      );
       return {
         ...prev,
-        pages: buildPagesFromMeetings(flat, prev.pages.length, Math.max(PUBLIC_MEETINGS_PAGE_SIZE, flat.length)),
+        pages,
+        pageParams,
       };
     });
     if (myFeedKey) {
@@ -106,9 +99,15 @@ export function applyMeetingsTableRealtimePayloadToQueryCaches(
         flat = [mapped, ...flat.filter((m) => m.id !== mapped.id)];
       }
     }
+    const { pages, pageParams } = buildMeetingsFeedInfinitePagesAndPageParams(
+      flat,
+      prev.pages.length,
+      Math.max(PUBLIC_MEETINGS_PAGE_SIZE, flat.length),
+    );
     return {
       ...prev,
-      pages: buildPagesFromMeetings(flat, prev.pages.length, Math.max(PUBLIC_MEETINGS_PAGE_SIZE, flat.length)),
+      pages,
+      pageParams,
     };
   });
 

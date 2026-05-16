@@ -1,5 +1,8 @@
+import type { Relation } from '@nozbe/watermelondb';
 import { Model } from '@nozbe/watermelondb';
-import { field } from '@nozbe/watermelondb/decorators';
+import { field, relation } from '@nozbe/watermelondb/decorators';
+
+import type { ChatRoom } from './ChatRoom';
 
 export class ChatMessage extends Model {
   static table = 'chat_messages' as const;
@@ -28,5 +31,12 @@ export class ChatMessage extends Model {
   @field('search_text') searchText!: string | null;
 
   @field('is_deleted') isDeleted!: boolean | null;
+  /** Supabase `chat_messages.seq` */
+  @field('server_seq') serverSeq!: number | null;
+  @field('client_mutation_id') clientMutationId!: string | null;
+  @field('chat_room_id') chatRoomId!: string | null;
+  @field('is_read') isRead!: boolean | null;
+
+  @relation('chat_rooms', 'chat_room_id') room!: Relation<ChatRoom>;
 }
 

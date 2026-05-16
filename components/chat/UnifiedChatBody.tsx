@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {FlashList, type FlashListRef } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/src/lib/ginit-timestamp';
 import { type RefObject, useCallback, useMemo, useRef, useState } from 'react';
 import { type LayoutChangeEvent, StyleSheet, Text, View} from 'react-native';
 import { runOnJS } from 'react-native-reanimated';

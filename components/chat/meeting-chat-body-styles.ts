@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 
@@ -90,6 +90,12 @@ export const meetingChatBodyStyles = StyleSheet.create({
     backgroundColor: 'rgba(220, 38, 38, 0.12)',
   },
   chatErrorText: { fontSize: 12, color: '#991b1b' },
+  chatReconnectBanner: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(69, 39, 160, 0.1)',
+  },
+  chatReconnectText: { fontSize: 12, color: '#4527A0' },
   chatListFooterSpinner: {
     paddingVertical: 12,
     alignItems: 'center',
@@ -100,6 +106,10 @@ export const meetingChatBodyStyles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 16,
     flexGrow: 1,
+  },
+  /** FlatList 행: `maxWidth: '78%'` 말풍선이 퍼센트 기준을 잡도록 전체 너비 확보 */
+  listRowRoot: {
+    width: '100%',
   },
   emptyChat: {
     textAlign: 'center',
@@ -139,6 +149,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 6,
     marginBottom: 10,
+    width: '100%',
   },
   bubbleMineWrap: {
     maxWidth: '78%',
@@ -152,6 +163,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     width: '100%',
   },
   bubbleMine: {
+    alignSelf: 'flex-start',
     backgroundColor: 'rgba(103, 58, 183, 0.22)',
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -170,6 +182,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     fontSize: 15,
     color: '#0f172a',
     lineHeight: 20,
+    ...(Platform.OS === 'android' ? ({ textBreakStrategy: 'simple' } as const) : null),
   },
   chatImage: {
     width: 220,
@@ -322,6 +335,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8,
     marginBottom: 10,
+    width: '100%',
   },
   avatarCol: {
     width: 40,
@@ -388,6 +402,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     width: '100%',
   },
   bubbleOther: {
+    alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.58)',
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -420,6 +435,7 @@ export const meetingChatBodyStyles = StyleSheet.create({
     fontSize: 15,
     color: '#0f172a',
     lineHeight: 20,
+    ...(Platform.OS === 'android' ? ({ textBreakStrategy: 'simple' } as const) : null),
   },
   imageCaptionOther: {
     marginTop: 6,

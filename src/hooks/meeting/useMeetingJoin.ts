@@ -1,4 +1,10 @@
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import {
+  patchMeetingDetailInWatermelon,
+  restoreMeetingDetailInWatermelon,
+} from '@/src/lib/meeting-detail-watermelon-cache';
+import { refreshMeetingDetailCaches } from '@/src/lib/meeting-detail-cache-mutations';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import {
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
@@ -180,8 +186,19 @@ export function useMeetingJoin({
         placeChipIds: effectivePlaceIds,
         movieChipIds: effectiveMovieIds,
       };
-      await joinMeeting(meeting.id, sessionPk, joinVotes);
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+      const pk = normalizeParticipantId(sessionPk) ?? sessionPk;
+      const { previous } = await patchMeetingDetailInWatermelon(meeting.id, (m) => {
+        const ids = new Set((m.participantIds ?? []).map((x) => String(x).trim()).filter(Boolean));
+        ids.add(pk);
+        return { ...m, participantIds: [...ids] };
+      });
+      try {
+        await joinMeeting(meeting.id, sessionPk, joinVotes);
+        void refreshMeetingDetailCaches(queryClient, meeting.id);
+      } catch (joinErr) {
+        await restoreMeetingDetailInWatermelon(meeting.id, previous);
+        throw joinErr;
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       if (isConfirmedScheduleOverlapErrorMessage(msg)) {

@@ -1,3 +1,4 @@
+import { readStoredUserId } from '@/src/lib/app-user-id';
 import type { OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
 import { incrementalSyncRoomMessagesToLocal } from '@/src/lib/offline-chat/offline-chat-sync';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
@@ -30,9 +31,14 @@ function parseChatRoomFromPushData(data: Record<string, unknown> | undefined | n
   };
 }
 
+/**
+ * FCM 등에서 최근 메시지를 Watermelon으로 당겨 목록 미리보기·정렬을 맞춤.
+ * `incrementalSyncRoomMessagesToLocal`는 `appUserId` 없으면 즉시 no-op이므로 세션 id를 반드시 넘깁니다.
+ */
 export function prewarmChatRoomMessagesFromPushData(
   data: Record<string, unknown> | undefined | null,
   source: string,
+  appUserId?: string | null,
 ): boolean {
   const parsed = parseChatRoomFromPushData(data);
   if (!parsed) return false;
@@ -46,15 +52,29 @@ export function prewarmChatRoomMessagesFromPushData(
   if (now - lastSeenAt < PREWARM_DEDUPE_MS) return false;
   prewarmSeenAtByKey.set(dedupeKey, now);
 
-  const task = incrementalSyncRoomMessagesToLocal({
-    key: { roomType: parsed.roomType, roomId: parsed.roomId },
-    initialSinceMs: now - 24 * 60 * 60 * 1000,
-    latestBlockSize: 20,
-    pageSize: 50,
-    maxDocs: 200,
-    maxPagesPerRun: 1,
-    timeBudgetMs: 900,
-  })
+  const task = (async () => {
+    const fromArg = typeof appUserId === 'string' ? appUserId.trim() : '';
+    const fromStore = (await readStoredUserId())?.trim() ?? '';
+    const me = fromArg || fromStore;
+    if (!me) {
+      ginitNotifyDbg('chat-prewarm', 'skip_no_app_user_id', {
+        source,
+        roomType: parsed.roomType,
+        roomId: parsed.roomId,
+      });
+      return { pulledDocs: 0, lastSyncedAtMs: 0 };
+    }
+    return incrementalSyncRoomMessagesToLocal({
+      key: { roomType: parsed.roomType, roomId: parsed.roomId },
+      appUserId: me,
+      initialSinceMs: now - 24 * 60 * 60 * 1000,
+      latestBlockSize: 20,
+      pageSize: 50,
+      maxDocs: 200,
+      maxPagesPerRun: 1,
+      timeBudgetMs: 900,
+    });
+  })()
     .then((res) => {
       ginitNotifyDbg('chat-prewarm', 'done', {
         source,

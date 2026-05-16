@@ -1,0 +1,45 @@
+---
+description: 모임 목록(피드)과 모임 채팅 목록(채팅 방·진입 목록) 용어·코드 경로 구분 — 혼동 방지
+alwaysApply: true
+---
+
+# 모임 목록 vs 모임 채팅 목록 (엄격 구분)
+
+에이전트·리뷰어는 아래를 **다른 도메인**으로 취급한다. 이름이 비슷해도 데이터 소스·쿼리 키·동기화 대상을 섞어 설명하거나 한쪽 로직을 다른 쪽에 적용하지 않는다.
+
+## 1. 용어 정의 (한글 고정)
+
+| 한글 용어 | 의미 | 비고 |
+|-----------|------|------|
+| **모임 목록** | 모임 **엔티티**(`Meeting`) 나열 — 탐색·피드·참여 모임 카드 | “공개 피드”, “내 모임 RPC”, “홈 피드”와 동일 계열 |
+| **모임 채팅 목록** | **채팅** 관점의 목록 — 모임 채팅방으로 들어가기 위한 줄, 또는 채팅 **방**(`room`) 목록 | 미리보기·읽지 않음·마지막 메시지 등 **채팅 상태**가 핵심 |
+
+**금지:** “모임 목록”이라고만 쓰고 채팅 탭의 모임 줄(gather)과 홈 피드를 구분하지 않기. 필요 시 **“홈 모임 목록”** / **“채팅 탭 모임(채팅) 줄”**처럼 수식어를 붙인다.
+
+## 2. 코드·데이터 매핑
+
+### 모임 목록 (Meeting catalog / feed)
+
+- **주 UI:** `app/(tabs)/index.tsx` (홈·피드)
+- **TanStack Query:** `useMeetingsFeedInfiniteQuery` → 키 `['meetings','feed','supabase']`; `useMyMeetingsFeedSync` → `['meetings','my-feed','supabase', …]`. 모임 델타는 **`meeting-sync-service`** 만 수정.
+- **Supabase:** 주로 `meetings` 행, `ledger_list_my_meetings_for_feed`, 증분 요약 `list_meeting_change_summaries` / `list_my_meeting_change_summaries`, 상세 `get_meetings_for_sync_by_ids`
+- **동기화 예:** `runMeetingsUserActionDeltaSync`, `performMeetingsQuerySurgicalSync`(`meeting-sync-service`), `applyPublicMeetingsFeedSummarySync` 등 — **모임 메타데이터 캐시**만 대상
+
+### 모임 채팅 목록 (Chat-side list)
+
+- **Realtime·쿼리 스냅샷:** `['chat','rooms', userId]` — **`chat-sync-service`** + `subscribeGlobalUserSyncChannel`(Supabase `chat_room_participants` postgres_changes를 `user_notifications:{profiles.id}` 멀티플렉스 채널에서 수신). **`['meetings', …]` 캐시와 교차 수정 금지.**
+- **채팅 탭 `gather`:** `app/(tabs)/chat.tsx` — 행은 `Meeting`을 쓰더라도 목적은 **모임 채팅방 진입**; 읽음·미리보기는 `useChatRoomListEngine`, 로컬 채팅 요약 등 **채팅 도메인**과 결합된다.
+- **채팅 탭 `social`:** `useChatRoomsInfiniteQuery` — **소셜 DM 채팅 방** 목록(모임과 별개의 채팅 방 엔티티)
+- **TanStack / 로컬:** 채팅 방·메시지·Watermelon 채팅 관련 훅·키 (`use-chat-rooms-infinite-query`, `useChatRoomListEngine` 등). **모임 피드 쿼리 키와 동일시하지 않는다.**
+
+## 3. 구현 규칙 (혼동 방지)
+
+1. **모임 목록용 증분/델타 동기화**(예: `list_meeting_change_summaries` → `get_meetings_for_sync_by_ids` → `meetings` 쿼리 캐시 패치)는 **모임 목록 쿼리**에만 적용한다. “채팅 목록 새로고침” 요청만으로 모임 피드 RPC를 바꾸지 않는다(반대도 동일).
+2. **채팅 목록** 갱신은 채팅 전용 경로(채팅 방 목록 쿼리, 로컬 동기, 소셜 룸 sync 등)로 처리한다.
+3. 문서·커밋·PR·코멘트에서는 위 표의 용어를 쓰거나, 파일/훅 이름을 **직접 인용**해 어떤 목록인지 명시한다.
+
+## 4. 사용자 요청 해석 가이드
+
+- “모임 **피드** / **홈** / **탐색** / **카드 목록**” → **모임 목록**
+- “채팅 탭 **모임** / **모임 채팅** / **채팅방 목록** / **읽지 않은 메시지**” → **모임 채팅 목록**(또는 소셜 DM이면 **채팅 방 목록**으로 별도 명시)
+- 애매하면 **한 문장으로 둘 중 무엇을 말하는지 확인**한 뒤 작업한다.

@@ -24,6 +24,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useUserProfileQuery } from '@/src/hooks/use-user-profile-query';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -36,7 +37,7 @@ import {
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import { PROFILE_META_PHOTO_COVER, type ProfilePhotoCover } from '@/src/lib/profile-photo-cover';
 import { uploadProfilePhoto } from '@/src/lib/profile-photo';
-import { ensureUserProfile, updateUserProfile, type UserProfile } from '@/src/lib/user-profile';
+import { updateUserProfile, type UserProfile } from '@/src/lib/user-profile';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
@@ -68,46 +69,37 @@ export default function ProfileTab() {
   const [trustSectionY, setTrustSectionY] = useState<number | null>(null);
   const [profileBodyRefreshTrigger, setProfileBodyRefreshTrigger] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
-  const [profileInitialLoading, setProfileInitialLoading] = useState(Boolean(profilePk));
+  const {
+    profile,
+    loading: profileQueryLoading,
+    refetch: refetchProfileQuery,
+    profileReady,
+  } = useUserProfileQuery(profilePk, { refetchOnMount: 'always', ensureMinimal: true });
+  const profileInitialLoading = Boolean(profilePk) && (!profileReady || profileQueryLoading);
   const isSignedIn = !!profilePk;
+
+  const applyProfileToLocalState = useCallback((p: UserProfile) => {
+    setNickname(p.nickname);
+    setPhotoUrl(p.photoUrl ?? '');
+    const nextTrust = effectiveGTrust(p);
+    setGTrust(nextTrust);
+    setGXp(typeof p.gXp === 'number' && Number.isFinite(p.gXp) ? Math.trunc(p.gXp) : 0);
+    setGLevel(effectiveGLevel(p));
+    setPenaltyCount(
+      typeof p.penaltyCount === 'number' && Number.isFinite(p.penaltyCount) ? Math.max(0, Math.trunc(p.penaltyCount)) : 0,
+    );
+    setIsRestricted(p.isRestricted === true);
+  }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    applyProfileToLocalState(profile);
+  }, [profile, applyProfileToLocalState]);
 
   const refreshProfile = useCallback(async () => {
     if (!profilePk) return;
-    try {
-      const p = await ensureUserProfile(profilePk);
-      setNickname(p.nickname);
-      setPhotoUrl(p.photoUrl ?? '');
-      const nextTrust = effectiveGTrust(p);
-      setGTrust(nextTrust);
-      setGXp(typeof p.gXp === 'number' && Number.isFinite(p.gXp) ? Math.trunc(p.gXp) : 0);
-      setGLevel(effectiveGLevel(p));
-      setPenaltyCount(typeof p.penaltyCount === 'number' && Number.isFinite(p.penaltyCount) ? Math.max(0, Math.trunc(p.penaltyCount)) : 0);
-      setIsRestricted(p.isRestricted === true);
-    } catch {
-      setNickname('');
-      setPhotoUrl('');
-    }
-  }, [profilePk]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!profilePk) {
-        setProfileInitialLoading(false);
-        return;
-      }
-      setProfileInitialLoading(true);
-      try {
-        await refreshProfile();
-      } finally {
-        if (cancelled) return;
-        setProfileInitialLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [profilePk, refreshProfile]);
+    await refetchProfileQuery();
+  }, [profilePk, refetchProfileQuery]);
 
   useSyncOnScreenFocus(
     useCallback(async () => {

@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
-import type { DocumentSnapshot, Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/src/lib/ginit-timestamp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import {
@@ -19,12 +19,13 @@ import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import {
-    deleteMeetingChatImageMessageBestEffort,
-    fetchMeetingChatImagesPage,
-    type MeetingChatMessage,
+  deleteMeetingChatImageMessageBestEffort,
+  fetchMeetingChatImagesPage,
+  type MeetingChatImagesPageCursor,
+  type MeetingChatMessage,
 } from '@/src/lib/meeting-chat';
+import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import type { Meeting } from '@/src/lib/meetings';
-import { subscribeMeetingById } from '@/src/lib/meetings';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
@@ -73,7 +74,9 @@ export default function MeetingChatMediaScreen() {
       : '';
   const { userId } = useUserSession();
 
-  const [meeting, setMeeting] = useState<Meeting | null | undefined>(undefined);
+  const { meeting, meetingReady, loading: meetingLoading } = useMeetingDetailQuery(meetingId, {
+    refetchOnMount: 'always',
+  });
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [rows, setRows] = useState<MeetingChatMessage[]>([]);
   const [busy, setBusy] = useState(true);
@@ -84,26 +87,14 @@ export default function MeetingChatMediaScreen() {
   const [imageViewer, setImageViewer] = useState<{ index: number } | null>(null);
   const [viewerBusy, setViewerBusy] = useState(false);
 
-  const cursorRef = useRef<DocumentSnapshot | null>(null);
+  const cursorRef = useRef<MeetingChatImagesPageCursor | null>(null);
   const loadSeq = useRef(0);
 
   const allowed = useMemo(() => {
-    if (meeting === undefined) return null;
+    if (!meetingReady) return null;
     if (!meeting) return false;
     return isUserJoinedMeeting(meeting, userId);
-  }, [meeting, userId]);
-
-  useEffect(() => {
-    if (!meetingId) {
-      setMeeting(null);
-      return;
-    }
-    return subscribeMeetingById(
-      meetingId,
-      (m) => setMeeting(m),
-      () => {},
-    );
-  }, [meetingId]);
+  }, [meeting, userId, meetingReady]);
 
   useEffect(() => {
     if (!meeting || allowed !== true) return;
@@ -227,7 +218,7 @@ export default function MeetingChatMediaScreen() {
     );
   }
 
-  if (meeting === undefined) {
+  if (!meetingReady || meetingLoading) {
     return (
       <SafeAreaView style={styles.center} edges={['top', 'bottom']}>
         <ActivityIndicator color={GinitTheme.colors.primary} />
@@ -324,7 +315,13 @@ export default function MeetingChatMediaScreen() {
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel="사진 크게 보기">
-                  <Image source={{ uri: u }} style={styles.thumbImg} contentFit="cover" />
+                  <Image
+                    source={{ uri: u }}
+                    style={styles.thumbImg}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                    recyclingKey={`${item.id}:${u}`}
+                  />
                 </GinitPressable>
               );
             }}

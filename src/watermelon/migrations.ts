@@ -188,6 +188,102 @@ export const migrations = schemaMigrations({
         ),
       ],
     },
+    {
+      toVersion: 9,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [{ name: 'last_server_seq', type: 'number', isOptional: true, isIndexed: true }],
+        }),
+      ],
+    },
+    {
+      toVersion: 10,
+      steps: [
+        addColumns({
+          table: 'chat_messages',
+          columns: [{ name: 'server_seq', type: 'number', isOptional: true, isIndexed: true }],
+        }),
+        addColumns({
+          table: 'chat_rooms',
+          columns: [{ name: 'backfill_before_server_seq', type: 'number', isOptional: true, isIndexed: true }],
+        }),
+      ],
+    },
+    {
+      toVersion: 11,
+      steps: [
+        addColumns({
+          table: 'chat_messages',
+          columns: [
+            { name: 'client_mutation_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'chat_room_id', type: 'string', isOptional: true, isIndexed: true },
+          ],
+        }),
+        unsafeExecuteSql(
+          "update chat_messages set chat_room_id = (select id from chat_rooms where chat_rooms.room_id = chat_messages.room_id and chat_rooms.room_type = chat_messages.room_type limit 1) where chat_room_id is null;",
+        ),
+      ],
+    },
+    {
+      toVersion: 12,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [{ name: 'last_read_server_seq', type: 'number', isOptional: true, isIndexed: true }],
+        }),
+      ],
+    },
+    {
+      toVersion: 13,
+      steps: [
+        addColumns({
+          table: 'chat_rooms',
+          columns: [{ name: 'message_read_last_seq_by_json', type: 'string', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      toVersion: 14,
+      steps: [
+        addColumns({
+          table: 'chat_messages',
+          columns: [{ name: 'is_read', type: 'boolean', isOptional: true, isIndexed: true }],
+        }),
+        addColumns({
+          table: 'chat_rooms',
+          columns: [
+            { name: 'pending_read_last_seq', type: 'number', isOptional: true, isIndexed: true },
+            { name: 'pending_read_message_id', type: 'string', isOptional: true },
+            { name: 'pending_read_at_ms', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 15,
+      steps: [
+        createTable({
+          name: 'cached_meeting_details',
+          columns: [
+            { name: 'meeting_json', type: 'string' },
+            { name: 'synced_at_ms', type: 'number', isIndexed: true },
+          ],
+        }),
+      ],
+    },
+    {
+      toVersion: 16,
+      steps: [
+        createTable({
+          name: 'cached_user_profiles',
+          columns: [
+            { name: 'profile_json', type: 'string' },
+            { name: 'synced_at_ms', type: 'number', isIndexed: true },
+          ],
+        }),
+      ],
+    },
   ],
 });
 

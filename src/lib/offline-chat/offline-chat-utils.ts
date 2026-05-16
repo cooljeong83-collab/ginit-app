@@ -1,4 +1,4 @@
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/src/lib/ginit-timestamp';
 
 /**
  * WatermelonDB(SQLite)·Hermes JSI로 넘길 때 U+0000·고아 UTF-16 서로게이트로

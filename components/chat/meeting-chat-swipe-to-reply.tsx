@@ -77,7 +77,7 @@ export function MeetingChatSwipeToReply({
       onGestureEvent={onGestureEvent}
       onHandlerStateChange={onHandlerStateChange}
     >
-      <Animated.View style={{ transform: [{ translateX }] }}>{children}</Animated.View>
+      <Animated.View style={{ width: '100%', transform: [{ translateX }] }}>{children}</Animated.View>
     </PanGestureHandler>
   );
 }

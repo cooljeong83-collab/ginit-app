@@ -14,6 +14,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useUserProfileQuery } from '@/src/hooks/use-user-profile-query';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { accountDeletionRejoinPolicyNotice, deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, validateAccountDeletionPreflight, wipeLocalAppData } from '@/src/lib/account-deletion';
 import { normalizeUserId } from '@/src/lib/app-user-id';
@@ -31,8 +32,8 @@ import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { syncMeetingComplianceToSupabase } from '@/src/lib/supabase-profile-compliance';
 import {
-    ensureUserProfile,
     firestoreTimestampLikeToDate,
+    getUserProfile,
     hasTermsAgreementRecorded,
     isDemographicsIncomplete,
     isMeetingServiceComplianceComplete,
@@ -42,9 +43,10 @@ import {
     readShareActivityStatusEnabled,
     readGooglePeopleDemographicsLocks,
     updateUserProfile,
+    type UserProfile,
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
-import { serverTimestamp, Timestamp } from 'firebase/firestore';
+import { serverTimestamp, Timestamp } from '@/src/lib/ginit-timestamp';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 /** `Switch.trackColor` */
@@ -62,6 +64,11 @@ export default function ProfileEditScreen() {
     if (em) return normalizeUserId(em) ?? '';
     return '';
   }, [userId, authProfile?.email]);
+
+  const { profile: cachedProfile, refetch: refetchProfileQuery } = useUserProfileQuery(profilePk, {
+    refetchOnMount: 'always',
+    ensureMinimal: true,
+  });
 
   const [profileBusy, setProfileBusy] = useState(false);
   const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
@@ -116,135 +123,66 @@ export default function ProfileEditScreen() {
     if (otpCode.replace(/\D/g, '').length >= 6) otpSmsUserConsent.stop();
   }, [otpCode, otpSmsUserConsent]);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      if (!profilePk) return;
-      try {
-        const p = await ensureUserProfile(profilePk);
-        if (!alive) return;
-        setNickname(p.nickname);
-        setPhotoUrl(p.photoUrl ?? '');
-        setPhotoCover(parseProfilePhotoCover(p.metadata));
-        setBio(p.bio ?? '');
-        setShareActivityStatus(readShareActivityStatusEnabled(p.metadata));
-        setIsPhoneVerified(isUserPhoneVerified(p));
-        const phone = p.phone?.trim();
-        const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
-        const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
-        const phoneDisplay =
-          phoneDigits.length <= 3
-            ? phoneDigits
-            : phoneDigits.length <= 7
-              ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
-              : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
-        setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
-        setPhoneField(phoneDisplay);
-        const gRaw = p.gender?.trim() ?? '';
-        const gNorm =
-          gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
-        setGenderDemo(gNorm);
-        const bd = p.birthDate as unknown;
-        const bdDate =
-          bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
-            ? (bd as { toDate: () => Date }).toDate()
-            : null;
-        if (bdDate) {
-          setBirthDemo({ year: bdDate.getFullYear(), month: bdDate.getMonth() + 1, day: bdDate.getDate() });
-        } else {
-          const y = typeof p.birthYear === 'number' ? p.birthYear : null;
-          const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
-          const d = typeof p.birthDay === 'number' ? p.birthDay : null;
-          if (y && m && d) setBirthDemo({ year: y, month: m, day: d });
-        }
-        const locks = readGooglePeopleDemographicsLocks(p);
-        setGoogleDemoGenderLocked(locks.genderLocked);
-        setGoogleDemoBirthLocked(locks.birthLocked);
-        setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
-      } catch {
-        if (!alive) return;
-        setNickname('');
-        setPhotoUrl('');
-        setPhotoCover(null);
-        setIsPhoneVerified(false);
-        setVerifiedPhoneLabel(null);
-        setPhoneField('');
-        setOtpVerificationId(null);
-        setOtpCode('');
-        setOtpError(null);
-        setGenderDemo(null);
-        setMeetingAuthComplete(false);
-        setGoogleDemoGenderLocked(false);
-        setGoogleDemoBirthLocked(false);
-        setShareActivityStatus(false);
+  const applyProfileToEditState = useCallback(
+    (p: UserProfile) => {
+      setNickname(p.nickname);
+      setPhotoUrl(p.photoUrl ?? '');
+      setPhotoCover(parseProfilePhotoCover(p.metadata));
+      setBio(p.bio ?? '');
+      setShareActivityStatus(readShareActivityStatusEnabled(p.metadata));
+      setIsPhoneVerified(isUserPhoneVerified(p));
+      const phone = p.phone?.trim();
+      const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
+      const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
+      const phoneDisplay =
+        phoneDigits.length <= 3
+          ? phoneDigits
+          : phoneDigits.length <= 7
+            ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
+            : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
+      setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
+      setPhoneField(phoneDisplay);
+      const gRaw = p.gender?.trim() ?? '';
+      const gNorm = gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
+      setGenderDemo(gNorm);
+      const bd = p.birthDate as unknown;
+      const bdDate =
+        bd && typeof bd === 'object' && 'toDate' in bd && typeof (bd as { toDate?: unknown }).toDate === 'function'
+          ? (bd as { toDate: () => Date }).toDate()
+          : null;
+      if (bdDate) {
+        setBirthDemo({ year: bdDate.getFullYear(), month: bdDate.getMonth() + 1, day: bdDate.getDate() });
+      } else {
+        const y = typeof p.birthYear === 'number' ? p.birthYear : null;
+        const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
+        const d = typeof p.birthDay === 'number' ? p.birthDay : null;
+        if (y && m && d) setBirthDemo({ year: y, month: m, day: d });
       }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [profilePk]);
+      const locks = readGooglePeopleDemographicsLocks(p);
+      setGoogleDemoGenderLocked(locks.genderLocked);
+      setGoogleDemoBirthLocked(locks.birthLocked);
+      setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
+    },
+    [profilePk],
+  );
+
+  useEffect(() => {
+    if (!cachedProfile) return;
+    applyProfileToEditState(cachedProfile);
+  }, [cachedProfile, applyProfileToEditState]);
 
   useEffect(() => {
     if (!authSheetVisible || !profilePk) return;
-    let alive = true;
-    void (async () => {
-      try {
-        const p = await ensureUserProfile(profilePk);
-        if (!alive) return;
-        const complete = isMeetingServiceComplianceComplete(p, profilePk);
-        setMeetingAuthComplete(complete);
-        // 완료 상태면 체크가 항상 보이도록(terms_agreed_at 누락 등 예외에도 잠금 UI 유지)
-        setTermsConsentChecked(complete ? true : hasTermsAgreementRecorded(p));
+    void refetchProfileQuery();
+  }, [authSheetVisible, profilePk, refetchProfileQuery]);
 
-        // 인증 팝업 진입 시: 이미 저장된 정보를 state에 다시 세팅(로그아웃/재로그인 후에도 잠금 유지)
-        setIsPhoneVerified(isUserPhoneVerified(p));
-        const phone = p.phone?.trim();
-        const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
-        const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
-        const phoneDisplay =
-          phoneDigits.length <= 3
-            ? phoneDigits
-            : phoneDigits.length <= 7
-              ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
-              : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
-        setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
-        setPhoneField(phoneDisplay);
-
-        const gRaw = p.gender?.trim() ?? '';
-        const gNorm =
-          gRaw === 'MALE' || gRaw === 'FEMALE' ? gRaw : mapGooglePeopleGenderToProfileGender(gRaw);
-        setGenderDemo(gNorm);
-
-        const bdDateOpen = firestoreTimestampLikeToDate(p.birthDate);
-        if (bdDateOpen) {
-          setBirthDemo({
-            year: bdDateOpen.getFullYear(),
-            month: bdDateOpen.getMonth() + 1,
-            day: bdDateOpen.getDate(),
-          });
-        } else {
-          const y = typeof p.birthYear === 'number' ? p.birthYear : null;
-          const m = typeof p.birthMonth === 'number' ? p.birthMonth : null;
-          const d = typeof p.birthDay === 'number' ? p.birthDay : null;
-          if (y) {
-            setBirthDemo({ year: y, month: m ?? 1, day: d ?? 1 });
-          }
-        }
-        const locksOpen = readGooglePeopleDemographicsLocks(p);
-        setGoogleDemoGenderLocked(locksOpen.genderLocked);
-        setGoogleDemoBirthLocked(locksOpen.birthLocked);
-      } catch {
-        if (!alive) return;
-        setTermsConsentChecked(false);
-        setMeetingAuthComplete(false);
-        setGoogleDemoGenderLocked(false);
-        setGoogleDemoBirthLocked(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [authSheetVisible, profilePk]);
+  useEffect(() => {
+    if (!authSheetVisible || !cachedProfile) return;
+    const p = cachedProfile;
+    const complete = isMeetingServiceComplianceComplete(p, profilePk);
+    setMeetingAuthComplete(complete);
+    setTermsConsentChecked(complete ? true : hasTermsAgreementRecorded(p));
+  }, [authSheetVisible, cachedProfile, profilePk]);
 
   const onCropConfirm = useCallback((cover: ProfilePhotoCover) => {
     setCropSession((prev) => {
@@ -338,7 +276,8 @@ export default function ProfileEditScreen() {
     }
     setProfileBusy(true);
     try {
-      const pCur = await ensureUserProfile(profilePk);
+      const pCur = cachedProfile ?? (await getUserProfile(profilePk));
+      if (!pCur) throw new Error('프로필을 불러오지 못했습니다.');
       const patch: Parameters<typeof updateUserProfile>[1] = {
         nickname: nickname.trim(),
         photoUrl: photoUrl.trim() || null,
@@ -362,7 +301,6 @@ export default function ProfileEditScreen() {
         }
       }
       await updateUserProfile(profilePk, patch);
-      await ensureUserProfile(profilePk);
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('저장됨', '프로필을 반영했어요.');
       safeRouterBack(router);
@@ -374,6 +312,7 @@ export default function ProfileEditScreen() {
     }
   }, [
     profilePk,
+    cachedProfile,
     nickname,
     photoUrl,
     bio,
@@ -478,21 +417,8 @@ export default function ProfileEditScreen() {
 
   const refreshEditProfile = useCallback(async () => {
     if (!profilePk) return;
-    const p = await ensureUserProfile(profilePk);
-    setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, profilePk));
-    setIsPhoneVerified(isUserPhoneVerified(p));
-    const phone = p.phone?.trim();
-    const phoneDisplayRaw = phone ? formatNormalizedPhoneKrDisplay(phone) : '';
-    const phoneDigits = phoneDisplayRaw.replace(/\D/g, '').slice(0, 11);
-    const phoneDisplay =
-      phoneDigits.length <= 3
-        ? phoneDigits
-        : phoneDigits.length <= 7
-          ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3)}`
-          : `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 7)}-${phoneDigits.slice(7)}`;
-    setVerifiedPhoneLabel(phoneDisplay ? phoneDisplay : null);
-    setPhoneField(phoneDisplay);
-  }, [profilePk]);
+    await refetchProfileQuery();
+  }, [profilePk, refetchProfileQuery]);
 
   const onSubmitMeetingCompliance = useCallback(async () => {
     if (!profilePk) {
@@ -512,7 +438,11 @@ export default function ProfileEditScreen() {
     });
     if (!ok) return;
 
-    const p0 = await ensureUserProfile(profilePk);
+    const p0 = cachedProfile ?? (await getUserProfile(profilePk));
+    if (!p0) {
+      Alert.alert('안내', '프로필을 불러오지 못했습니다.');
+      return;
+    }
     if (!hasTermsAgreementRecorded(p0) && !termsConsentChecked) {
       Alert.alert('동의 필요', '모임 이용 정보 수집 및 이용에 동의해 주세요.');
       return;
@@ -544,7 +474,7 @@ export default function ProfileEditScreen() {
         compliancePatch.birthDate = Timestamp.fromDate(new Date(birthDemo.year, birthDemo.month - 1, birthDemo.day));
       }
       await updateUserProfile(profilePk, compliancePatch);
-      const p = await ensureUserProfile(profilePk);
+      const p = (await getUserProfile(profilePk)) ?? p0;
       const phoneE164 = p.phone?.trim() ?? normalizePhoneUserId(phoneField)?.trim() ?? '';
       if (MEETING_PHONE_VERIFICATION_UI_ENABLED) {
         if (!phoneE164 || !phoneE164.startsWith('+')) throw new Error('전화번호 정보를 찾지 못했습니다.');
@@ -574,6 +504,7 @@ export default function ProfileEditScreen() {
     }
   }, [
     profilePk,
+    cachedProfile,
     termsConsentChecked,
     genderDemo,
     birthDemo.year,
@@ -600,22 +531,26 @@ export default function ProfileEditScreen() {
 
   const runDeleteAccount = useCallback(async () => {
     const sessionUserId = userId?.trim() ?? '';
-    const firebaseUid = authProfile?.firebaseUid?.trim() ?? '';
-    if (!sessionUserId && !firebaseUid) {
+    const authUid = authProfile?.supabaseUserId?.trim() ?? '';
+    if (!sessionUserId && !authUid) {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
     setDeleteBusy(true);
     try {
-      const preflight = validateAccountDeletionPreflight(sessionUserId, firebaseUid);
+      const preflight = await validateAccountDeletionPreflight(sessionUserId, authUid);
       if (!preflight.ok) {
         Alert.alert('탈퇴를 진행할 수 없어요', preflight.message);
         return;
       }
-      const res = sessionUserId ? await purgeUserAccountRemote(sessionUserId) : await purgeUserAccountRemoteByFirebaseUid(firebaseUid);
-      if (!res.ok) {
-        Alert.alert('탈퇴를 완료하지 못했어요', res.message);
-        return;
+      if (preflight.mode === 'full_deletion') {
+        const res = sessionUserId
+          ? await purgeUserAccountRemote(sessionUserId)
+          : await purgeUserAccountRemoteByFirebaseUid(authUid);
+        if (!res.ok) {
+          Alert.alert('탈퇴를 완료하지 못했어요', res.message);
+          return;
+        }
       }
       const authDel = await deleteFirebaseAuthUserStrict();
       if (!authDel.ok) {
@@ -624,7 +559,10 @@ export default function ProfileEditScreen() {
       }
       await signOutSession();
       await wipeLocalAppData();
-      const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
+      const doneMsg =
+        preflight.mode === 'local_session_cleanup_only'
+          ? '이미 서버에서 탈퇴 처리된 계정이에요. 이 기기에 남은 로그인 정보를 정리했습니다.'
+          : '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
       if (Platform.OS === 'android') {
         ToastAndroid.show(doneMsg, ToastAndroid.LONG);
         router.replace('/login');
@@ -637,12 +575,12 @@ export default function ProfileEditScreen() {
     } finally {
       setDeleteBusy(false);
     }
-  }, [userId, authProfile?.firebaseUid, router, signOutSession]);
+  }, [userId, authProfile?.supabaseUserId, router, signOutSession]);
 
   const onRequestDeleteAccount = useCallback(() => {
     const sessionUserId = userId?.trim() ?? '';
-    const firebaseUid = authProfile?.firebaseUid?.trim() ?? '';
-    if (!sessionUserId && !firebaseUid) {
+    const authUid = authProfile?.supabaseUserId?.trim() ?? '';
+    if (!sessionUserId && !authUid) {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
@@ -670,7 +608,7 @@ export default function ProfileEditScreen() {
         },
       ],
     );
-  }, [userId, authProfile?.firebaseUid, runDeleteAccount]);
+  }, [userId, authProfile?.supabaseUserId, runDeleteAccount]);
 
   const avatarInitial = useMemo(() => {
     const n = nickname.trim();

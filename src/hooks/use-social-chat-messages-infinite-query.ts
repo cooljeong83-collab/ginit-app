@@ -9,6 +9,7 @@ import {
   subscribeSocialChatLiveTail,
 } from '@/src/lib/social-chat-rooms';
 import { upsertLocalChatMessages, type OfflineChatLocalMessageInput } from '@/src/lib/offline-chat/offline-chat-sync';
+import { voidSafe } from '@/src/lib/void-safe';
 import { useLocalSocialChatMessages } from '@/src/hooks/use-local-chat-room-messages';
 
 const SOCIAL_CHAT_MESSAGES_STALE_MS = 5 * 60 * 1000;
@@ -197,12 +198,23 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
     const unsub = subscribeSocialChatLiveTail(
       rid,
       (e) => {
-        setLiveError(null);
-        queryClient.setQueryData(
-          socialChatMessagesQueryKey(rid),
-          (old: InfiniteData<SocialChatFetchedMessagesPage> | undefined) => mergeLiveTailIntoInfiniteData(old, e),
+        voidSafe(
+          (async () => {
+            try {
+              await upsertLocalChatMessages(
+                { roomType: 'social_dm', roomId: rid },
+                toLocalInputs([...e.tailDesc, ...e.evictedFromTailDesc]),
+              );
+              setLiveError(null);
+              queryClient.setQueryData(
+                socialChatMessagesQueryKey(rid),
+                (old: InfiniteData<SocialChatFetchedMessagesPage> | undefined) => mergeLiveTailIntoInfiniteData(old, e),
+              );
+            } catch (err) {
+              if (__DEV__) console.warn('[useSocialChatMessagesInfiniteQuery] live tail → local persist failed', err);
+            }
+          })(),
         );
-        void upsertLocalChatMessages({ roomType: 'social_dm', roomId: rid }, toLocalInputs([...e.tailDesc, ...e.evictedFromTailDesc]));
       },
       (msg) => setLiveError(msg),
     );
@@ -220,7 +232,9 @@ export function useSocialChatMessagesInfiniteQuery({ roomId, enabled }: UseSocia
     try {
       await query.fetchNextPage();
       const data = queryClient.getQueryData<InfiniteData<SocialChatFetchedMessagesPage>>(queryKey);
-      void upsertLocalChatMessages({ roomType: 'social_dm', roomId }, toLocalInputs(flattenSocialChatInfinitePages(data)));
+      voidSafe(
+        upsertLocalChatMessages({ roomType: 'social_dm', roomId }, toLocalInputs(flattenSocialChatInfinitePages(data))),
+      );
     } finally {
       olderPrefetchLockRef.current = false;
     }

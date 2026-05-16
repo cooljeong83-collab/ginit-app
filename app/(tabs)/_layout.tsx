@@ -22,7 +22,7 @@ import { ensureUserProfile } from '@/src/lib/user-profile';
 export default function TabsLayout() {
   const router = useTransitionRouter();
   const { userId, authProfile, isHydrated } = useUserSession();
-  const hasSession = Boolean(userId?.trim() || authProfile?.firebaseUid?.trim());
+  const hasSession = Boolean(userId?.trim() || authProfile?.supabaseUserId?.trim());
   const hasSessionRef = useRef(hasSession);
   hasSessionRef.current = hasSession;
 

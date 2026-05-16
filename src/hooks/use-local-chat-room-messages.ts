@@ -1,9 +1,10 @@
 import { Q } from '@nozbe/watermelondb';
 import { useEffect, useState } from 'react';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 
 import type { MeetingChatLinkPreview, MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 import type { SocialChatMessage, SocialChatReplyTo } from '@/src/lib/social-chat-rooms';
+import { WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS } from '@/src/lib/watermelon-observe-columns';
 import { database } from '@/src/watermelon';
 
 const DEFAULT_LOCAL_MESSAGE_LIMIT = 1000;
@@ -134,7 +135,7 @@ function useLocalMeetingMessagesByType({
         Q.sortBy('created_at_ms', Q.desc),
         Q.take(take),
       );
-    const sub = query.observe().subscribe((rows: any[]) => {
+    const sub = query.observeWithColumns([...WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS]).subscribe((rows: any[]) => {
       setMessages(rows.map(localRowToMeetingMessage).filter((m) => m.id && m.createdAt));
     });
     return () => sub.unsubscribe();

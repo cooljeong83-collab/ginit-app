@@ -1,4 +1,4 @@
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@/src/lib/ginit-timestamp';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { formatDateTimeWithKoWeekday } from '@/src/lib/date-display';

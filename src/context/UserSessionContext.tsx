@@ -1,21 +1,23 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { signOut as signOutJsAuth } from 'firebase/auth';
-
 import { clearStoredUserId, readStoredUserId, writeStoredUserId } from '@/src/lib/app-user-id';
+import { prefetchUserProfileCache } from '@/src/lib/user-profile-cache-sync';
 import { clearPendingPushOpenPayload } from '@/src/lib/pending-push-navigation';
 import { signOutGoogle } from '@/src/lib/google-sign-in';
-import { getFirebaseAuth } from '@/src/lib/firebase';
-import { clearSecureAuthSession } from '@/src/lib/secure-auth-session';
+import { readSecureAuthSession, clearSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { clearSecureGoogleSession } from '@/src/lib/secure-google-session';
+import { supabase } from '@/src/lib/supabase';
+import { startUserChatNotifications } from '@/src/lib/user-chat-notifications-runtime';
 import { AuthService } from '@/src/services/AuthService';
 
-/** 구글·Firebase에서 받은 표시용 프로필 (전역 세션 스냅샷) */
+/** Supabase Auth·OAuth에서 받은 표시용 프로필 (전역 세션 스냅샷) */
 export type AuthProfileSnapshot = {
   displayName: string | null;
   email: string | null;
   photoUrl: string | null;
-  firebaseUid: string | null;
+  /** Supabase Auth `auth.users.id` (UUID) */
+  supabaseUserId: string | null;
   gender?: string | null;
   /** 회원가입 시 선택 연령대 코드 예: `TEENS`, `TWENTIES` … */
   ageBand?: string | null;
@@ -38,6 +40,7 @@ type UserSessionContextValue = {
 const UserSessionContext = createContext<UserSessionContextValue | null>(null);
 
 export function UserSessionProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [userId, setUserIdState] = useState<string | null>(null);
   const [authProfile, setAuthProfileState] = useState<AuthProfileSnapshot | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -57,6 +60,19 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!userId?.trim()) return;
+    return startUserChatNotifications(userId.trim());
+  }, [isHydrated, userId]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    const uid = userId?.trim();
+    if (!uid) return;
+    void prefetchUserProfileCache(queryClient, uid);
+  }, [isHydrated, userId, queryClient]);
+
   const setUserId = useCallback(async (id: string) => {
     const t = id.trim();
     setUserIdState(t);
@@ -68,34 +84,102 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
     setUserIdState(null);
   }, []);
 
+  /** SecureStore가 일부 기기에서 오래 걸릴 수 있어 로그아웃 전체가 멈추지 않게 상한을 둡니다. */
+  const withClearDeadline = useCallback(async (label: string, ms: number, op: () => Promise<void>) => {
+    try {
+      await Promise.race([
+        op(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms),
+        ),
+      ]);
+    } catch (e) {
+      if (__DEV__) console.warn('[UserSession] clear mirror:', e instanceof Error ? e.message : e);
+    }
+  }, []);
+
+  /** Supabase 세션 종료·불일치 시 로컬 PK·secure·푸시 펜딩을 한 번에 비웁니다(레거시 secure-only 경로는 별도 가드). */
+  const clearAllLocalAuthMirrors = useCallback(async () => {
+    await clearStoredUserId();
+    await withClearDeadline('clearSecureAuthSession', 8000, () => clearSecureAuthSession());
+    await withClearDeadline('clearSecureGoogleSession', 8000, () => clearSecureGoogleSession());
+    clearPendingPushOpenPayload();
+    setUserIdState(null);
+    setAuthProfileState(null);
+  }, [withClearDeadline]);
+
   const setAuthProfile = useCallback((profile: AuthProfileSnapshot | null) => {
     setAuthProfileState(profile);
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!alive) return;
+      if (event !== 'SIGNED_OUT') return;
+      if (session?.user) return;
+      const {
+        data: { session: current },
+      } = await supabase.auth.getSession();
+      if (current?.user) {
+        /** 로그아웃 직후 바로 재로그인하면 SIGNED_OUT 콜백이 SIGNED_IN 뒤에 늦게 올 수 있음 */
+        return;
+      }
+      await clearAllLocalAuthMirrors();
+    });
+    return () => {
+      alive = false;
+      try {
+        subscription.unsubscribe();
+      } catch {
+        /* noop */
+      }
+    };
+  }, [clearAllLocalAuthMirrors]);
+
+  /** 하이드레이션 직후: Supabase 세션 없고 secure도 없는데 저장 PK만 남은 경우(세션 만료·크래시 등) 정리 */
+  useEffect(() => {
+    if (!isHydrated) return;
+    let cancelled = false;
+    void (async () => {
+      const [{ data: { session } }, secure] = await Promise.all([
+        supabase.auth.getSession(),
+        readSecureAuthSession(),
+      ]);
+      if (cancelled) return;
+      if (session?.user) return;
+      if (!userId?.trim()) return;
+      if (secure?.userId?.trim()) return;
+      const {
+        data: { session: again },
+      } = await supabase.auth.getSession();
+      if (again?.user) return;
+      await clearAllLocalAuthMirrors();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isHydrated, userId, clearAllLocalAuthMirrors]);
+
   const signOutSession = useCallback(async () => {
-    // 로그아웃(.cursorrules): Firebase signOut만 수행 — deleteUser/원격 탈퇴(purge)와 분리합니다.
-    try {
-      await AuthService.signOut();
-    } catch {
-      /* RN Phone Auth 세션 없음 등 */
-    }
-    try {
-      await signOutJsAuth(getFirebaseAuth());
-    } catch {
-      /* JS Auth 세션 없음/미초기화 등 */
-    }
+    if (__DEV__) console.log('[UserSession] signOutSession → signOutGoogle');
     try {
       await signOutGoogle();
     } catch {
-      /* 구글 네이티브/웹 세션 없음 등 */
+      /* 네이티브 Google SDK 정리 실패 등 — Supabase 로그아웃은 계속 진행 */
     }
-    await clearStoredUserId();
-    await clearSecureAuthSession();
-    await clearSecureGoogleSession();
-    clearPendingPushOpenPayload();
-    setUserIdState(null);
-    setAuthProfileState(null);
-  }, []);
+    if (__DEV__) console.log('[UserSession] signOutSession → AuthService.signOut');
+    try {
+      await AuthService.signOut();
+    } catch {
+      /* 세션 없음 등 */
+    }
+    if (__DEV__) console.log('[UserSession] signOutSession → clearAllLocalAuthMirrors');
+    await clearAllLocalAuthMirrors();
+    if (__DEV__) console.log('[UserSession] signOutSession → done');
+  }, [clearAllLocalAuthMirrors]);
 
   const value = useMemo(
     () => ({

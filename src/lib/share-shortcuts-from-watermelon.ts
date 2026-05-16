@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
 import { setNativeShareShortcuts, type NativeShareShortcutItem } from '@/src/lib/direct-share-native';
 import type { Meeting } from '@/src/lib/meetings';
+import { WM_CHAT_ROOM_LIST_OBSERVE_COLUMNS } from '@/src/lib/watermelon-observe-columns';
 import { database } from '@/src/watermelon/database';
 import type { ChatMessage } from '@/src/watermelon/models/ChatMessage';
 import type { ChatRoom } from '@/src/watermelon/models/ChatRoom';
@@ -139,7 +140,7 @@ export function subscribeShareShortcutsFromWatermelon(args: {
     }, 600);
   };
 
-  const sub = baseQuery.observe().subscribe((rooms) => {
+  const sub = baseQuery.observeWithColumns([...WM_CHAT_ROOM_LIST_OBSERVE_COLUMNS]).subscribe((rooms) => {
     schedulePush(rooms);
   });
 

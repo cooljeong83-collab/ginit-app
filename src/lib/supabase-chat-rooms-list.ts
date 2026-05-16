@@ -1,12 +1,8 @@
 /**
  * Supabase `chat_rooms` + RPC `chat_rooms_list_page` — 친구(1:1) 채팅방 목록 페이지.
- * 테이블이 비어 있거나 RPC 실패 시 Firestore `chat_rooms` 전체 스냅샷을 정렬·슬라이스하는 폴백을 사용합니다.
+ * 목록 실시간 무효화는 `user_notifications:{profiles.id}` Broadcast `refresh_list`(Edge) + `user-chat-list-refresh-bus` 를 사용합니다.
  */
-import { collection, getDocs, query, where, type Timestamp } from 'firebase/firestore';
-
-import { getFirebaseFirestore } from '@/src/lib/firebase';
-import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
-import { CHAT_ROOMS_COLLECTION, type SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
+import type { SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import { supabase } from '@/src/lib/supabase';
 import { fetchBlockedPeerIds } from '@/src/lib/user-blocks';
 
@@ -105,63 +101,6 @@ export async function fetchChatRoomsListPageFromSupabase(
   };
 }
 
-function sortKeyFromRoomDoc(data: Record<string, unknown>): number {
-  const ua = data.updatedAt ?? data.updated_at;
-  if (ua && typeof (ua as Timestamp).toMillis === 'function') {
-    try {
-      return (ua as Timestamp).toMillis();
-    } catch {
-      return 0;
-    }
-  }
-  const ca = data.createdAt ?? data.created_at;
-  if (ca && typeof (ca as Timestamp).toMillis === 'function') {
-    try {
-      return (ca as Timestamp).toMillis();
-    } catch {
-      return 0;
-    }
-  }
-  return 0;
-}
-
-/** RPC/테이블 미적용 환경용 — 기존 Firestore 쿼리로 전체 로드 후 메모리 페이징 */
-export async function fetchChatRoomsListPageFirestoreFallback(
-  myAppUserId: string,
-  pageParam: number,
-): Promise<{ rooms: SocialChatRoomSummary[]; hasMore: boolean }> {
-  const me = (normalizePhoneUserId(myAppUserId) ?? myAppUserId).trim();
-  if (!me) return { rooms: [], hasMore: false };
-  const q = query(
-    collection(getFirebaseFirestore(), CHAT_ROOMS_COLLECTION),
-    where('participantIds', 'array-contains', me),
-  );
-  const snap = await getDocs(q);
-  type Row = SocialChatRoomSummary & { _sort: number };
-  const rows: Row[] = [];
-  for (const d of snap.docs) {
-    const data = d.data() as Record<string, unknown>;
-    if (data.isGroup === true) continue;
-    const ids = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
-      : [];
-    const peer = ids.find((x) => (normalizePhoneUserId(x) ?? x) !== me) ?? '';
-    if (!peer) continue;
-    rows.push({
-      roomId: d.id,
-      peerAppUserId: normalizePhoneUserId(peer) ?? peer,
-      _sort: sortKeyFromRoomDoc(data),
-    });
-  }
-  rows.sort((a, b) => b._sort - a._sort || b.roomId.localeCompare(a.roomId));
-  const from = pageParam * CHAT_ROOMS_LIST_PAGE_SIZE;
-  const slice = rows.slice(from, from + CHAT_ROOMS_LIST_PAGE_SIZE).map(({ roomId, peerAppUserId }) => ({
-    roomId,
-    peerAppUserId,
-  }));
-  return { rooms: slice, hasMore: from + CHAT_ROOMS_LIST_PAGE_SIZE < rows.length };
-}
-
 export async function fetchChatRoomsListPageHybrid(
   userId: string,
   pageParam: number,
@@ -171,18 +110,7 @@ export async function fetchChatRoomsListPageHybrid(
 
   const [blocked, res] = await Promise.all([
     fetchBlockedPeerIds(me).catch(() => new Set<string>()),
-    (async () => {
-      try {
-        const r = await fetchChatRoomsListPageFromSupabase(me, pageParam);
-        if (pageParam === 0 && r.rooms.length === 0) {
-          const fb = await fetchChatRoomsListPageFirestoreFallback(me, pageParam);
-          if (fb.rooms.length > 0) return fb;
-        }
-        return r;
-      } catch {
-        return fetchChatRoomsListPageFirestoreFallback(me, pageParam);
-      }
-    })(),
+    fetchChatRoomsListPageFromSupabase(me, pageParam),
   ]);
 
   if (blocked.size === 0) return res;
@@ -190,39 +118,3 @@ export async function fetchChatRoomsListPageHybrid(
   return { rooms, hasMore: res.hasMore };
 }
 
-/**
- * DM(`is_group=false`) 채팅방 요약 변경 시 콜백.
- * - RLS(`chat_rooms_select_participant`, migration 0133)로 "내 participant_ids 포함 행"만 서버에서 전달됩니다.
- * - `event: '*'` 대신 INSERT/UPDATE/DELETE만 구독합니다.
- */
-export function subscribeChatRoomsListInvalidate(
-  viewerAppUserId: string,
-  onInvalidate: () => void,
-  onError?: (message: string) => void,
-): () => void {
-  const me = viewerAppUserId.trim();
-  if (!me) return () => {};
-
-  let cancelled = false;
-  const channel = supabase.channel(`realtime:chat-rooms-list:${me}:${Date.now()}:${Math.random().toString(36).slice(2)}`);
-
-  const fire = () => {
-    if (!cancelled) onInvalidate();
-  };
-
-  const dmOnly = 'is_group=eq.false';
-  for (const event of ['INSERT', 'UPDATE', 'DELETE'] as const) {
-    channel.on('postgres_changes', { event, schema: 'public', table: 'chat_rooms', filter: dmOnly }, fire);
-  }
-
-  void channel.subscribe((status) => {
-    if (status === 'CHANNEL_ERROR') {
-      onError?.('Supabase Realtime(chat_rooms) 연결 오류');
-    }
-  });
-
-  return () => {
-    cancelled = true;
-    void supabase.removeChannel(channel);
-  };
-}

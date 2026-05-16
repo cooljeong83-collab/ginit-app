@@ -4,6 +4,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import { fcmDebugSetError, fcmDebugSetSaveOk, fcmDebugSetToken } from '@/src/lib/fcm-debug-state';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
+import { supabase } from '@/src/lib/supabase';
 import { ensureUserProfile, getUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -59,10 +60,19 @@ export async function registerFcmDeviceAndGetToken(m: ReturnType<typeof getMessa
 }
 
 /** FcmMessagingBootstrap·로그인 직후 공통: Supabase profiles.fcm_token 저장 + 재조회 검증 */
-export async function persistFcmTokenAndVerify(uid: string, token: string): Promise<void> {
+/** @returns 실제로 프로필에 반영·검증까지 했으면 true, 세션 없음 등으로 스킵하면 false */
+export async function persistFcmTokenAndVerify(uid: string, token: string): Promise<boolean> {
   ginitNotifyDbg('FcmMessaging', 'persist_start', { uidSuffix: uid.slice(-6), tokenLen: token.length });
   if (__DEV__) {
     console.log('[fcm] persist start', { uid, tokenLen: token.length });
+  }
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) {
+    ginitNotifyDbg('FcmMessaging', 'persist_skip_no_supabase_session', { uidSuffix: uid.slice(-6) });
+    if (__DEV__) console.log('[fcm] persist skip — no Supabase session (signed out?)');
+    return false;
   }
   await withTimeout(ensureUserProfile(uid), 12_000, '[fcm] ensureUserProfile');
   const fcmPlatform =
@@ -84,6 +94,7 @@ export async function persistFcmTokenAndVerify(uid: string, token: string): Prom
   if (__DEV__) {
     console.log('[fcm] persist ok', { uid, savedLen: saved.length });
   }
+  return true;
 }
 
 /**
@@ -108,8 +119,8 @@ export async function syncFcmTokenFromDeviceToProfile(appUserId: string): Promis
       ginitNotifyDbg('FcmMessaging', 'login_sync_no_token', { uidSuffix: uid.slice(-6) });
       return;
     }
-    await persistFcmTokenAndVerify(uid, t);
-    fcmDebugSetSaveOk(true);
+    const ok = await persistFcmTokenAndVerify(uid, t);
+    if (ok) fcmDebugSetSaveOk(true);
   } catch (e) {
     fcmDebugSetSaveOk(false);
     fcmDebugSetError(e);

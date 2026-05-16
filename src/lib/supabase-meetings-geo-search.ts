@@ -2,6 +2,7 @@ import {
   diffMeetingSummaries,
   fetchMeetingsForSyncByIds,
   mapSupabaseMeetingRow,
+  meetingUpdatedFingerprintMd5FromMillis,
   mergeMeetingsBySummaries,
   type MeetingChangeSummary,
 } from '@/src/lib/supabase-meetings-list';
@@ -20,12 +21,22 @@ function mapGeoSummaryRow(row: Record<string, unknown>): MeetingChangeSummary | 
   const meetingId = typeof row.meeting_id === 'string' ? row.meeting_id.trim() : '';
   if (!meetingId) return null;
   const pc = row.participant_count;
+  const rowIdRaw = row.row_id;
+  const rowId =
+    typeof rowIdRaw === 'string'
+      ? rowIdRaw.trim()
+      : rowIdRaw != null
+        ? String(rowIdRaw).trim()
+        : '';
+  const updatedAtMs = summaryTimestampMs(row.updated_at);
+  const createdAtMs = summaryTimestampMs(row.created_at);
   return {
     meetingId,
-    rowId: typeof row.row_id === 'string' ? row.row_id.trim() : '',
-    updatedAtMs: summaryTimestampMs(row.updated_at),
+    rowId: rowId || meetingId,
+    updatedFp: meetingUpdatedFingerprintMd5FromMillis(updatedAtMs),
+    updatedAtMs,
     participantCount: typeof pc === 'number' && Number.isFinite(pc) ? Math.trunc(pc) : 0,
-    createdAtMs: summaryTimestampMs(row.created_at),
+    createdAtMs,
   };
 }
 

@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 
 import type { MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 

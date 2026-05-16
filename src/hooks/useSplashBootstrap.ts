@@ -4,13 +4,13 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { notifySplashReplacedToTabs } from '@/src/lib/splash-to-tabs-navigation';
 import { normalizeUserId, readStoredUserId } from '@/src/lib/app-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
-import { getFirebaseAuth } from '@/src/lib/firebase';
 import { isPhoneRegistered } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { readSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { writeSecureGoogleSession } from '@/src/lib/secure-google-session';
 import { ensureUserProfile, resolveSessionUserIdFromVerifiedPhone } from '@/src/lib/user-profile';
-import { onAuthStateChanged, type User } from 'firebase/auth';
+import { supabase } from '@/src/lib/supabase';
+import type { User } from '@supabase/supabase-js';
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let t: ReturnType<typeof setTimeout> | null = null;
@@ -30,9 +30,26 @@ async function tryEnsureProfileDuringBoot(pk: string): Promise<void> {
   }
 }
 
+function snapshotFromSupabaseUser(u: User) {
+  const meta = u.user_metadata as Record<string, unknown> | undefined;
+  const fullName =
+    (typeof meta?.full_name === 'string' && meta.full_name) ||
+    (typeof meta?.name === 'string' && meta.name) ||
+    null;
+  const avatar =
+    (typeof meta?.avatar_url === 'string' && meta.avatar_url) ||
+    (typeof meta?.picture === 'string' && meta.picture) ||
+    null;
+  return {
+    displayName: fullName ?? u.email ?? null,
+    email: u.email ?? null,
+    photoUrl: avatar,
+    supabaseUserId: u.id ?? null,
+  };
+}
+
 /**
- * 앱 부트: Secure 세션 / AsyncStorage 사용자 PK / 전화번호(레거시) → 회원 여부 확인 후 탭 또는 로그인으로 분기.
- * 온보딩은 스플래시 경로에 포함하지 않습니다(회원가입 완료 후에만 표시).
+ * 앱 부트: Supabase 세션 / Secure 세션 / AsyncStorage 사용자 PK / 전화번호(레거시) → 회원 여부 확인 후 탭 또는 로그인으로 분기.
  */
 export function useSplashBootstrap() {
   const router = useTransitionRouter();
@@ -61,29 +78,28 @@ export function useSplashBootstrap() {
     if (!isHydrated || finishedRef.current) return;
     let cancelled = false;
 
-    const snapshotFromFirebaseUser = (u: User) => ({
-      displayName: u.displayName ?? null,
-      email: u.email ?? null,
-      photoUrl: u.photoURL ?? null,
-      firebaseUid: u.uid ?? null,
-    });
-
-    const waitForFirebaseAuthOnce = async (): Promise<User | null> => {
-      const a = getFirebaseAuth();
-      if (a.currentUser) return a.currentUser;
+    const waitForSupabaseSessionOnce = async (): Promise<User | null> => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user) return session.user;
       return await withTimeout(
         new Promise<User | null>((resolve) => {
-          const unsub = onAuthStateChanged(a, (u) => {
-            try {
-              unsub();
-            } catch {
-              /* noop */
+          const {
+            data: { subscription },
+          } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (session?.user) {
+              try {
+                subscription.unsubscribe();
+              } catch {
+                /* noop */
+              }
+              resolve(session.user);
             }
-            resolve(u);
           });
         }),
         4000,
-        'firebaseAuthState',
+        'supabaseAuthState',
       ).catch(() => null);
     };
 
@@ -116,17 +132,19 @@ export function useSplashBootstrap() {
       try {
         setStatusLabel('세션 확인 중…');
 
-        // 0) Firebase Auth(구글) 세션이 있으면 자동 로그인 → 홈 진입
-        const firebaseUser = await waitForFirebaseAuthOnce();
+        const supabaseUser = await waitForSupabaseSessionOnce();
         if (cancelled) return;
-        if (firebaseUser && !firebaseUser.isAnonymous) {
+        if (supabaseUser) {
           setStatusLabel('로그인 상태 확인 중…');
-          setAuthProfile(snapshotFromFirebaseUser(firebaseUser));
-          void writeSecureGoogleSession({ uid: firebaseUser.uid, email: firebaseUser.email ?? null });
-          const emailNorm = firebaseUser.email ? normalizeUserId(firebaseUser.email) : null;
+          setAuthProfile(snapshotFromSupabaseUser(supabaseUser));
+          void writeSecureGoogleSession({
+            uid: supabaseUser.id,
+            email: supabaseUser.email ?? null,
+          });
+          const emailNorm = supabaseUser.email ? normalizeUserId(supabaseUser.email) : null;
           let pk: string | null = emailNorm;
           try {
-            const phoneRaw = firebaseUser.phoneNumber?.trim();
+            const phoneRaw = supabaseUser.phone?.trim();
             if (phoneRaw) {
               const n = normalizePhoneUserId(phoneRaw);
               if (n) {
@@ -154,7 +172,6 @@ export function useSplashBootstrap() {
           return;
         }
 
-        // 1) SecureStore 세션이 있으면 즉시 홈 진입 (당근마켓식)
         const secure = await readSecureAuthSession();
         if (cancelled) return;
         if (secure?.userId?.trim()) {
@@ -191,7 +208,6 @@ export function useSplashBootstrap() {
         goLogin();
       } catch (e) {
         if (cancelled) return;
-        // 부트 중 예외/네트워크 지연으로 스플래시에 갇히는 것을 방지: 항상 로그인으로 폴백.
         try {
           await clearStoredUserSession();
         } catch {

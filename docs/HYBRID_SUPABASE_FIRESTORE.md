@@ -11,7 +11,7 @@
 | 사용자 프로필, 레벨/XP/신뢰, 랭킹 포인트, 약관·전화 메타 | **Supabase `profiles`** | 정합성·집계·SQL 쿼리 |
 | 확정 모임 스냅샷(피드·지도·필터) | **Supabase `meetings`** + `meeting_participants` | `legacy_firestore_id` ↔ Firestore `meetings/{id}` |
 | 모임 초안·투표·후보·실시간 스냅샷 | **Firestore `meetings`** | 기존 앱 로직 유지, 확정 시 Supabase 동기화 |
-| 채팅 메시지 | **Firestore `meetings/{meetingId}/messages`** | 실시간 리스너 (`subscribeMeetingChatMessages`) |
+| 채팅 메시지 | **Firestore** `meetings/{meetingId}/messages` · `chat_rooms/{id}/messages` (기본) 또는 **`EXPO_PUBLIC_CHAT_DELTA_TRANSPORT=supabase`** 시 Postgres `public.chat_messages` + RPC `chat_pull_deltas` / `chat_send_message` (`0135`) |
 | 알림 신호(푸시·인앱 배지) | **Firestore `notifications`** (권장) | `src/lib/notifications-firestore.ts` — `userId` = `app_user_id` |
 | 카테고리 마스터 | **Supabase `meeting_categories`** (기본, Supabase 구성 시) · 레거시 Firestore `categories`는 `EXPO_PUBLIC_CATEGORIES_SOURCE=firestore` |
 
@@ -32,17 +32,21 @@
 
 | 변수 | 값 | 동작 |
 |------|-----|------|
-| `EXPO_PUBLIC_MEETING_LIST_SOURCE` | `supabase` | 공개 모임 목록: `subscribeMeetingsHybrid` → Supabase Realtime (`supabase-meetings-list.ts`) |
+| `EXPO_PUBLIC_CHAT_DELTA_TRANSPORT` | `supabase` | 채팅 델타: `src/lib/chat-supabase-delta.ts` RPC 경로 (`chatDeltaTransport()`). Realtime은 `chat_messages` RLS 기준. |
+| `EXPO_PUBLIC_MEETING_LIST_SOURCE` | `supabase` | 공개 모임 목록: `subscribeMeetingsHybrid` + TanStack Query — 전역 `meetings` postgres_changes 없음(Pull 기본). 참여 중·찜 등 지정 모임만 `meetings.id` 행 단위 Realtime(`supabase-meetings-list.ts`). |
 | `EXPO_PUBLIC_PROFILE_SOURCE` | `supabase` | `getUserProfile` → Supabase RPC (마이그레이션 `0007` 필요) |
 | `EXPO_PUBLIC_CATEGORIES_SOURCE` | _(비움·기본)_ 또는 `firestore` | 기본: Supabase `meeting_categories` (`0006`). Firestore만 쓸 때 `firestore` |
 
-채팅 메시지 목록은 **항상 Firestore** 리스너를 유지합니다.
+**채팅 목록·배지용 Supabase Realtime Broadcast** — Private 채널 토픽은 `user_notifications:{profiles.id}` 입니다(`public.profiles` 행 UUID). `app_user_id`(정규화 이메일·전화 PK 등)는 토픽 문자열에 넣지 않습니다. 송신: Edge `supabase/functions/chat-user-notifications-broadcast`; 수신·구독: `src/lib/user-chat-list-broadcast.ts` · `user-chat-notifications-runtime.ts`(행 UUID는 `get_profile_public_by_app_user_id` 응답의 `id`). Realtime 수신 RLS: `0150_realtime_user_notifications_broadcast_rls_profile_id.sql`(토픽 접미사 = 로그인 사용자의 `profiles.id`).
+
+채팅 메시지는 기본 **Firestore** 리스너를 유지합니다. `EXPO_PUBLIC_CHAT_DELTA_TRANSPORT=supabase`이면 **Supabase RPC 델타** 경로를 쓸 수 있습니다(앱 UI 전환은 별도 작업).
 
 ---
 
 ## 4. 실시간·알림 (Firestore 유지)
 
 - **채팅**: 기존 경로 유지. 참가자 ID는 이미 `participantIds`(앱 PK) — Supabase `meeting_participants.profile_id`와 맞출 때는 `profiles.app_user_id`로 조인 설계.
+- **채팅 목록 갱신 신호(Supabase 경로)**: DB Webhook → Edge `chat-user-notifications-broadcast`가 위 `user_notifications:{profiles.id}` 로 `unread_update` / `refresh_list` 를 브로드캐스트합니다. FCM `data.unread_count` 등은 기존처럼 `app_user_id` 기준으로 조회·발송합니다.
 - **알림**: Edge / Cloud Function / 클라이언트(주의: 보안)에서 `notifications`에 문서 생성 시 `userId` = **`app_user_id`**. Firestore 콘솔에서 `userId` + `createdAt` 복합 인덱스가 필요할 수 있습니다.
 
 ---
@@ -72,6 +76,7 @@
 ## 7. 체크리스트
 
 - [ ] `0001`~`0007` 마이그레이션 적용 순서 확인  
+- [ ] `0150_realtime_user_notifications_broadcast_rls_profile_id.sql` 적용(채팅 Broadcast 채널 토픽 = `profiles.id`) — Edge `chat-user-notifications-broadcast`·앱과 동시 배포  
 - [ ] `profiles` / `meetings` 백필 및 `legacy_firestore_id` 정합  
 - [ ] Edge에서 시스템 메시지 스키마를 `meeting-chat`과 동일하게 맞추기  
 - [ ] `notifications` 복합 인덱스 및 쓰기 경로(서버만) 확정  

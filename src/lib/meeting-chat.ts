@@ -1,61 +1,57 @@
 /**
- * 모임 채팅 — Firestore `meetings/{meetingId}/messages` 서브컬렉션.
- *
- * 보안 규칙 예시(프로젝트에 맞게 participantIds·인증 방식 조정):
- *
- * ```
- * match /meetings/{meetingId}/messages/{msgId} {
- *   allow read: if request.auth != null;
- *   allow create: if request.auth != null
- *     && request.resource.data.senderId == request.auth.uid; // 또는 전화 PK 커스텀 클레임과 비교
- * }
- * ```
- *
- * 참가자만 쓰기·읽기를 엄격히 제한하려면 Cloud Function으로 검증하거나,
- * `participantIds` 배열과 토큰 클레임을 맞춰 규칙을 작성하세요.
+ * 모임 채팅 — Supabase(Postgres·Realtime·RPC) + 로컬(WatermelonDB) 기준.
  *
  * 채팅 이미지는 **Supabase Storage** 버킷 `meeting_chat` 에 저장합니다(`0021_meeting_chat_storage.sql`).
  */
 import * as ImageManipulator from 'expo-image-manipulator';
 import { EncodingType, readAsStringAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import {
-  addDoc,
-  collection,
-  documentId,
-  FieldPath,
-  getDoc,
-  getDocs,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  startAfter,
-  updateDoc,
-  doc,
-  where,
-  type DocumentSnapshot,
-  Timestamp,
-  type Unsubscribe,
-  writeBatch,
-} from 'firebase/firestore';
+import { Timestamp, type Unsubscribe } from '@/src/lib/ginit-timestamp';
 import { supabase } from '@/src/lib/supabase';
+import { startPostgresRealtimeSubscription } from '@/src/lib/supabase-realtime-resilience';
 import {
   SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { normalizeParticipantId, readStoredUserId } from '@/src/lib/app-user-id';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
-import { sendInAppAlarmRemotePushToUserFireAndForget } from '@/src/lib/in-app-alarm-push';
+import {
+  chatReadPointerRoomIdsForRealtime,
+  chatReadPointersPostgresFilter,
+} from '@/src/lib/chat-bubble-read-pointers-realtime';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { applyChatReadPointerRealtimeToLocal } from '@/src/lib/chat-read-pointer-realtime-local';
+import {
+  pullMeetingChatReadPointersToLocal,
+  scheduleDebouncedPullMeetingChatReadPointers,
+} from '@/src/lib/meeting-chat-rooms-summary';
+import {
+  ensureSupabaseRealtimeAuthFromSession,
+  getSupabaseAuthUserIdForRealtimeTopic,
+} from '@/src/lib/supabase-realtime-resilience';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
-import { getFirestoreDb, getMeetingById, MEETINGS_COLLECTION } from '@/src/lib/meetings';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
-import { bumpMeetingChatRoomSummaryOnSend } from '@/src/lib/meeting-chat-rooms-summary';
+import {
+  chatDeleteAllMeetingMessagesRpc,
+  chatMarkReadRpc,
+  chatMeetingSummaryForMeRpc,
+  chatPullHistoryBeforeSeqRpc,
+  chatPullTailRpc,
+  chatSearchMessagesForMeRpc,
+  chatSendMessageRpc,
+  chatSoftDeleteMessageRpc,
+  newChatClientMutationId,
+  type ChatDeltaRow,
+} from '@/src/lib/chat-supabase-delta';
 import { getUserProfile } from '@/src/lib/user-profile';
+import {
+  normalizeChatRealtimeSubscribeCallbacks,
+  postgresRealtimeHandlersFromChatCallbacks,
+  type ChatRealtimeSubscribeCallbacks,
+} from '@/src/lib/chat-realtime-subscribe-callbacks';
+import { voidSafe } from '@/src/lib/void-safe';
 
 export const MEETING_MESSAGES_SUBCOLLECTION = 'messages';
 
@@ -94,6 +90,10 @@ export type MeetingChatMessage = {
   createdAt: Timestamp | null;
   updatedAt?: Timestamp | null;
   deletedAt?: Timestamp | null;
+  /** Watermelon `server_seq` — 낙관적 전송 UI(시계) 해제에 사용 */
+  serverSeq?: number | null;
+  /** Supabase `client_mutation_id` — tail upsert 시 낙관적 행과 병합 */
+  clientMutationId?: string | null;
 };
 
 function shallowUnknownRecord(v: unknown): Record<string, unknown> {
@@ -124,15 +124,68 @@ function meetingReadReceiptUserKeys(userId: string): string[] {
  * - `meetings/{meetingId}.chatReadAtBy.{userId}`: serverTimestamp (Firestore) / ISO 문자열(Ledger)
  * - `meetings/{meetingId}.chatReadMessageIdBy.{userId}`: 마지막으로 본 메시지 id
  *
- * Ledger 모임은 `subscribeMeetingById`가 Supabase 문서를 쓰므로, 읽음도 동일 문서에 병합해야 말풍선 안읽음이 갱신됩니다.
+ * Ledger 모임은 `ledger_meeting_put_doc`로 `meetings` 원장 JSON에 병합해야 말풍선 안읽음이 갱신됩니다.
+ * 동시에 채팅 메시지가 Postgres(`chat_messages`)에 있으면 `chat_mark_read`로 읽음 포인터·`chat_room_participants.unread_count`도 맞춥니다.
+ *
+ * Supabase 경로: `opts.lastReadSeq`가 있으면 `chat_messages` 조회 없이 `chat_mark_read`만 호출합니다.
+ * (로컬/낙관적 id로 `seq` 조회가 실패해 읽음이 서버에 안 남는 경우 방지)
  */
-export async function writeMeetingChatReadReceipt(meetingId: string, userId: string, lastMessageId: string): Promise<void> {
+export async function writeMeetingChatReadReceipt(
+  meetingId: string,
+  userId: string,
+  lastMessageId: string,
+  opts?: { lastReadSeq?: number | null; canonicalRoomId?: string | null },
+): Promise<void> {
   const mid = meetingId.trim();
   const uid = userId.trim();
   const lid = lastMessageId.trim();
-  if (!mid || !uid || !lid) return;
+  if (!mid || !uid) return;
+
+  const me = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
+  if (!me) return;
+
+  let seq: number | null = null;
+  const direct = opts?.lastReadSeq;
+  if (typeof direct === 'number' && Number.isFinite(direct) && direct > 0) {
+    seq = Math.floor(direct);
+  } else if (lid && !lid.startsWith('local:')) {
+    let canon = String(opts?.canonicalRoomId ?? '').trim();
+    if (!canon) {
+      try {
+        const peek = await chatPullTailRpc({ meAppUserId: me, roomKind: 'meeting', roomId: mid, limit: 1 });
+        if (peek.canonical_room_id?.trim()) canon = peek.canonical_room_id.trim();
+      } catch {
+        /* noop */
+      }
+    }
+    const roomIdsToTry = [...new Set([mid, canon].filter(Boolean))];
+    for (const rid of roomIdsToTry) {
+      const { data: row, error } = await supabase
+        .from('chat_messages')
+        .select('seq')
+        .eq('id', lid)
+        .eq('room_kind', 'meeting')
+        .eq('room_id', rid)
+        .maybeSingle();
+      if (error) {
+        ginitNotifyDbg('BubbleRead', 'mark_read_seq_lookup_error', { meetingId: mid, roomId: rid, message: error.message });
+        continue;
+      }
+      if (!row) continue;
+      const seqRaw = (row as { seq?: unknown }).seq;
+      const parsed = typeof seqRaw === 'number' && Number.isFinite(seqRaw) ? seqRaw : Number(seqRaw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        seq = Math.floor(parsed);
+        break;
+      }
+    }
+    if (seq == null) {
+      ginitNotifyDbg('BubbleRead', 'mark_read_seq_lookup_miss', { meetingId: mid, msgSuffix: lid.slice(-8) });
+    }
+  }
 
   if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
+    if (!lid) return;
     const cur = await ledgerTryLoadMeetingDoc(mid);
     if (!cur) return;
     const prevAt = shallowUnknownRecord(cur.chatReadAtBy);
@@ -143,42 +196,89 @@ export async function writeMeetingChatReadReceipt(meetingId: string, userId: str
       chatReadMessageIdBy: { ...prevMid, [uid]: lid },
     };
     await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(next) as Record<string, unknown>);
+    if (seq != null && seq > 0) {
+      const seqKey = meetingMarkReadSeqKey(me, mid);
+      const prevSeq = lastMeetingMarkReadSeqByKey.get(seqKey) ?? 0;
+      if (seq <= prevSeq) {
+        return;
+      }
+      const res = await chatMarkReadRpc({ meAppUserId: me, roomKind: 'meeting', roomId: mid, lastReadSeq: seq });
+      if (!res.ok) {
+        ginitNotifyDbg('BubbleRead', 'chat_mark_read_fail', { meetingId: mid, error: res.error ?? 'unknown' });
+      } else {
+        lastMeetingMarkReadSeqByKey.set(seqKey, seq);
+        ginitNotifyDbg('BubbleRead', 'chat_mark_read_ok', { meetingId: mid, lastReadSeq: seq });
+        scheduleDebouncedPullMeetingChatReadPointers({
+          meetingId: mid,
+          myAppUserId: me,
+          canonicalRoomId: opts?.canonicalRoomId ?? null,
+        });
+      }
+    }
     return;
   }
 
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const pairs: unknown[] = [];
-  for (const key of meetingReadReceiptUserKeys(uid)) {
-    pairs.push(new FieldPath('chatReadAtBy', key), serverTimestamp());
-    pairs.push(new FieldPath('chatReadMessageIdBy', key), lid);
+  if (seq == null || seq <= 0) {
+    if (lid && !lid.startsWith('local:')) {
+      ginitNotifyDbg('BubbleRead', 'mark_read_invalid_seq', { meetingId: mid, msgSuffix: lid.slice(-8) });
+    }
+    return;
   }
-  if (pairs.length > 0) await updateDoc(ref, ...(pairs as [any, any, ...any[]]));
+  const seqKey = meetingMarkReadSeqKey(me, mid);
+  const prevSeq = lastMeetingMarkReadSeqByKey.get(seqKey) ?? 0;
+  if (seq <= prevSeq) {
+    return;
+  }
+  const res = await chatMarkReadRpc({ meAppUserId: me, roomKind: 'meeting', roomId: mid, lastReadSeq: seq });
+  if (!res.ok) {
+    ginitNotifyDbg('BubbleRead', 'chat_mark_read_fail', { meetingId: mid, error: res.error ?? 'unknown' });
+    if (__DEV__) console.warn('[meeting-chat] chat_mark_read', res.error);
+    return;
+  }
+  lastMeetingMarkReadSeqByKey.set(seqKey, seq);
+  ginitNotifyDbg('BubbleRead', 'chat_mark_read_ok', { meetingId: mid, lastReadSeq: seq });
+  scheduleDebouncedPullMeetingChatReadPointers({
+    meetingId: mid,
+    myAppUserId: me,
+    canonicalRoomId: opts?.canonicalRoomId ?? null,
+  });
 }
 
-/** 실시간 tail + 과거 페이지 `getDocs`에서 공통으로 사용하는 페이지 크기 */
+/** 실시간 tail + 과거 페이지에서 공통으로 사용하는 페이지 크기 */
 export const MEETING_CHAT_PAGE_SIZE = 20;
 
-function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMessage {
-  const senderRaw = data.senderId;
-  const senderId =
-    typeof senderRaw === 'string' && senderRaw.trim() ? senderRaw.trim() : null;
-  const senderName = typeof data.senderName === 'string' && data.senderName.trim() ? data.senderName.trim() : null;
-  const senderAvatarUrl =
-    typeof data.senderAvatarUrl === 'string' && data.senderAvatarUrl.trim() ? data.senderAvatarUrl.trim() : null;
-  const text = typeof data.text === 'string' ? data.text : '';
-  const kindRaw = data.kind;
+const lastMeetingMarkReadSeqByKey = new Map<string, number>();
+
+function meetingMarkReadSeqKey(meAppUserId: string, meetingId: string): string {
+  return `${meAppUserId.trim()}\0${meetingId.trim()}`;
+}
+
+const LATEST_PREVIEW_LIMIT = 1;
+
+function isoStringToMeetingTimestamp(iso: string | null | undefined): Timestamp {
+  const t = typeof iso === 'string' && iso.trim() ? Date.parse(iso.trim()) : NaN;
+  return Timestamp.fromMillis(Number.isFinite(t) ? t : Date.now());
+}
+
+function mapChatDeltaRowToMeetingChatMessage(row: ChatDeltaRow): MeetingChatMessage {
+  const id = String(row.id ?? '').trim();
+  const createdAt = isoStringToMeetingTimestamp(row.created_at);
+  const updatedAt = row.updated_at ? isoStringToMeetingTimestamp(row.updated_at) : createdAt;
+  const deletedAt = row.deleted_at ? isoStringToMeetingTimestamp(row.deleted_at) : null;
+  const kindRaw = row.kind;
   const kind: MeetingChatMessageKind =
     kindRaw === 'system' ? 'system' : kindRaw === 'image' ? 'image' : 'text';
-  const imageRaw = data.imageUrl;
-  const imageUrl =
-    typeof imageRaw === 'string' && imageRaw.trim() ? imageRaw.trim() : null;
-  const createdAt = (data.createdAt as Timestamp | undefined) ?? null;
-  const updatedAt = (data.updatedAt as Timestamp | undefined) ?? createdAt;
-  const deletedAt = (data.deletedAt as Timestamp | undefined) ?? null;
-  const albumRaw = data.imageAlbumBatchId;
+  const text = typeof row.body_text === 'string' ? row.body_text : '';
+  const imageUrl = typeof row.image_url === 'string' && row.image_url.trim() ? row.image_url.trim() : null;
   const imageAlbumBatchId =
-    typeof albumRaw === 'string' && albumRaw.trim() ? albumRaw.trim() : null;
-  const rt = data.replyTo;
+    typeof row.image_album_batch_id === 'string' && row.image_album_batch_id.trim()
+      ? row.image_album_batch_id.trim()
+      : null;
+  const senderId =
+    typeof row.sender_app_user_id === 'string' && row.sender_app_user_id.trim()
+      ? row.sender_app_user_id.trim()
+      : null;
+  const rt = row.reply_to;
   let replyTo: MeetingChatMessage['replyTo'] = null;
   if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
     const r = rt as Record<string, unknown>;
@@ -196,7 +296,7 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
     };
   }
   let linkPreview: MeetingChatLinkPreview | null = null;
-  const lpRaw = data.linkPreview;
+  const lpRaw = row.link_preview;
   if (lpRaw && typeof lpRaw === 'object' && !Array.isArray(lpRaw)) {
     const o = lpRaw as Record<string, unknown>;
     const u = typeof o.url === 'string' ? o.url.trim() : '';
@@ -210,11 +310,22 @@ function mapMessageDoc(id: string, data: Record<string, unknown>): MeetingChatMe
       };
     }
   }
+  const seqRaw = row.seq;
+  const serverSeq =
+    typeof seqRaw === 'number' && Number.isFinite(seqRaw) && seqRaw > 0
+      ? Math.floor(seqRaw)
+      : Number.isFinite(Number(seqRaw)) && Number(seqRaw) > 0
+        ? Math.floor(Number(seqRaw))
+        : undefined;
+  const clientMutationId =
+    typeof row.client_mutation_id === 'string' && row.client_mutation_id.trim() ? row.client_mutation_id.trim() : null;
   return {
     id,
+    serverSeq,
+    clientMutationId,
     senderId,
-    senderName,
-    senderAvatarUrl,
+    senderName: null,
+    senderAvatarUrl: null,
     text,
     kind,
     imageUrl,
@@ -244,49 +355,74 @@ export function meetingChatMessageSearchHaystack(m: MeetingChatMessage): string 
 const CHAT_IMAGES_PAGE_SIZE = 60;
 const CHAT_IMAGES_SCAN_PAGE = 220;
 
+/** Supabase 사진 탭 페이징 커서(Firestore `DocumentSnapshot` 대체). */
+export type MeetingChatImagesSbCursor = {
+  __tag: 'sb_meeting_chat_images';
+  canonicalRoomId: string;
+  /** 다음 페이지: `seq < beforeSeqExclusive` */
+  beforeSeqExclusive: number;
+};
+
+export type MeetingChatImagesPageCursor = MeetingChatImagesSbCursor;
+
+function isMeetingChatImagesSbCursor(v: MeetingChatImagesSbCursor | null): v is MeetingChatImagesSbCursor {
+  return (
+    v != null &&
+    typeof v.__tag === 'string' &&
+    v.__tag === 'sb_meeting_chat_images'
+  );
+}
+
 /**
  * 채팅방 "사진" 탭용 — `kind === 'image'` 메시지 페이징.
  * 최신(최근)부터 내려받아 UI에서는 그대로 그리드에 추가합니다.
  */
 export async function fetchMeetingChatImagesPage(
   meetingId: string,
-  cursor: DocumentSnapshot | null,
-): Promise<{ images: MeetingChatMessage[]; nextCursor: DocumentSnapshot | null; hasMore: boolean }> {
+  cursor: MeetingChatImagesSbCursor | null,
+): Promise<{ images: MeetingChatMessage[]; nextCursor: MeetingChatImagesSbCursor | null; hasMore: boolean }> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) return { images: [], nextCursor: null, hasMore: false };
 
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  /**
-   * `where(kind == 'image') + orderBy(createdAt)`는 Firestore 복합 인덱스가 없으면 실패합니다.
-   * 채팅 "사진" 메뉴는 인덱스 의존을 피하기 위해 createdAt desc로만 가져오고 클라이언트에서 필터합니다.
-   */
-  const images: MeetingChatMessage[] = [];
-  let nextCursor: DocumentSnapshot | null = cursor;
-  let scannedLastSnap: DocumentSnapshot | null = null;
-
-  while (images.length < CHAT_IMAGES_PAGE_SIZE) {
-    const q = nextCursor
-      ? query(cref, orderBy('createdAt', 'desc'), startAfter(nextCursor), limit(CHAT_IMAGES_SCAN_PAGE))
-      : query(cref, orderBy('createdAt', 'desc'), limit(CHAT_IMAGES_SCAN_PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      scannedLastSnap = null;
-      break;
-    }
-    scannedLastSnap = snap.docs[snap.docs.length - 1]!;
-    nextCursor = scannedLastSnap;
-    for (const d of snap.docs) {
-      const m = mapMessageDoc(d.id, d.data() as Record<string, unknown>);
-      if (m.kind === 'image' && m.imageUrl?.trim()) {
-        images.push(m);
-        if (images.length >= CHAT_IMAGES_PAGE_SIZE) break;
-      }
-    }
-    if (snap.size < CHAT_IMAGES_SCAN_PAGE) break;
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return { images: [], nextCursor: null, hasMore: false };
+  let canonical = mid;
+  try {
+    const sum = await chatMeetingSummaryForMeRpc({ meAppUserId: me, meetingId: mid });
+    if (sum.canonical_room_id?.trim()) canonical = sum.canonical_room_id.trim();
+  } catch {
+    /* noop */
   }
-
-  const hasMore = scannedLastSnap != null;
-  return { images, nextCursor: scannedLastSnap, hasMore };
+  const beforeSeq = cursor?.beforeSeqExclusive ?? null;
+  const roomForQuery = cursor?.canonicalRoomId ?? canonical;
+  let q = supabase
+    .from('chat_messages')
+    .select(
+      'id, room_kind, room_id, seq, sender_app_user_id, kind, body_text, image_url, image_album_batch_id, reply_to, link_preview, client_mutation_id, created_at, updated_at, deleted_at',
+    )
+    .eq('room_kind', 'meeting')
+    .eq('room_id', roomForQuery)
+    .eq('kind', 'image')
+    .is('deleted_at', null)
+    .not('image_url', 'is', null)
+    .order('seq', { ascending: false })
+    .limit(CHAT_IMAGES_SCAN_PAGE);
+  if (beforeSeq != null && Number.isFinite(beforeSeq)) {
+    q = q.lt('seq', beforeSeq);
+  }
+  const { data: rowsRaw, error } = await q;
+  if (error) throw new Error(error.message);
+  const rows = (rowsRaw ?? []) as ChatDeltaRow[];
+  const withUrl = rows.filter((r) => typeof r.image_url === 'string' && r.image_url.trim());
+  const images = withUrl.slice(0, CHAT_IMAGES_PAGE_SIZE).map(mapChatDeltaRowToMeetingChatMessage);
+  const batchLen = withUrl.length;
+  const hasMore = batchLen >= CHAT_IMAGES_SCAN_PAGE;
+  const minSeq = batchLen ? Number(withUrl[batchLen - 1]!.seq) : null;
+  const nextCursor: MeetingChatImagesSbCursor | null =
+    hasMore && minSeq != null && Number.isFinite(minSeq)
+      ? { __tag: 'sb_meeting_chat_images', canonicalRoomId: roomForQuery, beforeSeqExclusive: minSeq }
+      : null;
+  return { images, nextCursor, hasMore };
 }
 
 function supabasePublicObjectPathFromUrl(url: string, bucket: string): string {
@@ -321,18 +457,19 @@ export async function deleteMeetingChatImageMessageBestEffort(
   if (!mid) throw new Error('모임 정보가 없습니다.');
   if (!msgId) throw new Error('메시지 정보가 없습니다.');
 
-  const db = getFirestoreDb();
-  const msgRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, msgId);
-  await updateDoc(msgRef, {
-    // 사람이 입력한 말풍선이 아니라 "시스템 알림"처럼 보이도록 처리
-    kind: 'system',
-    senderId: null,
-    text: '사진이 삭제되었습니다.',
-    imageUrl: null,
-    deletedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  } as Record<string, unknown>);
-
+  const me = (await readStoredUserId())?.trim();
+  if (!me) throw new Error('로그인이 필요합니다.');
+  const res = await chatSoftDeleteMessageRpc({
+    meAppUserId: me,
+    roomKind: 'meeting',
+    roomId: mid,
+    messageId: msgId,
+    mode: 'image',
+  });
+  if (!res.ok) {
+    const err = res.error?.trim();
+    if (err) throw new Error(err);
+  }
   const objectPath = supabasePublicObjectPathFromUrl(url, SUPABASE_STORAGE_BUCKET_MEETING_CHAT);
   if (!objectPath) return;
   try {
@@ -352,24 +489,24 @@ export async function deleteMeetingChatTextMessageBestEffort(meetingId: string, 
   if (!mid) throw new Error('모임 정보가 없습니다.');
   if (!msgId) throw new Error('메시지 정보가 없습니다.');
 
-  const db = getFirestoreDb();
-  const msgRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, msgId);
-  await updateDoc(msgRef, {
-    kind: 'system',
-    senderId: null,
-    text: '메시지가 삭제되었습니다.',
-    imageUrl: null,
-    linkPreview: null,
-    deletedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  } as Record<string, unknown>);
+  const me = (await readStoredUserId())?.trim();
+  if (!me) throw new Error('로그인이 필요합니다.');
+  const res = await chatSoftDeleteMessageRpc({
+    meAppUserId: me,
+    roomKind: 'meeting',
+    roomId: mid,
+    messageId: msgId,
+    mode: 'text',
+  });
+  if (!res.ok) {
+    const err = res.error?.trim();
+    if (err) throw new Error(err);
+  }
 }
-
-const SEARCH_PAGE = 120;
 
 /**
  * 모임 채팅에서 `needle`이 포함된 메시지를 과거 방향으로 페이지네이션하며 찾습니다.
- * Firestore에 전문 검색이 없어 클라이언트에서 문자열 포함 여부를 검사합니다.
+ * 서버 RPC로 후보를 가져온 뒤 클라이언트에서 문자열 포함 여부를 검사합니다.
  */
 export async function searchMeetingChatMessages(
   meetingId: string,
@@ -380,135 +517,197 @@ export async function searchMeetingChatMessages(
   const raw = typeof needle === 'string' ? needle.trim() : '';
   if (!mid || !raw) return [];
 
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return [];
   const maxDocs = Math.min(Math.max(200, opts?.maxDocsScanned ?? 2500), 8000);
   const norm = raw.toLowerCase();
-
-  const db = getFirestoreDb();
-  const cref = collection(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-
-  const matches: MeetingChatMessage[] = [];
-  const seen = new Set<string>();
-  let lastSnap: DocumentSnapshot | undefined;
-  let scanned = 0;
-
-  while (scanned < maxDocs) {
-    const q = lastSnap
-      ? query(cref, orderBy('createdAt', 'desc'), startAfter(lastSnap), limit(SEARCH_PAGE))
-      : query(cref, orderBy('createdAt', 'desc'), limit(SEARCH_PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) break;
-    for (const d of snap.docs) {
-      scanned++;
-      const m = mapMessageDoc(d.id, d.data() as Record<string, unknown>);
-      const hay = meetingChatMessageSearchHaystack(m).toLowerCase();
-      if (hay.includes(norm) && !seen.has(m.id)) {
-        seen.add(m.id);
-        matches.push(m);
-      }
-    }
-    lastSnap = snap.docs[snap.docs.length - 1]!;
-    if (snap.size < SEARCH_PAGE) break;
-  }
-
-  matches.sort((a, b) => {
+  const { rows, error } = await chatSearchMessagesForMeRpc({
+    meAppUserId: me,
+    roomKind: 'meeting',
+    roomId: mid,
+    needle: raw,
+    maxScan: maxDocs,
+    matchLimit: 200,
+  });
+  if (error) return [];
+  const mapped = rows.map(mapChatDeltaRowToMeetingChatMessage);
+  const filtered = mapped.filter((m) => meetingChatMessageSearchHaystack(m).toLowerCase().includes(norm));
+  filtered.sort((a, b) => {
     const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
     const tb = b.createdAt && typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : 0;
     if (ta !== tb) return ta - tb;
     return a.id.localeCompare(b.id);
   });
-  return matches;
+  return filtered;
 }
 
 export type MeetingChatLiveTailEvent = {
-  /** `orderBy('createdAt','desc')` + `limit(MEETING_CHAT_PAGE_SIZE)` — 최신순, 최대 20건 */
+  /** 최신순 tail, 최대 `MEETING_CHAT_PAGE_SIZE`건 */
   tail: MeetingChatMessage[];
-  /** tail 구간에서 가장 과거(정렬상 마지막) 문서. 첫 `startAfter` 기준으로 쓰지 않고, 화면에서 `paging` 초기화 시 참고 가능 */
-  tailOldestDoc: DocumentSnapshot | null;
-  /** `limit(20)` 밖으로 밀려난 메시지(실시간으로 tail이 갱신될 때). UI의 과거 구간에 합치면 됩니다. */
+  /** 호환 필드 — 항상 null(Supabase tail에는 문서 스냅샷 앵커 없음) */
+  tailOldestDoc: null;
+  /** tail 밖으로 밀려난 메시지(실시간으로 tail이 갱신될 때). UI의 과거 구간에 합치면 됩니다. */
   evictedFromTail: MeetingChatMessage[];
 };
 
+function subscribeMeetingChatLiveTailSupabase(
+  meetingId: string,
+  onEvent: (event: MeetingChatLiveTailEvent) => void,
+  callbacks?: ChatRealtimeSubscribeCallbacks | ((message: string) => void),
+): Unsubscribe {
+  const rt = normalizeChatRealtimeSubscribeCallbacks(callbacks);
+  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
+  if (!mid) {
+    onEvent({ tail: [], tailOldestDoc: null, evictedFromTail: [] });
+    return () => {};
+  }
+
+  let alive = true;
+  let stopRealtime: (() => void) | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let prevTail: MeetingChatMessage[] = [];
+
+  const emitFromRpcRows = (rows: ChatDeltaRow[]) => {
+    if (!alive) return;
+    const curr = rows.map(mapChatDeltaRowToMeetingChatMessage);
+    const currIds = new Set(curr.map((m) => m.id));
+    const evictedFromTail = prevTail.filter((m) => !currIds.has(m.id));
+    prevTail = curr;
+    onEvent({ tail: curr, tailOldestDoc: null, evictedFromTail });
+  };
+
+  const pullAndEmit = async () => {
+    const me = (await readStoredUserId())?.trim();
+    if (!alive || !me) return;
+    try {
+      const res = await chatPullTailRpc({
+        meAppUserId: me,
+        roomKind: 'meeting',
+        roomId: mid,
+        limit: MEETING_CHAT_PAGE_SIZE,
+      });
+      if (res.error) {
+        rt.onGiveUp?.(res.error);
+        return;
+      }
+      emitFromRpcRows(res.rows);
+    } catch (e) {
+      rt.onGiveUp?.(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  voidSafe(
+    (async () => {
+      await pullAndEmit();
+      if (!alive) return;
+      const me = (await readStoredUserId())?.trim();
+      if (!me) return;
+      let canonical = mid;
+      try {
+        const peek = await chatPullTailRpc({ meAppUserId: me, roomKind: 'meeting', roomId: mid, limit: 1 });
+        if (peek.canonical_room_id?.trim()) canonical = peek.canonical_room_id.trim();
+      } catch {
+        /* keep mid */
+      }
+      const filter = `room_id=eq.${canonical}`;
+      const readRoomIds = chatReadPointerRoomIdsForRealtime(mid, canonical);
+
+      const scheduleReadPointersPull = () => {
+        if (!alive || !me) return;
+        scheduleDebouncedPullMeetingChatReadPointers({
+          meetingId: mid,
+          myAppUserId: me,
+          canonicalRoomId: canonical !== mid ? canonical : null,
+        });
+      };
+
+      const onMeetingReadPointersChange = (payload: {
+        new?: Record<string, unknown>;
+        old?: Record<string, unknown>;
+      }) => {
+        if (!alive) return;
+        ginitNotifyDbg('BubbleRead', 'read_pointers_postgres_changes', { roomKind: 'meeting', roomIds: readRoomIds });
+        void applyChatReadPointerRealtimeToLocal({
+          roomKind: 'meeting',
+          localRoomIds: readRoomIds,
+          payload,
+        })
+          .catch(() => {})
+          .finally(() => {
+            scheduleReadPointersPull();
+          });
+      };
+
+      voidSafe(pullMeetingChatReadPointersToLocal({ meetingId: mid, myAppUserId: me, canonicalRoomId: canonical !== mid ? canonical : null }));
+
+      await ensureSupabaseRealtimeAuthFromSession();
+      const authUserIdForTopic = await getSupabaseAuthUserIdForRealtimeTopic();
+      const liveChannelUniqueKey = authUserIdForTopic ? `${canonical}:${authUserIdForTopic}` : canonical;
+
+      ginitNotifyDbg('BubbleRead', 'subscribe_meeting_live_channel', { meetingId: mid, canonical, readRoomIds });
+      stopRealtime = startPostgresRealtimeSubscription({
+        channelBaseName: 'meeting-chat-live',
+        uniqueKey: liveChannelUniqueKey,
+        configure: (ch) => {
+          ch.on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'chat_messages', filter },
+            () => {
+              if (!alive) return;
+              if (debounceTimer) clearTimeout(debounceTimer);
+              debounceTimer = setTimeout(() => {
+                debounceTimer = null;
+                voidSafe(pullAndEmit());
+                scheduleReadPointersPull();
+              }, 150);
+            },
+          );
+          for (const readRid of readRoomIds) {
+            const readFilter = chatReadPointersPostgresFilter('meeting', readRid);
+            ch.on(
+              'postgres_changes',
+              { event: '*', schema: 'public', table: 'chat_read_pointers', filter: readFilter },
+              onMeetingReadPointersChange,
+            );
+          }
+        },
+        shouldStop: () => !alive,
+        logLabel: 'meeting-chat-live',
+        onTransientFailure: () => {
+          voidSafe(pullAndEmit());
+          scheduleReadPointersPull();
+        },
+        ...postgresRealtimeHandlersFromChatCallbacks(rt, '채팅 실시간 연결에 실패했어요.'),
+      });
+    })(),
+  );
+
+  /**
+   * 화면 이탈 시 반드시 호출: `startPostgresRealtimeSubscription`의 `stop()`이
+   * `supabase.removeChannel`로 방 전용 `postgres_changes` 채널을 제거합니다.
+   */
+  return () => {
+    alive = false;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    stopRealtime?.();
+  };
+}
+
 /**
- * 최신 `MEETING_CHAT_PAGE_SIZE`건만 `onSnapshot`으로 구독합니다.
- * 새 메시지가 오면 tail이 갱신되고, 밀려난 문서는 `evictedFromTail`로 알려 줍니다.
+ * 최신 `MEETING_CHAT_PAGE_SIZE`건을 Supabase RPC + Realtime으로 구독합니다.
+ * 새 메시지가 오면 tail이 갱신되고, 밀려난 항목은 `evictedFromTail`로 알려 줍니다.
  *
  * 채팅 UI는 `FlatList inverted` + tail을 앞쪽(최신)에 두는 배열을 기본으로 사용합니다.
  */
 export function subscribeMeetingChatLiveTail(
   meetingId: string,
   onEvent: (event: MeetingChatLiveTailEvent) => void,
-  onError?: (message: string) => void,
+  callbacks?: ChatRealtimeSubscribeCallbacks | ((message: string) => void),
 ): Unsubscribe {
-  const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
-  if (!mid) {
-    onEvent({ tail: [], tailOldestDoc: null, evictedFromTail: [] });
-    return () => {};
-  }
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(MEETING_CHAT_PAGE_SIZE));
-
-  let prevDocs: DocumentSnapshot[] = [];
-
-  return onSnapshot(
-    q,
-    (snap) => {
-      const currDocs = snap.docs;
-      const currIds = new Set(currDocs.map((d) => d.id));
-      const evictedSnaps: DocumentSnapshot[] = [];
-      for (const d of prevDocs) {
-        if (!currIds.has(d.id)) evictedSnaps.push(d);
-      }
-      prevDocs = currDocs;
-
-      const evictedFromTail = evictedSnaps.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-      evictedFromTail.sort(meetingChatMessageDescComparator);
-
-      const tail = currDocs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-      const tailOldestDoc = currDocs.length ? currDocs[currDocs.length - 1]! : null;
-
-      if (__DEV__) {
-        const newest = tail[0];
-        const oldest = tail[tail.length - 1];
-        const baseLog = {
-          meetingId: mid,
-          limit: MEETING_CHAT_PAGE_SIZE,
-          firestoreDocCount: currDocs.length,
-          tailMappedCount: tail.length,
-          evictedCount: evictedFromTail.length,
-          newestId: newest?.id,
-          oldestId: oldest?.id,
-        };
-        const mergedForProbe = [...tail, ...evictedFromTail];
-        const msToIds = new Map<number, string[]>();
-        for (const m of mergedForProbe) {
-          const t = m.createdAt && typeof m.createdAt.toMillis === 'function' ? m.createdAt.toMillis() : 0;
-          const bucket = msToIds.get(t);
-          if (bucket) bucket.push(m.id);
-          else msToIds.set(t, [m.id]);
-        }
-        const sameMsGroups = [...msToIds.entries()].filter(([, ids]) => ids.length > 1);
-        if (evictedFromTail.length > 0 || sameMsGroups.length > 0) {
-          console.log('[meeting-chat:paging] onSnapshot tail+detail (repro)', {
-            ...baseLog,
-            tailIds: tail.map((m) => m.id),
-            evictedIds: evictedFromTail.map((m) => m.id),
-            tailCreatedAtMs: tail.map((m) =>
-              m.createdAt && typeof m.createdAt.toMillis === 'function' ? m.createdAt.toMillis() : 0,
-            ),
-            sameMsSample: sameMsGroups.slice(0, 4).map(([ms, ids]) => ({ ms, ids })),
-          });
-        } else {
-          console.log('[meeting-chat:paging] onSnapshot tail', baseLog);
-        }
-      }
-
-      onEvent({ tail, tailOldestDoc, evictedFromTail });
-    },
-    (err) => {
-      onError?.(err.message ?? '채팅을 불러오지 못했어요.');
-    },
-  );
+  return subscribeMeetingChatLiveTailSupabase(meetingId, onEvent, callbacks);
 }
+
+export type { ChatRealtimeSubscribeCallbacks } from '@/src/lib/chat-realtime-subscribe-callbacks';
 
 export function meetingChatMessageDescComparator(a: MeetingChatMessage, b: MeetingChatMessage): number {
   const ta = a.createdAt && typeof a.createdAt.toMillis === 'function' ? a.createdAt.toMillis() : 0;
@@ -525,30 +724,38 @@ export type MeetingChatFetchedMessagesPage = {
   hasMore: boolean;
 };
 
-/** `subscribeMeetingChatLiveTail` 과 동일한 최신 20건 스냅샷을 한 번 `getDocs`로 가져옵니다. */
+/** `subscribeMeetingChatLiveTail` 과 동일한 최신 20건을 RPC로 한 번 가져옵니다. */
 export async function fetchMeetingChatLatestPage(meetingId: string): Promise<MeetingChatFetchedMessagesPage> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) {
     return { messages: [], oldestMessageId: null, hasMore: false };
   }
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(MEETING_CHAT_PAGE_SIZE));
-  const snap = await getDocs(q);
-  if (snap.empty) {
+
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return { messages: [], oldestMessageId: null, hasMore: false };
+  try {
+    const res = await chatPullTailRpc({
+      meAppUserId: me,
+      roomKind: 'meeting',
+      roomId: mid,
+      limit: MEETING_CHAT_PAGE_SIZE,
+    });
+    if (res.error) {
+      if (__DEV__) console.warn('[meeting-chat] chat_pull_tail', res.error);
+      return { messages: [], oldestMessageId: null, hasMore: false };
+    }
+    const messages = res.rows.map(mapChatDeltaRowToMeetingChatMessage);
+    const oldestMessageId = messages.length ? messages[messages.length - 1]!.id : null;
+    return { messages, oldestMessageId, hasMore: res.has_more };
+  } catch (e) {
+    if (__DEV__) console.warn('[meeting-chat] fetchMeetingChatLatestPage supabase', e);
     return { messages: [], oldestMessageId: null, hasMore: false };
   }
-  const messages = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
-  return {
-    messages,
-    oldestMessageId,
-    hasMore: snap.size >= MEETING_CHAT_PAGE_SIZE,
-  };
 }
 
 /**
- * `afterMessageId` 문서 직후(더 과거)부터 `MEETING_CHAT_PAGE_SIZE`건.
- * Persist용 `useInfiniteQuery`에서 `DocumentSnapshot` 대신 메시지 id로 커서를 둡니다.
+ * `afterMessageId` **이후**(더 과거)부터 `pageSize`건.
+ * Persist용 `useInfiniteQuery`에서 메시지 id로 커서를 둡니다.
  */
 export async function fetchMeetingChatOlderPageAfterMessageId(
   meetingId: string,
@@ -560,24 +767,35 @@ export async function fetchMeetingChatOlderPageAfterMessageId(
   if (!mid || !aid) {
     return { messages: [], oldestMessageId: null, hasMore: false };
   }
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const anchorRef = doc(cref, aid);
-  const anchorSnap = await getDoc(anchorRef);
-  if (!anchorSnap.exists()) {
+
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return { messages: [], oldestMessageId: null, hasMore: false };
+  try {
+    const { data: anchorRow, error: anchorErr } = await supabase.from('chat_messages').select('seq').eq('id', aid).maybeSingle();
+    if (anchorErr || !anchorRow) return { messages: [], oldestMessageId: null, hasMore: false };
+    const seqRaw = (anchorRow as { seq?: unknown }).seq;
+    const anchorSeq = typeof seqRaw === 'number' && Number.isFinite(seqRaw) ? seqRaw : Number(seqRaw);
+    if (!Number.isFinite(anchorSeq) || anchorSeq <= 0) {
+      return { messages: [], oldestMessageId: null, hasMore: false };
+    }
+    const res = await chatPullHistoryBeforeSeqRpc({
+      meAppUserId: me,
+      roomKind: 'meeting',
+      roomId: mid,
+      beforeSeq: Math.floor(anchorSeq),
+      limit: pageSize,
+    });
+    if (res.error) {
+      if (__DEV__) console.warn('[meeting-chat] chat_pull_history_before_seq', res.error);
+      return { messages: [], oldestMessageId: null, hasMore: false };
+    }
+    const messages = res.rows.map(mapChatDeltaRowToMeetingChatMessage);
+    const oldestMessageId = messages.length ? messages[messages.length - 1]!.id : null;
+    return { messages, oldestMessageId, hasMore: res.has_more };
+  } catch (e) {
+    if (__DEV__) console.warn('[meeting-chat] fetchMeetingChatOlderPageAfterMessageId supabase', e);
     return { messages: [], oldestMessageId: null, hasMore: false };
   }
-  const q = query(cref, orderBy('createdAt', 'desc'), startAfter(anchorSnap), limit(pageSize));
-  const snap = await getDocs(q);
-  if (snap.empty) {
-    return { messages: [], oldestMessageId: null, hasMore: false };
-  }
-  const messages = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-  const oldestMessageId = snap.docs[snap.docs.length - 1]!.id;
-  return {
-    messages,
-    oldestMessageId,
-    hasMore: snap.size >= pageSize,
-  };
 }
 
 const PREFETCH_OLDER_DEFAULT_PAGE = 100;
@@ -634,98 +852,53 @@ export async function fetchOlderMeetingChatPagesUntilTargetMessageId(
 }
 
 /**
- * `lastVisible` 문서 **이후**(더 과거) `MEETING_CHAT_PAGE_SIZE`개를 한 번에 가져옵니다.
+ * `lastVisibleOrId` 앵커 **이후**(더 과거) `pageSize`개를 한 번에 가져옵니다.
+ * Firestore 문서 스냅샷 대신 `{ id }` 또는 메시지 id 문자열을 받습니다.
  */
 export async function fetchMeetingChatOlderPage(
   meetingId: string,
-  lastVisible: DocumentSnapshot,
+  lastVisibleOrId: string | { id: string },
   pageSize: number = MEETING_CHAT_PAGE_SIZE,
-): Promise<{ messages: MeetingChatMessage[]; lastVisible: DocumentSnapshot | null; hasMore: boolean }> {
+): Promise<{ messages: MeetingChatMessage[]; lastVisible: null; hasMore: boolean }> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) {
     return { messages: [], lastVisible: null, hasMore: false };
   }
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), startAfter(lastVisible), limit(pageSize));
-  const snap = await getDocs(q);
-  if (snap.empty) {
-    if (__DEV__) {
-      console.log('[meeting-chat:paging] fetchOlderPage (empty)', {
-        meetingId: mid,
-        pageSize,
-        afterDocId: lastVisible.id,
-      });
-    }
+  const anchorId =
+    typeof lastVisibleOrId === 'string'
+      ? lastVisibleOrId.trim()
+      : String(lastVisibleOrId?.id ?? '').trim();
+  if (!anchorId) {
     return { messages: [], lastVisible: null, hasMore: false };
   }
-  const messages = snap.docs.map((d) => mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-  const lastDoc = snap.docs[snap.docs.length - 1]!;
-  if (__DEV__) {
-    const first = messages[0];
-    const last = messages[messages.length - 1];
-    console.log('[meeting-chat:paging] fetchOlderPage', {
-      meetingId: mid,
-      requestedPageSize: pageSize,
-      returnedCount: snap.size,
-      hasMore: snap.size >= pageSize,
-      afterDocId: lastVisible.id,
-      pageNewestId: first?.id,
-      pageOldestId: last?.id,
-    });
-  }
-  return {
-    messages,
-    lastVisible: lastDoc,
-    hasMore: snap.size >= pageSize,
-  };
+  const page = await fetchMeetingChatOlderPageAfterMessageId(mid, anchorId, pageSize);
+  return { messages: page.messages, lastVisible: null, hasMore: page.hasMore };
 }
 
-const LATEST_PREVIEW_LIMIT = 1;
-
-/**
- * 채팅 탭 목록용 — 해당 모임의 **가장 최근 메시지 1건**만 구독합니다.
- */
 /** 목록 배지용 — 표시 상한(카카오톡 등과 유사) */
 export const MEETING_CHAT_UNREAD_LIST_CAP = 999;
 
-const UNREAD_COUNT_PAGE = 250;
-
 /**
- * 읽음 포인터(`readMessageId`) **다음**에 쌓인 메시지 개수.
- * `RunAggregationQuery` + `startAfter(문서)` 조합이 invalid-argument로 실패하는 경우가 있어
- * `getDocs` 페이지 누적으로 집계합니다.
+ * 읽지 않은 메시지 개수(서버 요약 RPC).
+ * `readMessageId` 인자는 호환용으로 유지되며, 집계는 서버 `chat_meeting_summary_for_me`를 따릅니다.
  */
 export async function fetchMeetingChatUnreadCount(meetingId: string, readMessageId: string | null | undefined): Promise<number> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) return 0;
-  const rid = typeof readMessageId === 'string' ? readMessageId.trim() : '';
+  void readMessageId;
 
-  const db = getFirestoreDb();
-  const cref = collection(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-
-  /** 커서 없음: 호출부에서 `latestMessageId` 등으로 보강해야 함. 여기서 전체를 세면 탈퇴/재가입·로컬 `''` 고착 시 배지가 과대해집니다. */
-  if (!rid) return 0;
-
-  const readRef = doc(db, MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION, rid);
-  const readSnap = await getDoc(readRef);
-  if (!readSnap.exists()) {
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return 0;
+  try {
+    const s = await chatMeetingSummaryForMeRpc({ meAppUserId: me, meetingId: mid });
+    const n = typeof s.unread_count === 'number' && Number.isFinite(s.unread_count) ? s.unread_count : 0;
+    return Math.min(Math.max(0, n), MEETING_CHAT_UNREAD_LIST_CAP);
+  } catch {
     return 0;
   }
-
-  let total = 0;
-  let cursor: DocumentSnapshot = readSnap;
-  for (;;) {
-    const q = query(cref, orderBy('createdAt', 'asc'), startAfter(cursor), limit(UNREAD_COUNT_PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) break;
-    total += snap.size;
-    if (total >= MEETING_CHAT_UNREAD_LIST_CAP) return MEETING_CHAT_UNREAD_LIST_CAP;
-    cursor = snap.docs[snap.docs.length - 1]!;
-    if (snap.size < UNREAD_COUNT_PAGE) break;
-  }
-  return total;
 }
 
+/** 채팅 탭 목록용 — 해당 모임의 **가장 최근 메시지 1건**만 초기 로드합니다. 실시간 갱신은 `user_notifications:{profiles.id}` 브로드캐스트로 처리합니다. */
 export function subscribeMeetingChatLatestMessage(
   meetingId: string,
   onLatest: (message: MeetingChatMessage | null) => void,
@@ -736,47 +909,43 @@ export function subscribeMeetingChatLatestMessage(
     onLatest(null);
     return () => {};
   }
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const q = query(cref, orderBy('createdAt', 'desc'), limit(LATEST_PREVIEW_LIMIT));
-  return onSnapshot(
-    q,
-    (snap) => {
-      if (snap.empty) {
-        onLatest(null);
+
+  let alive = true;
+  const pull = async () => {
+    const me = (await readStoredUserId())?.trim();
+    if (!alive || !me) return;
+    try {
+      const res = await chatPullTailRpc({ meAppUserId: me, roomKind: 'meeting', roomId: mid, limit: LATEST_PREVIEW_LIMIT });
+      if (res.error) {
+        onError?.(res.error);
         return;
       }
-      const d = snap.docs[0]!;
-      onLatest(mapMessageDoc(d.id, d.data() as Record<string, unknown>));
-    },
-    (err) => {
-      onError?.(err.message ?? '채팅 미리보기를 불러오지 못했어요.');
-    },
-  );
+      const first = res.rows[0];
+      onLatest(first ? mapChatDeltaRowToMeetingChatMessage(first) : null);
+    } catch (e) {
+      onError?.(e instanceof Error ? e.message : String(e));
+    }
+  };
+  voidSafe(pull());
+  return () => {
+    alive = false;
+  };
 }
 
-const MESSAGE_DELETE_PAGE = 400;
-
-/** 모임 채팅 서브컬렉션의 모든 문서를 배치로 삭제합니다(탈퇴·모임 삭제용). */
+/** 모임 채팅 메시지 전체 삭제(탈퇴·모임 삭제용). */
 export async function deleteAllMeetingChatMessages(meetingId: string): Promise<void> {
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!mid) return;
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const db = getFirestoreDb();
-  let lastId: string | undefined;
-  for (;;) {
-    const q =
-      lastId == null
-        ? query(cref, orderBy(documentId()), limit(MESSAGE_DELETE_PAGE))
-        : query(cref, orderBy(documentId()), startAfter(lastId), limit(MESSAGE_DELETE_PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) break;
-    const batch = writeBatch(db);
-    for (const d of snap.docs) {
-      batch.delete(d.ref);
+
+  const me = (await readStoredUserId())?.trim();
+  if (!me) return;
+  try {
+    const res = await chatDeleteAllMeetingMessagesRpc({ meAppUserId: me, meetingId: mid });
+    if (!res.ok && __DEV__ && res.error) {
+      console.warn('[meeting-chat] chat_delete_all_meeting_messages', res.error);
     }
-    await batch.commit();
-    lastId = snap.docs[snap.docs.length - 1]!.id;
-    if (snap.size < MESSAGE_DELETE_PAGE) break;
+  } catch (e) {
+    if (__DEV__) console.warn('[meeting-chat] chat_delete_all_meeting_messages', e);
   }
 }
 
@@ -785,33 +954,52 @@ export async function deleteMeetingChatMessagesFromSender(meetingId: string, use
   const mid = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   const uid = typeof userId === 'string' ? userId.trim() : String(userId ?? '').trim();
   if (!mid || !uid) return;
-  const ns = normalizePhoneUserId(uid) ?? uid;
-  const cref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const db = getFirestoreDb();
-  let lastId: string | undefined;
+
+  const sessionMe = (await readStoredUserId())?.trim();
+  if (!sessionMe) return;
+  const senderMe = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
+  if (!senderMe) return;
+  let canonical = mid;
+  try {
+    const tail = await chatPullTailRpc({ meAppUserId: sessionMe, roomKind: 'meeting', roomId: mid, limit: 1 });
+    if (tail.canonical_room_id?.trim()) canonical = tail.canonical_room_id.trim();
+  } catch {
+    /* noop */
+  }
+  const senderKeys = meetingReadReceiptUserKeys(uid);
+  if (!senderKeys.length) return;
+  const page = 200;
+  let offset = 0;
   for (;;) {
-    const q =
-      lastId == null
-        ? query(cref, orderBy(documentId()), limit(MESSAGE_DELETE_PAGE))
-        : query(cref, orderBy(documentId()), startAfter(lastId), limit(MESSAGE_DELETE_PAGE));
-    const snap = await getDocs(q);
-    if (snap.empty) break;
-    const batch = writeBatch(db);
-    let n = 0;
-    for (const d of snap.docs) {
-      const data = d.data() as Record<string, unknown>;
-      const sid = typeof data.senderId === 'string' ? data.senderId.trim() : '';
-      const nsSid = sid ? normalizePhoneUserId(sid) ?? sid : '';
-      if (nsSid === ns) {
-        batch.delete(d.ref);
-        n += 1;
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('id, kind')
+      .eq('room_kind', 'meeting')
+      .eq('room_id', canonical)
+      .is('deleted_at', null)
+      .in('sender_app_user_id', senderKeys)
+      .order('seq', { ascending: true })
+      .range(offset, offset + page - 1);
+    if (error || !data?.length) break;
+    for (const row of data) {
+      const id = typeof (row as { id?: unknown }).id === 'string' ? (row as { id: string }).id : String((row as { id?: unknown }).id ?? '');
+      const kindRaw = (row as { kind?: unknown }).kind;
+      const mode = kindRaw === 'image' ? 'image' : 'text';
+      if (!id) continue;
+      try {
+        await chatSoftDeleteMessageRpc({
+          meAppUserId: senderMe,
+          roomKind: 'meeting',
+          roomId: mid,
+          messageId: id,
+          mode,
+        });
+      } catch {
+        /* best-effort per row */
       }
     }
-    if (n > 0) {
-      await batch.commit();
-    }
-    lastId = snap.docs[snap.docs.length - 1]!.id;
-    if (snap.size < MESSAGE_DELETE_PAGE) break;
+    if (data.length < page) break;
+    offset += page;
   }
 }
 
@@ -845,8 +1033,8 @@ export async function deleteMeetingChatImagesStorageBestEffort(meetingId: string
   }
 }
 
-/** 모임 채팅 송신 직후 참가자에게 원격 푸시(수신자 앱이 백그라운드여도 동작). */
-function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
+/** 모임 채팅 INSERT 후 수신자 FCM — DB Webhook → `chat-user-notifications-broadcast` → `fcm-push-send`(data.unread_count)에서 처리 */
+export function notifyMeetingChatParticipantsRemoteFireAndForget(_args: {
   meetingId: string;
   senderId: string;
   preview: string;
@@ -854,51 +1042,6 @@ function notifyMeetingChatParticipantsRemoteFireAndForget(args: {
   senderName?: string | null;
 }): void {
   if (Platform.OS === 'web') return;
-  void (async () => {
-    try {
-      const mid = args.meetingId.trim();
-      if (!mid) return;
-      const m = await getMeetingById(mid);
-      if (!m) {
-        ginitNotifyDbg('meeting-chat', 'notify_skip_no_meeting', { meetingId: mid });
-        return;
-      }
-      const title = m.title?.trim() || '모임';
-      const senderPk = normalizeParticipantId(args.senderId.trim()) || args.senderId.trim();
-      const senderProfile = senderPk ? await getUserProfile(senderPk).catch(() => null) : null;
-      const senderName =
-        args.senderName?.trim() || senderProfile?.nickname?.trim() || senderProfile?.displayName?.trim() || undefined;
-      const senderPhotoUrl = senderProfile?.photoUrl?.trim() || undefined;
-      const ids = m.participantIds ?? [];
-      const seen = new Set<string>();
-      const pv = args.preview.trim().slice(0, 500);
-      let pushCount = 0;
-      for (const raw of ids) {
-        const pk = normalizeParticipantId(String(raw).trim()) || String(raw).trim();
-        if (!pk || pk === senderPk || seen.has(pk)) continue;
-        seen.add(pk);
-        pushCount += 1;
-        sendInAppAlarmRemotePushToUserFireAndForget(pk, {
-          kind: 'chat',
-          meetingId: mid,
-          meetingTitle: title,
-          preview: pv,
-          roomType: 'meeting',
-          lastMessageId: args.lastMessageId,
-          senderName,
-          senderPhotoUrl,
-        });
-      }
-      ginitNotifyDbg('meeting-chat', 'notify_participants', {
-        meetingId: mid,
-        recipientPushCount: pushCount,
-        participantIdsLen: ids.length,
-      });
-    } catch (e) {
-      ginitNotifyDbg('meeting-chat', 'notify_error', { message: e instanceof Error ? e.message : String(e) });
-      /* 푸시 실패는 전송 성공과 무관 */
-    }
-  })();
 }
 
 export async function sendMeetingChatTextMessage(
@@ -914,60 +1057,40 @@ export async function sendMeetingChatTextMessage(
   const text = rawText.trim().slice(0, 4000);
   if (!text) throw new Error('메시지를 입력해 주세요.');
 
+  const meAppUserId = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
   const senderId = normalizePhoneUserId(uid) ?? uid;
-  // Denormalization: 검색/리스트 렌더에서 Firestore 추가 Read를 막기 위해 sender meta를 메시지에 포함합니다.
   const senderProfile = await getUserProfile(senderId).catch(() => null);
   const linkPreview = await buildLinkPreviewForChatText(text);
-  const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const msgRef = doc(ref);
-  const batch = writeBatch(getFirestoreDb());
-  const now = Timestamp.now();
-  batch.set(
-    msgRef,
-    stripUndefinedDeep({
-      senderId,
-      senderName: senderProfile?.nickname ?? null,
-      senderAvatarUrl: senderProfile?.photoUrl ?? null,
-      text,
-      linkPreview,
-      replyTo:
-        replyTo && replyTo.messageId?.trim()
-          ? {
-              messageId: replyTo.messageId.trim(),
-              senderId: replyTo.senderId ?? null,
-              kind: replyTo.kind ?? 'text',
-              imageUrl: replyTo.imageUrl ?? null,
-              text: String(replyTo.text ?? '').trim().slice(0, 280),
-            }
-          : null,
-      kind: 'text' as const,
-      /**
-       * `serverTimestamp()`는 로컬에서 아직 값이 확정되기 전까지 `orderBy('createdAt')` 쿼리에서
-       * 문서가 제외되는 케이스가 있어(전송해도 리스트에 안 뜨는 현상), 우선 클라이언트 타임으로 저장합니다.
-       * 채팅 UI는 "즉시 보임"이 더 중요하고, 정렬이 필요한 경우에도 큰 문제 없이 동작합니다.
-       */
-      createdAt: now,
-      updatedAt: now,
-    }) as Record<string, unknown>,
-  );
-  await batch.commit();
-
-  // 목록 unread 요약(참여자별 unreadCountBy)
-  const m = await getMeetingById(mid).catch(() => null);
-  if (m) {
-    void bumpMeetingChatRoomSummaryOnSend({
-      meetingId: mid,
-      senderId,
-      messageId: msgRef.id,
-      preview: text,
-      participantIds: m.participantIds ?? [],
-    }).catch(() => {});
+  const clientMutationId = newChatClientMutationId();
+  const replyToRpc =
+    replyTo && replyTo.messageId?.trim()
+      ? {
+          messageId: replyTo.messageId.trim(),
+          senderId: replyTo.senderId ?? null,
+          kind: replyTo.kind ?? 'text',
+          imageUrl: replyTo.imageUrl ?? null,
+          text: String(replyTo.text ?? '').trim().slice(0, 280),
+        }
+      : null;
+  const res = await chatSendMessageRpc({
+    meAppUserId,
+    roomKind: 'meeting',
+    roomId: mid,
+    clientMutationId,
+    kind: 'text',
+    bodyText: text,
+    replyTo: replyToRpc,
+    linkPreview: linkPreview ? (linkPreview as unknown as Record<string, unknown>) : null,
+  });
+  if (!res.ok && !res.duplicate) {
+    throw new Error(res.error?.trim() || '메시지를 보내지 못했습니다.');
   }
+  const messageId = (res.id?.trim() || clientMutationId).trim();
   notifyMeetingChatParticipantsRemoteFireAndForget({
     meetingId: mid,
     senderId,
     preview: text,
-    lastMessageId: msgRef.id,
+    lastMessageId: messageId,
     senderName: senderProfile?.nickname ?? senderProfile?.displayName ?? undefined,
   });
 }
@@ -985,6 +1108,86 @@ export type SendMeetingChatImageExtras = {
   /** true면 참가자 푸시 알림을 보내지 않습니다(다중 전송 시 마지막 장에서만 false). */
   suppressParticipantNotify?: boolean;
 };
+
+export type MeetingChatImageCommitResult = {
+  messageId: string;
+  imageUrl: string;
+  seq?: number;
+  clientMutationId: string;
+};
+
+/**
+ * 로컬 이미지를 압축·업로드한 뒤 `chat_send_message`(image) RPC만 수행합니다.
+ * 낙관적 로컬 행과 `client_mutation_id`를 맞추려면 `clientMutationId`를 미리 넘기세요.
+ */
+export async function meetingChatCommitImageFromLocalUri(args: {
+  meetingId: string;
+  senderPhoneUserId: string;
+  localImageUri: string;
+  extras?: SendMeetingChatImageExtras;
+  clientMutationId?: string;
+}): Promise<MeetingChatImageCommitResult> {
+  const mid = typeof args.meetingId === 'string' ? args.meetingId.trim() : String(args.meetingId ?? '').trim();
+  const uid = typeof args.senderPhoneUserId === 'string' ? args.senderPhoneUserId.trim() : String(args.senderPhoneUserId ?? '').trim();
+  const uri = typeof args.localImageUri === 'string' ? args.localImageUri.trim() : '';
+  const extras = args.extras;
+  if (!mid) throw new Error('모임 정보가 없습니다.');
+  if (!uid) throw new Error('로그인이 필요합니다.');
+  if (!uri) throw new Error('이미지를 선택해 주세요.');
+
+  const cap = (extras?.caption ?? '').trim().slice(0, 500);
+  const naturalWidth = extras?.naturalWidth;
+  const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
+
+  const actions: ImageManipulator.Action[] = [];
+  if (typeof naturalWidth === 'number' && naturalWidth > CHAT_IMAGE_MAX_WIDTH) {
+    actions.push({ resize: { width: CHAT_IMAGE_MAX_WIDTH } });
+  }
+
+  const manipulated = await ImageManipulator.manipulateAsync(uri, actions, {
+    compress: CHAT_IMAGE_JPEG_QUALITY,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+
+  const base64 = await readAsStringAsync(manipulated.uri, { encoding: EncodingType.Base64 });
+  if (!base64?.length) {
+    throw new Error('압축된 이미지를 읽지 못했습니다. 다시 선택해 주세요.');
+  }
+
+  const rand = Math.random().toString(36).slice(2, 10);
+  const objectPath = `meetings/${mid}/chatImages/${Date.now()}_${rand}.jpg`;
+  const imageUrl = await uploadJpegBase64ToSupabasePublicBucket(
+    SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
+    objectPath,
+    base64,
+  );
+
+  const meAppUserId = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
+  const clientMutationId =
+    typeof args.clientMutationId === 'string' && args.clientMutationId.trim()
+      ? args.clientMutationId.trim()
+      : newChatClientMutationId();
+  const res = await chatSendMessageRpc({
+    meAppUserId,
+    roomKind: 'meeting',
+    roomId: mid,
+    clientMutationId,
+    kind: 'image',
+    bodyText: cap || null,
+    imageUrl,
+    imageAlbumBatchId: albumId || null,
+  });
+  if (!res.ok && !res.duplicate) {
+    throw new Error(res.error?.trim() || '사진을 보내지 못했습니다.');
+  }
+  const messageId = (res.id?.trim() || clientMutationId).trim();
+  return {
+    messageId,
+    imageUrl,
+    seq: typeof res.seq === 'number' ? res.seq : res.seq != null ? Number(res.seq) : undefined,
+    clientMutationId,
+  };
+}
 
 /**
  * 로컬 사진을 리사이즈·JPEG 압축한 뒤 Storage에 올리고, `kind: 'image'` 메시지를 추가합니다.
@@ -1005,73 +1208,16 @@ export async function sendMeetingChatImageMessage(
   const senderId = normalizePhoneUserId(uid) ?? uid;
   const senderProfile = await getUserProfile(senderId).catch(() => null);
   const cap = (extras?.caption ?? '').trim().slice(0, 500);
-  const naturalWidth = extras?.naturalWidth;
-  const albumId = typeof extras?.imageAlbumBatchId === 'string' ? extras.imageAlbumBatchId.trim() : '';
   const suppressNotify = extras?.suppressParticipantNotify === true;
 
-  const actions: ImageManipulator.Action[] = [];
-  if (typeof naturalWidth === 'number' && naturalWidth > CHAT_IMAGE_MAX_WIDTH) {
-    actions.push({ resize: { width: CHAT_IMAGE_MAX_WIDTH } });
-  }
-
-  const manipulated = await ImageManipulator.manipulateAsync(
-    uri,
-    actions,
-    {
-      compress: CHAT_IMAGE_JPEG_QUALITY,
-      format: ImageManipulator.SaveFormat.JPEG,
-    },
-  );
-
-  const base64 = await readAsStringAsync(manipulated.uri, { encoding: EncodingType.Base64 });
-  if (!base64?.length) {
-    throw new Error('압축된 이미지를 읽지 못했습니다. 다시 선택해 주세요.');
-  }
-
-  const rand = Math.random().toString(36).slice(2, 10);
-  const objectPath = `meetings/${mid}/chatImages/${Date.now()}_${rand}.jpg`;
-  const imageUrl = await uploadJpegBase64ToSupabasePublicBucket(
-    SUPABASE_STORAGE_BUCKET_MEETING_CHAT,
-    objectPath,
-    base64,
-  );
-
-  const msgRef = collection(getFirestoreDb(), MEETINGS_COLLECTION, mid, MEETING_MESSAGES_SUBCOLLECTION);
-  const docRef = doc(msgRef);
-  const batch = writeBatch(getFirestoreDb());
-  const now = Timestamp.now();
-  batch.set(
-    docRef,
-    stripUndefinedDeep({
-      senderId,
-      senderName: senderProfile?.nickname ?? null,
-      senderAvatarUrl: senderProfile?.photoUrl ?? null,
-      text: cap,
-      kind: 'image' as const,
-      imageUrl,
-      imageAlbumBatchId: albumId || undefined,
-      createdAt: now,
-      updatedAt: now,
-    }) as Record<string, unknown>,
-  );
-  await batch.commit();
+  const r = await meetingChatCommitImageFromLocalUri({ meetingId: mid, senderPhoneUserId: uid, localImageUri: uri, extras });
   if (!suppressNotify) {
     const imgPreview = cap ? `사진 · ${cap}` : '사진';
-    const m = await getMeetingById(mid).catch(() => null);
-    if (m) {
-      void bumpMeetingChatRoomSummaryOnSend({
-        meetingId: mid,
-        senderId,
-        messageId: docRef.id,
-        preview: imgPreview,
-        participantIds: m.participantIds ?? [],
-      }).catch(() => {});
-    }
     notifyMeetingChatParticipantsRemoteFireAndForget({
       meetingId: mid,
       senderId,
       preview: imgPreview,
-      lastMessageId: docRef.id,
+      lastMessageId: r.messageId,
       senderName: senderProfile?.nickname ?? senderProfile?.displayName ?? undefined,
     });
   }

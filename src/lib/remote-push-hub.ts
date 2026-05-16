@@ -5,15 +5,10 @@
  * - 발신 단말 OS(`Platform.OS`)로 Expo를 생략하지 않습니다. (이전 버그: Android 발신 시 iOS 수신자가 Expo를 못 받음)
  * - 수신자가 Android이고 FCM+Expo 토큰이 모두 있으면 FCM 성공 시 Expo는 생략해 **이중 알림**을 줄입니다.
  */
-import { doc, getDoc } from 'firebase/firestore';
-
 import { hintForFcmEdgeInvoke } from '@/src/lib/firebase-credential-hints';
-import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { sendExpoPushMessages, type ExpoPushMessage } from '@/src/lib/expo-push-api';
 import { fcmPushSuccessCount, sendFcmPushToUsersWithResult, type FcmPushInvokeResult } from '@/src/lib/fcm-push-api';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
-import { USER_EXPO_PUSH_TOKENS_COLLECTION } from '@/src/lib/user-expo-push-token';
 
 export type RemotePushHubPayload = {
   toUserIds: string[];
@@ -26,33 +21,14 @@ export type RemotePushHubPayload = {
   expoInterruptionLevel?: ExpoPushMessage['interruptionLevel'];
 };
 
-async function fetchExpoPushTokenForUser(userId: string): Promise<string | null> {
-  const uid = normalizeParticipantId(userId.trim());
-  if (!uid) return null;
-  const snap = await getDoc(doc(getFirebaseFirestore(), USER_EXPO_PUSH_TOKENS_COLLECTION, uid));
-  const t = snap.data()?.token;
-  if (typeof t === 'string' && (t.startsWith('ExponentPushToken') || t.startsWith('ExpoPushToken'))) {
-    return t;
-  }
+/** Firestore `userExpoPushTokens` 제거 — Expo 폴백 토큰은 서버/프로필 경로로 이전 필요 시 여기서 조회하세요. */
+async function fetchExpoPushTokenForUser(_userId: string): Promise<string | null> {
   return null;
 }
 
-async function fetchExpoPushTokensForUsers(userIds: string[]): Promise<string[]> {
-  if (userIds.length === 0) return [];
-  const db = getFirebaseFirestore();
-  const tokens: string[] = [];
-  await Promise.all(
-    userIds.map(async (pid) => {
-      const snap = await getDoc(doc(db, USER_EXPO_PUSH_TOKENS_COLLECTION, pid));
-      const t = snap.data()?.token;
-      if (typeof t === 'string' && (t.startsWith('ExponentPushToken') || t.startsWith('ExpoPushToken'))) {
-        tokens.push(t);
-      }
-    }),
-  );
-  return tokens;
+async function fetchExpoPushTokensForUsers(_userIds: string[]): Promise<string[]> {
+  return [];
 }
-
 function shouldExpoFallbackAfterFcm(res: FcmPushInvokeResult): boolean {
   const reason = String(res.reason ?? '').trim();
   if (reason === 'all_recipients_muted') return false;

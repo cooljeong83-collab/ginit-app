@@ -1,26 +1,30 @@
-import { Timestamp } from 'firebase/firestore';
-
-import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
+import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { invokeMeetingCreatedAreaNotifyFireAndForget } from '@/src/lib/meeting-created-area-notify-client';
 import { supabase } from '@/src/lib/supabase';
 
-/** Ledger 모임 ID: Supabase `meetings.id` (UUID v4). Firestore 자동 ID와 구분. */
+/** Ledger 모임 ID: Supabase `meetings.id` (UUID v4). 레거시 Firestore 자동 ID와 구분. */
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isLedgerMeetingId(meetingId: string): boolean {
-  if (!ledgerWritesToSupabase()) return false;
   return UUID_V4_RE.test(meetingId.trim());
+}
+
+function millisFromUnknownTimestampLike(v: unknown): number | null {
+  if (typeof v !== 'object' || v === null || !('toMillis' in v)) return null;
+  const fn = (v as { toMillis?: unknown }).toMillis;
+  if (typeof fn !== 'function') return null;
+  try {
+    const n = Number((fn as () => number).call(v));
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
 }
 
 function serializeValue(v: unknown): unknown {
   if (v == null) return v;
-  if (typeof v === 'object' && v !== null && 'toMillis' in v && typeof (v as Timestamp).toMillis === 'function') {
-    try {
-      return new Date((v as Timestamp).toMillis()).toISOString();
-    } catch {
-      return null;
-    }
-  }
+  const ms = millisFromUnknownTimestampLike(v);
+  if (ms != null) return new Date(ms).toISOString();
   if (Array.isArray(v)) return v.map(serializeValue);
   if (typeof v === 'object' && v.constructor === Object) {
     const o: Record<string, unknown> = {};
@@ -42,11 +46,11 @@ function normalizeRpcCreatedAt(doc: Record<string, unknown>): Record<string, unk
   const ca = o.createdAt;
   if (typeof ca === 'string') {
     const dt = new Date(ca);
-    if (Number.isFinite(dt.getTime())) o.createdAt = Timestamp.fromDate(dt);
+    if (Number.isFinite(dt.getTime())) o.createdAt = ca;
   } else if (ca != null && typeof ca === 'object' && !Array.isArray(ca)) {
     const s = JSON.stringify(ca);
     const dt = new Date(s.replace(/^"|"$/g, ''));
-    if (Number.isFinite(dt.getTime())) o.createdAt = Timestamp.fromDate(dt);
+    if (Number.isFinite(dt.getTime())) o.createdAt = dt.toISOString();
   }
   return o;
 }
@@ -108,6 +112,7 @@ export async function ledgerMeetingCreate(hostAppUserId: string, doc: Record<str
 }
 
 export async function ledgerMeetingDelete(meetingId: string): Promise<void> {
-  const { error } = await supabase.rpc('ledger_meeting_delete', { p_meeting_id: meetingId.trim() });
+  const mid = meetingId.trim();
+  const { error } = await supabase.rpc('ledger_meeting_delete', { p_meeting_id: mid });
   if (error) throw new Error(error.message);
 }

@@ -1,8 +1,11 @@
 import { skipToken, useIsRestoring, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 
+import { useObserveMeetingDetail } from '@/src/hooks/use-observe-meeting-detail';
+import { upsertMeetingDetailToWatermelon } from '@/src/lib/meeting-detail-watermelon-cache';
 import type { Meeting } from '@/src/lib/meetings';
-import { getMeetingById, subscribeMeetingById } from '@/src/lib/meetings';
+import { getMeetingById } from '@/src/lib/meetings';
 
 export function meetingDetailQueryKey(meetingId: string) {
   return ['meeting', meetingId] as const;
@@ -11,39 +14,37 @@ export function meetingDetailQueryKey(meetingId: string) {
 const STALE_MS = 1000 * 60 * 5;
 const GC_MS = 24 * 60 * 60 * 1000;
 
+async function fetchMeetingDetailAndPersist(meetingId: string): Promise<Meeting | null> {
+  const m = await getMeetingById(meetingId);
+  await upsertMeetingDetailToWatermelon(meetingId, m);
+  return m;
+}
+
+export type UseMeetingDetailQueryOptions = {
+  /** 채팅 등 — 로컬 캐시 즉시 표시 후에도 마운트마다 서버 revalidate */
+  refetchOnMount?: boolean | 'always';
+};
+
 /**
- * 모임 상세: TanStack Query + AsyncStorage 영구 캐시, Firestore onSnapshot 또는 레저 주기 폴링으로 캐시 동기화.
+ * 모임 상세: 진입 시 TanStack Query Fetch → Watermelon upsert(Stale-While-Revalidate).
+ * 네이티브 UI는 `useObserveMeetingDetail` 스냅샷을 렌더 소스로 사용합니다(Realtime 없음).
  */
-export function useMeetingDetailQuery(meetingId: string, retryNonce: number) {
+export function useMeetingDetailQuery(meetingId: string, opts?: UseMeetingDetailQueryOptions) {
   const queryClient = useQueryClient();
   const id = typeof meetingId === 'string' ? meetingId.trim() : '';
   const isRestoring = useIsRestoring();
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const cacheLogIdRef = useRef<string | null>(null);
+  const { meeting: localMeeting, hasLocalRow } = useObserveMeetingDetail(id);
+  const useWatermelonUi = Platform.OS !== 'web';
 
   const query = useQuery({
     queryKey: id ? meetingDetailQueryKey(id) : meetingDetailQueryKey('__none'),
-    queryFn:
-      id.length > 0
-        ? async () => {
-            console.log('📡 모임 상세 서버 동기화 중...');
-            return getMeetingById(id);
-          }
-        : skipToken,
+    queryFn: id.length > 0 ? () => fetchMeetingDetailAndPersist(id) : skipToken,
     staleTime: STALE_MS,
     gcTime: GC_MS,
+    enabled: id.length > 0,
+    refetchOnMount: opts?.refetchOnMount,
   });
-
-  type MeetingDetailQuerySnapshot = {
-    data: Meeting | null | undefined;
-    error: Error | null;
-    isError: boolean;
-    status: 'pending' | 'error' | 'success';
-    fetchStatus: 'fetching' | 'paused' | 'idle';
-    refetch: () => unknown;
-  };
-
-  const q = query as unknown as MeetingDetailQuerySnapshot;
 
   useEffect(() => {
     cacheLogIdRef.current = null;
@@ -54,55 +55,48 @@ export function useMeetingDetailQuery(meetingId: string, retryNonce: number) {
     if (cacheLogIdRef.current === id) return;
     const cached = queryClient.getQueryData<Meeting | null>(meetingDetailQueryKey(id));
     if (cached !== undefined) {
-      console.log('📦 모임 상세 캐시 로드: ' + id);
+      if (__DEV__) console.log('📦 모임 상세 캐시 로드: ' + id);
       cacheLogIdRef.current = id;
+      if (useWatermelonUi) {
+        void upsertMeetingDetailToWatermelon(id, cached);
+      }
     }
-  }, [id, isRestoring, queryClient]);
+  }, [id, isRestoring, queryClient, useWatermelonUi]);
 
-  useEffect(() => {
-    if (!id) {
-      setSubscriptionError(null);
-      return;
-    }
-    setSubscriptionError(null);
-    let alive = true;
-    const unsub = subscribeMeetingById(
-      id,
-      (m) => {
-        if (!alive) return;
-        queryClient.setQueryData(meetingDetailQueryKey(id), m);
-        setSubscriptionError(null);
-      },
-      (msg) => {
-        if (!alive) return;
-        setSubscriptionError(msg);
-      },
-    );
-    return () => {
-      alive = false;
-      unsub();
-    };
-  }, [id, retryNonce, queryClient]);
+  const wmHydrating = useWatermelonUi && localMeeting === undefined;
 
-  const meeting = q.data !== undefined ? q.data : null;
+  const meeting: Meeting | null = useWatermelonUi
+    ? localMeeting ?? null
+    : query.data !== undefined
+      ? query.data
+      : null;
 
   const queryErrorMsg =
-    q.error instanceof Error ? q.error.message : q.error ? String(q.error) : null;
+    query.error instanceof Error ? query.error.message : query.error ? String(query.error) : null;
 
-  const loadError = subscriptionError ?? queryErrorMsg;
+  const loadError = queryErrorMsg;
 
-  const hasFetched = q.data !== undefined || q.isError;
+  const hasFetched = query.data !== undefined || query.isError;
 
   const loading =
     Boolean(id) &&
     loadError == null &&
-    !hasFetched &&
-    (q.status === 'pending' || q.fetchStatus === 'fetching');
+    (wmHydrating || (!hasLocalRow && !hasFetched)) &&
+    (query.status === 'pending' || query.fetchStatus === 'fetching' || wmHydrating);
+
+  const refetch = useCallback(() => {
+    void query.refetch();
+  }, [query]);
+
+  /** 네이티브: Watermelon observe 첫 emit 완료. 웹: TanStack 첫 fetch 완료 */
+  const meetingReady = useWatermelonUi ? localMeeting !== undefined : hasFetched;
 
   return {
     meeting,
     loading,
     loadError,
-    refetch: () => void q.refetch(),
+    refetch,
+    meetingReady,
+    hasLocalRow,
   };
 }

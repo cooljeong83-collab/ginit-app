@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
+import { syncServerParticipantUnreadToLocalWatermelon } from '@/src/lib/chat-local-unread-sync';
 import {
   upsertLocalChatRoomSummary,
   type LocalChatRoomSummary,
 } from '@/src/lib/offline-chat/offline-chat-rooms';
+import { incrementalSyncRoomMessagesToLocal } from '@/src/lib/offline-chat/offline-chat-sync';
 import {
   fetchChatRoomsListPageHybrid,
   fetchChatRoomsChangeSummariesFromSupabase,
-  subscribeChatRoomsListInvalidate,
 } from '@/src/lib/supabase-chat-rooms-list';
+import { subscribeChatListRefresh } from '@/src/lib/user-chat-list-refresh-bus';
 
-/** TanStack 캐시 키 — 사용자별로 분리(재로그인 시 섞이지 않게) */
-export function chatRoomsQueryKey(userId: string) {
-  return ['chat_rooms', userId.trim()] as const;
-}
+export { chatRoomsListQueryKey, chatRoomsListQueryKey as chatRoomsQueryKey } from '@/src/lib/chat-query-keys';
 
 type ChatRoomListRow = SocialChatRoomSummary | LocalChatRoomSummary;
 
@@ -44,11 +44,14 @@ async function upsertSocialRoomsPageToLocal(
 }
 
 export function useChatRoomsInfiniteQuery(userId: string | null | undefined, enabled: boolean) {
+  const queryClient = useQueryClient();
   const uid = userId?.trim() ?? '';
   const didLogCacheRef = useRef(false);
   const didAttemptEmptyRecoveryRef = useRef(false);
   const [syncing, setSyncing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  /** FlashList가 동기화 직후에도 셀을 다시 그리도록 하는 단조 증가 키 */
+  const [listRenderRev, setListRenderRev] = useState(0);
   const localRooms = useLocalChatRoomSummaries({
     roomType: 'social_dm',
     ownerUserId: uid,
@@ -63,30 +66,54 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
 
   const rooms = localRooms;
 
-  const syncChangedRooms = useCallback(async () => {
+  const syncChangedRooms = useCallback(async (opts?: { pullTail?: boolean }) => {
     if (!enabled || !uid) return;
     setSyncing(true);
     setListError(null);
+    let syncedSocialRoomIds: string[] = [];
     try {
       const summariesRes = await fetchChatRoomsChangeSummariesFromSupabase(uid);
       if (summariesRes.ok && summariesRes.summaries.length > 0) {
         await upsertSocialRoomsPageToLocal(uid, summariesRes.summaries);
-        return;
+        syncedSocialRoomIds = summariesRes.summaries.map((s) => s.roomId.trim()).filter(Boolean);
+      } else {
+        const page = await fetchChatRoomsListPageHybrid(uid, 0);
+        if (page.rooms.length > 0) {
+          await upsertSocialRoomsPageToLocal(uid, page.rooms);
+          syncedSocialRoomIds = page.rooms.map((r) => r.roomId.trim()).filter(Boolean);
+        }
+        if (!summariesRes.ok) {
+          setListError(summariesRes.message);
+        }
       }
-      const page = await fetchChatRoomsListPageHybrid(uid, 0);
-      if (page.rooms.length > 0) {
-        await upsertSocialRoomsPageToLocal(uid, page.rooms);
-        return;
-      }
-      if (!summariesRes.ok) {
-        setListError(summariesRes.message);
+      /** RPC 목록에는 `unread_count`가 없음 — `chat_room_participants` 일괄 조회로 Watermelon·TanStack 배지 정합 */
+      await syncServerParticipantUnreadToLocalWatermelon(uid, { queryClient });
+      /** 당겨서 새로고침: 목록 메타만으로는 `last_message_*`가 안 바뀌므로 소셜 방별 최근 메시지 tail만 제한 동기화 */
+      if (opts?.pullTail && uid) {
+        const ids = [...new Set(syncedSocialRoomIds)].filter((id) => id.startsWith('social_')).slice(0, 12);
+        for (let i = 0; i < ids.length; i += 3) {
+          const chunk = ids.slice(i, i + 3);
+          await Promise.all(
+            chunk.map((roomId) =>
+              incrementalSyncRoomMessagesToLocal({
+                key: { roomType: 'social_dm', roomId },
+                appUserId: uid,
+                maxDocs: 40,
+                maxPagesPerRun: 1,
+                pageSize: 40,
+                timeBudgetMs: 900,
+              }).catch(() => undefined),
+            ),
+          );
+        }
       }
     } catch (e) {
       setListError(e instanceof Error ? e.message : String(e));
     } finally {
+      setListRenderRev((x) => x + 1);
       setSyncing(false);
     }
-  }, [enabled, uid]);
+  }, [enabled, queryClient, uid]);
 
   useEffect(() => {
     if (!enabled || !uid) return;
@@ -115,9 +142,18 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
 
   useEffect(() => {
     if (!enabled || !uid) return undefined;
-    return subscribeChatRoomsListInvalidate(uid, () => {
-      void syncChangedRooms();
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const unsub = subscribeChatListRefresh(() => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        void syncChangedRooms();
+      }, 320);
     });
+    return () => {
+      unsub();
+      if (debounce) clearTimeout(debounce);
+    };
   }, [enabled, uid, syncChangedRooms]);
 
   const fetchNextPageGuarded = useCallback(async () => {}, []);
@@ -125,11 +161,13 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
   return {
     rooms,
     listError,
+    listRenderRev,
     refetch: syncChangedRooms,
     syncChangedRooms,
     fetchNextPage: fetchNextPageGuarded,
     hasNextPage: false,
-    isFetchingNextPage: syncing,
+    isFetchingNextPage: false,
     isInitialLoading: false,
+    isListSyncing: syncing,
   };
 }

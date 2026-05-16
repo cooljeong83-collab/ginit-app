@@ -1,4 +1,4 @@
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 
 /** 휠·폼에서 온 값을 안전한 정수로 (Firestore undefined 방지). */
 export function toFiniteInt(n: unknown, fallback: number): number {

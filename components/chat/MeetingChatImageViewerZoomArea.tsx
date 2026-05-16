@@ -30,7 +30,15 @@ function maxTranslateForScale(containerSize: number, scale: number): number {
  */
 export function MeetingChatImageViewerZoomArea({ uri }: Props) {
   if (Platform.OS === 'web') {
-    return <Image source={{ uri }} style={styles.image} contentFit="contain" />;
+    return (
+      <Image
+        source={{ uri }}
+        style={styles.image}
+        contentFit="contain"
+        cachePolicy="disk"
+        recyclingKey={uri}
+      />
+    );
   }
 
   return <ZoomableNative uri={uri} />;
@@ -151,7 +159,14 @@ function ZoomableNative({ uri }: Props) {
     <GestureDetector gesture={composed}>
       <View style={styles.zoomHost} onLayout={onLayout}>
         <Animated.View style={[styles.zoomInner, animatedStyle]}>
-          <Image source={{ uri }} style={styles.image} contentFit="contain" pointerEvents="none" />
+          <Image
+            source={{ uri }}
+            style={styles.image}
+            contentFit="contain"
+            pointerEvents="none"
+            cachePolicy="disk"
+            recyclingKey={uri}
+          />
         </Animated.View>
       </View>
     </GestureDetector>

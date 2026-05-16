@@ -3,60 +3,55 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Modal, StyleSheet, Text, TextInput, View} from 'react-native';
-import { FlashList } from '@shopify/flash-list';
+import { ActivityIndicator, Alert, Keyboard, StyleSheet, Text, TextInput, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-import type { InfiniteData } from '@tanstack/react-query';
-import { useQueryClient } from '@tanstack/react-query';
 
 import {
     SocialDmChatRoomBody,
     type SocialDmChatRoomBodyHandle,
     type SocialDmChatRoomBodyProps,
 } from '@/components/chat/SocialDmChatRoomBody';
-import { MeetingPeerProfileModal } from '@/components/meeting/MeetingPeerProfileModal';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
+import { getAppQueryClient } from '@/src/context/QueryClientPersistProvider';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
-import { useSocialChatMessagesInfiniteQuery } from '@/src/hooks/use-social-chat-messages-infinite-query';
 import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
+import { syncServerParticipantUnreadForRoom } from '@/src/lib/chat-local-unread-sync';
+import { useChatMarkReadOnFocus } from '@/src/hooks/use-chat-mark-read-on-focus';
+import { useChatRealtimeConnectionBanner } from '@/src/hooks/use-chat-realtime-connection-banner';
+import { useChatEngine } from '@/src/hooks/useChatEngine';
+import { useFocusedDelayedSubscription } from '@/src/hooks/use-focused-delayed-subscription';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { chatEngineSnapshotsToSocialMessagesChrono } from '@/src/lib/chat-engine-snapshot-to-social';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
-import type { SocialChatFetchedMessagesPage, SocialChatMessage } from '@/src/lib/social-chat-rooms';
+import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
+import type { SocialChatMessage } from '@/src/lib/social-chat-rooms';
 import {
   ensureSocialChatRoomDoc,
-  fetchOlderSocialChatPagesUntilTargetMessageId,
   parsePeerFromSocialRoomId,
   subscribeSocialChatRoom,
-  updateSocialChatReadReceipt,
   type SocialChatRoomDoc,
 } from '@/src/lib/social-chat-rooms';
+import { subscribeSocialChatReadPointersRealtime } from '@/src/lib/social-chat-read-pointers';
 import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-search-navigator';
-import {
-  flattenSocialChatInfinitePages,
-  mergeSocialChatInfiniteAppendPages,
-  socialChatMessagesQueryKey,
-} from '@/src/hooks/use-social-chat-messages-infinite-query';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 import { listLocalSearchMessageIdsNewestFirst } from '@/src/lib/offline-chat/offline-chat-search';
 import { recordRecentSearch } from '@/src/lib/offline-chat/recent-searches';
 import {
-  clearLocalChatRoomUnread,
   firestoreTimeToMs,
-  markLocalChatRoomReadState,
+  optimisticZeroUnreadLocalChatRoomOnMount,
   upsertLocalChatRoomReadState,
 } from '@/src/lib/offline-chat/offline-chat-rooms';
+import { backfillOlderRoomMessagesToLocal } from '@/src/lib/offline-chat/offline-chat-sync';
 
 export default function SocialChatRoomScreen() {
   const router = useTransitionRouter();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
-  const queryClient = useQueryClient();
   const { userId } = useUserSession();
   const { markChatReadUpTo } = useInAppAlarms();
   const params = useLocalSearchParams<{ roomId: string | string[]; peerName?: string; peerPhotoUrl?: string }>();
@@ -76,19 +71,90 @@ export default function SocialChatRoomScreen() {
     if (!me || !roomId) return '';
     return parsePeerFromSocialRoomId(roomId, me) ?? '';
   }, [roomId, userId]);
+  const chatMe = useMemo(() => {
+    const raw = userId?.trim() ?? '';
+    return (normalizeParticipantId(raw) || normalizePhoneUserId(raw) || raw).trim();
+  }, [userId]);
   const canRenderChatShell = Boolean(roomId && userId?.trim() && peerId);
 
   const [chatError, setChatError] = useState<string | null>(null);
+  const realtimeBanner = useChatRealtimeConnectionBanner(true, isFocused);
   const [ready, setReady] = useState(false);
   const [roomDoc, setRoomDoc] = useState<SocialChatRoomDoc | null | undefined>(undefined);
   const dmBodyRef = useRef<SocialDmChatRoomBodyHandle | null>(null);
-  const lastMarkedReadMessageIdRef = useRef<string>('');
   const [searchNavigateLoading, setSearchNavigateLoading] = useState(false);
+  const [bubbleReadMapsRevision, setBubbleReadMapsRevision] = useState(0);
 
-  const { messages, listError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } =
-    useSocialChatMessagesInfiniteQuery({ roomId, enabled: ready });
+  const { messages: engineSnapshots, sendMessage } = useChatEngine({
+    roomKind: 'social_dm',
+    roomId,
+    meAppUserId: userId?.trim() ?? '',
+    enabled: ready && Boolean(userId?.trim()),
+    observeLimit: 5000,
+  });
 
-  useOfflineChatRoomSync({ roomType: 'social_dm', roomId }, ready);
+  const messages = useMemo(
+    () => chatEngineSnapshotsToSocialMessagesChrono(engineSnapshots),
+    [engineSnapshots],
+  );
+
+  const markReadMessages = useMemo(
+    () =>
+      messages.map((m) => ({
+        id: m.id,
+        serverSeq: m.serverSeq,
+        createdAtMs: m.createdAt?.toMillis?.() ?? 0,
+      })),
+    [messages],
+  );
+
+  const pickLatestSocialMessage = useCallback(
+    (msgs: readonly { id: string; serverSeq?: number | null; createdAtMs?: number }[]) =>
+      msgs.length > 0 ? (msgs[msgs.length - 1] ?? null) : null,
+    [],
+  );
+
+  useChatMarkReadOnFocus({
+    roomKind: 'social_dm',
+    roomId,
+    meAppUserId: chatMe,
+    ownerUserId: userId?.trim() ?? null,
+    peerUserId: peerId,
+    isFocused,
+    enabled: ready && Boolean(roomId && chatMe),
+    pickLatest: pickLatestSocialMessage,
+    messages: markReadMessages,
+    markChatReadUpTo,
+  });
+
+  useEffect(() => {
+    if (!ready || !isFocused || !roomId.trim() || !chatMe.trim()) return;
+    void syncServerParticipantUnreadForRoom(chatMe, 'social_dm', roomId, {
+      queryClient: getAppQueryClient(),
+    });
+  }, [ready, isFocused, roomId, chatMe]);
+
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [olderPrefetchBusy, setOlderPrefetchBusy] = useState(false);
+
+  useEffect(() => {
+    setHasMoreOlder(true);
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId || !userId?.trim()) return;
+    const ownerNorm = normalizeParticipantId(userId.trim()) || userId.trim();
+    const peer = peerId?.trim() || undefined;
+    void optimisticZeroUnreadLocalChatRoomOnMount({
+      roomType: 'social_dm',
+      roomId,
+      ownerUserId: ownerNorm,
+      isGroup: false,
+      peerUserId: peer,
+    });
+  }, [roomId, userId, peerId]);
+
+  useOfflineChatRoomSync({ roomType: 'social_dm', roomId }, ready, userId);
   const localSocialRoomSummaries = useLocalChatRoomSummaries({
     roomType: 'social_dm',
     ownerUserId: userId,
@@ -99,7 +165,8 @@ export default function SocialChatRoomScreen() {
     [localSocialRoomSummaries, roomId],
   );
 
-  const mergedChatError = chatError ?? listError;
+  const chatReconnecting = realtimeBanner.bannerTone === 'reconnecting';
+  const mergedChatError = realtimeBanner.bannerTone === 'error' ? realtimeBanner.bannerText : chatError;
 
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -202,49 +269,14 @@ export default function SocialChatRoomScreen() {
     return () => setCurrentChatRoomId(null);
   }, [roomId, isFocused]);
 
-  useEffect(() => {
-    lastMarkedReadMessageIdRef.current = '';
-  }, [roomId]);
-
-  useEffect(() => {
-    if (!roomId || !isFocused) return;
-    const last = messages[messages.length - 1];
-    const lid = last?.id?.trim() ?? '';
-    if (!lid || lastMarkedReadMessageIdRef.current === lid) return;
-    lastMarkedReadMessageIdRef.current = lid;
-    const readAtMs = Date.now();
-    markChatReadUpTo(roomId, lid);
-    void clearLocalChatRoomUnread({
-      roomType: 'social_dm',
-      roomId,
-      ownerUserId: userId?.trim() ?? null,
-      readMessageId: lid,
-      readAtMs,
-    });
-    void markLocalChatRoomReadState({
-      roomType: 'social_dm',
-      roomId,
-      ownerUserId: userId?.trim() ?? null,
-      peerUserId: peerId,
-      userId: userId?.trim() ?? '',
-      readMessageId: lid,
-      readAtMs,
-    });
-    void updateSocialChatReadReceipt(roomId, userId?.trim() ?? '', lid).catch(() => {});
-  }, [roomId, messages, markChatReadUpTo, isFocused, userId, peerId]);
-
-  // messages는 `useSocialChatMessagesInfiniteQuery`가 tail(20개) 구독 + 과거 페이징으로 유지합니다.
-
-  useEffect(() => {
-    if (!ready || !roomId) return () => {};
-    setRoomDoc(undefined);
-    const unsub = subscribeSocialChatRoom(
-      roomId,
-      (d) => setRoomDoc(d),
-      () => {},
-    );
-    return unsub;
-  }, [ready, roomId]);
+  useFocusedDelayedSubscription(
+    isFocused && ready && Boolean(roomId),
+    () => {
+      setRoomDoc(undefined);
+      return subscribeSocialChatRoom(roomId, (d) => setRoomDoc(d), realtimeBanner.handlers);
+    },
+    [ready, roomId, isFocused, realtimeBanner.handlers],
+  );
 
   useEffect(() => {
     if (!ready || !roomId || !roomDoc) return;
@@ -263,6 +295,21 @@ export default function SocialChatRoomScreen() {
       readStateLastAtMs: readStateLastAtMs || undefined,
     });
   }, [ready, roomId, roomDoc, userId, peerId]);
+
+  /** Supabase `chat_read_pointers` Realtime → 로컬 읽음 맵(말풍선 상대 읽음). 목록용 `chat_rooms` 엔진은 변경하지 않습니다. */
+  useFocusedDelayedSubscription(
+    isFocused && ready && Boolean(roomId) && Boolean(chatMe) && Boolean(peerId),
+    () =>
+      subscribeSocialChatReadPointersRealtime({
+        roomId,
+        myAppUserId: chatMe,
+        ownerUserId: userId?.trim() ?? null,
+        peerUserId: peerId,
+        realtimeCallbacks: realtimeBanner.handlers,
+        onReadPointersMerged: () => setBubbleReadMapsRevision((v) => v + 1),
+      }),
+    [ready, roomId, isFocused, chatMe, peerId, userId, realtimeBanner.handlers],
+  );
 
   const closeSearch = useCallback(() => {
     setSearchMode(false);
@@ -292,19 +339,51 @@ export default function SocialChatRoomScreen() {
     return `${cur}/${total}`;
   }, [searchBusy, searchSession]);
 
+  const onPrefetchOlderMessages = useCallback(() => {
+    const uid = userId?.trim();
+    if (!roomId.trim() || !uid || olderPrefetchBusy) return;
+    setOlderPrefetchBusy(true);
+    void (async () => {
+      try {
+        const r = await backfillOlderRoomMessagesToLocal({
+          key: { roomType: 'social_dm', roomId: roomId.trim() },
+          appUserId: uid,
+          pageSize: 120,
+          maxPages: 2,
+          timeBudgetMs: 2200,
+        });
+        if (r.pulledDocs <= 0) setHasMoreOlder(false);
+      } finally {
+        setOlderPrefetchBusy(false);
+      }
+    })();
+  }, [roomId, userId, olderPrefetchBusy]);
+
   const scrollSocialToMessageIdBestEffort = useCallback(
     async (messageId: string) => {
       const mid = String(messageId ?? '').trim();
       if (!mid) return;
       if (dmBodyRef.current?.scrollToMessageId(mid, { animated: true })) return;
-      for (let i = 0; i < 3; i += 1) {
-        if (!hasNextPage) break;
-        await fetchNextPage();
+      const uid = userId?.trim() ?? '';
+      const rid = roomId.trim();
+      if (!uid || !rid) return;
+      for (let i = 0; i < 10; i += 1) {
+        const r = await backfillOlderRoomMessagesToLocal({
+          key: { roomType: 'social_dm', roomId: rid },
+          appUserId: uid,
+          pageSize: 150,
+          maxPages: 3,
+          timeBudgetMs: 2800,
+        });
         if (dmBodyRef.current?.scrollToMessageId(mid, { animated: true })) return;
+        if (r.pulledDocs <= 0) {
+          setHasMoreOlder(false);
+          break;
+        }
       }
       Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
     },
-    [fetchNextPage, hasNextPage],
+    [roomId, userId],
   );
 
   const runSocialLocalSearch = useCallback(async () => {
@@ -380,53 +459,58 @@ export default function SocialChatRoomScreen() {
           const ok0 = dmBodyRef.current?.scrollToMessageId(tid) ?? false;
           if (ok0) return;
 
-          const cacheKey = socialChatMessagesQueryKey(rid);
-          const indexFromRQ = (): number => {
-            const data = queryClient.getQueryData<InfiniteData<SocialChatFetchedMessagesPage>>(cacheKey);
-            return flattenSocialChatInfinitePages(data).findIndex((m) => m.id === tid);
-          };
-
           setSearchNavigateLoading(true);
           try {
-            let data = queryClient.getQueryData<InfiniteData<SocialChatFetchedMessagesPage>>(cacheKey);
-            if (!data?.pages?.length) {
-              await refetch();
-              data = queryClient.getQueryData<InfiniteData<SocialChatFetchedMessagesPage>>(cacheKey);
-            }
-            const anchor = data?.pages?.[data.pages.length - 1]?.oldestMessageId?.trim() ?? '';
-            if (anchor) {
-              const { newPages, found } = await fetchOlderSocialChatPagesUntilTargetMessageId(rid, anchor, tid, {
-                pageSize: 100,
-                maxPages: 200,
+            const uid = userId?.trim() ?? '';
+            if (!uid) return;
+            for (let i = 0; i < 12; i += 1) {
+              const r = await backfillOlderRoomMessagesToLocal({
+                key: { roomType: 'social_dm', roomId: rid },
+                appUserId: uid,
+                pageSize: 150,
+                maxPages: 4,
+                timeBudgetMs: 3200,
               });
-              if (found && newPages.length) {
-                queryClient.setQueryData(
-                  cacheKey,
-                  (prev: InfiniteData<SocialChatFetchedMessagesPage> | undefined) => mergeSocialChatInfiniteAppendPages(prev, newPages),
-                );
+              const ok1 = dmBodyRef.current?.scrollToMessageId(tid) ?? false;
+              if (ok1) return;
+              if (r.pulledDocs <= 0) {
+                setHasMoreOlder(false);
+                break;
               }
             }
-
-            const ok1 = dmBodyRef.current?.scrollToMessageId(tid) ?? false;
-            if (ok1) return;
-
-            const idx = indexFromRQ();
-            if (idx < 0) {
-              Alert.alert('위치 이동', '해당 메시지를 목록에서 찾지 못했어요.');
-            } else {
-              // cache는 갱신되었지만 Body의 props 업데이트 타이밍이 늦을 수 있어 한 번 더 시도
-              setTimeout(() => {
-                const ok2 = dmBodyRef.current?.scrollToMessageId(tid) ?? false;
-                if (!ok2) Alert.alert('위치 이동', '해당 메시지를 목록에서 찾지 못했어요.');
-              }, 80);
-            }
+            setTimeout(() => {
+              const ok2 = dmBodyRef.current?.scrollToMessageId(tid) ?? false;
+              if (!ok2) Alert.alert('위치 이동', '해당 메시지를 목록에서 찾지 못했어요.');
+            }, 80);
           } finally {
             setSearchNavigateLoading(false);
           }
         })();
       }, 100);
     },
-    [closeSearch, queryClient, refetch, roomId],
+    [closeSearch, roomId, userId],
+  );
+
+  const sendTextOverride = useCallback(
+    async ({ body, replyTo }: { body: string; replyTo: MeetingChatMessage['replyTo'] }) => {
+      const uid = userId?.trim() ?? '';
+      if (!uid) return;
+      await sendMessage({
+        kind: 'text',
+        bodyText: body,
+        senderId: uid,
+        replyTo: replyTo?.messageId
+          ? {
+              messageId: replyTo.messageId,
+              senderId: replyTo.senderId,
+              kind: replyTo.kind,
+              imageUrl: replyTo.imageUrl,
+              text: replyTo.text,
+            }
+          : null,
+      });
+    },
+    [sendMessage, userId],
   );
 
   const exitSocialChat = useCallback(() => {
@@ -535,10 +619,12 @@ export default function SocialChatRoomScreen() {
             myUserId={userId.trim()}
             messages={messages}
             chatError={mergedChatError}
+            chatReconnecting={chatReconnecting}
             searchNavigateLoading={searchNavigateLoading}
-            hasNextPage={hasNextPage}
-            isFetchingNextPage={isFetchingNextPage}
-            onPrefetchOlderMessages={() => void fetchNextPage()}
+            hasNextPage={hasMoreOlder}
+            isFetchingNextPage={olderPrefetchBusy}
+            onPrefetchOlderMessages={onPrefetchOlderMessages}
+            sendTextOverride={sendTextOverride}
             searchMode={searchMode}
             searchQuery={searchQuery}
             searchCommittedQuery={searchCommittedQuery}
@@ -553,6 +639,7 @@ export default function SocialChatRoomScreen() {
             peerReadMessageId={effectivePeerReadState.readMessageId}
             peerReadAt={effectivePeerReadState.readAt}
             peerReadStateReady={(localSocialRoom?.messageReadStateLastAtMs ?? 0) > 0 || roomDoc !== undefined}
+            readMapsRevision={bubbleReadMapsRevision}
             initialPeerName={peerName}
             initialPeerPhotoUrl={initialPeerPhotoUrl}
             onPeerProfileOpen={(id) => {

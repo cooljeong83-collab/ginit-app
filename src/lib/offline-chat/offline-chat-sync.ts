@@ -1,22 +1,9 @@
 import { Q } from '@nozbe/watermelondb';
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  startAfter,
-  Timestamp,
-  where,
-  type DocumentSnapshot,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore';
 
 import { database } from '@/src/watermelon';
-import { getFirebaseFirestore } from '@/src/lib/firebase';
-import { CHAT_ROOMS_COLLECTION, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION } from '@/src/lib/social-chat-rooms';
-import { MEETING_MESSAGES_SUBCOLLECTION } from '@/src/lib/meeting-chat';
-import { MEETINGS_COLLECTION } from '@/src/lib/meetings';
+import { chatPullDeltasRpc, chatPullHistoryBeforeSeqRpc, type ChatDeltaRow } from '@/src/lib/chat-supabase-delta';
+import { isTransientNetworkErrorMessage } from '@/src/lib/supabase-realtime-resilience';
+import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { OfflineChatRoomKey, OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
 import { normalizeRoomKey, roomKeyToString } from '@/src/lib/offline-chat/offline-chat-types';
 import { buildSearchText, sanitizeUnicodeForSqliteStorage, tsToMs } from '@/src/lib/offline-chat/offline-chat-utils';
@@ -31,19 +18,19 @@ import { localRoomPreviewForMessage } from '@/src/lib/offline-chat/offline-chat-
 
 const DEFAULT_PAGE_SIZE = 200;
 const DEFAULT_MAX_DOCS = 1200;
-const DEFAULT_LATEST_BLOCK_SIZE = 80;
 const DEFAULT_MAX_PAGES_PER_RUN = 2;
 const DEFAULT_TIME_BUDGET_MS = 1800;
 
-function roomMessagesCollectionRef(roomType: OfflineChatRoomType, roomId: string) {
-  const db = getFirebaseFirestore();
-  if (roomType === 'meeting') {
-    return collection(db, MEETINGS_COLLECTION, roomId, MEETING_MESSAGES_SUBCOLLECTION);
+function devLogOfflineChatSyncRpcFailure(rpcLabel: string, error: string): void {
+  if (!__DEV__) return;
+  if (isTransientNetworkErrorMessage(error)) {
+    console.log(`[offline-chat-sync] ${rpcLabel} deferred (transient network)`);
+    return;
   }
-  return collection(db, CHAT_ROOMS_COLLECTION, roomId, SOCIAL_CHAT_MESSAGES_SUBCOLLECTION);
+  console.warn(`[offline-chat-sync] ${rpcLabel}`, error);
 }
 
-async function getOrCreateLocalRoom(key: OfflineChatRoomKey) {
+export async function getOrCreateLocalRoom(key: OfflineChatRoomKey) {
   const db = database;
   if (!db) return null;
   const k = normalizeRoomKey(key);
@@ -78,6 +65,9 @@ async function getOrCreateLocalRoom(key: OfflineChatRoomKey) {
       r.messageReadStateLastAtMs = null;
       r.remoteUpdatedAtMs = null;
       r.roomSearchText = null;
+      r.lastServerSeq = null;
+      r.backfillBeforeServerSeq = null;
+      r.lastReadServerSeq = null;
     });
   });
 }
@@ -107,7 +97,7 @@ function extractSenderDenorm(data: Record<string, unknown>): { senderName: strin
   return { senderName, senderAvatarUrl };
 }
 
-function mapFirestoreMessageToLocal(args: {
+function mapServerMessageDocToLocal(args: {
   roomType: OfflineChatRoomType;
   roomId: string;
   messageId: string;
@@ -180,8 +170,70 @@ function mapFirestoreMessageToLocal(args: {
   };
 }
 
+type LocalMessageUpsertRow = ReturnType<typeof mapServerMessageDocToLocal> & {
+  serverSeq?: number | null;
+  clientMutationId?: string | null;
+};
+
+function isoToMs(iso: string | null | undefined): number {
+  if (!iso || typeof iso !== 'string') return 0;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Supabase `chat_pull_deltas` 행 → 로컬 upsert 행 (로컬 `room_id`는 항상 화면 키 `k.roomId` 유지) */
+function mapSupabaseDeltaRowToLocal(k: OfflineChatRoomKey, row: ChatDeltaRow): LocalMessageUpsertRow {
+  const messageId = sanitizeStoredText(String(row.id ?? '')) ?? String(row.id ?? '').trim();
+  const createdAtMs = isoToMs(row.created_at);
+  const updatedAtMs = isoToMs(row.updated_at ?? undefined) || createdAtMs;
+  const deletedAtMs = row.deleted_at ? isoToMs(row.deleted_at) : null;
+  const kindRaw = row.kind;
+  const kind =
+    kindRaw === 'image' || kindRaw === 'text' || kindRaw === 'system' ? kindRaw : typeof kindRaw === 'string' ? kindRaw : null;
+  const text = sanitizeStoredText(typeof row.body_text === 'string' ? row.body_text : null);
+  const imageUrl = sanitizeStoredText(typeof row.image_url === 'string' ? row.image_url : null);
+  const imageAlbumBatchId = sanitizeStoredText(typeof row.image_album_batch_id === 'string' ? row.image_album_batch_id : null);
+  const rt = row.reply_to;
+  const replyToMessageId =
+    rt && typeof rt === 'object' && !Array.isArray(rt)
+      ? sanitizeStoredText(typeof (rt as Record<string, unknown>).messageId === 'string' ? String((rt as any).messageId) : null)
+      : null;
+  const senderId = sanitizeStoredText(typeof row.sender_app_user_id === 'string' ? row.sender_app_user_id : null);
+  const searchText = buildSearchText([text, kind === 'image' ? '사진' : '', null]);
+  const isDeleted = deletedAtMs && deletedAtMs > 0 ? true : null;
+  const serverSeq =
+    typeof row.seq === 'number' && Number.isFinite(row.seq) ? row.seq : Number.isFinite(Number(row.seq)) ? Number(row.seq) : null;
+  return {
+    roomId: k.roomId,
+    roomType: k.roomType,
+    messageId,
+    createdAtMs,
+    senderId,
+    senderName: null,
+    senderAvatarUrl: null,
+    kind,
+    text,
+    imageUrl,
+    imageAlbumBatchId,
+    replyToMessageId,
+    replyToJson: safeJson(rt),
+    linkPreviewJson: safeJson(row.link_preview),
+    rawPayloadJson: safeJson(row),
+    searchText,
+    isDeleted,
+    deletedAtMs,
+    updatedAtMs,
+    serverSeq: serverSeq != null && Number.isFinite(serverSeq) && serverSeq > 0 ? serverSeq : null,
+    clientMutationId: sanitizeStoredText(
+      typeof row.client_mutation_id === 'string' ? row.client_mutation_id : null,
+    ),
+  };
+}
+
 export type IncrementalSyncArgs = {
   key: OfflineChatRoomKey;
+  /** Supabase 델타(`EXPO_PUBLIC_CHAT_DELTA_TRANSPORT=supabase`)일 때 필수 — `app_user_id` PK */
+  appUserId?: string | null;
   /** 로컬 커서가 없을 때, 최근 이 ms 이후만(초기 pull 상한) */
   initialSinceMs?: number;
   pageSize?: number;
@@ -210,81 +262,172 @@ export type OfflineChatLocalMessageInput = {
   replyToJson?: string | null;
   linkPreviewJson?: string | null;
   rawPayloadJson?: string | null;
+  /** Supabase `chat_messages.seq` */
+  serverSeq?: number | null;
+  clientMutationId?: string | null;
 };
+
+function meetingCreatedTimeMs(v: MeetingChatMessage['createdAt'] | undefined | null): number {
+  if (v == null) return 0;
+  if (typeof (v as { toMillis?: () => number }).toMillis === 'function') {
+    try {
+      return (v as { toMillis: () => number }).toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+/** 라이브 tail 등 `MeetingChatMessage[]` → `upsertLocalChatMessages` 입력 */
+export function offlineInputsFromMeetingChatMessages(messages: readonly MeetingChatMessage[]): OfflineChatLocalMessageInput[] {
+  return messages.map((m) => ({
+    messageId: m.id,
+    createdAtMs: meetingCreatedTimeMs(m.createdAt),
+    updatedAtMs: meetingCreatedTimeMs(m.updatedAt) || meetingCreatedTimeMs(m.createdAt),
+    deletedAtMs: meetingCreatedTimeMs(m.deletedAt) || null,
+    senderId: m.senderId,
+    senderName: m.senderName ?? null,
+    senderAvatarUrl: m.senderAvatarUrl ?? null,
+    kind: m.kind,
+    text: m.text,
+    imageUrl: m.imageUrl,
+    imageAlbumBatchId: m.imageAlbumBatchId ?? null,
+    replyToMessageId: m.replyTo?.messageId ?? null,
+    replyToJson: m.replyTo ? JSON.stringify(m.replyTo) : null,
+    linkPreviewJson: m.linkPreview ? JSON.stringify(m.linkPreview) : null,
+    rawPayloadJson: null,
+    serverSeq:
+      typeof m.serverSeq === 'number' && Number.isFinite(m.serverSeq) && m.serverSeq > 0 ? Math.floor(m.serverSeq) : undefined,
+    clientMutationId:
+      typeof m.clientMutationId === 'string' && m.clientMutationId.trim() ? m.clientMutationId.trim() : undefined,
+  }));
+}
+
+function dedupeLocalMessageUpsertRows(rows: LocalMessageUpsertRow[]): LocalMessageUpsertRow[] {
+  const out = new Map<string, LocalMessageUpsertRow>();
+  for (const r of rows) {
+    const k = `${r.roomId}\u0000${r.roomType}\u0000${r.messageId}`;
+    out.set(k, r);
+  }
+  return [...out.values()];
+}
+
+function applyLocalMessageUpsertToWriter(x: any, row: LocalMessageUpsertRow, roomFk: string | null) {
+  x.messageId = row.messageId;
+  x.createdAtMs = row.createdAtMs;
+  x.updatedAtMs = row.updatedAtMs;
+  x.deletedAtMs = row.deletedAtMs;
+  x.senderId = row.senderId;
+  x.senderName = row.senderName;
+  x.senderAvatarUrl = row.senderAvatarUrl;
+  x.kind = row.kind;
+  x.text = row.text;
+  x.imageUrl = row.imageUrl;
+  x.imageAlbumBatchId = row.imageAlbumBatchId;
+  x.replyToMessageId = row.replyToMessageId;
+  x.replyToJson = row.replyToJson;
+  x.linkPreviewJson = row.linkPreviewJson;
+  x.rawPayloadJson = row.rawPayloadJson;
+  x.searchText = row.searchText;
+  x.isDeleted = row.isDeleted;
+  if (typeof row.serverSeq === 'number' && Number.isFinite(row.serverSeq) && row.serverSeq > 0) {
+    x.serverSeq = row.serverSeq;
+  }
+  if (roomFk) x.chatRoomId = roomFk;
+  if (row.clientMutationId !== undefined) {
+    x.clientMutationId = row.clientMutationId == null ? null : sanitizeStoredText(String(row.clientMutationId));
+  }
+}
 
 async function upsertLocalMessageRows(
   db: typeof database,
   localRoom: unknown,
-  rows: ReturnType<typeof mapFirestoreMessageToLocal>[],
+  rows: LocalMessageUpsertRow[],
 ): Promise<{ newestCreatedAtMs: number; newestUpdatedAtMs: number; newestMessageId: string | null }> {
   let newestCreatedAtMs = 0;
   let newestUpdatedAtMs = 0;
   let newestMessageId: string | null = null;
-  let newestRow: ReturnType<typeof mapFirestoreMessageToLocal> | null = null;
+  let newestRow: LocalMessageUpsertRow | null = null;
   if (!db || rows.length === 0) return { newestCreatedAtMs, newestUpdatedAtMs, newestMessageId };
 
+  const deduped = dedupeLocalMessageUpsertRows(rows);
+
+  const roomFk =
+    localRoom && typeof (localRoom as { id?: unknown }).id === 'string'
+      ? String((localRoom as { id: string }).id)
+      : null;
+
+  let maxServerSeqInBatch = 0;
+  for (const row of deduped) {
+    const s = typeof row.serverSeq === 'number' && Number.isFinite(row.serverSeq) ? Math.floor(row.serverSeq) : 0;
+    if (s > maxServerSeqInBatch) maxServerSeqInBatch = s;
+    if (row.createdAtMs > newestCreatedAtMs) {
+      newestCreatedAtMs = row.createdAtMs;
+      newestMessageId = row.messageId;
+      newestRow = row;
+    }
+    if (row.updatedAtMs > newestUpdatedAtMs) newestUpdatedAtMs = row.updatedAtMs;
+  }
+
+  const rid = deduped[0]!.roomId;
+  const rtype = deduped[0]!.roomType;
+  const msgs = db.get('chat_messages');
+
+  const messageIds = [...new Set(deduped.map((r) => r.messageId).filter(Boolean))];
+  const clientIdsRaw = deduped
+    .map((r) => (r.clientMutationId ? sanitizeStoredText(String(r.clientMutationId)) : null))
+    .filter((x): x is string => typeof x === 'string' && x.length > 0);
+  const clientIds = [...new Set(clientIdsRaw)];
+
+  const byMessageId = new Map<string, any>();
+  const byClientId = new Map<string, any>();
+  if (messageIds.length > 0) {
+    const found = await msgs
+      .query(Q.where('room_id', rid), Q.where('room_type', rtype), Q.where('message_id', Q.oneOf(messageIds)))
+      .fetch();
+    for (const m of found) {
+      const mid = typeof (m as any).messageId === 'string' ? (m as any).messageId.trim() : '';
+      if (mid) byMessageId.set(mid, m);
+    }
+  }
+  if (clientIds.length > 0) {
+    const foundC = await msgs
+      .query(Q.where('room_id', rid), Q.where('room_type', rtype), Q.where('client_mutation_id', Q.oneOf(clientIds)))
+      .fetch();
+    for (const m of foundC) {
+      const cm = typeof (m as any).clientMutationId === 'string' ? (m as any).clientMutationId.trim() : '';
+      if (cm) byClientId.set(cm, m);
+    }
+  }
+
   await db.write(async () => {
-    const msgs = db.get('chat_messages');
-    for (const row of rows) {
-      if (row.createdAtMs > newestCreatedAtMs) {
-        newestCreatedAtMs = row.createdAtMs;
-        newestMessageId = row.messageId;
-        newestRow = row;
+    const batchOps: any[] = [];
+    for (const row of deduped) {
+      let m = byMessageId.get(row.messageId);
+      if (!m) {
+        const cm = row.clientMutationId ? sanitizeStoredText(String(row.clientMutationId)) : '';
+        if (cm) m = byClientId.get(cm);
       }
-      if (row.updatedAtMs > newestUpdatedAtMs) newestUpdatedAtMs = row.updatedAtMs;
-      const existing = await msgs.query(
-        Q.where('room_id', row.roomId),
-        Q.where('room_type', row.roomType),
-        Q.where('message_id', row.messageId),
-      ).fetch();
-      const m = existing[0];
       if (m) {
-        await m.update((x: any) => {
-          x.createdAtMs = row.createdAtMs;
-          x.updatedAtMs = row.updatedAtMs;
-          x.deletedAtMs = row.deletedAtMs;
-          x.senderId = row.senderId;
-          x.senderName = row.senderName;
-          x.senderAvatarUrl = row.senderAvatarUrl;
-          x.kind = row.kind;
-          x.text = row.text;
-          x.imageUrl = row.imageUrl;
-          x.imageAlbumBatchId = row.imageAlbumBatchId;
-          x.replyToMessageId = row.replyToMessageId;
-          x.replyToJson = row.replyToJson;
-          x.linkPreviewJson = row.linkPreviewJson;
-          x.rawPayloadJson = row.rawPayloadJson;
-          x.searchText = row.searchText;
-          x.isDeleted = row.isDeleted;
-        });
+        batchOps.push(
+          m.prepareUpdate((x: any) => {
+            applyLocalMessageUpsertToWriter(x, row, roomFk);
+          }),
+        );
       } else {
-        await msgs.create((x: any) => {
-          x.roomId = row.roomId;
-          x.roomType = row.roomType;
-          x.messageId = row.messageId;
-          x.createdAtMs = row.createdAtMs;
-          x.updatedAtMs = row.updatedAtMs;
-          x.deletedAtMs = row.deletedAtMs;
-          x.senderId = row.senderId;
-          x.senderName = row.senderName;
-          x.senderAvatarUrl = row.senderAvatarUrl;
-          x.kind = row.kind;
-          x.text = row.text;
-          x.imageUrl = row.imageUrl;
-          x.imageAlbumBatchId = row.imageAlbumBatchId;
-          x.replyToMessageId = row.replyToMessageId;
-          x.replyToJson = row.replyToJson;
-          x.linkPreviewJson = row.linkPreviewJson;
-          x.rawPayloadJson = row.rawPayloadJson;
-          x.searchText = row.searchText;
-          x.isDeleted = row.isDeleted;
-        });
+        batchOps.push(
+          msgs.prepareCreate((x: any) => {
+            x.roomId = row.roomId;
+            x.roomType = row.roomType;
+            applyLocalMessageUpsertToWriter(x, row, roomFk);
+          }),
+        );
       }
     }
-    const count = await db
-      .get('chat_messages')
-      .query(Q.where('room_id', rows[0]!.roomId), Q.where('room_type', rows[0]!.roomType))
-      .fetchCount();
+
+    await db.batch(...batchOps);
+    const count = await msgs.query(Q.where('room_id', rid), Q.where('room_type', rtype)).fetchCount();
     await (localRoom as any).update((r: any) => {
       const prevLastMs = typeof r.lastMessageAtMs === 'number' ? r.lastMessageAtMs : 0;
       if (newestCreatedAtMs > 0) r.lastMessageAtMs = Math.max(prevLastMs, newestCreatedAtMs);
@@ -298,16 +441,14 @@ async function upsertLocalMessageRows(
       }
       if (newestUpdatedAtMs > 0) r.remoteUpdatedAtMs = Math.max(r.remoteUpdatedAtMs ?? 0, newestUpdatedAtMs);
       r.localMessageCount = count;
+      if (maxServerSeqInBatch > 0) {
+        const cur = typeof r.lastServerSeq === 'number' && Number.isFinite(r.lastServerSeq) ? Math.floor(r.lastServerSeq) : 0;
+        r.lastServerSeq = Math.max(cur, maxServerSeqInBatch);
+      }
     });
   });
 
   return { newestCreatedAtMs, newestUpdatedAtMs, newestMessageId };
-}
-
-function mapSnapRows(k: OfflineChatRoomKey, docs: QueryDocumentSnapshot[]) {
-  return docs.map((d) =>
-    mapFirestoreMessageToLocal({ roomType: k.roomType, roomId: k.roomId, messageId: d.id, data: d.data() as any }),
-  );
 }
 
 export async function upsertLocalChatMessages(
@@ -353,24 +494,26 @@ export async function upsertLocalChatMessages(
         searchText: buildSearchText([text, kind === 'image' ? '사진' : '', senderName]),
         isDeleted:
           typeof m.deletedAtMs === 'number' && Number.isFinite(m.deletedAtMs) && m.deletedAtMs > 0 ? true : null,
+        serverSeq:
+          typeof m.serverSeq === 'number' && Number.isFinite(m.serverSeq) && m.serverSeq > 0
+            ? Math.floor(m.serverSeq)
+            : null,
+        clientMutationId: sanitizeStoredText(typeof m.clientMutationId === 'string' ? m.clientMutationId : null),
       };
     })
     .filter((x): x is NonNullable<typeof x> => Boolean(x));
   await upsertLocalMessageRows(db, localRoom, rows);
 }
 
-export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncArgs): Promise<{
-  pulledDocs: number;
-  lastSyncedAtMs: number;
-}> {
+async function incrementalSyncFromSupabaseDeltas(
+  args: IncrementalSyncArgs & { appUserId: string },
+): Promise<{ pulledDocs: number; lastSyncedAtMs: number }> {
   const db = database;
   if (!db) return { pulledDocs: 0, lastSyncedAtMs: 0 };
 
-  const { key } = args;
-  const k = normalizeRoomKey(key);
+  const k = normalizeRoomKey(args.key);
   const pageSize = Math.min(Math.max(50, args.pageSize ?? DEFAULT_PAGE_SIZE), 500);
   const maxDocs = Math.min(Math.max(200, args.maxDocs ?? DEFAULT_MAX_DOCS), 5000);
-  const latestBlockSize = Math.min(Math.max(20, args.latestBlockSize ?? DEFAULT_LATEST_BLOCK_SIZE), 200);
   const maxPagesPerRun = Math.min(Math.max(1, args.maxPagesPerRun ?? DEFAULT_MAX_PAGES_PER_RUN), 10);
   const timeBudgetMs = Math.min(Math.max(500, args.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS), 10_000);
   const startedAt = Date.now();
@@ -378,79 +521,63 @@ export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncAr
   const localRoom = await getOrCreateLocalRoom(k);
   if (!localRoom) return { pulledDocs: 0, lastSyncedAtMs: 0 };
 
-  /** Direct Share 등에서 최근 방 정렬용 — 메시지 동기화 시마다 최신 createdAt 기준으로 갱신 */
+  const roomKind = k.roomType === 'social_dm' ? 'social_dm' : 'meeting';
+  let afterSeq = (() => {
+    const v = (localRoom as { lastServerSeq?: number | null }).lastServerSeq;
+    return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+  })();
+
+  let pulled = 0;
+  let pages = 0;
+  let newestChangedSeenMs =
+    ((localRoom as any).lastSyncedChangedAtMs as number | null | undefined) ??
+    ((localRoom as any).lastSyncedAtMs as number | null | undefined) ??
+    0;
   let accumulatedLastMessageMs = (() => {
     const v = (localRoom as any).lastMessageAtMs as number | null | undefined;
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
   })();
 
-  const existingChangedCursorMs =
-    ((localRoom as any).lastSyncedChangedAtMs as number | null | undefined) ??
-    ((localRoom as any).lastSyncedAtMs as number | null | undefined);
-  const cursorMs =
-    typeof existingChangedCursorMs === 'number' && Number.isFinite(existingChangedCursorMs) && existingChangedCursorMs > 0
-      ? existingChangedCursorMs
-      : Math.max(0, args.initialSinceMs ?? Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-  let pulled = 0;
-  let lastSnap: DocumentSnapshot | undefined;
-  let newestSeenMs = cursorMs;
-  let newestChangedSeenMs = cursorMs;
-
-  const cref = roomMessagesCollectionRef(k.roomType, k.roomId);
-
-  // 1) UI critical path: latest block by display order. This also covers legacy docs without updatedAt.
-  const latestSnap = await getDocs(query(cref, orderBy('createdAt', 'desc'), limit(latestBlockSize)));
-  if (!latestSnap.empty) {
-    const latestRows = mapSnapRows(k, latestSnap.docs);
-    pulled += latestRows.length;
-    const stats = await upsertLocalMessageRows(db, localRoom, latestRows);
-    accumulatedLastMessageMs = Math.max(accumulatedLastMessageMs, stats.newestCreatedAtMs);
-    const oldest = latestRows[latestRows.length - 1];
-    await db.write(async () => {
-      await (localRoom as any).update((r: any) => {
-        if (oldest?.createdAtMs) r.backfillCursorCreatedAtMs = oldest.createdAtMs;
-      });
-    });
-  }
-
-  // 2) Changed cursor sync: bounded pages so a long absence never blocks first render.
-  let pages = 0;
   while (pulled < maxDocs && pages < maxPagesPerRun && Date.now() - startedAt < timeBudgetMs) {
-    const base = query(
-      cref,
-      orderBy('updatedAt', 'asc'),
-      where('updatedAt', '>', Timestamp.fromMillis(cursorMs)),
-      ...(lastSnap ? [startAfter(lastSnap)] : []),
-      limit(pageSize),
-    );
-    const snap = await getDocs(base);
-    if (snap.empty) break;
+    const lim = Math.min(pageSize, maxDocs - pulled);
+    const res = await chatPullDeltasRpc({
+      meAppUserId: args.appUserId,
+      roomKind,
+      roomId: k.roomId,
+      afterSeq,
+      limit: lim,
+    });
+    if (res.error) {
+      devLogOfflineChatSyncRpcFailure('chat_pull_deltas', res.error);
+      break;
+    }
+    const rows = res.rows.map((r) => mapSupabaseDeltaRowToLocal(k, r));
+    if (rows.length > 0) {
+      const stats = await upsertLocalMessageRows(db, localRoom, rows);
+      accumulatedLastMessageMs = Math.max(accumulatedLastMessageMs, stats.newestCreatedAtMs);
+      newestChangedSeenMs = Math.max(newestChangedSeenMs, stats.newestUpdatedAtMs, Date.now());
+    }
+    pulled += rows.length;
+    afterSeq = typeof res.max_seq === 'number' && Number.isFinite(res.max_seq) ? res.max_seq : afterSeq;
     pages += 1;
 
-    const batchRows = mapSnapRows(k, snap.docs);
-    pulled += batchRows.length;
-
-    let batchMaxCreatedMs = 0;
-    let batchMaxUpdatedMs = 0;
-    for (const row of batchRows) {
-      if (row.createdAtMs > batchMaxCreatedMs) batchMaxCreatedMs = row.createdAtMs;
-      if (row.updatedAtMs > batchMaxUpdatedMs) batchMaxUpdatedMs = row.updatedAtMs;
-    }
-    accumulatedLastMessageMs = Math.max(accumulatedLastMessageMs, batchMaxCreatedMs);
-    newestChangedSeenMs = Math.max(newestChangedSeenMs, batchMaxUpdatedMs);
-    await upsertLocalMessageRows(db, localRoom, batchRows);
-
-    lastSnap = snap.docs[snap.docs.length - 1]!;
-    if (snap.size < pageSize) break;
-  }
-
-  if (pulled > 0 || newestChangedSeenMs > cursorMs) {
     await db.write(async () => {
       await (localRoom as any).update((r: any) => {
-        r.lastSyncedAtMs = Math.max(r.lastSyncedAtMs ?? 0, accumulatedLastMessageMs, newestSeenMs);
+        r.lastServerSeq = afterSeq;
+      });
+    });
+
+    if (!res.has_more) break;
+    if (rows.length === 0) break;
+  }
+
+  const cursorWall = Math.max(0, args.initialSinceMs ?? Date.now() - 7 * 24 * 60 * 60 * 1000);
+  if (pulled > 0 || afterSeq > 0) {
+    await db.write(async () => {
+      await (localRoom as any).update((r: any) => {
+        r.lastSyncedAtMs = Math.max(r.lastSyncedAtMs ?? 0, accumulatedLastMessageMs, cursorWall);
         r.lastSyncedChangedAtMs = Math.max(r.lastSyncedChangedAtMs ?? 0, newestChangedSeenMs);
-        if (accumulatedLastMessageMs > 0) r.lastMessageAtMs = accumulatedLastMessageMs;
+        if (accumulatedLastMessageMs > 0) r.lastMessageAtMs = Math.max(r.lastMessageAtMs ?? 0, accumulatedLastMessageMs);
       });
     });
   }
@@ -472,11 +599,25 @@ export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncAr
     }
   }
 
-  return { pulledDocs: pulled, lastSyncedAtMs: Math.max(newestChangedSeenMs, newestSeenMs) };
+  return { pulledDocs: pulled, lastSyncedAtMs: Math.max(newestChangedSeenMs, afterSeq > 0 ? Date.now() : 0) };
+}
+
+export async function incrementalSyncRoomMessagesToLocal(args: IncrementalSyncArgs): Promise<{
+  pulledDocs: number;
+  lastSyncedAtMs: number;
+}> {
+  const db = database;
+  if (!db) return { pulledDocs: 0, lastSyncedAtMs: 0 };
+
+  const uid = args.appUserId?.trim();
+  if (!uid) return { pulledDocs: 0, lastSyncedAtMs: 0 };
+  return incrementalSyncFromSupabaseDeltas({ ...args, appUserId: uid });
 }
 
 export async function backfillOlderRoomMessagesToLocal(args: {
   key: OfflineChatRoomKey;
+  /** Supabase 백필(`chat_pull_history_before_seq`)에 필수 */
+  appUserId?: string | null;
   pageSize?: number;
   maxPages?: number;
   timeBudgetMs?: number;
@@ -488,46 +629,119 @@ export async function backfillOlderRoomMessagesToLocal(args: {
   const localRoom = await getOrCreateLocalRoom(k);
   if (!localRoom) return { pulledDocs: 0, nextCursorCreatedAtMs: null };
 
-  const pageSize = Math.min(Math.max(20, args.pageSize ?? 100), 300);
+  const uid = args.appUserId?.trim();
+  if (!uid) {
+    const c = (localRoom as any).backfillCursorCreatedAtMs as number | null | undefined;
+    return {
+      pulledDocs: 0,
+      nextCursorCreatedAtMs: typeof c === 'number' && Number.isFinite(c) && c > 0 ? c : null,
+    };
+  }
+  const roomKind = k.roomType === 'social_dm' ? 'social_dm' : 'meeting';
+  const pageSize = Math.min(Math.max(20, args.pageSize ?? 100), 200);
   const maxPages = Math.min(Math.max(1, args.maxPages ?? 1), 5);
   const timeBudgetMs = Math.min(Math.max(300, args.timeBudgetMs ?? 900), 5000);
   const startedAt = Date.now();
-  let cursorMs = (localRoom as any).backfillCursorCreatedAtMs as number | null | undefined;
-  if (typeof cursorMs !== 'number' || !Number.isFinite(cursorMs) || cursorMs <= 0) {
-    const oldest = await db
-      .get('chat_messages')
-      .query(Q.where('room_id', k.roomId), Q.where('room_type', k.roomType), Q.sortBy('created_at_ms', Q.asc), Q.take(1))
+  const msgsTable = db.get('chat_messages');
+
+  const lastSrv = (() => {
+    const v = (localRoom as { lastServerSeq?: number | null }).lastServerSeq;
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+  })();
+
+  let beforeSeq = (() => {
+    const v = (localRoom as { backfillBeforeServerSeq?: number | null }).backfillBeforeServerSeq;
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+  })();
+
+  if (beforeSeq <= 0) {
+    const withSeq = await msgsTable
+      .query(
+        Q.where('room_id', k.roomId),
+        Q.where('room_type', k.roomType),
+        Q.where('server_seq', Q.gt(0)),
+        Q.sortBy('server_seq', Q.asc),
+        Q.take(1),
+      )
       .fetch();
-    cursorMs = (oldest[0] as any)?.createdAtMs ?? 0;
+    const minLocal = (withSeq[0] as { serverSeq?: number } | undefined)?.serverSeq;
+    if (typeof minLocal === 'number' && Number.isFinite(minLocal) && minLocal > 0) {
+      beforeSeq = minLocal;
+    } else if (lastSrv > 0) {
+      beforeSeq = lastSrv + 1;
+    } else {
+      const c = (localRoom as any).backfillCursorCreatedAtMs as number | null | undefined;
+      return {
+        pulledDocs: 0,
+        nextCursorCreatedAtMs: typeof c === 'number' && Number.isFinite(c) && c > 0 ? c : null,
+      };
+    }
   }
-  if (!cursorMs) return { pulledDocs: 0, nextCursorCreatedAtMs: null };
 
-  const cref = roomMessagesCollectionRef(k.roomType, k.roomId);
   let pulled = 0;
-  let nextCursor = cursorMs;
-  for (let page = 0; page < maxPages && Date.now() - startedAt < timeBudgetMs; page += 1) {
-    const snap = await getDocs(
-      query(cref, orderBy('createdAt', 'desc'), where('createdAt', '<', Timestamp.fromMillis(nextCursor)), limit(pageSize)),
-    );
-    if (snap.empty) break;
-    const rows = mapSnapRows(k, snap.docs);
-    pulled += rows.length;
-    await upsertLocalMessageRows(db, localRoom, rows);
-    const oldest = rows[rows.length - 1];
-    if (!oldest?.createdAtMs || oldest.createdAtMs >= nextCursor) break;
-    nextCursor = oldest.createdAtMs;
-    if (snap.size < pageSize) break;
-  }
-
-  if (pulled > 0) {
-    await db.write(async () => {
-      await (localRoom as any).update((r: any) => {
-        r.backfillCursorCreatedAtMs = nextCursor;
-      });
+  let nextCursorMs: number | null = null;
+  let pages = 0;
+  while (pages < maxPages && Date.now() - startedAt < timeBudgetMs) {
+    const res = await chatPullHistoryBeforeSeqRpc({
+      meAppUserId: uid,
+      roomKind,
+      roomId: k.roomId,
+      beforeSeq,
+      limit: pageSize,
     });
+    if (res.error) {
+      devLogOfflineChatSyncRpcFailure('chat_pull_history_before_seq', res.error);
+      break;
+    }
+    const rows = res.rows.map((r) => mapSupabaseDeltaRowToLocal(k, r));
+    if (rows.length > 0) {
+      await upsertLocalMessageRows(db, localRoom, rows);
+      pulled += rows.length;
+      const oldest = rows[rows.length - 1];
+      if (oldest?.createdAtMs) nextCursorMs = oldest.createdAtMs;
+    }
+    const seqs = rows
+      .map((r) => (typeof r.serverSeq === 'number' && Number.isFinite(r.serverSeq) ? r.serverSeq : NaN))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const minFromRows = seqs.length > 0 ? Math.min(...seqs) : null;
+    const minSeq =
+      typeof res.min_seq === 'number' && Number.isFinite(res.min_seq) && res.min_seq > 0
+        ? res.min_seq
+        : minFromRows != null && Number.isFinite(minFromRows)
+          ? minFromRows
+          : null;
+
+    pages += 1;
+    if (!res.has_more || rows.length === 0) {
+      await db.write(async () => {
+        await (localRoom as any).update((r: any) => {
+          r.backfillBeforeServerSeq = null;
+          if (nextCursorMs != null) r.backfillCursorCreatedAtMs = nextCursorMs;
+        });
+      });
+      break;
+    }
+    if (minSeq != null && minSeq < beforeSeq) {
+      beforeSeq = minSeq;
+      await db.write(async () => {
+        await (localRoom as any).update((r: any) => {
+          r.backfillBeforeServerSeq = minSeq;
+          if (nextCursorMs != null) r.backfillCursorCreatedAtMs = nextCursorMs;
+        });
+      });
+    } else {
+      await db.write(async () => {
+        await (localRoom as any).update((r: any) => {
+          r.backfillBeforeServerSeq = null;
+          if (nextCursorMs != null) r.backfillCursorCreatedAtMs = nextCursorMs;
+        });
+      });
+      break;
+    }
+    if (rows.length < pageSize && !res.has_more) break;
   }
 
-  return { pulledDocs: pulled, nextCursorCreatedAtMs: pulled > 0 ? nextCursor : cursorMs };
+  return { pulledDocs: pulled, nextCursorCreatedAtMs: nextCursorMs };
 }
 
 /**

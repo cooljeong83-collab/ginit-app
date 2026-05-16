@@ -42,6 +42,8 @@ function Cell({
           source={{ uri: u }}
           style={styles.ginitCellImage}
           contentFit={imageContentFit}
+          cachePolicy="disk"
+          recyclingKey={msg.id}
           onLoad={(e) => {
             const src = (e as any)?.source;
             const w = typeof src?.width === 'number' ? src.width : 0;

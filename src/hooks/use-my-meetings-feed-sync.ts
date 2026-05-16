@@ -2,9 +2,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { meetingListSource } from '@/src/lib/hybrid-data-source';
 import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-feed-deferred-sync';
 import type { Meeting } from '@/src/lib/meetings';
+import { myMeetingsFeedQueryKey } from '@/src/lib/meetings-query-keys';
 import {
   fetchMyMeetingsForFeedFromSupabase,
 } from '@/src/lib/supabase-meetings-list';
@@ -16,9 +16,7 @@ type MyMeetingsQueryData = {
 
 const EMPTY_MEETINGS: Meeting[] = [];
 
-export function myMeetingsFeedQueryKey(appUserId: string) {
-  return ['meetings', 'my-feed', meetingListSource(), normalizeParticipantId(appUserId)] as const;
-}
+export { myMeetingsFeedQueryKey };
 
 async function fetchMyMeetingsFull(appUserId: string): Promise<MyMeetingsQueryData> {
   const res = await fetchMyMeetingsForFeedFromSupabase(appUserId);
@@ -37,13 +35,13 @@ export function useMyMeetingsFeedSync({
   const normalizedUserId = useMemo(() => normalizeParticipantId(userId ?? ''), [userId]);
   const queryKey = useMemo(() => myMeetingsFeedQueryKey(normalizedUserId), [normalizedUserId]);
   const queryClient = useQueryClient();
-  const shouldRun = enabled && Boolean(normalizedUserId) && meetingListSource() === 'supabase';
+  const shouldRun = enabled && Boolean(normalizedUserId);
 
   const query = useQuery({
     queryKey,
     enabled: shouldRun,
     queryFn: () => fetchMyMeetingsFull(normalizedUserId),
-    staleTime: 10 * 60 * 1000,
+    staleTime: 0,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,

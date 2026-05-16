@@ -44,6 +44,11 @@ export function applyMeetingPushTargetedRefresh(
   const d = data ?? {};
   const mid = extractMeetingIdFromPushData(d);
   if (!mid) return;
+  /** 소셜 DM은 FCM `meetingId` 키에 방 문자열이 들어옴 — 모임 상세·피드 reconcile은 스킵(채팅은 Watermelon·Realtime 경로). */
+  if (mid.startsWith('social_')) {
+    ginitNotifyDbg('meeting-push-refresh', 'skip_social_dm_payload', { roomId: mid, source });
+    return;
+  }
 
   const appState = AppState.currentState;
   const uid = viewerAppUserId?.trim() ? viewerAppUserId.trim() : null;

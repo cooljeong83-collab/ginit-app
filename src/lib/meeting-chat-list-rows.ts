@@ -16,6 +16,14 @@ export function meetingChatListRowKey(row: MeetingChatListRow): string {
   return `album:${row.batchId}:${row.messages.map((m) => m.id).join(':')}`;
 }
 
+/** FlashList `getItemType` — 텍스트 / 이미지 / 시스템 / 앨범 레이아웃 분리 */
+export function meetingChatFlashListItemType(row: MeetingChatListRow): string {
+  if (row.type === 'imageAlbum') return 'album';
+  if (row.type === 'message' && row.message.kind === 'system') return 'system';
+  if (row.type === 'message' && row.message.kind === 'image') return 'image';
+  return 'text';
+}
+
 export function findMeetingChatListRowIndexByMessageId(rows: MeetingChatListRow[], messageId: string): number {
   const mid = String(messageId ?? '').trim();
   if (!mid) return -1;

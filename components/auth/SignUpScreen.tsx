@@ -63,7 +63,7 @@ export default function SignUpScreen() {
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
-  const [verifiedFirebaseUid, setVerifiedFirebaseUid] = useState<string | null>(null);
+  const [verifiedAuthUid, setVerifiedAuthUid] = useState<string | null>(null);
   const [displayNameBlockY, setDisplayNameBlockY] = useState<number | null>(null);
   const [phoneBlockY, setPhoneBlockY] = useState<number | null>(null);
   const [genderY, setGenderY] = useState<number | null>(null);
@@ -161,8 +161,8 @@ export default function SignUpScreen() {
   const phoneDigitCount = useMemo(() => phoneField.replace(/\D/g, '').length, [phoneField]);
   /** 회원 여부와 관계없이 탭 가능. 11자리·유효 번호일 때만 실제 전송은 `onSendOtp`에서 진행합니다. */
   const canSendOtp =
-    phoneDigitCount === 11 && !!normalizedPhone && !busy && !otpBusy && !verifiedFirebaseUid;
-  const canConfirmOtp = !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy && !busy && !verifiedFirebaseUid;
+    phoneDigitCount === 11 && !!normalizedPhone && !busy && !otpBusy && !verifiedAuthUid;
+  const canConfirmOtp = !!otpVerificationId && otpCode.trim().length === 6 && !otpBusy && !busy && !verifiedAuthUid;
 
   // 이메일 입력은 "도메인 선택" 또는 "직접 입력" 모드를 지원하고,
   // 실제 저장 값은 hook의 emailField로 동기화합니다.
@@ -175,7 +175,7 @@ export default function SignUpScreen() {
     setOtpVerificationId(null);
     setOtpCode('');
     setOtpError(null);
-    setVerifiedFirebaseUid(null);
+    setVerifiedAuthUid(null);
     smsRetriever.stop();
   }, [normalizedPhone]);
 
@@ -239,9 +239,9 @@ export default function SignUpScreen() {
     setOtpError(null);
     try {
       const cred = await AuthService.confirmCode(otpVerificationId, otpCode);
-      const uid = cred.user?.uid ?? '';
+      const uid = cred.uid.trim();
       if (!uid) throw new Error('인증은 완료됐지만 사용자 정보를 가져올 수 없습니다.');
-      setVerifiedFirebaseUid(uid);
+      setVerifiedAuthUid(uid);
       // "당근마켓식" 자동 로그인: 부트에서 홈 진입을 위해 secure store에 세션을 저장합니다.
       if (normalizedPhone) {
         await writeSecureAuthSession({ uid, userId: normalizedPhone });
@@ -273,20 +273,20 @@ export default function SignUpScreen() {
 
   const onSubmit = useCallback(() => {
     if (consented) {
-      void runSignUp(verifiedFirebaseUid ?? '', proceedAfterSignUp);
+      void runSignUp(verifiedAuthUid ?? '', proceedAfterSignUp);
       return;
     }
     setPendingConsentAction(async () => {
-      await runSignUp(verifiedFirebaseUid ?? '', proceedAfterSignUp);
+      await runSignUp(verifiedAuthUid ?? '', proceedAfterSignUp);
     });
     router.push('/terms-agreement');
-  }, [consented, runSignUp, verifiedFirebaseUid, proceedAfterSignUp, router]);
+  }, [consented, runSignUp, verifiedAuthUid, proceedAfterSignUp, router]);
 
   const signUpSubmitDisabled =
     !canSubmit ||
     busy ||
     otpBusy ||
-    !verifiedFirebaseUid ||
+    !verifiedAuthUid ||
     memberStatus === 'member' ||
     (memberStatus === 'checking' && phoneField.trim().length > 0);
 
@@ -502,7 +502,7 @@ export default function SignUpScreen() {
                     textContentType={Platform.OS === 'ios' ? 'telephoneNumber' : undefined}
                     importantForAutofill={Platform.OS === 'android' ? 'no' : 'yes'}
                     autoCapitalize="none"
-                    editable={!busy && !otpBusy && !verifiedFirebaseUid}
+                    editable={!busy && !otpBusy && !verifiedAuthUid}
                     selectTextOnFocus
                     returnKeyType="done"
                     enterKeyHint="done"
@@ -537,9 +537,9 @@ export default function SignUpScreen() {
                     </GinitPressable>
                   </View>
                 </View>
-                {verifiedFirebaseUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
+                {verifiedAuthUid ? <Text style={otpStyles.verifiedBadge}>인증 완료</Text> : null}
 
-                {otpVerificationId && !verifiedFirebaseUid ? (
+                {otpVerificationId && !verifiedAuthUid ? (
                   <View style={otpStyles.otpRow}>
                     <TextInput
                       ref={otpInputRef}
@@ -553,7 +553,7 @@ export default function SignUpScreen() {
                       inputMode="numeric"
                       textContentType="oneTimeCode"
                       autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
-                      editable={!verifiedFirebaseUid && !otpBusy && !busy}
+                      editable={!verifiedAuthUid && !otpBusy && !busy}
                       selectTextOnFocus
                       returnKeyType="done"
                       enterKeyHint="done"

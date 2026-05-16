@@ -153,7 +153,7 @@ export default function ProfileAppSettingsScreen() {
     };
   }, []);
 
-  const isSignedIn = Boolean(userId?.trim() || authProfile?.firebaseUid?.trim());
+  const isSignedIn = Boolean(userId?.trim() || authProfile?.supabaseUserId?.trim());
 
   const profilePk = useMemo(() => {
     const u = userId?.trim();
@@ -191,8 +191,14 @@ export default function ProfileAppSettingsScreen() {
       return;
     }
     setMeetingAuthLoaded(false);
+    const MEETING_AUTH_PROFILE_TIMEOUT_MS = 20_000;
     try {
-      const p = await ensureUserProfile(pk);
+      const p = await Promise.race([
+        ensureUserProfile(pk),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('meeting_auth_profile_timeout')), MEETING_AUTH_PROFILE_TIMEOUT_MS),
+        ),
+      ]);
       setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, pk));
     } catch {
       setMeetingAuthComplete(false);
@@ -431,24 +437,26 @@ export default function ProfileAppSettingsScreen() {
 
   const runDeleteAccount = useCallback(async () => {
     const sessionUserId = userId?.trim() ?? '';
-    const firebaseUid = authProfile?.firebaseUid?.trim() ?? '';
-    if (!sessionUserId && !firebaseUid) {
+    const authUid = authProfile?.supabaseUserId?.trim() ?? '';
+    if (!sessionUserId && !authUid) {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
     setDeleteBusy(true);
     try {
-      const preflight = validateAccountDeletionPreflight(sessionUserId, firebaseUid);
+      const preflight = await validateAccountDeletionPreflight(sessionUserId, authUid);
       if (!preflight.ok) {
         Alert.alert('탈퇴를 진행할 수 없어요', preflight.message);
         return;
       }
-      const res = sessionUserId
-        ? await purgeUserAccountRemote(sessionUserId)
-        : await purgeUserAccountRemoteByFirebaseUid(firebaseUid);
-      if (!res.ok) {
-        Alert.alert('탈퇴를 완료하지 못했어요', res.message);
-        return;
+      if (preflight.mode === 'full_deletion') {
+        const res = sessionUserId
+          ? await purgeUserAccountRemote(sessionUserId)
+          : await purgeUserAccountRemoteByFirebaseUid(authUid);
+        if (!res.ok) {
+          Alert.alert('탈퇴를 완료하지 못했어요', res.message);
+          return;
+        }
       }
       const authDel = await deleteFirebaseAuthUserStrict();
       if (!authDel.ok) {
@@ -457,7 +465,10 @@ export default function ProfileAppSettingsScreen() {
       }
       await signOutSession();
       await wipeLocalAppData();
-      const doneMsg = '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
+      const doneMsg =
+        preflight.mode === 'local_session_cleanup_only'
+          ? '이미 서버에서 탈퇴 처리된 계정이에요. 이 기기에 남은 로그인 정보를 정리했습니다.'
+          : '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
       if (Platform.OS === 'android') {
         ToastAndroid.show(doneMsg, ToastAndroid.LONG);
         router.replace('/login');
@@ -470,12 +481,12 @@ export default function ProfileAppSettingsScreen() {
     } finally {
       setDeleteBusy(false);
     }
-  }, [userId, authProfile?.firebaseUid, router, signOutSession]);
+  }, [userId, authProfile?.supabaseUserId, router, signOutSession]);
 
   const onRequestDeleteAccount = useCallback(() => {
     const sessionUserId = userId?.trim() ?? '';
-    const firebaseUid = authProfile?.firebaseUid?.trim() ?? '';
-    if (!sessionUserId && !firebaseUid) {
+    const authUid = authProfile?.supabaseUserId?.trim() ?? '';
+    if (!sessionUserId && !authUid) {
       Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
       return;
     }
@@ -503,7 +514,7 @@ export default function ProfileAppSettingsScreen() {
         },
       ],
     );
-  }, [userId, authProfile?.firebaseUid, runDeleteAccount]);
+  }, [userId, authProfile?.supabaseUserId, runDeleteAccount]);
 
   const versionLine = useMemo(() => {
     const app = Constants.nativeApplicationVersion ?? Constants.expoConfig?.version ?? '—';

@@ -1,4 +1,5 @@
 import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
+import { patchMeetingDetailLocal, refreshMeetingDetailCaches } from '@/src/lib/meeting-detail-cache-mutations';
 import {
   assertDateCandidatesNoOverlapWithOtherMeetings,
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
@@ -304,14 +305,14 @@ export function useMeetingVote({
         refreshed?.dateCandidates != null && refreshed.dateCandidates.length > 0
           ? refreshed.dateCandidates
           : merged;
-      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
-        if (!prev) return prev;
-        if (refreshed) {
-          return { ...refreshed, dateCandidates: dates.map((d) => ({ ...d })) };
-        }
-        return { ...prev, dateCandidates: dates.map((d) => ({ ...d })) };
-      });
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+      if (refreshed) {
+        await refreshMeetingDetailCaches(queryClient, meeting.id);
+      } else {
+        await patchMeetingDetailLocal(meeting.id, (prev) => ({
+          ...prev,
+          dateCandidates: dates.map((d) => ({ ...d })),
+        }));
+      }
       setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
       setProposeOpen(false);
     } catch (e) {
@@ -352,14 +353,14 @@ export function useMeetingVote({
         refreshed?.placeCandidates != null && refreshed.placeCandidates.length > 0
           ? refreshed.placeCandidates
           : merged;
-      queryClient.setQueryData<Meeting | null>(meetingDetailQueryKey(meeting.id), (prev) => {
-        if (!prev) return prev;
-        if (refreshed) {
-          return { ...refreshed, placeCandidates: places.map((p) => ({ ...p })) };
-        }
-        return { ...prev, placeCandidates: places.map((p) => ({ ...p })) };
-      });
-      void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+      if (refreshed) {
+        await refreshMeetingDetailCaches(queryClient, meeting.id);
+      } else {
+        await patchMeetingDetailLocal(meeting.id, (prev) => ({
+          ...prev,
+          placeCandidates: places.map((p) => ({ ...p })),
+        }));
+      }
       setSelectedPlaceIds(additions.map((p, j) => String(p.id ?? '').trim() || `pc-${existing.length + j}`));
       setPlaceProposeOpen(false);
     } catch (e) {

@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
-import { Image as RNImage, View, type StyleProp, type ViewStyle } from 'react-native';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
 
 import type { ProfilePhotoCover } from '@/src/lib/profile-photo-cover';
 
@@ -24,14 +24,14 @@ export function ProfileSquareAvatar({ uri, size, borderRadius, cover, style }: P
     setDims(null);
     const u = uri.trim();
     if (!u) return;
-    RNImage.getSize(
-      u,
-      (w, h) => {
+    void Image.loadAsync(u)
+      .then((ref) => {
         if (cancelled) return;
+        const w = ref.width * ref.scale;
+        const h = ref.height * ref.scale;
         if (w > 0 && h > 0) setDims({ w, h });
-      },
-      () => {},
-    );
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -50,16 +50,20 @@ export function ProfileSquareAvatar({ uri, size, borderRadius, cover, style }: P
     return { W, H, left, top };
   }, [dims, size, cover]);
 
+  const u = uri.trim();
+
   return (
     <View style={[{ width: size, height: size, borderRadius, overflow: 'hidden' }, style]}>
       {layout ? (
         <Image
-          source={{ uri }}
+          source={{ uri: u }}
           style={{ position: 'absolute', width: layout.W, height: layout.H, left: layout.left, top: layout.top }}
           contentFit="fill"
+          cachePolicy="disk"
+          recyclingKey={u}
         />
       ) : (
-        <Image source={{ uri }} style={{ width: size, height: size }} contentFit="cover" />
+        <Image source={{ uri: u }} style={{ width: size, height: size }} contentFit="cover" cachePolicy="disk" recyclingKey={u} />
       )}
     </View>
   );

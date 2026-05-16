@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
-import { onAuthStateChanged, type User } from 'firebase/auth';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -29,7 +29,6 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { LOGIN_LOGO_IMAGE_PX, LOGIN_LOGO_INTRO_MS, SPLASH_LOGO_FRAME_PX } from '@/constants/login-logo-intro';
 import { useUserSession, type AuthProfileSnapshot } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { getFirebaseAuth } from '@/src/lib/firebase';
 import { mapGooglePeopleGenderToProfileGender, type GooglePeopleExtras } from '@/src/lib/google-people-extras';
 import {
   consumeGoogleRedirectResultWithMeta,
@@ -51,9 +50,9 @@ import {
   resolveSessionUserIdFromVerifiedPhone,
   updateUserProfile,
 } from '@/src/lib/user-profile';
+import { createSupabaseClientWithAccessToken, supabase } from '@/src/lib/supabase';
 import { AuthService } from '@/src/services/AuthService';
-import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
-import { serverTimestamp, Timestamp } from 'firebase/firestore';
+import { serverTimestamp, Timestamp } from '@/src/lib/ginit-timestamp';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -65,17 +64,49 @@ function logUi(step: string, extra?: Record<string, unknown>) {
   }
 }
 
-function isGoogleSignedUser(u: User | null): boolean {
-  if (!u || u.isAnonymous) return false;
-  return u.providerData.some((p) => p.providerId === 'google.com');
+/** Supabase RPC가 응답 없이 걸리면 약관 화면이 ‘처리 중’에 멈춘 것처럼 보이므로 상한을 둡니다. */
+async function withOpTimeout<T>(p: Promise<T>, ms: number, labelKo: string): Promise<T> {
+  let tid: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((_, reject) => {
+        tid = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `${labelKo}이(가) ${Math.round(ms / 1000)}초를 넘겼어요. 네트워크·VPN·Supabase 상태를 확인한 뒤 다시 시도해 주세요.`,
+              ),
+            ),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (tid) clearTimeout(tid);
+  }
 }
 
-function snapshotFromFirebaseUser(u: User): AuthProfileSnapshot {
+function isGoogleSignedUser(u: SupabaseUser | null): boolean {
+  if (!u) return false;
+  return u.identities?.some((i) => i.provider === 'google') ?? false;
+}
+
+function snapshotFromSupabaseUser(u: SupabaseUser): AuthProfileSnapshot {
+  const meta = u.user_metadata as Record<string, unknown> | undefined;
+  const fullName =
+    (typeof meta?.full_name === 'string' && meta.full_name) ||
+    (typeof meta?.name === 'string' && meta.name) ||
+    null;
+  const avatar =
+    (typeof meta?.avatar_url === 'string' && meta.avatar_url) ||
+    (typeof meta?.picture === 'string' && meta.picture) ||
+    null;
   return {
-    displayName: u.displayName ?? null,
+    displayName: fullName ?? u.email ?? null,
     email: u.email ?? null,
-    photoUrl: u.photoURL ?? null,
-    firebaseUid: u.uid ?? null,
+    photoUrl: avatar,
+    supabaseUserId: u.id ?? null,
   };
 }
 
@@ -87,12 +118,12 @@ function pickNicknameFromGoogle(displayName: string, email: string): string {
   return generateRandomNickname();
 }
 
-function snapshotFromPhoneUser(u: FirebaseAuthTypes.User): AuthProfileSnapshot {
+function snapshotFromPhoneOtp(uid: string): AuthProfileSnapshot {
   return {
-    displayName: u.displayName ?? null,
-    email: u.email ?? null,
-    photoUrl: u.photoURL ?? null,
-    firebaseUid: u.uid ?? null,
+    displayName: null,
+    email: null,
+    photoUrl: null,
+    supabaseUserId: uid,
   };
 }
 
@@ -116,6 +147,7 @@ type LoginMemberStatus = 'unknown' | 'checking' | 'registered' | 'guest';
 
 export default function LoginScreen() {
   const router = useTransitionRouter();
+  const expoRouter = useRouter();
   const params = useLocalSearchParams<{ phone?: string | string[] }>();
   const initialPhone = useMemo(() => paramToString(params.phone), [params.phone]);
   const win = useWindowDimensions();
@@ -235,9 +267,9 @@ export default function LoginScreen() {
     setOtpError(null);
     try {
       const cred = await AuthService.confirmCode(otpVerificationId, otpCode);
-      const uid = cred.user?.uid ?? '';
+      const uid = cred.uid.trim();
       if (!uid) throw new Error('인증은 완료됐지만 사용자 정보를 가져올 수 없습니다.');
-      const e164 = cred.user.phoneNumber ?? normalizedPhone;
+      const e164 = cred.phoneNumber ?? normalizedPhone;
       const n = e164 ? normalizePhoneUserId(e164) : null;
       if (!n) throw new Error('전화번호를 확인할 수 없습니다.');
       const docId = await resolveSessionUserIdFromVerifiedPhone(n);
@@ -260,8 +292,8 @@ export default function LoginScreen() {
         lastLoginAt: serverTimestamp(),
         status: 'ACTIVE',
       });
-      setAuthProfile(snapshotFromPhoneUser(cred.user));
-      router.replace('/(tabs)');
+      setAuthProfile(snapshotFromPhoneOtp(uid));
+      expoRouter.replace('/(tabs)');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setOtpError(msg);
@@ -275,34 +307,37 @@ export default function LoginScreen() {
     normalizedPhone,
     setUserId,
     setAuthProfile,
-    router,
+    expoRouter,
   ]);
 
   useEffect(() => {
-    try {
-      const a = getFirebaseAuth();
-      return onAuthStateChanged(a, (u) => {
-        if (!u || u.isAnonymous) {
-          peopleExtrasRef.current = null;
-          setAuthProfile(null);
-          return;
-        }
-        if (isGoogleSignedUser(u)) {
-          const pe = peopleExtrasRef.current;
-          setAuthProfile({
-            ...snapshotFromFirebaseUser(u),
-            gender: mapGooglePeopleGenderToProfileGender(pe?.gender ?? null),
-            birthYear: pe?.birthYear ?? null,
-          });
-        } else {
-          setAuthProfile(snapshotFromFirebaseUser(u));
-        }
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn(UI_LOG, 'Firebase Auth 구독 실패', msg);
-      return undefined;
-    }
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user ?? null;
+      if (!u) {
+        peopleExtrasRef.current = null;
+        setAuthProfile(null);
+        return;
+      }
+      if (isGoogleSignedUser(u)) {
+        const pe = peopleExtrasRef.current;
+        setAuthProfile({
+          ...snapshotFromSupabaseUser(u),
+          gender: mapGooglePeopleGenderToProfileGender(pe?.gender ?? null),
+          birthYear: pe?.birthYear ?? null,
+        });
+      } else {
+        setAuthProfile(snapshotFromSupabaseUser(u));
+      }
+    });
+    return () => {
+      try {
+        subscription.unsubscribe();
+      } catch {
+        /* noop */
+      }
+    };
   }, [setAuthProfile]);
 
   useEffect(() => {
@@ -313,8 +348,8 @@ export default function LoginScreen() {
         const meta = await consumeGoogleRedirectResultWithMeta();
         if (!alive) return;
         if (meta.status === 'success') {
-          logUi('web redirect consume SUCCESS', { uid: meta.user.uid });
-          setAuthProfile(snapshotFromFirebaseUser(meta.user));
+          logUi('web redirect consume SUCCESS', { uid: meta.user.id });
+          setAuthProfile(snapshotFromSupabaseUser(meta.user));
         } else if (meta.status === 'error') {
           setLoginError(meta.message + (meta.code ? ` (${meta.code})` : ''));
           Alert.alert('리다이렉트 로그인 실패', meta.code ? `${meta.code}\n${meta.message}` : meta.message);
@@ -348,7 +383,8 @@ export default function LoginScreen() {
     setLoginError(null);
     setBusyGoogle(true);
     try {
-      const { user } = await signInWithGoogle({ forRegistration: false });
+      const { user, supabaseAccessToken } = await signInWithGoogle({ forRegistration: false });
+      const rpcDb = createSupabaseClientWithAccessToken(supabaseAccessToken);
 
       const email = user.email?.trim() ?? '';
       const emailPk = email ? normalizeUserId(email) : null;
@@ -356,10 +392,10 @@ export default function LoginScreen() {
         throw new Error('이메일이 있는 Google 계정으로 시도해 주세요. (계정에 이메일이 없습니다)');
       }
 
-      /** Firebase에 연결된 전화가 있으면 Supabase canonical `app_user_id`(이메일 PK 우선)로 맞춥니다. */
+      /** Supabase에 연결된 전화가 있으면 canonical `app_user_id`(이메일 PK 우선)로 맞춥니다. */
       let canonicalProfilePk = emailPk;
       try {
-        const phoneRaw = user.phoneNumber?.trim();
+        const phoneRaw = user.phone?.trim();
         if (phoneRaw) {
           const n = normalizePhoneUserId(phoneRaw);
           if (n) {
@@ -371,13 +407,15 @@ export default function LoginScreen() {
         /* 네트워크 등: 이메일 PK 유지 */
       }
 
-      await ensureUserProfile(canonicalProfilePk);
-      const people: GooglePeopleExtras | null = null;
+      logUi('googlePostSignIn', { step: 'ensureUserProfile_1', pkSuffix: canonicalProfilePk.slice(-8) });
+      await withOpTimeout(ensureUserProfile(canonicalProfilePk, rpcDb), 55_000, '프로필 준비');
+      const people = null as GooglePeopleExtras | null;
       peopleExtrasRef.current = people;
 
-      const display = user.displayName?.trim() ?? '';
+      const snap = snapshotFromSupabaseUser(user);
+      const display = snap.displayName?.trim() ?? '';
       const nickname = pickNicknameFromGoogle(display, email);
-      const photoUrl = user.photoURL?.trim() ? user.photoURL.trim() : null;
+      const photoUrl = snap.photoUrl?.trim() ? snap.photoUrl.trim() : null;
       const genderFs = mapGooglePeopleGenderToProfileGender(people?.gender ?? null);
       const py = people?.birthYear ?? null;
       const pm = people?.birthMonth ?? null;
@@ -392,30 +430,40 @@ export default function LoginScreen() {
         birthFromGoogle: Boolean(birthDateTs),
       });
 
-      await applyGoogleSignupProfile(canonicalProfilePk, {
-        nickname,
-        photoUrl,
-        email: email || null,
-        displayName: display ? display.slice(0, 64) : null,
-        // Google SNS 가입은 전화 OTP 인증을 거치지 않으므로, 필드는 null로 "생성"만 해 둡니다.
-        phone: null,
-        phoneVerifiedAt: null,
-        signupProvider: 'google_sns',
-        // People API 동의 후에만 넘어오는 값만 병합(없으면 기존 문서 값을 덮어쓰지 않음)
-        ...(genderFs ? { gender: genderFs } : {}),
-        ...(birthDateTs
-          ? {
-              birthDate: birthDateTs,
-              birthYear: py,
-              birthMonth: pm,
-              birthDay: pd,
-            }
-          : {}),
-        ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
-        firebaseUid: user.uid,
-      });
+      logUi('googlePostSignIn', { step: 'applyGoogleSignupProfile' });
+      await withOpTimeout(
+        applyGoogleSignupProfile(
+          canonicalProfilePk,
+          {
+          nickname,
+          photoUrl,
+          email: email || null,
+          displayName: display ? display.slice(0, 64) : null,
+          // Google SNS 가입은 전화 OTP 인증을 거치지 않으므로, 필드는 null로 "생성"만 해 둡니다.
+          phone: null,
+          phoneVerifiedAt: null,
+          signupProvider: 'google_sns',
+          // People API 동의 후에만 넘어오는 값만 병합(없으면 기존 문서 값을 덮어쓰지 않음)
+          ...(genderFs ? { gender: genderFs } : {}),
+          ...(birthDateTs
+            ? {
+                birthDate: birthDateTs,
+                birthYear: py,
+                birthMonth: pm,
+                birthDay: pd,
+              }
+            : {}),
+          ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
+          firebaseUid: user.id,
+          },
+          rpcDb,
+        ),
+        60_000,
+        '회원 정보 저장',
+      );
       /** 첫 upsert 직후에도 gender/birth가 비는 환경이 있어, People에서 확보된 값이면 한 번 더 반영합니다. */
-      const pAfterSignup = await ensureUserProfile(canonicalProfilePk);
+      logUi('googlePostSignIn', { step: 'ensureUserProfile_2' });
+      const pAfterSignup = await withOpTimeout(ensureUserProfile(canonicalProfilePk, rpcDb), 55_000, '프로필 확인');
       const repairGender = Boolean(genderFs) && !pAfterSignup.gender?.trim();
       const repairBirth =
         py != null &&
@@ -425,43 +473,57 @@ export default function LoginScreen() {
           pAfterSignup.birthMonth == null ||
           pAfterSignup.birthDay == null);
       if (repairGender || repairBirth) {
-        await updateUserProfile(canonicalProfilePk, {
-          ...(repairGender ? { gender: genderFs } : {}),
-          ...(repairBirth
-            ? {
-                birthDate: Timestamp.fromDate(new Date(py, pm - 1, pd)),
-                birthYear: py,
-                birthMonth: pm,
-                birthDay: pd,
-              }
-            : {}),
-          ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
-        });
+        logUi('googlePostSignIn', { step: 'updateUserProfile_repair' });
+        await withOpTimeout(
+          updateUserProfile(
+            canonicalProfilePk,
+            {
+            ...(repairGender ? { gender: genderFs } : {}),
+            ...(repairBirth
+              ? {
+                  birthDate: Timestamp.fromDate(new Date(py, pm - 1, pd)),
+                  birthYear: py,
+                  birthMonth: pm,
+                  birthDay: pd,
+                }
+              : {}),
+            ...(Object.keys(googleDemoMeta).length > 0 ? { metadata: googleDemoMeta } : {}),
+            },
+            rpcDb,
+          ),
+          45_000,
+          '프로필 보정',
+        );
       }
+      logUi('googlePostSignIn', { step: 'setUserId_secure_register' });
       await setUserId(canonicalProfilePk);
-      await writeSecureAuthSession({ uid: user.uid, userId: canonicalProfilePk });
+      await writeSecureAuthSession({ uid: user.id, userId: canonicalProfilePk });
       await registerSignupLocalKeys('', canonicalProfilePk);
       if (Platform.OS !== 'web') {
         void import('@/src/lib/fcm-token-supabase-sync').then(({ syncFcmTokenFromDeviceToProfile }) => {
           void syncFcmTokenFromDeviceToProfile(canonicalProfilePk);
         });
       }
-      await recordTermsAgreement(canonicalProfilePk);
-      await ensureUserProfile(canonicalProfilePk);
+      logUi('googlePostSignIn', { step: 'recordTermsAgreement' });
+      await withOpTimeout(recordTermsAgreement(canonicalProfilePk, rpcDb), 35_000, '약관 동의 기록');
+      logUi('googlePostSignIn', { step: 'ensureUserProfile_3' });
+      await withOpTimeout(ensureUserProfile(canonicalProfilePk, rpcDb), 55_000, '프로필 최종 동기화');
 
       setAuthProfile({
-        ...snapshotFromFirebaseUser(user),
+        ...snapshotFromSupabaseUser(user),
         gender: genderFs ?? null,
         birthYear: people?.birthYear ?? null,
         ageBand: null,
       });
 
       const introSeen = await readAppIntroComplete();
+      logUi('googlePostSignIn', { step: 'navigate', introSeen });
       if (introSeen) {
-        router.replace('/(tabs)');
+        expoRouter.replace('/(tabs)');
       } else {
-        router.replace({ pathname: '/onboarding', params: { next: 'tabs', flow: 'postGoogleSignup' } });
+        expoRouter.replace({ pathname: '/onboarding', params: { next: 'tabs', flow: 'postGoogleSignup' } });
       }
+      logUi('googlePostSignIn', { step: 'done' });
     } catch (e) {
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
       const message = e instanceof Error ? e.message : '알 수 없는 오류';
@@ -477,7 +539,7 @@ export default function LoginScreen() {
     } finally {
       setBusyGoogle(false);
     }
-  }, [setAuthProfile, setUserId, signOutSession, router]);
+  }, [setAuthProfile, setUserId, signOutSession, expoRouter]);
 
   const isExpoGo = Constants.appOwnership === 'expo';
 

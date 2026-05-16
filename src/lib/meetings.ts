@@ -1,40 +1,11 @@
 /**
- * Firestore `meetings` 컬렉션.
+ * 모임 엔티티 — Supabase 원장(`ledger_*` RPC, `public.meetings`) + 앱 캐시 매핑.
  *
  * `createdBy`는 **앱 사용자 PK** 문자열로 저장됩니다. (신규: 정규화 이메일, 레거시: +8210… 전화 PK)
- *
- * 콘솔 규칙 예시(인증만 요구하는 단순형):
- *   match /meetings/{id} {
- *     allow read: if request.auth != null;
- *     allow create: if request.auth != null;
- *     allow update, delete: if request.auth != null && request.auth.uid == resource.data.createdBy;
- *   }
- * → 위 update/delete 규칙은 UID 기준이므로, 전화 PK만 쓰려면 예를 들어
- *   `resource.data.createdBy == request.auth.token.phone_number` 처럼
- *   Custom Claim을 두거나, 별도 `authorUid` 필드와 함께 정책을 조정해야 합니다.
  */
-import {
-  addDoc,
-  arrayRemove,
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  Timestamp,
-  updateDoc,
-  type Unsubscribe,
-} from 'firebase/firestore';
-
 import { feedRegionNormFromAddressHaystack } from './feed-display-location';
-import { stripUndefinedDeep, toFiniteInt, toJsonSafeFirestorePreview } from './firestore-utils';
-import { getFirebaseFirestore } from './firebase';
+import { stripUndefinedDeep, toFiniteInt } from './firestore-utils';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 import { ginitNotifyDbg } from './ginit-notify-debug';
 import { ledgerWritesToSupabase } from './hybrid-data-source';
 import {
@@ -78,10 +49,29 @@ import {
   isHighTrustPublicMeeting,
   isUserTrustRestricted,
 } from './ginit-trust';
+import { upsertMeetingDetailToWatermelon } from './meeting-detail-watermelon-cache';
 import { supabase } from './supabase';
 import { getUserProfile, isMeetingServiceComplianceComplete, type UserProfile } from './user-profile';
 
 export const MEETINGS_COLLECTION = 'meetings';
+
+/** Supabase 원장 RPC용 모임 UUID. `meetings.legacy_firestore_id`가 있으면 해당 행의 `id`를 반환합니다. */
+async function resolveMeetingLedgerUuid(meetingId: string): Promise<string | null> {
+  const id = meetingId.trim();
+  if (!id) return null;
+  if (isLedgerMeetingId(id)) return id;
+  const { data, error } = await supabase.from('meetings').select('id').eq('legacy_firestore_id', id).maybeSingle();
+  if (error || !data) return null;
+  const rowId = typeof (data as { id?: unknown }).id === 'string' ? (data as { id: string }).id.trim() : '';
+  return isLedgerMeetingId(rowId) ? rowId : null;
+}
+
+async function requireLedgerUuidForMeetingWrite(meetingId: string): Promise<string> {
+  if (!ledgerWritesToSupabase()) throw new Error('Supabase가 필요합니다.');
+  const uuid = await resolveMeetingLedgerUuid(meetingId);
+  if (!uuid) throw new Error('모임을 찾을 수 없어요.');
+  return uuid;
+}
 
 /** `GlassDualCapacityWheel` 의 무제한 정원 값(999)과 동일해야 합니다. */
 export const MEETING_CAPACITY_UNLIMITED = 999;
@@ -197,7 +187,7 @@ export type Meeting = {
   capacity: number;
   /** 최소 인원(듀얼 휠). 없으면 기존 문서와 동일하게 `capacity`만 사용 */
   minParticipants?: number | null;
-  /** Firestore 서버 타임스탬프 */
+  /** 원장/JSON에서 오는 서버 타임스탬프(또는 ISO 문자열) */
   createdAt?: Timestamp | null;
   /** Supabase `meetings.updated_at` 기반 증분 동기화 기준 시각 */
   updatedAt?: Timestamp | null;
@@ -345,7 +335,7 @@ export function normalizeProfileGenderToHostSnapshot(gender: string | null | und
 }
 
 /**
- * Firestore `meetingConfig` → UI용. `null`이면 필드가 없거나 형식이 맞지 않음.
+ * 원장 JSON `meetingConfig` → UI용. `null`이면 필드가 없거나 형식이 맞지 않음.
  */
 export function parsePublicMeetingDetailsConfig(raw: unknown): PublicMeetingDetailsConfig | null {
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -506,10 +496,6 @@ export function meetingParticipantCount(m: Meeting): number {
   const host = m.createdBy?.trim() ? normalizeParticipantId(m.createdBy) ?? m.createdBy.trim() : '';
   if (host) set.add(host);
   return Math.max(set.size, ids.length > 0 ? ids.length : host ? 1 : 0);
-}
-
-export function getFirestoreDb() {
-  return getFirebaseFirestore();
 }
 
 type PlaceCandidateLike = {
@@ -931,7 +917,7 @@ export function computeMeetingConfirmAnalysis(
 }
 
 /** camel 빈 배열이 snake 쪽 실데이터를 가리지 않도록 후보 배열을 고릅니다(ledger fs·웹 공유 호환). */
-function resolveFirestoreCandidatesField(
+function resolveMeetingLedgerCandidatesField(
   data: Record<string, unknown>,
   camel: 'dateCandidates' | 'placeCandidates',
   snake: 'date_candidates' | 'place_candidates',
@@ -968,7 +954,7 @@ function parseSettlementDraftReceiptId(raw: unknown): string {
   return '';
 }
 
-/** Firestore/원장 JSON의 `draftReceipts` 배열을 검증해 정규화합니다. */
+/** 원장 JSON의 `draftReceipts` 배열을 검증해 정규화합니다. */
 export function parseMeetingSettlementDraftReceipts(drRaw: unknown): MeetingSettlementReceiptItem[] {
   if (!Array.isArray(drRaw)) return [];
   const xs: MeetingSettlementReceiptItem[] = [];
@@ -1074,9 +1060,10 @@ function parseMeetingLocationDataField(data: Record<string, unknown>): MeetingLo
   return out;
 }
 
-export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>): Meeting {
-  const dateCandidatesRaw = resolveFirestoreCandidatesField(data, 'dateCandidates', 'date_candidates');
-  const placeCandidatesRaw = resolveFirestoreCandidatesField(data, 'placeCandidates', 'place_candidates');
+/** 원장·JSONB 모임 문서(`ledger_meeting_get_doc` 등)를 앱 `Meeting` 모델로 매핑합니다. */
+export function mapMeetingLedgerDoc(id: string, data: Record<string, unknown>): Meeting {
+  const dateCandidatesRaw = resolveMeetingLedgerCandidatesField(data, 'dateCandidates', 'date_candidates');
+  const placeCandidatesRaw = resolveMeetingLedgerCandidatesField(data, 'placeCandidates', 'place_candidates');
   const readAtRaw = (data.chatReadAtBy ?? null) as unknown;
   const chatReadAtBy =
     readAtRaw && typeof readAtRaw === 'object' && !Array.isArray(readAtRaw) ? (readAtRaw as Record<string, Timestamp | null>) : null;
@@ -1152,72 +1139,80 @@ export function mapFirestoreMeetingDoc(id: string, data: Record<string, unknown>
   };
 }
 
+/** 네트워크·RPC 일시 실패 — 모임 없음(`null`)과 구분 */
+export const MEETING_LOAD_TRANSIENT_MESSAGE =
+  '모임 정보를 잠시 불러오지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.';
+
+export class MeetingLoadTransientError extends Error {
+  constructor(message = MEETING_LOAD_TRANSIENT_MESSAGE) {
+    super(message);
+    this.name = 'MeetingLoadTransientError';
+  }
+}
+
+export function isMeetingLoadTransientError(e: unknown): boolean {
+  return e instanceof MeetingLoadTransientError;
+}
+
 export async function getMeetingById(meetingId: string): Promise<Meeting | null> {
   const id = meetingId.trim();
   if (!id) return null;
   if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
+    const outcome = await ledgerGetMeetingDocOutcome(id);
+    if (outcome.status === 'failed') throw new MeetingLoadTransientError();
+    if (outcome.status === 'missing') return null;
+    return mapMeetingLedgerDoc(id, outcome.doc);
+  }
+  if (ledgerWritesToSupabase()) {
     try {
-      const data = await ledgerTryLoadMeetingDoc(id);
+      const { data, error } = await supabase.from('meetings').select('*').eq('legacy_firestore_id', id).maybeSingle();
+      if (error) throw new MeetingLoadTransientError();
       if (!data) return null;
-      return mapFirestoreMeetingDoc(id, data);
-    } catch {
-      return null;
+      const { mapSupabaseMeetingRow } = await import('./supabase-meetings-list');
+      return mapSupabaseMeetingRow(data as Record<string, unknown>);
+    } catch (e) {
+      if (isMeetingLoadTransientError(e)) throw e;
+      throw new MeetingLoadTransientError();
     }
   }
-  const snap = await getDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id));
-  if (!snap.exists()) return null;
-  return mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>);
+  return null;
 }
 
-/** 레저(Supabase UUID) 모임 폴링 주기 — Realtime 미사용, FCM 타깃 갱신·수동 새로고침과 병행 */
-const SUBSCRIBE_LEDGER_MEETING_POLL_MS = 45_000;
-
-/** 단일 모임 문서 구독 — Firestore는 onSnapshot, Supabase 레저 UUID는 주기 폴링(Realtime 없음) */
+/**
+ * 단일 모임 문서 — 마운트 시 **1회 Pull**만 수행합니다(Postgres Realtime `meeting-doc` 없음).
+ * 모임 상세 화면은 `useMeetingDetailQuery` + Watermelon `cached_meeting_details`를 사용하세요.
+ */
 export function subscribeMeetingById(
   meetingId: string,
   onMeeting: (meeting: Meeting | null) => void,
   onError?: (message: string) => void,
-): Unsubscribe {
+): () => void {
   const id = typeof meetingId === 'string' ? meetingId.trim() : String(meetingId ?? '').trim();
   if (!id) {
     onMeeting(null);
     return () => {};
   }
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
-    let cancelled = false;
-
-    const emit = () => {
-      if (cancelled) return;
-      void ledgerGetMeetingDocOutcome(id).then((outcome) => {
-        if (cancelled) return;
-        if (outcome.status === 'failed') return;
-        if (outcome.status === 'missing') onMeeting(null);
-        else onMeeting(mapFirestoreMeetingDoc(id, outcome.doc));
-      });
-    };
-
-    emit();
-    const pollId = setInterval(emit, SUBSCRIBE_LEDGER_MEETING_POLL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(pollId);
-    };
+  if (!ledgerWritesToSupabase()) {
+    onMeeting(null);
+    onError?.('Supabase가 필요합니다.');
+    return () => {};
   }
-  const dRef = doc(getFirestoreDb(), MEETINGS_COLLECTION, id);
-  return onSnapshot(
-    dRef,
-    (snap) => {
-      if (!snap.exists()) {
-        onMeeting(null);
-        return;
-      }
-      onMeeting(mapFirestoreMeetingDoc(snap.id, snap.data() as Record<string, unknown>));
-    },
-    (err) => {
-      onError?.(err.message ?? 'Firestore 구독 오류');
-    },
-  );
+
+  let cancelled = false;
+
+  void getMeetingById(id)
+    .then(async (m) => {
+      if (cancelled) return;
+      await upsertMeetingDetailToWatermelon(id, m);
+      onMeeting(m);
+    })
+    .catch(() => {
+      if (!cancelled) onError?.(MEETING_LOAD_TRANSIENT_MESSAGE);
+    });
+
+  return () => {
+    cancelled = true;
+  };
 }
 
 /** 일시 후보만 갱신 (상세 화면 날짜 제안 등) */
@@ -1240,23 +1235,14 @@ export async function updateMeetingDateCandidates(
   }
   const dateErr = validateDateCandidatesForSave(dateCandidates, new Date(), { oneMonthMax: false });
   if (dateErr) throw new Error(dateErr);
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
-    const data = await ledgerTryLoadMeetingDoc(id);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const next = {
-      ...data,
-      dateCandidates: dateCandidates.length ? stripUndefinedDeep(dateCandidates) : null,
-    };
-    await ledgerMeetingPutRawDoc(id, stripUndefinedDeep(next) as Record<string, unknown>);
-    const after = await getMeetingById(id);
-    if (after?.createdBy?.trim()) {
-      notifyMeetingParticipantsOfHostActionFireAndForget(after, 'dates_updated', after.createdBy.trim());
-    }
-    return;
-  }
-  await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
+  const ledgerId = await requireLedgerUuidForMeetingWrite(id);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const next = {
+    ...data,
     dateCandidates: dateCandidates.length ? stripUndefinedDeep(dateCandidates) : null,
-  });
+  };
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(next) as Record<string, unknown>);
   const after = await getMeetingById(id);
   if (after?.createdBy?.trim()) {
     notifyMeetingParticipantsOfHostActionFireAndForget(after, 'dates_updated', after.createdBy.trim());
@@ -1272,23 +1258,14 @@ export async function updateMeetingPlaceCandidates(
 ): Promise<void> {
   const id = meetingId.trim();
   if (!id) return;
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(id)) {
-    const data = await ledgerTryLoadMeetingDoc(id);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const next = {
-      ...data,
-      placeCandidates: placeCandidates.length ? stripUndefinedDeep(placeCandidates) : null,
-    };
-    await ledgerMeetingPutRawDoc(id, stripUndefinedDeep(next) as Record<string, unknown>);
-    const after = await getMeetingById(id);
-    if (after?.createdBy?.trim()) {
-      notifyMeetingParticipantsOfHostActionFireAndForget(after, 'places_updated', after.createdBy.trim());
-    }
-    return;
-  }
-  await updateDoc(doc(getFirestoreDb(), MEETINGS_COLLECTION, id), {
+  const ledgerId = await requireLedgerUuidForMeetingWrite(id);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const next = {
+    ...data,
     placeCandidates: placeCandidates.length ? stripUndefinedDeep(placeCandidates) : null,
-  });
+  };
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(next) as Record<string, unknown>);
   const after = await getMeetingById(id);
   if (after?.createdBy?.trim()) {
     notifyMeetingParticipantsOfHostActionFireAndForget(after, 'places_updated', after.createdBy.trim());
@@ -1306,7 +1283,7 @@ export type MeetingBasicFieldsPatch = {
 };
 
 /**
- * 주관자가 모임 이름·소개·공개 여부·정원(최소/최대)을 수정합니다. (Firestore 또는 Ledger)
+ * 주관자가 모임 이름·소개·공개 여부·정원(최소/최대)을 수정합니다. (Supabase 원장)
  */
 export async function updateMeetingBasicFieldsByHost(
   meetingId: string,
@@ -1371,7 +1348,7 @@ export async function updateMeetingBasicFieldsByHost(
     if (!nsCreated || nsCreated !== nsHost) {
       throw new Error('모임 주관자만 수정할 수 있어요.');
     }
-    const m = mapFirestoreMeetingDoc(mid, data);
+    const m = mapMeetingLedgerDoc(mid, data);
     const count = meetingParticipantCount(m);
     if (capacity !== MEETING_CAPACITY_UNLIMITED && capacity < count) {
       throw new Error(`현재 참여 ${count}명보다 작은 정원으로 줄일 수 없어요.`);
@@ -1383,41 +1360,20 @@ export async function updateMeetingBasicFieldsByHost(
 
   const nsHost = normalizeParticipantId(uid) ?? uid;
 
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    assertHostAndCount(data, nsHost);
-    const next = {
-      ...data,
-      title,
-      description,
-      isPublic,
-      capacity,
-      minParticipants,
-      meetingConfig: meetingConfigOut,
-    };
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(next) as Record<string, unknown>);
-    const after = await getMeetingById(mid);
-    if (after?.createdBy?.trim()) {
-      notifyMeetingParticipantsOfHostActionFireAndForget(after, 'details_updated', after.createdBy.trim());
-    }
-    return;
-  }
-
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
   assertHostAndCount(data, nsHost);
-
-  await updateDoc(ref, {
+  const next = {
+    ...data,
     title,
     description,
     isPublic,
     capacity,
     minParticipants,
     meetingConfig: meetingConfigOut,
-  });
+  };
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(next) as Record<string, unknown>);
   const after = await getMeetingById(mid);
   if (after?.createdBy?.trim()) {
     notifyMeetingParticipantsOfHostActionFireAndForget(after, 'details_updated', after.createdBy.trim());
@@ -1436,7 +1392,6 @@ export async function joinMeeting(
   const mid = meetingId.trim();
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
   const nsUid = normalizeParticipantId(uid) ?? uid;
 
   const profile = await getUserProfile(uid);
@@ -1444,185 +1399,13 @@ export async function joinMeeting(
     throw new Error('모임 이용 인증(약관 동의·필수 정보)을 완료한 사용자만 모임에 참여할 수 있어요. 설정에서 인증 정보 등록을 완료해 주세요.');
   }
 
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const joinBlock = getJoinGamificationBlockReason(profile, data);
-    if (joinBlock) throw new Error(joinBlock);
-    assertParticipantNotKickedFromMeetingDoc(data, nsUid);
-    const mPre = mapFirestoreMeetingDoc(mid, data);
-    const overlapBuf = getScheduleOverlapBufferHours(profile);
-    if (mPre.scheduleConfirmed === true) {
-      const startMs = meetingPrimaryStartMs(mPre);
-      if (startMs != null) {
-        await assertProposedStartsOverlapHybrid({
-          appUserId: uid,
-          startMsList: [startMs],
-          bufferHours: overlapBuf,
-          excludeMeetingId: mid,
-        });
-      }
-    } else {
-      const chipStarts: number[] = [];
-      for (const chipId of votes.dateChipIds) {
-        const ms = meetingStartMsForResolvedDateChip(mPre, chipId);
-        if (ms != null) chipStarts.push(ms);
-      }
-      if (chipStarts.length > 0) {
-        await assertProposedStartsOverlapHybrid({
-          appUserId: uid,
-          startMsList: chipStarts,
-          bufferHours: overlapBuf,
-          excludeMeetingId: mid,
-        });
-      }
-    }
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-    if (inList) return;
-    if (meetingDocRequiresHostApprovalJoin(data)) {
-      throw new Error('이 모임은 호스트 승인 방식이에요. 아래「참가 신청」으로 신청해 주세요.');
-    }
-    const prev = parseVoteTalliesField(data) ?? {};
-    const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
-    const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
-    const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
-    const log = parseParticipantVoteLog(data);
-    const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...filtered,
-      {
-        userId: nsUid,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-      },
-    ];
-    const nextDoc = {
-      ...data,
-      participantIds: [...rawList, nsUid],
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: stripUndefinedDeep(nextLog),
-    };
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
-    const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    if (hostId) {
-      notifyMeetingHostParticipantEventFireAndForget(
-        mapFirestoreMeetingDoc(mid, nextDoc as Record<string, unknown>),
-        hostId,
-        uid,
-        'joined',
-        profile.nickname || profile.displayName || '참여자',
-      );
-    }
-    return;
-  }
-
-  const preSnap = await getDoc(ref);
-  if (!preSnap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const preSnapData = preSnap.data() as Record<string, unknown>;
-  const joinBlock = getJoinGamificationBlockReason(profile, preSnapData);
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const joinBlock = getJoinGamificationBlockReason(profile, data);
   if (joinBlock) throw new Error(joinBlock);
-  assertParticipantNotKickedFromMeetingDoc(preSnapData, nsUid);
-  const mPreFs = mapFirestoreMeetingDoc(mid, preSnapData);
-  const overlapBufFs = getScheduleOverlapBufferHours(profile);
-  if (mPreFs.scheduleConfirmed === true) {
-    const startMs = meetingPrimaryStartMs(mPreFs);
-    if (startMs != null) {
-      await assertProposedStartsOverlapHybrid({
-        appUserId: uid,
-        startMsList: [startMs],
-        bufferHours: overlapBufFs,
-        excludeMeetingId: mid,
-      });
-    }
-  } else {
-    const chipStartsFs: number[] = [];
-    for (const chipId of votes.dateChipIds) {
-      const ms = meetingStartMsForResolvedDateChip(mPreFs, chipId);
-      if (ms != null) chipStartsFs.push(ms);
-    }
-    if (chipStartsFs.length > 0) {
-      await assertProposedStartsOverlapHybrid({
-        appUserId: uid,
-        startMsList: chipStartsFs,
-        bufferHours: overlapBufFs,
-        excludeMeetingId: mid,
-      });
-    }
-  }
-
-  const preJoinData = preSnapData;
-  const preJoinRaw = Array.isArray(preJoinData.participantIds)
-    ? (preJoinData.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-    : [];
-  const preAlreadyIn = preJoinRaw.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-  if (preAlreadyIn) return;
-  if (meetingDocRequiresHostApprovalJoin(preJoinData)) {
-    throw new Error('이 모임은 호스트 승인 방식이에요. 아래「참가 신청」으로 신청해 주세요.');
-  }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    assertParticipantNotKickedFromMeetingDoc(data, nsUid);
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-    if (inList) {
-      return;
-    }
-    if (meetingDocRequiresHostApprovalJoin(data)) {
-      throw new Error('이 모임은 호스트 승인 방식이에요. 아래「참가 신청」으로 신청해 주세요.');
-    }
-    const prev = parseVoteTalliesField(data) ?? {};
-    const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
-    const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
-    const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
-
-    const log = parseParticipantVoteLog(data);
-    const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...filtered,
-      {
-        userId: nsUid,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-      },
-    ];
-
-    transaction.update(ref, {
-      participantIds: arrayUnion(nsUid),
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: stripUndefinedDeep(nextLog),
-    });
-  });
-
-  const after = await getMeetingById(mid);
-  const hostId = after?.createdBy?.trim() ?? '';
-  if (after && hostId) {
-    notifyMeetingHostParticipantEventFireAndForget(
-      after,
-      hostId,
-      uid,
-      'joined',
-      profile.nickname || profile.displayName || '참여자',
-    );
-  }
-}
-
-async function assertJoinOverlapPrechecks(
-  profile: UserProfile,
-  uid: string,
-  mid: string,
-  mPre: Meeting,
-  votes: { dateChipIds: readonly string[]; placeChipIds: readonly string[]; movieChipIds: readonly string[] },
-): Promise<void> {
+  assertParticipantNotKickedFromMeetingDoc(data, nsUid);
+  const mPre = mapMeetingLedgerDoc(mid, data);
   const overlapBuf = getScheduleOverlapBufferHours(profile);
   if (mPre.scheduleConfirmed === true) {
     const startMs = meetingPrimaryStartMs(mPre);
@@ -1631,7 +1414,7 @@ async function assertJoinOverlapPrechecks(
         appUserId: uid,
         startMsList: [startMs],
         bufferHours: overlapBuf,
-        excludeMeetingId: mid,
+        excludeMeetingId: ledgerId,
       });
     }
   } else {
@@ -1645,7 +1428,82 @@ async function assertJoinOverlapPrechecks(
         appUserId: uid,
         startMsList: chipStarts,
         bufferHours: overlapBuf,
-        excludeMeetingId: mid,
+        excludeMeetingId: ledgerId,
+      });
+    }
+  }
+  const rawList = Array.isArray(data.participantIds)
+    ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
+  if (inList) return;
+  if (meetingDocRequiresHostApprovalJoin(data)) {
+    throw new Error('이 모임은 호스트 승인 방식이에요. 아래「참가 신청」으로 신청해 주세요.');
+  }
+  const prev = parseVoteTalliesField(data) ?? {};
+  const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
+  const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
+  const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
+  const log = parseParticipantVoteLog(data);
+  const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
+  const nextLog: ParticipantVoteSnapshot[] = [
+    ...filtered,
+    {
+      userId: nsUid,
+      dateChipIds: [...votes.dateChipIds],
+      placeChipIds: [...votes.placeChipIds],
+      movieChipIds: [...votes.movieChipIds],
+    },
+  ];
+  const nextDoc = {
+    ...data,
+    participantIds: [...rawList, nsUid],
+    voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+    participantVoteLog: stripUndefinedDeep(nextLog),
+  };
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
+  const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  if (hostId) {
+    notifyMeetingHostParticipantEventFireAndForget(
+      mapMeetingLedgerDoc(mid, nextDoc as Record<string, unknown>),
+      hostId,
+      uid,
+      'joined',
+      profile.nickname || profile.displayName || '참여자',
+    );
+  }
+}
+
+async function assertJoinOverlapPrechecks(
+  profile: UserProfile,
+  uid: string,
+  excludeMeetingId: string,
+  mPre: Meeting,
+  votes: { dateChipIds: readonly string[]; placeChipIds: readonly string[]; movieChipIds: readonly string[] },
+): Promise<void> {
+  const overlapBuf = getScheduleOverlapBufferHours(profile);
+  if (mPre.scheduleConfirmed === true) {
+    const startMs = meetingPrimaryStartMs(mPre);
+    if (startMs != null) {
+      await assertProposedStartsOverlapHybrid({
+        appUserId: uid,
+        startMsList: [startMs],
+        bufferHours: overlapBuf,
+        excludeMeetingId,
+      });
+    }
+  } else {
+    const chipStarts: number[] = [];
+    for (const chipId of votes.dateChipIds) {
+      const ms = meetingStartMsForResolvedDateChip(mPre, chipId);
+      if (ms != null) chipStarts.push(ms);
+    }
+    if (chipStarts.length > 0) {
+      await assertProposedStartsOverlapHybrid({
+        appUserId: uid,
+        startMsList: chipStarts,
+        bufferHours: overlapBuf,
+        excludeMeetingId,
       });
     }
   }
@@ -1669,124 +1527,55 @@ export async function requestJoinMeeting(
   if (!profile || !isMeetingServiceComplianceComplete(profile, uid)) {
     throw new Error('모임 이용 인증(약관 동의·필수 정보)을 완료한 사용자만 신청할 수 있어요. 설정에서 인증 정보 등록을 완료해 주세요.');
   }
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const fresh = await ledgerTryLoadMeetingDoc(mid);
-    if (!fresh) throw new Error('모임을 찾을 수 없어요.');
-    if (!meetingDocRequiresHostApprovalJoin(fresh)) {
-      throw new Error('호스트 승인 방식의 공개 모임만 참가 신청을 보낼 수 있어요.');
-    }
-    const joinBlockFresh = getJoinGamificationBlockReason(profile, fresh);
-    if (joinBlockFresh) throw new Error(joinBlockFresh);
-    assertParticipantNotKickedFromMeetingDoc(fresh, nsUid);
-    const mPreFresh = mapFirestoreMeetingDoc(mid, fresh);
-    assertMeetingHasCapacityForOneMore(mPreFresh);
-    await assertJoinOverlapPrechecks(profile, uid, mid, mPreFresh, votes);
-    const preWrite = await ledgerTryLoadMeetingDoc(mid);
-    if (!preWrite) throw new Error('모임을 찾을 수 없어요.');
-    assertParticipantNotKickedFromMeetingDoc(preWrite, nsUid);
-    const mPreWrite = mapFirestoreMeetingDoc(mid, preWrite);
-    assertMeetingHasCapacityForOneMore(mPreWrite);
-    const rawListWrite = Array.isArray(preWrite.participantIds)
-      ? (preWrite.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    if (rawListWrite.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) return;
-    const hostPkWrite =
-      typeof preWrite.createdBy === 'string' ? normalizeParticipantId(preWrite.createdBy.trim()) ?? preWrite.createdBy.trim() : '';
-    if (hostPkWrite && hostPkWrite === nsUid) throw new Error('호스트는 참가 신청을 보낼 수 없어요.');
-    const cfgWrite = parsePublicMeetingDetailsConfig(preWrite.meetingConfig);
-    let messageOutWrite: string | null | undefined;
-    if (cfgWrite?.requestMessageEnabled === true) {
-      const raw = typeof opts?.message === 'string' ? opts.message.trim() : '';
-      messageOutWrite = raw ? raw.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null;
-    }
-    const prevJr = parseJoinRequestsField(preWrite);
-    const row: MeetingJoinRequest = {
-      userId: nsUid,
-      dateChipIds: [...votes.dateChipIds],
-      placeChipIds: [...votes.placeChipIds],
-      movieChipIds: [...votes.movieChipIds],
-      requestedAt: new Date().toISOString(),
-      ...(messageOutWrite !== undefined ? { message: messageOutWrite } : {}),
-    };
-    const nextJr = mergeJoinRequestsReplaceUser(prevJr, nsUid, row);
-    const nextDoc = {
-      ...preWrite,
-      joinRequests: stripUndefinedDeep(nextJr) as unknown as MeetingJoinRequest[],
-    };
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
-    const hostId = typeof preWrite.createdBy === 'string' ? preWrite.createdBy.trim() : '';
-    if (hostId) {
-      notifyMeetingHostParticipantEventFireAndForget(
-        mapFirestoreMeetingDoc(mid, nextDoc as Record<string, unknown>),
-        hostId,
-        uid,
-        'join_requested',
-        profile.nickname || profile.displayName || '참여자',
-      );
-    }
-    return;
-  }
-
-  const preSnap = await getDoc(ref);
-  if (!preSnap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const preData = preSnap.data() as Record<string, unknown>;
-  if (!meetingDocRequiresHostApprovalJoin(preData)) {
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const fresh = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!fresh) throw new Error('모임을 찾을 수 없어요.');
+  if (!meetingDocRequiresHostApprovalJoin(fresh)) {
     throw new Error('호스트 승인 방식의 공개 모임만 참가 신청을 보낼 수 있어요.');
   }
-  const joinBlock = getJoinGamificationBlockReason(profile, preData);
-  if (joinBlock) throw new Error(joinBlock);
-  assertParticipantNotKickedFromMeetingDoc(preData, nsUid);
-  const mPreFs = mapFirestoreMeetingDoc(mid, preData);
-  assertMeetingHasCapacityForOneMore(mPreFs);
-  await assertJoinOverlapPrechecks(profile, uid, mid, mPreFs, votes);
-  const preRaw = Array.isArray(preData.participantIds)
-    ? (preData.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+  const joinBlockFresh = getJoinGamificationBlockReason(profile, fresh);
+  if (joinBlockFresh) throw new Error(joinBlockFresh);
+  assertParticipantNotKickedFromMeetingDoc(fresh, nsUid);
+  const mPreFresh = mapMeetingLedgerDoc(mid, fresh);
+  assertMeetingHasCapacityForOneMore(mPreFresh);
+  await assertJoinOverlapPrechecks(profile, uid, ledgerId, mPreFresh, votes);
+  const preWrite = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!preWrite) throw new Error('모임을 찾을 수 없어요.');
+  assertParticipantNotKickedFromMeetingDoc(preWrite, nsUid);
+  const mPreWrite = mapMeetingLedgerDoc(mid, preWrite);
+  assertMeetingHasCapacityForOneMore(mPreWrite);
+  const rawListWrite = Array.isArray(preWrite.participantIds)
+    ? (preWrite.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
     : [];
-  if (preRaw.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) return;
-  const hostPre = typeof preData.createdBy === 'string' ? normalizeParticipantId(preData.createdBy.trim()) ?? preData.createdBy.trim() : '';
-  if (hostPre && hostPre === nsUid) throw new Error('호스트는 참가 신청을 보낼 수 없어요.');
-
-  const cfgFs = parsePublicMeetingDetailsConfig(preData.meetingConfig);
-  let messageFs: string | null | undefined;
-  if (cfgFs?.requestMessageEnabled === true) {
+  if (rawListWrite.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) return;
+  const hostPkWrite =
+    typeof preWrite.createdBy === 'string' ? normalizeParticipantId(preWrite.createdBy.trim()) ?? preWrite.createdBy.trim() : '';
+  if (hostPkWrite && hostPkWrite === nsUid) throw new Error('호스트는 참가 신청을 보낼 수 없어요.');
+  const cfgWrite = parsePublicMeetingDetailsConfig(preWrite.meetingConfig);
+  let messageOutWrite: string | null | undefined;
+  if (cfgWrite?.requestMessageEnabled === true) {
     const raw = typeof opts?.message === 'string' ? opts.message.trim() : '';
-    messageFs = raw ? raw.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null;
+    messageOutWrite = raw ? raw.slice(0, MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN) : null;
   }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    if (!meetingDocRequiresHostApprovalJoin(data)) {
-      throw new Error('호스트 승인 방식의 공개 모임만 참가 신청을 보낼 수 있어요.');
-    }
-    assertParticipantNotKickedFromMeetingDoc(data, nsUid);
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    if (rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid)) return;
-    const prevJr = parseJoinRequestsField(data);
-    const row: MeetingJoinRequest = {
-      userId: nsUid,
-      dateChipIds: [...votes.dateChipIds],
-      placeChipIds: [...votes.placeChipIds],
-      movieChipIds: [...votes.movieChipIds],
-      requestedAt: new Date().toISOString(),
-      ...(messageFs !== undefined ? { message: messageFs } : {}),
-    };
-    const nextJr = mergeJoinRequestsReplaceUser(prevJr, nsUid, row);
-    transaction.update(ref, {
-      joinRequests: stripUndefinedDeep(nextJr),
-    });
-  });
-
-  const after = await getMeetingById(mid);
-  const hostId = after?.createdBy?.trim() ?? '';
-  if (after && hostId) {
+  const prevJr = parseJoinRequestsField(preWrite);
+  const row: MeetingJoinRequest = {
+    userId: nsUid,
+    dateChipIds: [...votes.dateChipIds],
+    placeChipIds: [...votes.placeChipIds],
+    movieChipIds: [...votes.movieChipIds],
+    requestedAt: new Date().toISOString(),
+    ...(messageOutWrite !== undefined ? { message: messageOutWrite } : {}),
+  };
+  const nextJr = mergeJoinRequestsReplaceUser(prevJr, nsUid, row);
+  const nextDoc = {
+    ...preWrite,
+    joinRequests: stripUndefinedDeep(nextJr) as unknown as MeetingJoinRequest[],
+  };
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
+  const hostId = typeof preWrite.createdBy === 'string' ? preWrite.createdBy.trim() : '';
+  if (hostId) {
     notifyMeetingHostParticipantEventFireAndForget(
-      after,
+      mapMeetingLedgerDoc(mid, nextDoc as Record<string, unknown>),
       hostId,
       uid,
       'join_requested',
@@ -1800,33 +1589,19 @@ export async function cancelJoinRequest(meetingId: string, phoneUserId: string):
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
   const nsUid = normalizeParticipantId(uid) ?? uid;
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const prevJr = parseJoinRequestsField(data);
-    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-    if (nextJr.length === prevJr.length) return;
-    await ledgerMeetingPutRawDoc(
-      mid,
-      stripUndefinedDeep({
-        ...data,
-        joinRequests: nextJr.length ? nextJr : null,
-      }) as Record<string, unknown>,
-    );
-    return;
-  }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    const prevJr = parseJoinRequestsField(data);
-    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-    if (nextJr.length === prevJr.length) return;
-    transaction.update(ref, { joinRequests: nextJr.length ? stripUndefinedDeep(nextJr) : null });
-  });
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const prevJr = parseJoinRequestsField(data);
+  const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
+  if (nextJr.length === prevJr.length) return;
+  await ledgerMeetingPutRawDoc(
+    ledgerId,
+    stripUndefinedDeep({
+      ...data,
+      joinRequests: nextJr.length ? nextJr : null,
+    }) as Record<string, unknown>,
+  );
 }
 
 export async function rejectJoinRequest(meetingId: string, hostPhoneUserId: string, applicantUserId: string): Promise<void> {
@@ -1836,50 +1611,25 @@ export async function rejectJoinRequest(meetingId: string, hostPhoneUserId: stri
   if (!mid || !hostUid || !appRaw) throw new Error('모임 또는 사용자 정보가 없습니다.');
   const nsHost = normalizeParticipantId(hostUid) ?? hostUid;
   const nsApp = normalizeParticipantId(appRaw) ?? appRaw;
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 거절할 수 있어요.');
-    const prevJr = parseJoinRequestsField(data);
-    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-    if (nextJr.length === prevJr.length) return;
-    await ledgerMeetingPutRawDoc(
-      mid,
-      stripUndefinedDeep({
-        ...data,
-        joinRequests: nextJr.length ? nextJr : null,
-      }) as Record<string, unknown>,
-    );
-    const afterReject = await getMeetingById(mid);
-    if (afterReject) {
-      notifyMeetingJoinRequestApplicantDecisionFireAndForget(afterReject, appRaw, 'rejected');
-    }
-    return;
-  }
-
-  let fsRejectDidMutate = false;
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 거절할 수 있어요.');
-    const prevJr = parseJoinRequestsField(data);
-    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-    if (nextJr.length === prevJr.length) return;
-    fsRejectDidMutate = true;
-    transaction.update(ref, { joinRequests: nextJr.length ? stripUndefinedDeep(nextJr) : null });
-  });
-  if (fsRejectDidMutate) {
-    const afterRejectFs = await getMeetingById(mid);
-    if (afterRejectFs) {
-      notifyMeetingJoinRequestApplicantDecisionFireAndForget(afterRejectFs, appRaw, 'rejected');
-    }
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 거절할 수 있어요.');
+  const prevJr = parseJoinRequestsField(data);
+  const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
+  if (nextJr.length === prevJr.length) return;
+  await ledgerMeetingPutRawDoc(
+    ledgerId,
+    stripUndefinedDeep({
+      ...data,
+      joinRequests: nextJr.length ? nextJr : null,
+    }) as Record<string, unknown>,
+  );
+  const afterReject = await getMeetingById(mid);
+  if (afterReject) {
+    notifyMeetingJoinRequestApplicantDecisionFireAndForget(afterReject, appRaw, 'rejected');
   }
 }
 
@@ -1895,7 +1645,6 @@ export async function approveJoinRequest(
   const nsHost = normalizeParticipantId(hostUid) ?? hostUid;
   const nsApp = normalizeParticipantId(appRaw) ?? appRaw;
   if (!nsApp) throw new Error('신청자 정보가 올바르지 않아요.');
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
   const webGuestApplicant = isGinitWebGuestParticipantId(nsApp);
   const applicantProfile = webGuestApplicant ? null : await getUserProfile(appRaw);
@@ -1905,185 +1654,80 @@ export async function approveJoinRequest(
     }
   }
 
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
-    if (!webGuestApplicant && applicantProfile) {
-      const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
-      if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
-    }
-    const prevJr = parseJoinRequestsField(data);
-    const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
-    if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
-    assertParticipantNotKickedFromMeetingDoc(data, nsApp);
-    const votes = {
-      dateChipIds: req.dateChipIds,
-      placeChipIds: req.placeChipIds,
-      movieChipIds: req.movieChipIds,
-    };
-    const mPre = mapFirestoreMeetingDoc(mid, data);
-    assertMeetingHasCapacityForOneMore(mPre);
-    if (!webGuestApplicant && applicantProfile) {
-      await assertJoinOverlapPrechecks(applicantProfile, appRaw, mid, mPre, votes);
-    }
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    if (rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsApp)) {
-      const nextJrOnly = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-      await ledgerMeetingPutRawDoc(
-        mid,
-        stripUndefinedDeep({
-          ...data,
-          joinRequests: nextJrOnly.length ? nextJrOnly : null,
-        }) as Record<string, unknown>,
-      );
-      return;
-    }
-    const prev = parseVoteTalliesField(data) ?? {};
-    const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
-    const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
-    const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
-    const log = parseParticipantVoteLog(data);
-    const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-    const dnFromReq =
-      typeof req.displayName === 'string' && req.displayName.trim() ? req.displayName.trim().slice(0, 40) : '';
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...filtered,
-      {
-        userId: nsApp,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-        ...(dnFromReq ? { displayName: dnFromReq } : {}),
-      },
-    ];
-    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-    const nextDoc = {
-      ...data,
-      participantIds: [...rawList, nsApp],
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: stripUndefinedDeep(nextLog),
-      joinRequests: nextJr.length ? nextJr : null,
-    };
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
-    const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const mJoined = mapFirestoreMeetingDoc(mid, nextDoc as Record<string, unknown>);
-    if (hostId) {
-      const joinNick = webGuestApplicant
-        ? dnFromReq || webGuestDisplayNameFromMeeting(mJoined, nsApp) || '웹 참여자'
-        : applicantProfile!.nickname || applicantProfile!.displayName || '참여자';
-      notifyMeetingHostParticipantEventFireAndForget(mJoined, hostId, appRaw, 'joined', joinNick);
-    }
-    notifyMeetingJoinRequestApplicantDecisionFireAndForget(mJoined, appRaw, 'approved');
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
+  if (!webGuestApplicant && applicantProfile) {
+    const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
+    if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
+  }
+  const prevJr = parseJoinRequestsField(data);
+  const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
+  if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
+  assertParticipantNotKickedFromMeetingDoc(data, nsApp);
+  const votes = {
+    dateChipIds: req.dateChipIds,
+    placeChipIds: req.placeChipIds,
+    movieChipIds: req.movieChipIds,
+  };
+  const mPre = mapMeetingLedgerDoc(mid, data);
+  assertMeetingHasCapacityForOneMore(mPre);
+  if (!webGuestApplicant && applicantProfile) {
+    await assertJoinOverlapPrechecks(applicantProfile, appRaw, ledgerId, mPre, votes);
+  }
+  const rawList = Array.isArray(data.participantIds)
+    ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  if (rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsApp)) {
+    const nextJrOnly = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
+    await ledgerMeetingPutRawDoc(
+      ledgerId,
+      stripUndefinedDeep({
+        ...data,
+        joinRequests: nextJrOnly.length ? nextJrOnly : null,
+      }) as Record<string, unknown>,
+    );
     return;
   }
-
-  const approveSnap = await getDoc(ref);
-  if (!approveSnap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const approvePre = approveSnap.data() as Record<string, unknown>;
-  const approveCreatedBy = typeof approvePre.createdBy === 'string' ? approvePre.createdBy.trim() : '';
-  const approveNsCreated = approveCreatedBy ? normalizeParticipantId(approveCreatedBy) ?? approveCreatedBy : '';
-  if (!approveNsCreated || approveNsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
-  if (!webGuestApplicant && applicantProfile) {
-    const joinBlockPre = getJoinGamificationBlockReason(applicantProfile, approvePre);
-    if (joinBlockPre) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlockPre}`);
-  }
-  const prevJrPre = parseJoinRequestsField(approvePre);
-  const reqPre = prevJrPre.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
-  if (!reqPre) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
-  const approveVotes = {
-    dateChipIds: reqPre.dateChipIds,
-    placeChipIds: reqPre.placeChipIds,
-    movieChipIds: reqPre.movieChipIds,
+  const prev = parseVoteTalliesField(data) ?? {};
+  const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
+  const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
+  const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
+  const log = parseParticipantVoteLog(data);
+  const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
+  const dnFromReq =
+    typeof req.displayName === 'string' && req.displayName.trim() ? req.displayName.trim().slice(0, 40) : '';
+  const nextLog: ParticipantVoteSnapshot[] = [
+    ...filtered,
+    {
+      userId: nsApp,
+      dateChipIds: [...votes.dateChipIds],
+      placeChipIds: [...votes.placeChipIds],
+      movieChipIds: [...votes.movieChipIds],
+      ...(dnFromReq ? { displayName: dnFromReq } : {}),
+    },
+  ];
+  const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
+  const nextDoc = {
+    ...data,
+    participantIds: [...rawList, nsApp],
+    voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+    participantVoteLog: stripUndefinedDeep(nextLog),
+    joinRequests: nextJr.length ? nextJr : null,
   };
-  const mApprovePre = mapFirestoreMeetingDoc(mid, approvePre);
-  assertMeetingHasCapacityForOneMore(mApprovePre);
-  if (!webGuestApplicant && applicantProfile) {
-    await assertJoinOverlapPrechecks(applicantProfile, appRaw, mid, mApprovePre, approveVotes);
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
+  const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const mJoined = mapMeetingLedgerDoc(mid, nextDoc as Record<string, unknown>);
+  if (hostId) {
+    const joinNick = webGuestApplicant
+      ? dnFromReq || webGuestDisplayNameFromMeeting(mJoined, nsApp) || '웹 참여자'
+      : applicantProfile!.nickname || applicantProfile!.displayName || '참여자';
+    notifyMeetingHostParticipantEventFireAndForget(mJoined, hostId, appRaw, 'joined', joinNick);
   }
-
-  let fsApproveDidAddParticipant = false;
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 승인할 수 있어요.');
-    if (!webGuestApplicant && applicantProfile) {
-      const joinBlock = getJoinGamificationBlockReason(applicantProfile, data);
-      if (joinBlock) throw new Error(`참가 자격 문제로 승인할 수 없어요: ${joinBlock}`);
-    }
-    const prevJr = parseJoinRequestsField(data);
-    const req = prevJr.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsApp);
-    if (!req) throw new Error('대기 중인 참가 신청을 찾을 수 없어요.');
-    assertParticipantNotKickedFromMeetingDoc(data, nsApp);
-    const votes = {
-      dateChipIds: req.dateChipIds,
-      placeChipIds: req.placeChipIds,
-      movieChipIds: req.movieChipIds,
-    };
-    const mTx = mapFirestoreMeetingDoc(mid, data);
-    assertMeetingHasCapacityForOneMore(mTx);
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    if (rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsApp)) {
-      const nextJrOnly = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-      transaction.update(ref, {
-        joinRequests: nextJrOnly.length ? stripUndefinedDeep(nextJrOnly) : null,
-      });
-      return;
-    }
-    fsApproveDidAddParticipant = true;
-    const prev = parseVoteTalliesField(data) ?? {};
-    const dates = mergeTallyIncrement(prev.dates, votes.dateChipIds);
-    const places = mergeTallyIncrement(prev.places, votes.placeChipIds);
-    const movies = mergeTallyIncrement(prev.movies, votes.movieChipIds);
-    const log = parseParticipantVoteLog(data);
-    const filtered = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-    const dnFs =
-      typeof req.displayName === 'string' && req.displayName.trim() ? req.displayName.trim().slice(0, 40) : '';
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...filtered,
-      {
-        userId: nsApp,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-        ...(dnFs ? { displayName: dnFs } : {}),
-      },
-    ];
-    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsApp);
-    transaction.update(ref, {
-      participantIds: arrayUnion(nsApp),
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: stripUndefinedDeep(nextLog),
-      joinRequests: nextJr.length ? stripUndefinedDeep(nextJr) : null,
-    });
-  });
-
-  if (fsApproveDidAddParticipant) {
-    const after = await getMeetingById(mid);
-    const hostId = after?.createdBy?.trim() ?? '';
-    if (after && hostId) {
-      const joinNickFs = webGuestApplicant
-        ? (typeof reqPre.displayName === 'string' && reqPre.displayName.trim()
-            ? reqPre.displayName.trim().slice(0, 40)
-            : null) ||
-          webGuestDisplayNameFromMeeting(after, nsApp) ||
-          '웹 참여자'
-        : applicantProfile!.nickname || applicantProfile!.displayName || '참여자';
-      notifyMeetingHostParticipantEventFireAndForget(after, hostId, appRaw, 'joined', joinNickFs);
-    }
-    if (after) {
-      notifyMeetingJoinRequestApplicantDecisionFireAndForget(after, appRaw, 'approved');
-    }
-  }
+  notifyMeetingJoinRequestApplicantDecisionFireAndForget(mJoined, appRaw, 'approved');
 }
 
 /** 참여자가 투표를 바꿀 때 집계·이력 갱신 */
@@ -2100,97 +1744,48 @@ export async function updateParticipantVotes(
     throw new Error('모임 이용 인증(약관 동의·필수 정보)을 완료한 사용자만 모임에서 투표할 수 있어요. 설정에서 인증 정보 등록을 완료해 주세요.');
   }
   const nsUid = normalizeParticipantId(uid) ?? uid;
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-    if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
-    if (!old) {
-      throw new Error(
-        '이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 아래 탈퇴 후 다시 참여해 주세요.',
-      );
-    }
-    const oldD = old.dateChipIds;
-    const oldP = old.placeChipIds;
-    const oldM = old.movieChipIds;
-    const vt = parseVoteTalliesField(data) ?? {};
-    let dates = mergeTallyDecrement({ ...vt.dates }, oldD);
-    let places = mergeTallyDecrement({ ...vt.places }, oldP);
-    let movies = mergeTallyDecrement({ ...vt.movies }, oldM);
-    dates = mergeTallyIncrement(dates, votes.dateChipIds);
-    places = mergeTallyIncrement(places, votes.placeChipIds);
-    movies = mergeTallyIncrement(movies, votes.movieChipIds);
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
-      {
-        userId: nsUid,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-      },
-    ];
-    await ledgerMeetingPutRawDoc(
-      mid,
-      stripUndefinedDeep({
-        ...data,
-        voteTallies: { dates, places, movies } as MeetingVoteTallies,
-        participantVoteLog: nextLog,
-      }) as Record<string, unknown>,
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const rawList = Array.isArray(data.participantIds)
+    ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
+  if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
+  const log = parseParticipantVoteLog(data);
+  const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
+  if (!old) {
+    throw new Error(
+      '이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 아래 탈퇴 후 다시 참여해 주세요.',
     );
-    return;
   }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-    if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
-
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
-    if (!old) {
-      throw new Error(
-        '이 모임은 예전 방식으로만 참여되어 있어요. 투표를 바꾸려면 아래 탈퇴 후 다시 참여해 주세요.',
-      );
-    }
-    const oldD = old.dateChipIds;
-    const oldP = old.placeChipIds;
-    const oldM = old.movieChipIds;
-
-    const vt = parseVoteTalliesField(data) ?? {};
-    let dates = mergeTallyDecrement({ ...vt.dates }, oldD);
-    let places = mergeTallyDecrement({ ...vt.places }, oldP);
-    let movies = mergeTallyDecrement({ ...vt.movies }, oldM);
-    dates = mergeTallyIncrement(dates, votes.dateChipIds);
-    places = mergeTallyIncrement(places, votes.placeChipIds);
-    movies = mergeTallyIncrement(movies, votes.movieChipIds);
-
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
-      {
-        userId: nsUid,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-      },
-    ];
-
-    transaction.update(ref, {
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: stripUndefinedDeep(nextLog),
-    });
-  });
+  const oldD = old.dateChipIds;
+  const oldP = old.placeChipIds;
+  const oldM = old.movieChipIds;
+  const vt = parseVoteTalliesField(data) ?? {};
+  let dates = mergeTallyDecrement({ ...vt.dates }, oldD);
+  let places = mergeTallyDecrement({ ...vt.places }, oldP);
+  let movies = mergeTallyDecrement({ ...vt.movies }, oldM);
+  dates = mergeTallyIncrement(dates, votes.dateChipIds);
+  places = mergeTallyIncrement(places, votes.placeChipIds);
+  movies = mergeTallyIncrement(movies, votes.movieChipIds);
+  const nextLog: ParticipantVoteSnapshot[] = [
+    ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
+    {
+      userId: nsUid,
+      dateChipIds: [...votes.dateChipIds],
+      placeChipIds: [...votes.placeChipIds],
+      movieChipIds: [...votes.movieChipIds],
+    },
+  ];
+  await ledgerMeetingPutRawDoc(
+    ledgerId,
+    stripUndefinedDeep({
+      ...data,
+      voteTallies: { dates, places, movies } as MeetingVoteTallies,
+      participantVoteLog: nextLog,
+    }) as Record<string, unknown>,
+  );
 }
 
 /**
@@ -2207,87 +1802,43 @@ export async function upsertParticipantVotes(
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
   const nsUid = normalizeParticipantId(uid) ?? uid;
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-    if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
-    const oldD = old?.dateChipIds ?? [];
-    const oldP = old?.placeChipIds ?? [];
-    const oldM = old?.movieChipIds ?? [];
-    const vt = parseVoteTalliesField(data) ?? {};
-    let dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
-    let places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
-    let movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    dates = mergeTallyIncrement(dates, votes.dateChipIds);
-    places = mergeTallyIncrement(places, votes.placeChipIds);
-    movies = mergeTallyIncrement(movies, votes.movieChipIds);
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
-      {
-        userId: nsUid,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-      },
-    ];
-    await ledgerMeetingPutRawDoc(
-      mid,
-      stripUndefinedDeep({
-        ...data,
-        voteTallies: { dates, places, movies } as MeetingVoteTallies,
-        participantVoteLog: nextLog,
-      }) as Record<string, unknown>,
-    );
-    return;
-  }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-    if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
-
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
-    const oldD = old?.dateChipIds ?? [];
-    const oldP = old?.placeChipIds ?? [];
-    const oldM = old?.movieChipIds ?? [];
-
-    const vt = parseVoteTalliesField(data) ?? {};
-    let dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
-    let places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
-    let movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    dates = mergeTallyIncrement(dates, votes.dateChipIds);
-    places = mergeTallyIncrement(places, votes.placeChipIds);
-    movies = mergeTallyIncrement(movies, votes.movieChipIds);
-
-    const nextLog: ParticipantVoteSnapshot[] = [
-      ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
-      {
-        userId: nsUid,
-        dateChipIds: [...votes.dateChipIds],
-        placeChipIds: [...votes.placeChipIds],
-        movieChipIds: [...votes.movieChipIds],
-      },
-    ];
-
-    transaction.update(ref, {
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: stripUndefinedDeep(nextLog),
-    });
-  });
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const rawList = Array.isArray(data.participantIds)
+    ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+    : [];
+  const inList = rawList.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
+  if (!inList) throw new Error('참여 중인 모임만 투표를 수정할 수 있어요.');
+  const log = parseParticipantVoteLog(data);
+  const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
+  const oldD = old?.dateChipIds ?? [];
+  const oldP = old?.placeChipIds ?? [];
+  const oldM = old?.movieChipIds ?? [];
+  const vt = parseVoteTalliesField(data) ?? {};
+  let dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+  let places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+  let movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+  dates = mergeTallyIncrement(dates, votes.dateChipIds);
+  places = mergeTallyIncrement(places, votes.placeChipIds);
+  movies = mergeTallyIncrement(movies, votes.movieChipIds);
+  const nextLog: ParticipantVoteSnapshot[] = [
+    ...log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid),
+    {
+      userId: nsUid,
+      dateChipIds: [...votes.dateChipIds],
+      placeChipIds: [...votes.placeChipIds],
+      movieChipIds: [...votes.movieChipIds],
+    },
+  ];
+  await ledgerMeetingPutRawDoc(
+    ledgerId,
+    stripUndefinedDeep({
+      ...data,
+      voteTallies: { dates, places, movies } as MeetingVoteTallies,
+      participantVoteLog: nextLog,
+    }) as Record<string, unknown>,
+  );
 }
 
 /** 참여 취소: 참여자 제거 + 해당 사용자 투표 집계 롤백 */
@@ -2322,10 +1873,10 @@ function isRetryableLeaveConfirmedTrustRpcError(message: string, code?: string):
  */
 export async function applyTrustPenaltyLeaveConfirmedMeeting(
   phoneUserId: string,
-  meetingFirestoreId: string,
+  meetingIdOrLegacyKey: string,
 ): Promise<void> {
   const uid = phoneUserId.trim();
-  const mid = meetingFirestoreId.trim();
+  const mid = meetingIdOrLegacyKey.trim();
   if (!uid || !mid) throw new Error('사용자 또는 모임 정보가 없습니다.');
   let lastMessage = '';
   for (let i = 0; i < LEAVE_CONFIRMED_TRUST_RPC_WAITS_MS.length; i += 1) {
@@ -2376,128 +1927,54 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
   const uid = phoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 사용자 정보가 없습니다.');
   const nsUid = normalizeParticipantId(uid) ?? uid;
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
 
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    let removeToken: string | null = null;
-    for (const x of rawList) {
-      if ((normalizeParticipantId(x) ?? x.trim()) === nsUid) {
-        removeToken = x;
-        break;
-      }
-    }
-    if (!removeToken) {
-      const prevJr = parseJoinRequestsField(data);
-      const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-      if (nextJr.length < prevJr.length) {
-        await ledgerMeetingPutRawDoc(
-          mid,
-          stripUndefinedDeep({
-            ...data,
-            joinRequests: nextJr.length ? nextJr : null,
-          }) as Record<string, unknown>,
-        );
-        return;
-      }
-      throw new Error('참여 중인 모임만 나갈 수 있어요.');
-    }
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
-    const oldD = old?.dateChipIds ?? [];
-    const oldP = old?.placeChipIds ?? [];
-    const oldM = old?.movieChipIds ?? [];
-    const vt = parseVoteTalliesField(data) ?? {};
-    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
-    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
-    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-    const patch: Record<string, unknown> = {
-      ...data,
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
-    };
-    patch.participantIds = rawList.filter((x) => x !== removeToken);
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(patch) as Record<string, unknown>);
-    const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    if (hostId && (normalizeParticipantId(hostId) ?? hostId) !== nsUid) {
-      let nick = '참여자';
-      try {
-        const p = await getUserProfile(uid);
-        nick = p?.nickname || p?.displayName || nick;
-      } catch {
-        /* ignore */
-      }
-      notifyMeetingHostParticipantEventFireAndForget(
-        mapFirestoreMeetingDoc(mid, patch as Record<string, unknown>),
-        hostId,
-        uid,
-        'left',
-        nick,
-      );
-    }
-    return;
-  }
-
-  const preLeaveFs = await getDoc(ref);
-  if (!preLeaveFs.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const d0 = preLeaveFs.data() as Record<string, unknown>;
-  const raw0 = Array.isArray(d0.participantIds)
-    ? (d0.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const rawList = Array.isArray(data.participantIds)
+    ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
     : [];
-  const inParticipantFs = raw0.some((x) => (normalizeParticipantId(x) ?? x.trim()) === nsUid);
-  if (!inParticipantFs) {
-    const jr0 = parseJoinRequestsField(d0);
-    if (jr0.some((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid)) {
-      await cancelJoinRequest(mid, uid);
+  let removeToken: string | null = null;
+  for (const x of rawList) {
+    if ((normalizeParticipantId(x) ?? x.trim()) === nsUid) {
+      removeToken = x;
+      break;
+    }
+  }
+  if (!removeToken) {
+    const prevJr = parseJoinRequestsField(data);
+    const nextJr = prevJr.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
+    if (nextJr.length < prevJr.length) {
+      await ledgerMeetingPutRawDoc(
+        ledgerId,
+        stripUndefinedDeep({
+          ...data,
+          joinRequests: nextJr.length ? nextJr : null,
+        }) as Record<string, unknown>,
+      );
       return;
     }
     throw new Error('참여 중인 모임만 나갈 수 있어요.');
   }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    let removeToken: string | null = null;
-    for (const x of rawList) {
-      if ((normalizeParticipantId(x) ?? x.trim()) === nsUid) {
-        removeToken = x;
-        break;
-      }
-    }
-    if (!removeToken) throw new Error('참여 중인 모임만 나갈 수 있어요.');
-
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
-    const oldD = old?.dateChipIds ?? [];
-    const oldP = old?.placeChipIds ?? [];
-    const oldM = old?.movieChipIds ?? [];
-
-    const vt = parseVoteTalliesField(data) ?? {};
-    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
-    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
-    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
-
-    const patch: Record<string, unknown> = {
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
-    };
-    patch.participantIds = arrayRemove(removeToken);
-    transaction.update(ref, patch);
-  });
-
-  const after = await getMeetingById(mid);
-  const hostId = after?.createdBy?.trim() ?? '';
-  if (after && hostId && (normalizeParticipantId(hostId) ?? hostId) !== nsUid) {
+  const log = parseParticipantVoteLog(data);
+  const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsUid);
+  const oldD = old?.dateChipIds ?? [];
+  const oldP = old?.placeChipIds ?? [];
+  const oldM = old?.movieChipIds ?? [];
+  const vt = parseVoteTalliesField(data) ?? {};
+  const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+  const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+  const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+  const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsUid);
+  const patch: Record<string, unknown> = {
+    ...data,
+    voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+    participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
+  };
+  patch.participantIds = rawList.filter((x) => x !== removeToken);
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(patch) as Record<string, unknown>);
+  const hostId = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  if (hostId && (normalizeParticipantId(hostId) ?? hostId) !== nsUid) {
     let nick = '참여자';
     try {
       const p = await getUserProfile(uid);
@@ -2505,7 +1982,13 @@ export async function leaveMeeting(meetingId: string, phoneUserId: string): Prom
     } catch {
       /* ignore */
     }
-    notifyMeetingHostParticipantEventFireAndForget(after, hostId, uid, 'left', nick);
+    notifyMeetingHostParticipantEventFireAndForget(
+      mapMeetingLedgerDoc(mid, patch as Record<string, unknown>),
+      hostId,
+      uid,
+      'left',
+      nick,
+    );
   }
 }
 
@@ -2525,141 +2008,52 @@ export async function hostRemoveParticipant(
   const nsHost = normalizeParticipantId(hostUid) ?? hostUid;
   const nsTarget = normalizeParticipantId(targetRaw) ?? targetRaw;
   if (!nsTarget) throw new Error('대상 사용자 정보가 올바르지 않아요.');
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    if (data.scheduleConfirmed === true) {
-      throw new Error('일정이 확정된 모임에서는 참여자를 강제 퇴장할 수 없어요.');
-    }
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 참여자를 퇴장시킬 수 있어요.');
-    if (nsTarget === nsCreated) throw new Error('호스트 본인은 이 방법으로 퇴장시킬 수 없어요.');
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    let removeToken: string | null = null;
-    for (const x of rawList) {
-      if ((normalizeParticipantId(x) ?? x.trim()) === nsTarget) {
-        removeToken = x;
-        break;
-      }
-    }
-    if (!removeToken) throw new Error('참여 중인 참여자만 강제 퇴장할 수 있어요.');
-
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsTarget);
-    const oldD = old?.dateChipIds ?? [];
-    const oldP = old?.placeChipIds ?? [];
-    const oldM = old?.movieChipIds ?? [];
-    const vt = parseVoteTalliesField(data) ?? {};
-    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
-    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
-    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
-    const nextKicked = mergeKickedParticipantIdsField(data, nsTarget);
-    const prevJrKick = parseJoinRequestsField(data);
-    const nextJrKick = prevJrKick.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
-    const patch: Record<string, unknown> = {
-      ...data,
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
-      kickedParticipantIds: nextKicked,
-      joinRequests: nextJrKick.length ? stripUndefinedDeep(nextJrKick) : null,
-    };
-    patch.participantIds = rawList.filter((x) => x !== removeToken);
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(patch) as Record<string, unknown>);
-    const mAfter = mapFirestoreMeetingDoc(mid, patch as Record<string, unknown>);
-    notifyMeetingParticipantRemovedByHostFireAndForget(mAfter, targetRaw);
-    return;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  if (data.scheduleConfirmed === true) {
+    throw new Error('일정이 확정된 모임에서는 참여자를 강제 퇴장할 수 없어요.');
   }
-
-  await runTransaction(getFirestoreDb(), async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    if (data.scheduleConfirmed === true) {
-      throw new Error('일정이 확정된 모임에서는 참여자를 강제 퇴장할 수 없어요.');
-    }
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 참여자를 퇴장시킬 수 있어요.');
-    if (nsTarget === nsCreated) throw new Error('호스트 본인은 이 방법으로 퇴장시킬 수 없어요.');
-    const rawList = Array.isArray(data.participantIds)
-      ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    let removeToken: string | null = null;
-    for (const x of rawList) {
-      if ((normalizeParticipantId(x) ?? x.trim()) === nsTarget) {
-        removeToken = x;
-        break;
-      }
-    }
-    if (!removeToken) throw new Error('참여 중인 참여자만 강제 퇴장할 수 있어요.');
-
-    const log = parseParticipantVoteLog(data);
-    const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsTarget);
-    const oldD = old?.dateChipIds ?? [];
-    const oldP = old?.placeChipIds ?? [];
-    const oldM = old?.movieChipIds ?? [];
-    const vt = parseVoteTalliesField(data) ?? {};
-    const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
-    const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
-    const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
-    const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
-    const nextKicked = mergeKickedParticipantIdsField(data, nsTarget);
-    const prevJrKick = parseJoinRequestsField(data);
-    const nextJrKick = prevJrKick.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
-    transaction.update(ref, {
-      voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
-      participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
-      participantIds: arrayRemove(removeToken),
-      kickedParticipantIds: nextKicked,
-      joinRequests: nextJrKick.length ? stripUndefinedDeep(nextJrKick) : null,
-    });
-  });
-
-  const after = await getMeetingById(mid);
-  if (after) notifyMeetingParticipantRemovedByHostFireAndForget(after, targetRaw);
-}
-
-function collectAppUserIdsFromFirestoreMeetingDoc(data: Record<string, unknown>): string[] {
-  const set = new Set<string>();
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-  if (createdBy) {
-    set.add(normalizeParticipantId(createdBy) ?? createdBy);
-  }
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsHost) throw new Error('모임 주관자만 참여자를 퇴장시킬 수 있어요.');
+  if (nsTarget === nsCreated) throw new Error('호스트 본인은 이 방법으로 퇴장시킬 수 없어요.');
   const rawList = Array.isArray(data.participantIds)
     ? (data.participantIds as unknown[]).filter((x): x is string => typeof x === 'string')
     : [];
-  for (const raw of rawList) {
-    const t = raw.trim();
-    if (!t) continue;
-    set.add(normalizeParticipantId(t) ?? t);
-  }
-  return [...set].filter((id) => id.length > 0);
-}
-
-/** Supabase `meetings` 트리거가 없는 Firestore 문서 전용 — 확정/확정 취소 시 `meeting_count` 동기화 */
-async function adjustProfilesMeetingCountForFirestoreMeetingDoc(
-  data: Record<string, unknown>,
-  delta: 1 | -1,
-): Promise<void> {
-  const ids = collectAppUserIdsFromFirestoreMeetingDoc(data);
-  if (ids.length === 0) return;
-  try {
-    const { error } = await supabase.rpc('adjust_profiles_meeting_count_by_app_user_ids', {
-      p_app_user_ids: ids,
-      p_delta: delta,
-    });
-    if (error && __DEV__) {
-      console.warn('[adjust_profiles_meeting_count_by_app_user_ids]', error.message);
+  let removeToken: string | null = null;
+  for (const x of rawList) {
+    if ((normalizeParticipantId(x) ?? x.trim()) === nsTarget) {
+      removeToken = x;
+      break;
     }
-  } catch (e) {
-    if (__DEV__) console.warn('[adjust_profiles_meeting_count_by_app_user_ids]', e);
   }
+  if (!removeToken) throw new Error('참여 중인 참여자만 강제 퇴장할 수 있어요.');
+
+  const log = parseParticipantVoteLog(data);
+  const old = log.find((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) === nsTarget);
+  const oldD = old?.dateChipIds ?? [];
+  const oldP = old?.placeChipIds ?? [];
+  const oldM = old?.movieChipIds ?? [];
+  const vt = parseVoteTalliesField(data) ?? {};
+  const dates = old ? mergeTallyDecrement({ ...vt.dates }, oldD) : { ...vt.dates };
+  const places = old ? mergeTallyDecrement({ ...vt.places }, oldP) : { ...vt.places };
+  const movies = old ? mergeTallyDecrement({ ...vt.movies }, oldM) : { ...vt.movies };
+  const nextLog = log.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
+  const nextKicked = mergeKickedParticipantIdsField(data, nsTarget);
+  const prevJrKick = parseJoinRequestsField(data);
+  const nextJrKick = prevJrKick.filter((e) => (normalizeParticipantId(e.userId) ?? e.userId.trim()) !== nsTarget);
+  const patch: Record<string, unknown> = {
+    ...data,
+    voteTallies: stripUndefinedDeep({ dates, places, movies }) as MeetingVoteTallies,
+    participantVoteLog: nextLog.length ? stripUndefinedDeep(nextLog) : null,
+    kickedParticipantIds: nextKicked,
+    joinRequests: nextJrKick.length ? stripUndefinedDeep(nextJrKick) : null,
+  };
+  patch.participantIds = rawList.filter((x) => x !== removeToken);
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(patch) as Record<string, unknown>);
+  const mAfter = mapMeetingLedgerDoc(mid, patch as Record<string, unknown>);
+  notifyMeetingParticipantRemovedByHostFireAndForget(mAfter, targetRaw);
 }
 
 /** 모임 주관자가 집계 투표(+동점 시 주관자 선택)로 일정·모집 확정 */
@@ -2671,90 +2065,47 @@ export async function confirmMeetingSchedule(
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsHost = normalizeParticipantId(uid) ?? uid;
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) {
-      throw new Error('모임 주관자만 일정을 확정할 수 있어요.');
-    }
-    const m = mapFirestoreMeetingDoc(mid, data);
-    const analysis = computeMeetingConfirmAnalysis(m, hostTiePicks);
-    if (!analysis.allReady) {
-      throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
-    }
-    const rp = analysis.resolvedPicks;
-    const sch = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
-    if (sch) {
-      const hostProf = await getUserProfile(uid);
-      const buf = getScheduleOverlapBufferHours(hostProf);
-      await assertNoConfirmedScheduleOverlapHybrid({
-        appUserId: uid,
-        startMs: sch.scheduledAt.toMillis(),
-        bufferHours: buf,
-        excludeMeetingId: mid,
-      });
-    }
-    const nextLedgerDoc: Record<string, unknown> = {
-      ...data,
-      scheduleConfirmed: true,
-      confirmedDateChipId: rp.dateChipId,
-      confirmedPlaceChipId: rp.placeChipId,
-      confirmedMovieChipId: rp.movieChipId,
-    };
-    if (sch) {
-      nextLedgerDoc.scheduleDate = sch.scheduleDate;
-      nextLedgerDoc.scheduleTime = sch.scheduleTime;
-      nextLedgerDoc.scheduledAt = sch.scheduledAt;
-    }
-    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextLedgerDoc) as Record<string, unknown>);
-    notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
-    await grantMeetingConfirmXpIfLedger(uid, mid);
-    return;
-  }
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
   const nsHost = normalizeParticipantId(uid) ?? uid;
   const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 일정을 확정할 수 있어요.');
   }
-  const m = mapFirestoreMeetingDoc(snap.id, data);
+  const m = mapMeetingLedgerDoc(mid, data);
   const analysis = computeMeetingConfirmAnalysis(m, hostTiePicks);
   if (!analysis.allReady) {
     throw new Error(analysis.firstBlock?.message ?? '투표 확정 조건을 만족하지 못했습니다.');
   }
   const rp = analysis.resolvedPicks;
-  const schFs = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
-  if (schFs) {
+  const sch = scheduleFieldsAfterHostConfirm(m, rp.dateChipId);
+  if (sch) {
     const hostProf = await getUserProfile(uid);
     const buf = getScheduleOverlapBufferHours(hostProf);
     await assertNoConfirmedScheduleOverlapHybrid({
       appUserId: uid,
-      startMs: schFs.scheduledAt.toMillis(),
+      startMs: sch.scheduledAt.toMillis(),
       bufferHours: buf,
-      excludeMeetingId: mid,
+      excludeMeetingId: ledgerId,
     });
   }
-  const fsPatch: Record<string, unknown> = {
+  const nextLedgerDoc: Record<string, unknown> = {
+    ...data,
     scheduleConfirmed: true,
     confirmedDateChipId: rp.dateChipId,
     confirmedPlaceChipId: rp.placeChipId,
     confirmedMovieChipId: rp.movieChipId,
   };
-  if (schFs) {
-    fsPatch.scheduleDate = schFs.scheduleDate;
-    fsPatch.scheduleTime = schFs.scheduleTime;
-    fsPatch.scheduledAt = schFs.scheduledAt;
+  if (sch) {
+    nextLedgerDoc.scheduleDate = sch.scheduleDate;
+    nextLedgerDoc.scheduleTime = sch.scheduleTime;
+    nextLedgerDoc.scheduledAt = sch.scheduledAt;
   }
-  await updateDoc(ref, fsPatch);
-  await adjustProfilesMeetingCountForFirestoreMeetingDoc(data, 1);
+  await ledgerMeetingPutRawDoc(ledgerId, stripUndefinedDeep(nextLedgerDoc) as Record<string, unknown>);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'confirmed', uid);
+  await grantMeetingConfirmXpIfLedger(uid, ledgerId);
 }
 
 /** 주관자가 일정 확정을 되돌려 투표·확정 전 상태로 복구합니다. */
@@ -2762,36 +2113,9 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsHost = normalizeParticipantId(uid) ?? uid;
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) {
-      throw new Error('모임 주관자만 확정을 취소할 수 있어요.');
-    }
-    if (data.scheduleConfirmed !== true) {
-      throw new Error('확정된 모임만 확정을 취소할 수 있어요.');
-    }
-    const m = mapFirestoreMeetingDoc(mid, data);
-    await ledgerMeetingPutRawDoc(
-      mid,
-      stripUndefinedDeep({
-        ...data,
-        scheduleConfirmed: false,
-        confirmedDateChipId: null,
-        confirmedPlaceChipId: null,
-        confirmedMovieChipId: null,
-      }) as Record<string, unknown>,
-    );
-    notifyMeetingParticipantsOfHostActionFireAndForget(m, 'unconfirmed', uid);
-    return;
-  }
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
   const nsHost = normalizeParticipantId(uid) ?? uid;
   const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
@@ -2801,14 +2125,17 @@ export async function unconfirmMeetingSchedule(meetingId: string, hostPhoneUserI
   if (data.scheduleConfirmed !== true) {
     throw new Error('확정된 모임만 확정을 취소할 수 있어요.');
   }
-  const m = mapFirestoreMeetingDoc(snap.id, data);
-  await updateDoc(ref, {
-    scheduleConfirmed: false,
-    confirmedDateChipId: null,
-    confirmedPlaceChipId: null,
-    confirmedMovieChipId: null,
-  });
-  await adjustProfilesMeetingCountForFirestoreMeetingDoc(data, -1);
+  const m = mapMeetingLedgerDoc(mid, data);
+  await ledgerMeetingPutRawDoc(
+    ledgerId,
+    stripUndefinedDeep({
+      ...data,
+      scheduleConfirmed: false,
+      confirmedDateChipId: null,
+      confirmedPlaceChipId: null,
+      confirmedMovieChipId: null,
+    }) as Record<string, unknown>,
+  );
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'unconfirmed', uid);
 }
 
@@ -2817,27 +2144,9 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsHost = normalizeParticipantId(uid) ?? uid;
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) {
-      throw new Error('모임 주관자만 삭제할 수 있어요.');
-    }
-    if (data.scheduleConfirmed === true) {
-      throw new Error('일정이 확정된 모임은 먼저 확정을 취소한 뒤 삭제할 수 있어요.');
-    }
-    const m = mapFirestoreMeetingDoc(mid, data);
-    notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
-    await ledgerMeetingDelete(mid);
-    return;
-  }
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
   const nsHost = normalizeParticipantId(uid) ?? uid;
   const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
@@ -2847,9 +2156,9 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   if (data.scheduleConfirmed === true) {
     throw new Error('일정이 확정된 모임은 먼저 확정을 취소한 뒤 삭제할 수 있어요.');
   }
-  const m = mapFirestoreMeetingDoc(snap.id, data);
+  const m = mapMeetingLedgerDoc(mid, data);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
-  await deleteDoc(ref);
+  await ledgerMeetingDelete(ledgerId);
 }
 
 /**
@@ -3056,39 +2365,22 @@ export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
   if (!mid || !uid) return false;
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) return false;
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsHost = normalizeParticipantId(uid) ?? uid;
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) return false;
-    if (data.isPublic !== true) return false;
-    if (data.scheduleConfirmed === true) return false;
-    const m = mapFirestoreMeetingDoc(mid, data);
-    const startMs = meetingPrimaryStartMs(m);
-    if (startMs == null || Date.now() < startMs) return false;
-    notifyMeetingParticipantsOfHostActionFireAndForget(m, 'auto_cancelled_unconfirmed', uid);
-    await ledgerMeetingDelete(mid);
-    return true;
-  }
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return false;
-  const data = snap.data() as Record<string, unknown>;
+  if (!ledgerWritesToSupabase()) return false;
+  const ledgerId = await resolveMeetingLedgerUuid(mid);
+  if (!ledgerId) return false;
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) return false;
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
   const nsHost = normalizeParticipantId(uid) ?? uid;
   const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) return false;
   if (data.isPublic !== true) return false;
   if (data.scheduleConfirmed === true) return false;
-
-  const m = mapFirestoreMeetingDoc(snap.id, data);
+  const m = mapMeetingLedgerDoc(mid, data);
   const startMs = meetingPrimaryStartMs(m);
   if (startMs == null || Date.now() < startMs) return false;
-
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'auto_cancelled_unconfirmed', uid);
-  await deleteDoc(ref);
+  await ledgerMeetingDelete(ledgerId);
   return true;
 }
 
@@ -3096,33 +2388,18 @@ export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPh
   const mid = meetingId.trim();
   const uid = hostPhoneUserId.trim();
   if (!mid || !uid) throw new Error('모임 또는 주관자 정보가 없습니다.');
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsHost = normalizeParticipantId(uid) ?? uid;
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsHost) {
-      throw new Error('모임 주관자만 삭제할 수 있어요.');
-    }
-    const m = mapFirestoreMeetingDoc(mid, data);
-    notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
-    await ledgerMeetingDelete(mid);
-    return;
-  }
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
   const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
   const nsHost = normalizeParticipantId(uid) ?? uid;
   const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) {
     throw new Error('모임 주관자만 삭제할 수 있어요.');
   }
-  const m = mapFirestoreMeetingDoc(snap.id, data);
+  const m = mapMeetingLedgerDoc(mid, data);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
-  await deleteDoc(ref);
+  await ledgerMeetingDelete(ledgerId);
 }
 
 /**
@@ -3139,47 +2416,22 @@ export async function transferMeetingHost(meetingId: string, currentHostUserId: 
   const nsNext = normalizeParticipantId(next) ?? next;
   if (nsCur === nsNext) throw new Error('다음 방장이 유효하지 않습니다.');
 
-  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
-    const data = await ledgerTryLoadMeetingDoc(mid);
-    if (!data) throw new Error('모임을 찾을 수 없어요.');
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsCur) {
-      throw new Error('모임 주관자만 방장을 이관할 수 있어요.');
-    }
-    // participantIds에 next가 없더라도 createdBy는 이관(이후 참여자 목록/권한은 별도 정책으로 정리)
-    const nextDoc = stripUndefinedDeep({
-      ...data,
-      createdBy: next,
-    }) as Record<string, unknown>;
-    await ledgerMeetingPutRawDoc(
-      mid,
-      nextDoc,
-    );
-    const after = mapFirestoreMeetingDoc(mid, nextDoc);
-    notifyMeetingNewHostAssignedFireAndForget(after, next);
-    return;
+  const ledgerId = await requireLedgerUuidForMeetingWrite(mid);
+  const data = await ledgerTryLoadMeetingDoc(ledgerId);
+  if (!data) throw new Error('모임을 찾을 수 없어요.');
+  const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
+  const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  if (!nsCreated || nsCreated !== nsCur) {
+    throw new Error('모임 주관자만 방장을 이관할 수 있어요.');
   }
-
-  const ref = doc(getFirestoreDb(), MEETINGS_COLLECTION, mid);
-  let before: Record<string, unknown> | null = null;
-  await runTransaction(getFirestoreDb(), async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-    const data = snap.data() as Record<string, unknown>;
-    before = data;
-    const createdBy = typeof data.createdBy === 'string' ? data.createdBy.trim() : '';
-    const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
-    if (!nsCreated || nsCreated !== nsCur) {
-      throw new Error('모임 주관자만 방장을 이관할 수 있어요.');
-    }
-    tx.update(ref, { createdBy: next });
-  });
-  if (before != null) {
-    const mergedHostTransfer = Object.assign({}, before, { createdBy: next }) as Record<string, unknown>;
-    const after = mapFirestoreMeetingDoc(mid, stripUndefinedDeep(mergedHostTransfer) as Record<string, unknown>);
-    notifyMeetingNewHostAssignedFireAndForget(after, next);
-  }
+  // participantIds에 next가 없더라도 createdBy는 이관(이후 참여자 목록/권한은 별도 정책으로 정리)
+  const nextDoc = stripUndefinedDeep({
+    ...data,
+    createdBy: next,
+  }) as Record<string, unknown>;
+  await ledgerMeetingPutRawDoc(ledgerId, nextDoc);
+  const after = mapMeetingLedgerDoc(mid, nextDoc);
+  notifyMeetingNewHostAssignedFireAndForget(after, next);
 }
 
 function collectCreateMeetingProposedStartMs(input: CreateMeetingInput): number[] {
@@ -3268,54 +2520,16 @@ export async function addMeeting(input: CreateMeetingInput): Promise<string> {
     return ledgerMeetingCreate(hostPk, cleaned);
   }
 
-  if (cleaned.isPublic === true) {
-    ginitNotifyDbg('meeting-created-notify', 'skip_no_supabase_ledger', {
-      hint: 'EXPO_PUBLIC_LEDGER_WRITES=firestore 이거나 SUPABASE URL/ANON 미설정 시 Edge 호출 없음',
-    });
-  }
-
-  console.log('Final Firestore Payload:', toJsonSafeFirestorePreview({ ...cleaned, createdAt: '[serverTimestamp]' }));
-
-  const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
-  const created = await addDoc(ref, {
-    ...cleaned,
-    createdAt: serverTimestamp(),
-  });
-  return created.id;
+  throw new Error('[meetings] 모임 생성은 Supabase(Ledger)가 필요합니다. EXPO_PUBLIC_SUPABASE_URL/ANON을 확인해 주세요.');
 }
 
-/** 모임 목록 일회 조회(당겨서 새로고침 등). `subscribeMeetings`와 동일 쿼리·매핑. */
+/** 모임 목록 일회 조회(당겨서 새로고침 등) — Supabase 공개 모임만. */
 export async function fetchMeetingsOnce(): Promise<{ ok: true; meetings: Meeting[] } | { ok: false; message: string }> {
   try {
-    const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
-    const q = query(ref, orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
-    const list: Meeting[] = snap.docs.map((d) =>
-      mapFirestoreMeetingDoc(d.id, d.data() as Record<string, unknown>),
-    );
-    return { ok: true, meetings: list };
+    const { fetchPublicMeetingsFromSupabaseOnce } = await import('./supabase-meetings-list');
+    return fetchPublicMeetingsFromSupabaseOnce();
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Firestore 조회 오류';
+    const message = e instanceof Error ? e.message : '모임 목록 조회 오류';
     return { ok: false, message };
   }
-}
-
-export function subscribeMeetings(
-  onData: (meetings: Meeting[]) => void,
-  onError?: (message: string) => void,
-): Unsubscribe {
-  const ref = collection(getFirestoreDb(), MEETINGS_COLLECTION);
-  const q = query(ref, orderBy('createdAt', 'desc'));
-  return onSnapshot(
-    q,
-    (snap) => {
-      const list: Meeting[] = snap.docs.map((d) =>
-        mapFirestoreMeetingDoc(d.id, d.data() as Record<string, unknown>),
-      );
-      onData(list);
-    },
-    (err) => {
-      onError?.(err.message ?? 'Firestore 구독 오류');
-    },
-  );
 }

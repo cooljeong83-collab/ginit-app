@@ -1,11 +1,8 @@
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-
-import { getFirebaseFirestore } from '@/src/lib/firebase';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
 import type { MeetingLifecycleStatus, MeetingSettlementInfo } from '@/src/lib/meetings';
-import { MEETINGS_COLLECTION, parseMeetingSettlementDraftReceipts } from '@/src/lib/meetings';
+import { parseMeetingSettlementDraftReceipts } from '@/src/lib/meetings';
 
 function settlementInfoToDocValue(info: MeetingSettlementInfo): Record<string, unknown> {
   const o: Record<string, unknown> = {};
@@ -72,7 +69,7 @@ function readLocationDataRaw(doc: Record<string, unknown>): Record<string, unkno
 }
 
 /**
- * `settlementInfo`만 얕게 병합 저장(원장·Firestore 공통 read-merge-write).
+ * `settlementInfo`만 얕게 병합 저장(Supabase 원장만).
  */
 export async function persistMeetingSettlementInfoPatch(
   meetingId: string,
@@ -96,15 +93,7 @@ export async function persistMeetingSettlementInfoPatch(
     return;
   }
 
-  const ref = doc(getFirebaseFirestore(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
-  const prev = readSettlementInfoRaw(data);
-  const nextInfo: MeetingSettlementInfo = { ...prev, ...cleaned };
-  await updateDoc(ref, {
-    settlementInfo: settlementInfoToDocValue(nextInfo),
-  } as Record<string, unknown>);
+  throw new Error('[settlement] Supabase 원장(UUID) 모임만 지원합니다.');
 }
 
 export type MeetingLocationDataPatch = {
@@ -132,13 +121,7 @@ export async function persistMeetingLocationDataPatch(
     return;
   }
 
-  const ref = doc(getFirebaseFirestore(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
-  const prev = readLocationDataRaw(data) ?? {};
-  const nextLd = { ...prev, ...cleaned };
-  await updateDoc(ref, { locationData: nextLd } as Record<string, unknown>);
+  throw new Error('[settlement] Supabase 원장(UUID) 모임만 지원합니다.');
 }
 
 /** 앱 푸시 정산 공유 성공 후에만 호출 — `lifecycleStatus` + finalizedAt */
@@ -161,14 +144,5 @@ export async function markMeetingLifecycleSettled(meetingId: string): Promise<vo
     return;
   }
 
-  const ref = doc(getFirebaseFirestore(), MEETINGS_COLLECTION, mid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('모임을 찾을 수 없어요.');
-  const data = snap.data() as Record<string, unknown>;
-  const prev = readSettlementInfoRaw(data);
-  const nextInfo: MeetingSettlementInfo = { ...prev, finalizedAt };
-  await updateDoc(ref, {
-    lifecycleStatus: 'SETTLED',
-    settlementInfo: settlementInfoToDocValue(nextInfo),
-  } as Record<string, unknown>);
+  throw new Error('[settlement] Supabase 원장(UUID) 모임만 지원합니다.');
 }

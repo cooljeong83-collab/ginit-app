@@ -389,6 +389,10 @@ verify_jwt = false
 [functions.unfurl-link-for-chat]
 verify_jwt = false
 
+# DB Webhook(chat_messages INSERT) → 사용자별 Broadcast. Authorization: service role 또는 x-chat-notify-secret.
+[functions.chat-user-notifications-broadcast]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
