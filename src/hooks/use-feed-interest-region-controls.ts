@@ -57,10 +57,10 @@ export function useFeedInterestRegionControls() {
 
   const exploreActiveRegionNorm = useMemo(
     () =>
-      feedLocationReady && registeredRegions.length > 0
+      registeredRegions.length > 0
         ? resolveExploreActiveRegionNorm(registeredRegions, activeRegionNorm)
         : '',
-    [feedLocationReady, registeredRegions, activeRegionNorm],
+    [registeredRegions, activeRegionNorm],
   );
 
   useEffect(() => {

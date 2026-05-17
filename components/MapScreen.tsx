@@ -83,7 +83,6 @@ import {
 import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
 import { peekFeedRegionMapSelectionForMapBoot } from '@/src/lib/feed-registered-regions';
 import {
-  approximateCenterLatLngForFeedRegion,
   approximateCenterLatLngForFeedRegionSync,
   buildCameraRegionForFeedInterestNorm,
   centerLatForMapSheetAndTopChrome,
@@ -886,23 +885,17 @@ export default function MapScreen() {
 
   /** 홈 탐색과 동일한 관심 구 — 조회 박스(마커·시트) 즉시 맞춘 뒤 카메라 이동 */
   const applyFeedInterestRegionToMap = useCallback(
-    async (regionNorm: string, opts?: { force?: boolean; animate?: boolean }) => {
+    (regionNorm: string, opts?: { force?: boolean; animate?: boolean }) => {
       const norm = normalizeFeedRegionLabel(regionNorm.trim());
       if (!norm) return;
       const shouldAnimate = opts?.animate !== false;
       if (!opts?.force && lastSnappedFeedRegionNormRef.current === norm && shouldAnimate) return;
       lastSnappedFeedRegionNormRef.current = norm;
 
-      const centerSync = approximateCenterLatLngForFeedRegionSync(norm);
-      const rSync = buildCameraRegionForFeedInterestNorm(norm, centerSync, feedInterestMapLayout);
-      commitMapGeoQueryForFeedInterest(rSync, centerSync, norm);
-
-      if (!shouldAnimate) return;
-
-      const center = await approximateCenterLatLngForFeedRegion(norm);
+      const center = approximateCenterLatLngForFeedRegionSync(norm);
       const rCamera = buildCameraRegionForFeedInterestNorm(norm, center, feedInterestMapLayout);
       commitMapGeoQueryForFeedInterest(rCamera, center, norm);
-      animateMapToRegion(rCamera);
+      if (shouldAnimate) animateMapToRegion(rCamera);
     },
     [animateMapToRegion, commitMapGeoQueryForFeedInterest, feedInterestMapLayout],
   );
@@ -1042,34 +1035,39 @@ export default function MapScreen() {
   );
 
   useLayoutEffect(() => {
-    if (!feedLocationReady || !exploreActiveRegionNorm) return;
+    if (!exploreActiveRegionNorm) return;
     if (skipInterestRegionMapSyncRef.current) return;
     const norm = normalizeFeedRegionLabel(exploreActiveRegionNorm);
     const centerSync = approximateCenterLatLngForFeedRegionSync(norm);
     const rSync = buildCameraRegionForFeedInterestNorm(norm, centerSync, feedInterestMapLayout);
     commitMapGeoQueryForFeedInterest(rSync, centerSync, norm);
-  }, [
-    exploreActiveRegionNorm,
-    feedLocationReady,
-    feedInterestMapLayout,
-    commitMapGeoQueryForFeedInterest,
-  ]);
+  }, [exploreActiveRegionNorm, feedInterestMapLayout, commitMapGeoQueryForFeedInterest]);
 
   useEffect(() => {
-    if (!feedLocationReady || !exploreActiveRegionNorm) return;
+    if (!exploreActiveRegionNorm) return;
     if (skipInterestRegionMapSyncRef.current) {
       skipInterestRegionMapSyncRef.current = false;
       return;
     }
-    void applyFeedInterestRegionToMap(exploreActiveRegionNorm, { force: true, animate: true });
-  }, [exploreActiveRegionNorm, feedLocationReady, applyFeedInterestRegionToMap]);
+    applyFeedInterestRegionToMap(exploreActiveRegionNorm, { force: true, animate: true });
+  }, [exploreActiveRegionNorm, applyFeedInterestRegionToMap]);
 
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(FEED_INTEREST_REGION_SELECTION_CHANGED, () => {
-      void refreshFromStorage();
+      void (async () => {
+        await refreshFromStorage();
+        const { regions, activeNorm } = peekFeedRegionMapSelectionForMapBoot();
+        if (regions.length === 0) return;
+        const setN = new Set(regions.map((x) => normalizeFeedRegionLabel(x)));
+        const norm =
+          activeNorm && setN.has(normalizeFeedRegionLabel(activeNorm))
+            ? normalizeFeedRegionLabel(activeNorm)
+            : normalizeFeedRegionLabel(regions[0]!);
+        applyFeedInterestRegionToMap(norm, { force: true, animate: true });
+      })();
     });
     return () => sub.remove();
-  }, [refreshFromStorage]);
+  }, [refreshFromStorage, applyFeedInterestRegionToMap]);
 
   useEffect(() => {
     let posSub: Location.LocationSubscription | null = null;

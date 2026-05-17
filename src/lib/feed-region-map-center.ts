@@ -1,7 +1,8 @@
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 
-import { normalizeFeedRegionLabel } from '@/src/lib/feed-display-location';
+import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
+import { FEED_NON_SEOUL_GU_SYNC_CENTERS } from '@/src/lib/feed-interest-region-sync-centers.generated';
 import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-districts';
 import { SEOUL_GU_LATLNG_BOUNDS, seoulGuBboxCenter } from '@/src/lib/seoul-gu-bounds';
@@ -67,6 +68,8 @@ export function approximateCenterLatLngForFeedRegionSync(normRaw: string): LatLn
   if (SEOUL_GU_SET.has(norm)) {
     return seoulGuBboxCenter(norm as SeoulGuLabel);
   }
+  const preset = FEED_NON_SEOUL_GU_SYNC_CENTERS[norm];
+  if (preset) return preset;
   return FEED_REGION_MAP_FALLBACK_CENTER;
 }
 

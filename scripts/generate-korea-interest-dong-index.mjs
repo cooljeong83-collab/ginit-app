@@ -1,0 +1,154 @@
+/**
+ * kr-legal-dong/dong.json → src/lib/korea-interest-dong-index.generated.ts
+ * 관심 지역 검색에서 동(읍·면) 이름으로 행정구를 찾을 때 사용합니다.
+ */
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const OUT = path.join(ROOT, 'src/lib/korea-interest-dong-index.generated.ts');
+const DONG_URL = 'https://raw.githubusercontent.com/kr-legal-dong/kr-legal-dong/master/dong.json';
+
+const METRO_SIGUNGU = {
+  부산광역시: [
+    '중구', '서구', '동구', '영도구', '부산진구', '동래구', '남구', '북구', '강서구', '해운대구', '사하구',
+    '금정구', '연제구', '수영구', '사상구',
+  ],
+  인천광역시: ['중구', '동구', '미추홀구', '연수구', '남동구', '부평구', '계양구', '서구'],
+  대구광역시: ['중구', '동구', '서구', '남구', '북구', '수성구', '달서구'],
+  광주광역시: ['동구', '서구', '남구', '북구', '광산구'],
+  대전광역시: ['동구', '중구', '서구', '유성구', '대덕구'],
+  울산광역시: ['중구', '남구', '동구', '북구'],
+};
+
+const SI_SIGUNGU_GUS = [
+  { sido: '경기도', city: '수원시', gus: ['장안구', '권선구', '팔달구', '영통구'] },
+  { sido: '경기도', city: '성남시', gus: ['수정구', '중원구', '분당구'] },
+  { sido: '경기도', city: '고양시', gus: ['덕양구', '일산동구', '일산서구'] },
+  { sido: '경기도', city: '용인시', gus: ['처인구', '기흥구', '수지구'] },
+  { sido: '경기도', city: '부천시', gus: ['원미구', '소사구', '오정구'] },
+  { sido: '경기도', city: '안양시', gus: ['만안구', '동안구'] },
+  { sido: '경기도', city: '안산시', gus: ['상록구', '단원구'] },
+  { sido: '충청북도', city: '청주시', gus: ['상당구', '서원구', '흥덕구', '청원구'] },
+  { sido: '충청남도', city: '천안시', gus: ['동남구', '서북구'] },
+  { sido: '경상북도', city: '포항시', gus: ['남구', '북구'] },
+  { sido: '경상남도', city: '창원시', gus: ['의창구', '성산구', '마산합포구', '마산회원구', '진해구'] },
+  { sido: '전북특별자치도', city: '전주시', gus: ['완산구', '덕진구'] },
+  { sido: '전라남도', city: '목포시', gus: ['동구', '서구'] },
+];
+
+const SEOUL_GUS = [
+  '강남구', '강동구', '강북구', '강서구', '관악구', '광진구', '구로구', '금천구', '노원구', '도봉구',
+  '동대문구', '동작구', '마포구', '서대문구', '서초구', '성동구', '성북구', '송파구', '양천구', '영등포구',
+  '용산구', '은평구', '종로구', '중구', '중랑구',
+];
+
+function metroShortToken(sido) {
+  return sido.replace(/특별시|광역시|특별자치시|특별자치도/g, '').trim();
+}
+
+function extractGuFromKoreanAddressText(text) {
+  const t = text.trim();
+  if (!t) return null;
+  const m = t.match(/([가-힣]{1,20}구)(?=\s|$|[^가-힣])/);
+  return m ? m[1] : null;
+}
+
+function normalizeFeedRegionLabel(label) {
+  const t = label.trim();
+  if (!t) return '';
+  const two = t.split(/\s+/).filter(Boolean);
+  if (
+    two.length === 2 &&
+    /구$/.test(two[1]) &&
+    two[1].length >= 2 &&
+    !/^서울/i.test(two[0]) &&
+    !/^seoul$/i.test(two[0])
+  ) {
+    return t;
+  }
+  return extractGuFromKoreanAddressText(t) ?? t;
+}
+
+function buildFlatKeys() {
+  const keys = new Set();
+  const add = (rawKey) => {
+    const k = normalizeFeedRegionLabel(rawKey);
+    if (k) keys.add(k);
+  };
+  for (const gu of SEOUL_GUS) add(gu);
+  for (const [sido, gus] of Object.entries(METRO_SIGUNGU)) {
+    const token = metroShortToken(sido);
+    for (const gu of gus) add(`${token} ${gu}`);
+  }
+  for (const row of SI_SIGUNGU_GUS) {
+    const cityShort = row.city.replace(/시$/, '');
+    for (const gu of row.gus) add(`${cityShort} ${gu}`);
+  }
+  return keys;
+}
+
+function feedRegionKeyFromLegalDong(siName, guName) {
+  if (siName === '서울특별시') {
+    const gu = extractGuFromKoreanAddressText(guName) ?? guName;
+    return SEOUL_GUS.includes(gu) ? normalizeFeedRegionLabel(gu) : '';
+  }
+  if (METRO_SIGUNGU[siName]) {
+    const gu = extractGuFromKoreanAddressText(guName) ?? guName;
+    if (!METRO_SIGUNGU[siName].includes(gu)) return '';
+    return normalizeFeedRegionLabel(`${metroShortToken(siName)} ${gu}`);
+  }
+  for (const row of SI_SIGUNGU_GUS) {
+    if (siName !== row.sido) continue;
+    if (!guName.startsWith(row.city)) continue;
+    const guPart = guName.slice(row.city.length).trim();
+    if (!row.gus.includes(guPart)) continue;
+    const cityShort = row.city.replace(/시$/, '');
+    return normalizeFeedRegionLabel(`${cityShort} ${guPart}`);
+  }
+  return '';
+}
+
+function escapeTsString(s) {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+const flatKeys = buildFlatKeys();
+const res = await fetch(DONG_URL);
+if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+const dongs = await res.json();
+
+const rows = [];
+const seenPair = new Set();
+for (const d of dongs) {
+  if (!d.active) continue;
+  const name = String(d.name ?? '').trim();
+  if (!name) continue;
+  if (!/(동|읍|면|리)$/.test(name)) continue;
+  const key = feedRegionKeyFromLegalDong(String(d.siName ?? ''), String(d.guName ?? ''));
+  if (!key || !flatKeys.has(key)) continue;
+  const pairKey = `${name}\0${key}`;
+  if (seenPair.has(pairKey)) continue;
+  seenPair.add(pairKey);
+  const hay = String(d.fullName ?? '').toLowerCase().replace(/\s+/g, ' ');
+  rows.push({ dong: name, key, hay });
+}
+
+rows.sort((a, b) => a.dong.localeCompare(b.dong, 'ko') || a.key.localeCompare(b.key, 'ko'));
+
+const body = rows
+  .map((r) => `  { dong: '${escapeTsString(r.dong)}', key: '${escapeTsString(r.key)}', hay: '${escapeTsString(r.hay)}' },`)
+  .join('\n');
+
+const ts = `/** @generated by scripts/generate-korea-interest-dong-index.mjs — do not edit manually */
+export type KoreaInterestDongRow = { dong: string; key: string; hay: string };
+
+/** 법정동·읍면동 이름 → 관심 지역 행정구 key (kr-legal-dong, ${rows.length}행) */
+export const KOREA_INTEREST_DONG_ROWS: readonly KoreaInterestDongRow[] = [
+${body}
+];
+`;
+
+writeFileSync(OUT, ts, 'utf8');
+console.log(`Wrote ${rows.length} dong rows → ${OUT}`);

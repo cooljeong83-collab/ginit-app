@@ -22,7 +22,9 @@
     "notion:log": "python3 scripts/notion_helper.py update-log",
     "migrate:profiles:firestore-to-supabase": "node ./scripts/migrate-firestore-profiles-to-supabase.mjs",
     "migrate:categories:firestore-to-supabase": "node ./scripts/migrate-firestore-categories-to-supabase.mjs",
-    "print:categories-sql": "node ./scripts/print-firestore-categories-sql.mjs"
+    "print:categories-sql": "node ./scripts/print-firestore-categories-sql.mjs",
+    "generate:korea-dong-index": "node ./scripts/generate-korea-interest-dong-index.mjs",
+    "generate:feed-region-centers": "node ./scripts/generate-feed-interest-region-sync-centers.mjs"
   },
   "dependencies": {
     "@eabdullazyanov/react-native-sms-user-consent": "^1.3.0",

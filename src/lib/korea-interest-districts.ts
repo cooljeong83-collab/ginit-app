@@ -3,9 +3,9 @@
  * 광역시·특별시는 cosmosfarm/korea-administrative-district 기준(군 제외),
  * 도 단위 시는 행정구(○○구)가 있는 시만 확장합니다.
  */
-import { formatSeoulGuLabel } from '@/src/lib/feed-display-location';
 import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
-import { ALL_SEOUL_GU } from '@/src/lib/seoul-gu-constants';
+import { KOREA_INTEREST_DONG_ROWS } from '@/src/lib/korea-interest-dong-index.generated';
+import { ALL_SEOUL_GU, SEOUL_GU_SET, type SeoulGuLabel } from '@/src/lib/seoul-gu-constants';
 
 export type KoreaGuSearchHit = { key: string; label: string };
 
@@ -97,6 +97,12 @@ function buildFlatRows(): FlatRow[] {
 
 const FLAT: readonly FlatRow[] = buildFlatRows();
 
+const FLAT_BY_KEY: ReadonlyMap<string, FlatRow> = (() => {
+  const m = new Map<string, FlatRow>();
+  for (const r of FLAT) m.set(r.key, r);
+  return m;
+})();
+
 const LABEL_BY_KEY: ReadonlyMap<string, string> = (() => {
   const m = new Map<string, string>();
   for (const r of FLAT) m.set(r.key, r.label);
@@ -105,11 +111,39 @@ const LABEL_BY_KEY: ReadonlyMap<string, string> = (() => {
 
 export function getInterestRegionDisplayLabel(regionKey: string): string {
   const k = normalizeFeedRegionLabel(regionKey);
-  return LABEL_BY_KEY.get(k) ?? formatSeoulGuLabel(regionKey);
+  if (LABEL_BY_KEY.has(k)) return LABEL_BY_KEY.get(k)!;
+  if (SEOUL_GU_SET.has(k as SeoulGuLabel)) return `서울특별시 ${k}`;
+  return regionKey.trim();
+}
+
+function searchDongRowsForInterestDistricts(
+  compactQ: string,
+  parts: string[],
+  exclude: ReadonlySet<string>,
+  tryPush: (row: FlatRow) => void,
+  cap: () => boolean,
+): void {
+  if (compactQ.length < 2 || compactQ === '동') return;
+
+  for (const d of KOREA_INTEREST_DONG_ROWS) {
+    if (cap()) break;
+    if (exclude.has(d.key)) continue;
+    const dn = d.dong.replace(/\s/g, '');
+    const hn = d.hay.replace(/\s/g, '');
+    const direct =
+      compactQ.length >= 1 && (dn.includes(compactQ) || hn.includes(compactQ));
+    const token =
+      parts.length > 0 &&
+      parts.every((w) => w.length > 0 && (d.hay.includes(w) || d.dong.includes(w) || d.key.includes(w)));
+    if (!direct && !token) continue;
+    const row = FLAT_BY_KEY.get(d.key);
+    if (row) tryPush(row);
+  }
 }
 
 /**
- * 전국 구 단위 검색. 이미 등록된 key(정규화)는 제외합니다.
+ * 전국 구 단위 검색. 동·읍·면 이름으로 검색해도 해당 행정구가 나옵니다.
+ * 이미 등록된 key(정규화)는 제외합니다.
  */
 export function searchKoreaInterestDistricts(queryRaw: string, excludeRegions: readonly string[]): KoreaGuSearchHit[] {
   const exclude = new Set(excludeRegions.map((x) => normalizeFeedRegionLabel(x)));
@@ -117,6 +151,7 @@ export function searchKoreaInterestDistricts(queryRaw: string, excludeRegions: r
   if (!q || q === '구') return [];
 
   const compactQ = q.replace(/\s+/g, '').toLowerCase();
+  const parts = q.split(/\s+/).filter(Boolean);
   const hits: KoreaGuSearchHit[] = [];
   const seenHit = new Set<string>();
 
@@ -126,6 +161,8 @@ export function searchKoreaInterestDistricts(queryRaw: string, excludeRegions: r
     hits.push({ key: row.key, label: row.label });
   };
 
+  const atCap = () => hits.length >= 80;
+
   for (const row of FLAT) {
     if (exclude.has(row.key)) continue;
     const hn = row.hay.replace(/\s/g, '');
@@ -133,17 +170,20 @@ export function searchKoreaInterestDistricts(queryRaw: string, excludeRegions: r
     const ln = row.label.replace(/\s/g, '').toLowerCase();
     if (compactQ.length >= 1 && (hn.includes(compactQ) || kn.includes(compactQ) || ln.includes(compactQ))) {
       tryPush(row);
-      if (hits.length >= 80) return hits;
+      if (atCap()) return hits;
     }
   }
 
+  searchDongRowsForInterestDistricts(compactQ, parts, exclude, tryPush, atCap);
+  if (atCap()) return hits;
+
   if (hits.length === 0 && q.length >= 1) {
-    const parts = q.split(/\s+/).filter(Boolean);
     for (const row of FLAT) {
       if (exclude.has(row.key)) continue;
       if (parts.every((w) => w.length > 0 && (row.label.includes(w) || row.key.includes(w)))) tryPush(row);
-      if (hits.length >= 80) break;
+      if (atCap()) break;
     }
+    if (!atCap()) searchDongRowsForInterestDistricts(compactQ, parts, exclude, tryPush, atCap);
   }
 
   return hits;
