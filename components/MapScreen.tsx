@@ -7,10 +7,11 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  DeviceEventEmitter,
   InteractionManager,
   LayoutAnimation,
   Modal,
@@ -40,12 +41,20 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 
+import {
+  FeedMeetingListSettingsModal,
+  computeFeedMeetingListSettingsDotActive,
+  useMeetingCreateNotifyEffective,
+} from '@/components/feed/FeedMeetingListSettingsModal';
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
+import { InterestRegionHeaderCluster } from '@/components/feed/InterestRegionHeaderCluster';
+import { InterestRegionModals } from '@/components/feed/InterestRegionModals';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-region-controls';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
@@ -55,11 +64,11 @@ import {
   FEED_LOCATION_FALLBACK_SHORT,
   normalizeFeedRegionLabel,
   resolveFeedLocationContextWithoutPermissionPrompt,
+  resolveFeedLocationForDistanceSort,
   resolveFeedLocationWithGrantedPermission,
 } from '@/src/lib/feed-display-location';
 import { saveFeedLocationCache } from '@/src/lib/feed-location-cache';
 import {
-  buildMapCategoryChips,
   defaultFeedSearchFilters,
   feedSearchFiltersActive,
   listSortModeLabel,
@@ -70,22 +79,27 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
+import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
+import { peekFeedRegionMapSelectionForMapBoot } from '@/src/lib/feed-registered-regions';
 import {
   approximateCenterLatLngForFeedRegion,
   approximateCenterLatLngForFeedRegionSync,
+  buildCameraRegionForFeedInterestNorm,
+  centerLatForMapSheetAndTopChrome,
   regionViewportForFeedInterestRegion,
 } from '@/src/lib/feed-region-map-center';
-import {
-  loadActiveFeedRegion,
-  loadRegisteredFeedRegions,
-  peekFeedRegionMapSelectionForMapBoot,
-  saveActiveFeedRegion,
-} from '@/src/lib/feed-registered-regions';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
-import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
-import { loadFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
-import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
+import {
+  alertForegroundLocationPermissionDeniedLikeMyLocation,
+  ensureForegroundLocationPermissionLikeMyLocation,
+} from '@/src/lib/location-permission';
+import {
+  loadFeedCategoryBarVisibleIds,
+  loadFeedExploreTodayOnly,
+  persistFeedCategoryBarVisibleIds,
+  persistFeedExploreTodayOnly,
+} from '@/src/lib/feed-category-bar-preference';
 import { prefetchMeetingDetailBeforeNavigate } from '@/src/lib/map-open-meeting-detail';
 import {
   MIXED_MEETING_CLUSTER_PIN_ACCENT,
@@ -106,7 +120,6 @@ import {
   formatPublicMeetingGenderSummary,
   formatPublicMeetingSettlementSummary,
   getMeetingRecruitmentPhase,
-  isMeetingScheduledTodaySeoul,
   meetingCategoryDisplayLabel,
   meetingParticipantCount,
   parsePublicMeetingDetailsConfig,
@@ -291,14 +304,7 @@ function centerLatForBetweenTopAndBottom(
   bottomSheetPx: number,
   windowH: number,
 ) {
-  const bottomFrac = Math.max(0, Math.min(0.9, bottomSheetPx / Math.max(1, windowH)));
-  // 상단 카테고리 메뉴(글래스 바)는 기기/폰트에 따라 높이 체감이 커서,
-  // 내 위치 이동 시 마커가 위쪽으로 붙어 보이지 않도록 추정치를 조금 넉넉하게 잡습니다.
-  const topOverlayPx = Math.max(0, topInsetPx) ; // 카테고리 글래스 바 영역(대략)
-  const topFrac = Math.max(0, Math.min(0.4, topOverlayPx / Math.max(1, windowH)));
-  const desiredY = (topFrac + (1 - bottomFrac)) / 2;
-  const yShiftFrac = 0.5 - desiredY;
-  return targetLat - baseDeltaLat * yShiftFrac;
+  return centerLatForMapSheetAndTopChrome(targetLat, baseDeltaLat, topInsetPx, bottomSheetPx, windowH);
 }
 
 function regionToBounds(r: Region) {
@@ -516,9 +522,13 @@ export default function MapScreen() {
   const mapGeoQueryRegionRef = useRef<Region | null>(null);
   /** 내 위치: 카메라는 좁게·RPC·병합은 `mapRadiusKm`일 때, idle에서 `pending`이 좁은 카메라로 덮이며 재검색이 뜨는 것 방지 */
   const mapSnapCameraTighterThanQueryRef = useRef(false);
+  /** «내 위치»로 관심지역만 바꿀 때 구 중심 카메라·조회 박스 동기화 생략 */
+  const skipInterestRegionMapSyncRef = useRef(false);
+  const pendingFocusFirstAfterSortRef = useRef(false);
 
   const [selectedMeetingIndex, setSelectedMeetingIndex] = useState(0);
   const [locatingUser, setLocatingUser] = useState(false);
+  const [distanceSortLocating, setDistanceSortLocating] = useState(false);
   // 바텀시트는 기본으로 요약 영역이 펼쳐진 상태(핸들만이 아닌 전체 피크)로 시작합니다.
   const sheetShown = useSharedValue(1);
   const locatingSpin = useSharedValue(0);
@@ -646,43 +656,28 @@ export default function MapScreen() {
   const [mapSearchOpen, setMapSearchOpen] = useState(false);
   const [mapSearchFilters, setMapSearchFilters] = useState<FeedSearchFilters>(defaultFeedSearchFilters());
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  /** `null`이면 상단 칩에 카테고리 마스터 전부 표시 */
-  const [mapBarVisibleCategoryIds, setMapBarVisibleCategoryIds] = useState<string[] | null>(null);
-  const [mapCategoryBarModalOpen, setMapCategoryBarModalOpen] = useState(false);
-  const [categoryBarDraft, setCategoryBarDraft] = useState<string[]>([]);
+  const [feedListSettingsModalOpen, setFeedListSettingsModalOpen] = useState(false);
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [userHeadingDeg, setUserHeadingDeg] = useState<number | null>(null);
   const [genderByUserId, setGenderByUserId] = useState<Map<string, string>>(new Map());
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
   /** 홈 «모임» 탐색과 동일 — 기본 false(홈 탐색 기본값) */
-  const recruitingOnly = false;
-  /** 탐색 상단 카테고리 팝업에서 저장 시 적용 — 서울 달력 기준 오늘 일정 모임만 */
-  const [mapTodayOnly, setMapTodayOnly] = useState(false);
-  const [categoryBarTodayOnlyDraft, setCategoryBarTodayOnlyDraft] = useState(false);
-  /** 상단 카테고리 설정 모달 — 카테고리 목록 스크롤 하단 «더 있음» */
-  const categoryBarModalListLayHRef = useRef(0);
-  const categoryBarModalListContHRef = useRef(0);
-  const categoryBarModalListScrollYRef = useRef(0);
-  const [categoryBarModalListShowMoreBelow, setCategoryBarModalListShowMoreBelow] = useState(false);
-  const categoryBarModalCategoryListScrollRef = useRef<ScrollView | null>(null);
+  const [recruitingOnly, setRecruitingOnly] = useState(false);
+  const [exploreTodayOnly, setExploreTodayOnly] = useState(false);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = useMemo(() => (Array.isArray(categoriesRaw) ? categoriesRaw : []), [categoriesRaw]);
-  const [registeredRegions, setRegisteredRegions] = useState<string[]>([]);
-  const [activeRegionNorm, setActiveRegionNorm] = useState<string | null>(null);
-  const [feedLocationReady, setFeedLocationReady] = useState(false);
+  const interestRegion = useFeedInterestRegionControls();
+  const {
+    registeredRegions,
+    exploreActiveRegionNorm,
+    feedLocationReady,
+    refreshFromStorage,
+    selectActiveRegionClosestToCoords,
+  } = interestRegion;
   const [feedBarVisibleCategoryIds, setFeedBarVisibleCategoryIds] = useState<string[] | null>(null);
   const { meetings: feedMeetings } = useMeetingsFeedInfiniteQuery({ enabled: feedLocationReady });
-
-  /** 홈 «모임» 탐색과 동일한 관심 구 선택 규칙 */
-  const exploreActiveRegionNorm = useMemo(() => {
-    if (!feedLocationReady || registeredRegions.length === 0) return '';
-    const set = new Set(registeredRegions.map((r) => normalizeFeedRegionLabel(r)));
-    const a = activeRegionNorm ? normalizeFeedRegionLabel(activeRegionNorm) : '';
-    if (a && set.has(a)) return a;
-    return normalizeFeedRegionLabel(registeredRegions[0]!);
-  }, [feedLocationReady, registeredRegions, activeRegionNorm]);
   const [meetingsBooted, setMeetingsBooted] = useState(false);
   /** Query Cache-First: geo RPC 미사용 — 스플래시·재검색 UI 조건용으로 항상 false */
   const mapGeoMeetingsLoading = false;
@@ -696,10 +691,6 @@ export default function MapScreen() {
   const [zoomDeltaForClustering, setZoomDeltaForClustering] = useState(
     INITIAL_VIEW_NS_SPAN_METERS / 111320,
   );
-  /** 상단 카테고리 칩 가로 스크롤 — 오른쪽 «더 있음» 표시용 */
-  const [chipScrollLayoutW, setChipScrollLayoutW] = useState(0);
-  const [chipScrollContentW, setChipScrollContentW] = useState(0);
-  const [chipScrollOffsetX, setChipScrollOffsetX] = useState(0);
   const isMapScreenFocused = useIsFocused();
   /** Android Fabric: NaverMapView 자식(마커)은 맵 초기화·포커스 후에만 마운트 — getChildAt OOB 방지 */
   const [androidMapOverlaysReady, setAndroidMapOverlaysReady] = useState(Platform.OS !== 'android');
@@ -734,7 +725,9 @@ export default function MapScreen() {
    * 하이브리드 최초 부트 전, 또는 반경 RPC 진행 중까지 시트 스플래시 — 그 사이 빈 시트 카피가 먼저 깜빡이지 않게 함.
    * 관심지역 기반 초기 앵커는 동기로 잡히므로 권한·GPS 대기로 시트를 가리지 않습니다.
    */
-  const showSheetSplash = !meetingsBooted && feedMeetings.length === 0;
+  const showSheetLocationChecking = locatingUser || distanceSortLocating;
+  const showSheetSplash = showSheetLocationChecking || (!meetingsBooted && feedMeetings.length === 0);
+  const sheetSplashLabel = showSheetLocationChecking ? '내 위치를 확인중입니다' : null;
 
   useAppPolicies();
   const mapRadiusKm = Math.max(0.5, Math.min(80, getPolicyNumeric('meeting', 'map_radius_km', 3)));
@@ -819,67 +812,77 @@ export default function MapScreen() {
     ],
   );
 
-  /** 모임 탭에서 선택한 관심 구 전체가 보이도록 카메라·조회 박스 동기화 */
-  const snapMapToFeedInterestRegion = useCallback(
-    async (regionNorm: string, opts?: { force?: boolean }) => {
+  const feedInterestMapLayout = useMemo(
+    () => ({
+      topInsetPx: insets.top ?? 0,
+      bottomSheetPx: sheetPeekHeight,
+      windowHeight,
+    }),
+    [insets.top, sheetPeekHeight, windowHeight],
+  );
+
+  const commitMapGeoQueryForFeedInterest = useCallback((rCamera: Region, center: LatLng, norm: string) => {
+    mapSnapCameraTighterThanQueryRef.current = false;
+    lastCompleteRegionRef.current = rCamera;
+    setSearchAnchor(center);
+    setMapGeoQueryRegion(rCamera);
+    setQueriedRegion(rCamera);
+    setPendingRegion(rCamera);
+    lastQueriedRegionRef.current = rCamera;
+    suppressRescanUntilMsRef.current = Date.now() + 1400;
+    setDriftTooFar(false);
+    setMapMovedSinceSearch(false);
+    setRegionLabel(norm);
+  }, []);
+
+  const animateMapToRegion = useCallback((rCamera: Region) => {
+    if (Platform.OS === 'android') setAndroidMapOverlaysReady(false);
+    const remountOverlaysAfterMs = 560;
+    try {
+      if (Platform.OS === 'android') {
+        naverMapRef.current?.animateRegionTo({
+          ...centerRegionToNaverRegion(rCamera),
+          duration: 520,
+          easing: 'EaseIn',
+        });
+      } else {
+        mapRef.current?.animateToRegion(rCamera, 450);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (Platform.OS === 'android') {
+      if (androidOverlayRemountTimeoutRef.current != null) {
+        clearTimeout(androidOverlayRemountTimeoutRef.current);
+      }
+      androidOverlayRemountTimeoutRef.current = setTimeout(() => {
+        androidOverlayRemountTimeoutRef.current = null;
+        setAndroidMapOverlaysReady(true);
+      }, remountOverlaysAfterMs);
+    }
+  }, []);
+
+  /** 홈 탐색과 동일한 관심 구 — 조회 박스(마커·시트) 즉시 맞춘 뒤 카메라 이동 */
+  const applyFeedInterestRegionToMap = useCallback(
+    async (regionNorm: string, opts?: { force?: boolean; animate?: boolean }) => {
       const norm = normalizeFeedRegionLabel(regionNorm.trim());
       if (!norm) return;
-      if (!opts?.force && lastSnappedFeedRegionNormRef.current === norm) return;
+      const shouldAnimate = opts?.animate !== false;
+      if (!opts?.force && lastSnappedFeedRegionNormRef.current === norm && shouldAnimate) return;
       lastSnappedFeedRegionNormRef.current = norm;
 
+      const centerSync = approximateCenterLatLngForFeedRegionSync(norm);
+      const rSync = buildCameraRegionForFeedInterestNorm(norm, centerSync, feedInterestMapLayout);
+      commitMapGeoQueryForFeedInterest(rSync, centerSync, norm);
+
+      if (!shouldAnimate) return;
+
       const center = await approximateCenterLatLngForFeedRegion(norm);
-      const viewport = regionViewportForFeedInterestRegion(norm);
-      const rCamera: Region = {
-        latitude: centerLatForBetweenTopAndBottom(
-          center.latitude,
-          viewport.latitudeDelta,
-          insets.top ?? 0,
-          sheetPeekHeight,
-          windowHeight,
-        ),
-        longitude: center.longitude,
-        latitudeDelta: viewport.latitudeDelta,
-        longitudeDelta: viewport.longitudeDelta,
-      };
-
-      mapSnapCameraTighterThanQueryRef.current = false;
-      if (Platform.OS === 'android') setAndroidMapOverlaysReady(false);
-      lastCompleteRegionRef.current = rCamera;
-      setSearchAnchor(center);
-      setMapGeoQueryRegion(rCamera);
-      setQueriedRegion(rCamera);
-      setPendingRegion(rCamera);
-      lastQueriedRegionRef.current = rCamera;
-      suppressRescanUntilMsRef.current = Date.now() + 1400;
-      setDriftTooFar(false);
-      setMapMovedSinceSearch(false);
-      setRegionLabel(norm);
-
-      const remountOverlaysAfterMs = 560;
-      try {
-        if (Platform.OS === 'android') {
-          naverMapRef.current?.animateRegionTo({
-            ...centerRegionToNaverRegion(rCamera),
-            duration: 520,
-            easing: 'EaseIn',
-          });
-        } else {
-          mapRef.current?.animateToRegion(rCamera, 450);
-        }
-      } catch {
-        /* ignore */
-      }
-      if (Platform.OS === 'android') {
-        if (androidOverlayRemountTimeoutRef.current != null) {
-          clearTimeout(androidOverlayRemountTimeoutRef.current);
-        }
-        androidOverlayRemountTimeoutRef.current = setTimeout(() => {
-          androidOverlayRemountTimeoutRef.current = null;
-          setAndroidMapOverlaysReady(true);
-        }, remountOverlaysAfterMs);
-      }
+      const rCamera = buildCameraRegionForFeedInterestNorm(norm, center, feedInterestMapLayout);
+      commitMapGeoQueryForFeedInterest(rCamera, center, norm);
+      animateMapToRegion(rCamera);
     },
-    [insets.top, sheetPeekHeight, windowHeight],
+    [animateMapToRegion, commitMapGeoQueryForFeedInterest, feedInterestMapLayout],
   );
 
   /** 지도 탭 진입·재진입: 시트·레이아웃만 동기화 (카메라·권한은 관심지역 동기 초기값 / «내 위치» 버튼에서만 처리) */
@@ -970,83 +973,81 @@ export default function MapScreen() {
     let cancelled = false;
     void (async () => {
       try {
-        const regions = await loadRegisteredFeedRegions();
-        if (cancelled) return;
-        setRegisteredRegions(regions);
-        const activeRaw = await loadActiveFeedRegion();
-        if (cancelled) return;
-        let nextActive: string | null = null;
-        let exploreActiveNormLocal = '';
-        if (regions.length > 0) {
-          const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
-          const candidate =
-            activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
-          exploreActiveNormLocal = candidate;
-          nextActive = candidate;
-          if (activeRaw !== candidate) void saveActiveFeedRegion(candidate);
-        } else {
-          void saveActiveFeedRegion(null);
-        }
-        setActiveRegionNorm(nextActive);
-
         const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
         if (cancelled) return;
-
-        const coordsForDistance = ctx.coords;
-
-        setRegionLabel(
-          exploreActiveNormLocal
-            ? normalizeFeedRegionLabel(exploreActiveNormLocal)
-            : normalizeFeedRegionLabel(ctx.labelShort),
-        );
-
-        setUserCoords(coordsForDistance);
-
-        const labelToSave = exploreActiveNormLocal
-          ? normalizeFeedRegionLabel(exploreActiveNormLocal)
+        const labelForCache = exploreActiveRegionNorm
+          ? normalizeFeedRegionLabel(exploreActiveRegionNorm)
           : normalizeFeedRegionLabel(ctx.labelShort);
-        await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: false });
-
-      } finally {
-        if (!cancelled) setFeedLocationReady(true);
+        setRegionLabel(labelForCache);
+        setUserCoords(ctx.coords);
+        await saveFeedLocationCache(labelForCache, ctx.coords, { manualRegion: false });
+      } catch {
+        /* ignore */
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [mapRadiusKm]);
+  }, [mapRadiusKm, exploreActiveRegionNorm]);
 
   useEffect(() => {
     let cancelled = false;
-    void loadFeedCategoryBarVisibleIds().then((v) => {
-      if (!cancelled) setFeedBarVisibleCategoryIds(v);
-    });
+    void (async () => {
+      const [categoryIds, todayOnly] = await Promise.all([
+        loadFeedCategoryBarVisibleIds(),
+        loadFeedExploreTodayOnly(),
+      ]);
+      if (cancelled) return;
+      setFeedBarVisibleCategoryIds(categoryIds);
+      setExploreTodayOnly(todayOnly);
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  useEffect(() => {
-    if (!feedLocationReady || !exploreActiveRegionNorm) return;
-    void snapMapToFeedInterestRegion(exploreActiveRegionNorm);
-  }, [exploreActiveRegionNorm, feedLocationReady, snapMapToFeedInterestRegion]);
-
   useFocusEffect(
     useCallback(() => {
-      void loadFeedCategoryBarVisibleIds().then(setFeedBarVisibleCategoryIds);
-      const { regions, activeNorm } = peekFeedRegionMapSelectionForMapBoot();
-      if (regions.length > 0) {
-        setRegisteredRegions([...regions]);
-        const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
-        const a = activeNorm && setN.has(activeNorm) ? activeNorm : normalizeFeedRegionLabel(regions[0]!);
-        const prev = activeRegionNorm ? normalizeFeedRegionLabel(activeRegionNorm) : '';
-        setActiveRegionNorm(a);
-        if (feedLocationReady && a && a !== prev) {
-          lastSnappedFeedRegionNormRef.current = null;
-        }
-      }
-    }, [activeRegionNorm, feedLocationReady]),
+      void (async () => {
+        const [categoryIds, todayOnly] = await Promise.all([
+          loadFeedCategoryBarVisibleIds(),
+          loadFeedExploreTodayOnly(),
+        ]);
+        setFeedBarVisibleCategoryIds(categoryIds);
+        setExploreTodayOnly(todayOnly);
+      })();
+    }, []),
   );
+
+  useLayoutEffect(() => {
+    if (!feedLocationReady || !exploreActiveRegionNorm) return;
+    if (skipInterestRegionMapSyncRef.current) return;
+    const norm = normalizeFeedRegionLabel(exploreActiveRegionNorm);
+    const centerSync = approximateCenterLatLngForFeedRegionSync(norm);
+    const rSync = buildCameraRegionForFeedInterestNorm(norm, centerSync, feedInterestMapLayout);
+    commitMapGeoQueryForFeedInterest(rSync, centerSync, norm);
+  }, [
+    exploreActiveRegionNorm,
+    feedLocationReady,
+    feedInterestMapLayout,
+    commitMapGeoQueryForFeedInterest,
+  ]);
+
+  useEffect(() => {
+    if (!feedLocationReady || !exploreActiveRegionNorm) return;
+    if (skipInterestRegionMapSyncRef.current) {
+      skipInterestRegionMapSyncRef.current = false;
+      return;
+    }
+    void applyFeedInterestRegionToMap(exploreActiveRegionNorm, { force: true, animate: true });
+  }, [exploreActiveRegionNorm, feedLocationReady, applyFeedInterestRegionToMap]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(FEED_INTEREST_REGION_SELECTION_CHANGED, () => {
+      void refreshFromStorage();
+    });
+    return () => sub.remove();
+  }, [refreshFromStorage]);
 
   useEffect(() => {
     let posSub: Location.LocationSubscription | null = null;
@@ -1093,16 +1094,6 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void loadMapCategoryBarVisibleIds().then((v) => {
-      if (!cancelled) setMapBarVisibleCategoryIds(v);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     setMeetingsBooted(true);
   }, [feedMeetings]);
 
@@ -1128,6 +1119,7 @@ export default function MapScreen() {
       barVisibleCategoryIds: feedBarVisibleCategoryIds,
       categories,
       recruitingOnly,
+      exploreTodayOnly,
       feedSearch: mapSearchFilters,
     }),
     [
@@ -1139,6 +1131,7 @@ export default function MapScreen() {
       feedBarVisibleCategoryIds,
       categories,
       recruitingOnly,
+      exploreTodayOnly,
       mapSearchFilters,
     ],
   );
@@ -1311,173 +1304,116 @@ export default function MapScreen() {
     [initialMapRegion, insets.top, mapGeoQueryRegion, sheetPeekHeight, windowHeight],
   );
 
-  const sortedMapCategoryMaster = useMemo(
-    () =>
-      [...categories].sort((a, b) =>
-        a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko'),
-      ),
-    [categories],
+  const profilePk = useMemo(() => userId?.trim() ?? '', [userId]);
+  const isSignedIn = Boolean(userId?.trim());
+
+  const {
+    loaded: meetingNotifyLoaded,
+    effectiveOn: meetingNotifyEffectiveOn,
+    refresh: refreshMeetingNotify,
+  } = useMeetingCreateNotifyEffective(profilePk);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshMeetingNotify();
+    }, [refreshMeetingNotify]),
   );
-
-  const mapCategoryChips = useMemo(
-    () => buildMapCategoryChips(categories, mapBarVisibleCategoryIds),
-    [categories, mapBarVisibleCategoryIds],
-  );
-
-  const showMapCategoryChipsScrollMore = useMemo(() => {
-    const lw = chipScrollLayoutW;
-    const cw = chipScrollContentW;
-    const ox = chipScrollOffsetX;
-    if (lw < 8 || cw <= lw + 4) return false;
-    return ox < cw - lw - 8;
-  }, [chipScrollLayoutW, chipScrollContentW, chipScrollOffsetX]);
-
-  const onMapCategoryChipsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    setChipScrollOffsetX(e.nativeEvent.contentOffset.x);
-  }, []);
-
-  const onMapCategoryChipsContentSizeChange = useCallback((w: number) => {
-    setChipScrollContentW(w);
-  }, []);
-
-  const onMapCategoryChipsLayout = useCallback((e: LayoutChangeEvent) => {
-    setChipScrollLayoutW(e.nativeEvent.layout.width);
-  }, []);
-
-  /** 상단 칩 일부만 표시하도록 저장된 경우 → 옵션 버튼을 선택된 칩 스타일로 */
-  const mapCategoryBarFilterActive = useMemo(() => {
-    if (mapTodayOnly) return true;
-    if (categories.length === 0) return false;
-    if (mapBarVisibleCategoryIds == null) return false;
-    return mapBarVisibleCategoryIds.length < categories.length;
-  }, [categories.length, mapBarVisibleCategoryIds, mapTodayOnly]);
 
   useEffect(() => {
-    if (!categories.length || mapBarVisibleCategoryIds == null) return;
+    if (!categories.length || feedBarVisibleCategoryIds == null) return;
     const idSet = new Set(categories.map((c) => c.id));
-    const valid = mapBarVisibleCategoryIds.filter((id) => idSet.has(id));
-    if (valid.length === mapBarVisibleCategoryIds.length) return;
+    const valid = feedBarVisibleCategoryIds.filter((id) => idSet.has(id));
+    if (valid.length === feedBarVisibleCategoryIds.length) return;
     const next =
       valid.length === 0 || valid.length === categories.length ? null : valid;
-    setMapBarVisibleCategoryIds(next);
-    void persistMapCategoryBarVisibleIds(next);
-  }, [categories, mapBarVisibleCategoryIds]);
+    setFeedBarVisibleCategoryIds(next);
+    void persistFeedCategoryBarVisibleIds(next);
+  }, [categories, feedBarVisibleCategoryIds]);
 
-  useEffect(() => {
-    if (selectedCategoryId == null) return;
-    const ok = mapCategoryChips.some((c) => c.filterId === selectedCategoryId);
-    if (!ok) setSelectedCategoryId(null);
-  }, [mapCategoryChips, selectedCategoryId]);
-
-  const openMapCategoryBarModal = useCallback(() => {
-    const ordered = sortedMapCategoryMaster.map((c) => c.id);
-    if (mapBarVisibleCategoryIds == null) {
-      setCategoryBarDraft(ordered);
-    } else {
-      setCategoryBarDraft(ordered.filter((id) => mapBarVisibleCategoryIds.includes(id)));
-    }
-    setCategoryBarTodayOnlyDraft(mapTodayOnly);
-    setMapCategoryBarModalOpen(true);
-  }, [sortedMapCategoryMaster, mapBarVisibleCategoryIds, mapTodayOnly]);
-
-  const closeMapCategoryBarModal = useCallback(() => setMapCategoryBarModalOpen(false), []);
-
-  const syncCategoryBarModalListMoreBelow = useCallback(() => {
-    const lh = categoryBarModalListLayHRef.current;
-    const ch = categoryBarModalListContHRef.current;
-    const y = categoryBarModalListScrollYRef.current;
-    if (lh <= 0 || ch <= lh + 8) {
-      setCategoryBarModalListShowMoreBelow(false);
-      return;
-    }
-    const remaining = ch - y - lh;
-    setCategoryBarModalListShowMoreBelow(remaining > 10);
-  }, []);
-
-  /** 상단 카테고리 모달: 카드 maxHeight 기준으로 목록 스크롤 상한을 잡아 카드 밖으로 밀리지 않게 함 */
-  const mapCategoryBarModalCardMaxH = useMemo(
-    () => Math.min(560, Math.floor(windowHeight * 0.82)),
-    [windowHeight],
-  );
-  const mapCategoryBarModalCategoryListMaxH = useMemo(
-    () => Math.max(120, mapCategoryBarModalCardMaxH - 372),
-    [mapCategoryBarModalCardMaxH],
+  const feedListSettingsDotActive = useMemo(
+    () =>
+      computeFeedMeetingListSettingsDotActive({
+        recruitingOnly,
+        exploreTodayOnly,
+        meetingNotifyLoaded,
+        meetingNotifyEffectiveOn,
+        selectedCategoryId,
+        categoriesLength: categories.length,
+        barVisibleCategoryIds: feedBarVisibleCategoryIds,
+      }),
+    [
+      recruitingOnly,
+      exploreTodayOnly,
+      meetingNotifyLoaded,
+      meetingNotifyEffectiveOn,
+      selectedCategoryId,
+      categories.length,
+      feedBarVisibleCategoryIds,
+    ],
   );
 
-  useEffect(() => {
-    if (mapCategoryBarModalOpen) return;
-    categoryBarModalListScrollYRef.current = 0;
-    categoryBarModalListLayHRef.current = 0;
-    categoryBarModalListContHRef.current = 0;
-    setCategoryBarModalListShowMoreBelow(false);
-  }, [mapCategoryBarModalOpen]);
+  const openFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(true), []);
+  const closeFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(false), []);
 
-  useEffect(() => {
-    if (!mapCategoryBarModalOpen) return;
-    categoryBarModalListScrollYRef.current = 0;
-    requestAnimationFrame(() => {
-      try {
-        categoryBarModalCategoryListScrollRef.current?.scrollTo({ y: 0, animated: false });
-      } catch {
-        /* ignore */
-      }
-      syncCategoryBarModalListMoreBelow();
-    });
-  }, [mapCategoryBarModalOpen, syncCategoryBarModalListMoreBelow]);
+  const openMeetingNotifySettings = useCallback(() => {
+    closeFeedListSettingsModal();
+    router.push('/profile/meeting-notify-settings');
+  }, [closeFeedListSettingsModal, router]);
 
-  const toggleCategoryBarDraft = useCallback(
-    (id: string) => {
-      setCategoryBarDraft((prev) => {
-        const ordered = sortedMapCategoryMaster.map((c) => c.id);
-        const set = new Set(prev);
-        if (set.has(id)) {
-          set.delete(id);
-        } else {
-          set.add(id);
-        }
-        return ordered.filter((oid) => set.has(oid));
-      });
+  const onSaveFeedListSettings = useCallback(
+    async (result: {
+      barVisibleCategoryIds: string[] | null;
+      recruitingOnly: boolean;
+      exploreTodayOnly: boolean;
+      selectedCategoryId: string | null;
+    }) => {
+      setFeedBarVisibleCategoryIds(result.barVisibleCategoryIds);
+      await persistFeedCategoryBarVisibleIds(result.barVisibleCategoryIds);
+      setSelectedCategoryId(result.selectedCategoryId);
+      setRecruitingOnly(result.recruitingOnly);
+      setExploreTodayOnly(result.exploreTodayOnly);
+      await persistFeedExploreTodayOnly(result.exploreTodayOnly);
+      setFeedListSettingsModalOpen(false);
     },
-    [sortedMapCategoryMaster],
+    [],
   );
-
-  /** 켜져 있으면 마스터 전부 선택(저장 시 null=전체 칩). 끄면 개별 선택을 비움 → 저장 시 최소 1개 검증. */
-  const toggleCategoryBarSelectAll = useCallback(() => {
-    setCategoryBarDraft((prev) => {
-      const ordered = sortedMapCategoryMaster.map((c) => c.id);
-      if (ordered.length === 0) return prev;
-      const allOn =
-        prev.length === ordered.length && ordered.every((id) => prev.includes(id));
-      return allOn ? [] : [...ordered];
-    });
-  }, [sortedMapCategoryMaster]);
-
-  const categoryBarSelectAllChecked = useMemo(() => {
-    const ordered = sortedMapCategoryMaster.map((c) => c.id);
-    if (ordered.length === 0) return false;
-    return (
-      categoryBarDraft.length === ordered.length &&
-      ordered.every((id) => categoryBarDraft.includes(id))
-    );
-  }, [sortedMapCategoryMaster, categoryBarDraft]);
-
-  const saveMapCategoryBarModal = useCallback(async () => {
-    const ordered = sortedMapCategoryMaster.map((c) => c.id);
-    if (ordered.length > 0 && categoryBarDraft.length === 0) {
-      Alert.alert('선택 필요', '상단 칩에 표시할 카테고리를 최소 하나 이상 선택해 주세요.');
-      return;
-    }
-    const next =
-      ordered.length === 0 || categoryBarDraft.length === ordered.length
-        ? null
-        : [...categoryBarDraft];
-    setMapBarVisibleCategoryIds(next);
-    await persistMapCategoryBarVisibleIds(next);
-    setMapTodayOnly(categoryBarTodayOnlyDraft);
-    setMapCategoryBarModalOpen(false);
-  }, [sortedMapCategoryMaster, categoryBarDraft, categoryBarTodayOnlyDraft]);
 
   const closeSortFilterModal = useCallback(() => setSortFilterModalOpen(false), []);
+  const openSortFilterModal = useCallback(() => setSortFilterModalOpen(true), []);
+  const sortComboLabel = useMemo(() => listSortModeLabel(listSortMode), [listSortMode]);
+
+  const applyListSortMode = useCallback(
+    (mode: MeetingListSortMode) => {
+      void (async () => {
+        if (mode === 'distance') {
+          closeSortFilterModal();
+          setDistanceSortLocating(true);
+          try {
+            const ctx = await resolveFeedLocationForDistanceSort();
+            if (!ctx.permissionGranted) return;
+            const c = ctx.coords;
+            if (c) {
+              userCoordsRef.current = c;
+              setUserCoords(c);
+            }
+            if (mode !== listSortMode) {
+              pendingFocusFirstAfterSortRef.current = true;
+            }
+            setListSortMode(mode);
+          } finally {
+            setDistanceSortLocating(false);
+          }
+          return;
+        }
+        if (mode !== listSortMode) {
+          pendingFocusFirstAfterSortRef.current = true;
+        }
+        setListSortMode(mode);
+        closeSortFilterModal();
+      })();
+    },
+    [closeSortFilterModal, listSortMode],
+  );
 
   const onPressRescanThisArea = useCallback(() => {
     const r = pendingRegion ?? lastCompleteRegionRef.current;
@@ -1514,14 +1450,7 @@ export default function MapScreen() {
 
       setLocatingUser(true);
       try {
-        const perm = await ensureForegroundLocationPermissionWithSettingsFallback({
-          promptOnce: false,
-          title: '위치 권한이 필요해요',
-          message:
-            Platform.OS === 'ios'
-              ? '내 위치로 이동하려면 위치 권한이 필요합니다.\n\n설정 앱 → 개인정보 보호 및 보안 → 위치 서비스 → 지닛에서 «위치»를 «앱을 사용하는 동안» 또는 «항상»으로 바꿔 주세요.'
-              : '내 위치로 이동하려면 위치 권한이 필요합니다.\n\n설정 → 앱 → 지닛 → 권한 → 위치에서 «앱 사용 중에만 허용» 또는 «항상 허용»으로 바꿔 주세요.',
-        });
+        const perm = await ensureForegroundLocationPermissionLikeMyLocation();
         if (perm.granted) {
           const ctx = await resolveFeedLocationWithGrantedPermission();
           const c = ctx.coords;
@@ -1534,18 +1463,18 @@ export default function MapScreen() {
           }
           userCoordsRef.current = c;
           setUserCoords(c);
+          skipInterestRegionMapSyncRef.current = true;
+          selectActiveRegionClosestToCoords(c);
           snapMapToUserCoords(c, MY_LOCATION_BUTTON_VIEW_RADIUS_KM);
           return;
         }
 
-        if (perm.canAskAgain) {
-          Alert.alert('위치 권한이 필요해요', '내 위치로 이동하려면 위치 권한을 허용해 주세요.');
-        }
+        alertForegroundLocationPermissionDeniedLikeMyLocation(perm.canAskAgain);
       } finally {
         setLocatingUser(false);
       }
     })();
-  }, [locatingUser, snapMapToUserCoords]);
+  }, [locatingUser, selectActiveRegionClosestToCoords, snapMapToUserCoords]);
 
   const onPressCreateFab = useCallback(() => {
     void (async () => {
@@ -1676,6 +1605,40 @@ export default function MapScreen() {
       setSelectedMeetingId(null);
     }
   }, [sortedFilteredMeetings, selectedMeetingId]);
+
+  const focusFirstSheetMeeting = useCallback(() => {
+    enableFollowSelected();
+    openSheet();
+    setSelectedMeetingIndex(0);
+    const first = sheetMeetings[0];
+    if (!first?.id) {
+      setSelectedMeetingId(null);
+      return;
+    }
+    setSelectedMeetingId(first.id);
+    if (scrollAfterInteractionTimeoutRef.current != null) {
+      clearTimeout(scrollAfterInteractionTimeoutRef.current);
+      scrollAfterInteractionTimeoutRef.current = null;
+    }
+    requestAnimationFrame(() => {
+      scrollListToMeetingId(first.id, { animated: false });
+      scrollCarouselToMeetingId(first.id, { animated: false });
+      moveMapToMeetingPin(first);
+    });
+  }, [
+    enableFollowSelected,
+    openSheet,
+    sheetMeetings,
+    scrollListToMeetingId,
+    scrollCarouselToMeetingId,
+    moveMapToMeetingPin,
+  ]);
+
+  useEffect(() => {
+    if (!pendingFocusFirstAfterSortRef.current) return;
+    pendingFocusFirstAfterSortRef.current = false;
+    focusFirstSheetMeeting();
+  }, [listSortMode, sheetMeetings, focusFirstSheetMeeting]);
 
   const onMeetingMarkerPress = useCallback(
     (meetingId: string) => {
@@ -2004,7 +1967,7 @@ export default function MapScreen() {
   );
 
   const rescanTop = useMemo(
-    () => Math.max(insets.top + 66, Math.round(windowHeight * 0.12) + 10),
+    () => Math.max(insets.top + 58, Math.round(windowHeight * 0.12) + 10),
     [insets.top, windowHeight],
   );
 
@@ -2531,71 +2494,40 @@ export default function MapScreen() {
           </View>
         ) : null}
 
-        {/* Layer 1 — 상단: 지역명 · 카테고리 칩 · 검색 */}
+        {/* Layer 1 — 상단: 관심 지역 · 카테고리 설정 */}
         <View style={[styles.layerTop, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
           <BlurView intensity={0} tint="light" style={styles.topGlass}>
             <View style={styles.topGlassInner}>
+              <InterestRegionHeaderCluster controls={interestRegion} variant="mapGlass" />
               <GinitPressable
-                onPress={openMapCategoryBarModal}
+                onPress={openSortFilterModal}
+                style={({ pressed }) => [styles.topChip, styles.topSortChip, pressed && { opacity: 0.88 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`정렬, 현재 ${sortComboLabel}`}
+                accessibilityHint="탭하면 정렬 순서를 바꿀 수 있어요"
+                accessibilityState={{ expanded: sortFilterModalOpen }}>
+                <Text style={styles.topSortChipLabel} numberOfLines={1} ellipsizeMode="tail">
+                  {sortComboLabel}
+                </Text>
+                <GinitSymbolicIcon name="chevron-down" size={16} color="#475569" />
+              </GinitPressable>
+              <GinitPressable
+                onPress={openFeedListSettingsModal}
                 style={({ pressed }) => [
                   styles.topChip,
-                  mapCategoryBarFilterActive && styles.topChipActive,
-                  { flexShrink: 0 },
+                  feedListSettingsDotActive && styles.topChipActive,
+                  styles.topSettingsChip,
                   pressed && { opacity: 0.88 },
                 ]}
                 accessibilityRole="button"
-                accessibilityState={{ selected: mapCategoryBarFilterActive }}
-                accessibilityLabel="상단에 표시할 카테고리 설정">
+                accessibilityState={{ selected: feedListSettingsDotActive }}
+                accessibilityLabel="모임 목록·카테고리 설정">
                 <GinitSymbolicIcon
                   name="settings-outline"
                   size={20}
-                  color={mapCategoryBarFilterActive ? '#ffffff' : '#475569'}
+                  color={feedListSettingsDotActive ? '#ffffff' : '#475569'}
                 />
               </GinitPressable>
-              <View style={styles.chipScrollWrap}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipRow}
-                  style={styles.chipScroll}
-                  onLayout={onMapCategoryChipsLayout}
-                  onContentSizeChange={(w) => onMapCategoryChipsContentSizeChange(w)}
-                  onScroll={onMapCategoryChipsScroll}
-                  scrollEventThrottle={32}
-                  onScrollBeginDrag={() => {}}>
-                  {mapCategoryChips.map((chip) => {
-                    const active = chip.filterId === selectedCategoryId;
-                    return (
-                      <GinitPressable
-                        key={chip.filterId ?? 'all'}
-                        onPress={() => setSelectedCategoryId(chip.filterId)}
-                        style={[styles.topChip, active && styles.topChipActive]}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: active }}>
-                        <Text style={[styles.topChipLabel, active && styles.topChipLabelActive]} numberOfLines={1}>
-                          {chip.label}
-                        </Text>
-                      </GinitPressable>
-                    );
-                  })}
-                </ScrollView>
-                {showMapCategoryChipsScrollMore ? (
-                  <View
-                    pointerEvents="none"
-                    style={styles.chipScrollMoreCue}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants">
-                    <LinearGradient
-                      colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.88)']}
-                      locations={[0.15, 1]}
-                      start={{ x: 0, y: 0.5 }}
-                      end={{ x: 1, y: 0.5 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <Feather name="chevron-right" size={18} color="#64748b" style={styles.chipScrollMoreIcon} />
-                  </View>
-                ) : null}
-              </View>
             </View>
           </BlurView>
         </View>
@@ -2708,8 +2640,12 @@ export default function MapScreen() {
 
         {/* 모임 호출/재호출 중: 스플래시(스피너)만 표시 (시트는 유지) */}
         {showSheetSplash ? (
-          <View style={styles.sheetSplash} pointerEvents="box-none">
+          <View
+            style={styles.sheetSplash}
+            pointerEvents={showSheetLocationChecking ? 'auto' : 'box-none'}
+            accessibilityLabel={sheetSplashLabel ?? '모임 불러오는 중'}>
             <ActivityIndicator color={GinitTheme.colors.primary} />
+            {sheetSplashLabel ? <Text style={styles.sheetSplashLabel}>{sheetSplashLabel}</Text> : null}
           </View>
         ) : sheetMeetings.length === 0 ? (
           <Animated.View style={[sheetContentStyle, styles.sheetEmptyWrap]}>
@@ -2729,153 +2665,20 @@ export default function MapScreen() {
         ) : null}
       </Animated.View>
 
-      <Modal
-        visible={mapCategoryBarModalOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={closeMapCategoryBarModal}>
-        <View style={styles.modalRoot}>
-          <GinitPressable
-            style={StyleSheet.absoluteFillObject}
-            onPress={closeMapCategoryBarModal}
-            accessibilityRole="button"
-            accessibilityLabel="카테고리 표시 설정 닫기"
-          />
-          <View
-            style={[styles.modalCard, { maxHeight: mapCategoryBarModalCardMaxH, overflow: 'hidden' }]}>
-            <Text style={styles.modalTitle}>상단 카테고리</Text>
-            <Text style={styles.modalHint}>
-              지도 위 가로 칩에 나올 카테고리만 골라요. «전체»는 항상 맨 앞에 있어요. 카테고리와 «당일 모임만 보기»는 «저장»할 때
-              반영돼요.
-            </Text>
-            <View style={styles.mapCategoryBarModalDivider} />
-            <GinitPressable
-              onPress={toggleCategoryBarSelectAll}
-              style={({ pressed }) => [
-                styles.mapCategoryBarModalRow,
-                pressed && styles.modalRowPressed,
-              ]}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: categoryBarSelectAllChecked }}
-              accessibilityLabel="모든 카테고리 표시">
-              <Text style={styles.modalRowLabel}>모두 표시</Text>
-              {categoryBarSelectAllChecked ? (
-                <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
-              ) : (
-                <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-              )}
-            </GinitPressable>
-            <View style={styles.mapCategoryBarModalDivider} />
-            <View style={styles.categoryBarModalScrollWrap}>
-              <ScrollView
-                ref={categoryBarModalCategoryListScrollRef}
-                style={[styles.categoryBarModalScroll, { maxHeight: mapCategoryBarModalCategoryListMaxH }]}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-                nestedScrollEnabled
-                scrollEventThrottle={16}
-                onLayout={(e) => {
-                  categoryBarModalListLayHRef.current = e.nativeEvent.layout.height;
-                  syncCategoryBarModalListMoreBelow();
-                }}
-                onContentSizeChange={(_, h) => {
-                  categoryBarModalListContHRef.current = h;
-                  syncCategoryBarModalListMoreBelow();
-                }}
-                onScroll={(e) => {
-                  categoryBarModalListScrollYRef.current = e.nativeEvent.contentOffset.y;
-                  syncCategoryBarModalListMoreBelow();
-                }}>
-                {sortedMapCategoryMaster.map((c) => {
-                  const on = categoryBarDraft.includes(c.id);
-                  return (
-                    <GinitPressable
-                      key={c.id}
-                      onPress={() => toggleCategoryBarDraft(c.id)}
-                      style={({ pressed }) => [
-                        styles.mapCategoryBarModalRow,
-                        pressed && styles.modalRowPressed,
-                      ]}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: on }}>
-                      <View style={styles.mapCategoryBarModalCategoryNameRow}>
-                        <Text style={styles.mapCategoryBarModalCategoryEmoji} allowFontScaling={false}>
-                          {c.emoji}
-                        </Text>
-                        <Text
-                          style={[styles.modalRowLabel, styles.mapCategoryBarModalCategoryLabel]}
-                          numberOfLines={1}>
-                          {c.label}
-                        </Text>
-                      </View>
-                      {on ? (
-                        <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
-                      ) : (
-                        <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                      )}
-                    </GinitPressable>
-                  );
-                })}
-              </ScrollView>
-              {categoryBarModalListShowMoreBelow ? (
-                <View
-                  pointerEvents="none"
-                  style={styles.categoryBarModalScrollMoreCue}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no-hide-descendants">
-                  <LinearGradient
-                    colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.96)']}
-                    locations={[0.2, 1]}
-                    start={{ x: 0.5, y: 0 }}
-                    end={{ x: 0.5, y: 1 }}
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                  <Feather name="chevron-down" size={18} color="#64748b" style={styles.categoryBarModalScrollMoreIcon} />
-                </View>
-              ) : null}
-            </View>
-            <View style={[styles.mapCategoryBarModalDivider, styles.mapCategoryBarModalDividerBeforeToday]} />
-            <GinitPressable
-              onPress={() => setCategoryBarTodayOnlyDraft((v) => !v)}
-              style={({ pressed }) => [
-                styles.mapCategoryBarModalRow,
-                styles.mapCategoryBarModalRowTall,
-                pressed && styles.modalRowPressed,
-              ]}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: categoryBarTodayOnlyDraft }}
-              accessibilityLabel="당일 모임만 보기">
-              <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                <Text style={styles.modalRowLabel}>당일 모임만 보기</Text>
-                <Text style={styles.mapCategoryBarModalSubHint} numberOfLines={2}>
-                  한국 기준 오늘 날짜로 잡힌 일정만 지도·목록에 표시합니다.
-                </Text>
-              </View>
-              <View style={styles.mapCategoryBarModalCheckCol}>
-                {categoryBarTodayOnlyDraft ? (
-                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
-                ) : (
-                  <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                )}
-              </View>
-            </GinitPressable>
-            <View style={styles.categoryBarModalActions}>
-              <GinitPressable
-                onPress={closeMapCategoryBarModal}
-                style={({ pressed }) => [styles.categoryBarActionGhost, pressed && { opacity: 0.85 }]}
-                accessibilityRole="button">
-                <Text style={styles.categoryBarActionGhostLabel}>취소</Text>
-              </GinitPressable>
-              <GinitPressable
-                onPress={() => void saveMapCategoryBarModal()}
-                style={({ pressed }) => [styles.categoryBarActionPrimary, pressed && { opacity: 0.9 }]}
-                accessibilityRole="button">
-                <Text style={styles.modalCloseLabel}>저장</Text>
-              </GinitPressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <FeedMeetingListSettingsModal
+        visible={feedListSettingsModalOpen}
+        onRequestClose={closeFeedListSettingsModal}
+        categories={categories}
+        barVisibleCategoryIds={feedBarVisibleCategoryIds}
+        recruitingOnly={recruitingOnly}
+        exploreTodayOnly={exploreTodayOnly}
+        selectedCategoryId={selectedCategoryId}
+        onSave={onSaveFeedListSettings}
+        windowHeight={windowHeight}
+        profilePk={profilePk}
+        isSignedIn={isSignedIn}
+        onOpenMeetingNotifySettings={openMeetingNotifySettings}
+      />
 
       <Modal visible={sortFilterModalOpen} animationType="fade" transparent onRequestClose={closeSortFilterModal}>
         <View style={styles.modalRoot}>
@@ -2889,10 +2692,7 @@ export default function MapScreen() {
               return (
                 <GinitPressable
                   key={mode}
-                  onPress={() => {
-                    setListSortMode(mode);
-                    closeSortFilterModal();
-                  }}
+                  onPress={() => applyListSortMode(mode)}
                   style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}>
@@ -2907,6 +2707,8 @@ export default function MapScreen() {
           </View>
         </View>
       </Modal>
+
+      <InterestRegionModals controls={interestRegion} safeAreaTop={insets.top} />
 
       <FeedSearchFilterModal
         visible={mapSearchOpen}
@@ -2947,47 +2749,34 @@ const styles = StyleSheet.create({
   topGlassInner: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
-  /** ScrollView는 자식 클리핑을 위해 부모에 라운딩 + overflow 권장(Android 포함) */
-  chipScrollWrap: {
-    flex: 1,
-    minWidth: 0,
-    position: 'relative',
-    borderRadius: 999,
-    overflow: 'hidden',
+  topSettingsChip: {
+    flexShrink: 0,
   },
-  chipScroll: {
-    flex: 1,
-    maxHeight: 40,
-  },
-  chipScrollMoreCue: {
-    position: 'absolute',
-    right: 2,
-    top: 2,
-    bottom: 2,
-    width: 38,
-    borderRadius: 999,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    paddingRight: 4,
-  },
-  chipScrollMoreIcon: {
-    zIndex: 1,
-  },
-  chipRow: {
+  topSortChip: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingRight: 4,
+    gap: 4,
+    flexShrink: 0,
+    maxWidth: 108,
+    minWidth: 88,
+    paddingHorizontal: 12,
+  },
+  topSortChipLabel: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#475569',
   },
   topChip: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.75)',
+    backgroundColor: '#ffffff',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.34)',
   },
@@ -3520,7 +3309,15 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
     backgroundColor: 'rgba(248, 250, 252, 0.65)',
+  },
+  sheetSplashLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#475569',
+    textAlign: 'center',
   },
   sheetEmptyWrap: {
     paddingHorizontal: 16,

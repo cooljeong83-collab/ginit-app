@@ -6,7 +6,11 @@ import {
   extractGuFromKoreanAddressText,
   normalizeFeedRegionLabel,
 } from '@/src/lib/feed-region-match';
-import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
+import {
+  alertForegroundLocationPermissionDeniedLikeMyLocation,
+  ensureForegroundLocationPermissionLikeMyLocation,
+  ensureForegroundLocationPermissionWithSettingsFallback,
+} from '@/src/lib/location-permission';
 import { SEOUL_GU_SET } from '@/src/lib/seoul-gu-constants';
 
 export {
@@ -226,6 +230,10 @@ export type FeedLocationContext = {
   coords: { latitude: number; longitude: number } | null;
 };
 
+export type FeedLocationForDistanceSortResult = FeedLocationContext & {
+  permissionGranted: boolean;
+};
+
 /**
  * 이미 포그라운드 위치 권한이 허용된 상태에서만 호출합니다.
  * GPS + 역지오코딩(피드 상단 지역·거리 정렬 기준).
@@ -270,6 +278,38 @@ export async function resolveFeedLocationContext(): Promise<FeedLocationContext>
     return await resolveFeedLocationWithGrantedPermission();
   } catch {
     return { labelShort: FEED_LOCATION_FALLBACK_SHORT, coords: null };
+  }
+}
+
+/** 거리순 정렬 선택 시: 지도 «내 위치»와 동일한 권한 요청·거부 안내. */
+export async function resolveFeedLocationForDistanceSort(): Promise<FeedLocationForDistanceSortResult> {
+  if (Platform.OS === 'web') {
+    alertForegroundLocationPermissionDeniedLikeMyLocation(false);
+    return {
+      labelShort: FEED_LOCATION_FALLBACK_SHORT,
+      coords: null,
+      permissionGranted: false,
+    };
+  }
+  try {
+    const perm = await ensureForegroundLocationPermissionLikeMyLocation();
+    if (!perm.granted) {
+      alertForegroundLocationPermissionDeniedLikeMyLocation(perm.canAskAgain);
+      return {
+        labelShort: FEED_LOCATION_FALLBACK_SHORT,
+        coords: null,
+        permissionGranted: false,
+      };
+    }
+    const ctx = await resolveFeedLocationWithGrantedPermission();
+    return { ...ctx, permissionGranted: true };
+  } catch {
+    alertForegroundLocationPermissionDeniedLikeMyLocation(true);
+    return {
+      labelShort: FEED_LOCATION_FALLBACK_SHORT,
+      coords: null,
+      permissionGranted: false,
+    };
   }
 }
 

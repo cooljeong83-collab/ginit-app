@@ -74,3 +74,44 @@ export async function ensureForegroundLocationPermissionWithSettingsFallback(opt
   return { granted: false, canAskAgain };
 }
 
+/** 탐색(지도) «내 위치»·거리순 정렬 등에서 동일하게 쓰는 권한 안내 문구 */
+export function foregroundLocationPermissionAlertContent(): {
+  title: string;
+  settingsMessage: string;
+  deniedCanAskAgainMessage: string;
+} {
+  return {
+    title: '위치 권한이 필요해요',
+    settingsMessage:
+      Platform.OS === 'ios'
+        ? '내 위치로 이동하려면 위치 권한이 필요합니다.\n\n설정 앱 → 개인정보 보호 및 보안 → 위치 서비스 → 지닛에서 «위치»를 «앱을 사용하는 동안» 또는 «항상»으로 바꿔 주세요.'
+        : '내 위치로 이동하려면 위치 권한이 필요합니다.\n\n설정 → 앱 → 지닛 → 권한 → 위치에서 «앱 사용 중에만 허용» 또는 «항상 허용»으로 바꿔 주세요.',
+    deniedCanAskAgainMessage: '내 위치로 이동하려면 위치 권한을 허용해 주세요.',
+  };
+}
+
+/** 지도 «내 위치» 버튼과 동일한 권한 요청(설정 유도 Alert 포함). */
+export async function ensureForegroundLocationPermissionLikeMyLocation(): Promise<{
+  granted: boolean;
+  canAskAgain: boolean;
+}> {
+  const { title, settingsMessage } = foregroundLocationPermissionAlertContent();
+  return ensureForegroundLocationPermissionWithSettingsFallback({
+    promptOnce: false,
+    title,
+    message: settingsMessage,
+  });
+}
+
+/** 권한 거부 후 «내 위치»와 동일한 안내 Alert (`canAskAgain`일 때만). */
+export function alertForegroundLocationPermissionDeniedLikeMyLocation(canAskAgain: boolean): void {
+  if (Platform.OS === 'web') {
+    Alert.alert('위치 권한', '웹에서는 내 위치 이동을 지원하지 않습니다.');
+    return;
+  }
+  if (canAskAgain) {
+    const { title, deniedCanAskAgainMessage } = foregroundLocationPermissionAlertContent();
+    Alert.alert(title, deniedCanAskAgainMessage);
+  }
+}
+

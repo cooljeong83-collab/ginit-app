@@ -13,7 +13,11 @@ import type {
   PublicMeetingGenderRatio,
   PublicMeetingSettlement,
 } from '@/src/lib/meetings';
-import { getMeetingRecruitmentPhase, parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import {
+  getMeetingRecruitmentPhase,
+  isMeetingScheduledTodaySeoul,
+  parsePublicMeetingDetailsConfig,
+} from '@/src/lib/meetings';
 import type { NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import type { UserProfile } from '@/src/lib/user-profile';
 
@@ -49,6 +53,8 @@ export type MeetingsHomeExploreListFilterParams = {
   barVisibleCategoryIds: string[] | null;
   categories: Category[];
   recruitingOnly: boolean;
+  /** 탐색·지도 — 서울 기준 오늘 일정 모임만 */
+  exploreTodayOnly?: boolean;
   feedSearch: FeedSearchFilters;
 };
 
@@ -62,6 +68,7 @@ export function filterMeetingsForHomeExploreList(params: MeetingsHomeExploreList
     barVisibleCategoryIds,
     categories,
     recruitingOnly,
+    exploreTodayOnly,
     feedSearch,
   } = params;
 
@@ -74,6 +81,7 @@ export function filterMeetingsForHomeExploreList(params: MeetingsHomeExploreList
       return false;
     }
     if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
+    if (exploreTodayOnly && !isMeetingScheduledTodaySeoul(m)) return false;
     if (!meetingMatchesFeedSearch(m, feedSearch)) return false;
     return true;
   });

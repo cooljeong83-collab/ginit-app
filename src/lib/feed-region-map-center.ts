@@ -2,7 +2,7 @@ import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 
 import { normalizeFeedRegionLabel } from '@/src/lib/feed-display-location';
-import type { LatLng } from '@/src/lib/geo-distance';
+import { haversineDistanceMeters, type LatLng } from '@/src/lib/geo-distance';
 import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-districts';
 import { SEOUL_GU_LATLNG_BOUNDS, seoulGuBboxCenter } from '@/src/lib/seoul-gu-bounds';
 import { SEOUL_GU_SET, type SeoulGuLabel } from '@/src/lib/seoul-gu-constants';
@@ -43,6 +43,24 @@ export const FEED_REGION_MAP_FALLBACK_CENTER: LatLng = { latitude: 37.5263, long
  * 지도 첫 프레임용: 서울 25구는 bbox 중심을 동기 반환, 그 외는 지오코딩 전까지 폴백 좌표.
  * `approximateCenterLatLngForFeedRegion`(비동기)로 이후 정밀 보정 가능.
  */
+/** 등록된 관심 지역 중 WGS84 기준으로 `user`와 가장 가까운 구(정규화 키). */
+export function closestRegisteredFeedRegionNorm(regions: readonly string[], user: LatLng): string | null {
+  if (regions.length === 0) return null;
+  let bestNorm = normalizeFeedRegionLabel(regions[0]!);
+  let bestM = Number.POSITIVE_INFINITY;
+  for (const raw of regions) {
+    const norm = normalizeFeedRegionLabel(raw);
+    if (!norm) continue;
+    const center = approximateCenterLatLngForFeedRegionSync(norm);
+    const d = haversineDistanceMeters(user, center);
+    if (d < bestM) {
+      bestM = d;
+      bestNorm = norm;
+    }
+  }
+  return bestNorm;
+}
+
 export function approximateCenterLatLngForFeedRegionSync(normRaw: string): LatLng {
   const norm = normalizeFeedRegionLabel(normRaw.trim());
   if (!norm) return FEED_REGION_MAP_FALLBACK_CENTER;
@@ -79,6 +97,52 @@ export function regionViewportForFeedInterestRegion(normRaw: string): FeedRegion
   const cosLat = Math.cos((center.latitude * Math.PI) / 180);
   const dLng = Math.min(0.48, dLat / Math.max(0.22, Math.abs(cosLat)));
   return regionFromCenterAndSpan(center.latitude, center.longitude, dLat, dLng);
+}
+
+export type FeedInterestMapLayoutMetrics = {
+  topInsetPx: number;
+  bottomSheetPx: number;
+  windowHeight: number;
+};
+
+/** 바텀 시트·상단 글래스 바를 고려해 마커가 가운데에 오도록 위도 보정 */
+export function centerLatForMapSheetAndTopChrome(
+  targetLat: number,
+  baseDeltaLat: number,
+  topInsetPx: number,
+  bottomSheetPx: number,
+  windowH: number,
+): number {
+  const bottomFrac = Math.max(0, Math.min(0.9, bottomSheetPx / Math.max(1, windowH)));
+  const topOverlayPx = Math.max(0, topInsetPx);
+  const topFrac = Math.max(0, Math.min(0.4, topOverlayPx / Math.max(1, windowH)));
+  const desiredY = (topFrac + (1 - bottomFrac)) / 2;
+  const yShiftFrac = 0.5 - desiredY;
+  return targetLat - baseDeltaLat * yShiftFrac;
+}
+
+/** 관심 구 기준 카메라·조회 박스(동기) — 홈 탐색 필터와 지도 마커/시트 SSOT */
+export function buildCameraRegionForFeedInterestNorm(
+  normRaw: string,
+  center: LatLng,
+  layout?: FeedInterestMapLayoutMetrics,
+): FeedRegionMapViewport {
+  const viewport = regionViewportForFeedInterestRegion(normRaw);
+  const latitude = layout
+    ? centerLatForMapSheetAndTopChrome(
+        center.latitude,
+        viewport.latitudeDelta,
+        layout.topInsetPx,
+        layout.bottomSheetPx,
+        layout.windowHeight,
+      )
+    : center.latitude;
+  return {
+    latitude,
+    longitude: center.longitude,
+    latitudeDelta: viewport.latitudeDelta,
+    longitudeDelta: viewport.longitudeDelta,
+  };
 }
 
 export async function approximateCenterLatLngForFeedRegion(normRaw: string): Promise<LatLng> {

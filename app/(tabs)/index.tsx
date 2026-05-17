@@ -30,6 +30,13 @@ import { FlashList } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
+import { InterestRegionHeaderCluster } from '@/components/feed/InterestRegionHeaderCluster';
+import {
+  FeedMeetingListSettingsModal,
+  computeFeedMeetingListSettingsDotActive,
+  useMeetingCreateNotifyEffective,
+} from '@/components/feed/FeedMeetingListSettingsModal';
+import { InterestRegionModals } from '@/components/feed/InterestRegionModals';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import {
@@ -44,6 +51,8 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-region-controls';
+import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
@@ -51,10 +60,15 @@ import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-ho
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { Category } from '@/src/lib/categories';
-import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
-  normalizeFeedRegionLabel,
+  loadFeedCategoryBarVisibleIds,
+  loadFeedExploreTodayOnly,
+  persistFeedCategoryBarVisibleIds,
+  persistFeedExploreTodayOnly,
+} from '@/src/lib/feed-category-bar-preference';
+import {
   resolveFeedLocationContextWithoutPermissionPrompt,
+  resolveFeedLocationForDistanceSort,
 } from '@/src/lib/feed-display-location';
 import {
   defaultFeedSearchFilters,
@@ -71,19 +85,9 @@ import {
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
-import {
-  FEED_REGISTERED_REGIONS_MAX,
-  loadActiveFeedRegion,
-  loadRegisteredFeedRegions,
-  saveActiveFeedRegion,
-  saveRegisteredFeedRegions,
-  syncFeedRegionMapBootMemoryFromSelection,
-} from '@/src/lib/feed-registered-regions';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
-import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 import {
   isMeetingArrivalNoticeBannerTimeEligible,
@@ -120,9 +124,6 @@ import {
   isMeetingServiceComplianceComplete,
   type UserProfile,
 } from '@/src/lib/user-profile';
-
-/** `app/profile/settings` 공개 모임 생성 알림 스위치 트랙과 동일 */
-const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 
 type HomeMeetingTopTab = 'explore' | 'my' | 'private';
 
@@ -187,27 +188,24 @@ export default function FeedScreen() {
     [windowHeight, safeInsets.top, safeInsets.bottom],
   );
 
-  /** 탐색 탭: 등록된 서울 구 최대 5곳 + 그중 표시용 1곳(active). GPS 없음. */
-  const [registeredRegions, setRegisteredRegions] = useState<string[]>([]);
-  const registeredRegionsRef = useRef<string[]>([]);
-  /** 탐색 필터에 쓰는 «현재 선택» 구(등록 목록에 포함된 정규화 라벨) */
-  const [activeRegionNorm, setActiveRegionNorm] = useState<string | null>(null);
-  const [draftRegisteredRegions, setDraftRegisteredRegions] = useState<string[]>([]);
-  /** 관심 지역 목록 로드 완료 전에는 탐색 지역 필터를 적용하지 않음 */
-  const [feedLocationReady, setFeedLocationReady] = useState(false);
-  const [regionModalOpen, setRegionModalOpen] = useState(false);
-  const [regionDropdownOpen, setRegionDropdownOpen] = useState(false);
-  const [regionSearchModalOpen, setRegionSearchModalOpen] = useState(false);
-  const [regionSearchQuery, setRegionSearchQuery] = useState('');
-  const [regionSearchKeyboardVisible, setRegionSearchKeyboardVisible] = useState(false);
+  const interestRegion = useFeedInterestRegionControls();
+  const {
+    registeredRegions,
+    exploreActiveRegionNorm,
+    feedLocationReady,
+    regionModalOpen,
+    regionSearchModalOpen,
+    openRegionModal,
+    refreshFromStorage,
+  } = interestRegion;
   const [feedListSettingsModalOpen, setFeedListSettingsModalOpen] = useState(false);
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
+  const [distanceSortLocating, setDistanceSortLocating] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('soon');
   /** true면 모집중(정원 미달·미확정) 모임만 표시. 기본값 off */
   const [recruitingOnly, setRecruitingOnly] = useState(false);
-  /** 목록·카테고리 통합 모달 초안 — 저장 시 recruitingOnly에 반영 */
-  const [recruitingOnlyDraft, setRecruitingOnlyDraft] = useState(false);
+  const [exploreTodayOnly, setExploreTodayOnly] = useState(false);
   const [feedSearchModalOpen, setFeedSearchModalOpen] = useState(false);
   const [homeNoticesModalOpen, setHomeNoticesModalOpen] = useState(false);
   const [appliedFeedSearch, setAppliedFeedSearch] = useState<FeedSearchFilters>(() => defaultFeedSearchFilters());
@@ -265,13 +263,6 @@ export default function FeedScreen() {
     }, []),
   );
 
-  /** 피드 통합 모달 초안: 표시할 마스터 id + 현재 필터(null=전체) */
-  const [categoryPickerDraft, setCategoryPickerDraft] = useState<{ visibility: string[] }>({ visibility: [] });
-  const feedCategoryModalCategoryListScrollRef = useRef<ScrollView | null>(null);
-  const feedCategoryModalListLayHRef = useRef(0);
-  const feedCategoryModalListContHRef = useRef(0);
-  const feedCategoryModalListScrollYRef = useRef(0);
-  const [feedCategoryModalListShowMoreBelow, setFeedCategoryModalListShowMoreBelow] = useState(false);
   /** `null`이면 드롭다운에 카테고리 마스터 전부 표시 */
   const [feedBarVisibleCategoryIds, setFeedBarVisibleCategoryIds] = useState<string[] | null>(null);
   const [feedUserProfile, setFeedUserProfile] = useState<UserProfile | null>(null);
@@ -308,7 +299,6 @@ export default function FeedScreen() {
     }
     const anyOverlayOpen =
       regionSearchModalOpen ||
-      regionDropdownOpen ||
       regionModalOpen ||
       feedListSettingsModalOpen ||
       feedSearchModalOpen ||
@@ -332,7 +322,6 @@ export default function FeedScreen() {
   }, [
     isHomeMeetingsScreenFocused,
     regionSearchModalOpen,
-    regionDropdownOpen,
     regionModalOpen,
     feedListSettingsModalOpen,
     feedSearchModalOpen,
@@ -400,46 +389,6 @@ export default function FeedScreen() {
   }, [feedHostIds]);
 
   useEffect(() => {
-    registeredRegionsRef.current = registeredRegions;
-  }, [registeredRegions]);
-
-  useEffect(() => {
-    if (!feedLocationReady) return;
-    syncFeedRegionMapBootMemoryFromSelection(registeredRegions, activeRegionNorm);
-  }, [feedLocationReady, registeredRegions, activeRegionNorm]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const regions = await loadRegisteredFeedRegions();
-        if (cancelled) return;
-        registeredRegionsRef.current = regions;
-        setRegisteredRegions(regions);
-        const activeRaw = await loadActiveFeedRegion();
-        if (cancelled) return;
-        let nextActive: string | null = null;
-        if (regions.length > 0) {
-          const set = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
-          const candidate = activeRaw && set.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
-          nextActive = candidate;
-          if (activeRaw !== candidate) void saveActiveFeedRegion(candidate);
-        } else {
-          void saveActiveFeedRegion(null);
-        }
-        if (!cancelled) setActiveRegionNorm(nextActive);
-      } finally {
-        // `cancelled`와 무관하게 피드를 연다 — cleanup(언마운트·StrictMode 등) 직전에 완료되면
-        // `if (!cancelled)`만 쓰면 이후 리마운트 없이 `feedLocationReady`가 영구 false → 목록 무한 스켈레톤.
-        setFeedLocationReady(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!feedLocationReady) return;
     let alive = true;
     void (async () => {
@@ -461,9 +410,15 @@ export default function FeedScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    void loadFeedCategoryBarVisibleIds().then((v) => {
-      if (!cancelled) setFeedBarVisibleCategoryIds(v);
-    });
+    void (async () => {
+      const [categoryIds, todayOnly] = await Promise.all([
+        loadFeedCategoryBarVisibleIds(),
+        loadFeedExploreTodayOnly(),
+      ]);
+      if (cancelled) return;
+      setFeedBarVisibleCategoryIds(categoryIds);
+      setExploreTodayOnly(todayOnly);
+    })();
     return () => {
       cancelled = true;
     };
@@ -498,23 +453,6 @@ export default function FeedScreen() {
     return meetings.filter((m) => meetingWithinHomeFeedRadius(m, null));
   }, [meetings]);
 
-  const sortedFeedCategoryMaster = useMemo(
-    () =>
-      [...categories].sort((a, b) =>
-        a.order !== b.order ? a.order - b.order : a.label.localeCompare(b.label, 'ko'),
-      ),
-    [categories],
-  );
-
-  /** 탐색에 적용할 단일 구(등록 목록·active 동기화) */
-  const exploreActiveRegionNorm = useMemo(() => {
-    if (!feedLocationReady || registeredRegions.length === 0) return '';
-    const set = new Set(registeredRegions.map((r) => normalizeFeedRegionLabel(r)));
-    const a = activeRegionNorm ? normalizeFeedRegionLabel(activeRegionNorm) : '';
-    if (a && set.has(a)) return a;
-    return normalizeFeedRegionLabel(registeredRegions[0]!);
-  }, [feedLocationReady, registeredRegions, activeRegionNorm]);
-
   const homeExploreListFilterParams = useMemo(
     () => ({
       meetings: meetingsWithinRadius,
@@ -525,6 +463,7 @@ export default function FeedScreen() {
       barVisibleCategoryIds: feedBarVisibleCategoryIds,
       categories,
       recruitingOnly,
+      exploreTodayOnly,
       feedSearch: appliedFeedSearch,
     }),
     [
@@ -536,6 +475,7 @@ export default function FeedScreen() {
       feedBarVisibleCategoryIds,
       categories,
       recruitingOnly,
+      exploreTodayOnly,
       appliedFeedSearch,
     ],
   );
@@ -974,118 +914,6 @@ export default function FeedScreen() {
     [homeTab, hasNextPage, isFetchingNextPage, fetchNextPage],
   );
 
-  const openRegionModal = useCallback(() => {
-    setDraftRegisteredRegions([...registeredRegionsRef.current]);
-    setRegionSearchModalOpen(false);
-    setRegionSearchQuery('');
-    setRegionModalOpen(true);
-  }, []);
-  const closeRegionModal = useCallback(() => {
-    if (registeredRegionsRef.current.length === 0) {
-      Alert.alert('관심 지역 필요', '탐색을 사용하려면 관심 지역을 한 곳 이상 추가한 뒤 「적용」을 눌러 주세요.');
-      return;
-    }
-    setRegionSearchModalOpen(false);
-    setRegionSearchQuery('');
-    setRegionDropdownOpen(false);
-    setRegionModalOpen(false);
-  }, []);
-
-  const openRegionDropdownModal = useCallback(() => {
-    setRegionDropdownOpen(true);
-  }, []);
-  const closeRegionDropdownModal = useCallback(() => setRegionDropdownOpen(false), []);
-
-  const pickActiveRegionFromDropdown = useCallback((normRaw: string) => {
-    const norm = normalizeFeedRegionLabel(normRaw);
-    setActiveRegionNorm(norm);
-    void saveActiveFeedRegion(norm);
-    setRegionDropdownOpen(false);
-  }, []);
-
-  const openRegionSearchModal = useCallback(() => {
-    if (draftRegisteredRegions.length >= FEED_REGISTERED_REGIONS_MAX) {
-      Alert.alert('알림', `관심 지역은 최대 ${FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.`);
-      return;
-    }
-    setRegionSearchQuery('');
-    setRegionSearchModalOpen(true);
-  }, [draftRegisteredRegions.length]);
-
-  const closeRegionSearchModal = useCallback(() => {
-    setRegionSearchKeyboardVisible(false);
-    setRegionSearchModalOpen(false);
-    setRegionSearchQuery('');
-  }, []);
-
-  useEffect(() => {
-    if (!regionSearchModalOpen) {
-      setRegionSearchKeyboardVisible(false);
-      return;
-    }
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const subShow = Keyboard.addListener(showEvt, () => setRegionSearchKeyboardVisible(true));
-    const subHide = Keyboard.addListener(hideEvt, () => setRegionSearchKeyboardVisible(false));
-    return () => {
-      subShow.remove();
-      subHide.remove();
-    };
-  }, [regionSearchModalOpen]);
-
-  const removeDraftRegion = useCallback((regionRaw: string) => {
-    const norm = normalizeFeedRegionLabel(regionRaw);
-    setDraftRegisteredRegions((prev) => {
-      if (registeredRegionsRef.current.length >= 1 && prev.length <= 1) return prev;
-      return prev.filter((x) => normalizeFeedRegionLabel(x) !== norm);
-    });
-  }, []);
-
-  const pickSearchResultDistrict = useCallback((districtKey: string) => {
-    const norm = normalizeFeedRegionLabel(districtKey);
-    setDraftRegisteredRegions((prev) => {
-      if (prev.some((x) => normalizeFeedRegionLabel(x) === norm)) return prev;
-      if (prev.length >= FEED_REGISTERED_REGIONS_MAX) {
-        Alert.alert('알림', `관심 지역은 최대 ${FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.`);
-        return prev;
-      }
-      return [...prev, norm];
-    });
-    setRegionSearchQuery('');
-    setRegionSearchModalOpen(false);
-  }, []);
-
-  const regionSearchResults = useMemo(
-    () => searchKoreaInterestDistricts(regionSearchQuery, draftRegisteredRegions),
-    [regionSearchQuery, draftRegisteredRegions],
-  );
-
-  const applyDraftRegisteredRegions = useCallback(() => {
-    const next = draftRegisteredRegions.map((x) => normalizeFeedRegionLabel(x)).filter(Boolean);
-    const dedup: string[] = [];
-    const seen = new Set<string>();
-    for (const r of next) {
-      if (seen.has(r)) continue;
-      seen.add(r);
-      dedup.push(r);
-      if (dedup.length >= FEED_REGISTERED_REGIONS_MAX) break;
-    }
-    if (dedup.length < 1) {
-      Alert.alert('관심 지역 필요', '한 곳 이상 추가해 주세요.');
-      return;
-    }
-    registeredRegionsRef.current = dedup;
-    setRegisteredRegions(dedup);
-    void saveRegisteredFeedRegions(dedup);
-    const setNorms = new Set(dedup.map((r) => normalizeFeedRegionLabel(r)));
-    const prevA = activeRegionNorm ? normalizeFeedRegionLabel(activeRegionNorm) : '';
-    const nextActive =
-      dedup.length === 0 ? null : prevA && setNorms.has(prevA) ? prevA : normalizeFeedRegionLabel(dedup[0]!);
-    setActiveRegionNorm(nextActive);
-    void saveActiveFeedRegion(nextActive);
-    setRegionModalOpen(false);
-  }, [draftRegisteredRegions, activeRegionNorm]);
-
   const selectedFilterLabel = useMemo(() => {
     if (selectedCategoryId == null) return null;
     return categories.find((c) => c.id === selectedCategoryId)?.label ?? null;
@@ -1093,66 +921,35 @@ export default function FeedScreen() {
 
   const sortComboLabel = useMemo(() => listSortModeLabel(listSortMode), [listSortMode]);
 
-  /** 모임 탭 통합 모달(카테고리+목록) — MapScreen 상단 카테고리 모달과 동일한 카드·스크롤 높이 규칙 */
-  const feedMeetingOptionsModalCardMaxH = useMemo(
-    () => Math.min(640, Math.floor(windowHeight * 0.88)),
-    [windowHeight],
-  );
-  const feedMeetingOptionsModalCategoryListMaxH = useMemo(
-    () => Math.max(120, feedMeetingOptionsModalCardMaxH - 500),
-    [feedMeetingOptionsModalCardMaxH],
-  );
-
-  const syncFeedCategoryModalListMoreBelow = useCallback(() => {
-    const lh = feedCategoryModalListLayHRef.current;
-    const ch = feedCategoryModalListContHRef.current;
-    const y = feedCategoryModalListScrollYRef.current;
-    if (lh <= 0 || ch <= lh + 8) {
-      setFeedCategoryModalListShowMoreBelow(false);
-      return;
-    }
-    const remaining = ch - y - lh;
-    setFeedCategoryModalListShowMoreBelow(remaining > 10);
-  }, []);
-
-  useEffect(() => {
-    if (feedListSettingsModalOpen) return;
-    feedCategoryModalListScrollYRef.current = 0;
-    feedCategoryModalListLayHRef.current = 0;
-    feedCategoryModalListContHRef.current = 0;
-    setFeedCategoryModalListShowMoreBelow(false);
-  }, [feedListSettingsModalOpen]);
-
-  useEffect(() => {
-    if (!feedListSettingsModalOpen) return;
-    feedCategoryModalListScrollYRef.current = 0;
-    requestAnimationFrame(() => {
-      try {
-        feedCategoryModalCategoryListScrollRef.current?.scrollTo({ y: 0, animated: false });
-      } catch {
-        /* ignore */
-      }
-      syncFeedCategoryModalListMoreBelow();
-    });
-  }, [feedListSettingsModalOpen, syncFeedCategoryModalListMoreBelow]);
-
-  const openFeedMeetingOptionsModal = useCallback(() => {
-    const ordered = sortedFeedCategoryMaster.map((c) => c.id);
-    const vis =
-      feedBarVisibleCategoryIds == null
-        ? [...ordered]
-        : ordered.filter((id) => feedBarVisibleCategoryIds.includes(id));
-    setCategoryPickerDraft({ visibility: vis });
-    setRecruitingOnlyDraft(recruitingOnly);
-    setFeedListSettingsModalOpen(true);
-  }, [sortedFeedCategoryMaster, feedBarVisibleCategoryIds, recruitingOnly]);
-
-  const openCategoryPicker = openFeedMeetingOptionsModal;
+  const openCategoryPicker = useCallback(() => setFeedListSettingsModalOpen(true), []);
 
   const closeFeedListSettingsModal = useCallback(() => setFeedListSettingsModalOpen(false), []);
 
   const openSortDropdown = useCallback(() => setSortDropdownOpen(true), []);
   const closeSortDropdown = useCallback(() => setSortDropdownOpen(false), []);
+
+  const applyListSortMode = useCallback(
+    (mode: MeetingListSortMode) => {
+      void (async () => {
+        if (mode === 'distance') {
+          closeSortDropdown();
+          setDistanceSortLocating(true);
+          try {
+            const ctx = await resolveFeedLocationForDistanceSort();
+            if (!ctx.permissionGranted) return;
+            setFeedCoords(ctx.coords);
+            setListSortMode(mode);
+          } finally {
+            setDistanceSortLocating(false);
+          }
+          return;
+        }
+        setListSortMode(mode);
+        closeSortDropdown();
+      })();
+    },
+    [closeSortDropdown],
+  );
 
   const profilePk = useMemo(() => {
     const u = userId?.trim();
@@ -1167,38 +964,11 @@ export default function FeedScreen() {
     [userId, authProfile?.supabaseUserId],
   );
 
-  const [meetingNotifyLoaded, setMeetingNotifyLoaded] = useState(false);
-  const [meetingNotifyEffectiveOn, setMeetingNotifyEffectiveOn] = useState(false);
-
-  const refreshMeetingNotify = useCallback(async () => {
-    if (Platform.OS === 'web') {
-      setMeetingNotifyLoaded(true);
-      setMeetingNotifyEffectiveOn(false);
-      return;
-    }
-    const pk = profilePk.trim();
-    if (!pk) {
-      setMeetingNotifyLoaded(true);
-      setMeetingNotifyEffectiveOn(false);
-      return;
-    }
-    setMeetingNotifyLoaded(false);
-    try {
-      const m = await fetchMeetingAreaNotifyMatrix(pk);
-      const rn = (m.region_norms ?? []).filter((x) => String(x ?? '').trim() !== '');
-      const ci = (m.category_ids ?? []).filter((x) => String(x ?? '').trim() !== '');
-      setMeetingNotifyEffectiveOn(rn.length > 0 && ci.length > 0);
-    } catch {
-      setMeetingNotifyEffectiveOn(false);
-    } finally {
-      setMeetingNotifyLoaded(true);
-    }
-  }, [profilePk]);
-
-  useEffect(() => {
-    if (!feedListSettingsModalOpen) return;
-    void refreshMeetingNotify();
-  }, [feedListSettingsModalOpen, refreshMeetingNotify]);
+  const {
+    loaded: meetingNotifyLoaded,
+    effectiveOn: meetingNotifyEffectiveOn,
+    refresh: refreshMeetingNotify,
+  } = useMeetingCreateNotifyEffective(profilePk);
 
   useFocusEffect(
     useCallback(() => {
@@ -1211,80 +981,46 @@ export default function FeedScreen() {
     router.push('/profile/meeting-notify-settings');
   }, [closeFeedListSettingsModal, router]);
 
+  const onSaveFeedListSettings = useCallback(
+    async (result: {
+      barVisibleCategoryIds: string[] | null;
+      recruitingOnly: boolean;
+      exploreTodayOnly: boolean;
+      selectedCategoryId: string | null;
+    }) => {
+      setFeedBarVisibleCategoryIds(result.barVisibleCategoryIds);
+      await persistFeedCategoryBarVisibleIds(result.barVisibleCategoryIds);
+      setSelectedCategoryId(result.selectedCategoryId);
+      setRecruitingOnly(result.recruitingOnly);
+      setExploreTodayOnly(result.exploreTodayOnly);
+      await persistFeedExploreTodayOnly(result.exploreTodayOnly);
+      setFeedListSettingsModalOpen(false);
+    },
+    [],
+  );
+
   /** 슬라이더 버튼 점 — 모집중·표시 카테고리·단일 종류 필터 또는 공개 모임 생성 알림이 켜진 경우 */
   const feedCategorySlidersDotActive = useMemo(
     () =>
-      recruitingOnly ||
-      (meetingNotifyLoaded && meetingNotifyEffectiveOn) ||
-      selectedCategoryId != null ||
-      (categories.length > 0 &&
-        feedBarVisibleCategoryIds != null &&
-        feedBarVisibleCategoryIds.length < categories.length),
+      computeFeedMeetingListSettingsDotActive({
+        recruitingOnly,
+        exploreTodayOnly,
+        meetingNotifyLoaded,
+        meetingNotifyEffectiveOn,
+        selectedCategoryId,
+        categoriesLength: categories.length,
+        barVisibleCategoryIds: feedBarVisibleCategoryIds,
+      }),
     [
       categories.length,
       feedBarVisibleCategoryIds,
       selectedCategoryId,
       recruitingOnly,
+      exploreTodayOnly,
       meetingNotifyLoaded,
       meetingNotifyEffectiveOn,
     ],
   );
-
-  const toggleFeedCategoryPickerVisibilityDraft = useCallback((id: string) => {
-    setCategoryPickerDraft((d) => {
-      const ordered = sortedFeedCategoryMaster.map((c) => c.id);
-      const set = new Set(d.visibility);
-      if (set.has(id)) set.delete(id);
-      else set.add(id);
-      const nextVis = ordered.filter((oid) => set.has(oid));
-      return { visibility: nextVis };
-    });
-  }, [sortedFeedCategoryMaster]);
-
-  const toggleFeedCategoryPickerSelectAll = useCallback(() => {
-    setCategoryPickerDraft((d) => {
-      const ordered = sortedFeedCategoryMaster.map((c) => c.id);
-      if (ordered.length === 0) return d;
-      const allOn =
-        d.visibility.length === ordered.length &&
-        ordered.every((oid) => d.visibility.includes(oid));
-      return allOn ? { visibility: [] } : { visibility: [...ordered] };
-    });
-  }, [sortedFeedCategoryMaster]);
-
-  const categoryPickerSelectAllChecked = useMemo(() => {
-    const ordered = sortedFeedCategoryMaster.map((c) => c.id);
-    if (ordered.length === 0) return false;
-    return (
-      categoryPickerDraft.visibility.length === ordered.length &&
-      ordered.every((id) => categoryPickerDraft.visibility.includes(id))
-    );
-  }, [sortedFeedCategoryMaster, categoryPickerDraft.visibility]);
-
-  const saveCategoryPickerModal = useCallback(async () => {
-    const ordered = sortedFeedCategoryMaster.map((c) => c.id);
-    if (ordered.length > 0 && categoryPickerDraft.visibility.length === 0) {
-      Alert.alert(
-        '선택 필요',
-        '피드에서 고를 카테고리를 최소 하나 이상 선택해 주세요.',
-      );
-      return;
-    }
-    const nextVisible =
-      ordered.length === 0 || categoryPickerDraft.visibility.length === ordered.length
-        ? null
-        : [...categoryPickerDraft.visibility];
-    let nextFilter = selectedCategoryId;
-    if (nextFilter != null) {
-      if (!ordered.includes(nextFilter)) nextFilter = null;
-      else if (nextVisible != null && !nextVisible.includes(nextFilter)) nextFilter = null;
-    }
-    setFeedBarVisibleCategoryIds(nextVisible);
-    await persistFeedCategoryBarVisibleIds(nextVisible);
-    setSelectedCategoryId(nextFilter);
-    setRecruitingOnly(recruitingOnlyDraft);
-    setFeedListSettingsModalOpen(false);
-  }, [sortedFeedCategoryMaster, categoryPickerDraft, recruitingOnlyDraft, selectedCategoryId]);
 
   const openFeedSearch = useCallback(() => {
     setDraftFeedSearch(appliedFeedSearch);
@@ -1309,11 +1045,15 @@ export default function FeedScreen() {
   useEffect(() => {
     if (!feedLocationReady) return;
     if (registeredRegions.length > 0) return;
-    setRegionSearchModalOpen(false);
-    setRegionSearchQuery('');
-    setDraftRegisteredRegions([]);
-    setRegionModalOpen(true);
-  }, [feedLocationReady, registeredRegions.length]);
+    openRegionModal();
+  }, [feedLocationReady, registeredRegions.length, openRegionModal]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(FEED_INTEREST_REGION_SELECTION_CHANGED, () => {
+      void refreshFromStorage();
+    });
+    return () => sub.remove();
+  }, [refreshFromStorage]);
 
   const listFooter = useMemo(
     () =>
@@ -1520,39 +1260,7 @@ export default function FeedScreen() {
         homeTopNoticeSlides.length > 0 && styles.feedHeaderWhenNoticePager,
       ]}>
       <View style={styles.feedHeaderTopRow}>
-        <View style={styles.locationCluster}>
-          <GinitPressable
-            onPress={openRegionModal}
-            style={({ pressed }) => [styles.locationClusterPressable, pressed && styles.locationClusterPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="관심 지역 등록·편집"
-            hitSlop={8}>
-            <Text
-              style={styles.locationText}
-              numberOfLines={1}
-              accessibilityLabel={
-                feedLocationReady
-                  ? registeredRegions.length === 0
-                    ? '관심 지역 등록'
-                    : `표시 중인 지역 ${getInterestRegionDisplayLabel(exploreActiveRegionNorm)}`
-                  : '관심 지역, 불러오는 중'
-              }>
-              {feedLocationReady
-                ? registeredRegions.length === 0
-                  ? '관심 지역 등록'
-                  : getInterestRegionDisplayLabel(exploreActiveRegionNorm)
-                : '불러오는 중…'}
-            </Text>
-          </GinitPressable>
-          <GinitPressable
-            onPress={openRegionDropdownModal}
-            style={({ pressed }) => [styles.locationChevronPressable, pressed && styles.locationClusterPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="등록된 관심 지역 중 표시 지역 선택"
-            hitSlop={{ top: 20, bottom: 20, left: 16, right: 20 }}>
-            <GinitSymbolicIcon name="chevron-down" size={20} color={GinitTheme.colors.primary} />
-          </GinitPressable>
-        </View>
+        <InterestRegionHeaderCluster controls={interestRegion} variant="feed" />
         <View style={styles.headerActions}>
           <GinitPressable
             onPress={openFeedSearch}
@@ -1814,195 +1522,29 @@ export default function FeedScreen() {
                 <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
                 <Text style={styles.locationBootstrapLabel}>불러오는 중…</Text>
               </View>
+            ) : distanceSortLocating ? (
+              <View style={styles.feedDistanceSortOverlay} accessibilityLabel="내 위치 확인 중">
+                <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
+                <Text style={styles.feedDistanceSortOverlayLabel}>내 위치를 확인중입니다</Text>
+              </View>
             ) : null}
           </View>
         </View>
 
-        <Modal
+        <FeedMeetingListSettingsModal
           visible={feedListSettingsModalOpen}
-          animationType="fade"
-          transparent
-          onRequestClose={closeFeedListSettingsModal}>
-          <View style={styles.modalRoot}>
-            <GinitPressable
-              style={StyleSheet.absoluteFillObject}
-              onPress={closeFeedListSettingsModal}
-              accessibilityRole="button"
-              accessibilityLabel="모임 목록 설정 닫기"
-            />
-            <View style={[styles.modalCard, { maxHeight: feedMeetingOptionsModalCardMaxH, overflow: 'hidden' }]}>
-              <Text style={styles.modalTitle}>모임 목록</Text>
-              <Text style={[styles.modalHint, styles.feedMeetingOptionsModalHint]}>
-                목록에 쓸 모임 종류는 «저장»할 때 반영돼요. 모집중만 보기는 탐색 탭에만 적용돼요. 정렬·검색 조건은 상단에서 바꿀 수 있어요.
-              </Text>
-              <View style={styles.mapCategoryBarModalDivider} />
-              <GinitPressable
-                onPress={toggleFeedCategoryPickerSelectAll}
-                style={({ pressed }) => [
-                  styles.mapCategoryBarModalRow,
-                  pressed && styles.modalRowPressed,
-                ]}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: categoryPickerSelectAllChecked }}
-                accessibilityLabel="모든 카테고리 표시">
-                <Text style={styles.modalRowLabel}>모두 표시</Text>
-                {categoryPickerSelectAllChecked ? (
-                  <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
-                ) : (
-                  <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                )}
-              </GinitPressable>
-              <View style={styles.mapCategoryBarModalDivider} />
-              <View style={styles.categoryBarModalScrollWrap}>
-                <ScrollView
-                  ref={feedCategoryModalCategoryListScrollRef}
-                  style={[styles.categoryBarModalScroll, { maxHeight: feedMeetingOptionsModalCategoryListMaxH }]}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                  nestedScrollEnabled
-                  scrollEventThrottle={16}
-                  onLayout={(e) => {
-                    feedCategoryModalListLayHRef.current = e.nativeEvent.layout.height;
-                    syncFeedCategoryModalListMoreBelow();
-                  }}
-                  onContentSizeChange={(_, h) => {
-                    feedCategoryModalListContHRef.current = h;
-                    syncFeedCategoryModalListMoreBelow();
-                  }}
-                  onScroll={(e) => {
-                    feedCategoryModalListScrollYRef.current = e.nativeEvent.contentOffset.y;
-                    syncFeedCategoryModalListMoreBelow();
-                  }}>
-                  {sortedFeedCategoryMaster.map((c) => {
-                    const on = categoryPickerDraft.visibility.includes(c.id);
-                    return (
-                      <GinitPressable
-                        key={c.id}
-                        onPress={() => toggleFeedCategoryPickerVisibilityDraft(c.id)}
-                        style={({ pressed }) => [
-                          styles.mapCategoryBarModalRow,
-                          pressed && styles.modalRowPressed,
-                        ]}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: on }}>
-                        <View style={styles.feedCategoryModalCategoryNameRow}>
-                          <Text style={styles.feedCategoryModalCategoryEmoji} allowFontScaling={false}>
-                            {c.emoji}
-                          </Text>
-                          <Text style={[styles.modalRowLabel, styles.feedCategoryModalCategoryLabel]} numberOfLines={1}>
-                            {c.label}
-                          </Text>
-                        </View>
-                        {on ? (
-                          <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
-                        ) : (
-                          <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                        )}
-                      </GinitPressable>
-                    );
-                  })}
-                </ScrollView>
-                {feedCategoryModalListShowMoreBelow ? (
-                  <View
-                    pointerEvents="none"
-                    style={styles.categoryBarModalScrollMoreCue}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants">
-                    <LinearGradient
-                      colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.96)']}
-                      locations={[0.2, 1]}
-                      start={{ x: 0.5, y: 0 }}
-                      end={{ x: 0.5, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <Feather name="chevron-down" size={18} color="#64748b" style={styles.categoryBarModalScrollMoreIcon} />
-                  </View>
-                ) : null}
-              </View>
-              <View style={[styles.mapCategoryBarModalDivider, styles.mapCategoryBarModalDividerBeforeToday]} />
-              <Text style={styles.modalSectionTitle}>표시</Text>
-              <GinitPressable
-                onPress={() => setRecruitingOnlyDraft((v) => !v)}
-                style={({ pressed }) => [
-                  styles.mapCategoryBarModalRow,
-                  styles.mapCategoryBarModalRowTall,
-                  pressed && styles.modalRowPressed,
-                ]}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: recruitingOnlyDraft }}
-                accessibilityLabel="모집중만 보기">
-                <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                  <Text style={styles.modalRowLabel}>모집중만 보기</Text>
-                  <Text style={styles.mapCategoryBarModalSubHint} numberOfLines={2}>
-                    탐색 탭에서만 정원 미달·일정 미확정 모임만 표시합니다. 참여중·종료 탭에는 적용되지 않아요.
-                  </Text>
-                </View>
-                <View style={styles.mapCategoryBarModalCheckCol}>
-                  {recruitingOnlyDraft ? (
-                    <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.themeMainColor} />
-                  ) : (
-                    <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                  )}
-                </View>
-              </GinitPressable>
-              {isSignedIn && Platform.OS !== 'web' ? (
-                <>
-                  <View style={styles.mapCategoryBarModalDivider} />
-                  <Text style={styles.modalSectionTitle}>알림</Text>
-                  <GinitPressable
-                    onPress={openMeetingNotifySettings}
-                    style={({ pressed }) => [
-                      styles.mapCategoryBarModalRow,
-                      styles.mapCategoryBarModalRowTall,
-                      pressed && styles.modalRowPressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="모임 생성 알림 설정">
-                    <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                      <Text style={styles.modalRowLabel}>공개 모임 생성 알림</Text>
-                      <Text style={styles.mapCategoryBarModalSubHint} numberOfLines={2}>
-                        관심 지역·카테고리별로 새 공개 모임만 알려요.
-                      </Text>
-                    </View>
-                    <GinitPressable
-                      onPress={openMeetingNotifySettings}
-                      hitSlop={10}
-                      accessibilityElementsHidden
-                      importantForAccessibility="no-hide-descendants">
-                      {meetingNotifyLoaded ? (
-                        <Switch
-                          value={meetingNotifyEffectiveOn}
-                          disabled
-                          trackColor={meetingCreateSwitchTrack}
-                          thumbColor={meetingNotifyEffectiveOn ? '#FFFFFF' : '#f1f5f9'}
-                          ios_backgroundColor="#cbd5e1"
-                          accessibilityElementsHidden
-                          importantForAccessibility="no-hide-descendants"
-                        />
-                      ) : (
-                        <ActivityIndicator color={GinitTheme.colors.primary} />
-                      )}
-                    </GinitPressable>
-                  </GinitPressable>
-                </>
-              ) : null}
-              <View style={styles.categoryBarModalActions}>
-                <GinitPressable
-                  onPress={closeFeedListSettingsModal}
-                  style={({ pressed }) => [styles.categoryBarActionGhost, pressed && { opacity: 0.85 }]}
-                  accessibilityRole="button">
-                  <Text style={styles.categoryBarActionGhostLabel}>취소</Text>
-                </GinitPressable>
-                <GinitPressable
-                  onPress={() => void saveCategoryPickerModal()}
-                  style={({ pressed }) => [styles.categoryBarActionPrimary, pressed && { opacity: 0.9 }]}
-                  accessibilityRole="button">
-                  <Text style={styles.modalCloseLabel}>저장</Text>
-                </GinitPressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
+          onRequestClose={closeFeedListSettingsModal}
+          categories={categories}
+          barVisibleCategoryIds={feedBarVisibleCategoryIds}
+          recruitingOnly={recruitingOnly}
+          exploreTodayOnly={exploreTodayOnly}
+          selectedCategoryId={selectedCategoryId}
+          onSave={onSaveFeedListSettings}
+          windowHeight={windowHeight}
+          profilePk={profilePk}
+          isSignedIn={isSignedIn}
+          onOpenMeetingNotifySettings={openMeetingNotifySettings}
+        />
 
         <Modal
           visible={homeNoticesModalOpen}
@@ -2089,138 +1631,7 @@ export default function FeedScreen() {
           onApply={applyFeedSearch}
         />
 
-        <Modal
-          visible={regionModalOpen}
-          animationType="fade"
-          transparent
-          onRequestClose={closeRegionModal}>
-          <View style={styles.modalRoot}>
-            <GinitPressable
-              style={StyleSheet.absoluteFillObject}
-              onPress={closeRegionModal}
-              accessibilityRole="button"
-              accessibilityLabel="관심 지역 설정 닫기"
-            />
-            <View style={[styles.modalCard, styles.modalCardWide]}>
-              <Text style={styles.modalTitle}>관심 지역 설정</Text>
-              <Text style={styles.modalHint}>
-                {registeredRegions.length === 0
-                  ? `탐색을 쓰려면 관심 지역을 최소 한 곳 등록한 뒤 「적용」을 눌러 주세요. `
-                  : ''}
-                + 로 전국 행정구(자치구) 단위로 검색해 추가해요. 최대 {FEED_REGISTERED_REGIONS_MAX}곳까지예요. 탐색에 보일 구는 상단 오른쪽 ▼에서 골라요.
-              </Text>
-              <Text style={styles.modalCurrentSummary} numberOfLines={1}>
-                등록 {draftRegisteredRegions.length}/{FEED_REGISTERED_REGIONS_MAX}곳
-              </Text>
-              <ScrollView style={styles.feedSettingsScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                {draftRegisteredRegions.length === 0 ? (
-                  <Text style={styles.interestRegionEmptyDraft}>추가된 관심 지역이 없어요.</Text>
-                ) : (
-                  draftRegisteredRegions.map((r) => {
-                    const norm = normalizeFeedRegionLabel(r);
-                    const blockLastDraftRemove =
-                      registeredRegions.length >= 1 && draftRegisteredRegions.length <= 1;
-                    return (
-                      <View key={norm} style={styles.modalRow}>
-                        <Text style={styles.modalRowLabel}>{getInterestRegionDisplayLabel(r)}</Text>
-                        {blockLastDraftRemove ? (
-                          <View style={{ width: 22 }} accessibilityElementsHidden />
-                        ) : (
-                          <GinitPressable
-                            onPress={() => removeDraftRegion(r)}
-                            accessibilityRole="button"
-                            accessibilityLabel={`${getInterestRegionDisplayLabel(r)} 삭제`}
-                            hitSlop={8}>
-                            <GinitSymbolicIcon name="trash-outline" size={22} color="#94a3b8" />
-                          </GinitPressable>
-                        )}
-                      </View>
-                    );
-                  })
-                )}
-                {draftRegisteredRegions.length < FEED_REGISTERED_REGIONS_MAX ? (
-                  <GinitPressable
-                    onPress={openRegionSearchModal}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel="관심 지역 추가">
-                    <GinitSymbolicIcon name="add-circle-outline" size={24} color={GinitTheme.colors.primary} />
-                    <Text style={[styles.modalRowLabel, styles.interestRegionAddLabel]}>관심 지역 추가</Text>
-                    <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
-                  </GinitPressable>
-                ) : (
-                  <Text style={styles.interestRegionEmptyDraft}>최대 {FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.</Text>
-                )}
-              </ScrollView>
-              <GinitPressable onPress={applyDraftRegisteredRegions} style={styles.modalPrimaryBtn} accessibilityRole="button">
-                <Text style={styles.modalPrimaryLabel}>적용</Text>
-              </GinitPressable>
-              {registeredRegions.length > 0 ? (
-                <GinitPressable onPress={closeRegionModal} style={styles.modalCloseBtn} accessibilityRole="button">
-                  <Text style={styles.modalCloseLabel}>닫기</Text>
-                </GinitPressable>
-              ) : null}
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={regionDropdownOpen}
-          animationType="fade"
-          transparent
-          onRequestClose={closeRegionDropdownModal}>
-          <View style={styles.modalRoot}>
-            <GinitPressable
-              style={StyleSheet.absoluteFillObject}
-              onPress={closeRegionDropdownModal}
-              accessibilityRole="button"
-              accessibilityLabel="표시 지역 선택 닫기"
-            />
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>표시 지역</Text>
-              {registeredRegions.length === 0 ? (
-                <>
-                  <Text style={styles.modalHint}>등록된 관심 지역이 없어요. 지역 이름을 눌러 등록해 주세요.</Text>
-                  <GinitPressable
-                    onPress={() => {
-                      closeRegionDropdownModal();
-                      openRegionModal();
-                    }}
-                    style={styles.modalPrimaryBtn}
-                    accessibilityRole="button">
-                    <Text style={styles.modalPrimaryLabel}>관심 지역 등록하기</Text>
-                  </GinitPressable>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.modalHint}>탐색에 보일 구를 골라 주세요.</Text>
-                  {registeredRegions.map((r) => {
-                    const norm = normalizeFeedRegionLabel(r);
-                    const active = norm === exploreActiveRegionNorm;
-                    return (
-                      <GinitPressable
-                        key={norm}
-                        onPress={() => pickActiveRegionFromDropdown(norm)}
-                        style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: active }}>
-                        <Text style={styles.modalRowLabel}>{getInterestRegionDisplayLabel(r)}</Text>
-                        {active ? (
-                          <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
-                        ) : (
-                          <GinitSymbolicIcon name="ellipse-outline" size={22} color="#cbd5e1" />
-                        )}
-                      </GinitPressable>
-                    );
-                  })}
-                </>
-              )}
-              <GinitPressable onPress={closeRegionDropdownModal} style={styles.modalCloseBtn} accessibilityRole="button">
-                <Text style={styles.modalCloseLabel}>닫기</Text>
-              </GinitPressable>
-            </View>
-          </View>
-        </Modal>
+        <InterestRegionModals controls={interestRegion} safeAreaTop={safeInsets.top} />
 
         <Modal
           visible={sortDropdownOpen}
@@ -2243,10 +1654,7 @@ export default function FeedScreen() {
                 return (
                   <GinitPressable
                     key={mode}
-                    onPress={() => {
-                      setListSortMode(mode);
-                      closeSortDropdown();
-                    }}
+                    onPress={() => applyListSortMode(mode)}
                     style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}>
@@ -2260,64 +1668,6 @@ export default function FeedScreen() {
                 );
               })}
               <GinitPressable onPress={closeSortDropdown} style={styles.modalCloseBtn} accessibilityRole="button">
-                <Text style={styles.modalCloseLabel}>닫기</Text>
-              </GinitPressable>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={regionSearchModalOpen}
-          animationType="fade"
-          transparent
-          onRequestClose={closeRegionSearchModal}>
-          <View
-            style={[
-              styles.modalRoot,
-              styles.regionSearchModalRoot,
-              regionSearchKeyboardVisible && styles.regionSearchModalRootKeyboardOpen,
-              regionSearchKeyboardVisible && { paddingTop: safeInsets.top + GinitTheme.spacing.sm },
-            ]}>
-            <GinitPressable
-              style={StyleSheet.absoluteFillObject}
-              onPress={closeRegionSearchModal}
-              accessibilityRole="button"
-              accessibilityLabel="지역 검색 닫기"
-            />
-            <View style={[styles.modalCard, styles.modalCardWide]}>
-              <Text style={styles.modalTitle}>지역 검색</Text>
-              <Text style={styles.modalHint}>
-                시·도·시 이름 또는 구 이름으로 검색한 뒤, 목록에서 누르면 관심 지역에 추가돼요.
-              </Text>
-              <TextInput
-                value={regionSearchQuery}
-                onChangeText={setRegionSearchQuery}
-                placeholder="예: 영등포구, 해운대구, 경기 수원"
-                placeholderTextColor="#94a3b8"
-                style={styles.regionSearchInput}
-                autoCorrect={false}
-                autoCapitalize="none"
-                accessibilityLabel="구 이름 검색"
-              />
-              <ScrollView style={styles.regionSearchScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                {regionSearchQuery.trim().length === 0 ? (
-                  <Text style={styles.interestRegionSearchEmpty}>검색어를 입력해 주세요.</Text>
-                ) : regionSearchResults.length === 0 ? (
-                  <Text style={styles.interestRegionSearchEmpty}>검색 결과가 없어요.</Text>
-                ) : (
-                  regionSearchResults.map((hit) => (
-                    <GinitPressable
-                      key={hit.key}
-                      onPress={() => pickSearchResultDistrict(hit.key)}
-                      style={({ pressed }) => [styles.modalRow, pressed && styles.modalRowPressed]}
-                      accessibilityRole="button">
-                      <Text style={styles.modalRowLabel}>{hit.label}</Text>
-                      <GinitSymbolicIcon name="chevron-forward" size={20} color="#94a3b8" />
-                    </GinitPressable>
-                  ))
-                )}
-              </ScrollView>
-              <GinitPressable onPress={closeRegionSearchModal} style={styles.modalCloseBtn} accessibilityRole="button">
                 <Text style={styles.modalCloseLabel}>닫기</Text>
               </GinitPressable>
             </View>
@@ -2356,6 +1706,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: GinitTheme.colors.textMuted,
+  },
+  feedDistanceSortOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(248, 250, 252, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+    zIndex: 20,
+  },
+  feedDistanceSortOverlayLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#475569',
+    textAlign: 'center',
   },
   tabPage: {
     flex: 1,
