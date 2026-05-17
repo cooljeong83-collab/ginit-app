@@ -7,6 +7,12 @@ let pendingServerProbe = false;
 let lastListNetworkSuccessAt = 0;
 let probeInFlight: Promise<void> | null = null;
 
+export function resetMeetingsFeedDeferredSyncState(): void {
+  pendingServerProbe = false;
+  lastListNetworkSuccessAt = 0;
+  probeInFlight = null;
+}
+
 export function markMeetingsFeedPendingServerProbe(): void {
   pendingServerProbe = true;
 }

@@ -87,8 +87,11 @@ async function pullSocialChatReadPointersToLocalImpl(args: PullSocialReadPointer
   await upsertLocalChatRoomReadState({
     roomType: 'social_dm',
     roomId: rid,
-    ownerUserId: args.ownerUserId?.trim() ?? null,
-    peerUserId: args.peerUserId === undefined ? undefined : String(args.peerUserId ?? '').trim() || null,
+    ownerUserId: args.ownerUserId?.trim() || undefined,
+    peerUserId:
+      args.peerUserId === undefined || args.peerUserId === null
+        ? undefined
+        : String(args.peerUserId).trim() || undefined,
     readMessageIdBy,
     readAtMsBy,
     readLastSeqBy,

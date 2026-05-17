@@ -1,8 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import {
+  fetchProfileFeedInterestRegions,
+  replaceProfileFeedInterestRegions,
+} from '@/src/lib/feed-interest-regions-server';
 import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
 import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-districts';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
+import { readStoredUserId } from '@/src/lib/app-user-id';
 
 const STORAGE_KEY = '@ginit/feed_registered_regions_v1';
 const ACTIVE_REGION_KEY = '@ginit/feed_active_region_norm_v1';
@@ -13,6 +18,9 @@ export const FEED_REGISTERED_REGIONS_MAX = 5;
 /** 지도 탭이 피드보다 먼저 열려도 직전/저장된 관심지역을 동기적으로 참고하기 위한 메모리 캐시 */
 let mapBootMemoryRegions: string[] = [];
 let mapBootMemoryActiveNorm: string | null = null;
+
+let pushDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingServerPush: { appUserId: string; regions: string[]; active: string | null } | null = null;
 
 function setMapBootMemory(regions: string[], activeNorm: string | null) {
   mapBootMemoryRegions = [...regions];
@@ -46,6 +54,131 @@ function normalizeList(input: unknown[]): string[] {
   return out;
 }
 
+async function readRegionsFromStorageOnly(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return normalizeList(parsed);
+  } catch {
+    return [];
+  }
+}
+
+async function readActiveFromStorageOnly(): Promise<string | null> {
+  try {
+    const v = await AsyncStorage.getItem(ACTIVE_REGION_KEY);
+    const t = v?.trim();
+    return t ? normalizeFeedRegionLabel(t) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRegionsToStorage(regions: string[]): Promise<void> {
+  const normalized = normalizeList(regions as unknown[]);
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    /* ignore */
+  }
+}
+
+async function writeActiveToStorage(norm: string | null): Promise<void> {
+  const n = norm?.trim() ? normalizeFeedRegionLabel(norm) : '';
+  try {
+    if (!n) await AsyncStorage.removeItem(ACTIVE_REGION_KEY);
+    else await AsyncStorage.setItem(ACTIVE_REGION_KEY, n);
+  } catch {
+    /* ignore */
+  }
+}
+
+function schedulePushFeedInterestRegionsToServer(
+  regions: string[],
+  activeNorm: string | null,
+  appUserId?: string,
+): void {
+  void (async () => {
+    const pk = appUserId?.trim() || (await readStoredUserId())?.trim() || '';
+    if (!pk) return;
+    pendingServerPush = { appUserId: pk, regions, active: activeNorm };
+    if (pushDebounceTimer) clearTimeout(pushDebounceTimer);
+    pushDebounceTimer = setTimeout(() => {
+      pushDebounceTimer = null;
+      const pending = pendingServerPush;
+      pendingServerPush = null;
+      if (!pending) return;
+      void replaceProfileFeedInterestRegions(
+        pending.appUserId,
+        pending.regions,
+        pending.active,
+      );
+    }, 500);
+  })();
+}
+
+/** 로컬 AsyncStorage만 비웁니다(로그아웃 시). 서버 백업은 유지됩니다. */
+export async function clearFeedInterestRegionsLocalOnSignOut(): Promise<void> {
+  if (pushDebounceTimer) {
+    clearTimeout(pushDebounceTimer);
+    pushDebounceTimer = null;
+  }
+  pendingServerPush = null;
+  try {
+    await Promise.all([
+      AsyncStorage.removeItem(STORAGE_KEY),
+      AsyncStorage.removeItem(ACTIVE_REGION_KEY),
+    ]);
+  } catch {
+    /* ignore */
+  }
+  setMapBootMemory([], null);
+}
+
+/** 로그인 직후 1회: 서버 → 로컬(앱 켤 때마다가 아닌 로그인 액션용). */
+export async function pullFeedInterestRegionsFromServerOnLogin(appUserId: string): Promise<void> {
+  const pk = appUserId.trim();
+  if (!pk) return;
+  const res = await fetchProfileFeedInterestRegions(pk);
+  if (!res.ok) return;
+  await persistFeedInterestRegionsLocally(res.data.region_norms, res.data.active_region_norm);
+}
+
+/**
+ * 재설치·세션 복구 등 로컬이 비었을 때만 서버에서 1회 복원합니다.
+ * 일반 콜드 스타트(로컬에 데이터 있음)에서는 호출하지 않습니다.
+ */
+export async function tryHydrateFeedInterestRegionsWhenLocalEmpty(appUserId: string): Promise<boolean> {
+  const pk = appUserId.trim();
+  if (!pk) return false;
+  const localRegions = await readRegionsFromStorageOnly();
+  if (localRegions.length > 0) return false;
+  const res = await fetchProfileFeedInterestRegions(pk);
+  if (!res.ok || res.data.region_norms.length === 0) return false;
+  await persistFeedInterestRegionsLocally(res.data.region_norms, res.data.active_region_norm);
+  return true;
+}
+
+export async function persistFeedInterestRegionsLocally(
+  regions: string[],
+  activeNorm: string | null,
+): Promise<void> {
+  const normalized = normalizeList(regions as unknown[]);
+  const active =
+    activeNorm && activeNorm.trim() ? normalizeFeedRegionLabel(activeNorm) : null;
+  const resolvedActive =
+    active && normalized.includes(active)
+      ? active
+      : normalized.length > 0
+        ? normalized[0]!
+        : null;
+  await writeRegionsToStorage(normalized);
+  await writeActiveToStorage(resolvedActive);
+  setMapBootMemory(normalized, resolvedActive);
+}
+
 /**
  * 모임 탭(탐색)용 관심 행정구 — AsyncStorage.
  * 기존 단일 `feed-location-cache` 라벨만 있으면 1개로 마이그레이션합니다.
@@ -53,11 +186,7 @@ function normalizeList(input: unknown[]): string[] {
 export async function loadRegisteredFeedRegions(): Promise<string[]> {
   let out: string[] = [];
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) out = normalizeList(parsed);
-    }
+    out = await readRegionsFromStorageOnly();
   } catch {
     /* ignore */
   }
@@ -80,13 +209,12 @@ export async function loadRegisteredFeedRegions(): Promise<string[]> {
   return out;
 }
 
-export async function saveRegisteredFeedRegions(regions: string[]): Promise<void> {
+export async function saveRegisteredFeedRegions(
+  regions: string[],
+  options?: { appUserId?: string; skipServerPush?: boolean },
+): Promise<void> {
   const normalized = normalizeList(regions as unknown[]);
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-  } catch {
-    /* ignore */
-  }
+  await writeRegionsToStorage(normalized);
   let active: string | null = mapBootMemoryActiveNorm;
   try {
     active = await loadActiveFeedRegion();
@@ -94,28 +222,53 @@ export async function saveRegisteredFeedRegions(regions: string[]): Promise<void
     /* ignore */
   }
   setMapBootMemory(normalized, active);
+  if (!options?.skipServerPush) {
+    schedulePushFeedInterestRegionsToServer(normalized, active, options?.appUserId);
+  }
 }
 
 /** 탐색 목록에 쓰는 «현재 선택» 구 라벨(정규화). 목록에 없으면 무시하고 첫 항목 등으로 맞춥니다. */
 export async function loadActiveFeedRegion(): Promise<string | null> {
-  try {
-    const v = await AsyncStorage.getItem(ACTIVE_REGION_KEY);
-    const t = v?.trim();
-    return t ? normalizeFeedRegionLabel(t) : null;
-  } catch {
-    return null;
+  return readActiveFromStorageOnly();
+}
+
+export async function saveActiveFeedRegion(
+  norm: string | null,
+  options?: { appUserId?: string; skipServerPush?: boolean },
+): Promise<void> {
+  const n = norm?.trim() ? normalizeFeedRegionLabel(norm) : '';
+  await writeActiveToStorage(n ? n : null);
+  setMapBootMemory(mapBootMemoryRegions, n ? n : null);
+  if (!options?.skipServerPush) {
+    const regions =
+      mapBootMemoryRegions.length > 0
+        ? mapBootMemoryRegions
+        : await readRegionsFromStorageOnly();
+    schedulePushFeedInterestRegionsToServer(regions, n ? n : null, options?.appUserId);
   }
 }
 
-export async function saveActiveFeedRegion(norm: string | null): Promise<void> {
-  const n = norm?.trim() ? normalizeFeedRegionLabel(norm) : '';
-  try {
-    if (!n) await AsyncStorage.removeItem(ACTIVE_REGION_KEY);
-    else await AsyncStorage.setItem(ACTIVE_REGION_KEY, n);
-  } catch {
-    /* ignore */
+/** 지역 목록·활성 구를 한 번에 로컬 저장 후 서버에 동기화합니다. */
+export async function saveFeedInterestRegionsSelection(
+  regions: string[],
+  activeNorm: string | null,
+  options?: { appUserId?: string; skipServerPush?: boolean },
+): Promise<void> {
+  const normalized = normalizeList(regions as unknown[]);
+  const active =
+    activeNorm && activeNorm.trim() ? normalizeFeedRegionLabel(activeNorm) : null;
+  const resolvedActive =
+    active && normalized.includes(active)
+      ? active
+      : normalized.length > 0
+        ? normalized[0]!
+        : null;
+  await writeRegionsToStorage(normalized);
+  await writeActiveToStorage(resolvedActive);
+  setMapBootMemory(normalized, resolvedActive);
+  if (!options?.skipServerPush) {
+    schedulePushFeedInterestRegionsToServer(normalized, resolvedActive, options?.appUserId);
   }
-  setMapBootMemory(mapBootMemoryRegions, n ? n : null);
 }
 
 /** 상단 헤더 한 줄 요약 (당근식 다중 관심 지역) */

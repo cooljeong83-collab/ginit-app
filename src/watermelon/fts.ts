@@ -16,23 +16,38 @@ import { database } from '@/src/watermelon/database';
  */
 
 let didInit = false;
+/** 기기 SQLite에 fts5 모듈이 없으면 재시도하지 않음(LIKE 폴백) */
+let fts5Unavailable = false;
+
+function isFts5ModuleError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? '');
+  return /fts5|no such module/i.test(msg);
+}
+
+/** 로그아웃 등 대량 삭제 후 FTS 트리거·가상 테이블을 다시 부트스트랩할 때 사용 */
+export function resetChatMessageFtsBootstrapState(): void {
+  didInit = false;
+}
 
 export async function ensureChatMessageFtsReady(): Promise<void> {
-  if (didInit) return;
+  if (didInit || fts5Unavailable) return;
   if (Platform.OS === 'web') return;
   const db = database;
   if (!db) return;
-  didInit = true;
 
   const adapter: any = (db as any).adapter;
   if (!adapter || typeof adapter.unsafeExecute !== 'function') {
     // adapter가 바뀌었거나 unsafeExecute가 없는 환경이면 FTS를 생략(폴백: LIKE)
+    didInit = true;
     return;
   }
 
+  const unsafeSql = (sqlString: string) => adapter.unsafeExecute({ sqlString });
+
+  try {
   // contentless FTS table: message_key를 저장하고, search_text만 인덱싱
   // NOTE: UNINDEXED는 FTS5에서 토큰화/인덱싱을 막습니다.
-  await adapter.unsafeExecute(`
+  await unsafeSql(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts
     USING fts5(
       message_key UNINDEXED,
@@ -46,7 +61,7 @@ export async function ensureChatMessageFtsReady(): Promise<void> {
   // 트리거: chat_messages의 search_text 변경을 FTS에 반영
   // - WatermelonDB는 table에 id(문자열 PK)를 포함합니다.
   // - message_key에는 "roomType:roomId:messageId"를 저장해 역참조합니다.
-  await adapter.unsafeExecute(`
+  await unsafeSql(`
     CREATE TRIGGER IF NOT EXISTS chat_messages_ai
     AFTER INSERT ON chat_messages
     BEGIN
@@ -60,7 +75,7 @@ export async function ensureChatMessageFtsReady(): Promise<void> {
     END;
   `);
 
-  await adapter.unsafeExecute(`
+  await unsafeSql(`
     CREATE TRIGGER IF NOT EXISTS chat_messages_au
     AFTER UPDATE OF search_text ON chat_messages
     BEGIN
@@ -75,13 +90,22 @@ export async function ensureChatMessageFtsReady(): Promise<void> {
     END;
   `);
 
-  await adapter.unsafeExecute(`
+  await unsafeSql(`
     CREATE TRIGGER IF NOT EXISTS chat_messages_ad
     AFTER DELETE ON chat_messages
     BEGIN
       DELETE FROM chat_messages_fts WHERE message_key = old.room_type || ':' || old.room_id || ':' || old.message_id;
     END;
   `);
+    didInit = true;
+  } catch (e) {
+    if (isFts5ModuleError(e)) {
+      fts5Unavailable = true;
+      if (__DEV__) console.warn('[chat-fts] fts5 unavailable, using LIKE search fallback');
+      return;
+    }
+    throw e;
+  }
 }
 
 export async function unsafeFtsSearchMessageKeys(args: {

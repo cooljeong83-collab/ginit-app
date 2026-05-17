@@ -16,6 +16,15 @@ export async function hydrateMeetingsIncrementalSyncAtFromStorage(): Promise<voi
 }
 
 /** 푸시·포그라운드 증분 동기화 등 “목록이 서버와 맞춰진 시점” 기록 */
+export async function clearMeetingsIncrementalSyncAt(): Promise<void> {
+  lastSuccessAtMsMem = 0;
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function markMeetingsIncrementalSyncSuccess(nowMs: number = Date.now()): Promise<void> {
   lastSuccessAtMsMem = nowMs;
   try {

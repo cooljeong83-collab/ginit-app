@@ -224,6 +224,21 @@ function assignDefined(r: any, key: string, value: unknown): void {
   if (value !== undefined) r[key] = value;
 }
 
+/** `null`은 “필드 미전달”로 취급 — 읽음 맵 병합 등에서 기존 owner/peer를 지우지 않습니다. */
+function assignOwnerPeerIfProvided(
+  r: any,
+  input: { ownerUserId?: string | null; peerUserId?: string | null },
+): void {
+  if (input.ownerUserId !== undefined && input.ownerUserId !== null) {
+    const o = cleanString(input.ownerUserId);
+    if (o) r.ownerUserId = o;
+  }
+  if (input.peerUserId !== undefined && input.peerUserId !== null) {
+    const p = cleanString(input.peerUserId);
+    if (p) r.peerUserId = p;
+  }
+}
+
 function resolveUnreadLastAtMs(input: LocalChatRoomSummaryInput): number | null {
   return cleanNumber(input.unreadLastAtMs) ?? cleanNumber(input.remoteUpdatedAtMs) ?? null;
 }
@@ -295,8 +310,7 @@ export async function upsertLocalChatRoomSummary(input: LocalChatRoomSummaryInpu
         const applyUnread = shouldApplyUnreadUpdate(r, input);
         r.roomId = roomId;
         r.roomType = roomType;
-        assignDefined(r, 'ownerUserId', input.ownerUserId === undefined ? undefined : cleanString(input.ownerUserId));
-        assignDefined(r, 'peerUserId', input.peerUserId === undefined ? undefined : cleanString(input.peerUserId));
+        assignOwnerPeerIfProvided(r, input);
         assignDefined(r, 'isGroup', input.isGroup === undefined ? undefined : input.isGroup === true);
         assignDefined(r, 'lastMessageId', input.lastMessageId === undefined ? undefined : cleanString(input.lastMessageId));
         assignDefined(r, 'lastMessageAtMs', input.lastMessageAtMs === undefined ? undefined : cleanNumber(input.lastMessageAtMs));
@@ -526,8 +540,7 @@ export async function upsertLocalChatRoomReadState(input: LocalChatRoomReadState
       const apply = (r: any) => {
         r.roomId = roomId;
         r.roomType = roomType;
-        assignDefined(r, 'ownerUserId', input.ownerUserId === undefined ? undefined : cleanString(input.ownerUserId));
-        assignDefined(r, 'peerUserId', input.peerUserId === undefined ? undefined : cleanString(input.peerUserId));
+        assignOwnerPeerIfProvided(r, input);
 
         const nextIds = parseStringMapJson(r.messageReadMessageIdByJson);
         const nextAts = parseNumberMapJson(r.messageReadAtByJson);
@@ -592,8 +605,8 @@ export async function markLocalChatRoomReadState(args: {
   await upsertLocalChatRoomReadState({
     roomType: args.roomType,
     roomId: args.roomId,
-    ownerUserId: args.ownerUserId ?? null,
-    peerUserId: args.peerUserId ?? null,
+    ownerUserId: args.ownerUserId ?? undefined,
+    peerUserId: args.peerUserId ?? undefined,
     readMessageIdBy: { [userKey]: messageId },
     readAtMsBy: { [userKey]: readAtMs },
     readStateLastAtMs: readAtMs,

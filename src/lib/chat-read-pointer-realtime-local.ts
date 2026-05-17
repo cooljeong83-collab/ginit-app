@@ -100,8 +100,8 @@ export async function applyChatReadPointerRealtimeToLocal(args: {
     await upsertLocalChatRoomReadState({
       roomType: parsed.roomKind,
       roomId,
-      ownerUserId: args.ownerUserId ?? null,
-      peerUserId: args.peerUserId,
+      ownerUserId: args.ownerUserId ?? undefined,
+      peerUserId: args.peerUserId ?? undefined,
       readMessageIdBy,
       readAtMsBy: { [parsed.readerAppUserId]: atMs },
       readLastSeqBy: { [parsed.readerAppUserId]: parsed.lastReadSeq },

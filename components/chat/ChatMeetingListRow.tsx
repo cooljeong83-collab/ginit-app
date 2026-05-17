@@ -74,7 +74,7 @@ type Props = {
   hostNickname: string;
   /** 탈퇴·익명화된 주관자 — 회색 기본 아이콘만 표시 */
   hostWithdrawn?: boolean;
-  /** `undefined`이면 아직 로딩 중, `null`이면 메시지 없음 */
+  /** `null`이면 마지막 메시지 없음(미리보기 비움). `undefined`도 동일하게 취급 권장 */
   latestMessage: MeetingChatMessage | null | undefined;
   /** 읽지 않은 새 메시지 수(목록 우측 시간 아래) */
   unreadCount?: number;
@@ -101,16 +101,15 @@ export function ChatMeetingListRow({
   const showCapacityBar = capacity > 0;
 
   const hasMessage = latestMessage != null;
-  const loadingPreview = latestMessage === undefined;
-  const showMetaRow = loadingPreview || hasMessage;
   const chatRel =
     hasMessage && latestMessage.createdAt ? formatRelativeFrom(latestMessage.createdAt) : '';
   const metaBits = [meeting.lifecycleStatus === 'SETTLED' ? '정산 완료' : '', place, chatRel].filter(Boolean);
   const metaText = metaBits.join(' · ');
+  const showMetaRow = metaText.length > 0;
 
-  const subtitle = hasMessage
+  const previewText = hasMessage
     ? previewFromMessage(latestMessage)
-    : (meeting.description?.trim() || '모임 소개가 아직 없어요.');
+    : (meeting.description?.trim() ?? '');
 
   const rightTime = hasMessage ? formatRightTime(latestMessage.createdAt) : '';
 
@@ -182,9 +181,11 @@ export function ChatMeetingListRow({
               </View>
             ) : null}
           </View>
-          <Text style={styles.previewLine} numberOfLines={2}>
-            {loadingPreview ? '불러오는 중…' : subtitle}
-          </Text>
+          {previewText ? (
+            <Text style={styles.previewLine} numberOfLines={2}>
+              {previewText}
+            </Text>
+          ) : null}
         </View>
       </View>
     </GinitPressable>

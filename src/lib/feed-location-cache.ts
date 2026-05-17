@@ -37,6 +37,15 @@ export async function loadFeedLocationCache(): Promise<FeedLocationCache | null>
   }
 }
 
+/** 로그아웃 — 공유 기기에서 이전 사용자의 피드 위치·구 선택 잔상 제거 */
+export async function clearFeedLocationCacheOnSignOut(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([KEY_LABEL, KEY_LAT, KEY_LNG, KEY_MANUAL]);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function saveFeedLocationCache(
   label: string,
   coords: LatLng | null,

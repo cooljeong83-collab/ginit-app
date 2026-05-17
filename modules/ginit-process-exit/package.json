@@ -1,0 +1,13 @@
+{
+  "name": "ginit-process-exit",
+  "version": "1.0.0",
+  "description": "Android hard process exit after sign-out (clears in-memory RN singletons).",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "react-native": "src/index.ts",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

@@ -3,6 +3,8 @@ import { QueryClient, focusManager } from '@tanstack/react-query';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+
+import { REACT_QUERY_PERSIST_STORAGE_KEY } from '@/src/lib/react-query-persist-storage';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 import { AppState } from 'react-native';
@@ -35,7 +37,7 @@ export function getAppQueryClient(): QueryClient {
 
 const persister = createAsyncStoragePersister({
   storage: AsyncStorage,
-  key: 'ginit-react-query-meetings-v2',
+  key: REACT_QUERY_PERSIST_STORAGE_KEY,
   throttleTime: 2000,
 });
 

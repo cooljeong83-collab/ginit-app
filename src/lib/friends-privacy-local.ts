@@ -74,3 +74,19 @@ export async function loadFriendBoolPref(
 export async function saveFriendBoolPref(me: string, keyFn: (m: string) => string, value: boolean): Promise<void> {
   await AsyncStorage.setItem(keyFn(me), JSON.stringify(value));
 }
+
+/** 로그아웃 — 해당 `app_user_id` 접미사 친구·차단·숨김 로컬 미러 제거 */
+export async function clearFriendsPrivacyLocalForUser(me: string): Promise<void> {
+  const pk = me.trim();
+  if (!pk) return;
+  try {
+    await AsyncStorage.multiRemove([
+      friendsHiddenStorageKey(pk),
+      friendsBlockedPeerIdsStorageKey(pk),
+      friendsAutoAddContactsStorageKey(pk),
+      friendsAllowRecommendationsStorageKey(pk),
+    ]);
+  } catch {
+    /* ignore */
+  }
+}

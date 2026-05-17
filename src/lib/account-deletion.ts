@@ -3,9 +3,7 @@
  * - 방장인 모임: 단독이면 삭제, 복수면 이관 후 나가기
  * - 게스트로만 참여 중인 모임: `leaveMeeting`으로 나가기
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Directory, Paths } from 'expo-file-system';
-import { Image } from 'expo-image';
+import { wipeLocalAppToFreshInstallState } from '@/src/lib/local-app-fresh-install-wipe';
 
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import { signOutSupabase, supabase } from '@/src/lib/supabase';
@@ -363,24 +361,7 @@ export async function deleteFirebaseAuthUserBestEffort(): Promise<void> {
   void (await deleteFirebaseAuthUserStrict());
 }
 
-/** AsyncStorage 전체·이미지 디스크 캐시를 비웁니다. */
+/** AsyncStorage 전체·Watermelon·이미지 캐시를 비웁니다(최초 설치에 가깝게). */
 export async function wipeLocalAppData(): Promise<void> {
-  try {
-    await AsyncStorage.clear();
-  } catch {
-    /* */
-  }
-  try {
-    await Image.clearDiskCache();
-    await Image.clearMemoryCache();
-  } catch {
-    /* */
-  }
-  try {
-    const dir = new Directory(Paths.cache);
-    // 캐시 전체 삭제는 기기·OS에 따라 실패할 수 있어 best-effort
-    dir.delete();
-  } catch {
-    /* 캐시 전체 삭제는 기기·OS에 따라 실패할 수 있음 */
-  }
+  await wipeLocalAppToFreshInstallState();
 }

@@ -209,6 +209,25 @@ export function socialDmRoomId(userA: string, userB: string): string {
   return `social_${a}__${b}`;
 }
 
+export function isValidSocialDmPeerForViewer(meAppUserId: string, peerAppUserId: string): boolean {
+  const x = (normalizePhoneUserId(meAppUserId) ?? meAppUserId).trim();
+  const y = (normalizePhoneUserId(peerAppUserId) ?? peerAppUserId).trim();
+  return Boolean(x && y && x !== y);
+}
+
+/** 목록·네비 — 실패 시 `social_` roomId 폴백, 없으면 빈 문자열(행 스킵). */
+export function resolveSocialDmRoomIdForViewer(
+  meAppUserId: string,
+  peerAppUserId: string,
+  fallbackRoomId?: string,
+): string {
+  if (isValidSocialDmPeerForViewer(meAppUserId, peerAppUserId)) {
+    return socialDmRoomId(meAppUserId, peerAppUserId);
+  }
+  const fb = fallbackRoomId?.trim();
+  return fb?.startsWith('social_') ? fb : '';
+}
+
 export function parsePeerFromSocialRoomId(roomId: string, meAppUserId: string): string | null {
   const rid = roomId.trim();
   const me = (normalizePhoneUserId(meAppUserId) ?? meAppUserId).trim();

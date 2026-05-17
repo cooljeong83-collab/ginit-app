@@ -93,26 +93,34 @@ export function useMeetingDetailQuery(meetingId: string, opts?: UseMeetingDetail
 
   const hasFetched = query.data !== undefined || query.isError;
   const serverSaysMissing = hasFetched && query.data === null && !query.isError;
+  const fetchedMeeting = hasFetched ? (query.data ?? null) : undefined;
 
   useEffect(() => {
     if (!id || !serverSaysMissing) return;
     void purgeDeletedMeetingLocally(queryClient, id, userId?.trim() ?? null);
   }, [id, queryClient, serverSaysMissing, userId]);
 
+  /**
+   * 네이티브: observe가 “행 없음(null)”을 먼저 emit한 뒤 fetch→WM upsert가 끝나는 짧은 구간이 있음.
+   * meetingReady만 true이고 meeting이 null이면 「모임을 찾을 수 없어요」로 떨어지므로, fetch 결과를 임시 폴백합니다.
+   */
   const meeting: Meeting | null = serverSaysMissing
     ? null
     : useWatermelonUi
-      ? (localMeeting ?? null)
-      : query.data !== undefined
-        ? query.data
+      ? (localMeeting ?? fetchedMeeting ?? null)
+      : fetchedMeeting !== undefined
+        ? fetchedMeeting
         : null;
 
   const loading =
     Boolean(id) &&
     loadError == null &&
     !serverSaysMissing &&
-    (wmHydrating || (!hasLocalRow && !hasFetched)) &&
-    (query.status === 'pending' || query.fetchStatus === 'fetching' || wmHydrating);
+    meeting == null &&
+    (wmHydrating ||
+      !hasFetched ||
+      query.status === 'pending' ||
+      query.fetchStatus === 'fetching');
 
   const refetch = useCallback(() => {
     void query.refetch();

@@ -516,18 +516,24 @@ export default function ProfileEditScreen() {
     refreshEditProfile,
   ]);
 
-  const onSignOut = useCallback(async () => {
+  const runSignOut = useCallback(async () => {
     setBusy(true);
     try {
-      await signOutSession();
-      router.replace('/login');
+      await signOutSession({ exitApp: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
       Alert.alert('로그아웃 실패', msg);
     } finally {
       setBusy(false);
     }
-  }, [router, signOutSession]);
+  }, [signOutSession]);
+
+  const onRequestSignOut = useCallback(() => {
+    Alert.alert('로그아웃', '이 기기에서 로그아웃할까요?', [
+      { text: '취소', style: 'cancel' },
+      { text: '로그아웃', style: 'destructive', onPress: () => void runSignOut() },
+    ]);
+  }, [runSignOut]);
 
   const runDeleteAccount = useCallback(async () => {
     const sessionUserId = userId?.trim() ?? '';
@@ -557,25 +563,15 @@ export default function ProfileEditScreen() {
         Alert.alert('탈퇴를 완료하지 못했어요', authDel.message);
         return;
       }
-      await signOutSession();
       await wipeLocalAppData();
-      const doneMsg =
-        preflight.mode === 'local_session_cleanup_only'
-          ? '이미 서버에서 탈퇴 처리된 계정이에요. 이 기기에 남은 로그인 정보를 정리했습니다.'
-          : '탈퇴가 완료되었습니다. 그동안 지닛과 함께해주셔서 감사합니다.';
-      if (Platform.OS === 'android') {
-        ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-        router.replace('/login');
-      } else {
-        Alert.alert('탈퇴 완료', doneMsg, [{ text: '확인', onPress: () => router.replace('/login') }]);
-      }
+      await signOutSession({ exitApp: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
       Alert.alert('탈퇴 실패', msg);
     } finally {
       setDeleteBusy(false);
     }
-  }, [userId, authProfile?.supabaseUserId, router, signOutSession]);
+  }, [userId, authProfile?.supabaseUserId, signOutSession]);
 
   const onRequestDeleteAccount = useCallback(() => {
     const sessionUserId = userId?.trim() ?? '';

@@ -3,13 +3,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Keyboard, Platform } from 'react-native';
 
 import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
+import { readStoredUserId } from '@/src/lib/app-user-id';
 import {
   FEED_REGISTERED_REGIONS_MAX,
   loadActiveFeedRegion,
   loadRegisteredFeedRegions,
   saveActiveFeedRegion,
-  saveRegisteredFeedRegions,
+  saveFeedInterestRegionsSelection,
   syncFeedRegionMapBootMemoryFromSelection,
+  tryHydrateFeedInterestRegionsWhenLocalEmpty,
 } from '@/src/lib/feed-registered-regions';
 import { emitFeedInterestRegionSelectionChanged } from '@/src/lib/feed-interest-region-events';
 import { closestRegisteredFeedRegionNorm } from '@/src/lib/feed-region-map-center';
@@ -74,8 +76,7 @@ export function useFeedInterestRegionControls() {
     registeredRegionsRef.current = regions;
     setRegisteredRegions(regions);
     setActiveRegionNorm(nextActive);
-    void saveRegisteredFeedRegions(regions);
-    void saveActiveFeedRegion(nextActive);
+    void saveFeedInterestRegionsSelection(regions, nextActive);
     syncFeedRegionMapBootMemoryFromSelection(regions, nextActive);
     emitFeedInterestRegionSelectionChanged();
   }, []);
@@ -94,7 +95,16 @@ export function useFeedInterestRegionControls() {
     let cancelled = false;
     void (async () => {
       try {
-        const regions = await loadRegisteredFeedRegions();
+        let regions = await loadRegisteredFeedRegions();
+        if (cancelled) return;
+        if (regions.length === 0) {
+          const pk = (await readStoredUserId())?.trim() || '';
+          if (pk) {
+            const hydrated = await tryHydrateFeedInterestRegionsWhenLocalEmpty(pk);
+            if (cancelled) return;
+            if (hydrated) regions = await loadRegisteredFeedRegions();
+          }
+        }
         if (cancelled) return;
         const activeRaw = await loadActiveFeedRegion();
         if (cancelled) return;
@@ -104,7 +114,7 @@ export function useFeedInterestRegionControls() {
         setActiveRegionNorm(nextActive);
         syncFeedRegionMapBootMemoryFromSelection(regions, nextActive);
       } finally {
-        setFeedLocationReady(true);
+        if (!cancelled) setFeedLocationReady(true);
       }
     })();
     return () => {

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { candidateUserKeys } from '@/src/lib/meeting-chat-rooms-summary';
 import { mapLocalChatRoomRow, type LocalChatRoomSummary } from '@/src/lib/offline-chat/offline-chat-rooms';
+import { isValidSocialDmPeerForViewer } from '@/src/lib/social-chat-rooms';
 import type { OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
 import { WM_CHAT_ROOM_LIST_OBSERVE_COLUMNS } from '@/src/lib/watermelon-observe-columns';
 import { database } from '@/src/watermelon';
@@ -38,12 +39,9 @@ export function useChatRoomListEngine(args: {
       ownerKeys.length === 0
         ? []
         : [
-            Q.or(
-              Q.where('owner_user_id', null),
-              ownerKeys.length === 1
-                ? Q.where('owner_user_id', ownerKeys[0])
-                : Q.where('owner_user_id', Q.oneOf(ownerKeys)),
-            ),
+            ownerKeys.length === 1
+              ? Q.where('owner_user_id', ownerKeys[0])
+              : Q.where('owner_user_id', Q.oneOf(ownerKeys)),
           ];
     const clauses = [
       Q.where('room_type', roomType),
@@ -58,7 +56,10 @@ export function useChatRoomListEngine(args: {
         .map(mapLocalChatRoomRow)
         .filter((r) => {
           if (!r.roomId.trim()) return false;
-          if (roomType === 'social_dm' && !r.peerAppUserId.trim()) return false;
+          if (roomType === 'social_dm') {
+            if (!r.peerAppUserId.trim()) return false;
+            if (owner && !isValidSocialDmPeerForViewer(owner, r.peerAppUserId)) return false;
+          }
           if (owner) {
             const rowOwn = (r.ownerUserId ?? '').trim();
             if (rowOwn && ownerKeys.length > 0 && !ownerKeys.includes(rowOwn)) return false;

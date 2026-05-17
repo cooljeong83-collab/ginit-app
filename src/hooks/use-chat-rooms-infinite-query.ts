@@ -13,13 +13,15 @@ import {
   fetchChatRoomsListPageHybrid,
   fetchChatRoomsChangeSummariesFromSupabase,
 } from '@/src/lib/supabase-chat-rooms-list';
+import {
+  hasAttemptedChatRoomsEmptyRecovery,
+  markChatRoomsEmptyRecoveryAttempted,
+} from '@/src/lib/chat-rooms-empty-recovery-state';
 import { subscribeChatListRefresh } from '@/src/lib/user-chat-list-refresh-bus';
 
 export { chatRoomsListQueryKey, chatRoomsListQueryKey as chatRoomsQueryKey } from '@/src/lib/chat-query-keys';
 
 type ChatRoomListRow = SocialChatRoomSummary | LocalChatRoomSummary;
-
-const attemptedEmptyRecoveryUserIds = new Set<string>();
 
 async function upsertSocialRoomsPageToLocal(
   ownerUserId: string,
@@ -59,7 +61,7 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
 
   useEffect(() => {
     didLogCacheRef.current = false;
-    didAttemptEmptyRecoveryRef.current = uid ? attemptedEmptyRecoveryUserIds.has(uid) : false;
+    didAttemptEmptyRecoveryRef.current = uid ? hasAttemptedChatRoomsEmptyRecovery(uid) : false;
     setListError(null);
   }, [uid]);
 
@@ -126,7 +128,7 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
     const timer = setTimeout(() => {
       if (didAttemptEmptyRecoveryRef.current) return;
       didAttemptEmptyRecoveryRef.current = true;
-      attemptedEmptyRecoveryUserIds.add(uid);
+      markChatRoomsEmptyRecoveryAttempted(uid);
       void syncChangedRooms();
     }, 250);
 

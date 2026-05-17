@@ -38,7 +38,8 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
   searchSocialChatMessages,
   socialDmPreviewLine,
-  socialDmRoomId,
+  isValidSocialDmPeerForViewer,
+  resolveSocialDmRoomIdForViewer,
   socialMessageTimeMs,
   type SocialChatMessage,
   type SocialChatRoomSummary,
@@ -490,7 +491,10 @@ export default function ChatTab() {
   }, [socialFriendDmRooms, localSocialRoomById]);
 
   const displayedSocialRooms = useMemo(() => {
-    let rows = socialFriendDmRooms;
+    const me = userId?.trim() ?? '';
+    let rows = socialFriendDmRooms.filter(
+      (r) => !me || isValidSocialDmPeerForViewer(me, r.peerAppUserId),
+    );
     const q = appliedSocialTextQuery.trim().toLowerCase();
     if (q) {
       rows = rows.filter((r) => {
@@ -513,6 +517,7 @@ export default function ChatTab() {
     return list;
   }, [
     socialFriendDmRooms,
+    userId,
     appliedSocialTextQuery,
     socialProfiles,
     socialMessageMatchRoomIds,
@@ -989,7 +994,7 @@ export default function ChatTab() {
                         hostPhotoUrl={host?.photoUrl ?? null}
                         hostNickname={host?.nickname ?? '주관자'}
                         hostWithdrawn={isUserProfileWithdrawn(host)}
-                        latestMessage={effectiveLatestByMeetingId[m.id]}
+                        latestMessage={effectiveLatestByMeetingId[m.id] ?? null}
                         unreadCount={unread}
                         categories={meetingCategories}
                         onPress={() => {
@@ -1058,14 +1063,17 @@ export default function ChatTab() {
                 onEndReachedThreshold={0.6}
                 onLoad={scrollSocialListToTop}
                 renderItem={({ item: row }) => {
+                  const me = userId?.trim() ?? '';
+                  const rid = me
+                    ? resolveSocialDmRoomIdForViewer(me, row.peerAppUserId, row.roomId)
+                    : row.roomId;
+                  if (!rid) return null;
                   const prof = socialProfiles.get(row.peerAppUserId);
                   const uri = prof?.photoUrl?.trim();
                   const nick = prof?.nickname ?? '친구';
-                  const rid = userId?.trim() ? socialDmRoomId(userId.trim(), row.peerAppUserId) : row.roomId;
                   const latest = effectiveLatestBySocialRoomId[row.roomId];
                   const hasMessage = latest != null;
-                  const loadingPreview = false;
-                  const preview = hasMessage ? socialDmPreviewLine(latest) : '대화를 시작해 보세요.';
+                  const preview = hasMessage ? socialDmPreviewLine(latest) : '';
                   const rightTime = hasMessage ? formatRightTimeFromMs(latestSocialChatMessageMs(latest)) : '';
                   const unread = localSocialRoomById.get(row.roomId)?.unreadCount ?? 0;
                   return (
@@ -1149,9 +1157,11 @@ export default function ChatTab() {
                               </View>
                             ) : null}
                           </View>
-                          <Text style={styles.socialPreviewLine} numberOfLines={2}>
-                            {loadingPreview ? '불러오는 중…' : preview}
-                          </Text>
+                          {preview ? (
+                            <Text style={styles.socialPreviewLine} numberOfLines={2}>
+                              {preview}
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
                     </GinitPressable>
