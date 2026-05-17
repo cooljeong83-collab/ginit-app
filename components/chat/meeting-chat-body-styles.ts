@@ -476,6 +476,9 @@ export const meetingChatBodyStyles = StyleSheet.create({
     height: 120,
     backgroundColor: '#e2e8f0',
   },
+  linkPreviewThumbPlaceholder: {
+    backgroundColor: '#e2e8f0',
+  },
   linkPreviewBody: {
     paddingHorizontal: 10,
     paddingVertical: 8,

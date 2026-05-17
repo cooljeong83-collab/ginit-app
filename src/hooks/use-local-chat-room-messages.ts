@@ -2,7 +2,8 @@ import { Q } from '@nozbe/watermelondb';
 import { useEffect, useState } from 'react';
 import { Timestamp } from '@/src/lib/ginit-timestamp';
 
-import type { MeetingChatLinkPreview, MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
+import { normalizeMeetingChatLinkPreview } from '@/src/lib/chat-link-preview-normalize';
+import type { MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 import type { SocialChatMessage, SocialChatReplyTo } from '@/src/lib/social-chat-rooms';
 import { WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS } from '@/src/lib/watermelon-observe-columns';
 import { database } from '@/src/watermelon';
@@ -27,17 +28,8 @@ function normalizeKind(v: unknown): MeetingChatMessageKind {
   return v === 'system' ? 'system' : v === 'image' ? 'image' : 'text';
 }
 
-function parseLinkPreview(raw: unknown): MeetingChatLinkPreview | null {
-  const o = parseJsonObject(raw);
-  const url = typeof o?.url === 'string' ? o.url.trim() : '';
-  if (!url) return null;
-  return {
-    url,
-    title: typeof o?.title === 'string' ? o.title : null,
-    description: typeof o?.description === 'string' ? o.description : null,
-    imageUrl: typeof o?.imageUrl === 'string' ? o.imageUrl : null,
-    siteName: typeof o?.siteName === 'string' ? o.siteName : null,
-  };
+function parseLinkPreview(raw: unknown) {
+  return normalizeMeetingChatLinkPreview(parseJsonObject(raw));
 }
 
 function parseReplyTo(raw: unknown, fallbackMessageId: unknown): MeetingChatMessage['replyTo'] {

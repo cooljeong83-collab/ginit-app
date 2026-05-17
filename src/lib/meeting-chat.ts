@@ -14,6 +14,7 @@ import {
   uploadJpegBase64ToSupabasePublicBucket,
 } from '@/src/lib/supabase-storage-upload';
 import { normalizeParticipantId, readStoredUserId } from '@/src/lib/app-user-id';
+import { normalizeMeetingChatLinkPreview } from '@/src/lib/chat-link-preview-normalize';
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import {
   chatReadPointerRoomIdsForRealtime,
@@ -295,21 +296,7 @@ function mapChatDeltaRowToMeetingChatMessage(row: ChatDeltaRow): MeetingChatMess
       text: typeof r.text === 'string' ? String(r.text) : '',
     };
   }
-  let linkPreview: MeetingChatLinkPreview | null = null;
-  const lpRaw = row.link_preview;
-  if (lpRaw && typeof lpRaw === 'object' && !Array.isArray(lpRaw)) {
-    const o = lpRaw as Record<string, unknown>;
-    const u = typeof o.url === 'string' ? o.url.trim() : '';
-    if (u) {
-      linkPreview = {
-        url: u,
-        title: typeof o.title === 'string' ? o.title : null,
-        description: typeof o.description === 'string' ? o.description : null,
-        imageUrl: typeof o.imageUrl === 'string' ? o.imageUrl : null,
-        siteName: typeof o.siteName === 'string' ? o.siteName : null,
-      };
-    }
-  }
+  const linkPreview = normalizeMeetingChatLinkPreview(row.link_preview);
   const seqRaw = row.seq;
   const serverSeq =
     typeof seqRaw === 'number' && Number.isFinite(seqRaw) && seqRaw > 0

@@ -315,7 +315,13 @@ const MeetingChatBubbleRow = memo(function MeetingChatBubbleRow(props: MeetingCh
           [styles.bubbleMineWrap, styles.ginitPlainMineWrap, chatBubbleMaxWidthStyle],
           pressed && styles.pressed,
         ]}>
-        <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={singleMsg.text} standalone />
+        <MeetingChatLinkPreviewCard
+          preview={singleMsg.linkPreview}
+          mine
+          layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
+          rawUrlText={singleMsg.text}
+          standalone
+        />
       </GinitPressable>
     ) : (
       <GinitPressable
@@ -331,6 +337,7 @@ const MeetingChatBubbleRow = memo(function MeetingChatBubbleRow(props: MeetingCh
             <MeetingChatLinkPreviewCard
               preview={singleMsg.linkPreview}
               mine
+              layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
               rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''}
             />
           ) : null}
@@ -467,7 +474,13 @@ const MeetingChatBubbleRow = memo(function MeetingChatBubbleRow(props: MeetingCh
               delayLongPress={420}
               accessibilityLabel="말풍선 옵션"
               style={({ pressed }) => [styles.bubbleOtherOuter, chatBubbleMaxWidthStyle, pressed && styles.pressed]}>
-              <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={singleMsg.text} standalone />
+              <MeetingChatLinkPreviewCard
+                preview={singleMsg.linkPreview}
+                mine={false}
+                layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
+                rawUrlText={singleMsg.text}
+                standalone
+              />
             </GinitPressable>
           ) : (
             <View style={[styles.bubbleOtherOuter, chatBubbleMaxWidthStyle]}>
@@ -484,6 +497,7 @@ const MeetingChatBubbleRow = memo(function MeetingChatBubbleRow(props: MeetingCh
                     <MeetingChatLinkPreviewCard
                       preview={singleMsg.linkPreview}
                       mine={false}
+                      layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
                       rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''}
                     />
                   ) : null}

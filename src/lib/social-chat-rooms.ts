@@ -33,6 +33,7 @@ import {
   ensureSupabaseRealtimeAuthFromSession,
   getSupabaseAuthUserIdForRealtimeTopic,
 } from '@/src/lib/supabase-realtime-resilience';
+import { normalizeMeetingChatLinkPreview } from '@/src/lib/chat-link-preview-normalize';
 import type { MeetingChatLinkPreview, MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { fetchChatRoomsListPageFromSupabase } from '@/src/lib/supabase-chat-rooms-list';
@@ -135,21 +136,7 @@ function mapChatDeltaRowToSocialMessage(row: ChatDeltaRow): SocialChatMessage {
       text: typeof r.text === 'string' ? String(r.text) : '',
     };
   }
-  let linkPreview: MeetingChatLinkPreview | null = null;
-  const lpRaw = row.link_preview;
-  if (lpRaw && typeof lpRaw === 'object' && !Array.isArray(lpRaw)) {
-    const o = lpRaw as Record<string, unknown>;
-    const u = typeof o.url === 'string' ? o.url.trim() : '';
-    if (u) {
-      linkPreview = {
-        url: u,
-        title: typeof o.title === 'string' ? o.title : null,
-        description: typeof o.description === 'string' ? o.description : null,
-        imageUrl: typeof o.imageUrl === 'string' ? o.imageUrl : null,
-        siteName: typeof o.siteName === 'string' ? o.siteName : null,
-      };
-    }
-  }
+  const linkPreview = normalizeMeetingChatLinkPreview(row.link_preview);
   return {
     id,
     senderId,

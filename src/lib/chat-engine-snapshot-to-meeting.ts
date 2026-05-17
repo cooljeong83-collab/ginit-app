@@ -1,7 +1,8 @@
 import { Timestamp } from '@/src/lib/ginit-timestamp';
 
 import type { ChatEngineMessageSnapshot } from '@/src/hooks/useChatEngine';
-import type { MeetingChatLinkPreview, MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
+import { normalizeMeetingChatLinkPreview } from '@/src/lib/chat-link-preview-normalize';
+import type { MeetingChatMessage, MeetingChatMessageKind } from '@/src/lib/meeting-chat';
 
 function msToTimestamp(ms: number | null | undefined): Timestamp | null {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return null;
@@ -12,19 +13,10 @@ function msToTimestamp(ms: number | null | undefined): Timestamp | null {
   }
 }
 
-function parseLinkPreviewJson(raw: string | null): MeetingChatLinkPreview | null {
+function parseLinkPreviewJson(raw: string | null): ReturnType<typeof normalizeMeetingChatLinkPreview> {
   if (!raw?.trim()) return null;
   try {
-    const o = JSON.parse(raw) as Record<string, unknown>;
-    const url = typeof o.url === 'string' ? o.url.trim() : '';
-    if (!url) return null;
-    return {
-      url,
-      title: typeof o.title === 'string' ? o.title : null,
-      description: typeof o.description === 'string' ? o.description : null,
-      imageUrl: typeof o.imageUrl === 'string' ? o.imageUrl : null,
-      siteName: typeof o.siteName === 'string' ? o.siteName : null,
-    };
+    return normalizeMeetingChatLinkPreview(JSON.parse(raw));
   } catch {
     return null;
   }

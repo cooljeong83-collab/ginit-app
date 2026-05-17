@@ -394,7 +394,13 @@ export function useMeetingChatRenderItem({
               [styles.bubbleMineWrap, styles.ginitPlainMineWrap, chatBubbleMaxWidthStyle],
               pressed && styles.pressed,
             ]}>
-            <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={singleMsg.text} standalone />
+            <MeetingChatLinkPreviewCard
+              preview={singleMsg.linkPreview}
+              mine
+              layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
+              rawUrlText={singleMsg.text}
+              standalone
+            />
           </GinitPressable>
         ) : (
           <GinitPressable
@@ -407,7 +413,12 @@ export function useMeetingChatRenderItem({
               {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
               {bubbleText(singleMsg?.text, styles.bubbleMineText)}
               {singleMsg?.linkPreview?.url && singleMsg.linkPreview ? (
-                <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''} />
+                <MeetingChatLinkPreviewCard
+                  preview={singleMsg.linkPreview}
+                  mine
+                  layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
+                  rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''}
+                />
               ) : null}
             </BlurView>
           </GinitPressable>
@@ -541,7 +552,13 @@ export function useMeetingChatRenderItem({
                   delayLongPress={420}
                   accessibilityLabel="말풍선 옵션"
                   style={({ pressed }) => [styles.bubbleOtherOuter, chatBubbleMaxWidthStyle, pressed && styles.pressed]}>
-                  <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={singleMsg.text} standalone />
+                  <MeetingChatLinkPreviewCard
+                    preview={singleMsg.linkPreview}
+                    mine={false}
+                    layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
+                    rawUrlText={singleMsg.text}
+                    standalone
+                  />
                 </GinitPressable>
               ) : (
                 <View style={[styles.bubbleOtherOuter, chatBubbleMaxWidthStyle]}>
@@ -555,7 +572,12 @@ export function useMeetingChatRenderItem({
                       {anchorMsg.replyTo?.messageId ? <View style={styles.replyDivider} /> : null}
                       {bubbleText(singleMsg?.text, styles.bubbleOtherText)}
                       {singleMsg?.linkPreview?.url && singleMsg.linkPreview ? (
-                        <MeetingChatLinkPreviewCard preview={singleMsg.linkPreview} mine={false} rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''} />
+                        <MeetingChatLinkPreviewCard
+                          preview={singleMsg.linkPreview}
+                          mine={false}
+                          layoutWidth={chatBubbleMaxWidthStyle.maxWidth}
+                          rawUrlText={extractFirstHttpUrlFromChatText(singleMsg?.text ?? '') ?? ''}
+                        />
                       ) : null}
                     </BlurView>
                     {sid === 'ginit_ai' ? <View style={styles.aiNeonOutline} pointerEvents="none" /> : null}
