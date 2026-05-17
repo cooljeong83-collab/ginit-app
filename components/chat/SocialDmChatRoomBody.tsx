@@ -1,5 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
+import { Image } from 'expo-image';
 import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -26,6 +27,7 @@ import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat
 import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { buildChatMessageIndexById } from '@/src/lib/chat-message-index-by-id';
+import { profilesFromMessageSenderMeta } from '@/components/chat/meeting-chat-ui-helpers';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import {
   deleteSocialChatImageMessageBestEffort,
@@ -327,6 +329,35 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   );
 
   useEffect(() => {
+    const cachedProfiles = profilesFromMessageSenderMeta(messages);
+    if (cachedProfiles.size > 0) {
+      setProfiles((prev) => {
+        let changed = false;
+        const next = new Map(prev);
+        for (const [senderId, cached] of cachedProfiles) {
+          const existing = next.get(senderId);
+          const cachedNickname = cached.nickname?.trim() || '회원';
+          const cachedPhotoUrl = cached.photoUrl?.trim() || null;
+          const existingNickname = existing?.nickname?.trim() || '';
+          const existingPhotoUrl = existing?.photoUrl?.trim() || null;
+          const merged: UserProfile = {
+            ...(existing ?? { nickname: cachedNickname, photoUrl: cachedPhotoUrl }),
+            nickname: existingNickname && existingNickname !== '회원' ? existingNickname : cachedNickname,
+            photoUrl: existingPhotoUrl || cachedPhotoUrl,
+          };
+          if (!existing || existing.nickname !== merged.nickname || existing.photoUrl !== merged.photoUrl) {
+            next.set(senderId, merged);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+      const urls = [...cachedProfiles.values()].map((p) => p.photoUrl?.trim()).filter(Boolean) as string[];
+      if (urls.length > 0) void Image.prefetch(urls, 'disk').catch(() => {});
+    }
+  }, [messages]);
+
+  useEffect(() => {
     const ids = [myUserId.trim(), peerId.trim()].filter(Boolean);
     if (ids.length < 2) return;
     setProfiles((prev) => {
@@ -341,7 +372,25 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       }
       return next;
     });
-    void getUserProfilesForIds(ids).then(setProfiles);
+    let cancelled = false;
+    void getUserProfilesForIds(ids).then((fetched) => {
+      if (cancelled) return;
+      setProfiles((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of fetched) {
+          const existing = next.get(k);
+          const nickname = v.nickname?.trim() || existing?.nickname?.trim() || '회원';
+          const photoUrl = v.photoUrl?.trim() || existing?.photoUrl?.trim() || null;
+          next.set(k, { ...existing, ...v, nickname, photoUrl });
+        }
+        return next;
+      });
+      const urls = [...fetched.values()].map((p) => p.photoUrl?.trim()).filter(Boolean) as string[];
+      if (urls.length > 0) void Image.prefetch(urls, 'disk').catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [initialPeerName, initialPeerPhotoUrl, myUserId, peerId]);
 
   const composerBottomPad = getChatComposerBottomPadding();

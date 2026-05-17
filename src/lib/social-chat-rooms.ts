@@ -58,39 +58,15 @@ import { getUserProfile } from '@/src/lib/user-profile';
 export const CHAT_ROOMS_COLLECTION = 'chat_rooms';
 export const SOCIAL_CHAT_MESSAGES_SUBCOLLECTION = 'messages';
 
-export type SocialChatRoomDoc = {
-  id: string;
-  isGroup?: boolean;
-  participantIds?: string[];
-  readMessageIdBy?: Record<string, string | null | undefined>;
-  readAtBy?: Record<string, unknown>;
-  unreadCountBy?: Record<string, number | null | undefined>;
-  updatedAt?: unknown | null;
-};
+export type {
+  SocialChatMessage,
+  SocialChatReplyTo,
+  SocialChatRoomDoc,
+  SocialChatRoomSummary,
+} from '@/src/lib/social-chat-types';
+export { isSocialDmChatRoomId, socialDmPreviewLine } from '@/src/lib/social-chat-types';
 
-export type SocialChatReplyTo = {
-  messageId: string;
-  senderId: string | null;
-  kind?: MeetingChatMessageKind;
-  imageUrl?: string | null;
-  text: string;
-};
-
-export type SocialChatMessage = {
-  id: string;
-  serverSeq?: number;
-  clientMutationId?: string | null;
-  senderId: string | null;
-  text: string;
-  kind?: MeetingChatMessageKind;
-  imageUrl?: string | null;
-  imageAlbumBatchId?: string | null;
-  linkPreview?: MeetingChatLinkPreview | null;
-  replyTo?: SocialChatReplyTo | null;
-  createdAt: Timestamp | null;
-  updatedAt?: Timestamp | null;
-  deletedAt?: Timestamp | null;
-};
+import type { SocialChatMessage, SocialChatReplyTo, SocialChatRoomDoc, SocialChatRoomSummary } from '@/src/lib/social-chat-types';
 
 export const SOCIAL_CHAT_PAGE_SIZE = 20;
 const SOCIAL_LATEST_PREVIEW_LIMIT = 1;
@@ -162,15 +138,6 @@ export function socialMessageTimeMs(m: SocialChatMessage | null | undefined): nu
   }
 }
 
-export function socialDmPreviewLine(m: SocialChatMessage | null | undefined): string {
-  const t = m?.text?.trim();
-  if (t) {
-    const clipped = t.length > 100 ? `${t.slice(0, 100)}…` : t;
-    return sanitizeUnicodeForSqliteStorage(clipped);
-  }
-  return '새 메시지';
-}
-
 export function socialMessageToMeetingMessage(m: SocialChatMessage): MeetingChatMessage {
   return {
     id: m.id,
@@ -207,11 +174,6 @@ export function socialDmRoomId(userA: string, userB: string): string {
   if (!x || !y || x === y) throw new Error('유효한 상대가 필요합니다.');
   const [a, b] = x < y ? [x, y] : [y, x];
   return `social_${a}__${b}`;
-}
-
-/** 친구 DM `chat_rooms.id` — 모임 RPC(`chat_meeting_summary_for_me` 등)에 넘기면 `meeting_not_found`. */
-export function isSocialDmChatRoomId(roomId: string): boolean {
-  return String(roomId ?? '').trim().startsWith('social_');
 }
 
 export function isValidSocialDmPeerForViewer(meAppUserId: string, peerAppUserId: string): boolean {
@@ -875,11 +837,6 @@ export async function fetchSocialChatUnreadCount(
     return 0;
   }
 }
-
-export type SocialChatRoomSummary = {
-  roomId: string;
-  peerAppUserId: string;
-};
 
 async function fetchAllSocialRoomsForUser(me: string): Promise<SocialChatRoomSummary[]> {
   const blocked = await fetchBlockedPeerIds(me).catch(() => new Set<string>());

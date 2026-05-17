@@ -273,10 +273,7 @@ export default function SocialChatRoomScreen() {
 
   useFocusedDelayedSubscription(
     isFocused && ready && Boolean(roomId),
-    () => {
-      setRoomDoc(undefined);
-      return subscribeSocialChatRoom(roomId, (d) => setRoomDoc(d), realtimeBanner.handlers);
-    },
+    () => subscribeSocialChatRoom(roomId, (d) => setRoomDoc(d), realtimeBanner.handlers),
     [ready, roomId, isFocused, realtimeBanner.handlers],
   );
 
@@ -618,7 +615,7 @@ export default function SocialChatRoomScreen() {
         </View>
       </SafeAreaView>
 
-      {!canRenderChatShell ? (
+      {!canRenderChatShell || !ready ? (
         <View style={s.loading}>
           <ActivityIndicator color={GinitTheme.colors.primary} />
         </View>

@@ -6,6 +6,28 @@ import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
+/** 말풍선에 캐시된 발신자 메타 → 프로필 RPC 전에도 아바타 깜빡임 완화 */
+export function profilesFromMessageSenderMeta(
+  messages: ReadonlyArray<{
+    senderId?: string | null;
+    senderName?: string | null;
+    senderAvatarUrl?: string | null;
+  }>,
+): Map<string, UserProfile> {
+  const out = new Map<string, UserProfile>();
+  for (const message of messages) {
+    const senderId = message.senderId?.trim() ? normalizeParticipantId(message.senderId.trim()) : '';
+    if (!senderId) continue;
+    const photoUrl = message.senderAvatarUrl?.trim() || null;
+    const nickname = message.senderName?.trim() || '회원';
+    if (!photoUrl && nickname === '회원') continue;
+    const existing = out.get(senderId);
+    if (existing?.photoUrl || (existing && !photoUrl)) continue;
+    out.set(senderId, { nickname, photoUrl });
+  }
+  return out;
+}
+
 export function profileForSender(map: Map<string, UserProfile>, senderId: string): UserProfile | undefined {
   const n = normalizeParticipantId(senderId);
   const hit = map.get(senderId) ?? map.get(n);

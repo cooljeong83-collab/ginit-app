@@ -8,7 +8,7 @@ import {
   type SocialChatMessage,
   type SocialChatRoomDoc,
   type SocialChatRoomSummary,
-} from '@/src/lib/social-chat-rooms';
+} from '@/src/lib/social-chat-types';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { Timestamp } from '@/src/lib/ginit-timestamp';

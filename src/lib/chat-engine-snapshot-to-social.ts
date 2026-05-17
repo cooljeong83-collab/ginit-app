@@ -69,6 +69,8 @@ export function chatEngineSnapshotsToSocialMessagesChrono(rows: readonly ChatEng
       serverSeq: typeof r.seq === 'number' && Number.isFinite(r.seq) && r.seq > 0 ? Math.floor(r.seq) : undefined,
       clientMutationId: typeof r.clientMutationId === 'string' && r.clientMutationId.trim() ? r.clientMutationId.trim() : null,
       senderId: r.senderId,
+      senderName: r.senderName ?? undefined,
+      senderAvatarUrl: r.senderAvatarUrl ?? undefined,
       text: typeof r.text === 'string' ? r.text : '',
       kind,
       imageUrl: r.imageUrl,
