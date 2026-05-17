@@ -14,6 +14,14 @@ import {
   syncRoomParticipantToLocalDb,
   type ChatRoomParticipantRow,
 } from '@/src/lib/chat-sync-service';
+import { upsertMeetingUnreadAcrossLocalRoomIds } from '@/src/lib/chat-meeting-room-id-mirror';
+import { markChatUnreadBaselineReady } from '@/src/lib/chat-unread-baseline';
+import {
+  isChatRoomOpenForUnreadApply,
+  reconcileServerUnreadWithLocal,
+  shouldSkipUnreadBroadcastApply,
+} from '@/src/lib/chat-unread-apply-guard';
+import { markRecentUnreadBroadcast } from '@/src/lib/chat-unread-recent-broadcast';
 import { flushPendingChatReadOutbox } from '@/src/lib/chat-mark-read';
 import { upsertLocalChatRoomSummary } from '@/src/lib/offline-chat/offline-chat-rooms';
 import { supabase } from '@/src/lib/supabase';
@@ -51,13 +59,66 @@ export async function applyRealtimeUnreadToLocalWatermelon(
 ): Promise<void> {
   const uid = normalizeParticipantId(ownerUserId) || ownerUserId.trim();
   if (!uid) return;
+
+  if (
+    await shouldSkipUnreadBroadcastApply({
+      meAppUserId: uid,
+      roomKind: p.roomKind,
+      roomId: p.canonicalRoomId,
+      serverUnread: p.unreadCount,
+      serverLastMessageId: p.lastMessageId,
+    })
+  ) {
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log('[chat-local-unread-sync] skip_unread_broadcast_apply', {
+        roomKind: p.roomKind,
+        roomId: p.canonicalRoomId.slice(-20),
+        unread: p.unreadCount,
+      });
+    }
+    return;
+  }
+
   const now = Date.now();
+  const unreadCount = await reconcileServerUnreadWithLocal({
+    meAppUserId: uid,
+    roomKind: p.roomKind,
+    roomId: p.canonicalRoomId,
+    serverUnread: p.unreadCount,
+    serverLastMessageId: p.lastMessageId,
+  });
+  if (__DEV__ && unreadCount !== p.unreadCount) {
+    // eslint-disable-next-line no-console
+    console.log('[chat-local-unread-sync] reconcile_unread_broadcast', {
+      roomId: p.canonicalRoomId.slice(-20),
+      server: p.unreadCount,
+      local: unreadCount,
+    });
+  }
+
+  if (p.roomKind === 'meeting') {
+    await upsertMeetingUnreadAcrossLocalRoomIds(uid, p.canonicalRoomId, {
+      ownerUserId: uid,
+      unreadCount,
+      lastMessagePreview: p.lastMessage,
+      lastMessageId: p.lastMessageId || undefined,
+      lastMessageAtMs: now,
+      lastMessageKind: p.messageKind,
+      remoteUpdatedAtMs: now,
+      unreadLastAtMs: now,
+      forceServerUnread: true,
+      touchListSurface: true,
+    });
+    markRecentUnreadBroadcast('meeting', p.canonicalRoomId);
+    return;
+  }
   await upsertLocalChatRoomSummary({
-    roomType: p.roomKind,
+    roomType: 'social_dm',
     roomId: p.canonicalRoomId,
     ownerUserId: uid,
-    isGroup: p.roomKind === 'meeting',
-    unreadCount: p.unreadCount,
+    isGroup: false,
+    unreadCount,
     lastMessagePreview: p.lastMessage,
     lastMessageId: p.lastMessageId || undefined,
     lastMessageAtMs: now,
@@ -67,6 +128,7 @@ export async function applyRealtimeUnreadToLocalWatermelon(
     forceServerUnread: true,
     touchListSurface: true,
   });
+  markRecentUnreadBroadcast('social_dm', p.canonicalRoomId);
 }
 
 export type SyncChatUnreadCachesOpts = {
@@ -104,38 +166,42 @@ export async function syncServerParticipantUnreadToLocalWatermelon(
 
   const qc = opts?.queryClient;
 
-  const alias = await supabase.rpc('fetch_my_chat_unread_counts' as never);
-  let data: unknown;
-  let error = alias.error;
-  if (error) {
-    const pull = await supabase.rpc('chat_room_participants_pull_for_me', { p_me: me });
-    data = pull.data;
-    error = pull.error;
-  } else {
-    data = alias.data;
-  }
-
-  if (error) {
-    if (__DEV__) console.warn('[chat-local-unread-sync] unread RPC', error.message);
-    return { rooms: 0, error: error.message };
-  }
-
-  const rows = parseRpcRows(data);
-  let n = 0;
-  for (const r of rows) {
-    const row = rowFromPullRpc(r);
-    if (!row) continue;
-    const applied = await syncRoomParticipantToLocalDb(me, row, { source: 'rpc' });
-    if (applied && qc) {
-      mergeChatRoomParticipantIntoQueryCache(qc, me, row);
+  try {
+    const alias = await supabase.rpc('fetch_my_chat_unread_counts' as never);
+    let data: unknown;
+    let error = alias.error;
+    if (error) {
+      const pull = await supabase.rpc('chat_room_participants_pull_for_me', { p_me: me });
+      data = pull.data;
+      error = pull.error;
+    } else {
+      data = alias.data;
     }
-    n += 1;
+
+    if (error) {
+      if (__DEV__) console.warn('[chat-local-unread-sync] unread RPC', error.message);
+      return { rooms: 0, error: error.message };
+    }
+
+    const rows = parseRpcRows(data);
+    let n = 0;
+    for (const r of rows) {
+      const row = rowFromPullRpc(r);
+      if (!row) continue;
+      const applied = await syncRoomParticipantToLocalDb(me, row, { source: 'rpc' });
+      if (applied && qc) {
+        mergeChatRoomParticipantIntoQueryCache(qc, me, row);
+      }
+      n += 1;
+    }
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(`[chat-local-unread-sync] RPC → caches reconciled rooms=${n} tanstack=${Boolean(qc)}`);
+    }
+    return { rooms: n };
+  } finally {
+    markChatUnreadBaselineReady();
   }
-  if (__DEV__) {
-    // eslint-disable-next-line no-console
-    console.log(`[chat-local-unread-sync] RPC → caches reconciled rooms=${n} tanstack=${Boolean(qc)}`);
-  }
-  return { rooms: n };
 }
 
 /**
@@ -153,6 +219,14 @@ export async function syncServerParticipantUnreadForRoom(
   if (!me || !rid) return false;
   const rk = roomKind === 'social_dm' ? 'social_dm' : 'meeting';
   const qc = opts?.queryClient;
+
+  if (await isChatRoomOpenForUnreadApply(me, rk, rid)) {
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log('[chat-local-unread-sync] skip_single_room_sync_while_open', { roomKind: rk, roomId: rid.slice(-20) });
+    }
+    return false;
+  }
 
   const { data, error } = await supabase
     .from('chat_room_participants')
@@ -205,8 +279,10 @@ export function registerChatUnreadReconcileOnAppForeground(appUserId: string): (
       return;
     }
     lastForegroundSyncAt = now;
-    void syncServerParticipantUnreadToLocalWatermelon(me, { queryClient: getAppQueryClient() });
-    void flushPendingChatReadOutbox(me);
+    void (async () => {
+      await syncServerParticipantUnreadToLocalWatermelon(me, { queryClient: getAppQueryClient() });
+      await flushPendingChatReadOutbox(me);
+    })();
   };
 
   foregroundSub = AppState.addEventListener('change', onChange);

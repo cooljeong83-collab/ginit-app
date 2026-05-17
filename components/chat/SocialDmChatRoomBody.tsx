@@ -15,7 +15,11 @@ import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-style
 import { meetingImageViewerMeta } from '@/components/chat/meeting-chat-ui-helpers';
 import { useMeetingChatRenderItem } from '@/components/chat/use-meeting-chat-render-item';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
-import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
+import {
+  buildMeetingChatListRows,
+  findMeetingChatListRowIndexByMessageId,
+  meetingChatListExtraDataKey,
+} from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
@@ -33,6 +37,7 @@ import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { useChatInvertedStickToLatest } from '@/src/hooks/use-chat-inverted-stick-to-latest';
 
 export type SocialDmChatRoomBodyHandle = {
   /** 모임 채팅과 동일하게 `data`는 최신이 index 0(inverted 기준). */
@@ -122,14 +127,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     index: number;
   } | null>(null);
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
-  const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const lastAutoScrolledMessageIdRef = useRef<string>('');
-  const latestAutoScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stickToLatestScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingAutoScrollToLatestRef = useRef(false);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
   const mountedRef = useRef(true);
@@ -145,8 +145,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
-      if (stickToLatestScrollDebounceRef.current) clearTimeout(stickToLatestScrollDebounceRef.current);
       listRef.current = null;
       innerFlashListRef.current = null;
     };
@@ -155,60 +153,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const myId = useMemo(() => (myUserId.trim() ? normalizeParticipantId(myUserId.trim()) : ''), [myUserId]);
   const hostNorm = '';
 
-  const didHandleDirectShareRef = useRef(false);
-  useEffect(() => {
-    if (didHandleDirectShareRef.current) return;
-    const rid = roomId.trim();
-    const uid = myUserId.trim();
-    if (!rid || !uid) return;
-    const peek = peekPendingDirectSharePayload();
-    if (!peek || peek.targetType !== 'dm' || peek.targetId.trim() !== rid) return;
-
-    const payload = consumePendingDirectSharePayload();
-    if (!payload || payload.targetType !== 'dm' || payload.targetId.trim() !== rid) return;
-    didHandleDirectShareRef.current = true;
-
-    ginitNotifyDbg('direct-share', 'dm_consume', {
-      roomId: rid,
-      kind: payload.kind,
-      hasImageUri: payload.kind === 'image' ? Boolean(payload.imageUri?.trim()) : false,
-      textLen: payload.kind === 'text' ? payload.text.length : (payload.text?.length ?? 0),
-      imageUriPrefix: payload.kind === 'image' ? String(payload.imageUri ?? '').slice(0, 28) : '',
-    });
-
-    pendingAutoScrollToLatestRef.current = true;
-    setSending(true);
-    void (async () => {
-      try {
-        if (payload.kind === 'image') {
-          const uri = payload.imageUri.trim();
-          if (uri) {
-            await sendSocialChatImageMessagesBatch(rid, uid, [uri], { naturalWidths: [undefined] });
-          }
-        } else {
-          const text = payload.text.trim();
-          if (text) {
-            if (sendTextOverride) {
-              await sendTextOverride({ body: text, replyTo: null });
-            } else {
-              await sendSocialChatTextMessage(rid, uid, text, null);
-            }
-          }
-        }
-      } catch (e) {
-        ginitNotifyDbg('direct-share', 'dm_send_failed', {
-          roomId: rid,
-          message: e instanceof Error ? e.message : String(e),
-        });
-        Alert.alert('공유 전송 실패', e instanceof Error ? e.message : String(e));
-      } finally {
-        setSending(false);
-      }
-    })();
-  }, [roomId, myUserId, sendTextOverride]);
-
   const messages = useMemo(() => socialMessagesToMeetingNewestFirst(rawMessages), [rawMessages]);
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
+  const chatListExtraData = useMemo(() => meetingChatListExtraDataKey(chatListRows), [chatListRows]);
 
   const chatImageGalleryChrono = useMemo(() => {
     const imgs = messages.filter((m) => m.kind === 'image' && m.imageUrl?.trim());
@@ -274,21 +221,77 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     }
   }, [resolveListScroller]);
 
-  const scheduleStickToLatestScroll = useCallback(() => {
-    if (stickToLatestScrollDebounceRef.current) clearTimeout(stickToLatestScrollDebounceRef.current);
-    stickToLatestScrollDebounceRef.current = setTimeout(() => {
-      stickToLatestScrollDebounceRef.current = null;
-      if (!mountedRef.current) return;
-      scrollToOffsetSafe(0, false);
-    }, 90);
-  }, [scrollToOffsetSafe]);
+  const latestMessageId = messages[0]?.id ?? '';
 
-  const jumpToLatest = useCallback(() => {
-    setShowJumpToBottomFab(false);
-    requestAnimationFrame(() => {
-      scrollToOffsetSafe(0, false);
+  const {
+    showJumpToBottomFab,
+    onChatScroll,
+    onChatListContentSizeChange,
+    jumpToLatest,
+    markPendingStickToLatest,
+    scheduleStickToLatest,
+    stickWhenNearLatestOnLayoutChange,
+  } = useChatInvertedStickToLatest({
+    scrollToOffsetSafe,
+    scrollToIndexSafe,
+    latestMessageId,
+    messagesEmpty: messages.length === 0,
+    keyboardHeight,
+  });
+
+  const didHandleDirectShareRef = useRef(false);
+  useEffect(() => {
+    if (didHandleDirectShareRef.current) return;
+    const rid = roomId.trim();
+    const uid = myUserId.trim();
+    if (!rid || !uid) return;
+    const peek = peekPendingDirectSharePayload();
+    if (!peek || peek.targetType !== 'dm' || peek.targetId.trim() !== rid) return;
+
+    const payload = consumePendingDirectSharePayload();
+    if (!payload || payload.targetType !== 'dm' || payload.targetId.trim() !== rid) return;
+    didHandleDirectShareRef.current = true;
+
+    ginitNotifyDbg('direct-share', 'dm_consume', {
+      roomId: rid,
+      kind: payload.kind,
+      hasImageUri: payload.kind === 'image' ? Boolean(payload.imageUri?.trim()) : false,
+      textLen: payload.kind === 'text' ? payload.text.length : (payload.text?.length ?? 0),
+      imageUriPrefix: payload.kind === 'image' ? String(payload.imageUri ?? '').slice(0, 28) : '',
     });
-  }, [scrollToOffsetSafe]);
+
+    markPendingStickToLatest();
+    setSending(true);
+    void (async () => {
+      try {
+        if (payload.kind === 'image') {
+          const uri = payload.imageUri.trim();
+          if (uri) {
+            await sendSocialChatImageMessagesBatch(rid, uid, [uri], { naturalWidths: [undefined] });
+          }
+        } else {
+          const text = payload.text.trim();
+          if (text) {
+            if (sendTextOverride) {
+              await sendTextOverride({ body: text, replyTo: null });
+            } else {
+              await sendSocialChatTextMessage(rid, uid, text, null);
+            }
+          }
+        }
+      } catch (e) {
+        ginitNotifyDbg('direct-share', 'dm_send_failed', {
+          roomId: rid,
+          message: e instanceof Error ? e.message : String(e),
+        });
+        Alert.alert('공유 전송 실패', e instanceof Error ? e.message : String(e));
+      } finally {
+        setSending(false);
+        markPendingStickToLatest();
+        scheduleStickToLatest();
+      }
+    })();
+  }, [roomId, myUserId, sendTextOverride, markPendingStickToLatest, scheduleStickToLatest]);
 
   const scrollToMessageIndexBestEffort = useCallback(
     (idx: number, animated = false) => {
@@ -346,49 +349,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     () => (keyboardHeight > 0 ? 8 : Math.max(insets.bottom, 8)),
     [insets.bottom, keyboardHeight],
   );
-
-  const onChatScroll = useCallback(
-    (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
-      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-      const viewH = layoutMeasurement.height;
-      const contentH = contentSize.height;
-      if (viewH <= 0 || contentH <= 0) {
-        setShowJumpToBottomFab(false);
-        return;
-      }
-      if (contentH <= viewH + 4) {
-        setShowJumpToBottomFab(false);
-        return;
-      }
-      const threshold = 56;
-      setShowJumpToBottomFab(contentOffset.y > threshold);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (messages.length === 0) setShowJumpToBottomFab(false);
-  }, [messages.length]);
-
-  useEffect(() => {
-    const latest = messages[0];
-    if (!latest?.id) return;
-    if (lastAutoScrolledMessageIdRef.current === latest.id) return;
-
-    const shouldAutoScroll = keyboardHeight > 0 || pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
-    if (!shouldAutoScroll) return;
-
-    lastAutoScrolledMessageIdRef.current = latest.id;
-    pendingAutoScrollToLatestRef.current = false;
-    if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
-    latestAutoScrollDebounceRef.current = setTimeout(() => {
-      latestAutoScrollDebounceRef.current = null;
-      scrollToOffsetSafe(0, false);
-    }, 90);
-    return () => {
-      if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
-    };
-  }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
   const messageIndexById = useMemo(() => buildChatMessageIndexById(messages as MeetingChatMessage[]), [messages]);
 
@@ -473,7 +433,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       const uid = myUserId.trim();
       if (!uid || !roomId || uris.length === 0 || sending) return;
       setSending(true);
-      pendingAutoScrollToLatestRef.current = true;
+      markPendingStickToLatest();
       try {
         await sendSocialChatImageMessagesBatch(roomId, uid, uris, {
           naturalWidths: widths,
@@ -483,11 +443,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
         Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
       } finally {
         setSending(false);
-        pendingAutoScrollToLatestRef.current = true;
-        scheduleStickToLatestScroll();
+        markPendingStickToLatest();
+        scheduleStickToLatest();
       }
     },
-    [roomId, myUserId, sending, scheduleStickToLatestScroll],
+    [roomId, myUserId, sending, markPendingStickToLatest, scheduleStickToLatest],
   );
 
   const onSend = useCallback(async () => {
@@ -495,7 +455,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     const body = draft.trim();
     if (!uid || !roomId || !body || sending) return;
     setSending(true);
-    pendingAutoScrollToLatestRef.current = true;
+    markPendingStickToLatest();
     try {
       if (sendTextOverride) {
         await sendTextOverride({ body, replyTo: replyTo?.messageId ? replyTo : null });
@@ -508,11 +468,10 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
-      // Firestore tail 반영이 한 틱 늦을 때 shouldAutoScroll이 잠깐 false로 떨어져 첫 메시지가 가려지는 경우 방지
-      pendingAutoScrollToLatestRef.current = true;
-      scheduleStickToLatestScroll();
+      markPendingStickToLatest();
+      scheduleStickToLatest();
     }
-  }, [roomId, myUserId, draft, sending, replyTo, scheduleStickToLatestScroll, sendTextOverride]);
+  }, [roomId, myUserId, draft, sending, replyTo, markPendingStickToLatest, scheduleStickToLatest, sendTextOverride]);
 
   const chatListContentStyle = useMemo(
     () => [
@@ -549,15 +508,13 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   // 입력 독/키보드 높이 변화로 리스트 패딩이 바뀌는 순간,
   // 최신 영역에 머무는 중이면(offset=0) 한 번 더 최신으로 붙여 가려짐을 방지합니다.
   useEffect(() => {
-    if (showJumpToBottomFab) return;
-    scheduleStickToLatestScroll();
+    stickWhenNearLatestOnLayoutChange();
   }, [
-    showJumpToBottomFab,
+    stickWhenNearLatestOnLayoutChange,
     composerDockBlockHeight,
     composerInputBarHeight,
     composerBottomPad,
     keyboardHeight,
-    scheduleStickToLatestScroll,
   ]);
 
   const listFooterLoading = useMemo(
@@ -687,9 +644,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           setListRef={setListRef}
           setInnerFlashListRef={setInnerFlashListRef}
           chatListRows={chatListRows}
+          listExtraData={chatListExtraData}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
           onChatScroll={onChatScroll}
+          onChatListContentSizeChange={onChatListContentSizeChange}
           listFooterLoading={listFooterLoading}
           hasNextPage={Boolean(hasNextPage)}
           isFetchingNextPage={Boolean(isFetchingNextPage)}

@@ -1,4 +1,5 @@
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { formatDateWithKoWeekday } from '@/src/lib/date-display';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 
 export type MeetingChatListRow =
@@ -22,6 +23,70 @@ export function meetingChatFlashListItemType(row: MeetingChatListRow): string {
   if (row.type === 'message' && row.message.kind === 'system') return 'system';
   if (row.type === 'message' && row.message.kind === 'image') return 'image';
   return 'text';
+}
+
+function rowAnchorDate(row: MeetingChatListRow): Date | null {
+  if (row.type === 'message') return row.message.createdAt?.toDate?.() ?? null;
+  return meetingChatAlbumAnchorMessage(row).createdAt?.toDate?.() ?? null;
+}
+
+/** inverted 목록 `index` 행 — 바로 위(과거) 이웃과 날짜가 다를 때만 일자 칩 문자열 */
+export function meetingChatDateChipLabelAtIndex(rows: readonly MeetingChatListRow[], index: number): string {
+  const row = rows[index];
+  if (!row) return '';
+  const next = index + 1 < rows.length ? rows[index + 1]! : null;
+  const currDate = rowAnchorDate(row);
+  const nextDate = next ? rowAnchorDate(next) : null;
+  if (
+    !currDate ||
+    (nextDate &&
+      currDate.getFullYear() === nextDate.getFullYear() &&
+      currDate.getMonth() === nextDate.getMonth() &&
+      currDate.getDate() === nextDate.getDate())
+  ) {
+    return '';
+  }
+  return formatDateWithKoWeekday(currDate);
+}
+
+function rowSenderNorm(row: MeetingChatListRow): string {
+  if (row.type === 'message') {
+    const s = row.message.senderId?.trim();
+    return s ? normalizeParticipantId(s) : '';
+  }
+  const f = row.messages[0]?.senderId?.trim();
+  return f ? normalizeParticipantId(f) : '';
+}
+
+function rowIsSystemRow(row: MeetingChatListRow): boolean {
+  return row.type === 'message' && row.message.kind === 'system';
+}
+
+/**
+ * inverted·최신순 목록에서 상대 말풍선 그룹의 **맨 위(더 과거 쪽) 한 줄**에만 아바타·닉네임.
+ * `index === 0`(최신 1건) 예외는 제거 — 진입·동기화 직후 최하단에 프로필이 잠깐 떴다 사라지는 깜빡임 원인.
+ */
+export function meetingChatShowPeerAvatarAtIndex(
+  rows: readonly MeetingChatListRow[],
+  index: number,
+  myNorm: string,
+): boolean {
+  const row = rows[index];
+  if (!row) return false;
+  const sid = rowSenderNorm(row);
+  if (!sid || (myNorm && sid === myNorm)) return false;
+
+  const next = index + 1 < rows.length ? rows[index + 1]! : null;
+  if (!next) return true;
+  if (rowIsSystemRow(next)) return true;
+  const nextSid = rowSenderNorm(next);
+  return !nextSid || nextSid !== sid;
+}
+
+/** FlashList `extraData` — `listRows` 구조·순서 변경 시 `renderItem` 재호출 */
+export function meetingChatListExtraDataKey(rows: readonly MeetingChatListRow[]): string {
+  if (rows.length === 0) return '';
+  return rows.map((r) => meetingChatListRowKey(r)).join('\u0001');
 }
 
 export function findMeetingChatListRowIndexByMessageId(rows: MeetingChatListRow[], messageId: string): number {

@@ -29,6 +29,7 @@ export type MeetingChatMainColumnProps = {
   renderItem: ListRenderItem<MeetingChatListRow>;
   chatListContentStyle: StyleProp<ViewStyle>;
   onChatScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onChatListContentSizeChange?: (width: number, height: number) => void;
   listFooterLoading: React.ReactElement | null;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
@@ -74,6 +75,7 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
   renderItem,
   chatListContentStyle,
   onChatScroll,
+  onChatListContentSizeChange,
   listFooterLoading,
   hasNextPage,
   isFetchingNextPage,
@@ -142,6 +144,7 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
             contentContainerStyle={chatListContentStyle}
             inverted
             onScroll={onChatScroll}
+            onContentSizeChange={onChatListContentSizeChange}
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={<Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>}

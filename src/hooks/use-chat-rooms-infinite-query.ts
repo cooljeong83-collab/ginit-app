@@ -24,7 +24,6 @@ const attemptedEmptyRecoveryUserIds = new Set<string>();
 async function upsertSocialRoomsPageToLocal(
   ownerUserId: string,
   rooms: readonly ChatRoomListRow[],
-  remoteUpdatedAtMs: number = Date.now(),
 ): Promise<void> {
   const owner = ownerUserId.trim();
   if (!owner || rooms.length === 0) return;
@@ -36,8 +35,8 @@ async function upsertSocialRoomsPageToLocal(
         ownerUserId: owner,
         peerUserId: r.peerAppUserId,
         isGroup: false,
-        unreadLastAtMs: (r as LocalChatRoomSummary).unreadLastAtMs || (r as { changedAtMs?: number }).changedAtMs || remoteUpdatedAtMs,
-        remoteUpdatedAtMs: (r as LocalChatRoomSummary).remoteUpdatedAtMs || (r as { changedAtMs?: number }).changedAtMs || remoteUpdatedAtMs,
+        /** unread·`remoteUpdatedAtMs`는 넣지 않음 — 목록 요약 시각이 `unread_update` 직후보다 낮으면
+         *  postgres `realtime`의 stale unread=0 가드(`skip_stale_unread_zero`)가 깨져 탭 배지가 7→1로 떨어질 수 있음 */
       }),
     ),
   );
@@ -66,11 +65,12 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
 
   const rooms = localRooms;
 
-  const syncChangedRooms = useCallback(async (opts?: { pullTail?: boolean }) => {
+  const syncChangedRooms = useCallback(async (opts?: { pullTail?: boolean; reconcileUnread?: boolean }) => {
     if (!enabled || !uid) return;
     setSyncing(true);
     setListError(null);
     let syncedSocialRoomIds: string[] = [];
+    const reconcileUnread = opts?.reconcileUnread !== false;
     try {
       const summariesRes = await fetchChatRoomsChangeSummariesFromSupabase(uid);
       if (summariesRes.ok && summariesRes.summaries.length > 0) {
@@ -86,8 +86,10 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
           setListError(summariesRes.message);
         }
       }
-      /** RPC 목록에는 `unread_count`가 없음 — `chat_room_participants` 일괄 조회로 Watermelon·TanStack 배지 정합 */
-      await syncServerParticipantUnreadToLocalWatermelon(uid, { queryClient });
+      /** `refresh_list`는 목록 메타만 — unread는 `unread_update`·포그라운드 RPC가 담당(직후 전체 RPC는 배지 흔들림 유발) */
+      if (reconcileUnread) {
+        await syncServerParticipantUnreadToLocalWatermelon(uid, { queryClient });
+      }
       /** 당겨서 새로고침: 목록 메타만으로는 `last_message_*`가 안 바뀌므로 소셜 방별 최근 메시지 tail만 제한 동기화 */
       if (opts?.pullTail && uid) {
         const ids = [...new Set(syncedSocialRoomIds)].filter((id) => id.startsWith('social_')).slice(0, 12);
@@ -147,7 +149,7 @@ export function useChatRoomsInfiniteQuery(userId: string | null | undefined, ena
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        void syncChangedRooms();
+        void syncChangedRooms({ reconcileUnread: false });
       }, 320);
     });
     return () => {

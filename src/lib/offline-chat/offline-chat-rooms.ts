@@ -354,11 +354,16 @@ export async function upsertLocalChatRoomSummary(input: LocalChatRoomSummaryInpu
             }
           }
         }
-        assignDefined(
-          r,
-          'remoteUpdatedAtMs',
-          input.remoteUpdatedAtMs === undefined ? undefined : cleanNumber(input.remoteUpdatedAtMs) ?? Date.now(),
-        );
+        let remoteUpdatedAtMsToApply =
+          input.remoteUpdatedAtMs === undefined ? undefined : cleanNumber(input.remoteUpdatedAtMs) ?? Date.now();
+        if (remoteUpdatedAtMsToApply != null && input.unreadCount === undefined) {
+          const curRemote =
+            typeof r.remoteUpdatedAtMs === 'number' && Number.isFinite(r.remoteUpdatedAtMs)
+              ? Math.floor(r.remoteUpdatedAtMs)
+              : 0;
+          if (curRemote > remoteUpdatedAtMsToApply) remoteUpdatedAtMsToApply = undefined;
+        }
+        assignDefined(r, 'remoteUpdatedAtMs', remoteUpdatedAtMsToApply);
         assignDefined(r, 'roomSearchText', input.roomSearchText === undefined ? defaultSearchText(input) : cleanString(input.roomSearchText));
         if (input.touchListSurface === true) {
           r.lastSyncedChangedAtMs = Date.now();

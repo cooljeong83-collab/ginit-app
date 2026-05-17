@@ -125,6 +125,7 @@ export default function SocialChatRoomScreen() {
     pickLatest: pickLatestSocialMessage,
     messages: markReadMessages,
     markChatReadUpTo,
+    markOnBlur: true,
   });
 
   useEffect(() => {

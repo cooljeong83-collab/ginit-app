@@ -7,7 +7,7 @@ import { pruneLocalChatRoomMessages } from '@/src/lib/offline-chat/offline-chat-
 
 /**
  * 채팅방 진입 시 로컬 DB를 최신으로 맞추는 "가벼운" 증분 동기화 훅.
- * - Firestore Read 비용을 통제하기 위해 page/maxDocs 상한을 강제합니다.
+ * - Supabase RPC·Postgres 스캔을 통제하기 위해 page/maxDocs/timeBudget 상한을 강제합니다.
  * - `EXPO_PUBLIC_CHAT_DELTA_TRANSPORT=supabase` 일 때는 `appUserId`(세션 PK)를 넘겨야 Supabase RPC 델타가 동작합니다.
  */
 export function useOfflineChatRoomSync(

@@ -7,6 +7,7 @@ import {
   registerChatUnreadReconcileOnAppForeground,
   syncServerParticipantUnreadToLocalWatermelon,
 } from '@/src/lib/chat-local-unread-sync';
+import { resetChatUnreadBaseline } from '@/src/lib/chat-unread-baseline';
 import { flushPendingChatReadOutbox } from '@/src/lib/chat-mark-read';
 import { supabase } from '@/src/lib/supabase';
 import { fetchSupabaseProfileRowIdByAppUserId } from '@/src/lib/supabase-profile-row-id';
@@ -78,8 +79,11 @@ export function startUserChatNotifications(appUserId: string): () => void {
   let unsubscribe: (() => void) | null = null;
   const unregisterForeground = registerChatUnreadReconcileOnAppForeground(uid);
 
-  void syncServerParticipantUnreadToLocalWatermelon(uid, { queryClient: getAppQueryClient() });
-  void flushPendingChatReadOutbox(uid);
+  resetChatUnreadBaseline();
+  void (async () => {
+    await syncServerParticipantUnreadToLocalWatermelon(uid, { queryClient: getAppQueryClient() });
+    await flushPendingChatReadOutbox(uid);
+  })();
 
   void (async () => {
     const authed = await ensureSupabaseRealtimeAuthFromSession(5000);

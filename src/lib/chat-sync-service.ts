@@ -6,6 +6,9 @@ import type { QueryClient } from '@tanstack/react-query';
 import { Q } from '@nozbe/watermelondb';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { upsertMeetingUnreadAcrossLocalRoomIds } from '@/src/lib/chat-meeting-room-id-mirror';
+import { reconcileServerUnreadWithLocal, shouldSkipParticipantUnreadBump } from '@/src/lib/chat-unread-apply-guard';
+import { markRecentUnreadBroadcast, wasRecentUnreadBroadcast } from '@/src/lib/chat-unread-recent-broadcast';
 import { chatRoomsListQueryKey } from '@/src/lib/chat-query-keys';
 import { unreadCountForChatRoomListRow, upsertLocalChatRoomSummary } from '@/src/lib/offline-chat/offline-chat-rooms';
 import { database } from '@/src/watermelon';
@@ -127,6 +130,26 @@ export async function syncRoomParticipantToLocalDb(
   const uc = row.unread_count;
   const roomType = row.room_kind === 'meeting' ? 'meeting' : 'social_dm';
 
+  if (
+    uc > 0 &&
+    (await shouldSkipParticipantUnreadBump({
+      meAppUserId: me,
+      roomKind: roomType,
+      roomId: row.room_id,
+      serverUnread: uc,
+    }))
+  ) {
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log('[chat-sync-service] skip_participant_unread_bump', {
+        source: opts?.source,
+        room: `${row.room_kind}:${row.room_id.slice(0, 12)}…`,
+        unread: uc,
+      });
+    }
+    return false;
+  }
+
   if (opts?.source === 'realtime') {
     const db = database;
     if (db) {
@@ -152,27 +175,70 @@ export async function syncRoomParticipantToLocalDb(
     }
   }
 
-  if (opts?.source === 'rpc' && uc === 0) {
-    const db = database;
-    if (db) {
-      const existing = await db.get('chat_rooms').query(Q.where('room_id', row.room_id), Q.where('room_type', roomType)).fetch();
-      const r0 = existing[0] as { remoteUpdatedAtMs?: number | null } | undefined;
-      if (r0) {
-        const localUr = unreadCountForChatRoomListRow(r0);
-        const localRu =
-          typeof r0.remoteUpdatedAtMs === 'number' && Number.isFinite(r0.remoteUpdatedAtMs) ? Math.floor(r0.remoteUpdatedAtMs) : 0;
-        if (localUr > 0 && serverAt < localRu) {
-          if (__DEV__) {
-            // eslint-disable-next-line no-console
-            console.log('[chat-sync-service] skip_stale_rpc_unread_zero', {
-              room: `${row.room_kind}:${row.room_id.slice(0, 12)}…`,
-              localUr,
-              serverAt,
-              localRu,
-            });
-          }
-          return false;
+  const db = database;
+  const fromServer = opts?.source === 'rpc' || opts?.source === 'realtime';
+  const existingForGuard =
+    db && fromServer
+      ? ((await db.get('chat_rooms').query(Q.where('room_id', row.room_id), Q.where('room_type', roomType)).fetch())[0] as
+          | { remoteUpdatedAtMs?: number | null }
+          | undefined)
+      : undefined;
+
+  if (fromServer) {
+    const rk = roomType === 'meeting' ? 'meeting' : 'social_dm';
+    if (wasRecentUnreadBroadcast(rk, row.room_id)) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log('[chat-sync-service] skip_participant_sync_after_unread_broadcast', {
+          source: opts?.source,
+          room: `${row.room_kind}:${row.room_id.slice(0, 12)}…`,
+          unread: uc,
+        });
+      }
+      return false;
+    }
+    if (existingForGuard) {
+      const localUr = unreadCountForChatRoomListRow(existingForGuard);
+      const localRu =
+        typeof existingForGuard.remoteUpdatedAtMs === 'number' && Number.isFinite(existingForGuard.remoteUpdatedAtMs)
+          ? Math.floor(existingForGuard.remoteUpdatedAtMs)
+          : 0;
+      if (localUr > 0 && uc < localUr && serverAt <= localRu) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[chat-sync-service] skip_participant_sync_stale_unread_downgrade', {
+            source: opts?.source,
+            room: `${row.room_kind}:${row.room_id.slice(0, 12)}…`,
+            localUr,
+            serverUnread: uc,
+            serverAt,
+            localRu,
+          });
         }
+        return false;
+      }
+    }
+  }
+
+  if (uc === 0) {
+    if (existingForGuard) {
+      const localUr = unreadCountForChatRoomListRow(existingForGuard);
+      const localRu =
+        typeof existingForGuard.remoteUpdatedAtMs === 'number' && Number.isFinite(existingForGuard.remoteUpdatedAtMs)
+          ? Math.floor(existingForGuard.remoteUpdatedAtMs)
+          : 0;
+      if (localUr > 0 && serverAt < localRu) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[chat-sync-service] skip_stale_unread_zero', {
+            source: opts?.source ?? 'unknown',
+            room: `${row.room_kind}:${row.room_id.slice(0, 12)}…`,
+            localUr,
+            serverAt,
+            localRu,
+          });
+        }
+        return false;
       }
     }
   }
@@ -180,18 +246,51 @@ export async function syncRoomParticipantToLocalDb(
   /** 서버 unread>0일 때 forceServerUnread를 쓰면 이후 낙관적 0 등과의 순서에 따라 잘못 덮일 수 있어, 0일 때만 강제한다. */
   const forceServerUnread = uc === 0;
   const unreadLastAtMs = uc > 0 ? Math.max(serverAt, now) : serverAt;
-  await upsertLocalChatRoomSummary({
-    roomType,
-    roomId: row.room_id,
-    ownerUserId: me,
-    isGroup: row.room_kind === 'meeting',
-    unreadCount: uc,
-    lastMessagePreview: row.last_message_preview ?? undefined,
-    unreadLastAtMs,
-    remoteUpdatedAtMs: remoteAt,
-    forceServerUnread,
-    touchListSurface: true,
-  });
+  const unreadToApply =
+    uc > 0
+      ? await reconcileServerUnreadWithLocal({
+          meAppUserId: me,
+          roomKind: roomType,
+          roomId: row.room_id,
+          serverUnread: uc,
+        })
+      : 0;
+  if (__DEV__ && uc > 0 && unreadToApply !== uc) {
+    // eslint-disable-next-line no-console
+    console.log('[chat-sync-service] reconcile_unread_participant', {
+      source: opts?.source,
+      room: `${row.room_kind}:${row.room_id.slice(0, 12)}…`,
+      server: uc,
+      local: unreadToApply,
+    });
+  }
+  if (roomType === 'meeting') {
+    await upsertMeetingUnreadAcrossLocalRoomIds(me, row.room_id, {
+      ownerUserId: me,
+      unreadCount: unreadToApply,
+      lastMessagePreview: row.last_message_preview ?? undefined,
+      unreadLastAtMs,
+      remoteUpdatedAtMs: remoteAt,
+      forceServerUnread,
+      touchListSurface: true,
+    });
+  } else {
+    await upsertLocalChatRoomSummary({
+      roomType,
+      roomId: row.room_id,
+      ownerUserId: me,
+      isGroup: false,
+      unreadCount: unreadToApply,
+      lastMessagePreview: row.last_message_preview ?? undefined,
+      unreadLastAtMs,
+      remoteUpdatedAtMs: remoteAt,
+      forceServerUnread: unreadToApply === 0,
+      touchListSurface: true,
+    });
+  }
+  if (unreadToApply > 0) {
+    markRecentUnreadBroadcast(roomType === 'meeting' ? 'meeting' : 'social_dm', row.room_id);
+  }
   return true;
 }
 

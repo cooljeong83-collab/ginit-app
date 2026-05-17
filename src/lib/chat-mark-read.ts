@@ -5,6 +5,8 @@ import { Q } from '@nozbe/watermelondb';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { ChatRoomKindDelta } from '@/src/lib/chat-supabase-delta';
+import { meetingChatRoomIdsForLocalUnread } from '@/src/lib/chat-meeting-room-id-mirror';
+import { markRecentUnreadBroadcast, markRecentUnreadBroadcastMany } from '@/src/lib/chat-unread-recent-broadcast';
 import { chatMarkReadRpc } from '@/src/lib/chat-supabase-delta';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import { writeMeetingChatReadReceipt } from '@/src/lib/meeting-chat';
@@ -230,13 +232,30 @@ export async function markChatRoomReadLocally(input: ChatMarkReadInput): Promise
     }
   });
 
-  await clearLocalChatRoomUnread({
-    roomType,
-    roomId: rid,
+  const clearUnreadArgs = {
     ownerUserId: input.ownerUserId ?? me,
     readMessageId: msgId,
     readAtMs,
-  });
+  };
+  if (input.roomKind === 'meeting') {
+    const mirrorIds = await meetingChatRoomIdsForLocalUnread(me, rid);
+    const targets = mirrorIds.length > 0 ? mirrorIds : [rid];
+    for (const localRoomId of targets) {
+      await clearLocalChatRoomUnread({
+        roomType: 'meeting',
+        roomId: localRoomId,
+        ...clearUnreadArgs,
+      });
+    }
+    markRecentUnreadBroadcastMany('meeting', targets);
+  } else {
+    await clearLocalChatRoomUnread({
+      roomType,
+      roomId: rid,
+      ...clearUnreadArgs,
+    });
+    markRecentUnreadBroadcast('social_dm', rid);
+  }
   await markLocalChatRoomReadState({
     roomType,
     roomId: rid,
@@ -333,6 +352,8 @@ export async function flushPendingChatReadOutbox(meAppUserId: string): Promise<F
       pendingReadAtMs?: number | null;
       ownerUserId?: string | null;
       peerUserId?: string | null;
+      unreadCount?: number | null;
+      lastServerSeq?: number | null;
     };
     const rid = typeof r.roomId === 'string' ? r.roomId.trim() : '';
     const rt = r.roomType === 'social_dm' ? 'social_dm' : r.roomType === 'meeting' ? 'meeting' : null;
@@ -342,6 +363,29 @@ export async function flushPendingChatReadOutbox(meAppUserId: string): Promise<F
         : 0;
     const msgId = typeof r.pendingReadMessageId === 'string' ? r.pendingReadMessageId.trim() : '';
     if (!rid || !rt || seq <= 0 || !msgId) continue;
+
+    const unread =
+      typeof r.unreadCount === 'number' && Number.isFinite(r.unreadCount) ? Math.max(0, Math.floor(r.unreadCount)) : 0;
+    const lastSrv =
+      typeof r.lastServerSeq === 'number' && Number.isFinite(r.lastServerSeq) ? Math.max(0, Math.floor(r.lastServerSeq)) : 0;
+    /**
+     * `chat_mark_read`는 `chat_reset_room_unread`로 방 전체 unread를 0으로 만듭니다.
+     * pending이 남은 채 새 메시지가 오면(로컬 unread>0 또는 tail seq 증가) stale flush가 서버·탭 배지를 지웁니다.
+     */
+    if (unread > 0 || (lastSrv > seq && lastSrv > 0)) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log('[chat-mark-read] skip_stale_outbox_flush', {
+          roomKind: rt,
+          roomId: rid.slice(-12),
+          unread,
+          lastSrv,
+          pendingSeq: seq,
+        });
+      }
+      await clearChatReadOutbox(rt, rid);
+      continue;
+    }
 
     const owner = typeof r.ownerUserId === 'string' && r.ownerUserId.trim() ? r.ownerUserId.trim() : me;
     try {

@@ -1,0 +1,50 @@
+---
+description: 채팅 unread 배지(탭·목록·세그먼트·방) 로직 수정 금지 — 사용자 승인 필수
+alwaysApply: true
+---
+
+# 채팅 unread 배지·미읽음 카운트 수정 금지 (승인 필수)
+
+## 적용 범위 (UI·집계 모두)
+
+다음 **미읽음 배지·unread_count 표시·합산**에 영향을 주는 코드는 **기본적으로 절대 수정하지 않는다.**
+
+| UI | 예시 |
+|----|------|
+| **하단 탭 메뉴** | `GinitTabBar` 채팅 탭 숫자 배지 |
+| **채팅 목록 줄** | 모임 gather / 친구 DM 행 옆 배지 |
+| **채팅 목록 탭(세그먼트)** | 모임·친구 세그먼트 합계 배지 |
+| **채팅방 메시지** | 방 내 미읽음·읽음과 연동된 배지/카운트 표시 |
+
+버그 수정·리팩터·성능 작업이라도 위 항목의 **숫자·노출 조건·집계 규칙**을 바꿀 수 있으면 동일하게 금지한다.
+
+## 수정 전 필수 절차
+
+1. **먼저 사용자에게** 변경 이유·영향 범위(어떤 UI가 바뀌는지)·대안을 한국어로 제시한다.
+2. **명시적 승인** 없이는 diff에 포함하지 않는다.
+3. 승인 후에도 **요청·승인된 범위만** 최소 수정한다. “겸사겸사” 정리·통합·가드 추가 금지.
+
+## 보호 대상 파일 (대표 — unread 경로 전반)
+
+아래 및 동일 도메인 연동부를 열람·수정할 때 특히 주의한다. 목록은 exhaustive가 아니며, **unread_count를 쓰거나 갱신하는 모든 경로**가 해당한다.
+
+- `src/hooks/use-watermelon-chat-unread-total.ts`
+- `src/lib/chat-unread-apply-guard.ts`, `chat-unread-recent-broadcast.ts`, `chat-unread-baseline.ts`
+- `src/lib/chat-local-unread-sync.ts`, `chat-sync-service.ts` (participant unread → Watermelon)
+- `src/lib/chat-mark-read.ts`, `offline-chat/offline-chat-rooms.ts` (`unreadCount` upsert·clear)
+- `src/context/InAppAlarmsContext.tsx` (`chatTabUnreadTotal` 등)
+- `components/ginit/GinitTabBar.tsx`
+- `app/(tabs)/chat.tsx` (목록·`gatherTabUnreadTotal` / `socialTabUnreadTotal`)
+- `app/meeting-chat/**`, `app/social-chat/**` (읽음·unread 연동)
+- Edge `supabase/functions/chat-user-notifications-broadcast/**` (브로드캐스트 `unread_count`)
+
+## 승인 없이 허용되는 것 (배지 숫자·규칙 불변)
+
+- 주석·타입만 추가 (동작 동일)
+- unread와 **무관한** 파일의 import 정리
+- 사용자가 **unread 배지가 아닌** 다른 UI/기능만 수정하라고 명시한 작업
+
+## 다른 규칙과의 관계
+
+- `.cursorrules`의 **레이아웃·디자인 변경 금지**와 별도로, 본 규칙은 **미읽음 숫자·배지 동작** 전용이다.
+- 모임 목록 vs 모임 채팅 목록 용어·데이터 소스 혼동 방지는 `meetings-list-vs-meeting-chat-list.mdc`를 따른다.

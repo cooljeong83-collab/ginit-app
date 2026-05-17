@@ -205,17 +205,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
 
-  const chatOwnerIdForUnreadBadge = useMemo(() => {
-    const u = userId?.trim() ?? '';
-    if (!u) return '';
-    return normalizeParticipantId(u) || u;
-  }, [userId]);
-
-  const chatTabUnreadTotal = useWatermelonChatUnreadTotal({
-    ownerUserId: chatOwnerIdForUnreadBadge,
-    enabled: Boolean(persistReady && userId?.trim()),
-  });
-
   /** 동일 메시지·동일 모임 지문에 대한 푸시 중복 방지 */
   const pushDedupeRef = useRef<Set<string>>(new Set());
   const prevParticipantSetRef = useRef<Record<string, string>>({});
@@ -377,6 +366,19 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
 
   const meetingsForChatUnreadRef = useRef(meetingsForChatUnread);
   meetingsForChatUnreadRef.current = meetingsForChatUnread;
+
+  const joinedMeetingRoomIdsForTabBadge = useMemo(
+    () => meetingsForChatUnread.map((m) => m.id).filter(Boolean),
+    [meetingsForChatUnread],
+  );
+
+  const chatTabUnreadTotal = useWatermelonChatUnreadTotal({
+    /** `chat.tsx` 목록·세그먼트 배지와 동일 — `candidateUserKeys`에 raw·정규화 id 모두 포함 */
+    ownerUserId: userId,
+    enabled: Boolean(persistReady && userId?.trim()),
+    meetingsFilterReady: meetingsBootstrapped,
+    joinedMeetingRoomIds: joinedMeetingRoomIdsForTabBadge,
+  });
 
   /** `user_notifications:{profiles.id}` → 모임/소셜 요약·최신 메시지 스텁(배지 베이스라인)만 갱신. 목록용 per-room Realtime은 사용하지 않습니다. */
   useEffect(() => {
@@ -1164,7 +1166,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   }, [persistReady, userId, chatTabUnreadTotal, friendsTabPendingRequestBadge]);
 
   // NOTE: 채팅 탭 배지 합계는 Watermelon `chat_rooms.unread_count` 합(`useWatermelonChatUnreadTotal`)이며,
-  // `ownerUserId`는 `normalizeParticipantId`로 DB `owner_user_id`와 맞춘 뒤 `candidateUserKeys`로 조회합니다.
+  // owner·룸 필터는 `app/(tabs)/chat.tsx`의 `useChatRoomListEngine`과 동일합니다.
 
   // social chat room docs — 초기 스냅샷만 RPC. 이후 최신 메시지 스텁은 `user_notifications` 브로드캐스트.
   useEffect(() => {

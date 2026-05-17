@@ -1,7 +1,14 @@
 import { Q } from '@nozbe/watermelondb';
 
 import { database } from '@/src/watermelon';
-import { chatPullDeltasRpc, chatPullHistoryBeforeSeqRpc, type ChatDeltaRow } from '@/src/lib/chat-supabase-delta';
+import {
+  chatPullDeltasRpc,
+  chatPullHistoryBeforeSeqRpc,
+  chatSearchMessagesForMeRpc,
+  type ChatDeltaRow,
+  type ChatRoomKindDelta,
+} from '@/src/lib/chat-supabase-delta';
+import { fetchSearchIndexChunksFromSupabase } from '@/src/lib/offline-chat/chat-search-index-chunk-port';
 import { isTransientNetworkErrorMessage } from '@/src/lib/supabase-realtime-resilience';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { OfflineChatRoomKey, OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
@@ -10,10 +17,11 @@ import { buildSearchText, sanitizeUnicodeForSqliteStorage, tsToMs } from '@/src/
 import { localRoomPreviewForMessage } from '@/src/lib/offline-chat/offline-chat-rooms';
 
 /**
- * Firestore Read 비용 절감 핵심:
- * - (증분) createdAt > lastSyncedAt 이후만 가져오기
- * - (상한) 한번에 너무 많은 문서 pull 금지(페이지네이션)
- * - (Denormalize) senderName/avatar 등을 메시지에 같이 저장해 추가 read 방지
+ * Supabase PostgreSQL 델타 동기화·비용 통제:
+ * - UI 진실 원천: WatermelonDB local-first; 서버는 파티션 `chat_messages`
+ * - (증분) `chat_pull_deltas` + `last_server_seq` 커서(`after_seq`)
+ * - (상한) pageSize / maxDocs / maxPagesPerRun / timeBudgetMs로 RPC·compute 폭주 방지
+ * - (역정규화) 모임 tail 등에서 senderName/avatar를 메시지에 포함(델타 행은 null 허용)
  */
 
 const DEFAULT_PAGE_SIZE = 200;
@@ -451,6 +459,22 @@ async function upsertLocalMessageRows(
   return { newestCreatedAtMs, newestUpdatedAtMs, newestMessageId };
 }
 
+/** `chat_search_messages_for_me` 등 Supabase 델타 행 → 로컬 메시지 upsert (검색 수렴 백필용). */
+export async function upsertLocalChatMessagesFromSupabaseDeltaRows(
+  key: OfflineChatRoomKey,
+  rows: ChatDeltaRow[],
+): Promise<number> {
+  const db = database;
+  if (!db || rows.length === 0) return 0;
+  const k = normalizeRoomKey(key);
+  if (!k.roomId) return 0;
+  const localRoom = await getOrCreateLocalRoom(k);
+  if (!localRoom) return 0;
+  const mapped = rows.map((r) => mapSupabaseDeltaRowToLocal(k, r));
+  await upsertLocalMessageRows(db, localRoom, mapped);
+  return mapped.length;
+}
+
 export async function upsertLocalChatMessages(
   key: OfflineChatRoomKey,
   messages: readonly OfflineChatLocalMessageInput[],
@@ -744,64 +768,110 @@ export async function backfillOlderRoomMessagesToLocal(args: {
   return { pulledDocs: pulled, nextCursorCreatedAtMs: nextCursorMs };
 }
 
+function roomKindFromOfflineKey(key: OfflineChatRoomKey): ChatRoomKindDelta {
+  return key.roomType === 'social_dm' ? 'social_dm' : 'meeting';
+}
+
 /**
- * (개념) Firestore Search Index Chunk 조회 → 로컬 chunk 캐시 저장.
- *
- * 서버 구조 제안:
- * - collection: `chat_search_index_chunks`
- * - docId: `${roomType}:${roomId}:${chunkId}`
- * - fields: { roomType, roomId, chunkId, rangeStartAt, rangeEndAt, chunkText }
- *
- * 비용 포인트:
- * - 검색 시에만 "최소 chunk"를 읽고, 결과가 없다면 더 과거 chunk를 추가로 읽는 방식(상한 필요)
+ * 서버 검색(`chat_search_messages_for_me`) 결과를 로컬 `chat_messages`에 upsert해 검색 커버리지를 수렴합니다.
+ * chunk RPC(`chat_pull_search_index_chunks`)와 별도 — 메시지 단위 백필 경로입니다.
+ */
+export async function convergentBackfillSearchHitsToLocalBestEffort(args: {
+  meAppUserId: string;
+  key: OfflineChatRoomKey;
+  needle: string;
+  maxScan?: number;
+  matchLimit?: number;
+}): Promise<{ upserted: number; error?: string }> {
+  const me = args.meAppUserId.trim();
+  const k = normalizeRoomKey(args.key);
+  const needle = String(args.needle ?? '').trim();
+  if (!me || !k.roomId || !needle) return { upserted: 0 };
+
+  const { rows, error } = await chatSearchMessagesForMeRpc({
+    meAppUserId: me,
+    roomKind: roomKindFromOfflineKey(k),
+    roomId: k.roomId,
+    needle,
+    maxScan: args.maxScan,
+    matchLimit: args.matchLimit,
+  });
+  if (error) return { upserted: 0, error };
+  if (rows.length === 0) return { upserted: 0 };
+
+  const upserted = await upsertLocalChatMessagesFromSupabaseDeltaRows(k, rows);
+  return { upserted };
+}
+
+/**
+ * Supabase 검색 인덱스 chunk RPC 포트 → 로컬 `chat_search_index_chunks` 캐시.
+ * 원격 `chunkText`가 있는 chunk만 저장하며, 빈 placeholder는 쓰지 않습니다.
  */
 export async function backfillSearchIndexChunksBestEffort(args: {
   key: OfflineChatRoomKey;
   /** 예: '2026-05-01_0' 같은 서버 chunk id들(최근 -> 과거 순) */
   chunkIds: string[];
-}): Promise<{ stored: number }> {
+  /** Supabase RPC 포트용 `app_user_id` PK */
+  appUserId?: string | null;
+}): Promise<{ stored: number; skipped: number }> {
   const db = database;
-  if (!db) return { stored: 0 };
+  if (!db) return { stored: 0, skipped: 0 };
   const k = normalizeRoomKey(args.key);
-  if (!k.roomId) return { stored: 0 };
+  if (!k.roomId) return { stored: 0, skipped: 0 };
 
-  // TODO: 실제 Firestore chunk 컬렉션/필드가 정의되면 여기서 getDocs/getDoc로 가져옵니다.
-  // 현재는 "설계/구현 자리"만 마련하고, 서버 스키마 확정 후 연결합니다.
+  const chunkIds = [...new Set(args.chunkIds.map((id) => String(id ?? '').trim()).filter(Boolean))];
+  if (chunkIds.length === 0) return { stored: 0, skipped: 0 };
 
+  const me = args.appUserId?.trim();
+  if (!me) return { stored: 0, skipped: chunkIds.length };
+
+  const remote = await fetchSearchIndexChunksFromSupabase({ meAppUserId: me, key: k, chunkIds });
+  if (remote.error || remote.chunks.length === 0) {
+    return { stored: 0, skipped: chunkIds.length };
+  }
+
+  const byId = new Map(remote.chunks.map((c) => [c.chunkId, c]));
   let stored = 0;
+  let skipped = 0;
+
   await db.write(async () => {
     const chunks = db.get('chat_search_index_chunks');
-    for (const cid of args.chunkIds) {
-      const id = String(cid ?? '').trim();
-      if (!id) continue;
-      const existing = await chunks.query(
-        Q.where('room_id', k.roomId),
-        Q.where('room_type', k.roomType),
-        Q.where('chunk_id', id),
-      ).fetch();
-      if (existing.length) continue;
+    for (const id of chunkIds) {
+      const remoteChunk = byId.get(id);
+      const chunkText = remoteChunk?.chunkText?.trim() ?? '';
+      if (!remoteChunk || !chunkText) {
+        skipped += 1;
+        continue;
+      }
+      const existing = await chunks
+        .query(Q.where('room_id', k.roomId), Q.where('room_type', k.roomType), Q.where('chunk_id', id))
+        .fetch();
+      if (existing.length) {
+        skipped += 1;
+        continue;
+      }
       await chunks.create((x: any) => {
         x.roomId = k.roomId;
         x.roomType = k.roomType;
         x.chunkId = id;
-        x.rangeStartAtMs = null;
-        x.rangeEndAtMs = null;
-        x.chunkText = '';
+        x.rangeStartAtMs = remoteChunk.rangeStartAtMs;
+        x.rangeEndAtMs = remoteChunk.rangeEndAtMs;
+        x.chunkText = chunkText;
         x.fetchedAtMs = Date.now();
       });
-      stored++;
+      stored += 1;
     }
   });
 
-  return { stored };
+  return { stored, skipped };
 }
 
 export function getOfflineCostGuide(): string {
   return [
-    'Firestore Read 비용 절감을 위해, 로컬 DB가 "진실의 원본"이 되도록 설계합니다.',
-    '- 증분 동기화: createdAt > lastSyncedAt 조건 + 페이지 상한',
-    '- Denormalize: senderName/avatar 등은 메시지에 포함해 프로필 조회 read 차단',
-    '- 검색: 로컬 FTS/LIKE로 해결하고, 부족할 때만 server index chunk를 온디맨드로 backfill',
+    'Supabase RPC·Postgres 스캔을 줄이기 위해, 채팅 UI는 WatermelonDB local-first로 설계합니다.',
+    '- 증분 동기화: `chat_pull_deltas` + `last_server_seq` 커서 + 페이지·시간 상한',
+    '- 역정규화: senderName/avatar 등을 메시지에 포함해 프로필 조회 RPC 차단',
+    '- 검색: 로컬 FTS/LIKE 우선; 부족 시 `chat_search_messages_for_me` 또는 (미래) chunk RPC로 온디맨드 backfill',
   ].join('\n');
 }
 

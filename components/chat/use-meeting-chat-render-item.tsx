@@ -23,6 +23,8 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { extractFirstHttpUrlFromChatText } from '@/src/lib/chat-text-linkify';
 import {
   meetingChatAlbumAnchorMessage,
+  meetingChatDateChipLabelAtIndex,
+  meetingChatShowPeerAvatarAtIndex,
   type MeetingChatListRow,
 } from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
@@ -31,11 +33,6 @@ import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { LinkableChatText } from '@/components/ui/LinkableChatText';
-import { formatDateWithKoWeekday } from '@/src/lib/date-display';
-
-function rowIsSystemRow(row: MeetingChatListRow): boolean {
-  return row.type === 'message' && row.message.kind === 'system';
-}
 
 function rowSenderNorm(row: MeetingChatListRow): string {
   if (row.type === 'message') {
@@ -44,11 +41,6 @@ function rowSenderNorm(row: MeetingChatListRow): string {
   }
   const f = row.messages[0]?.senderId?.trim();
   return f ? normalizeParticipantId(f) : '';
-}
-
-function rowAnchorDate(row: MeetingChatListRow): Date | null {
-  if (row.type === 'message') return row.message.createdAt?.toDate?.() ?? null;
-  return meetingChatAlbumAnchorMessage(row).createdAt?.toDate?.() ?? null;
 }
 
 function flatUnreadIndex(messageIndexById: Map<string, number>, album: MeetingChatMessage[]): number {
@@ -217,19 +209,9 @@ export function useMeetingChatRenderItem({
           highlightTextColor="#FFFFFF"
         />
       );
-      /** inverted + 최신순 data: index 작을수록 화면 아래(최신). `next` = 더 과거(위쪽) 이웃 */
-      const rowsNow = listRowsRef.current;
-      const next = index + 1 < rowsNow.length ? rowsNow[index + 1]! : null;
-      const currDate = rowAnchorDate(item);
-      const nextDate = next ? rowAnchorDate(next) : null;
-      const dateLabel =
-        currDate &&
-        (!nextDate ||
-          currDate.getFullYear() !== nextDate.getFullYear() ||
-          currDate.getMonth() !== nextDate.getMonth() ||
-          currDate.getDate() !== nextDate.getDate())
-          ? formatDateWithKoWeekday(currDate)
-          : '';
+      const rowsNow = listRowsRef.current ?? [];
+      const rowAt = rowsNow[index] ?? item;
+      const dateLabel = meetingChatDateChipLabelAtIndex(rowsNow, index);
 
       if (item.type === 'message' && item.message.kind === 'system') {
         const sys = item.message;
@@ -280,26 +262,17 @@ export function useMeetingChatRenderItem({
         );
       }
 
-      const isAlbum = item.type === 'imageAlbum';
+      const isAlbum = rowAt.type === 'imageAlbum';
       const anchorMsg: MeetingChatMessage = isAlbum
-        ? meetingChatAlbumAnchorMessage(item)
-        : (item as Extract<MeetingChatListRow, { type: 'message' }>).message;
+        ? meetingChatAlbumAnchorMessage(rowAt)
+        : (rowAt as Extract<MeetingChatListRow, { type: 'message' }>).message;
       const itemForReply: MeetingChatMessage = isAlbum
-        ? meetingChatAlbumAnchorMessage(item)
-        : (item as { type: 'message'; message: MeetingChatMessage }).message;
+        ? meetingChatAlbumAnchorMessage(rowAt)
+        : (rowAt as { type: 'message'; message: MeetingChatMessage }).message;
 
-      const sid = rowSenderNorm(item);
+      const sid = rowSenderNorm(rowAt);
       const isMine = Boolean(myId && sid && sid === myId);
-      const nextSid = next ? rowSenderNorm(next) : '';
-      const sameSenderAsNext = Boolean(sid && nextSid && nextSid === sid);
-      /**
-       * 상대 말풍선: (1) 항상 최신 1건은 표시 (2) 과거 이웃이 다른 사람·시스템이면 그룹 경계로 표시.
-       * 예전에는 더 최신 이웃(`prev`)만 보아, 바로 위(과거)가 다른 사람인데 닉이 숨겨져 상대 글이 위 사람 연속으로 보이는 경우가 있었습니다.
-       */
-      const showAvatar =
-        !isMine &&
-        sid &&
-        (index === 0 || !next || rowIsSystemRow(next) || !sameSenderAsNext);
+      const showAvatar = meetingChatShowPeerAvatarAtIndex(rowsNow, index, myId);
 
       const profFromMap = sid ? profileForSender(profilesRef.current, sid) : undefined;
       const cachedSenderPhotoUrl = anchorMsg.senderAvatarUrl?.trim() || null;
@@ -317,7 +290,7 @@ export function useMeetingChatRenderItem({
       const isHost = Boolean(hostNorm && sid && sid === hostNorm);
       const canOpenPeerProfile = Boolean(sid && !withdrawn && sid !== 'ginit_ai');
 
-      const singleMsg = item.type === 'message' ? item.message : null;
+      const singleMsg = rowAt.type === 'message' ? rowAt.message : null;
       const isImage = Boolean(singleMsg && singleMsg.kind === 'image');
       const hasServerAck =
         typeof singleMsg?.serverSeq === 'number' && Number.isFinite(singleMsg.serverSeq) && singleMsg.serverSeq > 0;

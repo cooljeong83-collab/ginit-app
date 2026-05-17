@@ -45,6 +45,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { syncServerParticipantUnreadForRoom } from '@/src/lib/chat-local-unread-sync';
+import { useChatInvertedStickToLatest } from '@/src/hooks/use-chat-inverted-stick-to-latest';
 import { useChatMarkReadOnFocus } from '@/src/hooks/use-chat-mark-read-on-focus';
 import { useChatRealtimeConnectionBanner } from '@/src/hooks/use-chat-realtime-connection-banner';
 import { useChatEngine, type ChatEngineSendMeetingImageBatchInput, type ChatEngineSendMessageInput } from '@/src/hooks/useChatEngine';
@@ -55,7 +56,11 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { createChatSearchSession, type ChatSearchSession } from '@/src/lib/chat-search-navigator';
 import { buildLinkPreviewForChatText } from '@/src/lib/chat-link-preview-for-send';
 import { chatEngineSnapshotsToMeetingMessagesNewestFirst } from '@/src/lib/chat-engine-snapshot-to-meeting';
-import { buildMeetingChatListRows, findMeetingChatListRowIndexByMessageId } from '@/src/lib/meeting-chat-list-rows';
+import {
+  buildMeetingChatListRows,
+  findMeetingChatListRowIndexByMessageId,
+  meetingChatListExtraDataKey,
+} from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -204,7 +209,6 @@ export default function MeetingChatRoomScreen() {
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   /** 맨 아래에서 조금이라도 위로 올라왔을 때만「최신으로」FAB 표시 */
   const [bubbleReadMapsRevision, setBubbleReadMapsRevision] = useState(0);
-  const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const [chatSearchMode, setChatSearchMode] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   /** 엔터로 확정된 검색어(로컬 DB·▲/▼ 탐색 기준) */
@@ -239,10 +243,6 @@ export default function MeetingChatRoomScreen() {
     sendBatch: async () => {},
   });
   const { markChatReadUpTo } = useInAppAlarms();
-  const lastScrollOffsetRef = useRef(0);
-  const pendingAutoScrollToLatestRef = useRef(false);
-  const lastAutoScrolledMessageIdRef = useRef<string>('');
-  const latestAutoScrollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resolveListScroller = useCallback(() => {
     const r = innerFlashListRef.current ?? listRef.current;
@@ -292,13 +292,6 @@ export default function MeetingChatRoomScreen() {
       return false;
     }
   }, [resolveListScroller]);
-
-  const jumpToLatest = useCallback(() => {
-    setShowJumpToBottomFab(false);
-    requestAnimationFrame(() => {
-      scrollToOffsetSafe(0, false);
-    });
-  }, [scrollToOffsetSafe]);
 
   const myId = useMemo(() => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''), [userId]);
 
@@ -435,6 +428,48 @@ export default function MeetingChatRoomScreen() {
     appPoliciesVersion,
   ]);
 
+  useOfflineChatRoomSync({ roomType: 'meeting', roomId: meetingId }, allowed === true, userId);
+
+  const meetingReadRoomIds = useMemo(
+    () => [...new Set([meetingId.trim(), meeting?.id?.trim() ?? ''].filter(Boolean))],
+    [meetingId, meeting?.id],
+  );
+
+  const chatEngineEnabled = Boolean(meetingId.trim() && userId?.trim()) && allowed !== false;
+
+  const { messages: engineSnapshots, sendMessage, sendMeetingImageUrisBatch } = useChatEngine({
+    roomKind: 'meeting',
+    roomId: meetingId,
+    meAppUserId: myId || userId?.trim() || '',
+    enabled: chatEngineEnabled,
+    observeLimit: 5000,
+  });
+
+  meetingEngineSendRef.current = { sendMessage, sendBatch: sendMeetingImageUrisBatch };
+
+  const messages = useMemo(
+    () => chatEngineSnapshotsToMeetingMessagesNewestFirst(engineSnapshots),
+    [engineSnapshots],
+  );
+
+  const latestMessageId = messages[0]?.id ?? '';
+
+  const {
+    showJumpToBottomFab,
+    onChatScroll,
+    onChatListContentSizeChange,
+    jumpToLatest,
+    markPendingStickToLatest,
+    scheduleStickToLatest,
+    stickWhenNearLatestOnLayoutChange,
+  } = useChatInvertedStickToLatest({
+    scrollToOffsetSafe,
+    scrollToIndexSafe,
+    latestMessageId,
+    messagesEmpty: messages.length === 0,
+    keyboardHeight,
+  });
+
   const didHandleDirectShareRef = useRef(false);
   useEffect(() => {
     if (didHandleDirectShareRef.current) return;
@@ -443,7 +478,6 @@ export default function MeetingChatRoomScreen() {
     const peek = peekPendingDirectSharePayload();
     if (!peek || peek.targetType !== 'meeting' || peek.targetId.trim() !== meetingId.trim()) return;
 
-    // consume exactly once for this screen
     const payload = consumePendingDirectSharePayload();
     if (!payload || payload.targetType !== 'meeting' || payload.targetId.trim() !== meetingId.trim()) return;
     didHandleDirectShareRef.current = true;
@@ -456,7 +490,7 @@ export default function MeetingChatRoomScreen() {
       imageUriPrefix: payload.kind === 'image' ? String(payload.imageUri ?? '').slice(0, 28) : '',
     });
 
-    pendingAutoScrollToLatestRef.current = true;
+    markPendingStickToLatest();
     setSending(true);
     void (async () => {
       try {
@@ -500,33 +534,11 @@ export default function MeetingChatRoomScreen() {
         Alert.alert('공유 전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
       } finally {
         setSending(false);
+        markPendingStickToLatest();
+        scheduleStickToLatest();
       }
     })();
-  }, [allowed, meetingId, userId]);
-
-  useOfflineChatRoomSync({ roomType: 'meeting', roomId: meetingId }, allowed === true, userId);
-
-  const meetingReadRoomIds = useMemo(
-    () => [...new Set([meetingId.trim(), meeting?.id?.trim() ?? ''].filter(Boolean))],
-    [meetingId, meeting?.id],
-  );
-
-  const chatEngineEnabled = Boolean(meetingId.trim() && userId?.trim()) && allowed !== false;
-
-  const { messages: engineSnapshots, sendMessage, sendMeetingImageUrisBatch } = useChatEngine({
-    roomKind: 'meeting',
-    roomId: meetingId,
-    meAppUserId: myId || userId?.trim() || '',
-    enabled: chatEngineEnabled,
-    observeLimit: 5000,
-  });
-
-  meetingEngineSendRef.current = { sendMessage, sendBatch: sendMeetingImageUrisBatch };
-
-  const messages = useMemo(
-    () => chatEngineSnapshotsToMeetingMessagesNewestFirst(engineSnapshots),
-    [engineSnapshots],
-  );
+  }, [allowed, meetingId, userId, markPendingStickToLatest, scheduleStickToLatest]);
 
   const maxMessageServerSeq = useMemo(() => {
     let max = 0;
@@ -602,6 +614,7 @@ export default function MeetingChatRoomScreen() {
   }, [allowed, messages]);
 
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
+  const chatListExtraData = useMemo(() => meetingChatListExtraDataKey(chatListRows), [chatListRows]);
 
   const markReadMessages = useMemo(
     () =>
@@ -706,7 +719,6 @@ export default function MeetingChatRoomScreen() {
     [allowed, meetingId, isFocused, myId, userId, realtimeBanner.handlers],
   );
 
-  const latestMessageId = messages[0]?.id ?? '';
   const latestServerSeq = messages[0]?.serverSeq;
 
   /** Realtime이 막혀 있어도 최신 메시지·seq 변화 시 읽음 맵을 한 번 더 맞춤(방당 debounce·in-flight 합침). */
@@ -720,53 +732,6 @@ export default function MeetingChatRoomScreen() {
       ownerUserId: userId?.trim() ?? null,
     });
   }, [allowed, meetingId, isFocused, myId, userId, latestMessageId, latestServerSeq, maxMessageServerSeq]);
-
-  // inverted 리스트: offset=0 이 "최신(하단)" 이므로 별도 scrollToEnd 로직이 필요 없습니다.
-
-  const onChatScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-    lastScrollOffsetRef.current = contentOffset.y;
-    const viewH = layoutMeasurement.height;
-    const contentH = contentSize.height;
-    if (viewH <= 0 || contentH <= 0) {
-      setShowJumpToBottomFab(false);
-      return;
-    }
-    /** 스크롤이 생기지 않으면(내용이 짧으면) FAB 숨김 */
-    if (contentH <= viewH + 4) {
-      setShowJumpToBottomFab(false);
-      return;
-    }
-    const threshold = 56;
-    // inverted: 최신 위치(하단)는 offset=0, 위로 갈수록 offset이 증가
-    setShowJumpToBottomFab(contentOffset.y > threshold);
-  }, []);
-
-  useEffect(() => {
-    if (messages.length === 0) {
-      setShowJumpToBottomFab(false);
-    }
-  }, [messages.length]);
-
-  useEffect(() => {
-    const latest = messages[0];
-    if (!latest?.id) return;
-    if (lastAutoScrolledMessageIdRef.current === latest.id) return;
-
-    const shouldAutoScroll = keyboardHeight > 0 || pendingAutoScrollToLatestRef.current || !showJumpToBottomFab;
-    if (!shouldAutoScroll) return;
-
-    lastAutoScrolledMessageIdRef.current = latest.id;
-    pendingAutoScrollToLatestRef.current = false;
-    if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
-    latestAutoScrollDebounceRef.current = setTimeout(() => {
-      latestAutoScrollDebounceRef.current = null;
-      scrollToOffsetSafe(0, false);
-    }, 90);
-    return () => {
-      if (latestAutoScrollDebounceRef.current) clearTimeout(latestAutoScrollDebounceRef.current);
-    };
-  }, [messages, showJumpToBottomFab, keyboardHeight, scrollToOffsetSafe]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1032,7 +997,7 @@ export default function MeetingChatRoomScreen() {
       }
       if (uris.length === 0 || sending) return;
       setSending(true);
-      pendingAutoScrollToLatestRef.current = true;
+      markPendingStickToLatest();
       try {
         const uid = userId.trim();
         const senderPhone = normalizePhoneUserId(uid) ?? uid;
@@ -1049,9 +1014,11 @@ export default function MeetingChatRoomScreen() {
         Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
       } finally {
         setSending(false);
+        markPendingStickToLatest();
+        scheduleStickToLatest();
       }
     },
-    [meetingId, userId, sending, sendMeetingImageUrisBatch],
+    [meetingId, userId, sending, sendMeetingImageUrisBatch, markPendingStickToLatest, scheduleStickToLatest],
   );
 
   const onSend = useCallback(async () => {
@@ -1062,7 +1029,7 @@ export default function MeetingChatRoomScreen() {
     const body = draft.trim();
     if (!body || sending) return;
     setSending(true);
-    pendingAutoScrollToLatestRef.current = true;
+    markPendingStickToLatest();
     try {
       const uid = userId.trim();
       const senderPhone = normalizePhoneUserId(uid) ?? uid;
@@ -1091,8 +1058,10 @@ export default function MeetingChatRoomScreen() {
       Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
     } finally {
       setSending(false);
+      markPendingStickToLatest();
+      scheduleStickToLatest();
     }
-  }, [meetingId, userId, draft, sending, replyTo, sendMessage]);
+  }, [meetingId, userId, draft, sending, replyTo, sendMessage, markPendingStickToLatest, scheduleStickToLatest]);
 
   const chatListContentStyle = useMemo(
     () => [
@@ -1130,11 +1099,14 @@ export default function MeetingChatRoomScreen() {
   // 입력 독/키보드 높이 변화로 리스트 패딩이 바뀌는 순간,
   // 최신 영역에 머무는 중이면(offset=0) 한 번 더 최신으로 붙여 가려짐을 방지합니다.
   useEffect(() => {
-    if (showJumpToBottomFab) return;
-    requestAnimationFrame(() => {
-      scrollToOffsetSafe(0, false);
-    });
-  }, [showJumpToBottomFab, composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight, scrollToOffsetSafe]);
+    stickWhenNearLatestOnLayoutChange();
+  }, [
+    stickWhenNearLatestOnLayoutChange,
+    composerDockBlockHeight,
+    composerInputBarHeight,
+    composerBottomPad,
+    keyboardHeight,
+  ]);
 
   const hostNorm = meeting?.createdBy?.trim() ? normalizeParticipantId(meeting.createdBy.trim()) : '';
 
@@ -1488,9 +1460,11 @@ export default function MeetingChatRoomScreen() {
           setListRef={setListRef}
           setInnerFlashListRef={setInnerFlashListRef}
           chatListRows={chatListRows}
+          listExtraData={chatListExtraData}
           renderItem={renderItem}
           chatListContentStyle={chatListContentStyle}
           onChatScroll={onChatScroll}
+          onChatListContentSizeChange={onChatListContentSizeChange}
           listFooterLoading={listFooterLoading}
           hasNextPage={hasMoreOlder}
           isFetchingNextPage={olderPrefetchBusy}

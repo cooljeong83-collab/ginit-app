@@ -25,8 +25,12 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { copyMeetingChatListRowToClipboard, copyTextForMeetingChatListRow } from '@/src/lib/meeting-chat-bubble-copy';
 import { MessageReadCount } from '@/components/chat/MessageReadCount';
 import { extractFirstHttpUrlFromChatText } from '@/src/lib/chat-text-linkify';
-import { formatDateWithKoWeekday } from '@/src/lib/date-display';
-import { meetingChatAlbumAnchorMessage, type MeetingChatListRow } from '@/src/lib/meeting-chat-list-rows';
+import {
+  meetingChatAlbumAnchorMessage,
+  meetingChatDateChipLabelAtIndex,
+  meetingChatShowPeerAvatarAtIndex,
+  type MeetingChatListRow,
+} from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { wmChatMessageModelToMeetingMessage } from '@/src/lib/watermelon-chat-message-map';
 import { WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS } from '@/src/lib/watermelon-observe-columns';
@@ -35,10 +39,6 @@ import type { ChatMessage } from '@/src/watermelon/models/ChatMessage';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 
-function rowIsSystemRow(row: MeetingChatListRow): boolean {
-  return row.type === 'message' && row.message.kind === 'system';
-}
-
 function rowSenderNorm(row: MeetingChatListRow): string {
   if (row.type === 'message') {
     const s = row.message.senderId?.trim();
@@ -46,11 +46,6 @@ function rowSenderNorm(row: MeetingChatListRow): string {
   }
   const f = row.messages[0]?.senderId?.trim();
   return f ? normalizeParticipantId(f) : '';
-}
-
-function rowAnchorDate(row: MeetingChatListRow): Date | null {
-  if (row.type === 'message') return row.message.createdAt?.toDate?.() ?? null;
-  return meetingChatAlbumAnchorMessage(row).createdAt?.toDate?.() ?? null;
 }
 
 export type MeetingChatObservableMessageRowProps = {
@@ -207,23 +202,12 @@ const MeetingChatBubbleRow = memo(function MeetingChatBubbleRow(props: MeetingCh
 
   const listRows = listRowsRef.current ?? [];
   const index = listRowIndex;
-  const next = index + 1 < listRows.length ? listRows[index + 1]! : null;
-  const currDate = rowAnchorDate(item);
-  const nextDate = next ? rowAnchorDate(next) : null;
-  const dateLabel =
-    currDate &&
-    (!nextDate ||
-      currDate.getFullYear() !== nextDate.getFullYear() ||
-      currDate.getMonth() !== nextDate.getMonth() ||
-      currDate.getDate() !== nextDate.getDate())
-      ? formatDateWithKoWeekday(currDate)
-      : '';
+  const rowAt = listRows[index] ?? item;
+  const dateLabel = meetingChatDateChipLabelAtIndex(listRows, index);
 
-  const sid = rowSenderNorm(item);
+  const sid = rowSenderNorm(rowAt);
   const isMine = Boolean(myId && sid && sid === myId);
-  const nextSid = next ? rowSenderNorm(next) : '';
-  const sameSenderAsNext = Boolean(sid && nextSid && nextSid === sid);
-  const showAvatar = !isMine && sid && (index === 0 || !next || rowIsSystemRow(next) || !sameSenderAsNext);
+  const showAvatar = meetingChatShowPeerAvatarAtIndex(listRows, index, myId);
 
   const profiles = profilesRef.current ?? new Map<string, UserProfile>();
   const profFromMap = sid ? profileForSender(profiles, sid) : undefined;

@@ -255,6 +255,15 @@ export default function FeedScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!feedLocationReady || !userId) return;
+      void runMeetingsUserActionDeltaSync(queryClient, userId, 'foreground').catch((err) =>
+        console.log('Meetings focus sync failed:', err),
+      );
+    }, [queryClient, userId, feedLocationReady]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       return () => {
         cancelPendingMeetingOpenFromFeedRef.current?.();
         cancelPendingMeetingOpenFromFeedRef.current = null;
