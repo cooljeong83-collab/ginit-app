@@ -613,7 +613,6 @@ export default function MeetingChatRoomScreen() {
 
   const chatListRows = useMemo(() => buildMeetingChatListRows(messages), [messages]);
   const chatListExtraData = useMemo(() => meetingChatListExtraDataKey(chatListRows), [chatListRows]);
-
   const markReadMessages = useMemo(
     () =>
       messages.map((m) => ({

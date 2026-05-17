@@ -121,6 +121,11 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
 
   const listKeyboardHeader = useMemo(() => <ChatInvertedKeyboardSpacer />, []);
 
+  const listEmptyComponent = useMemo(
+    () => <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>,
+    [],
+  );
+
   const stickyOffset = useMemo(
     () => ({ closed: 0, opened: stickyOpenedOffset }),
     [stickyOpenedOffset],
@@ -175,7 +180,7 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
           onContentSizeChange={onChatListContentSizeChange}
           scrollEventThrottle={16}
           keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={<Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>}
+            ListEmptyComponent={listEmptyComponent}
           ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
           onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
           onEndReachedThreshold={0.55}

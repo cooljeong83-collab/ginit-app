@@ -188,6 +188,8 @@ export function useChatEngine(options: {
       return;
     }
 
+    setMessages([]);
+
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     let readPullTimer: ReturnType<typeof setTimeout> | null = null;
@@ -202,26 +204,30 @@ export function useChatEngine(options: {
     };
 
     void (async () => {
-      const rooms = db.get('chat_rooms');
-      const roomRows = await rooms.query(Q.where('room_id', rid), Q.where('room_type', roomKind)).fetch();
-      const roomModel = roomRows[0] as ChatRoom | undefined;
+      try {
+        const rooms = db.get('chat_rooms');
+        const roomRows = await rooms.query(Q.where('room_id', rid), Q.where('room_type', roomKind)).fetch();
+        const roomModel = roomRows[0] as ChatRoom | undefined;
 
-      const fallbackQuery = db
-        .get('chat_messages')
-        .query(Q.where('room_id', rid), Q.where('room_type', roomKind), Q.sortBy('created_at_ms', Q.desc), Q.take(take));
+        const fallbackQuery = db
+          .get('chat_messages')
+          .query(Q.where('room_id', rid), Q.where('room_type', roomKind), Q.sortBy('created_at_ms', Q.desc), Q.take(take));
 
-      const query =
-        roomModel && roomModel.messages
-          ? roomModel.messages.extend(Q.sortBy('created_at_ms', Q.desc), Q.take(take))
-          : fallbackQuery;
+        const query =
+          roomModel && roomModel.messages
+            ? roomModel.messages.extend(Q.sortBy('created_at_ms', Q.desc), Q.take(take))
+            : fallbackQuery;
 
-      const sub = query.observeWithColumns([...WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS]).subscribe((rows: any[]) => {
-        if (cancelled) return;
-        const mapped = rows.map(modelRowToSnapshot).filter((m) => m.messageId && m.createdAtMs > 0);
-        setMessages(dedupeChatEngineSnapshots(mapped));
-        scheduleReadPullFromMessages();
-      });
-      unsubscribe = () => sub.unsubscribe();
+        const sub = query.observeWithColumns([...WM_CHAT_MESSAGE_LIST_OBSERVE_COLUMNS]).subscribe((rows: any[]) => {
+          if (cancelled) return;
+          const mapped = rows.map(modelRowToSnapshot).filter((m) => m.messageId && m.createdAtMs > 0);
+          setMessages(dedupeChatEngineSnapshots(mapped));
+          scheduleReadPullFromMessages();
+        });
+        unsubscribe = () => sub.unsubscribe();
+      } catch {
+        if (!cancelled) setMessages([]);
+      }
     })();
 
     return () => {
