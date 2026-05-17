@@ -3,12 +3,22 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import type { ReactNode, RefObject } from 'react';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
-import {ActivityIndicator, Text, TextInput, View} from 'react-native';
+import { ActivityIndicator, Text, TextInput, View } from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
-import { KeyboardStickyView } from 'react-native-keyboard-controller';
-
+import {
+  KeyboardGestureArea,
+  KeyboardStickyView,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import {
+  ChatInvertedKeyboardSpacer,
+  CHAT_FLASH_LIST_DRAW_DISTANCE,
+  GINIT_CHAT_COMPOSER_NATIVE_ID,
+  useChatComposerStickyOffset,
+} from '@/components/chat/ChatKeyboardScrollView';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-chat-ui-helpers';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -36,8 +46,6 @@ export type MeetingChatMainColumnProps = {
   onPrefetchOlderMessages?: () => void;
   showJumpToBottomFab: boolean;
   composerDockBlockHeight: number;
-  /** 키보드가 올라온 높이(px). 리스트/FAB 위치 보정용 */
-  keyboardHeight?: number;
   jumpToLatest: () => void;
   composerBottomPad: number;
   onComposerDockLayout: (e: LayoutChangeEvent) => void;
@@ -82,7 +90,6 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
   onPrefetchOlderMessages,
   showJumpToBottomFab,
   composerDockBlockHeight,
-  keyboardHeight,
   jumpToLatest,
   composerBottomPad,
   onComposerDockLayout,
@@ -102,6 +109,23 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
   hideComposer = false,
   listExtraData,
 }: MeetingChatMainColumnProps) {
+  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
+  const { stickyOpenedOffset } = useChatComposerStickyOffset();
+
+  const jumpFabAnimatedStyle = useAnimatedStyle(
+    () => ({
+      bottom: 12 + composerDockBlockHeight - keyboardHeight.value,
+    }),
+    [composerDockBlockHeight],
+  );
+
+  const listKeyboardHeader = useMemo(() => <ChatInvertedKeyboardSpacer />, []);
+
+  const stickyOffset = useMemo(
+    () => ({ closed: 0, opened: stickyOpenedOffset }),
+    [stickyOpenedOffset],
+  );
+
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
     setListRef(r);
     setInnerFlashListRef(r);
@@ -109,7 +133,10 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
   const sendDisabled = !canSend || sending || !draft.trim();
 
   return (
-    <View style={styles.chatMainColumn}>
+    <KeyboardGestureArea
+      interpolator="ios"
+      style={styles.chatMainColumn}
+      textInputNativeID={GINIT_CHAT_COMPOSER_NATIVE_ID}>
       <View style={styles.listWrap}>
         {chatReconnecting ? (
           <View style={styles.chatReconnectBanner}>
@@ -129,133 +156,142 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
             <Text style={styles.searchJumpLoadingText}>이전 대화를 불러오는 중…</Text>
           </View>
         ) : null}
-        <View style={{ flex: 1 }}>
-          <FlashList
-            ref={setBothRefs as any}
-            style={{ flex: 1, minHeight: 0 }}
-            data={chatListRows}
-            extraData={listExtraData}
-            getItemType={(row) => meetingChatFlashListItemType(row)}
-            keyExtractor={(row) => {
-              if (row.type === 'message') return row.message.id;
-              return `album:${row.batchId}:${row.messages.map((m: MeetingChatMessage) => m.id).join(':')}`;
-            }}
-            renderItem={renderItem}
-            contentContainerStyle={chatListContentStyle}
-            inverted
-            onScroll={onChatScroll}
-            onContentSizeChange={onChatListContentSizeChange}
-            scrollEventThrottle={16}
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={<Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>}
-            ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
-            onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
-            onEndReachedThreshold={0.55}
-          />
-        </View>
+        <FlashList
+          ref={setBothRefs}
+          style={{ flex: 1, minHeight: 0 }}
+          data={chatListRows}
+          extraData={listExtraData}
+          getItemType={(row) => meetingChatFlashListItemType(row)}
+          keyExtractor={(row) => {
+            if (row.type === 'message') return row.message.id;
+            return `album:${row.batchId}:${row.messages.map((m: MeetingChatMessage) => m.id).join(':')}`;
+          }}
+          renderItem={renderItem}
+          contentContainerStyle={chatListContentStyle}
+          inverted
+          drawDistance={CHAT_FLASH_LIST_DRAW_DISTANCE}
+          ListHeaderComponent={listKeyboardHeader}
+          onScroll={onChatScroll}
+          onContentSizeChange={onChatListContentSizeChange}
+          scrollEventThrottle={16}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={<Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>}
+          ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
+          onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
+          onEndReachedThreshold={0.55}
+        />
         {showJumpToBottomFab ? (
-          <GinitPressable
-            style={[styles.jumpFab, { bottom: 12 + composerDockBlockHeight + Math.max(0, keyboardHeight ?? 0) }]}
-            onPress={jumpToLatest}
-            accessibilityRole="button"
-            accessibilityLabel="최신 메시지로">
-            <GinitSymbolicIcon name="chevron-down" size={22} color="#334155" />
-          </GinitPressable>
+          <Animated.View style={[styles.jumpFab, jumpFabAnimatedStyle]} pointerEvents="box-none">
+            <GinitPressable
+              style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+              onPress={jumpToLatest}
+              accessibilityRole="button"
+              accessibilityLabel="최신 메시지로">
+              <GinitSymbolicIcon name="chevron-down" size={22} color="#334155" />
+            </GinitPressable>
+          </Animated.View>
         ) : null}
       </View>
-      <KeyboardStickyView style={styles.composerStickyWrap}>
+      <KeyboardStickyView offset={stickyOffset} style={styles.composerStickyWrap}>
         <View style={[styles.composerDock, { paddingBottom: composerBottomPad }]} onLayout={onComposerDockLayout}>
-        {bottomSearchNavigator ? <View style={styles.bottomSearchNavigatorWrap}>{bottomSearchNavigator}</View> : null}
-        {replyTo?.messageId ? (
-          <View style={styles.replyPreviewRow}>
-            <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
-              <View style={styles.replyPreviewIconWrap} accessibilityElementsHidden pointerEvents="none">
-                <GinitSymbolicIcon name="return-up-back-outline" size={20} color="#0f172a" />
-              </View>
-              <View style={styles.replyPreviewTextCol} pointerEvents="none">
-                <Text style={styles.replyPreviewTitle} numberOfLines={1}>
-                  {replyTargetLabel(replyTo, profiles)}에게 답장
-                </Text>
-                <Text style={styles.replyPreviewBody} numberOfLines={1}>
-                  {replyPreviewText(replyTo)}
-                </Text>
-              </View>
-              {replyTo.kind === 'image' && replyTo.imageUrl?.trim() ? (
-                <View style={styles.replyPreviewThumbOuter} pointerEvents="none" accessibilityElementsHidden>
-                  <Image
-                    source={{ uri: replyTo.imageUrl.trim() }}
-                    style={styles.replyPreviewThumb}
-                    contentFit="cover"
-                    cachePolicy="disk"
-                    recyclingKey={replyTo.messageId ? `${replyTo.messageId}:${replyTo.imageUrl.trim()}` : replyTo.imageUrl.trim()}
-                  />
+          {bottomSearchNavigator ? (
+            <View style={styles.bottomSearchNavigatorWrap}>{bottomSearchNavigator}</View>
+          ) : null}
+          {replyTo?.messageId ? (
+            <View style={styles.replyPreviewRow}>
+              <BlurView tint="light" intensity={55} style={styles.replyPreviewCard}>
+                <View style={styles.replyPreviewIconWrap} accessibilityElementsHidden pointerEvents="none">
+                  <GinitSymbolicIcon name="return-up-back-outline" size={20} color="#0f172a" />
                 </View>
-              ) : null}
-              <GinitPressable
-                onPress={() => setReplyTo(null)}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="답장 취소">
-                <GinitSymbolicIcon name="close" size={18} color="#475569" />
-              </GinitPressable>
-            </BlurView>
-          </View>
-        ) : null}
-        {!hideComposer ? (
-          <View
-            style={styles.composerCluster}
-            onLayout={(e) => {
+                <View style={styles.replyPreviewTextCol} pointerEvents="none">
+                  <Text style={styles.replyPreviewTitle} numberOfLines={1}>
+                    {replyTargetLabel(replyTo, profiles)}에게 답장
+                  </Text>
+                  <Text style={styles.replyPreviewBody} numberOfLines={1}>
+                    {replyPreviewText(replyTo)}
+                  </Text>
+                </View>
+                {replyTo.kind === 'image' && replyTo.imageUrl?.trim() ? (
+                  <View style={styles.replyPreviewThumbOuter} pointerEvents="none" accessibilityElementsHidden>
+                    <Image
+                      source={{ uri: replyTo.imageUrl.trim() }}
+                      style={styles.replyPreviewThumb}
+                      contentFit="cover"
+                      cachePolicy="disk"
+                      recyclingKey={
+                        replyTo.messageId
+                          ? `${replyTo.messageId}:${replyTo.imageUrl.trim()}`
+                          : replyTo.imageUrl.trim()
+                      }
+                    />
+                  </View>
+                ) : null}
+                <GinitPressable
+                  onPress={() => setReplyTo(null)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="답장 취소">
+                  <GinitSymbolicIcon name="close" size={18} color="#475569" />
+                </GinitPressable>
+              </BlurView>
+            </View>
+          ) : null}
+          {!hideComposer ? (
+            <View
+              style={styles.composerCluster}
+              onLayout={(e) => {
               const h = e.nativeEvent.layout.height;
               if (h > 0) setComposerInputBarHeight(h);
             }}>
-            <View style={styles.composer}>
-              {onPressAttach ? (
+              <View style={styles.composer}>
+                {onPressAttach ? (
+                  <GinitPressable
+                    onPress={onPressAttach}
+                    style={({ pressed }) => [styles.plusBtn, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="사진 첨부">
+                    <View style={styles.plusBtnIconSlot}>
+                      <GinitSymbolicIcon name="add" size={26} color="#475569" />
+                    </View>
+                  </GinitPressable>
+                ) : null}
+                <View style={styles.inputShell}>
+                  <TextInput
+                    ref={messageInputRef}
+                    nativeID={GINIT_CHAT_COMPOSER_NATIVE_ID}
+                    style={styles.input}
+                    placeholder="메시지 보내기"
+                    placeholderTextColor="#94a3b8"
+                    value={draft}
+                    onChangeText={setDraft}
+                    multiline={inputMultiline}
+                    submitBehavior={inputMultiline ? 'submit' : undefined}
+                    blurOnSubmit={false}
+                    returnKeyType="send"
+                    onSubmitEditing={() => {
+                      if (sendDisabled) return;
+                      void onSend();
+                    }}
+                    maxLength={4000}
+                  />
+                </View>
                 <GinitPressable
-                  onPress={onPressAttach}
-                  style={({ pressed }) => [styles.plusBtn, pressed && styles.pressed]}
+                  onPress={() => void onSend()}
+                  style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
+                  disabled={sendDisabled}
                   accessibilityRole="button"
-                  accessibilityLabel="사진 첨부">
-                  <View style={styles.plusBtnIconSlot}>
-                    <GinitSymbolicIcon name="add" size={26} color="#475569" />
-                  </View>
+                  accessibilityLabel="보내기">
+                  {sending ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <GinitSymbolicIcon name="send" size={20} color="#fff" />
+                  )}
                 </GinitPressable>
-              ) : null}
-              <View style={styles.inputShell}>
-                <TextInput
-                  ref={messageInputRef}
-                  style={styles.input}
-                  placeholder="메시지 보내기"
-                  placeholderTextColor="#94a3b8"
-                  value={draft}
-                  onChangeText={setDraft}
-                  multiline={inputMultiline}
-                  submitBehavior={inputMultiline ? 'submit' : undefined}
-                  blurOnSubmit={false}
-                  returnKeyType="send"
-                  onSubmitEditing={() => {
-                    if (sendDisabled) return;
-                    void onSend();
-                  }}
-                  maxLength={4000}
-                />
               </View>
-              <GinitPressable
-                onPress={() => void onSend()}
-                style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
-                disabled={sendDisabled}
-                accessibilityRole="button"
-                accessibilityLabel="보내기">
-                {sending ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <GinitSymbolicIcon name="send" size={20} color="#fff" />
-                )}
-              </GinitPressable>
             </View>
-          </View>
-        ) : null}
+          ) : null}
         </View>
       </KeyboardStickyView>
-    </View>
+    </KeyboardGestureArea>
   );
 });

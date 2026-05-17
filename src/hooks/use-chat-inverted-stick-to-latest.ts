@@ -19,7 +19,6 @@ type UseChatInvertedStickToLatestArgs = {
   scrollToIndexSafe?: (index: number, viewPosition?: number, animated?: boolean) => boolean;
   latestMessageId: string;
   messagesEmpty: boolean;
-  keyboardHeight: number;
 };
 
 /**
@@ -31,7 +30,6 @@ export function useChatInvertedStickToLatest({
   scrollToIndexSafe,
   latestMessageId,
   messagesEmpty,
-  keyboardHeight,
 }: UseChatInvertedStickToLatestArgs) {
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const lastScrollOffsetRef = useRef(0);
@@ -56,17 +54,16 @@ export function useChatInvertedStickToLatest({
 
   const shouldStickToLatestNow = useCallback(() => {
     return (
-      keyboardHeight > 0 ||
       pendingStickToLatestRef.current ||
       !userViewingHistoryRef.current ||
       isNearLatestOffset()
     );
-  }, [keyboardHeight, isNearLatestOffset]);
+  }, [isNearLatestOffset]);
 
   const tryConfirmStuckForTarget = useCallback(() => {
     const target = stickTargetMessageIdRef.current.trim();
     if (!target) return false;
-    if (!isNearLatestOffset() && !pendingStickToLatestRef.current && keyboardHeight <= 0) {
+    if (!isNearLatestOffset() && !pendingStickToLatestRef.current) {
       return false;
     }
     lastStuckMessageIdRef.current = target;
@@ -75,7 +72,7 @@ export function useChatInvertedStickToLatest({
     userViewingHistoryRef.current = false;
     setShowJumpToBottomFab(false);
     return true;
-  }, [keyboardHeight, isNearLatestOffset]);
+  }, [isNearLatestOffset]);
 
   const runStickToLatest = useCallback(() => {
     stickInFlightRef.current = true;
@@ -199,14 +196,14 @@ export function useChatInvertedStickToLatest({
   }, [clearStickBurst, latestMessageId, scheduleStickBurst]);
 
   const stickWhenNearLatestOnLayoutChange = useCallback(() => {
-    if (userViewingHistoryRef.current && !pendingStickToLatestRef.current && keyboardHeight <= 0) {
+    if (userViewingHistoryRef.current && !pendingStickToLatestRef.current) {
       return;
     }
     if (lastScrollOffsetRef.current > CHAT_INVERTED_NEAR_LATEST_OFFSET_PX && userViewingHistoryRef.current) {
       return;
     }
     scheduleStickBurst(latestMessageId);
-  }, [keyboardHeight, latestMessageId, scheduleStickBurst]);
+  }, [latestMessageId, scheduleStickBurst]);
 
   useLayoutEffect(() => {
     if (messagesEmpty) {
@@ -235,7 +232,6 @@ export function useChatInvertedStickToLatest({
   }, [
     latestMessageId,
     messagesEmpty,
-    keyboardHeight,
     clearStickBurst,
     scheduleStickBurst,
     shouldStickToLatestNow,

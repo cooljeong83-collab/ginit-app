@@ -4,8 +4,7 @@ import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef
 import {
   ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
-import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
+import { useKeyboardState } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
@@ -129,7 +128,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
   const mountedRef = useRef(true);
@@ -236,7 +235,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     scrollToIndexSafe,
     latestMessageId,
     messagesEmpty: messages.length === 0,
-    keyboardHeight,
   });
 
   const didHandleDirectShareRef = useRef(false);
@@ -346,8 +344,8 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
 
   /** 모임 채팅과 동일: IME 표시 중 일부 기기에서 하단 inset이 키보드 오프셋과 중복될 수 있어 최소 패딩만 사용 */
   const composerBottomPad = useMemo(
-    () => (keyboardHeight > 0 ? 8 : Math.max(insets.bottom, 8)),
-    [insets.bottom, keyboardHeight],
+    () => (keyboardVisible ? 8 : Math.max(insets.bottom, 8)),
+    [insets.bottom, keyboardVisible],
   );
 
   const messageIndexById = useMemo(() => buildChatMessageIndexById(messages as MeetingChatMessage[]), [messages]);
@@ -479,25 +477,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       {
         paddingTop: Math.max(
           4,
-          Math.max(composerDockBlockHeight, composerInputBarHeight + composerBottomPad) + Math.max(0, keyboardHeight),
+          Math.max(composerDockBlockHeight, composerInputBarHeight + composerBottomPad),
         ),
       },
     ],
-    [composerDockBlockHeight, composerInputBarHeight, composerBottomPad, keyboardHeight],
-  );
-
-  useGenericKeyboardHandler(
-    {
-      onMove: (e) => {
-        'worklet';
-        runOnJS(setKeyboardHeight)(Math.max(0, e.height));
-      },
-      onEnd: (e) => {
-        'worklet';
-        runOnJS(setKeyboardHeight)(Math.max(0, e.height));
-      },
-    },
-    [],
+    [composerDockBlockHeight, composerInputBarHeight, composerBottomPad],
   );
 
   const onComposerDockLayout = useCallback((e: LayoutChangeEvent) => {
@@ -505,17 +489,9 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     if (h > 0) setComposerDockBlockHeight(h);
   }, []);
 
-  // 입력 독/키보드 높이 변화로 리스트 패딩이 바뀌는 순간,
-  // 최신 영역에 머무는 중이면(offset=0) 한 번 더 최신으로 붙여 가려짐을 방지합니다.
   useEffect(() => {
     stickWhenNearLatestOnLayoutChange();
-  }, [
-    stickWhenNearLatestOnLayoutChange,
-    composerDockBlockHeight,
-    composerInputBarHeight,
-    composerBottomPad,
-    keyboardHeight,
-  ]);
+  }, [stickWhenNearLatestOnLayoutChange, composerDockBlockHeight, composerInputBarHeight]);
 
   const listFooterLoading = useMemo(
     () => (
@@ -655,7 +631,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           onPrefetchOlderMessages={hasNextPage ? onPrefetchOlderMessages : undefined}
           showJumpToBottomFab={showJumpToBottomFab}
           composerDockBlockHeight={composerDockBlockHeight}
-          keyboardHeight={keyboardHeight}
           jumpToLatest={jumpToLatest}
           composerBottomPad={composerBottomPad}
           onComposerDockLayout={onComposerDockLayout}
