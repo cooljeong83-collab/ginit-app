@@ -9,7 +9,9 @@ import {
   notifyMeetingChatParticipantsRemoteFireAndForget,
 } from '@/src/lib/meeting-chat';
 import { scheduleChatBubbleReadPointersPull } from '@/src/lib/chat-bubble-read-pointers-pull';
+import { upsertSocialDmListSurfaceAcrossLocalRoomIds } from '@/src/lib/chat-social-room-id-mirror';
 import { getOrCreateLocalRoom } from '@/src/lib/offline-chat/offline-chat-sync';
+import { localRoomPreviewForMessage } from '@/src/lib/offline-chat/offline-chat-rooms';
 import { buildSearchText, sanitizeUnicodeForSqliteStorage } from '@/src/lib/offline-chat/offline-chat-utils';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { getUserProfile } from '@/src/lib/user-profile';
@@ -299,6 +301,24 @@ export function useChatEngine(options: {
           m.serverSeq = null;
         });
       });
+
+      if (roomKind === 'social_dm') {
+        const preview =
+          localRoomPreviewForMessage({
+            kind: input.kind,
+            text: bodyText,
+            imageUrl,
+          }) ?? '';
+        await upsertSocialDmListSurfaceAcrossLocalRoomIds(uid, rid, {
+          ownerUserId: uid,
+          lastMessageId: optimisticMessageId,
+          lastMessageAtMs: now,
+          lastMessagePreview: preview,
+          lastMessageKind: input.kind,
+          lastSenderId: senderId,
+          touchListSurface: true,
+        });
+      }
 
       deferAfterInteractions(() => {
         void (async () => {

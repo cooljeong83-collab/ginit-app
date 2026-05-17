@@ -37,7 +37,6 @@ import type { Meeting } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import {
   searchSocialChatMessages,
-  socialDmPreviewLine,
   isValidSocialDmPeerForViewer,
   resolveSocialDmRoomIdForViewer,
   socialMessageTimeMs,
@@ -55,6 +54,8 @@ import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import {
   firestoreTimeToMs,
   meetingMessageFromLocalRoom,
+  socialListLastMessageMs,
+  socialListPreviewFromLocalRoom,
   socialMessageFromLocalRoom,
   upsertLocalChatRoomReadState,
   upsertLocalChatRoomSummary,
@@ -1118,12 +1119,13 @@ export default function ChatTab() {
                   const nick = prof?.nickname ?? '친구';
                   const friendBio =
                     prof && !isUserProfileWithdrawn(prof) ? (prof.bio?.trim() ?? '') : '';
+                  const loc = localSocialRoomById.get(row.roomId) as LocalChatRoomSummary | undefined;
                   const latest = effectiveLatestBySocialRoomId[row.roomId];
-                  const hasMessage = latest != null;
-                  const messageMs = hasMessage ? latestSocialChatMessageMs(latest) : 0;
-                  const preview = hasMessage ? socialDmPreviewLine(latest) : '';
-                  const rightTime = hasMessage && messageMs > 0 ? formatRelativeFromMs(messageMs) : '';
-                  const unread = localSocialRoomById.get(row.roomId)?.unreadCount ?? 0;
+                  const messageMs = socialListLastMessageMs(loc ?? { lastMessageAtMs: 0 }, latest);
+                  const hasListableMessage = messageMs > 0;
+                  const preview = socialListPreviewFromLocalRoom(loc ?? { lastMessagePreview: null }, latest);
+                  const rightTime = hasListableMessage ? formatRelativeFromMs(messageMs) : '';
+                  const unread = loc?.unreadCount ?? 0;
                   return (
                     <GinitPressable
                       onPress={() => {

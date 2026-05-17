@@ -15,6 +15,7 @@ import {
   type ChatRoomParticipantRow,
 } from '@/src/lib/chat-sync-service';
 import { upsertMeetingUnreadAcrossLocalRoomIds } from '@/src/lib/chat-meeting-room-id-mirror';
+import { upsertSocialDmListSurfaceAcrossLocalRoomIds } from '@/src/lib/chat-social-room-id-mirror';
 import { markChatUnreadBaselineReady } from '@/src/lib/chat-unread-baseline';
 import {
   isChatRoomOpenForUnreadApply,
@@ -113,11 +114,8 @@ export async function applyRealtimeUnreadToLocalWatermelon(
     markRecentUnreadBroadcast('meeting', p.canonicalRoomId);
     return;
   }
-  await upsertLocalChatRoomSummary({
-    roomType: 'social_dm',
-    roomId: p.canonicalRoomId,
+  await upsertSocialDmListSurfaceAcrossLocalRoomIds(uid, p.canonicalRoomId, {
     ownerUserId: uid,
-    isGroup: false,
     unreadCount,
     lastMessagePreview: p.lastMessage,
     lastMessageId: p.lastMessageId || undefined,

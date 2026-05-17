@@ -182,7 +182,7 @@ export function UnifiedChatBody<TMessage extends UnifiedChatMessage>({
               {title}
             </Text>
           }
-          ListEmptyComponent={<Text style={styles.empty}>첫 인사를 남겨 보세요.</Text>}
+          ListEmptyComponent={null}
         />
         {showJumpToBottomFab ? (
           <GinitPressable

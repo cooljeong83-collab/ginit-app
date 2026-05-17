@@ -3,7 +3,12 @@ import { Q } from '@nozbe/watermelondb';
 import { database } from '@/src/watermelon';
 import type { OfflineChatRoomType } from '@/src/lib/offline-chat/offline-chat-types';
 import { buildSearchText, sanitizeUnicodeForSqliteStorage } from '@/src/lib/offline-chat/offline-chat-utils';
-import type { SocialChatMessage, SocialChatRoomDoc, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
+import {
+  socialDmPreviewLine,
+  type SocialChatMessage,
+  type SocialChatRoomDoc,
+  type SocialChatRoomSummary,
+} from '@/src/lib/social-chat-rooms';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { Timestamp } from '@/src/lib/ginit-timestamp';
@@ -612,6 +617,36 @@ export async function markLocalChatRoomReadState(args: {
     readAtMsBy: { [userKey]: readAtMs },
     readStateLastAtMs: readAtMs,
   });
+}
+
+/** 친구 채팅 목록 미리보기 — 메시지 스텁이 없어도 `chat_rooms` denorm 폴백 */
+export function socialListPreviewFromLocalRoom(
+  room: Pick<LocalChatRoomSummary, 'lastMessagePreview'>,
+  latest: SocialChatMessage | null | undefined,
+): string {
+  if (latest != null) {
+    const line = socialDmPreviewLine(latest);
+    if (line) return line;
+  }
+  return room.lastMessagePreview?.trim() ?? '';
+}
+
+/** 친구 채팅 목록 우측 상대 시각(ms) */
+export function socialListLastMessageMs(
+  room: Pick<LocalChatRoomSummary, 'lastMessageAtMs'>,
+  latest: SocialChatMessage | null | undefined,
+): number {
+  const ts = latest?.createdAt;
+  if (ts && typeof ts.toMillis === 'function') {
+    try {
+      const ms = ts.toMillis();
+      if (ms > 0) return ms;
+    } catch {
+      /* noop */
+    }
+  }
+  const lm = room.lastMessageAtMs;
+  return typeof lm === 'number' && Number.isFinite(lm) && lm > 0 ? lm : 0;
 }
 
 export function socialMessageFromLocalRoom(room: LocalChatRoomSummary): SocialChatMessage | null {

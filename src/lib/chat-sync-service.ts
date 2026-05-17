@@ -10,6 +10,7 @@ import { upsertMeetingUnreadAcrossLocalRoomIds } from '@/src/lib/chat-meeting-ro
 import { reconcileServerUnreadWithLocal, shouldSkipParticipantUnreadBump } from '@/src/lib/chat-unread-apply-guard';
 import { markRecentUnreadBroadcast, wasRecentUnreadBroadcast } from '@/src/lib/chat-unread-recent-broadcast';
 import { chatRoomsListQueryKey } from '@/src/lib/chat-query-keys';
+import { upsertSocialDmListSurfaceAcrossLocalRoomIds } from '@/src/lib/chat-social-room-id-mirror';
 import { unreadCountForChatRoomListRow, upsertLocalChatRoomSummary } from '@/src/lib/offline-chat/offline-chat-rooms';
 import { parsePeerFromSocialRoomId } from '@/src/lib/social-chat-rooms';
 import { database } from '@/src/watermelon';
@@ -277,11 +278,8 @@ export async function syncRoomParticipantToLocalDb(
     });
   } else {
     const peerFromRoomId = parsePeerFromSocialRoomId(row.room_id, me) ?? undefined;
-    await upsertLocalChatRoomSummary({
-      roomType,
-      roomId: row.room_id,
+    await upsertSocialDmListSurfaceAcrossLocalRoomIds(me, row.room_id, {
       ownerUserId: me,
-      isGroup: false,
       peerUserId: peerFromRoomId,
       unreadCount: unreadToApply,
       lastMessagePreview: row.last_message_preview ?? undefined,

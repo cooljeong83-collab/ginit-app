@@ -118,11 +118,6 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
     [composerDockBlockHeight],
   );
 
-  const listEmptyComponent = useMemo(
-    () => <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>,
-    [],
-  );
-
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
     setListRef(r);
     setInnerFlashListRef(r);
@@ -172,7 +167,7 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
           onContentSizeChange={onChatListContentSizeChange}
           scrollEventThrottle={16}
           keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={listEmptyComponent}
+            ListEmptyComponent={null}
           ListFooterComponent={isFetchingNextPage ? listFooterLoading : null}
           onEndReached={hasNextPage ? onPrefetchOlderMessages : undefined}
           onEndReachedThreshold={0.55}
