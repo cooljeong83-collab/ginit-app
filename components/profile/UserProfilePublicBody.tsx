@@ -2,6 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as Haptics from 'expo-haptics';
 import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Modal, Platform, StyleSheet, Text, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -41,11 +42,14 @@ import {
   type ProfilePhotoHistoryItem,
 } from '@/src/lib/profile-photo-history';
 import { PROFILE_META_PHOTO_COVER, parseProfilePhotoCover } from '@/src/lib/profile-photo-cover';
+import { fetchUserProfileAndPersist } from '@/src/lib/user-profile-cache-sync';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import { useObserveUserProfile } from '@/src/hooks/use-observe-user-profile';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import {
   ensureUserProfile,
+  getPeerUserProfile,
   getUserProfile,
   isUserProfileWithdrawn,
   meetingDemographicsIncomplete,
@@ -57,6 +61,22 @@ import {
 /** `avatars` 버킷에 앱이 올린 본인 폴더 경로의 공개 URL인지 (가입 시 외부 프로필 사진 URL 제외) */
 function isAvatarsStorageUploadedByUser(photoUrl: string, ownerAppUserId: string): boolean {
   return avatarsObjectPathFromPublicUrlIfOwned(photoUrl, ownerAppUserId) != null;
+}
+
+function isProfilePhotoOwnedByUser(photoUrl: string, ownerNorm: string, ownerRaw: string): boolean {
+  if (isAvatarsStorageUploadedByUser(photoUrl, ownerNorm)) return true;
+  const raw = ownerRaw.trim();
+  return Boolean(raw && raw !== ownerNorm && isAvatarsStorageUploadedByUser(photoUrl, raw));
+}
+
+function mergeCurrentPhotoIntoHistory(
+  rows: ProfilePhotoHistoryItem[],
+  currentPhoto: string,
+): ProfilePhotoHistoryItem[] {
+  const p = currentPhoto.trim();
+  if (!p) return rows;
+  if (rows.some((h) => h.photoUrl.trim() === p)) return rows;
+  return [{ photoUrl: p, createdAt: new Date().toISOString() }, ...rows];
 }
 
 function nicknameInitial(nickname: string): string {
@@ -85,10 +105,11 @@ export function UserProfilePublicBody({
   layout: 'tab' | 'stack';
   onPressMyAvatar?: () => void;
   hideMyEditCta?: boolean;
-  /** 부모(탭 등)에서 당겨서 새로고침 시 증가시키면 `getUserProfile`을 다시 호출합니다. */
+  /** 부모(탭 등)에서 사진 업로드·당겨서 새로고침 시 증가 — 프로필·하단 사진 히스토리 재조회 */
   refreshTrigger?: number;
 }) {
   const router = useTransitionRouter();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { userId } = useUserSession();
@@ -98,6 +119,9 @@ export function UserProfilePublicBody({
   const targetNorm = targetUserId.trim() ? normalizeParticipantId(targetUserId.trim()) : '';
   const isMe = Boolean(meNorm && targetNorm && meNorm === targetNorm);
   const isAi = targetNorm === 'ginit_ai';
+  const { profile: observedSelfProfile, hasLocalRow: hasObservedSelfRow } = useObserveUserProfile(
+    isMe ? targetNorm : '',
+  );
 
   const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined);
   const [history, setHistory] = useState<ProfilePhotoHistoryItem[]>([]);
@@ -123,35 +147,36 @@ export function UserProfilePublicBody({
     const targetChanged = lastProfileTargetRef.current !== targetNorm;
     lastProfileTargetRef.current = targetNorm;
     if (targetChanged) setProfile(undefined);
-    void getUserProfile(targetNorm).then((p) => {
+    const applyProfile = (p: UserProfile | null) => {
       if (!alive) return;
       setProfile(p ?? null);
-    });
+    };
+    if (isMe) {
+      if (refreshTrigger > 0 || !hasObservedSelfRow) {
+        void fetchUserProfileAndPersist(targetNorm, queryClient).then(applyProfile);
+      } else {
+        void getUserProfile(targetNorm, { viewerId: meNorm, queryClient }).then(applyProfile);
+      }
+    } else {
+      void getPeerUserProfile(targetNorm, {
+        queryClient,
+        force: refreshTrigger > 0,
+        onUpdated: (changed) => {
+          const p = changed.get(targetNorm);
+          if (p) applyProfile(p);
+        },
+      }).then(applyProfile);
+    }
     return () => {
       alive = false;
     };
-  }, [targetNorm, refreshTrigger]);
+  }, [targetNorm, refreshTrigger, isMe, meNorm, queryClient, hasObservedSelfRow]);
 
+  /** 프로필 탭: 부모 `useUserProfileQuery`·업로드가 Watermelon만 갱신할 때 본문 state 동기화 */
   useEffect(() => {
-    let cancelled = false;
-    setHistory([]);
-    setHistoryLoaded(false);
-    if (!targetNorm) return;
-    void fetchProfilePhotoHistory(targetNorm, 30)
-      .then((rows) => {
-        if (cancelled) return;
-        setHistory(rows);
-      })
-      .catch(() => {
-        /* noop */
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [targetNorm]);
+    if (!isMe || observedSelfProfile === undefined) return;
+    setProfile(observedSelfProfile);
+  }, [isMe, observedSelfProfile]);
 
   useEffect(() => {
     if (!meNorm) {
@@ -244,6 +269,63 @@ export function UserProfilePublicBody({
   const photo = withdrawn ? '' : (profile?.photoUrl?.trim() ?? '');
   const photoCover = useMemo(() => parseProfilePhotoCover(profile?.metadata), [profile?.metadata]);
   const bio = withdrawn ? '' : (profile?.bio?.trim() ?? '');
+  const historyCandidateIds = useMemo(() => {
+    const ids = isMe ? [targetNorm, meNorm, targetUserId.trim()] : [targetNorm, targetUserId.trim()];
+    return [...new Set(ids.map((x) => x.trim()).filter(Boolean))];
+  }, [isMe, meNorm, targetNorm, targetUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyRows = (rows: ProfilePhotoHistoryItem[]) => {
+      const merged = isMe && photo ? mergeCurrentPhotoIntoHistory(rows, photo) : rows;
+      setHistory(merged);
+    };
+
+    const loadHistory = async () => {
+      if (historyCandidateIds.length === 0) {
+        setHistory([]);
+        return;
+      }
+      let rows: ProfilePhotoHistoryItem[] = [];
+      for (const id of historyCandidateIds) {
+        rows = await fetchProfilePhotoHistory(id, 30);
+        if (rows.length > 0) break;
+      }
+      if (rows.length === 0) {
+        rows = await fetchProfilePhotoHistory(historyCandidateIds[0]!, 30);
+      }
+      if (cancelled) return;
+      applyRows(rows);
+    };
+
+    setHistory([]);
+    setHistoryLoaded(false);
+    if (historyCandidateIds.length === 0) {
+      setHistoryLoaded(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void loadHistory()
+      .catch(() => {
+        /* noop */
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoaded(true);
+      });
+
+    retryTimer = setTimeout(() => {
+      void loadHistory();
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [historyCandidateIds, refreshTrigger, photo, isMe]);
   const trust = effectiveGTrust(profile);
   const ringBase = useMemo(() => levelBarFillColorForTrust(trust), [trust]);
   const compositeTier = useMemo(() => compositeReputationTier(profile), [profile, appPoliciesVersion]);
@@ -271,14 +353,13 @@ export function UserProfilePublicBody({
   }, [friendRelResolvedForPeer, friendRelation.status, hideMyEditCta, isMe, showCta, targetNorm]);
 
   const profileImageGallery = useMemo<ImageViewerGalleryItem[]>(() => {
-    const owner = targetNorm.trim();
-    if (!owner) return [];
+    if (!targetNorm.trim()) return [];
     const seen = new Set<string>();
     const out: ImageViewerGalleryItem[] = [];
     const push = (id: string, url: string) => {
       const u = url.trim();
       if (!u || seen.has(u)) return;
-      if (!isAvatarsStorageUploadedByUser(u, owner)) return;
+      if (!isProfilePhotoOwnedByUser(u, targetNorm, targetUserId)) return;
       seen.add(u);
       out.push({ id, imageUrl: u });
     };
@@ -287,7 +368,7 @@ export function UserProfilePublicBody({
       push(`h-${i}-${history[i]!.createdAt}`, history[i]!.photoUrl);
     }
     return out;
-  }, [history, photo, targetNorm]);
+  }, [history, photo, targetNorm, targetUserId]);
 
   const openProfileImageAtUrl = useCallback(
     (url: string) => {
@@ -682,7 +763,9 @@ export function UserProfilePublicBody({
       ) : null}
 
       <View style={styles.grid}>
-        {history.filter((h) => isAvatarsStorageUploadedByUser(h.photoUrl, targetNorm)).map((h, i) => {
+        {history
+          .filter((h) => isProfilePhotoOwnedByUser(h.photoUrl, targetNorm, targetUserId))
+          .map((h, i) => {
           const url = h.photoUrl.trim();
           if (!url) return null;
           const isEndOfRow = (i + 1) % 2 === 0;

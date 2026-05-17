@@ -22,7 +22,15 @@ export function profilesFromMessageSenderMeta(
     const nickname = message.senderName?.trim() || '회원';
     if (!photoUrl && nickname === '회원') continue;
     const existing = out.get(senderId);
-    if (existing?.photoUrl || (existing && !photoUrl)) continue;
+    const existingPhoto = existing?.photoUrl?.trim() || null;
+    if (existingPhoto && photoUrl && existingPhoto !== photoUrl) {
+      out.set(senderId, {
+        nickname: existing?.nickname?.trim() || nickname,
+        photoUrl,
+      });
+      continue;
+    }
+    if (existingPhoto || (existing && !photoUrl)) continue;
     out.set(senderId, { nickname, photoUrl });
   }
   return out;

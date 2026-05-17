@@ -24,6 +24,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { useUserProfileQuery } from '@/src/hooks/use-user-profile-query';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { normalizeUserId } from '@/src/lib/app-user-id';
@@ -47,9 +48,9 @@ export default function ProfileTab() {
   const scrollRef = useRef<ScrollView>(null);
   const profilePk = useMemo(() => {
     const u = userId?.trim();
-    if (u) return u;
+    if (u) return normalizeParticipantId(u) || u;
     const em = authProfile?.email?.trim();
-    if (em) return normalizeUserId(em) ?? '';
+    if (em) return normalizeParticipantId(normalizeUserId(em) ?? em) || em;
     return '';
   }, [userId, authProfile?.email]);
 

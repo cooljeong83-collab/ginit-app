@@ -1,6 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
@@ -10,7 +11,7 @@ import { HomeGlassStyles, homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur }
 import type { FriendAcceptedRow, FriendInboxRow } from '@/src/lib/friends';
 import { acceptGinitRequest, fetchFriendsAcceptedList, fetchFriendsPendingInbox } from '@/src/lib/friends';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { getPeerUserProfilesForIds } from '@/src/lib/user-profile';
 
 type Props = {
   /** 현재 로그인 앱 사용자 PK */
@@ -71,9 +72,11 @@ function PendingGinitMiniCard({
 
 function FriendTrustTile({
   profile,
+  peerKey,
   onPress,
 }: {
   profile: UserProfile & { appUserId: string };
+  peerKey: string;
   onPress: () => void;
 }) {
   const uri = profile.photoUrl?.trim();
@@ -83,7 +86,13 @@ function FriendTrustTile({
     <GinitPressable onPress={onPress} style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]} accessibilityRole="button">
       <View style={styles.tileAvatars}>
         {uri ? (
-          <Image source={{ uri }} style={styles.tileAvatarImg} contentFit="cover" />
+          <Image
+            source={{ uri }}
+            style={styles.tileAvatarImg}
+            contentFit="cover"
+            cachePolicy="disk"
+            recyclingKey={peerKey ? `${peerKey}:${uri}` : uri}
+          />
         ) : (
           <View style={styles.tileAvatarFallback}>
             <Text style={styles.tileAvatarLetter}>{initials}</Text>
@@ -107,6 +116,7 @@ function FriendTrustTile({
  * 친구 관리 — 채팅 탭 미니 카드 UI로 받은 지닛 대기열 + gTrust 순 친구 그리드.
  */
 export function FriendManager({ userId, onOpenChatWithPeer }: Props) {
+  const queryClient = useQueryClient();
   const me = userId.trim();
   const [pending, setPending] = useState<FriendInboxRow[]>([]);
   const [accepted, setAccepted] = useState<FriendAcceptedRow[]>([]);
@@ -128,7 +138,18 @@ export function FriendManager({ userId, onOpenChatWithPeer }: Props) {
       ].filter(Boolean);
       const uniq = [...new Set(ids)];
       if (uniq.length) {
-        const map = await getUserProfilesForIds(uniq);
+        const map = await getPeerUserProfilesForIds(uniq, {
+          queryClient,
+          viewerId: me,
+          onUpdated: (changed) => {
+            if (changed.size === 0) return;
+            setProfiles((prev) => {
+              const next = new Map(prev);
+              for (const [k, v] of changed) next.set(k, v);
+              return next;
+            });
+          },
+        });
         setProfiles(map);
       } else {
         setProfiles(new Map());
@@ -138,7 +159,7 @@ export function FriendManager({ userId, onOpenChatWithPeer }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [me]);
+  }, [me, queryClient]);
 
   useEffect(() => {
     void reload();
@@ -225,6 +246,7 @@ export function FriendManager({ userId, onOpenChatWithPeer }: Props) {
           return (
             <FriendTrustTile
               key={row.id}
+              peerKey={row.peer_app_user_id.trim()}
               profile={{ ...p, appUserId: row.peer_app_user_id }}
               onPress={() => onOpenChatWithPeer(row.peer_app_user_id, p.nickname)}
             />

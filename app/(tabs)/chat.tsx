@@ -44,7 +44,11 @@ import {
   type SocialChatRoomSummary,
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import {
+  getPeerUserProfilesForIds,
+  revalidatePeerUserProfilesIfStale,
+  isUserProfileWithdrawn,
+} from '@/src/lib/user-profile';
 import {
   consumeIncomingDirectSharePayload,
   peekIncomingDirectSharePayload,
@@ -662,13 +666,24 @@ export default function ChatTab() {
     }
     const peers = [...new Set(socialFriendDmRooms.map((r) => r.peerAppUserId))];
     let cancelled = false;
-    void getUserProfilesForIds(peers).then((map) => {
+    void getPeerUserProfilesForIds(peers, {
+      queryClient,
+      viewerId: userId?.trim() || undefined,
+      onUpdated: (changed) => {
+        if (cancelled || changed.size === 0) return;
+        setSocialProfiles((prev) => {
+          const next = new Map(prev);
+          for (const [k, v] of changed) next.set(k, v);
+          return next;
+        });
+      },
+    }).then((map) => {
       if (!cancelled) setSocialProfiles(map);
     });
     return () => {
       cancelled = true;
     };
-  }, [socialRoomKey]);
+  }, [socialRoomKey, queryClient, userId]);
 
   useEffect(() => {
     const hosts = [
@@ -683,26 +698,55 @@ export default function ChatTab() {
       return;
     }
     let cancelled = false;
-    void getUserProfilesForIds(hosts).then((map) => {
+    void getPeerUserProfilesForIds(hosts, {
+      queryClient,
+      viewerId: userId?.trim() || undefined,
+      onUpdated: (changed) => {
+        if (cancelled || changed.size === 0) return;
+        setHostProfiles((prev) => {
+          const next = new Map(prev);
+          for (const [k, v] of changed) next.set(k, v);
+          return next;
+        });
+      },
+    }).then((map) => {
       if (!cancelled) setHostProfiles(map);
     });
     return () => {
       cancelled = true;
     };
-  }, [joinedMeetingRowKey]);
+  }, [joinedMeetingRowKey, queryClient, userId]);
 
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       if (chatKind === 'social') {
-        await syncChangedSocialRooms({ pullTail: true });
+        await Promise.all([
+          syncChangedSocialRooms({ pullTail: true }),
+          revalidatePeerUserProfilesIfStale(
+            [...new Set(socialFriendDmRooms.map((r) => r.peerAppUserId))],
+            {
+              queryClient,
+              viewerId: userId?.trim() || undefined,
+              force: true,
+              onUpdated: (changed) => {
+                if (changed.size === 0) return;
+                setSocialProfiles((prev) => {
+                  const next = new Map(prev);
+                  for (const [k, v] of changed) next.set(k, v);
+                  return next;
+                });
+              },
+            },
+          ),
+        ]);
       } else {
         await runMeetingsUserActionDeltaSync(queryClient, userId?.trim() ?? null, 'pull_refresh');
       }
     } finally {
       setRefreshing(false);
     }
-  }, [chatKind, syncChangedSocialRooms, queryClient, userId]);
+  }, [chatKind, syncChangedSocialRooms, queryClient, userId, socialFriendDmRooms]);
 
   const openChatSearch = useCallback(() => {
     setDraftChatSearchQuery(chatKind === 'gather' ? appliedGatherTextQuery : appliedSocialTextQuery);

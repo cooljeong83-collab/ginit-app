@@ -3762,8 +3762,8 @@ export default function MeetingDetailScreen() {
                               return base;
                             }
                             const tail = ledgerArrivalVerifiedByUserId.has(userId)
-                              ? ', 장소 인증 완료'
-                              : ', 장소 미인증';
+                              ? ', 도착 인증'
+                              : ', 도착 미인증';
                             return base + tail;
                           })()
                         }>
@@ -3795,8 +3795,8 @@ export default function MeetingDetailScreen() {
                             {withdrawn || isWebGuest
                               ? '—'
                               : ledgerArrivalVerifiedByUserId.has(userId)
-                                ? '인증 완료'
-                                : '미인증'}
+                                ? '도착 인증'
+                                : '도착 미인증'}
                           </Text>
                         ) : null}
                         <Text style={styles.avatarLabel} numberOfLines={2}>

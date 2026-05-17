@@ -602,7 +602,7 @@ export default function MeetingChatRoomScreen() {
         const merged: UserProfile = {
           ...(existing ?? { nickname: cachedNickname, photoUrl: cachedPhotoUrl }),
           nickname: existingNickname && existingNickname !== '회원' ? existingNickname : cachedNickname,
-          photoUrl: existingPhotoUrl || cachedPhotoUrl,
+          photoUrl: cachedPhotoUrl || existingPhotoUrl,
         };
         if (!existing || existing.nickname !== merged.nickname || existing.photoUrl !== merged.photoUrl) {
           next.set(senderId, merged);

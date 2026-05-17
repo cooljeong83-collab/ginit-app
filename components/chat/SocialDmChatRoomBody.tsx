@@ -1,6 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { Image } from 'expo-image';
+import { useQueryClient } from '@tanstack/react-query';
 import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -38,7 +39,7 @@ import {
   type SocialChatMessage,
 } from '@/src/lib/social-chat-rooms';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { getPeerUserProfilesForIds } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useChatInvertedStickToLatest } from '@/src/hooks/use-chat-inverted-stick-to-latest';
@@ -120,6 +121,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
 ) {
   void _peerReadMessageId;
   void _peerReadAt;
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [profiles, setProfiles] = useState<Map<string, UserProfile>>(new Map());
   const [draft, setDraft] = useState('');
@@ -343,7 +345,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           const merged: UserProfile = {
             ...(existing ?? { nickname: cachedNickname, photoUrl: cachedPhotoUrl }),
             nickname: existingNickname && existingNickname !== '회원' ? existingNickname : cachedNickname,
-            photoUrl: existingPhotoUrl || cachedPhotoUrl,
+            photoUrl: cachedPhotoUrl || existingPhotoUrl,
           };
           if (!existing || existing.nickname !== merged.nickname || existing.photoUrl !== merged.photoUrl) {
             next.set(senderId, merged);
@@ -373,7 +375,23 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       return next;
     });
     let cancelled = false;
-    void getUserProfilesForIds(ids).then((fetched) => {
+    void getPeerUserProfilesForIds(ids, {
+      queryClient,
+      viewerId: myUserId.trim() || undefined,
+      onUpdated: (changed) => {
+        if (cancelled || changed.size === 0) return;
+        setProfiles((prev) => {
+          const next = new Map(prev);
+          for (const [k, v] of changed) {
+            const existing = next.get(k);
+            const nickname = v.nickname?.trim() || existing?.nickname?.trim() || '회원';
+            const photoUrl = v.photoUrl?.trim() || existing?.photoUrl?.trim() || null;
+            next.set(k, { ...existing, ...v, nickname, photoUrl });
+          }
+          return next;
+        });
+      },
+    }).then((fetched) => {
       if (cancelled) return;
       setProfiles((prev) => {
         const next = new Map(prev);
@@ -385,13 +403,11 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
         }
         return next;
       });
-      const urls = [...fetched.values()].map((p) => p.photoUrl?.trim()).filter(Boolean) as string[];
-      if (urls.length > 0) void Image.prefetch(urls, 'disk').catch(() => {});
     });
     return () => {
       cancelled = true;
     };
-  }, [initialPeerName, initialPeerPhotoUrl, myUserId, peerId]);
+  }, [initialPeerName, initialPeerPhotoUrl, myUserId, peerId, queryClient]);
 
   const composerBottomPad = getChatComposerBottomPadding();
 

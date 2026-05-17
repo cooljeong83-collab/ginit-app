@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import { useObserveUserProfile } from '@/src/hooks/use-observe-user-profile';
+import { PEER_PROFILE_STALE_MS } from '@/src/lib/user-profile-swr';
 import { fetchUserProfileAndPersist } from '@/src/lib/user-profile-cache-sync';
 import { userProfileQueryKey } from '@/src/lib/user-profile-query-keys';
 import { upsertUserProfileToWatermelon } from '@/src/lib/user-profile-watermelon-cache';
@@ -39,7 +40,7 @@ export function useUserProfileQuery(appUserId: string, opts?: UseUserProfileQuer
             return fetchUserProfileAndPersist(id, queryClient);
           }
         : skipToken,
-    staleTime: 1000 * 60 * 10,
+    staleTime: opts?.refetchOnMount === 'always' ? 0 : PEER_PROFILE_STALE_MS,
     gcTime: 24 * 60 * 60 * 1000,
     enabled: id.length > 0,
     refetchOnMount: opts?.refetchOnMount,

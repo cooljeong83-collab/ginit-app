@@ -77,6 +77,20 @@ export async function readUserProfileFromWatermelon(appUserId: string): Promise<
   }
 }
 
+/** 로컬 프로필 스냅샷 동기화 시각(ms). 행 없으면 `null`. */
+export async function readUserProfileSyncedAtMsFromWatermelon(appUserId: string): Promise<number | null> {
+  const db = database;
+  const id = profileRowId(appUserId);
+  if (!db || !id) return null;
+  try {
+    const row = await db.get<CachedUserProfile>('cached_user_profiles').find(id);
+    const ms = row.syncedAtMs;
+    return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function upsertUserProfileToWatermelon(appUserId: string, profile: UserProfile): Promise<void> {
   const db = database;
   const id = profileRowId(appUserId);

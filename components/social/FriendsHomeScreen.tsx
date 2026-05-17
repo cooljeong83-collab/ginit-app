@@ -2,6 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -17,7 +18,6 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
 import {
-  compareFriendsByPresenceDistanceTrust,
   computeFriendSortSignals,
   formatDistanceCompact,
   pickPrimaryMeetingForPeer,
@@ -34,6 +34,7 @@ import {
   removeAcceptedFriend,
 } from '@/src/lib/friends';
 import { friendDisplayName, loadFavoritePeerKeys, loadFriendDisplayAliases } from '@/src/lib/friend-device-meta';
+import { compareKoreanDisplayNames } from '@/src/lib/korean-display-name-sort';
 import {
   loadBlockedPeerIds,
   loadHiddenPeerIds,
@@ -47,7 +48,11 @@ import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { subscribeFriendsPostgresChanged } from '@/src/lib/friends-postgres-sync-bus';
 import type { UserProfile } from '@/src/lib/user-profile';
-import { getUserProfile, getUserProfilesForIds, readShareActivityStatusEnabled } from '@/src/lib/user-profile';
+import {
+  getPeerUserProfilesForIds,
+  getUserProfile,
+  readShareActivityStatusEnabled,
+} from '@/src/lib/user-profile';
 
 function friendAppUserKey(raw: string | null | undefined): string {
   const t = raw?.trim() ?? '';
@@ -79,7 +84,13 @@ function PendingGinitRow({
     <View style={s.requestRow}>
       <View style={s.rowAvatarWrap}>
         {photo ? (
-          <Image source={{ uri: photo }} style={s.rowAvatarImg} contentFit="cover" />
+          <Image
+            source={{ uri: photo }}
+            style={s.rowAvatarImg}
+            contentFit="cover"
+            cachePolicy="disk"
+            recyclingKey={`${friendAppUserKey(row.requester_app_user_id)}:${photo}`}
+          />
         ) : (
           <View style={s.rowAvatarFallback}>
             <Text style={s.rowAvatarLetter}>{initials}</Text>
@@ -135,7 +146,13 @@ function OutgoingGinitRow({
     <View style={s.requestRow} accessibilityRole="summary" accessibilityLabel={`내가 보낸 지닛, ${nick}, ${hint}`}>
       <View style={s.rowAvatarWrap}>
         {photo ? (
-          <Image source={{ uri: photo }} style={s.rowAvatarImg} contentFit="cover" />
+          <Image
+            source={{ uri: photo }}
+            style={s.rowAvatarImg}
+            contentFit="cover"
+            cachePolicy="disk"
+            recyclingKey={`${friendAppUserKey(row.addressee_app_user_id)}:${photo}`}
+          />
         ) : (
           <View style={s.rowAvatarFallback}>
             <Text style={s.rowAvatarLetter}>{initials}</Text>
@@ -176,16 +193,72 @@ type EnrichedFriend = {
   sort: ReturnType<typeof computeFriendSortSignals>;
 };
 
+function friendListDisplayName(aliases: Record<string, string>, peerId: string, nickname: string): string {
+  return friendDisplayName(aliases, peerId, nickname?.trim() ?? '');
+}
+
+function compareEnrichedFriendsByDisplayNameKo(
+  a: EnrichedFriend,
+  b: EnrichedFriend,
+  aliases: Record<string, string>,
+): number {
+  const na = friendListDisplayName(aliases, a.row.peer_app_user_id, a.profile.nickname ?? '');
+  const nb = friendListDisplayName(aliases, b.row.peer_app_user_id, b.profile.nickname ?? '');
+  const byName = compareKoreanDisplayNames(na, nb);
+  if (byName !== 0) return byName;
+  return friendAppUserKey(a.row.peer_app_user_id).localeCompare(friendAppUserKey(b.row.peer_app_user_id));
+}
+
+function comparePendingInboxByDisplayNameKo(
+  a: FriendInboxRow,
+  b: FriendInboxRow,
+  aliases: Record<string, string>,
+  profiles: Map<string, UserProfile>,
+): number {
+  const na = friendListDisplayName(
+    aliases,
+    a.requester_app_user_id,
+    profileFromMap(profiles, a.requester_app_user_id)?.nickname ?? '',
+  );
+  const nb = friendListDisplayName(
+    aliases,
+    b.requester_app_user_id,
+    profileFromMap(profiles, b.requester_app_user_id)?.nickname ?? '',
+  );
+  return compareKoreanDisplayNames(na, nb);
+}
+
+function comparePendingOutboxByDisplayNameKo(
+  a: FriendInboxRow,
+  b: FriendInboxRow,
+  aliases: Record<string, string>,
+  profiles: Map<string, UserProfile>,
+): number {
+  const na = friendListDisplayName(
+    aliases,
+    a.addressee_app_user_id,
+    profileFromMap(profiles, a.addressee_app_user_id)?.nickname ?? '',
+  );
+  const nb = friendListDisplayName(
+    aliases,
+    b.addressee_app_user_id,
+    profileFromMap(profiles, b.addressee_app_user_id)?.nickname ?? '',
+  );
+  return compareKoreanDisplayNames(na, nb);
+}
+
 function FriendListRow({
   item,
   categories,
   rowTitleText,
+  peerKey,
   onPressAvatar,
   onPressOpenChat,
   onPressOpenMeeting,
   onLongPressFriendMenu,
 }: {
   item: EnrichedFriend;
+  peerKey: string;
   categories: Category[];
   rowTitleText: string;
   onPressAvatar: () => void;
@@ -215,7 +288,13 @@ function FriendListRow({
         style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
         <View style={s.rowAvatarWrap}>
           {uri ? (
-            <Image source={{ uri }} style={s.rowAvatarImg} contentFit="cover" />
+            <Image
+              source={{ uri }}
+              style={s.rowAvatarImg}
+              contentFit="cover"
+              cachePolicy="disk"
+              recyclingKey={peerKey ? `${peerKey}:${uri}` : uri}
+            />
           ) : (
             <View style={s.rowAvatarFallback}>
               <Text style={s.rowAvatarLetter}>{initials}</Text>
@@ -276,6 +355,7 @@ export function FriendsHomeScreen() {
     setTimeout(lockRelease, 900);
     return true;
   }, []);
+  const queryClient = useQueryClient();
   const me = useMemo(() => {
     const raw = userId?.trim() ?? '';
     return raw ? normalizeParticipantId(raw) : '';
@@ -300,7 +380,7 @@ export function FriendsHomeScreen() {
   const [peerAliases, setPeerAliases] = useState<Record<string, string>>({});
   const [favoritePeerKeys, setFavoritePeerKeys] = useState<Set<string>>(() => new Set());
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (opts?: { force?: boolean }) => {
     if (!me) {
       setLoading(false);
       setRefreshing(false);
@@ -324,7 +404,19 @@ export function FriendsHomeScreen() {
         ]),
       ].filter(Boolean);
       if (ids.length) {
-        const map = await getUserProfilesForIds(ids);
+        const map = await getPeerUserProfilesForIds(ids, {
+          queryClient,
+          viewerId: me,
+          force: opts?.force === true,
+          onUpdated: (changed) => {
+            if (changed.size === 0) return;
+            setProfiles((prev) => {
+              const next = new Map(prev);
+              for (const [k, v] of changed) next.set(k, v);
+              return next;
+            });
+          },
+        });
         setProfiles(map);
       } else {
         setProfiles(new Map());
@@ -335,16 +427,16 @@ export function FriendsHomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [me]);
+  }, [me, queryClient]);
 
   const loadMeProfile = useCallback(async () => {
     if (!me.trim()) {
       setMeProfile(null);
       return;
     }
-    const p = await getUserProfile(me);
+    const p = await getUserProfile(me, { viewerId: me, queryClient });
     setMeProfile(p);
-  }, [me]);
+  }, [me, queryClient]);
 
   useFocusEffect(
     useCallback(() => {
@@ -412,7 +504,7 @@ export function FriendsHomeScreen() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void Promise.all([reload(), loadMeProfile()]).finally(() => setRefreshing(false));
+    void Promise.all([reload({ force: true }), loadMeProfile()]).finally(() => setRefreshing(false));
   }, [reload, loadMeProfile]);
 
   const enrichedFriends = useMemo((): EnrichedFriend[] => {
@@ -426,9 +518,9 @@ export function FriendsHomeScreen() {
       const sort = computeFriendSortSignals(p, shareOn ? meeting : null, meProfile);
       out.push({ row, profile: p, meeting, sort });
     }
-    out.sort((a, b) => compareFriendsByPresenceDistanceTrust(a.sort, b.sort));
+    out.sort((a, b) => compareEnrichedFriendsByDisplayNameKo(a, b, peerAliases));
     return out;
-  }, [accepted, profiles, meetings, meProfile]);
+  }, [accepted, profiles, meetings, meProfile, peerAliases]);
 
   const visibleFriends = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -446,8 +538,18 @@ export function FriendsHomeScreen() {
   /** 즐겨찾기 친구는 상단 섹션 + 아래 친구 목록에 각각 표시(검색·숨김·차단 필터는 `visibleFriends`와 동일) */
   const visibleFavoriteFriends = useMemo(() => {
     const fav = visibleFriends.filter((e) => favoritePeerKeys.has(friendAppUserKey(e.row.peer_app_user_id)));
-    return [...fav].sort((a, b) => compareFriendsByPresenceDistanceTrust(a.sort, b.sort));
-  }, [visibleFriends, favoritePeerKeys]);
+    return [...fav].sort((a, b) => compareEnrichedFriendsByDisplayNameKo(a, b, peerAliases));
+  }, [visibleFriends, favoritePeerKeys, peerAliases]);
+
+  const sortedPendingInbox = useMemo(
+    () => [...pending].sort((a, b) => comparePendingInboxByDisplayNameKo(a, b, peerAliases, profiles)),
+    [pending, peerAliases, profiles],
+  );
+
+  const sortedPendingOutbox = useMemo(
+    () => [...pendingOut].sort((a, b) => comparePendingOutboxByDisplayNameKo(a, b, peerAliases, profiles)),
+    [pendingOut, peerAliases, profiles],
+  );
 
   const openDm = useCallback(
     (peerAppUserId: string, peerDisplayName?: string) => {
@@ -656,7 +758,7 @@ export function FriendsHomeScreen() {
   const myInitial = myNick.slice(0, 1) || '나';
 
   const listHeader = useMemo(() => {
-    const showRequests = pending.length > 0 || pendingOut.length > 0;
+    const showRequests = sortedPendingInbox.length > 0 || sortedPendingOutbox.length > 0;
     return (
       <View>
         <GinitPressable
@@ -689,7 +791,7 @@ export function FriendsHomeScreen() {
             <View style={s.sectionSpacer} />
             <Text style={s.sectionHeader}>친구 요청</Text>
             <View style={s.sectionBody}>
-              {pending.map((row) => (
+              {sortedPendingInbox.map((row) => (
                 <View key={row.id}>
                   <PendingGinitRow
                     row={row}
@@ -700,7 +802,7 @@ export function FriendsHomeScreen() {
                   <View style={s.fullSeparator} />
                 </View>
               ))}
-              {pendingOut.map((row) => (
+              {sortedPendingOutbox.map((row) => (
                 <View key={row.id}>
                   <OutgoingGinitRow
                     row={row}
@@ -725,6 +827,7 @@ export function FriendsHomeScreen() {
                   {index > 0 ? <View style={s.friendSeparator} /> : null}
                   <FriendListRow
                     item={item}
+                    peerKey={friendAppUserKey(item.row.peer_app_user_id)}
                     categories={categories}
                     rowTitleText={friendDisplayName(
                       peerAliases,
@@ -764,8 +867,8 @@ export function FriendsHomeScreen() {
     openFriendPublicProfile,
     openMeetingFromFriendsTab,
     peerAliases,
-    pending,
-    pendingOut,
+    sortedPendingInbox,
+    sortedPendingOutbox,
     profiles,
     visibleFavoriteFriends,
     visibleFriends.length,
@@ -928,6 +1031,7 @@ export function FriendsHomeScreen() {
           renderItem={({ item }) => (
             <FriendListRow
               item={item}
+              peerKey={friendAppUserKey(item.row.peer_app_user_id)}
               categories={categories}
               rowTitleText={friendDisplayName(peerAliases, item.row.peer_app_user_id, item.profile.nickname?.trim() ?? '')}
               onPressAvatar={() => openFriendPublicProfile(item.row.peer_app_user_id)}
@@ -956,6 +1060,8 @@ export function FriendsHomeScreen() {
                         source={{ uri: sheetFriend.profile.photoUrl.trim() }}
                         style={s.sheetAvatarImg}
                         contentFit="cover"
+                        cachePolicy="disk"
+                        recyclingKey={`${friendAppUserKey(sheetFriend.row.peer_app_user_id)}:${sheetFriend.profile.photoUrl.trim()}`}
                       />
                     ) : (
                       <View style={s.sheetAvatarFallback}>

@@ -3,8 +3,14 @@
  * - 신규: 정규화 이메일(`normalizeUserId`). `phone` 필드에 E.164(+82…)를 둡니다.
  * - 레거시: 문서 ID가 전화 PK인 계정(OTP 전용 가입 등)도 그대로 읽습니다.
  */
+import type { QueryClient } from '@tanstack/react-query';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { profilesSource } from '@/src/lib/hybrid-data-source';
+import {
+  isPeerProfileStale,
+  persistPeerProfileFromServer,
+  profilePeerDisplayFieldsChanged,
+} from '@/src/lib/user-profile-swr';
 import {
   mergeUserProfilePatch,
   patchUserProfileInWatermelon,
@@ -13,6 +19,7 @@ import {
   upsertUserProfileToWatermelon,
 } from '@/src/lib/user-profile-watermelon-cache';
 import { supabase } from '@/src/lib/supabase';
+
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from './meeting-phone-verification-ui';
 
 export const USERS_COLLECTION = 'users';
@@ -817,7 +824,7 @@ type SupabasePublicProfilesBatchFetch =
   | { ok: false; message: string };
 
 /** `get_profiles_public_by_app_user_ids` — 스키마 캐시 지연 시 재시도(루프 1회·N명 공통) */
-async function fetchUserProfilesFromSupabaseRpcBatchDetailed(
+export async function fetchUserProfilesFromSupabaseRpcBatchDetailed(
   appUserIds: readonly string[],
 ): Promise<SupabasePublicProfilesBatchFetch> {
   if (appUserIds.length === 0) return { ok: true, byId: new Map() };
@@ -859,12 +866,30 @@ export async function fetchUserProfileFromServer(phoneUserId: string): Promise<U
   return r.ok ? r.profile : null;
 }
 
-/** Watermelon 캐시 우선 → 미스 시 서버 Pull 후 upsert. */
-export async function getUserProfile(phoneUserId: string): Promise<UserProfile | null> {
+export type UserProfileLoadOptions = {
+  queryClient?: QueryClient;
+  /** 본인 PK — `phoneUserId`와 같으면 타인 SWR 대신 기존 캐시·서버 miss 로직 */
+  viewerId?: string;
+};
+
+function isSelfProfileLoad(targetId: string, viewerId: string | undefined): boolean {
+  const t = targetId.trim();
+  const v = viewerId?.trim() ?? '';
+  return Boolean(t && v && t === v);
+}
+
+/** Watermelon 캐시 우선 → 미스 시 서버 Pull 후 upsert. 타인은 `getPeerUserProfile` SWR. */
+export async function getUserProfile(
+  phoneUserId: string,
+  opts?: UserProfileLoadOptions,
+): Promise<UserProfile | null> {
   const id = phoneUserId.trim();
   if (!id) return null;
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
+  }
+  if (!isSelfProfileLoad(id, opts?.viewerId)) {
+    return getPeerUserProfile(id, { queryClient: opts?.queryClient });
   }
   const local = await readUserProfileFromWatermelon(id);
   if (local) return local;
@@ -1208,39 +1233,157 @@ export async function deleteUserProfileDocument(phoneUserId: string): Promise<vo
   throw new Error('[profiles] Firestore `users` 문서 삭제는 더 이상 지원하지 않습니다.');
 }
 
-export async function getUserProfilesForIds(phoneUserIds: string[]): Promise<Map<string, UserProfile>> {
+export type PeerProfileLoadOptions = {
+  queryClient?: QueryClient;
+  viewerId?: string;
+  /** true면 stale 여부와 관계없이 백그라운드 RPC */
+  force?: boolean;
+  /** 백그라운드 revalidate 후 display 필드(photoUrl·bio)가 바뀐 프로필 */
+  onUpdated?: (map: Map<string, UserProfile>) => void;
+};
+
+async function applyPeerProfilesBatchRpc(
+  ids: readonly string[],
+  out: Map<string, UserProfile>,
+  queryClient: QueryClient | undefined,
+  previousById: Map<string, UserProfile | null>,
+): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    const r = await fetchUserProfilesFromSupabaseRpcBatchDetailed(ids);
+    if (!r.ok) {
+      for (const uid of ids) {
+        if (!out.has(uid)) out.set(uid, fallbackProfileLabel(uid));
+      }
+      return;
+    }
+    for (const uid of ids) {
+      const p = r.byId.get(uid) ?? null;
+      const profile = p ?? fallbackProfileLabel(uid);
+      out.set(uid, profile);
+      if (p) {
+        void persistPeerProfileFromServer(uid, p, queryClient, previousById.get(uid) ?? null);
+      }
+    }
+  } catch {
+    for (const uid of ids) {
+      if (!out.has(uid)) out.set(uid, fallbackProfileLabel(uid));
+    }
+  }
+}
+
+/** 타인 프로필 배치 — 로컬 즉시 반환, stale만 백그라운드 RPC */
+export async function revalidatePeerUserProfilesIfStale(
+  phoneUserIds: readonly string[],
+  opts?: PeerProfileLoadOptions,
+): Promise<void> {
+  if (profilesSource() !== 'supabase') return;
+  const viewer = opts?.viewerId?.trim() ?? '';
+  const unique = [...new Set(phoneUserIds.map((x) => x.trim()).filter(Boolean))].filter(
+    (id) => !viewer || id !== viewer,
+  );
+  const stale: string[] = [];
+  for (const uid of unique) {
+    if (opts?.force || (await isPeerProfileStale(uid, opts?.queryClient))) stale.push(uid);
+  }
+  if (stale.length === 0) return;
+
+  const previousById = new Map<string, UserProfile | null>();
+  for (const uid of stale) {
+    previousById.set(uid, (await readUserProfileFromWatermelon(uid)) ?? null);
+  }
+
+  const merged = new Map<string, UserProfile>();
+  await applyPeerProfilesBatchRpc(stale, merged, opts?.queryClient, previousById);
+
+  if (opts?.onUpdated) {
+    const changed = new Map<string, UserProfile>();
+    for (const [uid, profile] of merged) {
+      if (profilePeerDisplayFieldsChanged(previousById.get(uid), profile)) {
+        changed.set(uid, profile);
+      }
+    }
+    if (changed.size > 0) opts.onUpdated(changed);
+  }
+}
+
+/** 타인 단건 — 캐시 즉시, stale이면 백그라운드 revalidate */
+export async function getPeerUserProfile(
+  phoneUserId: string,
+  opts?: Pick<PeerProfileLoadOptions, 'queryClient' | 'onUpdated' | 'force'>,
+): Promise<UserProfile | null> {
+  const id = phoneUserId.trim();
+  if (!id) return null;
   if (profilesSource() !== 'supabase') {
     throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
   }
+
+  const local = await readUserProfileFromWatermelon(id);
+  const immediate = local ?? null;
+
+  void (async () => {
+    if (!opts?.force && !(await isPeerProfileStale(id, opts?.queryClient))) return;
+    const previous = local;
+    const r = await fetchUserProfileFromSupabaseRpcDetailed(id);
+    if (!r.ok) return;
+    const changed = await persistPeerProfileFromServer(id, r.profile, opts?.queryClient, previous);
+    if (changed && opts?.onUpdated) {
+      opts.onUpdated(new Map([[id, r.profile]]));
+    }
+  })();
+
+  if (immediate) return immediate;
+
+  const profile = await fetchUserProfileFromServer(id);
+  if (profile) await persistPeerProfileFromServer(id, profile, opts?.queryClient, null);
+  return profile ?? fallbackProfileLabel(id);
+}
+
+/** 타인 프로필 배치 — 로컬 즉시, 미스·stale은 RPC(미스 동기, stale 백그라운드) */
+export async function getPeerUserProfilesForIds(
+  phoneUserIds: string[],
+  opts?: PeerProfileLoadOptions,
+): Promise<Map<string, UserProfile>> {
+  if (profilesSource() !== 'supabase') {
+    throw new Error('[profiles] Firestore `users`는 더 이상 사용하지 않습니다.');
+  }
+  const viewer = opts?.viewerId?.trim() ?? '';
   const unique = [...new Set(phoneUserIds.map((x) => x.trim()).filter(Boolean))];
   const out = new Map<string, UserProfile>();
   if (unique.length === 0) return out;
 
   const missing: string[] = [];
+  const stale: string[] = [];
+  const previousById = new Map<string, UserProfile | null>();
+
   for (const uid of unique) {
+    if (viewer && uid === viewer) {
+      const self = await getUserProfile(uid, { queryClient: opts?.queryClient, viewerId: viewer });
+      if (self) out.set(uid, self);
+      continue;
+    }
     const local = await readUserProfileFromWatermelon(uid);
+    previousById.set(uid, local);
     if (local) out.set(uid, local);
     else missing.push(uid);
+    if (opts?.force || (await isPeerProfileStale(uid, opts?.queryClient))) stale.push(uid);
   }
-  if (missing.length === 0) return out;
 
-  try {
-    const r = await fetchUserProfilesFromSupabaseRpcBatchDetailed(missing);
-    if (!r.ok) {
-      for (const uid of missing) out.set(uid, fallbackProfileLabel(uid));
-      return out;
-    }
-    for (const uid of missing) {
-      const p = r.byId.get(uid) ?? null;
-      const profile = p ?? fallbackProfileLabel(uid);
-      out.set(uid, profile);
-      if (p) void upsertUserProfileToWatermelon(uid, p);
-    }
-    return out;
-  } catch {
-    for (const uid of missing) {
-      if (!out.has(uid)) out.set(uid, fallbackProfileLabel(uid));
-    }
-    return out;
+  if (missing.length > 0) {
+    await applyPeerProfilesBatchRpc(missing, out, opts?.queryClient, previousById);
   }
+
+  const staleOnly = stale.filter((id) => !missing.includes(id));
+  if (staleOnly.length > 0) {
+    void revalidatePeerUserProfilesIfStale(staleOnly, opts);
+  }
+
+  return out;
+}
+
+export async function getUserProfilesForIds(
+  phoneUserIds: string[],
+  opts?: PeerProfileLoadOptions,
+): Promise<Map<string, UserProfile>> {
+  return getPeerUserProfilesForIds(phoneUserIds, opts);
 }
