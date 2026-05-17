@@ -47,6 +47,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { syncServerParticipantUnreadForRoom } from '@/src/lib/chat-local-unread-sync';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useChatInvertedStickToLatest } from '@/src/hooks/use-chat-inverted-stick-to-latest';
 import { useChatMarkReadOnFocus } from '@/src/hooks/use-chat-mark-read-on-focus';
 import { useChatRealtimeConnectionBanner } from '@/src/hooks/use-chat-realtime-connection-banner';
@@ -780,6 +781,16 @@ export default function MeetingChatRoomScreen() {
     setChatSearchSession(createChatSearchSession(''));
     setChatSearchBusy(false);
   }, []);
+
+  const handleMeetingChatHardwareBack = useCallback(() => {
+    if (chatSearchMode) {
+      closeChatSearch();
+      return;
+    }
+    exitChatRoom();
+  }, [chatSearchMode, closeChatSearch, exitChatRoom]);
+
+  useAndroidOverlayHardwareBack(handleMeetingChatHardwareBack);
 
   const searchStatusLabel = useMemo(() => {
     const total = chatSearchSession.matchIds.length;

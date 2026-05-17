@@ -6,6 +6,7 @@ import { buildSearchText, sanitizeUnicodeForSqliteStorage } from '@/src/lib/offl
 import type { SocialChatMessage, SocialChatRoomDoc, SocialChatRoomSummary } from '@/src/lib/social-chat-rooms';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { Timestamp } from '@/src/lib/ginit-timestamp';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
 export type LocalChatRoomSummary = SocialChatRoomSummary & {
@@ -615,6 +616,8 @@ export async function markLocalChatRoomReadState(args: {
 
 export function socialMessageFromLocalRoom(room: LocalChatRoomSummary): SocialChatMessage | null {
   if (!room.lastMessageId || !room.lastMessageAtMs) return null;
+  const createdAt = Timestamp.fromMillis(room.lastMessageAtMs);
+  const updatedAt = Timestamp.fromMillis(room.remoteUpdatedAtMs || room.lastMessageAtMs);
   return {
     id: room.lastMessageId,
     senderId: room.lastSenderId,
@@ -627,12 +630,8 @@ export function socialMessageFromLocalRoom(room: LocalChatRoomSummary): SocialCh
     imageAlbumBatchId: null,
     linkPreview: null,
     replyTo: null,
-    createdAt: {
-      toMillis: () => room.lastMessageAtMs,
-    } as any,
-    updatedAt: {
-      toMillis: () => room.remoteUpdatedAtMs || room.lastMessageAtMs,
-    } as any,
+    createdAt,
+    updatedAt,
     deletedAt: null,
   };
 }

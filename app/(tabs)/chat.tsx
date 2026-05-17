@@ -106,8 +106,19 @@ function latestMeetingChatMessageMs(msg: MeetingChatMessage | null | undefined):
   return 0;
 }
 
-/** `chat_room_participants` Realtime만 오고 마지막 메시지 스텁이 없을 때도 목록 순서가 움직이게 함(웹훅 `unread_update` 없을 때 대비). */
-function gatherMeetingListActivityMs(
+function gatherMeetingHasConversation(
+  meetingId: string,
+  effectiveLatestById: Record<string, MeetingChatMessage | null | undefined>,
+  rowById: Map<string, LocalChatRoomSummary>,
+): boolean {
+  const latest = effectiveLatestById[meetingId];
+  if (latest != null && latestMeetingChatMessageMs(latest) > 0) return true;
+  const loc = rowById.get(meetingId);
+  return Boolean(loc?.lastMessageId?.trim() && loc.lastMessageAtMs && loc.lastMessageAtMs > 0);
+}
+
+/** 모임 채팅 목록 정렬: 실제 마지막 메시지 시각만 사용(미읽음·participant 갱신만으로는 위로 올리지 않음). */
+function gatherMeetingConversationSortMs(
   meetingId: string,
   effectiveLatestById: Record<string, MeetingChatMessage | null | undefined>,
   rowById: Map<string, LocalChatRoomSummary>,
@@ -115,15 +126,39 @@ function gatherMeetingListActivityMs(
   const msgMs = latestMeetingChatMessageMs(effectiveLatestById[meetingId]);
   if (msgMs > 0) return msgMs;
   const loc = rowById.get(meetingId);
+  const lm = typeof loc?.lastMessageAtMs === 'number' && Number.isFinite(loc.lastMessageAtMs) ? loc.lastMessageAtMs : 0;
+  return lm > 0 ? lm : 0;
+}
+
+/** `chat_room_participants` Realtime만 오고 마지막 메시지 스텁이 없을 때도 목록 순서가 움직이게 함(웹훅 `unread_update` 없을 때 대비). */
+function gatherMeetingListActivityMs(
+  meetingId: string,
+  effectiveLatestById: Record<string, MeetingChatMessage | null | undefined>,
+  rowById: Map<string, LocalChatRoomSummary>,
+): number {
+  const conv = gatherMeetingConversationSortMs(meetingId, effectiveLatestById, rowById);
+  if (conv > 0) return conv;
+  const loc = rowById.get(meetingId);
   if (!loc) return 0;
   const ur = typeof loc.unreadLastAtMs === 'number' && Number.isFinite(loc.unreadLastAtMs) ? loc.unreadLastAtMs : 0;
   const ru = typeof loc.remoteUpdatedAtMs === 'number' && Number.isFinite(loc.remoteUpdatedAtMs) ? loc.remoteUpdatedAtMs : 0;
-  const lm = typeof loc.lastMessageAtMs === 'number' && Number.isFinite(loc.lastMessageAtMs) ? loc.lastMessageAtMs : 0;
-  return Math.max(ur, ru, lm);
+  return Math.max(ur, ru);
 }
 
 function latestSocialChatMessageMs(msg: SocialChatMessage | null | undefined): number {
   return socialMessageTimeMs(msg);
+}
+
+/** 친구 탭 목록: 실제 메시지가 있는 1:1 DM만 표시 */
+function socialRoomHasConversation(
+  roomId: string,
+  effectiveLatestById: Record<string, SocialChatMessage | null | undefined>,
+  rowById: Map<string, LocalChatRoomSummary>,
+): boolean {
+  const latest = effectiveLatestById[roomId];
+  if (latest != null && latestSocialChatMessageMs(latest) > 0) return true;
+  const loc = rowById.get(roomId);
+  return Boolean(loc?.lastMessageId?.trim() && loc.lastMessageAtMs && loc.lastMessageAtMs > 0);
 }
 
 function socialRoomListActivityMs(
@@ -157,22 +192,6 @@ function formatRelativeFromMs(ms: number): string {
   if (week < 6) return `${week}주 전`;
   const d = new Date(ms);
   return formatDateWithKoWeekday(d);
-}
-
-function formatRightTimeFromMs(ms: number): string {
-  if (!ms || ms <= 0) return '';
-  try {
-    const d = new Date(ms);
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    if (sameDay) {
-      return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit', hour12: true });
-    }
-    return formatRelativeFromMs(ms);
-  } catch {
-    return '';
-  }
 }
 
 function meetingTextSearchHaystack(m: Meeting): string {
@@ -380,7 +399,6 @@ export default function ChatTab() {
     });
   }, [joinedMeetings, appliedGatherTextQuery, gatherMessageMatchIds]);
 
-  /** 최근 메시지 시각 기준(없으면 모임 생성일) — 최신 대화가 위로 — 전부 로컬 `chat_rooms` denorm */
   const effectiveLatestByMeetingId = useMemo(() => {
     const out: Record<string, MeetingChatMessage | null | undefined> = {};
     for (const row of localMeetingRoomSummaries) {
@@ -390,12 +408,21 @@ export default function ChatTab() {
     return out;
   }, [localMeetingRoomSummaries]);
 
+  /** 대화 있는 방 → 최근 메시지순 상단, 대화 없는 방 → 하단(모임 생성일순) */
   const displayedGatherMeetings = useMemo(() => {
     const list = [...gatherMeetingsFiltered];
     list.sort((a, b) => {
-      const tb = gatherMeetingListActivityMs(b.id, effectiveLatestByMeetingId, localMeetingRoomById);
-      const ta = gatherMeetingListActivityMs(a.id, effectiveLatestByMeetingId, localMeetingRoomById);
-      if (tb !== ta) return tb - ta;
+      const hasA = gatherMeetingHasConversation(a.id, effectiveLatestByMeetingId, localMeetingRoomById);
+      const hasB = gatherMeetingHasConversation(b.id, effectiveLatestByMeetingId, localMeetingRoomById);
+      if (hasA !== hasB) return hasA ? -1 : 1;
+
+      if (hasA && hasB) {
+        const tb = gatherMeetingConversationSortMs(b.id, effectiveLatestByMeetingId, localMeetingRoomById);
+        const ta = gatherMeetingConversationSortMs(a.id, effectiveLatestByMeetingId, localMeetingRoomById);
+        if (tb !== ta) return tb - ta;
+        return a.title.localeCompare(b.title, 'ko');
+      }
+
       const cb = meetingCreatedAtMs(b);
       const ca = meetingCreatedAtMs(a);
       if (cb !== ca) return cb - ca;
@@ -493,7 +520,9 @@ export default function ChatTab() {
   const displayedSocialRooms = useMemo(() => {
     const me = userId?.trim() ?? '';
     let rows = socialFriendDmRooms.filter(
-      (r) => !me || isValidSocialDmPeerForViewer(me, r.peerAppUserId),
+      (r) =>
+        (!me || isValidSocialDmPeerForViewer(me, r.peerAppUserId)) &&
+        socialRoomHasConversation(r.roomId, effectiveLatestBySocialRoomId, localSocialRoomById),
     );
     const q = appliedSocialTextQuery.trim().toLowerCase();
     if (q) {
@@ -933,7 +962,23 @@ export default function ChatTab() {
       signedIn &&
       !socialSearchBusy &&
       socialFriendDmRooms.length > 0 &&
-      displayedSocialRooms.length === 0
+      displayedSocialRooms.length === 0 &&
+      appliedSocialTextQuery.trim() === ''
+        ? chatListEmptyCentered(
+            'chatbubbles-outline',
+            '아직 대화한 친구가 없어요',
+            '친구와 대화를 나누면 여기에 표시돼요.',
+          )
+        : null}
+
+      {kind === 'social' &&
+      !(socialRoomsInitialLoading && socialRooms.length === 0) &&
+      !socialListError &&
+      signedIn &&
+      !socialSearchBusy &&
+      socialFriendDmRooms.length > 0 &&
+      displayedSocialRooms.length === 0 &&
+      appliedSocialTextQuery.trim() !== ''
         ? chatListEmptyCentered(
             'search-outline',
             '검색 결과가 없어요',
@@ -1071,10 +1116,13 @@ export default function ChatTab() {
                   const prof = socialProfiles.get(row.peerAppUserId);
                   const uri = prof?.photoUrl?.trim();
                   const nick = prof?.nickname ?? '친구';
+                  const friendBio =
+                    prof && !isUserProfileWithdrawn(prof) ? (prof.bio?.trim() ?? '') : '';
                   const latest = effectiveLatestBySocialRoomId[row.roomId];
                   const hasMessage = latest != null;
+                  const messageMs = hasMessage ? latestSocialChatMessageMs(latest) : 0;
                   const preview = hasMessage ? socialDmPreviewLine(latest) : '';
-                  const rightTime = hasMessage ? formatRightTimeFromMs(latestSocialChatMessageMs(latest)) : '';
+                  const rightTime = hasMessage && messageMs > 0 ? formatRelativeFromMs(messageMs) : '';
                   const unread = localSocialRoomById.get(row.roomId)?.unreadCount ?? 0;
                   return (
                     <GinitPressable
@@ -1136,9 +1184,11 @@ export default function ChatTab() {
                               <Text style={styles.socialHeroTitle} numberOfLines={1}>
                                 {nick}
                               </Text>
-                              <Text style={styles.socialMetaMuted} numberOfLines={1}>
-                                친구 채팅
-                              </Text>
+                              {friendBio ? (
+                                <Text style={styles.socialMetaMuted} numberOfLines={1}>
+                                  {friendBio}
+                                </Text>
+                              ) : null}
                             </View>
                             {rightTime || unread > 0 ? (
                               <View style={styles.socialTimeColumn}>
@@ -1539,9 +1589,11 @@ const styles = StyleSheet.create({
   },
   socialTimeRight: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
     color: GinitTheme.colors.textMuted,
     letterSpacing: -0.12,
+    marginTop: 1,
+    textAlign: 'right',
   },
   socialUnreadBadge: {
     marginTop: 2,

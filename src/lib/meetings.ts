@@ -2218,6 +2218,20 @@ export function meetingPrimaryStartMs(m: Pick<Meeting, 'scheduledAt' | 'schedule
   return parsed ? parsed.toMillis() : null;
 }
 
+/** 홈·채팅 목록 메타용 모임 일시(`scheduleDate`·`scheduleTime`, 없으면 `scheduledAt`). 없으면 빈 문자열. */
+export function formatMeetingScheduleListLabel(
+  m: Pick<Meeting, 'scheduleDate' | 'scheduleTime' | 'scheduledAt'>,
+): string {
+  const d = m.scheduleDate?.trim();
+  const t = m.scheduleTime?.trim();
+  if (d && t) return formatYmdHmWithKoWeekday(d, t);
+  if (d) return formatYmdWithKoWeekday(d);
+  if (t) return t;
+  const ms = meetingPrimaryStartMs(m);
+  if (ms == null || !Number.isFinite(ms)) return '';
+  return formatDateTimeWithKoWeekday(new Date(ms));
+}
+
 export type ConfirmedScheduleNoticeBarOpts = {
   showArrivalVerifyBanner: boolean;
   showSettlementHostBanner: boolean;

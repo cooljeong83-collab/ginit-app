@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import {useIsFocused, useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
 import { ActivityIndicator, Alert, Keyboard, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -18,6 +18,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useLocalChatRoomSummaries } from '@/src/hooks/use-local-chat-room-summaries';
 import { useOfflineChatRoomSync } from '@/src/hooks/useOfflineChatRoomSync';
 import { syncServerParticipantUnreadForRoom } from '@/src/lib/chat-local-unread-sync';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useChatMarkReadOnFocus } from '@/src/hooks/use-chat-mark-read-on-focus';
 import { useChatRealtimeConnectionBanner } from '@/src/hooks/use-chat-realtime-connection-banner';
 import { useChatEngine } from '@/src/hooks/useChatEngine';
@@ -521,6 +522,16 @@ export default function SocialChatRoomScreen() {
       router.replace('/(tabs)/chat');
     }
   }, [navigation, router]);
+
+  const handleSocialChatHardwareBack = useCallback(() => {
+    if (searchMode) {
+      closeSearch();
+      return;
+    }
+    exitSocialChat();
+  }, [searchMode, closeSearch, exitSocialChat]);
+
+  useAndroidOverlayHardwareBack(handleSocialChatHardwareBack);
 
   if (!userId?.trim()) {
     return (

@@ -10,7 +10,7 @@ import { formatDateWithKoWeekday } from '@/src/lib/date-display';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
-import { meetingParticipantCount } from '@/src/lib/meetings';
+import { formatMeetingScheduleListLabel, meetingParticipantCount } from '@/src/lib/meetings';
 
 function formatRelativeFrom(ts: Timestamp | null | undefined): string {
   if (!ts || typeof ts.toDate !== 'function') return '';
@@ -29,29 +29,6 @@ function formatRelativeFrom(ts: Timestamp | null | undefined): string {
     const week = Math.floor(day / 7);
     if (week < 6) return `${week}주 전`;
     return formatDateWithKoWeekday(d);
-  } catch {
-    return '';
-  }
-}
-
-function formatRightTime(messageTs: Timestamp | null | undefined): string {
-  const ts = messageTs;
-  if (!ts || typeof ts.toDate !== 'function') return '';
-  try {
-    const d = ts.toDate();
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
-    if (sameDay) {
-      return d.toLocaleTimeString('ko-KR', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      });
-    }
-    return formatRelativeFrom(ts);
   } catch {
     return '';
   }
@@ -94,6 +71,7 @@ export function ChatMeetingListRow({
   onPress,
 }: Props) {
   const title = meeting.title?.trim() || '모임';
+  const schedule = formatMeetingScheduleListLabel(meeting);
   const place = placeLine(meeting);
   const pCount = meetingParticipantCount(meeting);
   const capacity = typeof meeting.capacity === 'number' && meeting.capacity > 0 ? meeting.capacity : 0;
@@ -101,17 +79,19 @@ export function ChatMeetingListRow({
   const showCapacityBar = capacity > 0;
 
   const hasMessage = latestMessage != null;
-  const chatRel =
+  const rightTime =
     hasMessage && latestMessage.createdAt ? formatRelativeFrom(latestMessage.createdAt) : '';
-  const metaBits = [meeting.lifecycleStatus === 'SETTLED' ? '정산 완료' : '', place, chatRel].filter(Boolean);
-  const metaText = metaBits.join(' · ');
-  const showMetaRow = metaText.length > 0;
+  const scheduleMetaBits = [
+    meeting.lifecycleStatus === 'SETTLED' ? '정산 완료' : '',
+    schedule,
+  ].filter(Boolean);
+  const scheduleMetaText = scheduleMetaBits.join(' · ');
+  const showScheduleMeta = scheduleMetaText.length > 0;
+  const showPlaceMeta = place.length > 0;
 
   const previewText = hasMessage
     ? previewFromMessage(latestMessage)
     : (meeting.description?.trim() ?? '');
-
-  const rightTime = hasMessage ? formatRightTime(latestMessage.createdAt) : '';
 
   const categoryEmoji = categoryEmojiForMeeting(meeting, categories);
   const isPrivateMeeting = meeting.isPublic === false;
@@ -158,9 +138,14 @@ export function ChatMeetingListRow({
                   {title}
                 </Text>
               </View>
-              {showMetaRow && metaText ? (
+              {showScheduleMeta ? (
                 <Text style={styles.metaMuted} numberOfLines={1}>
-                  {metaText}
+                  {scheduleMetaText}
+                </Text>
+              ) : null}
+              {showPlaceMeta ? (
+                <Text style={styles.metaMuted} numberOfLines={1}>
+                  {place}
                 </Text>
               ) : null}
             </View>

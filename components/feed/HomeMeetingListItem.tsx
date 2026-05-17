@@ -19,14 +19,13 @@ import {
   isHighTrustPublicMeeting,
   levelBarFillColorForTrust,
 } from '@/src/lib/ginit-trust';
-import { formatDateTimeWithKoWeekday, formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import { firstPlaceCandidatePreferredPhotoUri } from '@/src/lib/meeting-list-thumbnail';
 import {
   formatPublicMeetingAgeSummary,
   MEETING_CAPACITY_UNLIMITED,
   meetingCategoryDisplayLabel,
+  formatMeetingScheduleListLabel,
   meetingParticipantCount,
-  meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   type Meeting,
   type PublicMeetingDetailsConfig,
@@ -53,19 +52,6 @@ function settlementCornerLabel(cfg: PublicMeetingDetailsConfig): string {
     default:
       return 'N분할';
   }
-}
-
-function formatMeetingScheduleLine(m: Meeting): string {
-  const date = m.scheduleDate?.trim() ?? '';
-  const time = m.scheduleTime?.trim() ?? '';
-  if (date && time) return formatYmdHmWithKoWeekday(date, time);
-  if (date) return formatYmdWithKoWeekday(date);
-  if (time) return time;
-  const ms = meetingPrimaryStartMs(m);
-  if (ms != null) {
-    return formatDateTimeWithKoWeekday(new Date(ms));
-  }
-  return '';
 }
 
 function capacityFillRatio(m: Meeting): number {
@@ -184,7 +170,7 @@ export function HomeMeetingListItem({
     [m, statusBadgeListKind],
   );
   const iconColor = useMemo(() => homeCategoryMarkerIconColor(visual.gradient), [visual.gradient]);
-  const scheduleLine = useMemo(() => formatMeetingScheduleLine(m), [m]);
+  const scheduleLine = useMemo(() => formatMeetingScheduleListLabel(m), [m]);
   const capFill = useMemo(() => capacityFillRatio(m), [m]);
   const showCapacityBar = useMemo(() => {
     const cap = m.capacity ?? 0;
