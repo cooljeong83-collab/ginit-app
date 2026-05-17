@@ -209,6 +209,11 @@ export function socialDmRoomId(userA: string, userB: string): string {
   return `social_${a}__${b}`;
 }
 
+/** 친구 DM `chat_rooms.id` — 모임 RPC(`chat_meeting_summary_for_me` 등)에 넘기면 `meeting_not_found`. */
+export function isSocialDmChatRoomId(roomId: string): boolean {
+  return String(roomId ?? '').trim().startsWith('social_');
+}
+
 export function isValidSocialDmPeerForViewer(meAppUserId: string, peerAppUserId: string): boolean {
   const x = (normalizePhoneUserId(meAppUserId) ?? meAppUserId).trim();
   const y = (normalizePhoneUserId(peerAppUserId) ?? peerAppUserId).trim();

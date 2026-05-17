@@ -21,6 +21,7 @@ import {
   chatMeetingSummaryForMeRpc,
 } from '@/src/lib/chat-supabase-delta';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
+import { isSocialDmChatRoomId } from '@/src/lib/social-chat-rooms';
 import { upsertLocalChatRoomReadState } from '@/src/lib/offline-chat/offline-chat-rooms';
 import type { ChatRealtimeSubscribeCallbacks } from '@/src/lib/chat-realtime-subscribe-callbacks';
 import { voidSafe } from '@/src/lib/void-safe';
@@ -153,6 +154,7 @@ async function pullMeetingChatReadPointersToLocalImpl(args: PullMeetingChatReadP
   const mid = String(args.meetingId ?? '').trim();
   const me = String(args.myAppUserId ?? '').trim();
   if (!mid || !me) return;
+  if (isSocialDmChatRoomId(mid)) return;
 
   let canon = String(args.canonicalRoomId ?? '').trim();
   if (!canon) {
@@ -316,6 +318,9 @@ export function subscribeMeetingChatReadPointersRealtime(args: {
   if (!mid || !me) {
     return () => {};
   }
+  if (isSocialDmChatRoomId(mid)) {
+    return () => {};
+  }
   let alive = true;
   let stopRealtime: (() => void) | null = null;
   let canonicalForPull = mid;
@@ -445,6 +450,7 @@ export async function clearMeetingChatUnreadForUser(meetingId: string, userId: s
   const mid = String(meetingId ?? '').trim();
   const uid = String(userId ?? '').trim();
   if (!mid || !uid) return;
+  if (isSocialDmChatRoomId(mid)) return;
 
   const me = (normalizeParticipantId(uid) || normalizePhoneUserId(uid) || uid).trim();
   if (!me) return;

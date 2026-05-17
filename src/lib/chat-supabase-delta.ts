@@ -256,10 +256,14 @@ export async function chatMeetingSummaryForMeRpc(args: {
   meAppUserId: string;
   meetingId: string;
 }): Promise<ChatMeetingSummaryForMeResult> {
+  const mid = args.meetingId.trim();
+  if (mid.startsWith('social_')) {
+    return { unread_count: 0, error: 'invalid_meeting_id' };
+  }
   const { data, error } = await invokeSupabaseRpc(() =>
     supabase.rpc('chat_meeting_summary_for_me', {
       p_me: args.meAppUserId.trim(),
-      p_meeting_id: args.meetingId.trim(),
+      p_meeting_id: mid,
     }),
   );
   if (error) return { unread_count: 0, error };

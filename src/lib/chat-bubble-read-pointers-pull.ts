@@ -77,3 +77,27 @@ export function scheduleChatBubbleReadPointersPull(args: ChatBubbleReadPointersP
     debounceMs,
   );
 }
+
+const postSendReadPullTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** 메시지 전송·서버 seq 확정 후 — 상대 읽음 맵 1회 동기화(주기 폴링 없음). */
+export function schedulePostSendChatBubbleReadPointersPull(
+  args: ChatBubbleReadPointersPullArgs,
+  delayMs = 2000,
+): void {
+  const rid = String(args.roomId ?? '').trim();
+  const me = String(args.myAppUserId ?? '').trim();
+  if (!rid || !me) return;
+  const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 2000;
+  const key = `${args.roomKind}:${me}:${rid}`;
+  const prev = postSendReadPullTimers.get(key);
+  if (prev) clearTimeout(prev);
+  postSendReadPullTimers.set(
+    key,
+    setTimeout(() => {
+      postSendReadPullTimers.delete(key);
+      scheduleChatBubbleReadPointersPull(args);
+    }, delay),
+  );
+}
+

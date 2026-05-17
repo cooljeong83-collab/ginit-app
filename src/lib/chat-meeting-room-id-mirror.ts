@@ -1,6 +1,7 @@
 import { Q } from '@nozbe/watermelondb';
 
 import { chatMeetingSummaryForMeRpc } from '@/src/lib/chat-supabase-delta';
+import { isSocialDmChatRoomId } from '@/src/lib/social-chat-rooms';
 import { markRecentUnreadBroadcastMany } from '@/src/lib/chat-unread-recent-broadcast';
 import { upsertLocalChatRoomSummary } from '@/src/lib/offline-chat/offline-chat-rooms';
 import { database } from '@/src/watermelon';
@@ -22,6 +23,11 @@ export async function meetingChatRoomIdsForLocalUnread(meAppUserId: string, room
   if (hit && Date.now() - hit.at < TTL_MS) return hit.ids;
 
   const ids = new Set<string>([rid]);
+  if (isSocialDmChatRoomId(rid)) {
+    const out = [...ids];
+    cache.set(cacheKey, { ids: out, at: Date.now() });
+    return out;
+  }
   try {
     const sum = await chatMeetingSummaryForMeRpc({ meAppUserId: me, meetingId: rid });
     const canon = sum.canonical_room_id?.trim();

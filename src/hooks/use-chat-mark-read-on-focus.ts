@@ -50,6 +50,7 @@ export function useChatMarkReadOnFocus(args: UseChatMarkReadOnFocusArgs): void {
   const lastMarkedIdRef = useRef('');
   /** 동일 방에서 이미 처리한 최대 server_seq — tail 재정렬로 id가 바뀌어도 역행·중복 방지 */
   const lastMarkedSeqRef = useRef(0);
+  const prevEnabledRef = useRef(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
@@ -74,6 +75,7 @@ export function useChatMarkReadOnFocus(args: UseChatMarkReadOnFocusArgs): void {
         return;
       }
 
+      /** async 전에 예약 — `markChatRoomReadLocally`→messages effect 재진입 시 markChatReadUpTo 폭주 방지 */
       lastMarkedIdRef.current = lid;
       if (lastReadSeq != null && lastReadSeq > 0) {
         lastMarkedSeqRef.current = lastReadSeq;
@@ -104,11 +106,12 @@ export function useChatMarkReadOnFocus(args: UseChatMarkReadOnFocusArgs): void {
   useEffect(() => {
     lastMarkedIdRef.current = '';
     lastMarkedSeqRef.current = 0;
+    prevEnabledRef.current = false;
   }, [roomId]);
 
-  /** 방 진입 직후: `chat_rooms` 요약만으로 읽음(메시지 리스트 대기 없음). 포커스당 1회 경로(useFocusEffect). */
+  /** 방 진입 직후: `chat_rooms` 요약만으로 읽음(메시지 리스트 대기 없음). */
   const flushEnterReadFromRoomSummary = useCallback(async () => {
-    if (!isFocused) return;
+    if (!isFocused || !enabled) return;
     const rid = roomId.trim();
     const me = meAppUserId.trim();
     if (!rid || !me) return;
@@ -125,7 +128,7 @@ export function useChatMarkReadOnFocus(args: UseChatMarkReadOnFocusArgs): void {
       serverSeq: input.lastReadSeq ?? undefined,
       createdAtMs: input.readAtMs,
     });
-  }, [isFocused, roomKind, roomId, meAppUserId, ownerUserId, peerUserId, runMarkRead]);
+  }, [isFocused, enabled, roomKind, roomId, meAppUserId, ownerUserId, peerUserId, runMarkRead]);
 
   useFocusEffect(
     useCallback(() => {
@@ -133,6 +136,18 @@ export function useChatMarkReadOnFocus(args: UseChatMarkReadOnFocusArgs): void {
       return () => {};
     }, [flushEnterReadFromRoomSummary]),
   );
+
+  /** `ready` 직후: enabled=false 때 서버 RPC만 스킵됐을 수 있어 ref 리셋 후 요약 읽음 재시도 */
+  useEffect(() => {
+    const wasEnabled = prevEnabledRef.current;
+    prevEnabledRef.current = enabled;
+    if (!enabled || !isFocused) return;
+    if (!wasEnabled) {
+      lastMarkedIdRef.current = '';
+      lastMarkedSeqRef.current = 0;
+      void flushEnterReadFromRoomSummary();
+    }
+  }, [enabled, isFocused, flushEnterReadFromRoomSummary]);
 
   /** tail 로드·새 메시지 시 요약보다 최신이면 한 번 더 읽음 처리 */
   useEffect(() => {

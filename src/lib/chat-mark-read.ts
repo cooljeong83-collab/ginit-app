@@ -34,6 +34,34 @@ function roomTypeFromKind(kind: ChatRoomKindDelta): OfflineChatRoomType {
   return kind === 'social_dm' ? 'social_dm' : 'meeting';
 }
 
+function maxPositiveSeq(...values: Array<number | null | undefined>): number | null {
+  let best = 0;
+  for (const v of values) {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+      best = Math.max(best, Math.floor(v));
+    }
+  }
+  return best > 0 ? best : null;
+}
+
+/** `last_message_id`만 갱신되고 `last_server_seq`가 뒤처진 요약 행 보정용 */
+async function resolveServerSeqForLocalMessage(
+  roomType: OfflineChatRoomType,
+  roomId: string,
+  messageId: string,
+): Promise<number | null> {
+  const db = database;
+  const mid = messageId.trim();
+  if (!db || !mid || mid.startsWith('local:')) return null;
+  const rows = await db
+    .get('chat_messages')
+    .query(Q.where('room_id', roomId), Q.where('room_type', roomType), Q.where('message_id', mid))
+    .fetch();
+  const row = rows[0] as { serverSeq?: number | null } | undefined;
+  const seq = row?.serverSeq;
+  return typeof seq === 'number' && Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : null;
+}
+
 /**
  * 메시지 리스트 로드 전 — Watermelon `chat_rooms` 요약(목록에서 이미 알고 있는 마지막 메시지·seq)으로 읽음 입력을 만듭니다.
  */
@@ -80,7 +108,9 @@ export async function buildChatMarkReadInputFromLocalRoom(args: {
   const readMessageId = pendingMsg || tailMsg;
   if (!readMessageId || readMessageId.startsWith('local:')) return null;
 
-  const lastReadSeq = pendingSeq ?? tailSeq;
+  const messageSeq = await resolveServerSeqForLocalMessage(roomType, rid, readMessageId);
+  const effectiveTailSeq = maxPositiveSeq(tailSeq, messageSeq);
+  const lastReadSeq = pendingSeq ?? effectiveTailSeq;
   const unread =
     typeof row.unreadCount === 'number' && Number.isFinite(row.unreadCount) ? Math.max(0, Math.floor(row.unreadCount)) : 0;
   const alreadyReadLocally =
@@ -89,8 +119,8 @@ export async function buildChatMarkReadInputFromLocalRoom(args: {
     typeof row.readMessageId === 'string' &&
     row.readMessageId.trim() === readMessageId &&
     lastReadSeq != null &&
-    tailSeq != null &&
-    lastReadSeq >= tailSeq;
+    effectiveTailSeq != null &&
+    lastReadSeq >= effectiveTailSeq;
 
   if (alreadyReadLocally) return null;
 
@@ -321,6 +351,7 @@ export async function syncChatMarkReadToServer(input: ChatMarkReadInput): Promis
     if (!res.ok) {
       throw new Error(res.error ?? 'chat_mark_read_failed');
     }
+    ginitNotifyDbg('BubbleRead', 'chat_mark_read_ok', { roomId: rid, lastReadSeq });
     return;
   }
 

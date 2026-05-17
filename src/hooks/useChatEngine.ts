@@ -8,7 +8,10 @@ import {
   meetingChatCommitImageFromLocalUri,
   notifyMeetingChatParticipantsRemoteFireAndForget,
 } from '@/src/lib/meeting-chat';
-import { scheduleChatBubbleReadPointersPull } from '@/src/lib/chat-bubble-read-pointers-pull';
+import {
+  scheduleChatBubbleReadPointersPull,
+  schedulePostSendChatBubbleReadPointersPull,
+} from '@/src/lib/chat-bubble-read-pointers-pull';
 import { upsertSocialDmListSurfaceAcrossLocalRoomIds } from '@/src/lib/chat-social-room-id-mirror';
 import { getOrCreateLocalRoom } from '@/src/lib/offline-chat/offline-chat-sync';
 import { localRoomPreviewForMessage } from '@/src/lib/offline-chat/offline-chat-rooms';
@@ -46,16 +49,6 @@ function deferAfterInteractions(task: () => void) {
   }
   InteractionManager.runAfterInteractions(() => {
     queueMicrotask(task);
-  });
-}
-
-/** 말풍선 읽음 맵 — 서버 message id·seq 확정 직후 상대 읽음 포인터를 한 번 더 맞춤 */
-function scheduleBubbleReadPointersPull(roomKind: ChatRoomKindDelta, roomId: string, meAppUserId: string) {
-  const rid = roomId.trim();
-  const uid = meAppUserId.trim();
-  if (!rid || !uid) return;
-  deferAfterInteractions(() => {
-    scheduleChatBubbleReadPointersPull({ roomKind, roomId: rid, myAppUserId: uid });
   });
 }
 
@@ -201,7 +194,7 @@ export function useChatEngine(options: {
       if (readPullTimer) clearTimeout(readPullTimer);
       readPullTimer = setTimeout(() => {
         readPullTimer = null;
-        scheduleBubbleReadPointersPull(roomKind, rid, uid);
+        scheduleChatBubbleReadPointersPull({ roomKind, roomId: rid, myAppUserId: uid });
       }, 450);
     };
 
@@ -371,9 +364,9 @@ export function useChatEngine(options: {
               }
             });
 
-            /** 소셜 DM 방 화면은 `subscribeSocialChatReadPointersRealtime`이 읽음 맵을 담당 — 전송 직후 중복 RPC 방지 */
-            if (roomKind === 'meeting' && (serverId || (serverSeq != null && serverSeq > 0))) {
-              scheduleBubbleReadPointersPull(roomKind, rid, uid);
+            /** 전송·seq 확정 2초 후 상대 읽음 맵 1회 pull(Realtime·observe 보조). */
+            if (serverId || (serverSeq != null && serverSeq > 0)) {
+              schedulePostSendChatBubbleReadPointersPull({ roomKind, roomId: rid, myAppUserId: uid });
             }
 
             if (roomKind === 'meeting' && input.kind === 'text' && serverId) {
@@ -526,7 +519,7 @@ export function useChatEngine(options: {
                 senderName: senderProfile?.nickname ?? senderProfile?.displayName ?? undefined,
               });
             }
-            scheduleBubbleReadPointersPull('meeting', rid, uid);
+            schedulePostSendChatBubbleReadPointersPull({ roomKind: 'meeting', roomId: rid, myAppUserId: uid });
           } catch (e) {
             if (__DEV__) console.warn('[useChatEngine] sendMeetingImageUrisBatch failed', e);
           }

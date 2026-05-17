@@ -1216,7 +1216,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       chatReadMessageId: { ...p.chatReadMessageId, [mid]: id },
     }));
     const uid = userIdRef.current?.trim() ?? '';
-    if (uid) {
+    if (uid && !mid.startsWith('social_')) {
       void clearMeetingChatUnreadForUser(mid, uid).catch(() => {});
     }
   }, []);
