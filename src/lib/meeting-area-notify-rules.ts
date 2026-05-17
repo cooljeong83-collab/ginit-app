@@ -1,6 +1,8 @@
 import { supabase } from '@/src/lib/supabase';
 
 const RPC_SCHEMA_CACHE_RETRY_WAITS_MS = [0, 800, 2500, 6000, 14_000] as const;
+/** 재로그인 직후 RPC·세션 레이스 시 설정 스위치 스피너가 영구히 도는 것을 막습니다. */
+const MEETING_AREA_NOTIFY_MATRIX_TOTAL_TIMEOUT_MS = 25_000;
 
 function isPostgrestSchemaCacheOrMissingRpcError(message: string, code?: string): boolean {
   const m = message.toLowerCase();
@@ -39,7 +41,7 @@ function parseMatrixJson(data: unknown): MeetingAreaNotifyMatrix {
   };
 }
 
-export async function fetchMeetingAreaNotifyMatrix(appUserId: string): Promise<MeetingAreaNotifyMatrix> {
+async function fetchMeetingAreaNotifyMatrixInner(appUserId: string): Promise<MeetingAreaNotifyMatrix> {
   const id = appUserId.trim();
   if (!id) return { region_norms: [], category_ids: [] };
   let lastMessage = '';
@@ -57,6 +59,25 @@ export async function fetchMeetingAreaNotifyMatrix(appUserId: string): Promise<M
     }
   }
   return { region_norms: [], category_ids: [] };
+}
+
+export async function fetchMeetingAreaNotifyMatrix(appUserId: string): Promise<MeetingAreaNotifyMatrix> {
+  const id = appUserId.trim();
+  if (!id) return { region_norms: [], category_ids: [] };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fetchMeetingAreaNotifyMatrixInner(id),
+      new Promise<MeetingAreaNotifyMatrix>((resolve) => {
+        timer = setTimeout(
+          () => resolve({ region_norms: [], category_ids: [] }),
+          MEETING_AREA_NOTIFY_MATRIX_TOTAL_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function replaceMeetingAreaNotifyMatrix(

@@ -4,7 +4,10 @@ import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef
 import {
   ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useKeyboardState } from 'react-native-keyboard-controller';
+import {
+  getChatComposerBottomPadding,
+  getChatListVisualBottomPadding,
+} from '@/components/chat/ChatKeyboardScrollView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
@@ -128,7 +131,6 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
   const [imageViewerBusy, setImageViewerBusy] = useState(false);
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
-  const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const listRef = useRef<unknown>(null);
   const innerFlashListRef = useRef<unknown>(null);
   const mountedRef = useRef(true);
@@ -342,11 +344,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     void getUserProfilesForIds(ids).then(setProfiles);
   }, [initialPeerName, initialPeerPhotoUrl, myUserId, peerId]);
 
-  /** 모임 채팅과 동일: IME 표시 중 일부 기기에서 하단 inset이 키보드 오프셋과 중복될 수 있어 최소 패딩만 사용 */
-  const composerBottomPad = useMemo(
-    () => (keyboardVisible ? 8 : Math.max(insets.bottom, 8)),
-    [insets.bottom, keyboardVisible],
-  );
+  const composerBottomPad = getChatComposerBottomPadding();
 
   const messageIndexById = useMemo(() => buildChatMessageIndexById(messages as MeetingChatMessage[]), [messages]);
 
@@ -475,9 +473,10 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
     () => [
       meetingChatBodyStyles.listContent,
       {
-        paddingTop: Math.max(
-          4,
-          Math.max(composerDockBlockHeight, composerInputBarHeight + composerBottomPad),
+        paddingTop: getChatListVisualBottomPadding(
+          composerDockBlockHeight,
+          composerInputBarHeight,
+          composerBottomPad,
         ),
       },
     ],

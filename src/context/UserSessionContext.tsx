@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { clearStoredUserId, readStoredUserId, writeStoredUserId } from '@/src/lib/app-user-id';
+import { resetMeetingsSessionCaches } from '@/src/lib/meetings-session-cache-reset';
 import { prefetchUserProfileCache } from '@/src/lib/user-profile-cache-sync';
 import { clearPendingPushOpenPayload } from '@/src/lib/pending-push-navigation';
 import { signOutGoogle } from '@/src/lib/google-sign-in';
@@ -104,9 +105,19 @@ export function UserSessionProvider({ children }: { children: ReactNode }) {
     await withClearDeadline('clearSecureAuthSession', 8000, () => clearSecureAuthSession());
     await withClearDeadline('clearSecureGoogleSession', 8000, () => clearSecureGoogleSession());
     clearPendingPushOpenPayload();
+    try {
+      await resetMeetingsSessionCaches(queryClient);
+    } catch (e) {
+      if (__DEV__) {
+        console.warn(
+          '[UserSession] resetMeetingsSessionCaches:',
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
     setUserIdState(null);
     setAuthProfileState(null);
-  }, [withClearDeadline]);
+  }, [withClearDeadline, queryClient]);
 
   const setAuthProfile = useCallback((profile: AuthProfileSnapshot | null) => {
     setAuthProfileState(profile);

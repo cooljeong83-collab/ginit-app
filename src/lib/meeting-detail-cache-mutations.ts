@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 
-import { meetingDetailQueryKey } from '@/src/hooks/use-meeting-detail-query';
+import { meetingDetailQueryKey } from '@/src/lib/meeting-detail-query-keys';
+import { isMeetingNotFoundError, purgeDeletedMeetingLocally } from '@/src/lib/meeting-deleted-local-purge';
 import {
   patchMeetingDetailInWatermelon,
   restoreMeetingDetailInWatermelon,
@@ -17,6 +18,10 @@ export async function refreshMeetingDetailCaches(
   const mid = meetingId.trim();
   if (!mid) return null;
   const m = await getMeetingById(mid);
+  if (m === null) {
+    await purgeDeletedMeetingLocally(queryClient, mid);
+    return null;
+  }
   await upsertMeetingDetailToWatermelon(mid, m);
   queryClient.setQueryData(meetingDetailQueryKey(mid), m);
   return m;
@@ -38,7 +43,11 @@ export async function withMeetingDetailOptimistic<T>(
     }
     return result;
   } catch (e) {
-    await restoreMeetingDetailInWatermelon(mid, previous);
+    if (isMeetingNotFoundError(e) && opts?.queryClient) {
+      await purgeDeletedMeetingLocally(opts.queryClient, mid);
+    } else {
+      await restoreMeetingDetailInWatermelon(mid, previous);
+    }
     throw e;
   }
 }

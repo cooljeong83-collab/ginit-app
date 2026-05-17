@@ -5,6 +5,7 @@ import {
   restoreMeetingDetailInWatermelon,
 } from '@/src/lib/meeting-detail-watermelon-cache';
 import { refreshMeetingDetailCaches } from '@/src/lib/meeting-detail-cache-mutations';
+import { isMeetingNotFoundError, purgeDeletedMeetingLocally } from '@/src/lib/meeting-deleted-local-purge';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import {
   GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION,
@@ -45,6 +46,10 @@ function movieCandidateChipId(mv: SelectedMovieExtra, index: number): string {
   const mid = String(mv.id ?? '').trim();
   if (mid) return `${mid}#${index}`;
   return `movie-${index}`;
+}
+
+function alertMeetingDeletedAndGoBack(router: UseMeetingJoinArgs['router']): void {
+  Alert.alert('삭제된 모임', '이 모임은 더 이상 존재하지 않아요.', [{ text: '확인', onPress: () => router.back() }]);
 }
 
 type UseMeetingJoinArgs = {
@@ -196,10 +201,19 @@ export function useMeetingJoin({
         await joinMeeting(meeting.id, sessionPk, joinVotes);
         void refreshMeetingDetailCaches(queryClient, meeting.id);
       } catch (joinErr) {
-        await restoreMeetingDetailInWatermelon(meeting.id, previous);
+        if (isMeetingNotFoundError(joinErr)) {
+          await purgeDeletedMeetingLocally(queryClient, meeting.id, sessionPk);
+        } else {
+          await restoreMeetingDetailInWatermelon(meeting.id, previous);
+        }
         throw joinErr;
       }
     } catch (e) {
+      if (isMeetingNotFoundError(e)) {
+        await purgeDeletedMeetingLocally(queryClient, meeting.id, sessionPk);
+        alertMeetingDeletedAndGoBack(router);
+        return;
+      }
       const msg = e instanceof Error ? e.message : '';
       if (isConfirmedScheduleOverlapErrorMessage(msg)) {
         showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
@@ -213,6 +227,7 @@ export function useMeetingJoin({
     router,
     meeting,
     sessionPk,
+    queryClient,
     guestVotesReady,
     needsDatePick,
     needsPlacePick,
@@ -226,7 +241,6 @@ export function useMeetingJoin({
     selectedDateIds,
     selectedPlaceIds,
     selectedMovieIds,
-    queryClient,
     scrollToVoteBlock,
   ]);
 
@@ -305,6 +319,11 @@ export function useMeetingJoin({
         void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
         showTransientBottomMessage('참가 신청을 보냈어요. 호스트 승인을 기다려 주세요.');
       } catch (e) {
+        if (isMeetingNotFoundError(e)) {
+          await purgeDeletedMeetingLocally(queryClient, meeting.id, sessionPk);
+          alertMeetingDeletedAndGoBack(router);
+          return;
+        }
         const msg = e instanceof Error ? e.message : '';
         if (isConfirmedScheduleOverlapErrorMessage(msg)) {
           showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);

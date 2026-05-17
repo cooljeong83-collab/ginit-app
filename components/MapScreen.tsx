@@ -3,6 +3,7 @@ import Feather from '@expo/vector-icons/Feather';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {NaverMapMarkerOverlay, NaverMapView, type NaverMapViewRef, type Region as NaverRegion, } from '@mj-studio/react-native-naver-map';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
@@ -111,6 +112,7 @@ import {
   groupMeetingsByCoordinateOverlap,
   meetingCoordinateKey,
 } from '@/src/lib/map-people-markers';
+import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { setPendingMeetingPlace } from '@/src/lib/meeting-place-bridge';
 import type { Meeting, MeetingRecruitmentPhase } from '@/src/lib/meetings';
 import {
@@ -496,6 +498,7 @@ function naverRegionToCenter(r: NaverRegion): Region {
 
 export default function MapScreen() {
   const router = useTransitionRouter();
+  const queryClient = useQueryClient();
   const { userId } = useUserSession();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -524,14 +527,15 @@ export default function MapScreen() {
   const mapSnapCameraTighterThanQueryRef = useRef(false);
   /** «내 위치»로 관심지역만 바꿀 때 구 중심 카메라·조회 박스 동기화 생략 */
   const skipInterestRegionMapSyncRef = useRef(false);
-  const pendingFocusFirstAfterSortRef = useRef(false);
 
   const [selectedMeetingIndex, setSelectedMeetingIndex] = useState(0);
   const [locatingUser, setLocatingUser] = useState(false);
+  const [meetingsRefreshing, setMeetingsRefreshing] = useState(false);
   const [distanceSortLocating, setDistanceSortLocating] = useState(false);
   // 바텀시트는 기본으로 요약 영역이 펼쳐진 상태(핸들만이 아닌 전체 피크)로 시작합니다.
   const sheetShown = useSharedValue(1);
   const locatingSpin = useSharedValue(0);
+  const meetingsRefreshSpin = useSharedValue(0);
   const carouselDragStartIndexRef = useRef(0);
   const followSelectedRef = useRef(true);
   const lastMarkerTapAtRef = useRef(0);
@@ -606,8 +610,26 @@ export default function MapScreen() {
       : withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never });
   }, [locatingUser, locatingSpin]);
 
+  useEffect(() => {
+    meetingsRefreshSpin.value = meetingsRefreshing
+      ? withRepeat(
+          withTiming(1, {
+            duration: 820,
+            easing: Easing.linear,
+            reduceMotion: ReduceMotion.Never,
+          }),
+          -1,
+          false,
+        )
+      : withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never });
+  }, [meetingsRefreshing, meetingsRefreshSpin]);
+
   const locatingIconSpinStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${locatingSpin.value * 360}deg` }],
+  }));
+
+  const meetingsRefreshIconSpinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${meetingsRefreshSpin.value * 360}deg` }],
   }));
 
   const sheetContentStyle = useAnimatedStyle(() => ({
@@ -1396,17 +1418,11 @@ export default function MapScreen() {
               userCoordsRef.current = c;
               setUserCoords(c);
             }
-            if (mode !== listSortMode) {
-              pendingFocusFirstAfterSortRef.current = true;
-            }
             setListSortMode(mode);
           } finally {
             setDistanceSortLocating(false);
           }
           return;
-        }
-        if (mode !== listSortMode) {
-          pendingFocusFirstAfterSortRef.current = true;
         }
         setListSortMode(mode);
         closeSortFilterModal();
@@ -1439,6 +1455,16 @@ export default function MapScreen() {
       /* ignore */
     }
   }, [pendingRegion]);
+
+  const onPressMeetingsRefresh = useCallback(async () => {
+    if (!feedLocationReady || meetingsRefreshing) return;
+    setMeetingsRefreshing(true);
+    try {
+      await runMeetingsUserActionDeltaSync(queryClient, userId?.trim() ?? null, 'pull_refresh');
+    } finally {
+      setMeetingsRefreshing(false);
+    }
+  }, [feedLocationReady, meetingsRefreshing, queryClient, userId]);
 
   const onPressMyLocation = useCallback(() => {
     void (async () => {
@@ -1606,39 +1632,19 @@ export default function MapScreen() {
     }
   }, [sortedFilteredMeetings, selectedMeetingId]);
 
-  const focusFirstSheetMeeting = useCallback(() => {
-    enableFollowSelected();
-    openSheet();
-    setSelectedMeetingIndex(0);
-    const first = sheetMeetings[0];
-    if (!first?.id) {
-      setSelectedMeetingId(null);
-      return;
-    }
-    setSelectedMeetingId(first.id);
-    if (scrollAfterInteractionTimeoutRef.current != null) {
-      clearTimeout(scrollAfterInteractionTimeoutRef.current);
-      scrollAfterInteractionTimeoutRef.current = null;
-    }
-    requestAnimationFrame(() => {
-      scrollListToMeetingId(first.id, { animated: false });
-      scrollCarouselToMeetingId(first.id, { animated: false });
-      moveMapToMeetingPin(first);
-    });
-  }, [
-    enableFollowSelected,
-    openSheet,
-    sheetMeetings,
-    scrollListToMeetingId,
-    scrollCarouselToMeetingId,
-    moveMapToMeetingPin,
-  ]);
-
+  /** 정렬·필터로 `sheetMeetings` 순서만 바뀔 때 선택 모임은 유지하고 캐러셀 인덱스만 맞춤 */
   useEffect(() => {
-    if (!pendingFocusFirstAfterSortRef.current) return;
-    pendingFocusFirstAfterSortRef.current = false;
-    focusFirstSheetMeeting();
-  }, [listSortMode, sheetMeetings, focusFirstSheetMeeting]);
+    if (!selectedMeetingId) return;
+    const idx = sheetMeetings.findIndex((m) => m.id === selectedMeetingId);
+    if (idx < 0) return;
+    setSelectedMeetingIndex((prev) => {
+      if (prev === idx) return prev;
+      requestAnimationFrame(() => {
+        scrollCarouselToMeetingId(selectedMeetingId, { animated: false });
+      });
+      return idx;
+    });
+  }, [sheetMeetings, selectedMeetingId, scrollCarouselToMeetingId]);
 
   const onMeetingMarkerPress = useCallback(
     (meetingId: string) => {
@@ -2532,10 +2538,29 @@ export default function MapScreen() {
           </BlurView>
         </View>
 
-        {/* Layer 2 — 우측 컨트롤 (모임추가/검색/내위치): 바텀 시트 위에 항상 위치 */}
+        {/* Layer 2 — 우측 컨트롤 (새로고침/모임추가/검색/내위치): 바텀 시트 위에 항상 위치 */}
         <Animated.View
           style={[styles.mapControlsRight, { bottom: sheetMiniPeekHeight + 12 }, controlsLiftStyle]}
           pointerEvents="box-none">
+          <GinitPressable
+            onPress={() => void onPressMeetingsRefresh()}
+            disabled={meetingsRefreshing}
+            style={({ pressed }) => [
+              styles.roundMapBtn,
+              meetingsRefreshing && styles.roundMapBtnLocating,
+              pressed && !meetingsRefreshing && { opacity: 0.9 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={meetingsRefreshing ? '모임 목록 새로고침 중' : '모임 목록 새로고침'}
+            accessibilityState={{ busy: meetingsRefreshing, disabled: meetingsRefreshing }}>
+            <Animated.View style={meetingsRefreshing ? meetingsRefreshIconSpinStyle : undefined}>
+              <GinitSymbolicIcon
+                name="refresh"
+                size={22}
+                color={meetingsRefreshing ? GinitTheme.colors.texWhite : GinitTheme.colors.deepPurple}
+              />
+            </Animated.View>
+          </GinitPressable>
           <GinitPressable
             onPress={onPressCreateFab}
             style={({ pressed }) => [styles.roundMapBtn, pressed && { opacity: 0.9 }]}

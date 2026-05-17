@@ -21,7 +21,10 @@ import {
     View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useKeyboardState } from 'react-native-keyboard-controller';
+import {
+  getChatComposerBottomPadding,
+  getChatListVisualBottomPadding,
+} from '@/components/chat/ChatKeyboardScrollView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingChatMediaPickerModal } from '@/components/chat/MeetingChatMediaPickerModal';
@@ -222,7 +225,6 @@ export default function MeetingChatRoomScreen() {
   /** 퀵 메뉴·닫기 레이어를 입력창(composerDock) 바로 위에 붙이기 위한 높이 */
   const [composerDockBlockHeight, setComposerDockBlockHeight] = useState(104);
   const [composerInputBarHeight, setComposerInputBarHeight] = useState(56);
-  const keyboardVisible = useKeyboardState((s) => s.isVisible);
   const chatSearchInputRef = useRef<TextInput>(null);
   const listRef = useRef<any>(null);
   const innerFlashListRef = useRef<any>(null);
@@ -742,14 +744,7 @@ export default function MeetingChatRoomScreen() {
     };
   }, []);
 
-  /**
-   * 입력 독 하단 패딩. IME가 떠 있을 때 일부 Android(예: 구형 One UI)는 safe-area bottom이 0으로 줄지 않아
-   * `KeyboardStickyView` 보정과 겹쳐 키보드–입력창 사이가 과하게 벌어질 수 있어, 키보드 표시 중엔 최소만 둡니다.
-   */
-  const composerBottomPad = useMemo(
-    () => (keyboardVisible ? 8 : Math.max(insets.bottom, 8)),
-    [insets.bottom, keyboardVisible],
-  );
+  const composerBottomPad = getChatComposerBottomPadding();
 
   const goMeetingDetail = useCallback(() => {
     if (!meetingId) return;
@@ -1064,10 +1059,11 @@ export default function MeetingChatRoomScreen() {
     () => [
       meetingChatBodyStyles.listContent,
       {
-        // inverted: 입력 독이 absolute+sticky이므로 리스트 시각 하단에 독 높이만큼 여백
-        paddingTop: Math.max(
-          4,
-          Math.max(composerDockBlockHeight, composerInputBarHeight + composerBottomPad),
+        // inverted: 입력 독 높이(네비·키보드 lift는 ListHeader `ChatInvertedKeyboardSpacer`)
+        paddingTop: getChatListVisualBottomPadding(
+          composerDockBlockHeight,
+          composerInputBarHeight,
+          composerBottomPad,
         ),
       },
     ],

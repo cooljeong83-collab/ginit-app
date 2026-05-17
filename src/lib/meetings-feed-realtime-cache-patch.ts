@@ -39,26 +39,43 @@ function meetingIdFromRealtimeRow(row: Record<string, unknown>): string {
   return legacy || rowId;
 }
 
-type QueryKeys = { feedKey: readonly unknown[]; myFeedKey: readonly unknown[] | null };
+export type MeetingsFeedCacheKeys = { feedKey: readonly unknown[]; myFeedKey: readonly unknown[] | null };
 
-/** Realtime `new`/`old` 행이 있으면 React Query 캐시(AsyncStorage persist 대상)에 즉시 반영합니다. */
-export function applyMeetingsTableRealtimePayloadToQueryCaches(
+export type RemoveMeetingsFromFeedCachesScope = {
+  publicFeed?: boolean;
+  myFeed?: boolean;
+};
+
+function meetingIdInRemoveSet(meetingId: string, idSet: ReadonlySet<string>): boolean {
+  const id = meetingId.trim();
+  return Boolean(id && idSet.has(id));
+}
+
+/** 공개 피드·내 모임 TanStack 캐시에서 지정 id를 제거합니다. */
+export function removeMeetingsFromMeetingsFeedCaches(
   qc: QueryClient,
-  payload: MeetingsTableRealtimePayload,
-  keys: QueryKeys,
-): void {
-  const { feedKey, myFeedKey } = keys;
+  meetingIds: readonly string[],
+  keys: MeetingsFeedCacheKeys,
+  scope: RemoveMeetingsFromFeedCachesScope = { publicFeed: true, myFeed: true },
+): boolean {
+  const idSet = new Set(meetingIds.map((x) => x.trim()).filter(Boolean));
+  if (idSet.size === 0) return false;
 
-  if (payload.eventType === 'DELETE' && payload.oldRecord) {
-    const id = meetingIdFromRealtimeRow(payload.oldRecord);
-    if (!id) return;
-    qc.setQueryData<FeedInfiniteData>(feedKey, (prev) => {
+  const touchPublic = scope.publicFeed !== false;
+  const touchMy = scope.myFeed !== false && keys.myFeedKey != null;
+  let mutated = false;
+
+  if (touchPublic) {
+    qc.setQueryData<FeedInfiniteData>(keys.feedKey, (prev) => {
       if (!prev) return prev;
-      const flat = flattenFeedPages(prev).filter((m) => m.id !== id);
+      const flat = flattenFeedPages(prev);
+      const nextFlat = flat.filter((m) => !meetingIdInRemoveSet(typeof m.id === 'string' ? m.id : '', idSet));
+      if (nextFlat.length === flat.length) return prev;
+      mutated = true;
       const { pages, pageParams } = buildMeetingsFeedInfinitePagesAndPageParams(
-        flat,
+        nextFlat,
         prev.pages.length,
-        Math.max(PUBLIC_MEETINGS_PAGE_SIZE, flat.length),
+        Math.max(PUBLIC_MEETINGS_PAGE_SIZE, nextFlat.length),
       );
       return {
         ...prev,
@@ -66,12 +83,33 @@ export function applyMeetingsTableRealtimePayloadToQueryCaches(
         pageParams,
       };
     });
-    if (myFeedKey) {
-      qc.setQueryData<{ meetings: Meeting[] }>(myFeedKey, (prev) => {
-        if (!prev) return prev;
-        return { meetings: prev.meetings.filter((m) => m.id !== id) };
-      });
-    }
+  }
+
+  if (touchMy && keys.myFeedKey) {
+    qc.setQueryData<{ meetings: Meeting[] }>(keys.myFeedKey, (prev) => {
+      if (!prev) return prev;
+      const next = prev.meetings.filter(
+        (m) => !meetingIdInRemoveSet(typeof m.id === 'string' ? m.id : '', idSet),
+      );
+      if (next.length === prev.meetings.length) return prev;
+      mutated = true;
+      return { meetings: next };
+    });
+  }
+
+  return mutated;
+}
+
+/** Realtime `new`/`old` 행이 있으면 React Query 캐시(AsyncStorage persist 대상)에 즉시 반영합니다. */
+export function applyMeetingsTableRealtimePayloadToQueryCaches(
+  qc: QueryClient,
+  payload: MeetingsTableRealtimePayload,
+  keys: MeetingsFeedCacheKeys,
+): void {
+  if (payload.eventType === 'DELETE' && payload.oldRecord) {
+    const id = meetingIdFromRealtimeRow(payload.oldRecord);
+    if (!id) return;
+    removeMeetingsFromMeetingsFeedCaches(qc, [id], keys);
     return;
   }
 
@@ -83,6 +121,7 @@ export function applyMeetingsTableRealtimePayloadToQueryCaches(
   if (!mapped.id) return;
 
   const isPublic = mapped.isPublic === true;
+  const { feedKey, myFeedKey } = keys;
 
   qc.setQueryData<FeedInfiniteData>(feedKey, (prev) => {
     if (!prev) return prev;

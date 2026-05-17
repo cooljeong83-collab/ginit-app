@@ -174,6 +174,7 @@ export default function ProfileAppSettingsScreen() {
   const [showTestCrashRow, setShowTestCrashRow] = useState(false);
   const versionTapCountRef = useRef(0);
   const versionTapResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const meetingNotifyFetchGenRef = useRef(0);
 
   const { height: windowHeight } = useWindowDimensions();
   const soundSheetLayout = useMemo(() => {
@@ -235,16 +236,19 @@ export default function ProfileAppSettingsScreen() {
       setMeetingNotifyEffectiveOn(false);
       return;
     }
+    const gen = ++meetingNotifyFetchGenRef.current;
     setMeetingNotifyLoaded(false);
     try {
       const m = await fetchMeetingAreaNotifyMatrix(pk);
+      if (gen !== meetingNotifyFetchGenRef.current) return;
       const rn = (m.region_norms ?? []).filter((x) => String(x ?? '').trim() !== '');
       const ci = (m.category_ids ?? []).filter((x) => String(x ?? '').trim() !== '');
       setMeetingNotifyEffectiveOn(rn.length > 0 && ci.length > 0);
     } catch {
+      if (gen !== meetingNotifyFetchGenRef.current) return;
       setMeetingNotifyEffectiveOn(false);
     } finally {
-      setMeetingNotifyLoaded(true);
+      if (gen === meetingNotifyFetchGenRef.current) setMeetingNotifyLoaded(true);
     }
   }, [profilePk]);
 
@@ -721,18 +725,6 @@ export default function ProfileAppSettingsScreen() {
           {isSignedIn ? (
             <View style={[styles.block, styles.blockGap]}>
               {sectionTitle('개인')}
-              <GinitPressable
-                onPress={() => router.push('/profile/meeting-history')}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="모임 히스토리">
-                <SettingsRowLeadIcon name="history-outline" />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>모임 히스토리</Text>
-                </View>
-                <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-              </GinitPressable>
-              <RowSep />
               <GinitPressable
                 onPress={() => router.push('/settlement/accounts')}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}

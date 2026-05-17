@@ -5,19 +5,17 @@ import { Image } from 'expo-image';
 import type { ReactNode, RefObject } from 'react';
 import { memo, useMemo } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle } from 'react-native';
-import { ActivityIndicator, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Text, TextInput, View } from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
-import {
-  KeyboardGestureArea,
-  KeyboardStickyView,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
+import { KeyboardGestureArea, KeyboardStickyView } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import {
   ChatInvertedKeyboardSpacer,
   CHAT_FLASH_LIST_DRAW_DISTANCE,
   GINIT_CHAT_COMPOSER_NATIVE_ID,
+  useChatAndroidStickyComposerInputMode,
   useChatComposerStickyOffset,
+  useChatReanimatedKeyboardAnimation,
 } from '@/components/chat/ChatKeyboardScrollView';
 import { meetingChatBodyStyles as styles } from '@/components/chat/meeting-chat-body-styles';
 import { replyPreviewText, replyTargetLabel } from '@/components/chat/meeting-chat-ui-helpers';
@@ -109,8 +107,9 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
   hideComposer = false,
   listExtraData,
 }: MeetingChatMainColumnProps) {
-  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
-  const { stickyOpenedOffset } = useChatComposerStickyOffset();
+  useChatAndroidStickyComposerInputMode();
+  const { height: keyboardHeight } = useChatReanimatedKeyboardAnimation();
+  const stickyOffset = useChatComposerStickyOffset();
 
   const jumpFabAnimatedStyle = useAnimatedStyle(
     () => ({
@@ -119,16 +118,9 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
     [composerDockBlockHeight],
   );
 
-  const listKeyboardHeader = useMemo(() => <ChatInvertedKeyboardSpacer />, []);
-
   const listEmptyComponent = useMemo(
     () => <Text style={styles.emptyChat}>첫 메시지를 남겨 보세요.</Text>,
     [],
-  );
-
-  const stickyOffset = useMemo(
-    () => ({ closed: 0, opened: stickyOpenedOffset }),
-    [stickyOpenedOffset],
   );
 
   const setBothRefs = (r: FlashListRef<MeetingChatListRow> | null) => {
@@ -139,7 +131,7 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
 
   return (
     <KeyboardGestureArea
-      interpolator="ios"
+      interpolator={Platform.OS === 'ios' ? 'ios' : 'linear'}
       style={styles.chatMainColumn}
       textInputNativeID={GINIT_CHAT_COMPOSER_NATIVE_ID}>
       <View style={styles.listWrap}>
@@ -175,7 +167,7 @@ export const MeetingChatMainColumn = memo(function MeetingChatMainColumn({
           contentContainerStyle={chatListContentStyle}
           inverted
           drawDistance={CHAT_FLASH_LIST_DRAW_DISTANCE}
-          ListHeaderComponent={listKeyboardHeader}
+          ListHeaderComponent={ChatInvertedKeyboardSpacer}
           onScroll={onChatScroll}
           onContentSizeChange={onChatListContentSizeChange}
           scrollEventThrottle={16}

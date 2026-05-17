@@ -75,6 +75,7 @@ export function computeFeedMeetingListSettingsDotActive(params: {
 export function useMeetingCreateNotifyEffective(profilePk: string, refreshWhen = true) {
   const [loaded, setLoaded] = useState(false);
   const [effectiveOn, setEffectiveOn] = useState(false);
+  const fetchGenRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (Platform.OS === 'web') {
@@ -88,16 +89,19 @@ export function useMeetingCreateNotifyEffective(profilePk: string, refreshWhen =
       setEffectiveOn(false);
       return;
     }
+    const gen = ++fetchGenRef.current;
     setLoaded(false);
     try {
       const m = await fetchMeetingAreaNotifyMatrix(pk);
+      if (gen !== fetchGenRef.current) return;
       const rn = (m.region_norms ?? []).filter((x) => String(x ?? '').trim() !== '');
       const ci = (m.category_ids ?? []).filter((x) => String(x ?? '').trim() !== '');
       setEffectiveOn(rn.length > 0 && ci.length > 0);
     } catch {
+      if (gen !== fetchGenRef.current) return;
       setEffectiveOn(false);
     } finally {
-      setLoaded(true);
+      if (gen === fetchGenRef.current) setLoaded(true);
     }
   }, [profilePk]);
 

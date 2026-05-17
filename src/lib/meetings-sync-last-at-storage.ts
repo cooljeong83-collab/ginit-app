@@ -38,3 +38,19 @@ export async function setMyMeetingsFeedLastSyncIso(iso: string): Promise<void> {
     /* ignore */
   }
 }
+
+export async function clearPublicMeetingsFeedLastSyncIso(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KEY_PUBLIC);
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function clearMyMeetingsFeedLastSyncIso(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KEY_MY);
+  } catch {
+    /* ignore */
+  }
+}

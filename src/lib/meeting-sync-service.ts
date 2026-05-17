@@ -15,6 +15,7 @@ import {
   setMyMeetingsFeedLastSyncIso,
   setPublicMeetingsFeedLastSyncIso,
 } from '@/src/lib/meetings-sync-last-at-storage';
+import { removeMeetingsFromMeetingsFeedCaches } from '@/src/lib/meetings-feed-realtime-cache-patch';
 import {
   diffMeetingSummariesDelta,
   fetchMeetingsForSyncByIds,
@@ -148,6 +149,25 @@ export function patchMeetingsInMyFeedCache(
   return mutated;
 }
 
+/** 삭제·권한 상실 등으로 상세 fetch에 없는 id를 피드 캐시에서 제거합니다. */
+export function removeMeetingFromMeetingsQueryCaches(
+  queryClient: QueryClient,
+  meetingId: string,
+  viewerUserId?: string | null,
+): boolean {
+  const mid = meetingId.trim();
+  if (!mid) return false;
+  const uid = normalizeParticipantId(viewerUserId ?? '');
+  return removeMeetingsFromMeetingsFeedCaches(
+    queryClient,
+    [mid],
+    {
+      feedKey: meetingsFeedInfiniteQueryKey(),
+      myFeedKey: uid ? myMeetingsFeedQueryKey(uid) : null,
+    },
+  );
+}
+
 export async function performMeetingsQuerySurgicalSync(
   queryClient: QueryClient,
   viewerUserId: string | null | undefined,
@@ -254,6 +274,38 @@ export async function performMeetingsQuerySurgicalSync(
     if (!m) continue;
     if (flatMy.some((x) => (typeof x.id === 'string' ? x.id.trim() : '') === id)) updMy.set(id, m);
     else prepMy.push(m);
+  }
+
+  const cacheKeys = {
+    feedKey: pubKey,
+    myFeedKey: myKey,
+  };
+  const pubRemoveIds = pubChanged
+    .map((x) => x.trim())
+    .filter(
+      (id) =>
+        id &&
+        !byId.has(id) &&
+        flatPub.some((x) => (typeof x.id === 'string' ? x.id.trim() : '') === id),
+    );
+  const myRemoveIds = myChanged
+    .map((x) => x.trim())
+    .filter(
+      (id) =>
+        id &&
+        !byId.has(id) &&
+        flatMy.some((x) => (typeof x.id === 'string' ? x.id.trim() : '') === id),
+    );
+
+  if (runPublic && pubRemoveIds.length > 0) {
+    if (removeMeetingsFromMeetingsFeedCaches(queryClient, pubRemoveIds, cacheKeys, { myFeed: false })) {
+      patchedAny = true;
+    }
+  }
+  if (runMy && myRemoveIds.length > 0) {
+    if (removeMeetingsFromMeetingsFeedCaches(queryClient, myRemoveIds, cacheKeys, { publicFeed: false })) {
+      patchedAny = true;
+    }
   }
 
   if (runPublic && (flatPub.length > 0 || prepPub.length > 0 || updPub.size > 0)) {

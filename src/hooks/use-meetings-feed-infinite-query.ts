@@ -95,10 +95,9 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
   const listError =
     query.error instanceof Error ? query.error.message : query.error ? String(query.error) : null;
 
+  /** 하단 스피너는 무한 스크롤 다음 페이지만. 백그라운드 refetch(`isFetching`)는 persist·재로그인 직후에도 목록을 유지합니다. */
   const showFooterSpinner =
-    query.isFetchingNextPage ||
-    (query.isPending && meetings.length === 0) ||
-    (query.isFetching && meetings.length > 0);
+    query.isFetchingNextPage || (query.isPending && meetings.length === 0);
 
   return {
     meetings,
