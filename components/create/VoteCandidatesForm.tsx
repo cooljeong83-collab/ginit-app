@@ -87,6 +87,11 @@ import {
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import {
+  gatePlaceAgainstRegisteredInterestRegions,
+  type PlaceRegionCheckInput,
+} from '@/src/lib/meeting-create-place-region';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -431,6 +436,9 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   // 장소 후보 단계: 인라인 검색 UI (AI 초기 검색어 + 추천 검색어 + 결과 그리드)
   const [placeQuery, setPlaceQuery] = useState('');
   const [placeBiasHint, setPlaceBiasHint] = useState<string | null>(null);
+  const [registeredInterestRegions, setRegisteredInterestRegions] = useState<string[]>([]);
+  const registeredInterestRegionsRef = useRef<string[]>([]);
+  registeredInterestRegionsRef.current = registeredInterestRegions;
   const [placeSearchRows, setPlaceSearchRows] = useState<PlaceSearchRow[]>([]);
   const [placeSearchNextPageToken, setPlaceSearchNextPageToken] = useState<string | null>(null);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
@@ -469,6 +477,33 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const placeCandidatesRef = useRef(placeCandidates);
   placeCandidatesRef.current = placeCandidates;
+
+  const gatePlaceForInterestRegions = useCallback((place: PlaceRegionCheckInput) => {
+    return gatePlaceAgainstRegisteredInterestRegions(place, registeredInterestRegionsRef.current);
+  }, []);
+
+  const alertIfPlaceOutsideInterestRegions = useCallback((place: PlaceRegionCheckInput): boolean => {
+    const gate = gatePlaceForInterestRegions(place);
+    if (gate.ok) return true;
+    Alert.alert(gate.title, gate.message);
+    return false;
+  }, [gatePlaceForInterestRegions]);
+
+  const validateFilledPlacesInterestRegions = useCallback((): VoteCandidatesGateResult => {
+    const filled = placeCandidatesRef.current.filter(isFilled);
+    for (const r of filled) {
+      const gate = gatePlaceForInterestRegions({
+        placeName: r.placeName,
+        address: r.address,
+        latitude: r.latitude,
+        longitude: r.longitude,
+      });
+      if (!gate.ok) {
+        return { ok: false, error: `${gate.title}\n\n${gate.message}` };
+      }
+    }
+    return { ok: true };
+  }, [gatePlaceForInterestRegions]);
   const dateCandidatesRef = useRef(dateCandidates);
   dateCandidatesRef.current = dateCandidates;
   /** 레거시: place-search 화면 이동 플로우에서 쓰던 임시 행 ID (현재는 인라인 검색 UI 사용) */
@@ -989,6 +1024,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       const resolved = item;
       const address = resolved.roadAddress?.trim() || resolved.address?.trim() || addr;
       const placeName = resolved.title.trim() || title.trim();
+      if (
+        !alertIfPlaceOutsideInterestRegions({
+          placeName,
+          address,
+          latitude: resolved.latitude,
+          longitude: resolved.longitude,
+        })
+      ) {
+        return false;
+      }
       const linkFromApi =
         sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
       const thumb = (resolved.thumbnailUrl ?? '').trim();
@@ -1016,7 +1061,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     } finally {
       setPlaceResolvingById((prev) => ({ ...prev, [item.id]: false }));
     }
-  }, []);
+  }, [alertIfPlaceOutsideInterestRegions]);
 
   const playAgentPlaceInlinePick = useCallback(
     async (opts: { maxPicks: number; isAlive: () => boolean }): Promise<'ok' | 'empty' | 'error' | 'aborted'> => {
@@ -1094,6 +1139,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             error: `장소 후보는 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 선택할 수 있어요.`,
           };
         }
+        const regionGate = validateFilledPlacesInterestRegions();
+        if (!regionGate.ok) return regionGate;
         return { ok: true };
       },
       buildPayload: (): VoteCandidatesBuildResult => {
@@ -1116,6 +1163,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           const err = validateDateCandidate(dates[i], i);
           if (err) return { ok: false, error: err };
         }
+        const regionGate = validateFilledPlacesInterestRegions();
+        if (!regionGate.ok) return regionGate;
         const placeCandidatesOut = filledPlaces.map(
           (r) =>
             stripUndefinedDeep({
@@ -1224,6 +1273,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             error: `장소 후보는 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 선택할 수 있어요.`,
           };
         }
+        const regionGateOnly = validateFilledPlacesInterestRegions();
+        if (!regionGateOnly.ok) return regionGateOnly;
         const placeCandidatesOut = filledPlaces.map(
           (r) =>
             stripUndefinedDeep({
@@ -1249,13 +1300,35 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       playAgentPlaceInlinePick,
       playAgentSchedulePickAnimation,
     }),
-    [router, seedQ, seedDate, seedTime, sessionUserId, playAgentPlaceInlinePick, playAgentSchedulePickAnimation],
+    [
+      router,
+      seedQ,
+      seedDate,
+      seedTime,
+      sessionUserId,
+      playAgentPlaceInlinePick,
+      playAgentSchedulePickAnimation,
+      validateFilledPlacesInterestRegions,
+    ],
   );
 
   useFocusEffect(
     useCallback(() => {
       const sel = consumePendingVotePlaceRow();
       if (sel) {
+        const gate = gatePlaceAgainstRegisteredInterestRegions(
+          {
+            placeName: sel.placeName,
+            address: sel.address,
+            latitude: sel.latitude,
+            longitude: sel.longitude,
+          },
+          registeredInterestRegionsRef.current,
+        );
+        if (!gate.ok) {
+          Alert.alert(gate.title, gate.message);
+          return;
+        }
         pendingEphemeralPlaceRowIdRef.current = null;
         setPlaceCandidates((prev) => {
           const hit = prev.some((r) => r.id === sel.rowId);
@@ -1487,6 +1560,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placeGameKindLabels,
     placeFocusKnowledgePreferenceLabels,
   ]);
+
+  useEffect(() => {
+    let alive = true;
+    void loadRegisteredFeedRegions().then((regions) => {
+      if (!alive) return;
+      setRegisteredInterestRegions(regions);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -2360,6 +2444,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                   const address =
                                     resolved.roadAddress?.trim() || resolved.address?.trim() || addressOnly;
                                   const placeName = resolved.title.trim() || title.trim();
+                                  if (
+                                    !alertIfPlaceOutsideInterestRegions({
+                                      placeName,
+                                      address,
+                                      latitude: resolved.latitude,
+                                      longitude: resolved.longitude,
+                                    })
+                                  ) {
+                                    return;
+                                  }
                                   const linkFromApi =
                                     sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
                                   const resolvedPhoto =

@@ -9,7 +9,22 @@ import * as Location from 'expo-location';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, UIManager, View, useWindowDimensions, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent} from 'react-native';
+  ActivityIndicator,
+  Alert,
+  InteractionManager,
+  LayoutAnimation,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  UIManager,
+  View,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import MapView from 'react-native-map-clustering';
 import { Marker, type Region } from 'react-native-maps';
@@ -31,8 +46,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
-import { useSupabaseMeetingPatchesByIds } from '@/src/hooks/useSupabaseMeetingPatchesByIds';
-import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
+import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useUnmountCleanup } from '@/src/hooks/useUnmountCleanup';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import type { Category } from '@/src/lib/categories';
@@ -49,8 +63,9 @@ import {
   defaultFeedSearchFilters,
   feedSearchFiltersActive,
   listSortModeLabel,
-  meetingMatchesCategoryFilter,
+  filterMeetingsForHomeExploreTab,
   meetingMatchesFeedSearch,
+  meetingWithinHomeFeedRadius,
   sortMeetingsForFeed,
   type FeedSearchFilters,
   type MeetingListSortMode,
@@ -58,12 +73,20 @@ import {
 import {
   approximateCenterLatLngForFeedRegion,
   approximateCenterLatLngForFeedRegionSync,
+  regionViewportForFeedInterestRegion,
 } from '@/src/lib/feed-region-map-center';
-import { loadRegisteredFeedRegions, peekFeedRegionMapSelectionForMapBoot } from '@/src/lib/feed-registered-regions';
+import {
+  loadActiveFeedRegion,
+  loadRegisteredFeedRegions,
+  peekFeedRegionMapSelectionForMapBoot,
+  saveActiveFeedRegion,
+} from '@/src/lib/feed-registered-regions';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import { formatDistanceForList, haversineDistanceMeters, meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
+import { loadFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import { loadMapCategoryBarVisibleIds, persistMapCategoryBarVisibleIds } from '@/src/lib/map-category-bar-preference';
+import { prefetchMeetingDetailBeforeNavigate } from '@/src/lib/map-open-meeting-detail';
 import {
   MIXED_MEETING_CLUSTER_PIN_ACCENT,
   getMapPinGradientColors,
@@ -88,14 +111,9 @@ import {
   meetingParticipantCount,
   parsePublicMeetingDetailsConfig,
 } from '@/src/lib/meetings';
-import { subscribeMeetingsHybrid } from '@/src/lib/meetings-hybrid';
 import { centerRegionToNaverRegion } from '@/src/lib/naver-map-region';
 import { applyNearbySearchBiasFromMapNavigation } from '@/src/lib/nearby-search-bias';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import {
-  fetchMeetingsWithinRadiusFromSupabase,
-  syncMeetingsWithinRadiusFromSupabase,
-} from '@/src/lib/supabase-meetings-geo-search';
 import { getUserProfile, getUserProfilesForIds, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
 
 // RN New Architecture(Fabric)에서는 setLayoutAnimationEnabledExperimental이 no-op이며
@@ -172,28 +190,25 @@ const INITIAL_VIEW_NS_SPAN_METERS = 2000;
 // 위치 권한 미허용·관심 지역 미설정 시 기본 진입 중심(영등포구)
 const DEFAULT_NO_LOCATION_CENTER: LatLng = { latitude: 37.5263, longitude: 126.8962 };
 
-/** `getPolicyNumeric('meeting','map_radius_km',3)` 기본과 동일 — 초기 state는 정책 훅보다 먼저 잡기 위함 */
-const MAP_BOOT_POLICY_RADIUS_KM = 3;
+/** 한국 수도권 탐색 — 전국 축소 방지 / 과도한 확대 제한 */
+const MAP_MIN_ZOOM = 9;
+const MAP_MAX_ZOOM = 18;
 
-function mapBootAnchorAndRegionFromInterestMemory(radiusKm: number): {
+function mapBootAnchorAndRegionFromInterestMemory(): {
   anchor: LatLng;
   region: Region;
   exploreActiveNorm: string;
 } {
   const { regions, activeNorm } = peekFeedRegionMapSelectionForMapBoot();
   if (regions.length === 0) {
-    const r = regionCenteredOnUserRadius(
-      DEFAULT_NO_LOCATION_CENTER.latitude,
-      DEFAULT_NO_LOCATION_CENTER.longitude,
-      radiusKm,
-    );
+    const r = regionViewportForFeedInterestRegion('');
     return { anchor: DEFAULT_NO_LOCATION_CENTER, region: r, exploreActiveNorm: '' };
   }
   const setN = new Set(regions.map((x) => normalizeFeedRegionLabel(x)));
   const exploreActiveNorm =
     activeNorm && setN.has(activeNorm) ? activeNorm : normalizeFeedRegionLabel(regions[0]!);
   const center = approximateCenterLatLngForFeedRegionSync(exploreActiveNorm);
-  const r = regionCenteredOnUserRadius(center.latitude, center.longitude, radiusKm);
+  const r = regionViewportForFeedInterestRegion(exploreActiveNorm);
   return { anchor: center, region: r, exploreActiveNorm };
 }
 
@@ -480,7 +495,9 @@ export default function MapScreen() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [sheetLayoutWidth, setSheetLayoutWidth] = useState(() => Math.max(1, Math.floor(windowWidth)));
   const { addCleanup } = useUnmountCleanup();
-  const mapBootInit = useMemo(() => mapBootAnchorAndRegionFromInterestMemory(MAP_BOOT_POLICY_RADIUS_KM), []);
+  const mapBootInit = useMemo(() => mapBootAnchorAndRegionFromInterestMemory(), []);
+  const lastSnappedFeedRegionNormRef = useRef<string | null>(null);
+  const androidOverlayRemountTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // `react-native-map-clustering`의 ref 타입은 내부적으로 콜백 ref를 쓰므로 any로 둡니다.
   const mapRef = useRef<any>(null);
   const naverMapRef = useRef<NaverMapViewRef>(null);
@@ -537,7 +554,6 @@ export default function MapScreen() {
     // 마커 탭 직후 카메라 콜백/탭 버블링으로 시트가 바로 닫히는 것을 방지
     if (Date.now() - lastMarkerTapAtRef.current < 450) return;
     followSelectedRef.current = false;
-    setMapMovedSinceSearch(true);
     closeSheet();
   }, [closeSheet]);
 
@@ -604,7 +620,6 @@ export default function MapScreen() {
         .failOffsetX([-28, 28])
         .onBegin(() => {
           dragStartShown.value = sheetShown.value;
-          runOnJS(setMapMovedSinceSearch)(true);
         })
         .onUpdate((e) => {
           const next = dragStartShown.value + (-e.translationY / Math.max(1, liftDelta));
@@ -621,7 +636,7 @@ export default function MapScreen() {
             reduceMotion: ReduceMotion.Never,
           });
         }),
-    [dragStartShown, liftDelta, sheetShown, enableFollowSelected, setMapMovedSinceSearch],
+    [dragStartShown, liftDelta, sheetShown, enableFollowSelected],
   );
 
   const [regionLabel, setRegionLabel] = useState(FEED_LOCATION_FALLBACK_SHORT);
@@ -639,7 +654,8 @@ export default function MapScreen() {
   const [userHeadingDeg, setUserHeadingDeg] = useState<number | null>(null);
   const [genderByUserId, setGenderByUserId] = useState<Map<string, string>>(new Map());
   const [listSortMode, setListSortMode] = useState<MeetingListSortMode>('distance');
-  const recruitingOnly = true;
+  /** 홈 «모임» 탐색과 동일 — 기본 false(홈 탐색 기본값) */
+  const recruitingOnly = false;
   /** 탐색 상단 카테고리 팝업에서 저장 시 적용 — 서울 달력 기준 오늘 일정 모임만 */
   const [mapTodayOnly, setMapTodayOnly] = useState(false);
   const [categoryBarTodayOnlyDraft, setCategoryBarTodayOnlyDraft] = useState(false);
@@ -653,14 +669,23 @@ export default function MapScreen() {
 
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = useMemo(() => (Array.isArray(categoriesRaw) ? categoriesRaw : []), [categoriesRaw]);
-  const [hybridMeetings, setHybridMeetings] = useState<Meeting[]>([]);
-  const [rpcMeetings, setRpcMeetings] = useState<Meeting[]>([]);
-  const rpcMeetingsRef = useRef<Meeting[]>([]);
-  const lastMapGeoQueryKeyRef = useRef<string>('');
+  const [registeredRegions, setRegisteredRegions] = useState<string[]>([]);
+  const [activeRegionNorm, setActiveRegionNorm] = useState<string | null>(null);
+  const [feedLocationReady, setFeedLocationReady] = useState(false);
+  const [feedBarVisibleCategoryIds, setFeedBarVisibleCategoryIds] = useState<string[] | null>(null);
+  const { meetings: feedMeetings } = useMeetingsFeedInfiniteQuery({ enabled: feedLocationReady });
+
+  /** 홈 «모임» 탐색과 동일한 관심 구 선택 규칙 */
+  const exploreActiveRegionNorm = useMemo(() => {
+    if (!feedLocationReady || registeredRegions.length === 0) return '';
+    const set = new Set(registeredRegions.map((r) => normalizeFeedRegionLabel(r)));
+    const a = activeRegionNorm ? normalizeFeedRegionLabel(activeRegionNorm) : '';
+    if (a && set.has(a)) return a;
+    return normalizeFeedRegionLabel(registeredRegions[0]!);
+  }, [feedLocationReady, registeredRegions, activeRegionNorm]);
   const [meetingsBooted, setMeetingsBooted] = useState(false);
-  /** 반경 RPC(fetchMeetingsWithinRadiusFromSupabase) 진행 중 — 하이브리드 부트 후에도 시트 빈 카피 깜빡임 방지 */
-  const [mapGeoMeetingsLoading, setMapGeoMeetingsLoading] = useState(false);
-  const [mapGeoRefreshSeq, setMapGeoRefreshSeq] = useState(0);
+  /** Query Cache-First: geo RPC 미사용 — 스플래시·재검색 UI 조건용으로 항상 false */
+  const mapGeoMeetingsLoading = false;
   const [searchAnchor, setSearchAnchor] = useState<LatLng | null>(() => mapBootInit.anchor);
   const [driftTooFar, setDriftTooFar] = useState(false);
   /** 마지막으로 조회한 지도 가시 영역(이 지역 재검색·초기 로드·내 위치) — RPC·목록·마커 기준 */
@@ -676,12 +701,40 @@ export default function MapScreen() {
   const [chipScrollContentW, setChipScrollContentW] = useState(0);
   const [chipScrollOffsetX, setChipScrollOffsetX] = useState(0);
   const isMapScreenFocused = useIsFocused();
+  /** Android Fabric: NaverMapView 자식(마커)은 맵 초기화·포커스 후에만 마운트 — getChildAt OOB 방지 */
+  const [androidMapOverlaysReady, setAndroidMapOverlaysReady] = useState(Platform.OS !== 'android');
+  const showNaverMapOverlays =
+    Platform.OS !== 'android' || (isMapScreenFocused && androidMapOverlaysReady);
+
+  useEffect(() => {
+    if (!isMapScreenFocused) {
+      if (Platform.OS === 'android') setAndroidMapOverlaysReady(false);
+      return;
+    }
+    if (Platform.OS !== 'android') {
+      setAndroidMapOverlaysReady(true);
+      return;
+    }
+    setAndroidMapOverlaysReady(false);
+    let cancelled = false;
+    const handle = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!cancelled) setAndroidMapOverlaysReady(true);
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+      handle.cancel();
+    };
+  }, [isMapScreenFocused]);
 
   /**
    * 하이브리드 최초 부트 전, 또는 반경 RPC 진행 중까지 시트 스플래시 — 그 사이 빈 시트 카피가 먼저 깜빡이지 않게 함.
    * 관심지역 기반 초기 앵커는 동기로 잡히므로 권한·GPS 대기로 시트를 가리지 않습니다.
    */
-  const showSheetSplash = !meetingsBooted || mapGeoMeetingsLoading;
+  const showSheetSplash = !meetingsBooted && feedMeetings.length === 0;
 
   useAppPolicies();
   const mapRadiusKm = Math.max(0.5, Math.min(80, getPolicyNumeric('meeting', 'map_radius_km', 3)));
@@ -766,6 +819,69 @@ export default function MapScreen() {
     ],
   );
 
+  /** 모임 탭에서 선택한 관심 구 전체가 보이도록 카메라·조회 박스 동기화 */
+  const snapMapToFeedInterestRegion = useCallback(
+    async (regionNorm: string, opts?: { force?: boolean }) => {
+      const norm = normalizeFeedRegionLabel(regionNorm.trim());
+      if (!norm) return;
+      if (!opts?.force && lastSnappedFeedRegionNormRef.current === norm) return;
+      lastSnappedFeedRegionNormRef.current = norm;
+
+      const center = await approximateCenterLatLngForFeedRegion(norm);
+      const viewport = regionViewportForFeedInterestRegion(norm);
+      const rCamera: Region = {
+        latitude: centerLatForBetweenTopAndBottom(
+          center.latitude,
+          viewport.latitudeDelta,
+          insets.top ?? 0,
+          sheetPeekHeight,
+          windowHeight,
+        ),
+        longitude: center.longitude,
+        latitudeDelta: viewport.latitudeDelta,
+        longitudeDelta: viewport.longitudeDelta,
+      };
+
+      mapSnapCameraTighterThanQueryRef.current = false;
+      if (Platform.OS === 'android') setAndroidMapOverlaysReady(false);
+      lastCompleteRegionRef.current = rCamera;
+      setSearchAnchor(center);
+      setMapGeoQueryRegion(rCamera);
+      setQueriedRegion(rCamera);
+      setPendingRegion(rCamera);
+      lastQueriedRegionRef.current = rCamera;
+      suppressRescanUntilMsRef.current = Date.now() + 1400;
+      setDriftTooFar(false);
+      setMapMovedSinceSearch(false);
+      setRegionLabel(norm);
+
+      const remountOverlaysAfterMs = 560;
+      try {
+        if (Platform.OS === 'android') {
+          naverMapRef.current?.animateRegionTo({
+            ...centerRegionToNaverRegion(rCamera),
+            duration: 520,
+            easing: 'EaseIn',
+          });
+        } else {
+          mapRef.current?.animateToRegion(rCamera, 450);
+        }
+      } catch {
+        /* ignore */
+      }
+      if (Platform.OS === 'android') {
+        if (androidOverlayRemountTimeoutRef.current != null) {
+          clearTimeout(androidOverlayRemountTimeoutRef.current);
+        }
+        androidOverlayRemountTimeoutRef.current = setTimeout(() => {
+          androidOverlayRemountTimeoutRef.current = null;
+          setAndroidMapOverlaysReady(true);
+        }, remountOverlaysAfterMs);
+      }
+    },
+    [insets.top, sheetPeekHeight, windowHeight],
+  );
+
   /** 지도 탭 진입·재진입: 시트·레이아웃만 동기화 (카메라·권한은 관심지역 동기 초기값 / «내 위치» 버튼에서만 처리) */
   useFocusEffect(
     useCallback(() => {
@@ -777,29 +893,10 @@ export default function MapScreen() {
     }, [openSheet, setMapMovedSinceSearch]),
   );
 
-  useSyncOnScreenFocus(
-    useCallback(() => {
-      if (!searchAnchor && !mapGeoQueryRegionRef.current) return;
-      setMapGeoRefreshSeq((n) => n + 1);
-    }, [searchAnchor]),
-    [searchAnchor],
-    { enabled: Boolean(searchAnchor || mapGeoQueryRegion) },
-  );
-
-  const driftThresholdM = mapRadiusKm * 1000;
-
   const debouncedDriftCheck = useDebouncedRegion(
-    useCallback(
-      (r: Region) => {
-        const center: LatLng = { latitude: r.latitude, longitude: r.longitude };
-        if (!searchAnchor) {
-          setDriftTooFar(false);
-          return;
-        }
-        setDriftTooFar(haversineDistanceMeters(center, searchAnchor) > driftThresholdM);
-      },
-      [searchAnchor, driftThresholdM],
-    ),
+    useCallback((_r: Region) => {
+      setDriftTooFar(false);
+    }, []),
     400,
   );
 
@@ -833,6 +930,7 @@ export default function MapScreen() {
         mapSnapCameraTighterThanQueryRef.current = false;
       }
       setPendingRegion(r);
+      setMapGeoQueryRegion(r);
       debouncedDriftCheck(r);
       debouncedZoomClustering(r);
     },
@@ -847,18 +945,7 @@ export default function MapScreen() {
     setMapMovedSinceSearch(false);
   }, [mapGeoQueryRegion]);
 
-  const hasPendingRescan = useMemo(() => {
-    if (Date.now() < suppressRescanUntilMsRef.current) return false;
-    const q = queriedRegion;
-    const p = pendingRegion;
-    if (!q || !p) return false;
-    const centerMoveM = haversineDistanceMeters(
-      { latitude: q.latitude, longitude: q.longitude },
-      { latitude: p.latitude, longitude: p.longitude },
-    );
-    const zoomChanged = Math.abs((q.latitudeDelta ?? 0) - (p.latitudeDelta ?? 0)) > 0.0001;
-    return centerMoveM > 8 || zoomChanged;
-  }, [pendingRegion, queriedRegion]);
+  const hasPendingRescan = useMemo(() => false, []);
 
   useEffect(() => {
     // 초기/복귀 타이밍에 `mapGeoQueryRegion`이 아직 세팅되지 않으면 버튼 판단 기준(queriedRegion)이 null이라
@@ -882,63 +969,84 @@ export default function MapScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const regions = await loadRegisteredFeedRegions();
-      if (cancelled) return;
-      const { activeNorm: activeRaw } = peekFeedRegionMapSelectionForMapBoot();
-      let exploreActiveNorm = '';
-      if (regions.length > 0) {
-        const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
-        exploreActiveNorm =
-          activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
-      }
+      try {
+        const regions = await loadRegisteredFeedRegions();
+        if (cancelled) return;
+        setRegisteredRegions(regions);
+        const activeRaw = await loadActiveFeedRegion();
+        if (cancelled) return;
+        let nextActive: string | null = null;
+        let exploreActiveNormLocal = '';
+        if (regions.length > 0) {
+          const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
+          const candidate =
+            activeRaw && setN.has(activeRaw) ? activeRaw : normalizeFeedRegionLabel(regions[0]!);
+          exploreActiveNormLocal = candidate;
+          nextActive = candidate;
+          if (activeRaw !== candidate) void saveActiveFeedRegion(candidate);
+        } else {
+          void saveActiveFeedRegion(null);
+        }
+        setActiveRegionNorm(nextActive);
 
-      const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
-      if (cancelled) return;
+        const ctx = await resolveFeedLocationContextWithoutPermissionPrompt();
+        if (cancelled) return;
 
-      const coordsForDistance = ctx.coords;
+        const coordsForDistance = ctx.coords;
 
-      setRegionLabel(
-        exploreActiveNorm
-          ? normalizeFeedRegionLabel(exploreActiveNorm)
-          : normalizeFeedRegionLabel(ctx.labelShort),
-      );
+        setRegionLabel(
+          exploreActiveNormLocal
+            ? normalizeFeedRegionLabel(exploreActiveNormLocal)
+            : normalizeFeedRegionLabel(ctx.labelShort),
+        );
 
-      setUserCoords(coordsForDistance);
+        setUserCoords(coordsForDistance);
 
-      const labelToSave = exploreActiveNorm
-        ? normalizeFeedRegionLabel(exploreActiveNorm)
-        : normalizeFeedRegionLabel(ctx.labelShort);
-      await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: false });
+        const labelToSave = exploreActiveNormLocal
+          ? normalizeFeedRegionLabel(exploreActiveNormLocal)
+          : normalizeFeedRegionLabel(ctx.labelShort);
+        await saveFeedLocationCache(labelToSave, coordsForDistance, { manualRegion: false });
 
-      const interestCenter = exploreActiveNorm
-        ? await approximateCenterLatLngForFeedRegion(exploreActiveNorm)
-        : DEFAULT_NO_LOCATION_CENTER;
-      if (cancelled) return;
-      const r0 = regionCenteredOnUserRadius(interestCenter.latitude, interestCenter.longitude, mapRadiusKm);
-      const prev = lastCompleteRegionRef.current;
-      const movedM =
-        prev == null
-          ? 99999
-          : haversineDistanceMeters(
-              { latitude: prev.latitude, longitude: prev.longitude },
-              interestCenter,
-            );
-      const zoomChanged =
-        prev == null ||
-        Math.abs((prev.latitudeDelta ?? 0) - (r0.latitudeDelta ?? 0)) > 1e-7;
-      if (movedM > 120 || zoomChanged) {
-        lastCompleteRegionRef.current = r0;
-        setSearchAnchor(interestCenter);
-        setMapGeoQueryRegion(r0);
-        setPendingRegion(r0);
-        lastQueriedRegionRef.current = r0;
-        setMapMovedSinceSearch(false);
+      } finally {
+        if (!cancelled) setFeedLocationReady(true);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [mapRadiusKm]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadFeedCategoryBarVisibleIds().then((v) => {
+      if (!cancelled) setFeedBarVisibleCategoryIds(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!feedLocationReady || !exploreActiveRegionNorm) return;
+    void snapMapToFeedInterestRegion(exploreActiveRegionNorm);
+  }, [exploreActiveRegionNorm, feedLocationReady, snapMapToFeedInterestRegion]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadFeedCategoryBarVisibleIds().then(setFeedBarVisibleCategoryIds);
+      const { regions, activeNorm } = peekFeedRegionMapSelectionForMapBoot();
+      if (regions.length > 0) {
+        setRegisteredRegions([...regions]);
+        const setN = new Set(regions.map((r) => normalizeFeedRegionLabel(r)));
+        const a = activeNorm && setN.has(activeNorm) ? activeNorm : normalizeFeedRegionLabel(regions[0]!);
+        const prev = activeRegionNorm ? normalizeFeedRegionLabel(activeRegionNorm) : '';
+        setActiveRegionNorm(a);
+        if (feedLocationReady && a && a !== prev) {
+          lastSnappedFeedRegionNormRef.current = null;
+        }
+      }
+    }, [activeRegionNorm, feedLocationReady]),
+  );
 
   useEffect(() => {
     let posSub: Location.LocationSubscription | null = null;
@@ -995,16 +1103,8 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
-    rpcMeetingsRef.current = rpcMeetings;
-  }, [rpcMeetings]);
-
-  useEffect(() => {
-    const unsub = subscribeMeetingsHybrid((list) => {
-      setHybridMeetings(list);
-      setMeetingsBooted(true);
-    }, () => {});
-    return unsub;
-  }, [userId]);
+    setMeetingsBooted(true);
+  }, [feedMeetings]);
 
   useEffect(() => {
     if (selectedCategoryId == null) return;
@@ -1013,121 +1113,50 @@ export default function MapScreen() {
     }
   }, [categories, selectedCategoryId]);
 
-  useEffect(() => {
-    if (!searchAnchor && !mapGeoQueryRegion) {
-      setMapGeoMeetingsLoading(false);
-      return;
-    }
-    let alive = true;
-    setMapGeoMeetingsLoading(true);
-    void (async () => {
-      try {
-        const anchor =
-          mapGeoQueryRegion != null
-            ? { latitude: mapGeoQueryRegion.latitude, longitude: mapGeoQueryRegion.longitude }
-            : searchAnchor!;
-        const radiusKm = mapGeoQueryRegion ? regionCoverageRadiusKm(mapGeoQueryRegion, 80) : mapRadiusKm;
-        const queryKey = [
-          anchor.latitude.toFixed(5),
-          anchor.longitude.toFixed(5),
-          radiusKm.toFixed(2),
-          selectedCategoryId ?? '',
-        ].join('|');
-        const forceFull = lastMapGeoQueryKeyRef.current !== queryKey;
-        const res = forceFull
-          ? await fetchMeetingsWithinRadiusFromSupabase(anchor.latitude, anchor.longitude, radiusKm, selectedCategoryId)
-          : await syncMeetingsWithinRadiusFromSupabase(
-              rpcMeetingsRef.current,
-              anchor.latitude,
-              anchor.longitude,
-              radiusKm,
-              selectedCategoryId,
-            );
-        if (!alive) return;
-        if (res.ok) {
-          lastMapGeoQueryKeyRef.current = queryKey;
-          setRpcMeetings(res.meetings);
-          setDriftTooFar(false);
-        } else {
-          setRpcMeetings([]);
-        }
-      } finally {
-        if (alive) setMapGeoMeetingsLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [searchAnchor, mapGeoQueryRegion, mapRadiusKm, selectedCategoryId, mapGeoRefreshSeq]);
+  const meetingsWithinRadius = useMemo(
+    () => feedMeetings.filter((m) => meetingWithinHomeFeedRadius(m, null)),
+    [feedMeetings],
+  );
 
-  useEffect(() => {
-    setDriftTooFar(false);
-  }, [searchAnchor]);
+  const homeExploreListFilterParams = useMemo(
+    () => ({
+      meetings: meetingsWithinRadius,
+      feedLocationReady,
+      registeredRegions,
+      exploreActiveRegionNorm,
+      selectedCategoryId,
+      barVisibleCategoryIds: feedBarVisibleCategoryIds,
+      categories,
+      recruitingOnly,
+      feedSearch: mapSearchFilters,
+    }),
+    [
+      meetingsWithinRadius,
+      feedLocationReady,
+      registeredRegions,
+      exploreActiveRegionNorm,
+      selectedCategoryId,
+      feedBarVisibleCategoryIds,
+      categories,
+      recruitingOnly,
+      mapSearchFilters,
+    ],
+  );
 
-  const hybridInMapQueryArea = useMemo(() => {
-    if (!mapGeoQueryRegion) return [];
-    return hybridMeetings.filter((m) => meetingInBounds(m, mapGeoQueryRegion));
-  }, [hybridMeetings, mapGeoQueryRegion]);
+  const exploreFeedMeetings = useMemo(
+    () => filterMeetingsForHomeExploreTab(homeExploreListFilterParams),
+    [homeExploreListFilterParams],
+  );
 
-  const mergedMeetingsBase = useMemo(() => {
-    const mapById = new Map<string, Meeting>();
-    const inQuery = (m: Meeting) => {
-      return !mapGeoQueryRegion || meetingInBounds(m, mapGeoQueryRegion);
-    };
-    for (const m of rpcMeetings) {
-      if (inQuery(m)) mapById.set(m.id, m);
-    }
-    for (const m of hybridInMapQueryArea) mapById.set(m.id, m);
-    return [...mapById.values()];
-  }, [rpcMeetings, hybridInMapQueryArea, mapGeoQueryRegion]);
-
-  const supabasePatches = useSupabaseMeetingPatchesByIds(mergedMeetingsBase.map((m) => m.id), true, userId);
-
-  const mergedMeetings = useMemo(() => {
-    if (supabasePatches.size === 0) return mergedMeetingsBase;
-    return mergedMeetingsBase.map((m) => {
-      const row = supabasePatches.get(m.id);
-      if (!row) return m;
-      return {
-        ...m,
-        participantIds: row.participantIds ?? m.participantIds,
-        participantVoteLog: row.participantVoteLog ?? m.participantVoteLog,
-        voteTallies: row.voteTallies ?? m.voteTallies,
-      };
-    });
-  }, [mergedMeetingsBase, supabasePatches]);
-
-  const textFilteredMeetings = useMemo(() => {
-    if (!meetingMatchesFeedSearch) return mergedMeetings;
-    const active = mapSearchFilters;
-    const isActive = Boolean(
-      active.textQuery.trim() ||
-        active.ageInclude.length > 0 ||
-        active.genderRatio != null ||
-        active.settlement != null ||
-        active.approvalType != null,
-    );
-    if (!isActive) return mergedMeetings;
-    return mergedMeetings.filter((m) => meetingMatchesFeedSearch(m, active));
-  }, [mergedMeetings, mapSearchFilters]);
-
-  const filteredMeetings = useMemo(() => {
-    return textFilteredMeetings.filter((m) => {
-      if (m.isPublic === false) return false;
-      if (!meetingMatchesCategoryFilter(m, selectedCategoryId, categories)) return false;
-      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
-      if (mapTodayOnly && !isMeetingScheduledTodaySeoul(m)) return false;
-      return true;
-    });
-  }, [textFilteredMeetings, selectedCategoryId, categories, recruitingOnly, mapTodayOnly]);
+  const mergedMeetings = exploreFeedMeetings;
 
   /** 목록·거리 표시: 내 위치(GPS) 기준. GPS 없을 때 «가까운 순»은 임박순과 동일하게 정렬 */
   const sortedFilteredMeetings = useMemo(() => {
     if (listSortMode === 'distance' && !userCoords) {
-      return sortMeetingsForFeed(filteredMeetings, 'soon', null);
+      return sortMeetingsForFeed(exploreFeedMeetings, 'soon', null);
     }
-    return sortMeetingsForFeed(filteredMeetings, listSortMode, userCoords);
-  }, [filteredMeetings, listSortMode, userCoords]);
+    return sortMeetingsForFeed(exploreFeedMeetings, listSortMode, userCoords);
+  }, [exploreFeedMeetings, listSortMode, userCoords]);
 
   const meetingsOnMap = useMemo(() => {
     let list = sortedFilteredMeetings.filter(
@@ -1454,8 +1483,6 @@ export default function MapScreen() {
     const r = pendingRegion ?? lastCompleteRegionRef.current;
     if (!r) return;
     mapSnapCameraTighterThanQueryRef.current = false;
-    const next: LatLng = { latitude: r.latitude, longitude: r.longitude };
-    setSearchAnchor(next);
     setMapGeoQueryRegion(r);
     setQueriedRegion(r);
     lastQueriedRegionRef.current = r;
@@ -1463,7 +1490,15 @@ export default function MapScreen() {
     setDriftTooFar(false);
     setMapMovedSinceSearch(false);
     try {
-      mapRef.current?.animateToRegion(r, 420);
+      if (Platform.OS === 'android') {
+        naverMapRef.current?.animateRegionTo({
+          ...centerRegionToNaverRegion(r),
+          duration: 420,
+          easing: 'EaseIn',
+        });
+      } else {
+        mapRef.current?.animateToRegion(r, 420);
+      }
     } catch {
       /* ignore */
     }
@@ -1558,6 +1593,10 @@ export default function MapScreen() {
       if (scrollAfterInteractionCancelRef.current) {
         scrollAfterInteractionCancelRef.current();
         scrollAfterInteractionCancelRef.current = null;
+      }
+      if (androidOverlayRemountTimeoutRef.current != null) {
+        clearTimeout(androidOverlayRemountTimeoutRef.current);
+        androidOverlayRemountTimeoutRef.current = null;
       }
     });
   }, [addCleanup]);
@@ -1725,7 +1764,6 @@ export default function MapScreen() {
 
   const onSheetCarouselBeginDrag = useCallback(() => {
     carouselDragStartIndexRef.current = selectedMeetingIndex;
-    setMapMovedSinceSearch(true);
     enableFollowSelected();
     openSheet();
   }, [selectedMeetingIndex, enableFollowSelected, openSheet]);
@@ -1973,8 +2011,12 @@ export default function MapScreen() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <View style={styles.mapWrap}>
-        {isMapScreenFocused ? (
+        {Platform.OS === 'android' || isMapScreenFocused ? (
           Platform.OS === 'android' ? (
+            <View
+              style={StyleSheet.absoluteFillObject}
+              pointerEvents={isMapScreenFocused ? 'auto' : 'none'}
+              collapsable={false}>
             <NaverMapView
               ref={naverMapRef}
               style={StyleSheet.absoluteFillObject}
@@ -2003,11 +2045,16 @@ export default function MapScreen() {
               isShowCompass={false}
               isShowScaleBar={false}
               isShowLocationButton={false}
+              isRotateGesturesEnabled={false}
+              isTiltGesturesEnabled={false}
               isExtentBoundedInKorea
+              minZoom={MAP_MIN_ZOOM}
+              maxZoom={MAP_MAX_ZOOM}
               locale="ko"
               isUseTextureViewAndroid
               accessibilityLabel="모임 지도 (네이버맵)">
-              {mapMarkerRenderItems.map((item) => {
+              {showNaverMapOverlays
+                ? mapMarkerRenderItems.map((item) => {
                 if (item.kind === 'single') {
                   const m = item.meeting;
                   const selected = m.id === selectedMeetingId;
@@ -2270,9 +2317,14 @@ export default function MapScreen() {
                     </View>
                   </NaverMapMarkerOverlay>
                 );
-              })}
+              })
+                : null}
 
             </NaverMapView>
+            {!isMapScreenFocused ? (
+              <View style={[StyleSheet.absoluteFillObject, styles.mapPausedFill]} pointerEvents="none" />
+            ) : null}
+            </View>
           ) : (
             <MapView
               ref={mapRef}
@@ -2290,6 +2342,10 @@ export default function MapScreen() {
               clusterTextColor="#FFFFFF"
               minPoints={2}
               radius={windowWidth * 0.08}
+              minZoomLevel={MAP_MIN_ZOOM}
+              maxZoomLevel={MAP_MAX_ZOOM}
+              rotateEnabled={false}
+              pitchEnabled={false}
               accessibilityLabel="모임 지도">
               {mapMarkerRenderItems.map((item) => {
                 if (item.kind === 'single') {
@@ -2506,7 +2562,7 @@ export default function MapScreen() {
                   onContentSizeChange={(w) => onMapCategoryChipsContentSizeChange(w)}
                   onScroll={onMapCategoryChipsScroll}
                   scrollEventThrottle={32}
-                  onScrollBeginDrag={() => setMapMovedSinceSearch(true)}>
+                  onScrollBeginDrag={() => {}}>
                   {mapCategoryChips.map((chip) => {
                     const active = chip.filterId === selectedCategoryId;
                     return (
@@ -2637,7 +2693,10 @@ export default function MapScreen() {
                 const m = sheetMeetings[selectedMeetingIndex];
                 if (!m?.id) return;
                 setSelectedMeetingId(m.id);
-                router.push(`/meeting/${m.id}`);
+                void (async () => {
+                  await prefetchMeetingDetailBeforeNavigate(m.id);
+                  router.push(`/meeting/${m.id}`);
+                })();
               }}
               style={({ pressed }) => [styles.sheetCta, pressed && { opacity: 0.92 }]}
               accessibilityRole="button"

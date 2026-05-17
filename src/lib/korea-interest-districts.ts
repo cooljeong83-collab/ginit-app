@@ -3,7 +3,8 @@
  * 광역시·특별시는 cosmosfarm/korea-administrative-district 기준(군 제외),
  * 도 단위 시는 행정구(○○구)가 있는 시만 확장합니다.
  */
-import { formatSeoulGuLabel, normalizeFeedRegionLabel } from '@/src/lib/feed-display-location';
+import { formatSeoulGuLabel } from '@/src/lib/feed-display-location';
+import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
 import { ALL_SEOUL_GU } from '@/src/lib/seoul-gu-constants';
 
 export type KoreaGuSearchHit = { key: string; label: string };

@@ -53,7 +53,6 @@ import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { Category } from '@/src/lib/categories';
 import { loadFeedCategoryBarVisibleIds, persistFeedCategoryBarVisibleIds } from '@/src/lib/feed-category-bar-preference';
 import {
-  haystackMatchesFeedRegion,
   normalizeFeedRegionLabel,
   resolveFeedLocationContextWithoutPermissionPrompt,
 } from '@/src/lib/feed-display-location';
@@ -62,6 +61,8 @@ import {
   feedMeetingSymbolBox,
   feedSearchFiltersActive,
   listSortModeLabel,
+  applyHomeExploreFeedVisibility,
+  filterMeetingsForHomeExploreList,
   meetingMatchesFeedCategoryBarAndFilter,
   meetingMatchesFeedSearch,
   meetingWithinHomeFeedRadius,
@@ -122,13 +123,6 @@ import {
 
 /** `app/profile/settings` 공개 모임 생성 알림 스위치 트랙과 동일 */
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
-
-function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean {
-  const hay = [m.address, m.location, m.placeName]
-    .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-    .join(' ');
-  return haystackMatchesFeedRegion(hay, regionLabel);
-}
 
 type HomeMeetingTopTab = 'explore' | 'my' | 'private';
 
@@ -521,29 +515,35 @@ export default function FeedScreen() {
     return normalizeFeedRegionLabel(registeredRegions[0]!);
   }, [feedLocationReady, registeredRegions, activeRegionNorm]);
 
-  const filteredMeetings = useMemo(() => {
-    return meetingsWithinRadius.filter((m) => {
-      if (feedLocationReady) {
-        if (registeredRegions.length === 0 || !exploreActiveRegionNorm) return false;
-        if (!meetingMatchesSelectedRegion(m, exploreActiveRegionNorm)) return false;
-      }
-      if (!meetingMatchesFeedCategoryBarAndFilter(m, selectedCategoryId, feedBarVisibleCategoryIds, categories))
-        return false;
-      if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
-      if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
-      return true;
-    });
-  }, [
-    meetingsWithinRadius,
-    registeredRegions,
-    exploreActiveRegionNorm,
-    feedLocationReady,
-    selectedCategoryId,
-    feedBarVisibleCategoryIds,
-    categories,
-    recruitingOnly,
-    appliedFeedSearch,
-  ]);
+  const homeExploreListFilterParams = useMemo(
+    () => ({
+      meetings: meetingsWithinRadius,
+      feedLocationReady,
+      registeredRegions,
+      exploreActiveRegionNorm,
+      selectedCategoryId,
+      barVisibleCategoryIds: feedBarVisibleCategoryIds,
+      categories,
+      recruitingOnly,
+      feedSearch: appliedFeedSearch,
+    }),
+    [
+      meetingsWithinRadius,
+      feedLocationReady,
+      registeredRegions,
+      exploreActiveRegionNorm,
+      selectedCategoryId,
+      feedBarVisibleCategoryIds,
+      categories,
+      recruitingOnly,
+      appliedFeedSearch,
+    ],
+  );
+
+  const filteredMeetings = useMemo(
+    () => filterMeetingsForHomeExploreList(homeExploreListFilterParams),
+    [homeExploreListFilterParams],
+  );
 
   const sortedFilteredMeetings = useMemo(() => {
     return sortMeetingsForFeed(filteredMeetings, listSortMode, feedCoords);
@@ -551,13 +551,7 @@ export default function FeedScreen() {
 
   /** 탐색 탭: 비공개(`false`)뿐 아니라 플래그 미설정(`null`/`undefined`)도 목록에서 제외. 일정 시작이 지난 공개 모임도 제외 */
   const exploreFeedMeetings = useMemo(
-    () =>
-      sortedFilteredMeetings.filter((m) => {
-        if (m.isPublic !== true) return false;
-        const startMs = meetingScheduleStartMs(m);
-        if (startMs != null && startMs < Date.now()) return false;
-        return true;
-      }),
+    () => applyHomeExploreFeedVisibility(sortedFilteredMeetings),
     [sortedFilteredMeetings],
   );
 

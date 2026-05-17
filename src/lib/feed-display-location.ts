@@ -2,8 +2,18 @@ import * as Location from 'expo-location';
 import type { LocationGeocodedAddress } from 'expo-location';
 import { Platform } from 'react-native';
 
+import {
+  extractGuFromKoreanAddressText,
+  normalizeFeedRegionLabel,
+} from '@/src/lib/feed-region-match';
 import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
 import { SEOUL_GU_SET } from '@/src/lib/seoul-gu-constants';
+
+export {
+  extractGuFromKoreanAddressText,
+  haystackMatchesFeedRegion,
+  normalizeFeedRegionLabel,
+} from '@/src/lib/feed-region-match';
 
 /** 위치 권한 거부·역지오 실패 등일 때 피드 상단 기본 라벨(구 단위) */
 export const FEED_LOCATION_FALLBACK_SHORT = '영등포구';
@@ -136,34 +146,6 @@ export function formatSeoulGuLabel(label: string, locationHintForDisplay?: strin
 }
 
 /**
- * 한국 주소 문자열에서 첫 번째 `○○구` 행정구명을 추출합니다.
- *
- * ECMAScript에서 `\b`는 한글을 단어 문자로 보지 않아 `…구\b` 패턴이 거의 항상 실패합니다.
- * `중구`처럼 구명 앞 글자가 한 자인 경우도 포함하려면 `{1,}` 길이가 필요합니다.
- */
-export function extractGuFromKoreanAddressText(text: string): string | null {
-  const t = text.trim();
-  if (!t) return null;
-  const m = t.match(/([가-힣]{1,20}구)(?=\s|$|[^가-힣])/);
-  return m ? m[1] : null;
-}
-
-/**
- * 피드·캐시에 저장된 지역 문자열을 탐색 필터용으로 맞춥니다.
- * (`서울시 강남구` → `강남구`, `경기도 성남시 분당구` → `분당구` 등).
- * 비서울 광역 `인천 서구`처럼 시·군 축약 + 구 두 토큰은 그대로 유지합니다.
- */
-export function normalizeFeedRegionLabel(label: string): string {
-  const t = label.trim();
-  if (!t) return '';
-  const two = t.split(/\s+/).filter(Boolean);
-  if (two.length === 2 && /구$/.test(two[1]!) && two[1]!.length >= 2 && !/^서울/i.test(two[0]!) && !/^seoul$/i.test(two[0]!)) {
-    return t;
-  }
-  return extractGuFromKoreanAddressText(t) ?? t;
-}
-
-/**
  * 모임 생성 시 `feedRegionNorm` 용: 주소·장소 문자열에서 피드와 동일한 구 키를 추정합니다.
  * 광역시 등 비서울은 `인천 서구`처럼 시·구 두 토큰 형태로 맞추고, 서울은 `○○구`만 둡니다.
  */
@@ -179,28 +161,6 @@ export function feedRegionNormFromAddressHaystack(hayRaw: string): string | null
   const labeled = withCityPrefixIfNeeded(gu, metroCityRaw);
   const norm = normalizeFeedRegionLabel(labeled);
   return norm || null;
-}
-
-/**
- * 모임 주소·장소 문자열이 피드/지도에 선택된 지역(`normalizeFeedRegionLabel` 기준)과 맞는지 판별합니다.
- */
-export function haystackMatchesFeedRegion(hayRaw: string, regionLabel: string): boolean {
-  const sel = normalizeFeedRegionLabel(regionLabel);
-  if (!sel) return true;
-  const hay = hayRaw.replace(/\s+/g, ' ').trim();
-  if (!hay) return false;
-
-  const parts = sel.split(/\s+/).filter(Boolean);
-  if (parts.length === 2 && /구$/.test(parts[1]!) && !/^서울/i.test(parts[0]!) && !/^seoul$/i.test(parts[0]!)) {
-    const [cityShort, gu] = parts as [string, string];
-    if (!hay.includes(gu)) return false;
-    return hay.includes(cityShort);
-  }
-
-  const selGu = extractGuFromKoreanAddressText(sel) ?? sel;
-  const mGu = extractGuFromKoreanAddressText(hay);
-  if (mGu && selGu.endsWith('구')) return mGu === selGu;
-  return hay.includes(sel) || hay.includes(selGu);
 }
 
 /**

@@ -1,0 +1,42 @@
+import type { SeoulGuLabel } from '@/src/lib/seoul-gu-constants';
+
+export type SeoulGuLatLngBounds = { latMin: number; latMax: number; lngMin: number; lngMax: number };
+
+/** KOSTAT 2013 기준 각 구 polygon envelope — southkorea/seoul-maps 단순화본 */
+export const SEOUL_GU_LATLNG_BOUNDS: Record<SeoulGuLabel, SeoulGuLatLngBounds> = {
+  강남구: { latMin: 37.45578434878651, latMax: 37.536064291470424, lngMin: 127.01397119667513, lngMax: 127.12441393026374 },
+  강동구: { latMin: 37.51415680680291, latMax: 37.57791388161732, lngMin: 127.1116764203608, lngMax: 127.18543378919821 },
+  강북구: { latMin: 37.60634705009134, latMax: 37.68228507374621, lngMin: 126.9817452676551, lngMax: 127.05209373568619 },
+  강서구: { latMin: 37.52373707805596, latMax: 37.601857300987895, lngMin: 126.76700465024426, lngMax: 126.89184663862764 },
+  관악구: { latMin: 37.43315139671158, latMax: 37.49218420958284, lngMin: 126.90156094129895, lngMax: 126.99072073195462 },
+  광진구: { latMin: 37.52077294752823, latMax: 37.57076342290955, lngMin: 127.05867359288398, lngMax: 127.11600943681239 },
+  구로구: { latMin: 37.47146723936323, latMax: 37.513970034765684, lngMin: 126.81480709048222, lngMax: 126.90531975801812 },
+  금천구: { latMin: 37.43100963341445, latMax: 37.48378287831426, lngMin: 126.87553760781829, lngMax: 126.93084408056525 },
+  노원구: { latMin: 37.61136014256744, latMax: 37.693602239076704, lngMin: 127.04358800895609, lngMax: 127.1144974746579 },
+  도봉구: { latMin: 37.62848931298715, latMax: 37.698589417759045, lngMin: 127.01017954927539, lngMax: 127.05800075220091 },
+  동대문구: { latMin: 37.55724769712085, latMax: 37.60654335765868, lngMin: 127.02527254528003, lngMax: 127.08068541280403 },
+  동작구: { latMin: 37.472561363278125, latMax: 37.51722500741813, lngMin: 126.90531975801812, lngMax: 126.9871787157338 },
+  마포구: { latMin: 37.526617542453366, latMax: 37.588143322880526, lngMin: 126.85950389772532, lngMax: 126.96604189284825 },
+  서대문구: { latMin: 37.552310003728124, latMax: 37.60508692737045, lngMin: 126.90370105002282, lngMax: 126.97169209525231 },
+  서초구: { latMin: 37.42574929824175, latMax: 37.52503988289669, lngMin: 126.98223807916081, lngMax: 127.09842759318751 },
+  성동구: { latMin: 37.52629974922568, latMax: 37.57022476304866, lngMin: 127.01043978345277, lngMax: 127.07580697427795 },
+  성북구: { latMin: 37.57524616245249, latMax: 37.63377641288196, lngMin: 126.977175406416, lngMax: 127.07382707099227 },
+  송파구: { latMin: 37.46240445587048, latMax: 37.540669955324965, lngMin: 127.06860425556381, lngMax: 127.1634944215765 },
+  양천구: { latMin: 37.49965438083505, latMax: 37.54859191094823, lngMin: 126.82389942108053, lngMax: 126.89361739665432 },
+  영등포구: { latMin: 37.48218087575429, latMax: 37.547373974997114, lngMin: 126.88156402353862, lngMax: 126.95249990298159 },
+  용산구: { latMin: 37.509314966770326, latMax: 37.552184137181925, lngMin: 126.94566733083212, lngMax: 127.02302831890559 },
+  은평구: { latMin: 37.573123712282076, latMax: 37.656145979585894, lngMin: 126.88433284773288, lngMax: 126.9738864128702 },
+  종로구: { latMin: 37.56313604690827, latMax: 37.62949634786888, lngMin: 126.95145384404022, lngMax: 127.02547266349976 },
+  중구: { latMin: 37.54101133407434, latMax: 37.568943552237734, lngMin: 126.96358226710812, lngMax: 127.02881029425372 },
+  중랑구: { latMin: 37.566762290300666, latMax: 37.61804244241069, lngMin: 127.07152840437725, lngMax: 127.12048134936907 },
+};
+
+export function pointInSeoulGuLatLngBounds(
+  lat: number,
+  lng: number,
+  gu: SeoulGuLabel,
+): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const b = SEOUL_GU_LATLNG_BOUNDS[gu];
+  return lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax;
+}

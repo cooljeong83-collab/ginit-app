@@ -1,5 +1,6 @@
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import type { Category } from '@/src/lib/categories';
+import { haystackMatchesFeedRegion } from '@/src/lib/feed-display-location';
 import { isKakaoMapPlacePageUrl } from '@/src/lib/kakao-place-page-image';
 import { meetingDistanceMetersFromUser, type LatLng } from '@/src/lib/geo-distance';
 import type { MeetingExtraData } from '@/src/lib/meeting-extra-data';
@@ -12,7 +13,7 @@ import type {
   PublicMeetingGenderRatio,
   PublicMeetingSettlement,
 } from '@/src/lib/meetings';
-import { parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
+import { getMeetingRecruitmentPhase, parsePublicMeetingDetailsConfig } from '@/src/lib/meetings';
 import type { NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import type { UserProfile } from '@/src/lib/user-profile';
 
@@ -28,6 +29,69 @@ export function meetingWithinHomeFeedRadius(m: Meeting, userCoords: LatLng | nul
   if (!userCoords) return true;
   const d = meetingDistanceMetersFromUser(m, userCoords);
   return d != null && d <= FEED_HOME_LIST_RADIUS_METERS;
+}
+
+/** 탐색·지도 — 선택 관심 구(정규화 라벨)와 모임 주소/장소 문자열 매칭 */
+export function meetingMatchesSelectedRegion(m: Meeting, regionLabel: string): boolean {
+  const hay = [m.address, m.location, m.placeName]
+    .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    .join(' ');
+  return haystackMatchesFeedRegion(hay, regionLabel);
+}
+
+/** 홈 «모임» 탭 · 탐색(지도) 공통 — 목록 필터(구·카테고리·검색·모집중) */
+export type MeetingsHomeExploreListFilterParams = {
+  meetings: Meeting[];
+  feedLocationReady: boolean;
+  registeredRegions: string[];
+  exploreActiveRegionNorm: string;
+  selectedCategoryId: string | null;
+  barVisibleCategoryIds: string[] | null;
+  categories: Category[];
+  recruitingOnly: boolean;
+  feedSearch: FeedSearchFilters;
+};
+
+export function filterMeetingsForHomeExploreList(params: MeetingsHomeExploreListFilterParams): Meeting[] {
+  const {
+    meetings,
+    feedLocationReady,
+    registeredRegions,
+    exploreActiveRegionNorm,
+    selectedCategoryId,
+    barVisibleCategoryIds,
+    categories,
+    recruitingOnly,
+    feedSearch,
+  } = params;
+
+  return meetings.filter((m) => {
+    if (feedLocationReady) {
+      if (registeredRegions.length === 0 || !exploreActiveRegionNorm) return false;
+      if (!meetingMatchesSelectedRegion(m, exploreActiveRegionNorm)) return false;
+    }
+    if (!meetingMatchesFeedCategoryBarAndFilter(m, selectedCategoryId, barVisibleCategoryIds, categories)) {
+      return false;
+    }
+    if (recruitingOnly && getMeetingRecruitmentPhase(m) !== 'recruiting') return false;
+    if (!meetingMatchesFeedSearch(m, feedSearch)) return false;
+    return true;
+  });
+}
+
+/** 홈 탐색 피드 노출: 공개만·일정 시작 전만 */
+export function applyHomeExploreFeedVisibility(meetings: Meeting[]): Meeting[] {
+  return meetings.filter((m) => {
+    if (m.isPublic !== true) return false;
+    const startMs = meetingScheduleStartMs(m);
+    if (startMs != null && startMs < Date.now()) return false;
+    return true;
+  });
+}
+
+/** `filterMeetingsForHomeExploreList` + `applyHomeExploreFeedVisibility` (지도 마커·탐색 SSOT) */
+export function filterMeetingsForHomeExploreTab(params: MeetingsHomeExploreListFilterParams): Meeting[] {
+  return applyHomeExploreFeedVisibility(filterMeetingsForHomeExploreList(params));
 }
 
 export function meetingCreatedAtMs(m: Meeting): number {

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { normalizeFeedRegionLabel } from '@/src/lib/feed-display-location';
+import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
 import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-districts';
 import { loadFeedLocationCache } from '@/src/lib/feed-location-cache';
 

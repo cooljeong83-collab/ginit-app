@@ -6,7 +6,16 @@ import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, InteractionManager, Keyboard, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
+  ActivityIndicator,
+  Alert,
+  InteractionManager,
+  Keyboard,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -25,6 +34,8 @@ import {
 import { setPendingMeetingPlace, setPendingVotePlaceRow } from '@/src/lib/meeting-place-bridge';
 import { setCreateMeetingPlaceAutopilotError } from '@/src/lib/create-meeting-autopilot-place-result';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import { gatePlaceAgainstRegisteredInterestRegions } from '@/src/lib/meeting-create-place-region';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
@@ -81,11 +92,25 @@ function PlaceSearchScreenInner({
   const [hasSearched, setHasSearched] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [registeredInterestRegions, setRegisteredInterestRegions] = useState<string[]>([]);
+  const registeredInterestRegionsRef = useRef<string[]>([]);
+  registeredInterestRegionsRef.current = registeredInterestRegions;
   const lastListSearchKeyRef = useRef('');
   const loadMoreGuardRef = useRef(false);
   const autopilotEmptyHandledRef = useRef(false);
   const autopilotPickStartedRef = useRef(false);
   const autopilotConfirmStartedRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    void loadRegisteredFeedRegions().then((regions) => {
+      if (!alive) return;
+      setRegisteredInterestRegions(regions);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -244,6 +269,25 @@ function PlaceSearchScreenInner({
       return;
     }
     const addr = selected.roadAddress?.trim() || selected.address?.trim() || '';
+    const placeName = selected.title.trim();
+    const regionGate = gatePlaceAgainstRegisteredInterestRegions(
+      {
+        placeName,
+        address: addr,
+        latitude: selected.latitude,
+        longitude: selected.longitude,
+      },
+      registeredInterestRegionsRef.current,
+    );
+    if (!regionGate.ok) {
+      Alert.alert(regionGate.title, regionGate.message);
+      setError(regionGate.message);
+      if (createAutopilot === '1') {
+        setCreateMeetingPlaceAutopilotError(regionGate.message);
+        router.back();
+      }
+      return;
+    }
     const linkFromApi = sanitizeNaverLocalPlaceLink(selected.link);
     const thumb = (selected.thumbnailUrl ?? '').trim();
     const cat = (selected.category ?? '').trim();
@@ -262,7 +306,7 @@ function PlaceSearchScreenInner({
       setPendingMeetingPlace(payload);
     }
     router.back();
-  }, [router, selected, voteRowId]);
+  }, [createAutopilot, router, selected, voteRowId]);
 
   const onConfirmRef = useRef(onConfirm);
   onConfirmRef.current = onConfirm;
