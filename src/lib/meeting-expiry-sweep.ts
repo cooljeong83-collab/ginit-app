@@ -6,8 +6,8 @@ import {
 } from '@/src/lib/meetings';
 
 /**
- * 목록에 포함된 모임 중, 로그인 사용자가 주관하는 공개·미확정·일시 경과 모임을 삭제합니다.
- * Firestore 규칙상 삭제는 주관자만 가능하므로, 참가자만 있는 기기에서는 no-op입니다.
+ * 목록에 포함된 모임 중, 로그인 사용자가 주관하는 미확정(공개·비공개)·일시 경과 모임을 삭제합니다.
+ * 삭제는 주관자만 가능하므로, 참가자만 있는 기기에서는 no-op입니다.
  */
 export async function sweepStalePublicUnconfirmedMeetingsForHost(
   hostPhoneUserId: string,
@@ -20,7 +20,6 @@ export async function sweepStalePublicUnconfirmedMeetingsForHost(
   for (const m of meetings) {
     const host = m.createdBy?.trim() ? normalizeParticipantId(m.createdBy) ?? m.createdBy.trim() : '';
     if (!host || host !== nsSelf) continue;
-    if (m.isPublic !== true) continue;
     if (m.scheduleConfirmed === true) continue;
     const startMs = meetingPrimaryStartMs(m);
     if (startMs == null || Date.now() < startMs) continue;

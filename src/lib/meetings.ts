@@ -2387,7 +2387,7 @@ export function isMeetingScheduledTodaySeoul(
 }
 
 /**
- * 공개·미확정이며 대표 일시가 이미 지난 모임을 주관자 세션에서 삭제합니다.
+ * 미확정(공개·비공개)이며 대표 일시가 이미 지난 모임을 주관자 세션에서 삭제합니다.
  * 주관자·참가자에게 `auto_cancelled_unconfirmed` FCM 푸시가 발송되고, 새 소식에도 쌓입니다.
  */
 export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
@@ -2406,7 +2406,6 @@ export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
   const nsHost = normalizeParticipantId(uid) ?? uid;
   const nsCreated = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
   if (!nsCreated || nsCreated !== nsHost) return false;
-  if (data.isPublic !== true) return false;
   if (data.scheduleConfirmed === true) return false;
   const m = mapMeetingLedgerDoc(mid, data);
   const startMs = meetingPrimaryStartMs(m);

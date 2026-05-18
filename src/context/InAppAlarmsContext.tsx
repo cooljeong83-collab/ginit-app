@@ -1562,6 +1562,12 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         const uid = userId?.trim() ?? '';
         if (uid) void dismissMeetingAutoCancelUnconfirmedAlarm(uid, row.id);
         closeAlarmPanel();
+        const mid = row.meetingId.trim();
+        if (!mid) return;
+        requestHomeMeetingsAndDetailRefresh(mid);
+        InteractionManager.runAfterInteractions(() => {
+          router.push(`/meeting/${mid}`);
+        });
         return;
       }
       const m = meetings.find((x) => x.id === row.meetingId);

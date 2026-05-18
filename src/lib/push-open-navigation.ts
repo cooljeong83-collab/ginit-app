@@ -233,11 +233,12 @@ export function navigateFromPushData(
     if (urlRaw) void Linking.openURL(urlRaw);
     return;
   }
-  if (
-    action === 'deleted' ||
-    action === MEETING_REMOVED_BY_HOST_PUSH_ACTION ||
-    action === MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION
-  ) {
+  if (meetingId && action === MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION) {
+    ginitNotifyDbg('push-open-nav', 'branch_auto_cancelled_meeting', { meetingIdLen: meetingId.length });
+    navTo(`/meeting/${meetingId}`);
+    return;
+  }
+  if (action === 'deleted' || action === MEETING_REMOVED_BY_HOST_PUSH_ACTION) {
     ginitNotifyDbg('push-open-nav', 'branch_meeting_deleted_or_removed', { action });
     router.replace('/(tabs)' as never);
     return;
