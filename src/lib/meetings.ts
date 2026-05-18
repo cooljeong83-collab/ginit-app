@@ -17,6 +17,8 @@ import {
   ledgerTryLoadMeetingDoc,
 } from './meetings-ledger';
 import { appendMeetingAutoCancelUnconfirmedAlarm } from './meeting-auto-cancel-unconfirmed-alarm';
+import { purgeMeetingStorageBestEffort } from './meeting-delete-cleanup';
+import { purgeLocalMeetingChatWatermelon } from './meeting-deleted-local-purge';
 import {
   notifyMeetingJoinRequestApplicantDecisionFireAndForget,
   notifyMeetingNewHostAssignedFireAndForget,
@@ -72,6 +74,30 @@ async function requireLedgerUuidForMeetingWrite(meetingId: string): Promise<stri
   const uuid = await resolveMeetingLedgerUuid(meetingId);
   if (!uuid) throw new Error('모임을 찾을 수 없어요.');
   return uuid;
+}
+
+function ledgerDocImageUrl(data: Record<string, unknown> | null | undefined): string | null {
+  if (!data) return null;
+  const raw = data.imageUrl ?? data.image_url;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+}
+
+/** Storage·서버 연관 행 purge·로컬 채팅 캐시 정리 후 `meetings` 행 삭제. */
+async function deleteMeetingLedgerWithArtifacts(params: {
+  routeMeetingId: string;
+  ledgerMeetingId: string;
+  imageUrl?: string | null;
+}): Promise<void> {
+  const routeMeetingId = params.routeMeetingId.trim();
+  const ledgerMeetingId = params.ledgerMeetingId.trim();
+  if (!routeMeetingId || !ledgerMeetingId) return;
+  await purgeMeetingStorageBestEffort({
+    routeMeetingId,
+    ledgerMeetingId,
+    imageUrl: params.imageUrl,
+  });
+  await ledgerMeetingDelete(ledgerMeetingId);
+  await purgeLocalMeetingChatWatermelon(routeMeetingId, ledgerMeetingId);
 }
 
 /** `GlassDualCapacityWheel` 의 무제한 정원 값(999)과 동일해야 합니다. */
@@ -2176,12 +2202,15 @@ export async function deleteMeetingByHost(meetingId: string, hostPhoneUserId: st
   }
   const m = mapMeetingLedgerDoc(mid, data);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
-  await ledgerMeetingDelete(ledgerId);
+  await deleteMeetingLedgerWithArtifacts({
+    routeMeetingId: mid,
+    ledgerMeetingId: ledgerId,
+    imageUrl: ledgerDocImageUrl(data),
+  });
 }
 
 /**
- * 회원 탈퇴 등: 주관자 검증 후 모임 문서만 삭제합니다.
- * 채팅 서브컬렉션·Storage는 호출 측에서 먼저 비운 뒤 호출하세요.
+ * 회원 탈퇴 등: 주관자 검증 후 모임·연관 데이터(채팅·정산·Storage 등)를 삭제합니다.
  * 확정 여부와 관계없이 삭제합니다.
  */
 /** 주관자 확정 시 선택된 일시 칩 기준 대표 시각(ms). 후보 없으면 `meetingPrimaryStartMs`로 대체. */
@@ -2308,6 +2337,53 @@ export function buildConfirmedScheduleNoticeAccessibilityLabel(
   return [left, right].filter((x) => x.length > 0).join(' ');
 }
 
+/** 미확정 자동 파기 경고 공지 — 모임 시작 1시간 전부터 표시 */
+export const UNCONFIRMED_AUTO_CANCEL_WARNING_WINDOW_MS = 60 * 60 * 1000;
+
+/** 미확정 자동 파기 경고 공지 좌측 — `미확정 : [카테고리] 제목`(확정 공지와 동일 제목 규칙). */
+export function buildUnconfirmedAutoCancelWarningNoticeTitleLeft(
+  m: Pick<Meeting, 'categoryId' | 'categoryLabel' | 'title'>,
+  categories?: readonly { id: string; label: string }[] | null | undefined,
+): string {
+  return `미확정 : ${buildMeetingTopNoticeTitleLeft(m, categories)}`;
+}
+
+/** 미확정 자동 파기 경고 공지 우측 일시 — 대표 일시(`meetingPrimaryStartMs` 등) 포맷. */
+export function buildUnconfirmedAutoCancelWarningNoticeTimeRight(
+  m: Pick<Meeting, 'scheduleDate' | 'scheduleTime' | 'scheduledAt'>,
+): string {
+  return formatMeetingScheduleListLabel(m);
+}
+
+/** 접근성·보조용 한 줄(`미확정 : [카] 제목` + 공백 + 일시). */
+export function buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel(
+  m: Pick<Meeting, 'categoryId' | 'categoryLabel' | 'title' | 'scheduleDate' | 'scheduleTime' | 'scheduledAt'>,
+  categories?: readonly { id: string; label: string }[] | null | undefined,
+): string {
+  const left = buildUnconfirmedAutoCancelWarningNoticeTitleLeft(m, categories).trim();
+  const right = buildUnconfirmedAutoCancelWarningNoticeTimeRight(m).trim();
+  return [left, right].filter((x) => x.length > 0).join(' ');
+}
+
+/**
+ * 미확정·참여 2명 이상·시작까지 1시간 미만(아직 시작 전)일 때 자동 파기 경고 공지.
+ * 홈 상단 공지는 주관자(`isMeetingHost`) 모임만, 모임 상세·채팅은 참가자에게도 표시합니다.
+ */
+export function shouldShowUnconfirmedAutoCancelWarningNotice(
+  m: Meeting | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!m) return false;
+  if (m.scheduleConfirmed === true) return false;
+  if (meetingParticipantCount(m) < 2) return false;
+  if (buildUnconfirmedAutoCancelWarningNoticeTimeRight(m).trim() === '') return false;
+  const startMs = meetingPrimaryStartMs(m);
+  if (startMs == null || !Number.isFinite(startMs)) return false;
+  if (nowMs >= startMs) return false;
+  const msUntilStart = startMs - nowMs;
+  return msUntilStart > 0 && msUntilStart <= UNCONFIRMED_AUTO_CANCEL_WARNING_WINDOW_MS;
+}
+
 /**
  * 확정 일시·장소 한 줄 공지 표시 여부(홈·채팅·모임 상세 동일).
  * - 예정 시작(`meetingPrimaryStartMs`)이 지나면 숨김(진행중·이후).
@@ -2416,7 +2492,11 @@ export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
     meetingTitle: m.title ?? '',
   }).catch(() => {});
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'auto_cancelled_unconfirmed', uid);
-  await ledgerMeetingDelete(ledgerId);
+  await deleteMeetingLedgerWithArtifacts({
+    routeMeetingId: mid,
+    ledgerMeetingId: ledgerId,
+    imageUrl: ledgerDocImageUrl(data),
+  });
   return true;
 }
 
@@ -2435,7 +2515,11 @@ export async function deleteMeetingDocumentByHostForce(meetingId: string, hostPh
   }
   const m = mapMeetingLedgerDoc(mid, data);
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'deleted', uid);
-  await ledgerMeetingDelete(ledgerId);
+  await deleteMeetingLedgerWithArtifacts({
+    routeMeetingId: mid,
+    ledgerMeetingId: ledgerId,
+    imageUrl: ledgerDocImageUrl(data),
+  });
 }
 
 /**

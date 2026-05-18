@@ -132,7 +132,11 @@ import {
   meetingPrimaryStartMs,
   parsePublicMeetingDetailsConfig,
   resolveVoteTopTies,
+  buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel,
+  buildUnconfirmedAutoCancelWarningNoticeTimeRight,
+  buildUnconfirmedAutoCancelWarningNoticeTitleLeft,
   shouldShowConfirmedScheduleNoticeBar,
+  shouldShowUnconfirmedAutoCancelWarningNotice,
   updateMeetingDateCandidates,
   updateMeetingPlaceCandidates,
   webGuestDisplayNameFromMeeting
@@ -1969,6 +1973,21 @@ export default function MeetingDetailScreen() {
     categories,
   ]);
 
+  const meetingDetailUnconfirmedWarningNoticeParts = useMemo(() => {
+    if (!meeting) return null;
+    void arrivalUiTick;
+    void meetingDetailListEndUiTick;
+    if (!shouldShowUnconfirmedAutoCancelWarningNotice(meeting, Date.now())) return null;
+    const titleLeft = buildUnconfirmedAutoCancelWarningNoticeTitleLeft(meeting, categories);
+    const timeRight = buildUnconfirmedAutoCancelWarningNoticeTimeRight(meeting);
+    if (!titleLeft.trim() || !timeRight.trim()) return null;
+    return {
+      titleLeft,
+      timeRight,
+      a11y: buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel(meeting, categories),
+    };
+  }, [meeting, arrivalUiTick, meetingDetailListEndUiTick, categories]);
+
   const meetingDetailTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     if (!meeting) return [];
     const slides: MeetingDetailTopNoticeSlide[] = [];
@@ -2017,6 +2036,20 @@ export default function MeetingDetailScreen() {
         ),
       });
     }
+    if (meetingDetailUnconfirmedWarningNoticeParts) {
+      slides.push({
+        key: 'unconfirmed-auto-cancel',
+        element: (
+          <MeetingDetailStaticNoticeRow
+            titleLeft={meetingDetailUnconfirmedWarningNoticeParts.titleLeft}
+            timeRight={meetingDetailUnconfirmedWarningNoticeParts.timeRight}
+            accessibilityLabel={meetingDetailUnconfirmedWarningNoticeParts.a11y}
+            textColor={GinitTheme.colors.danger}
+            slideTrackFullBleed
+          />
+        ),
+      });
+    }
     if (meetingDetailScheduleNoticeParts) {
       slides.push({
         key: 'schedule',
@@ -2037,6 +2070,7 @@ export default function MeetingDetailScreen() {
     showSettlementParticipantBanner,
     showMeetingArrivalVerifyTopBanner,
     meetingDetailScheduleNoticeParts,
+    meetingDetailUnconfirmedWarningNoticeParts,
     router,
     openArrivalVerifyMap,
     categories,

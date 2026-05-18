@@ -112,7 +112,11 @@ import {
   buildMeetingTopNoticeTitleLeft,
   getMeetingRecruitmentPhase,
   isConfirmedMeetingPastListEndWindow,
+  buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel,
+  buildUnconfirmedAutoCancelWarningNoticeTimeRight,
+  buildUnconfirmedAutoCancelWarningNoticeTitleLeft,
   shouldShowConfirmedScheduleNoticeBar,
+  shouldShowUnconfirmedAutoCancelWarningNotice,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -137,7 +141,8 @@ type HomeFeedNoticeRow =
   | { key: string; kind: 'settlement'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'settlement_collab'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'arrival'; meetingId: string; meetingTitle: string }
-  | { key: string; kind: 'schedule'; meetingId: string; titleLeft: string; timeRight: string };
+  | { key: string; kind: 'schedule'; meetingId: string; titleLeft: string; timeRight: string }
+  | { key: string; kind: 'unconfirmed_auto_cancel'; meetingId: string; titleLeft: string; timeRight: string };
 
 function homeFeedNoticeRowSubtitle(row: HomeFeedNoticeRow): string {
   if (row.kind === 'settlement') return '정산하기';
@@ -766,13 +771,19 @@ export default function FeedScreen() {
         showArrivalVerifyBanner: hasArrival,
         showSettlementHostBanner: hasSettlement || hasSettlementCollab,
       });
-      if (!hasSettlement && !hasSettlementCollab && !hasArrival && !hasScheduleLine) continue;
+      const uid = userId?.trim() ?? '';
+      const hasAutoCancelWarning =
+        Boolean(uid) &&
+        isMeetingHost(m, uid) &&
+        shouldShowUnconfirmedAutoCancelWarningNotice(m, Date.now());
+      if (!hasSettlement && !hasSettlementCollab && !hasArrival && !hasScheduleLine && !hasAutoCancelWarning)
+        continue;
       seen.add(id);
       out.push(m);
     }
     out.sort((a, b) => (meetingScheduleStartMs(a) ?? 0) - (meetingScheduleStartMs(b) ?? 0));
     return out;
-  }, [myTabsMeetings, settlementNoticeIdSet, settlementCollabNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick]);
+  }, [myTabsMeetings, settlementNoticeIdSet, settlementCollabNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick, userId]);
 
   const homeTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     void homeArrivalNoticeUiTick;
@@ -851,6 +862,34 @@ export default function FeedScreen() {
           ),
         });
       }
+      const uid = userId?.trim() ?? '';
+      const unconfOk =
+        Boolean(uid) && isMeetingHost(m, uid) && shouldShowUnconfirmedAutoCancelWarningNotice(m, now);
+      const unconfTitleLeft = unconfOk ? buildUnconfirmedAutoCancelWarningNoticeTitleLeft(m, categories) : '';
+      const unconfTimeRight = unconfOk ? buildUnconfirmedAutoCancelWarningNoticeTimeRight(m) : '';
+      const unconfA11y = unconfOk
+        ? buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel(m, categories)
+        : '';
+      if (unconfOk && unconfTitleLeft.trim() !== '' && unconfTimeRight.trim() !== '') {
+        slides.push({
+          key: `unconfirmed-auto-cancel-${id}`,
+          element: (
+            <GinitPressable
+              onPress={() => router.push(`/meeting/${encodeURIComponent(id)}`)}
+              accessibilityRole="link"
+              accessibilityLabel={unconfA11y.trim() || '모임 상세'}
+              style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+              <MeetingDetailStaticNoticeRow
+                titleLeft={unconfTitleLeft}
+                timeRight={unconfTimeRight}
+                accessibilityLabel={unconfA11y}
+                textColor={GinitTheme.colors.danger}
+                slideTrackFullBleed
+              />
+            </GinitPressable>
+          ),
+        });
+      }
     }
     return slides;
   }, [
@@ -861,6 +900,7 @@ export default function FeedScreen() {
     router,
     homeArrivalNoticeUiTick,
     categories,
+    userId,
   ]);
 
   const homeFeedNoticeRows = useMemo((): HomeFeedNoticeRow[] => {
@@ -899,6 +939,20 @@ export default function FeedScreen() {
           timeRight: schedTimeRight,
         });
       }
+      const uid = userId?.trim() ?? '';
+      const unconfOk =
+        Boolean(uid) && isMeetingHost(m, uid) && shouldShowUnconfirmedAutoCancelWarningNotice(m, now);
+      const unconfTitleLeft = unconfOk ? buildUnconfirmedAutoCancelWarningNoticeTitleLeft(m, categories) : '';
+      const unconfTimeRight = unconfOk ? buildUnconfirmedAutoCancelWarningNoticeTimeRight(m) : '';
+      if (unconfOk && unconfTitleLeft.trim() !== '' && unconfTimeRight.trim() !== '') {
+        rows.push({
+          key: `unconfirmed-auto-cancel-${id}`,
+          kind: 'unconfirmed_auto_cancel',
+          meetingId: id,
+          titleLeft: unconfTitleLeft,
+          timeRight: unconfTimeRight,
+        });
+      }
     }
     return rows;
   }, [
@@ -908,6 +962,7 @@ export default function FeedScreen() {
     arrivalNoticeIdSet,
     homeArrivalNoticeUiTick,
     categories,
+    userId,
   ]);
 
   const homeNoticesModalLayout = useMemo(() => {
@@ -1662,15 +1717,24 @@ export default function FeedScreen() {
                           name={homeFeedNoticeRowIcon(item.kind)}
                           size={22}
                           color={
-                            item.kind === 'schedule'
-                              ? GinitTheme.colors.deepPurple
-                              : GinitTheme.themeMainColor
+                            item.kind === 'unconfirmed_auto_cancel'
+                              ? GinitTheme.colors.danger
+                              : item.kind === 'schedule'
+                                ? GinitTheme.colors.deepPurple
+                                : GinitTheme.themeMainColor
                           }
                         />
                       </View>
                       <View style={styles.homeNoticesModalTextCol}>
-                        <Text style={styles.homeNoticesModalRowTitle} numberOfLines={1}>
-                          {item.kind === 'schedule' ? item.titleLeft : item.meetingTitle}
+                        <Text
+                          style={[
+                            styles.homeNoticesModalRowTitle,
+                            item.kind === 'unconfirmed_auto_cancel' && styles.homeNoticesModalRowTitleDanger,
+                          ]}
+                          numberOfLines={1}>
+                          {item.kind === 'schedule' || item.kind === 'unconfirmed_auto_cancel'
+                            ? item.titleLeft
+                            : item.meetingTitle}
                         </Text>
                         <Text
                           style={[
@@ -1679,8 +1743,11 @@ export default function FeedScreen() {
                               item.kind === 'settlement_collab' ||
                               item.kind === 'arrival') &&
                               styles.homeNoticesModalRowSubCta,
+                            item.kind === 'unconfirmed_auto_cancel' && styles.homeNoticesModalRowSubDanger,
                           ]}
-                          {...(item.kind === 'schedule' ? {} : { numberOfLines: 3 as const })}>
+                          {...(item.kind === 'schedule' || item.kind === 'unconfirmed_auto_cancel'
+                            ? {}
+                            : { numberOfLines: 3 as const })}>
                           {homeFeedNoticeRowSubtitle(item)}
                         </Text>
                       </View>
@@ -2034,6 +2101,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
   },
+  homeNoticesModalRowTitleDanger: {
+    color: GinitTheme.colors.danger,
+  },
   homeNoticesModalRowSub: {
     fontSize: 13,
     color: '#475569',
@@ -2042,6 +2112,10 @@ const styles = StyleSheet.create({
   homeNoticesModalRowSubCta: {
     color: GinitTheme.colors.deepPurple,
     fontWeight: '700',
+  },
+  homeNoticesModalRowSubDanger: {
+    color: GinitTheme.colors.danger,
+    fontWeight: '600',
   },
   homeNoticesModalEmpty: {
     paddingVertical: 28,

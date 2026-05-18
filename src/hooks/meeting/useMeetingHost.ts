@@ -21,6 +21,7 @@ import {
   parseNearMeetingCancelPenaltyWindowPolicy,
 } from '@/src/lib/meeting-schedule-times';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
+import { purgeDeletedMeetingLocally } from '@/src/lib/meeting-deleted-local-purge';
 import { removeMeetingFromMeetingsQueryCaches } from '@/src/lib/meeting-sync-service';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
@@ -338,6 +339,7 @@ export function useMeetingHost({
               try {
                 markRecentSelfMeetingChange(meeting.id);
                 await deleteMeetingByHost(meeting.id, userId.trim());
+                await purgeDeletedMeetingLocally(queryClient, meeting.id, userId.trim());
                 removeMeetingFromMeetingsQueryCaches(queryClient, meeting.id, userId.trim());
                 void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
                 router.push('/(tabs)');

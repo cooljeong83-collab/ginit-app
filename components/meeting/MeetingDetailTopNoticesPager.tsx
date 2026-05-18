@@ -22,12 +22,17 @@ export function MeetingDetailStaticNoticeRow({
   timeRight,
   accessibilityLabel: accessibilityLabelProp,
   slideTrackFullBleed,
+  textColor,
+  numberOfLines = 1,
 }: {
   text?: string;
   titleLeft?: string;
   timeRight?: string;
   accessibilityLabel?: string;
   slideTrackFullBleed?: boolean;
+  /** 기본 `GinitTheme.colors.text` — 미확정 자동 파기 경고 등 */
+  textColor?: string;
+  numberOfLines?: number;
 }) {
   const useSplit =
     typeof titleLeft === 'string' &&
@@ -45,16 +50,24 @@ export function MeetingDetailStaticNoticeRow({
         <GinitSymbolicIcon name="megaphone-outline" size={16} color={GinitTheme.colors.deepPurple} />
         {useSplit ? (
           <>
-            <Text style={staticStyles.text} numberOfLines={1} ellipsizeMode="tail">
+            <Text
+              style={[staticStyles.text, textColor ? { color: textColor } : null]}
+              numberOfLines={numberOfLines}
+              ellipsizeMode="tail">
               {(titleLeft ?? '').trim() || '모임'}
             </Text>
-            <Text style={staticStyles.timeRight} numberOfLines={1}>
+            <Text
+              style={[staticStyles.timeRight, textColor ? { color: textColor } : null]}
+              numberOfLines={numberOfLines}>
               {(timeRight ?? '').trim()}
             </Text>
           </>
         ) : (
           <>
-            <Text style={staticStyles.text} numberOfLines={1} ellipsizeMode="tail">
+            <Text
+              style={[staticStyles.text, textColor ? { color: textColor } : null]}
+              numberOfLines={numberOfLines}
+              ellipsizeMode="tail">
               {text ?? ''}
             </Text>
             <View style={staticStyles.trailingSpacer} />

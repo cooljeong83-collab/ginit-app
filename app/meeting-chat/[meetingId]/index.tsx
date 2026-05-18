@@ -106,7 +106,11 @@ import {
   buildMeetingTopNoticeTitleLeft,
   isConfirmedMeetingPastListEndWindow,
   meetingParticipantCount,
+  buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel,
+  buildUnconfirmedAutoCancelWarningNoticeTimeRight,
+  buildUnconfirmedAutoCancelWarningNoticeTitleLeft,
   shouldShowConfirmedScheduleNoticeBar,
+  shouldShowUnconfirmedAutoCancelWarningNotice,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import {
@@ -1272,10 +1276,41 @@ export default function MeetingChatRoomScreen() {
         ),
       });
     }
-    const scheduleOk = shouldShowConfirmedScheduleNoticeBar(meeting, Date.now(), {
+    const now = Date.now();
+    const autoCancelWarningOk = shouldShowUnconfirmedAutoCancelWarningNotice(meeting, now);
+    const unconfTitleLeft = autoCancelWarningOk
+      ? buildUnconfirmedAutoCancelWarningNoticeTitleLeft(meeting, categories)
+      : '';
+    const unconfTimeRight = autoCancelWarningOk
+      ? buildUnconfirmedAutoCancelWarningNoticeTimeRight(meeting)
+      : '';
+    const unconfA11y = autoCancelWarningOk
+      ? buildUnconfirmedAutoCancelWarningNoticeAccessibilityLabel(meeting, categories)
+      : '';
+    const scheduleOk = shouldShowConfirmedScheduleNoticeBar(meeting, now, {
       showArrivalVerifyBanner: showMeetingArrivalVerifyTopBanner,
       showSettlementHostBanner: showSettlementHostBanner,
     });
+    if (autoCancelWarningOk && unconfTitleLeft.trim() !== '' && unconfTimeRight.trim() !== '') {
+      slides.push({
+        key: 'unconfirmed-auto-cancel',
+        element: (
+          <GinitPressable
+            onPress={goMeetingDetail}
+            accessibilityRole="link"
+            accessibilityLabel={unconfA11y.trim() || '모임 상세'}
+            style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+            <MeetingDetailStaticNoticeRow
+              titleLeft={unconfTitleLeft}
+              timeRight={unconfTimeRight}
+              accessibilityLabel={unconfA11y}
+              textColor={GinitTheme.colors.danger}
+              slideTrackFullBleed
+            />
+          </GinitPressable>
+        ),
+      });
+    }
     const schedTitleLeft = scheduleOk ? buildConfirmedScheduleNoticeTitleLeft(meeting, categories) : '';
     const schedTimeRight = scheduleOk ? buildConfirmedScheduleNoticeTimeRight(meeting) : '';
     const schedA11y = scheduleOk ? buildConfirmedScheduleNoticeAccessibilityLabel(meeting, categories) : '';
