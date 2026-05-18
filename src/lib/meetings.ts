@@ -16,6 +16,7 @@ import {
   ledgerMeetingPutRawDoc,
   ledgerTryLoadMeetingDoc,
 } from './meetings-ledger';
+import { appendMeetingAutoCancelUnconfirmedAlarm } from './meeting-auto-cancel-unconfirmed-alarm';
 import {
   notifyMeetingJoinRequestApplicantDecisionFireAndForget,
   notifyMeetingNewHostAssignedFireAndForget,
@@ -2387,7 +2388,7 @@ export function isMeetingScheduledTodaySeoul(
 
 /**
  * 공개·미확정이며 대표 일시가 이미 지난 모임을 주관자 세션에서 삭제합니다.
- * 참가자에게는 `auto_cancelled_unconfirmed` 푸시가 발송됩니다.
+ * 주관자·참가자에게 `auto_cancelled_unconfirmed` FCM 푸시가 발송되고, 새 소식에도 쌓입니다.
  */
 export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
   meetingId: string,
@@ -2410,6 +2411,11 @@ export async function autoExpireStalePublicUnconfirmedMeetingAsHost(
   const m = mapMeetingLedgerDoc(mid, data);
   const startMs = meetingPrimaryStartMs(m);
   if (startMs == null || Date.now() < startMs) return false;
+  void appendMeetingAutoCancelUnconfirmedAlarm({
+    userId: uid,
+    meetingId: mid,
+    meetingTitle: m.title ?? '',
+  }).catch(() => {});
   notifyMeetingParticipantsOfHostActionFireAndForget(m, 'auto_cancelled_unconfirmed', uid);
   await ledgerMeetingDelete(ledgerId);
   return true;

@@ -154,6 +154,7 @@ export function PushNotificationBootstrap() {
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
         markMeetingInviteReadByMeetingId,
+        userId,
       );
       ginitNotifyDbg('ExpoPushRouting', 'notification_response_navigate_done', {});
     });
@@ -203,6 +204,7 @@ export function PushNotificationBootstrap() {
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
         markMeetingInviteReadByMeetingId,
+        userId,
       );
       ginitNotifyDbg('ExpoPushRouting', 'getLastNotification_navigate_done', {});
     })();

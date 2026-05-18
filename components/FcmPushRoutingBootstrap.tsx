@@ -115,6 +115,7 @@ export function FcmPushRoutingBootstrap() {
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
         markMeetingInviteReadByMeetingId,
+        userId,
       );
       ginitNotifyDbg('FcmPushRouting', 'navigate_immediate_done', { source });
     };

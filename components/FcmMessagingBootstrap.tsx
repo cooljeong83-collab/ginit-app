@@ -26,6 +26,8 @@ import {
   fcmForegroundDedupeKey,
 } from '@/src/lib/fcm-foreground-message-dedupe';
 import { prewarmChatRoomMessagesFromPushData } from '@/src/lib/offline-chat/offline-chat-prewarm';
+import { appendMeetingAutoCancelUnconfirmedAlarm } from '@/src/lib/meeting-auto-cancel-unconfirmed-alarm';
+import { MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION } from '@/src/lib/meeting-host-push-notify';
 import { applyMeetingPushTargetedRefresh, normalizeFcmStringMap } from '@/src/lib/meeting-push-cache-refresh';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
@@ -112,6 +114,14 @@ export function FcmMessagingBootstrap() {
           ginitNotifyDbg('FcmMessaging', 'on_message_new_meeting_feed_region', {
             meetingId: meetingId || undefined,
           });
+        }
+        if (action === MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION && meetingId) {
+          const meetingTitle = String(rm?.data?.meetingTitle ?? '').trim() || '모임';
+          void appendMeetingAutoCancelUnconfirmedAlarm({
+            userId: uid,
+            meetingId,
+            meetingTitle,
+          }).catch(() => {});
         }
         if (action === 'in_app_chat' && meetingId) {
           const notifyOn = await isMeetingChatNotifyEnabled(meetingId);

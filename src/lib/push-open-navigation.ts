@@ -2,7 +2,14 @@ import * as Linking from 'expo-linking';
 import type { Router } from 'expo-router';
 
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
-import { MEETING_REMOVED_BY_HOST_PUSH_ACTION } from '@/src/lib/meeting-host-push-notify';
+import {
+  dismissMeetingAutoCancelUnconfirmedAlarm,
+  meetingAutoCancelUnconfirmedAlarmId,
+} from '@/src/lib/meeting-auto-cancel-unconfirmed-alarm';
+import {
+  MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION,
+  MEETING_REMOVED_BY_HOST_PUSH_ACTION,
+} from '@/src/lib/meeting-host-push-notify';
 import { getMeetingById, type Meeting } from '@/src/lib/meetings';
 import { TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION } from '@/src/lib/trust-penalty-notify';
 
@@ -226,7 +233,11 @@ export function navigateFromPushData(
     if (urlRaw) void Linking.openURL(urlRaw);
     return;
   }
-  if (action === 'deleted' || action === MEETING_REMOVED_BY_HOST_PUSH_ACTION) {
+  if (
+    action === 'deleted' ||
+    action === MEETING_REMOVED_BY_HOST_PUSH_ACTION ||
+    action === MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION
+  ) {
     ginitNotifyDbg('push-open-nav', 'branch_meeting_deleted_or_removed', { action });
     router.replace('/(tabs)' as never);
     return;
@@ -248,10 +259,19 @@ export async function markAlarmReadFromPushData(
   markFriendRequestAlarmDismissed: (friendshipId: string) => void,
   markFriendAcceptedAlarmDismissed: (friendshipId: string) => void,
   markMeetingInviteReadByMeetingId?: (meetingId: string) => void,
+  phoneUserId?: string | null,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const action = typeof data.action === 'string' ? data.action.trim() : '';
+  if (action === MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION && meetingId) {
+    const uid = phoneUserId?.trim();
+    if (uid) {
+      ginitNotifyDbg('push-open-nav', 'mark_auto_cancelled_unconfirmed', { meetingId });
+      await dismissMeetingAutoCancelUnconfirmedAlarm(uid, meetingAutoCancelUnconfirmedAlarmId(meetingId));
+    }
+    return;
+  }
   if (action === 'in_app_friend_request' && meetingId) {
     ginitNotifyDbg('push-open-nav', 'mark_read_friend_request', { meetingId });
     markFriendRequestAlarmDismissed(meetingId);

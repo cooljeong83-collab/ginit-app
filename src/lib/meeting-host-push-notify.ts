@@ -24,6 +24,9 @@ export type MeetingHostPushAction =
   | 'details_updated'
   | 'auto_cancelled_unconfirmed';
 
+/** FCM `data.action` — 미확정·일시 경과 자동 파기 */
+export const MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION = 'auto_cancelled_unconfirmed' as const;
+
 function hostNorm(hostUserId: string): string {
   return normalizeParticipantId(hostUserId.trim());
 }
@@ -39,6 +42,16 @@ function participantRecipientIds(m: Meeting, hostId: string): string[] {
     out.add(id);
   }
   return [...out];
+}
+
+/** 주관자 액션 푸시 수신자 — `auto_cancelled_unconfirmed`는 주관자 본인도 포함 */
+function hostActionRecipientIds(m: Meeting, hostId: string, action: MeetingHostPushAction): string[] {
+  const host = hostNorm(hostId);
+  const participants = participantRecipientIds(m, hostId);
+  if (action === MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION && host) {
+    return [...new Set([host, ...participants])];
+  }
+  return participants;
 }
 
 function copyForPush(action: MeetingHostPushAction, meetingTitle: string): { title: string; body: string } {
@@ -84,14 +97,15 @@ function copyForHostParticipantEvent(
 }
 
 /**
- * 주관자 액션 후 참가자(주관자 제외)에게 푸시. 실패는 삼키고 로그만(호출부 UX 유지).
+ * 주관자 액션 후 참가자에게 푸시(`auto_cancelled_unconfirmed`는 주관자 포함).
+ * 실패는 삼키고 로그만(호출부 UX 유지).
  */
 export async function notifyMeetingParticipantsOfHostAction(
   meeting: Meeting,
   action: MeetingHostPushAction,
   hostPhoneUserId: string,
 ): Promise<void> {
-  const recipients = participantRecipientIds(meeting, hostPhoneUserId);
+  const recipients = hostActionRecipientIds(meeting, hostPhoneUserId, action);
   if (recipients.length === 0) {
     ginitNotifyDbg('meeting-host-push', 'host_action_skip_no_recipients', { meetingId: meeting.id, action });
     return;
@@ -106,6 +120,7 @@ export async function notifyMeetingParticipantsOfHostAction(
   const data: Record<string, unknown> = {
     meetingId: meeting.id,
     action,
+    meetingTitle: meeting.title?.trim() || '모임',
     url: `ginitapp://meeting/${meeting.id}`,
   };
 

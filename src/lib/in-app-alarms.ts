@@ -8,6 +8,7 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 export type InAppAlarmKind =
   | 'chat'
   | 'meeting_change'
+  | 'meeting_auto_cancelled'
   | 'friend_request'
   | 'friend_accepted'
   | 'social_dm'

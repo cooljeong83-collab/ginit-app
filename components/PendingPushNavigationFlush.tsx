@@ -48,6 +48,7 @@ export function PendingPushNavigationFlush() {
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
         markMeetingInviteReadByMeetingId,
+        userId,
       );
       return true;
     },
@@ -58,6 +59,7 @@ export function PendingPushNavigationFlush() {
       markFriendRequestAlarmDismissed,
       markFriendAcceptedAlarmDismissed,
       markMeetingInviteReadByMeetingId,
+      userId,
     ],
   );
 

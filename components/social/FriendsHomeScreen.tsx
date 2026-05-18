@@ -10,7 +10,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { FlashList } from '@shopify/flash-list';
 
 import { GinitButton } from '@/components/ginit';
-import { ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
+import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
@@ -369,7 +369,6 @@ export function FriendsHomeScreen() {
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [meProfile, setMeProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -382,7 +381,6 @@ export function FriendsHomeScreen() {
 
   const reload = useCallback(async (opts?: { force?: boolean }) => {
     if (!me) {
-      setLoading(false);
       setRefreshing(false);
       return;
     }
@@ -424,7 +422,6 @@ export function FriendsHomeScreen() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }, [me, queryClient]);
@@ -441,7 +438,6 @@ export function FriendsHomeScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!me) {
-        setLoading(false);
         setMeProfile(null);
         setHiddenPeerIds(new Set());
         setBlockedPeerIds(new Set());
@@ -960,10 +956,6 @@ export function FriendsHomeScreen() {
   return (
     <ScreenShell padded={false} style={s.root}>
       <SafeAreaView style={s.safe} edges={['top']}>
-        {loading && accepted.length === 0 && pending.length === 0 && pendingOut.length === 0 ? (
-          <ScreenTransitionSkeleton variant="list" rows={7} />
-        ) : null}
-
         {err ? (
           <View style={s.errBanner}>
             <Text style={s.errText}>{err}</Text>
@@ -1160,13 +1152,6 @@ const s = StyleSheet.create({
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, fontWeight: '600', color: '#0f172a', paddingVertical: 10 },
   listPad: { paddingHorizontal: 20, paddingTop: 8 },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.65)',
-  },
   errBanner: {
     marginHorizontal: 20,
     marginBottom: 8,

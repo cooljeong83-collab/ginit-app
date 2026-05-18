@@ -67,8 +67,16 @@ import {
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { clearMeetingChatUnreadForUser, candidateUserKeys, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
+import {
+  dismissAllMeetingAutoCancelUnconfirmedAlarms,
+  dismissMeetingAutoCancelUnconfirmedAlarm,
+  loadMeetingAutoCancelUnconfirmedAlarms,
+  subscribeMeetingAutoCancelUnconfirmedAlarms,
+  type MeetingAutoCancelUnconfirmedAlarm,
+} from '@/src/lib/meeting-auto-cancel-unconfirmed-alarm';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import {
+  getMeetingById,
   type Meeting,
   isGinitWebGuestParticipantId,
   meetingParticipantCount,
@@ -121,6 +129,13 @@ const HEADS_UP_MAX_EVENT_AGE_MS = 120_000;
 function isRecentEnoughForHeadsUp(eventTimeMs: number): boolean {
   if (!eventTimeMs || !Number.isFinite(eventTimeMs)) return true;
   return Date.now() - eventTimeMs <= HEADS_UP_MAX_EVENT_AGE_MS;
+}
+
+/** 새 소식에서 모임 상세·채팅으로 보낼 수 있는지(목록에 아직 있는 모임). */
+function isMeetingListedForAlarmNavigation(meetingId: string, meetings: readonly Meeting[]): boolean {
+  const mid = meetingId.trim();
+  if (!mid) return false;
+  return meetings.some((m) => m.id === mid);
 }
 
 type InAppAlarmsContextValue = {
@@ -197,6 +212,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [socialPeerNickByRoomId, setSocialPeerNickByRoomId] = useState<Map<string, string>>(() => new Map());
   /** `public.notifications` type=meeting_friend_invite (읽지 않음만) */
   const [meetingInviteInbox, setMeetingInviteInbox] = useState<NotificationDoc[]>([]);
+  /** 미확정·일시 경과 자동 파기 — 모임 삭제 후에도 새 소식에 남김 */
+  const [autoCancelUnconfirmedAlarms, setAutoCancelUnconfirmedAlarms] = useState<
+    MeetingAutoCancelUnconfirmedAlarm[]
+  >([]);
   const friendHeadsUpNotifiedIdsRef = useRef<Set<string>>(new Set());
   const friendAcceptHeadsUpNotifiedIdsRef = useRef<Set<string>>(new Set());
   const prevOutboxFriendshipIdsRef = useRef<Set<string>>(new Set());
@@ -274,6 +293,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       setSocialPeerNickByRoomId(new Map());
       setMeetingChatSummaryById({});
       setSocialRoomDocById({});
+      setMeetingInviteInbox([]);
+      setAutoCancelUnconfirmedAlarms([]);
       friendHeadsUpNotifiedIdsRef.current = new Set();
       friendAcceptHeadsUpNotifiedIdsRef.current = new Set();
       prevOutboxFriendshipIdsRef.current = new Set();
@@ -303,6 +324,24 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [userId]);
+
+  const reloadAutoCancelUnconfirmedAlarms = useCallback(() => {
+    const uid = userId?.trim();
+    if (!uid) {
+      setAutoCancelUnconfirmedAlarms([]);
+      return;
+    }
+    void loadMeetingAutoCancelUnconfirmedAlarms(uid).then(setAutoCancelUnconfirmedAlarms);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!persistReady || !userId?.trim()) {
+      setAutoCancelUnconfirmedAlarms([]);
+      return;
+    }
+    reloadAutoCancelUnconfirmedAlarms();
+    return subscribeMeetingAutoCancelUnconfirmedAlarms(reloadAutoCancelUnconfirmedAlarms);
+  }, [persistReady, userId, reloadAutoCancelUnconfirmedAlarms]);
 
   // 참여자 변동 알람을 위해, "첫 변동"이 아니라 "첫 관측" 시점에 기준 participantIds를 잡아둡니다.
   useEffect(() => {
@@ -1142,6 +1181,16 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         inviterAppUserId: payload.inviterAppUserId || undefined,
       });
     }
+    for (const ac of autoCancelUnconfirmedAlarms) {
+      rows.push({
+        id: ac.id,
+        kind: 'meeting_auto_cancelled',
+        meetingId: ac.meetingId,
+        meetingTitle: ac.meetingTitle,
+        subtitle: ac.subtitle,
+        sortMs: ac.sortMs,
+      });
+    }
     for (const sr of socialRooms) {
       const rid = sr.roomId.trim();
       if (!rid) continue;
@@ -1179,6 +1228,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     socialLatestByRoomId,
     socialPeerNickByRoomId,
     meetingInviteInbox,
+    autoCancelUnconfirmedAlarms,
   ]);
 
   const hasUnread = alarms.length > 0;
@@ -1427,6 +1477,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (!nid) continue;
         void markMeetingFriendInviteNotificationRead(nid, uid).catch(() => {});
       }
+      void dismissAllMeetingAutoCancelUnconfirmedAlarms(uid);
     }
     setFriendAcceptQueue([]);
     setHostParticipantEventLog({});
@@ -1456,8 +1507,9 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
             chatReadMessageId: { ...p.chatReadMessageId, [row.meetingId]: lid },
           }));
         }
-        requestHomeMeetingsAndDetailRefresh(row.meetingId);
         closeAlarmPanel();
+        if (!isMeetingListedForAlarmNavigation(row.meetingId, meetings)) return;
+        requestHomeMeetingsAndDetailRefresh(row.meetingId);
         const latest = latestById[row.meetingId];
         const latestId = (latest?.id ?? '').trim();
         const senderRaw = typeof latest?.senderId === 'string' ? latest.senderId.trim() : '';
@@ -1493,11 +1545,23 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (uid && nid) {
           void markMeetingFriendInviteNotificationRead(nid, uid).catch(() => {});
         }
-        requestHomeMeetingsAndDetailRefresh(row.meetingId);
         closeAlarmPanel();
-        InteractionManager.runAfterInteractions(() => {
-          router.push(`/meeting/${row.meetingId}`);
-        });
+        void (async () => {
+          const mid = row.meetingId.trim();
+          if (!mid) return;
+          const doc = await getMeetingById(mid).catch(() => null);
+          if (!doc) return;
+          requestHomeMeetingsAndDetailRefresh(mid);
+          InteractionManager.runAfterInteractions(() => {
+            router.push(`/meeting/${mid}`);
+          });
+        })();
+        return;
+      }
+      if (row.kind === 'meeting_auto_cancelled') {
+        const uid = userId?.trim() ?? '';
+        if (uid) void dismissMeetingAutoCancelUnconfirmedAlarm(uid, row.id);
+        closeAlarmPanel();
         return;
       }
       const m = meetings.find((x) => x.id === row.meetingId);
@@ -1508,14 +1572,16 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           meetingAckFingerprint: { ...p.meetingAckFingerprint, [row.meetingId]: fp },
         }));
       }
-      requestHomeMeetingsAndDetailRefresh(row.meetingId);
       setHostParticipantEventLog((prev) => {
         if (!prev[row.meetingId]?.length) return prev;
         const next = { ...prev };
         delete next[row.meetingId];
         return next;
       });
+      delete meetingChangePreviewRef.current[row.meetingId];
       closeAlarmPanel();
+      if (!isMeetingListedForAlarmNavigation(row.meetingId, meetings)) return;
+      requestHomeMeetingsAndDetailRefresh(row.meetingId);
       InteractionManager.runAfterInteractions(() => {
         router.push(`/meeting/${row.meetingId}`);
       });
