@@ -19,6 +19,11 @@ function maskNameMiddleForShare(name: string): string {
   return `${s[0]}${'*'.repeat(n - 2)}${s[n - 1]}`;
 }
 
+export type SettlementShareParticipantAmount = {
+  displayName: string;
+  amountWon: number;
+};
+
 export type SettlementShareMessageParams = {
   meetingTitle: string;
   participantCount: number;
@@ -27,8 +32,8 @@ export type SettlementShareMessageParams = {
   bankName?: string | null;
   accountNumber?: string | null;
   accountHolder?: string | null;
-  perPersonWon: number | null;
   totalWon: number | null;
+  participantAmounts?: readonly SettlementShareParticipantAmount[];
   receiptSummaries?: SettlementShareReceiptSummary[];
 };
 
@@ -37,8 +42,17 @@ export type SettlementShareReceiptSummary = {
   bizNum?: string | null;
   visitedAt?: string | null;
   amountWon?: number | null;
+  payerNickname?: string | null;
   tags?: string[] | null;
 };
+
+export function formatSignedWonForSettlementShare(won: number): string {
+  if (!Number.isFinite(won)) return '0원';
+  const n = Math.trunc(won);
+  const abs = Math.abs(n).toLocaleString('ko-KR');
+  if (n < 0) return `-${abs}원`;
+  return `${abs}원`;
+}
 
 export function buildSettlementShareMessage(p: SettlementShareMessageParams): string {
   const title = (p.meetingTitle ?? '').trim() || '모임';
@@ -49,7 +63,7 @@ export function buildSettlementShareMessage(p: SettlementShareMessageParams): st
     `[지닛 정산] ${title}`,
     `인원 : ${Math.max(0, Math.trunc(p.participantCount)).toLocaleString('ko-KR')}명`,
     `총 금액 : ${formatWon(p.totalWon)}`,
-    `내가 지불할 금액 : ${formatWon(p.perPersonWon)}`,
+    ...buildParticipantAmountShareLines(p.participantAmounts ?? []),
     `정산 방식 : ${(p.settlementMethodText ?? '').trim()}`,
     `지불 방식 : ${paymentMethodText}`,
   ];
@@ -62,6 +76,15 @@ export function buildSettlementShareMessage(p: SettlementShareMessageParams): st
   lines.push('');
   lines.push('영수증 및 상세 내역을 확인하고 싶으시면 어플 모임 상세에서 확인하세요.');
   return lines.join('\n');
+}
+
+function buildParticipantAmountShareLines(
+  participants: readonly SettlementShareParticipantAmount[],
+): string[] {
+  return participants.map((participant, index) => {
+    const name = (participant.displayName ?? '').trim() || `참여자 ${index + 1}`;
+    return `${index + 1}. ${name} : ${formatSignedWonForSettlementShare(participant.amountWon)}`;
+  });
 }
 
 function buildPaymentMethodText(p: SettlementShareMessageParams): string {
@@ -88,9 +111,11 @@ function buildReceiptSummaryLines(
     lines.push(`${index + 1}. ${storeName}`);
     const bizNum = (receipt.bizNum ?? '').trim();
     const visitedAt = (receipt.visitedAt ?? '').trim();
+    const payerNickname = (receipt.payerNickname ?? '').trim();
     if (bizNum) lines.push(`사업자번호 : ${bizNum}`);
     if (visitedAt) lines.push(`결제일시 : ${visitedAt}`);
     if (amount) lines.push(`결제금액 : ${amount}`);
+    if (payerNickname) lines.push(`결제자 : ${payerNickname}`);
   });
   return lines;
 }

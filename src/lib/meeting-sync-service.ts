@@ -6,6 +6,7 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { Meeting } from '@/src/lib/meetings';
 import type { MeetingsFeedPageSlice } from '@/src/lib/meetings-feed-page-utils';
 import { meetingsFeedInfiniteQueryKey, myMeetingsFeedQueryKey } from '@/src/lib/meetings-query-keys';
@@ -184,6 +185,25 @@ export function meetingSnapshotAfterParticipantLeave(m: Meeting, viewerUserId: s
     participantIds: nextParticipantIds,
     joinRequests: nextJoinRequests.length > 0 ? nextJoinRequests : null,
   };
+}
+
+/** 참여 성공 직후 my-feed·공개 feed에 서버 상세 스냅샷을 반영해 목록↔상세 reconcile이 참여를 되돌리지 않게 합니다. */
+export function applyMeetingParticipantJoinToFeedCaches(
+  queryClient: QueryClient,
+  meetingId: string,
+  viewerUserId: string,
+  snapshot: Meeting,
+): boolean {
+  const mid = meetingId.trim();
+  const uid = normalizeParticipantId(viewerUserId) ?? viewerUserId.trim();
+  if (!mid || !uid || snapshot.id?.trim() !== mid) return false;
+  if (!isUserJoinedMeeting(snapshot, uid)) return false;
+
+  const upd = new Map<string, Meeting>([[mid, snapshot]]);
+  let mutated = false;
+  if (patchMeetingsInInfiniteFeedCache(queryClient, upd, [])) mutated = true;
+  if (patchMeetingsInMyFeedCache(queryClient, uid, upd, [snapshot])) mutated = true;
+  return mutated;
 }
 
 /** 모임 나가기 성공 직후 홈 참여중·종료 탭이 즉시 갱신되도록 TanStack 모임 피드 캐시를 패치합니다. */

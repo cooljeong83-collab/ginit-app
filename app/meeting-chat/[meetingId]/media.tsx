@@ -26,6 +26,7 @@ import {
 } from '@/src/lib/meeting-chat';
 import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import type { Meeting } from '@/src/lib/meetings';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
@@ -179,6 +180,7 @@ export default function MeetingChatMediaScreen() {
   const onBack = useCallback(() => {
     router.back();
   }, [router]);
+  useAndroidOverlayHardwareBack(onBack);
 
   const viewer = useMemo(() => {
     if (!imageViewer || rows.length === 0) return null;

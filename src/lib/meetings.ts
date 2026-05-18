@@ -104,6 +104,8 @@ export type MeetingSettlementReceiptItem = {
   id: string;
   imageUrl: string;
   amountWon: number;
+  /** 업로드한 참여자 PK — 없으면 레거시(호스트 일괄 업로드) */
+  uploaderAppUserId?: string | null;
 };
 
 /** 원장 `extra_data.fs`에만 저장되는 정산 전용 부가 데이터(핵심 모임 필드와 분리). */
@@ -121,6 +123,8 @@ export type MeetingSettlementInfo = {
   selectedParticipantIds?: string[] | null;
   linkedPlaceChipId?: string | null;
   finalizedAt?: string | null;
+  /** 정산 완료 직전 스냅샷 — app_user_id → 순정산액(음수=받음, 양수=보냄) */
+  participantNetWonById?: Record<string, number> | null;
 };
 
 /** 후기 2단계 등에서 확정 장소와 연결하기 위한 얇은 스냅샷. */
@@ -967,7 +971,10 @@ export function parseMeetingSettlementDraftReceipts(drRaw: unknown): MeetingSett
     const amountWon = parseSettlementDraftReceiptAmountWon(q.amountWon ?? q.amount_won);
     if (!id || !imageUrl || amountWon == null || amountWon < 0) continue;
     if (!/^https?:\/\//i.test(imageUrl)) continue;
-    xs.push({ id, imageUrl, amountWon });
+    const uploaderRaw = q.uploaderAppUserId ?? q.uploader_app_user_id;
+    const uploaderAppUserId =
+      typeof uploaderRaw === 'string' && uploaderRaw.trim() ? uploaderRaw.trim() : undefined;
+    xs.push({ id, imageUrl, amountWon, uploaderAppUserId });
   }
   return xs;
 }
@@ -1042,6 +1049,16 @@ function parseMeetingSettlementInfoField(data: Record<string, unknown>): Meeting
   if (selectedParticipantIds) out.selectedParticipantIds = selectedParticipantIds;
   if (linkedPlaceChipId) out.linkedPlaceChipId = linkedPlaceChipId;
   if (finalizedAt) out.finalizedAt = finalizedAt;
+  const pnRaw = o.participantNetWonById ?? o.participant_net_won_by_id;
+  if (pnRaw != null && typeof pnRaw === 'object' && !Array.isArray(pnRaw)) {
+    const map: Record<string, number> = {};
+    for (const [k, v] of Object.entries(pnRaw as Record<string, unknown>)) {
+      const key = normalizeParticipantId(String(k)) ?? String(k).trim();
+      if (!key) continue;
+      if (typeof v === 'number' && Number.isFinite(v)) map[key] = Math.trunc(v);
+    }
+    if (Object.keys(map).length > 0) out.participantNetWonById = map;
+  }
   return out;
 }
 

@@ -18,6 +18,7 @@ import {
   webGuestDisplayNameFromMeeting,
 } from '@/src/lib/meetings';
 import type { Meeting } from '@/src/lib/meetings';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
@@ -112,6 +113,7 @@ export default function MeetingChatMembersScreen() {
   const onBack = useCallback(() => {
     router.back();
   }, [router]);
+  useAndroidOverlayHardwareBack(onBack);
 
   if (!meetingId) {
     return (

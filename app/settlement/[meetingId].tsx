@@ -7,7 +7,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   ActivityIndicator,
   Alert,
-  BackHandler,
   Modal,
   Platform,
   ScrollView,
@@ -37,6 +36,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -50,6 +50,7 @@ import {
   markMeetingLifecycleSettled,
   persistMeetingLocationDataPatch,
   persistMeetingSettlementInfoPatch,
+  persistParticipantSettlementReceipts,
 } from '@/src/lib/meeting-settlement-persist';
 import {
   buildMeetingTopNoticeTitleLeft,
@@ -62,7 +63,17 @@ import {
 import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
 import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
 import { safeRouterBack } from '@/src/lib/router-safe';
-import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
+import {
+  computeReceiptBasedSettlementNet,
+  formatSettlementNetWonLabel,
+  formatSettlementNetWonSelfSummary,
+  formatSettlementReadonlyParticipantNet,
+} from '@/src/lib/settlement-receipt-split';
+import {
+  isMeetingHost,
+  isMeetingSettlementCollaborationEligible,
+  isMeetingSettlementCtaEligibleForHost,
+} from '@/src/lib/settlement-eligibility';
 import {
   fetchSettlementReceiptAnalysesFromSupabase,
   syncSettlementReceiptAnalysesToSupabase,
@@ -77,6 +88,7 @@ import {
 import {
   buildSettlementShareMessage,
   maskHolderInHostAccountTextForShare,
+  type SettlementShareParticipantAmount,
   type SettlementShareReceiptSummary,
   shareSettlementText,
 } from '@/src/lib/settlement-share-channels';
@@ -128,6 +140,7 @@ type SettlementReceiptRow = {
   id: string;
   previewUri: string;
   amountWon: number;
+  uploaderAppUserId?: string;
   naturalWidth?: number;
   analysis?: SettlementReceiptOcrAnalysis;
 };
@@ -158,6 +171,36 @@ type SettlementReceiptScanPreviewState = {
 
 function newSettlementReceiptId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function mapDraftReceiptsToSettlementRows(
+  drRows: readonly MeetingSettlementReceiptItem[],
+): SettlementReceiptRow[] {
+  return drRows
+    .map((r) => {
+      const id = typeof r.id === 'string' && r.id.trim() ? r.id.trim() : newSettlementReceiptId();
+      const previewUri = (r.imageUrl ?? '').trim();
+      const uploaderRaw = (r.uploaderAppUserId ?? '').trim();
+      const uploaderNorm = uploaderRaw ? normalizeParticipantId(uploaderRaw) ?? uploaderRaw : '';
+      return {
+        id,
+        previewUri,
+        amountWon: typeof r.amountWon === 'number' && Number.isFinite(r.amountWon) ? Math.trunc(r.amountWon) : 0,
+        uploaderAppUserId: uploaderNorm || undefined,
+      };
+    })
+    .filter((row) => row.previewUri.length > 0);
+}
+
+function isReceiptUploadedByMeetingHost(
+  receipt: MeetingSettlementReceiptItem,
+  meetingHostNorm: string,
+): boolean {
+  if (!meetingHostNorm) return false;
+  const u = (receipt.uploaderAppUserId ?? '').trim();
+  if (!u) return true;
+  const norm = normalizeParticipantId(u) ?? u;
+  return norm === meetingHostNorm;
 }
 
 function compactReceiptOcrText(chunks: string[]): string[] {
@@ -221,6 +264,98 @@ function settlementReceiptImageKey(raw: string): string {
   return decodeURIComponent(path.split('/').filter(Boolean).at(-1) ?? '').trim();
 }
 
+type SettlementReceiptAnalysisMaps = {
+  byId: Map<string, SettlementReceiptAnalysisRecord>;
+  byUrl: Map<string, SettlementReceiptAnalysisRecord>;
+  byKey: Map<string, SettlementReceiptAnalysisRecord>;
+};
+
+function buildSettlementReceiptAnalysisMaps(
+  rows: readonly SettlementReceiptAnalysisRecord[],
+): SettlementReceiptAnalysisMaps {
+  const byId = new Map<string, SettlementReceiptAnalysisRecord>();
+  const byUrl = new Map<string, SettlementReceiptAnalysisRecord>();
+  const byKey = new Map<string, SettlementReceiptAnalysisRecord>();
+  for (const row of rows) {
+    byId.set(row.receiptId, row);
+    byUrl.set(row.imageUrl.trim(), row);
+    const key = settlementReceiptImageKey(row.imageUrl);
+    if (key) byKey.set(key, row);
+  }
+  return { byId, byUrl, byKey };
+}
+
+function lookupSettlementReceiptAnalysis(
+  row: SettlementReceiptRow,
+  maps: SettlementReceiptAnalysisMaps,
+): SettlementReceiptAnalysisRecord | undefined {
+  return (
+    maps.byId.get(row.id) ??
+    maps.byUrl.get(row.previewUri.trim()) ??
+    maps.byKey.get(settlementReceiptImageKey(row.previewUri))
+  );
+}
+
+type SettlementReceiptPayerContext = {
+  hostNorm: string;
+  meeting: Meeting | null;
+  participantProfiles: Map<string, UserProfile>;
+  authDisplayName?: string | null;
+};
+
+function resolveSettlementParticipantDisplayName(
+  pid: string,
+  meeting: Meeting | null,
+  participantProfiles: Map<string, UserProfile>,
+  authDisplayName?: string | null,
+): string {
+  const createdBy = meeting?.createdBy?.trim() ?? '';
+  const hostPid = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  const isHostRow = Boolean(hostPid && pid === hostPid);
+  const profile = participantProfiles.get(pid);
+  return (
+    profile?.nickname?.trim() || (isHostRow ? authDisplayName?.trim() ?? '' : '') || pid
+  );
+}
+
+function resolveSettlementReceiptPayerNickname(
+  uploaderAppUserId: string | undefined,
+  ctx: SettlementReceiptPayerContext,
+): string | null {
+  const norm = uploaderAppUserId?.trim()
+    ? normalizeParticipantId(uploaderAppUserId) ?? uploaderAppUserId.trim()
+    : ctx.hostNorm;
+  if (!norm) return null;
+  const createdBy = ctx.meeting?.createdBy?.trim() ?? '';
+  const hostPid = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  const isHostRow = Boolean(hostPid && norm === hostPid);
+  const profile = ctx.participantProfiles.get(norm);
+  const nick =
+    profile?.nickname?.trim() || (isHostRow ? ctx.authDisplayName?.trim() ?? '' : '') || '';
+  return nick.trim() || null;
+}
+
+function buildSettlementShareReceiptSummariesFromRows(
+  items: readonly SettlementReceiptRow[],
+  maps: SettlementReceiptAnalysisMaps,
+  payerContext?: SettlementReceiptPayerContext,
+): SettlementShareReceiptSummary[] {
+  return items.map((it) => {
+    const savedAnalysis = lookupSettlementReceiptAnalysis(it, maps);
+    const analysis = savedAnalysis?.analysis ?? it.analysis;
+    return {
+      storeName: savedAnalysis?.storeName?.trim() || analysis?.verification.store_name?.trim() || null,
+      bizNum: savedAnalysis?.bizNum?.trim() || analysis?.verification.biz_num?.trim() || null,
+      visitedAt: savedAnalysis?.receiptDateText?.trim() || analysis?.verification.datetime?.trim() || null,
+      amountWon: analysis?.billing.total_amount ?? savedAnalysis?.amountWon ?? it.amountWon,
+      payerNickname: payerContext
+        ? resolveSettlementReceiptPayerNickname(it.uploaderAppUserId, payerContext)
+        : null,
+      tags: receiptAnalysisTags(analysis),
+    };
+  });
+}
+
 function findReceiptScanAdditionByAssetIndex(
   additions: SettlementReceiptAddition[],
   assetIndex: number,
@@ -230,6 +365,40 @@ function findReceiptScanAdditionByAssetIndex(
 
 function waitReceiptScanResultPreview(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 650));
+}
+
+function SettlementReceiptUploaderBadge(props: {
+  uploaderAppUserId?: string;
+  hostNorm: string;
+  meeting: Meeting | null;
+  participantProfiles: Map<string, UserProfile>;
+  authDisplayName?: string | null;
+  authPhotoUrl?: string | null;
+}) {
+  const norm = props.uploaderAppUserId?.trim()
+    ? normalizeParticipantId(props.uploaderAppUserId) ?? props.uploaderAppUserId.trim()
+    : props.hostNorm;
+  if (!norm) return null;
+  const createdBy = props.meeting?.createdBy?.trim() ?? '';
+  const hostPid = createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  const isHostRow = Boolean(hostPid && norm === hostPid);
+  const profile = props.participantProfiles.get(norm);
+  const nick =
+    profile?.nickname?.trim() || (isHostRow ? props.authDisplayName?.trim() ?? '' : '') || '';
+  const photoUrl =
+    profile?.photoUrl?.trim() || (isHostRow ? props.authPhotoUrl?.trim() ?? '' : '');
+  const initial = nick.trim().slice(0, 1) || '?';
+  return (
+    <View style={styles.receiptUploaderBadge} pointerEvents="none">
+      {photoUrl ? (
+        <Image source={{ uri: photoUrl }} style={styles.receiptUploaderBadgeImg} contentFit="cover" />
+      ) : (
+        <View style={styles.receiptUploaderBadgeFallback}>
+          <Text style={styles.receiptUploaderBadgeInitial}>{initial}</Text>
+        </View>
+      )}
+    </View>
+  );
 }
 
 function waitReceiptScanSlideTransition(): Promise<void> {
@@ -406,6 +575,11 @@ export default function SettlementMeetingScreen() {
     return u ? normalizeParticipantId(u) ?? u : '';
   }, [userId]);
 
+  const meetingHostNorm = useMemo(() => {
+    const createdBy = meeting?.createdBy?.trim() ?? '';
+    return createdBy ? normalizeParticipantId(createdBy) ?? createdBy : '';
+  }, [meeting?.createdBy]);
+
   const participantRows = useMemo(() => {
     if (!meeting?.createdBy) return [];
     const host = normalizeParticipantId(meeting.createdBy.trim()) ?? meeting.createdBy.trim();
@@ -499,21 +673,23 @@ export default function SettlementMeetingScreen() {
     }
     const drRows = si?.draftReceipts;
     if (Array.isArray(drRows) && drRows.length > 0) {
+      const mapped = mapDraftReceiptsToSettlementRows(drRows);
+      const onlyMineInReceiptItems =
+        !isMeetingHost(meeting, hostNorm) &&
+        meeting.lifecycleStatus !== 'SETTLED' &&
+        isMeetingSettlementCollaborationEligible(meeting, hostNorm, Date.now());
+      const rowsForState = onlyMineInReceiptItems
+        ? mapped.filter((row) => row.uploaderAppUserId === hostNorm)
+        : mapped;
       setReceiptItems((prev) =>
-        drRows
-          .map((r) => {
-            const id = typeof r.id === 'string' && r.id.trim() ? r.id.trim() : newSettlementReceiptId();
-            const previewUri = (r.imageUrl ?? '').trim();
-            const previous = prev.find((item) => item.id === id || item.previewUri.trim() === previewUri);
-            return {
-              id,
-              previewUri,
-              amountWon: typeof r.amountWon === 'number' && Number.isFinite(r.amountWon) ? Math.trunc(r.amountWon) : 0,
-              naturalWidth: previous?.naturalWidth,
-              analysis: previous?.analysis,
-            };
-          })
-          .filter((row) => row.previewUri.length > 0),
+        rowsForState.map((row) => {
+          const previous = prev.find((item) => item.id === row.id || item.previewUri.trim() === row.previewUri);
+          return {
+            ...row,
+            naturalWidth: previous?.naturalWidth,
+            analysis: previous?.analysis,
+          };
+        }),
       );
     } else {
       setReceiptItems([]);
@@ -522,35 +698,12 @@ export default function SettlementMeetingScreen() {
   }, [meeting, hostNorm, allSettlementParticipantIds]);
 
   useEffect(() => {
+    if (meeting?.lifecycleStatus === 'SETTLED') return;
     if (receiptItems.length === 0) return;
     if (settlementAmountTab === 'manual') return;
     const sum = receiptItems.reduce((s, x) => s + x.amountWon, 0);
     setTotalWonInput(formatWonInput(String(sum)));
-  }, [receiptItems, settlementAmountTab]);
-
-  const receiptImageGallery = useMemo<ImageViewerGalleryItem[]>(
-    () =>
-      receiptItems
-        .map((it) => ({ id: it.id, imageUrl: it.previewUri.trim() }))
-        .filter((it) => it.imageUrl.length > 0),
-    [receiptItems],
-  );
-
-  const receiptImageViewerSafeIndex = useMemo(() => {
-    if (receiptImageViewerIndex == null || receiptImageGallery.length === 0) return 0;
-    return Math.max(0, Math.min(receiptImageGallery.length - 1, receiptImageViewerIndex));
-  }, [receiptImageGallery.length, receiptImageViewerIndex]);
-
-  useEffect(() => {
-    if (receiptImageViewerIndex == null) return;
-    if (receiptImageGallery.length === 0) {
-      setReceiptImageViewerIndex(null);
-      return;
-    }
-    if (receiptImageViewerIndex > receiptImageGallery.length - 1) {
-      setReceiptImageViewerIndex(receiptImageGallery.length - 1);
-    }
-  }, [receiptImageGallery.length, receiptImageViewerIndex]);
+  }, [meeting?.lifecycleStatus, receiptItems, settlementAmountTab]);
 
   useEffect(() => {
     if (!meeting?.id || !hostNorm || profileAccounts === null) return;
@@ -644,6 +797,53 @@ export default function SettlementMeetingScreen() {
     return isMeetingSettlementCtaEligibleForHost(meeting, userId, Date.now());
   }, [meeting, userId]);
 
+  const canCollaborateSettlement = useMemo(() => {
+    if (!meeting || !hostNorm) return false;
+    if (isMeetingHost(meeting, hostNorm)) return false;
+    return isMeetingSettlementCollaborationEligible(meeting, hostNorm, Date.now());
+  }, [meeting, hostNorm]);
+
+  const settlementParticipantMode = canCollaborateSettlement && !canEditSettlement;
+
+  const hostCollaborationReceiptRows = useMemo(() => {
+    if (!settlementParticipantMode || !meetingHostNorm) return [] as SettlementReceiptRow[];
+    const hostReceipts = (meeting?.settlementInfo?.draftReceipts ?? []).filter((r) =>
+      isReceiptUploadedByMeetingHost(r, meetingHostNorm),
+    );
+    return mapDraftReceiptsToSettlementRows(hostReceipts).map((row) => ({
+      ...row,
+      uploaderAppUserId: row.uploaderAppUserId ?? meetingHostNorm,
+    }));
+  }, [settlementParticipantMode, meetingHostNorm, meeting?.settlementInfo?.draftReceipts]);
+
+  const receiptImageGallery = useMemo<ImageViewerGalleryItem[]>(
+    () => {
+      const rows = settlementParticipantMode
+        ? [...receiptItems, ...hostCollaborationReceiptRows]
+        : receiptItems;
+      return rows
+        .map((it) => ({ id: it.id, imageUrl: it.previewUri.trim() }))
+        .filter((it) => it.imageUrl.length > 0);
+    },
+    [receiptItems, hostCollaborationReceiptRows, settlementParticipantMode],
+  );
+
+  const receiptImageViewerSafeIndex = useMemo(() => {
+    if (receiptImageViewerIndex == null || receiptImageGallery.length === 0) return 0;
+    return Math.max(0, Math.min(receiptImageGallery.length - 1, receiptImageViewerIndex));
+  }, [receiptImageGallery.length, receiptImageViewerIndex]);
+
+  useEffect(() => {
+    if (receiptImageViewerIndex == null) return;
+    if (receiptImageGallery.length === 0) {
+      setReceiptImageViewerIndex(null);
+      return;
+    }
+    if (receiptImageViewerIndex > receiptImageGallery.length - 1) {
+      setReceiptImageViewerIndex(receiptImageGallery.length - 1);
+    }
+  }, [receiptImageGallery.length, receiptImageViewerIndex]);
+
   const canViewSettledSettlement = useMemo(() => {
     const uid = (userId ?? '').trim();
     if (!meeting || !uid || meeting.lifecycleStatus !== 'SETTLED') return false;
@@ -656,10 +856,110 @@ export default function SettlementMeetingScreen() {
     return allSettlementParticipantIds.includes(viewer);
   }, [meeting, userId, allSettlementParticipantIds]);
 
-  const settlementReadOnly = !canEditSettlement && canViewSettledSettlement;
+  const settlementReadOnly =
+    canViewSettledSettlement && !canEditSettlement && !canCollaborateSettlement;
   const settlementParticipantDisplayIds = settlementReadOnly ? activeSplitParticipantIds : allSettlementParticipantIds;
+
   useEffect(() => {
-    if (!settlementReadOnly || !meetingId || receiptItems.length === 0) {
+    if (!settlementParticipantMode) return;
+    setSelectedParticipantIds(new Set(allSettlementParticipantIds));
+  }, [settlementParticipantMode, allSettlementParticipantIds]);
+
+  const mergedDraftReceiptsForSplit = useMemo((): MeetingSettlementReceiptItem[] => {
+    const fromServer = meeting?.settlementInfo?.draftReceipts ?? [];
+    if (canEditSettlement && settlementHasUnsavedUserChanges) {
+      return receiptItems
+        .filter((r) => r.previewUri.trim())
+        .map((r) => ({
+          id: r.id,
+          imageUrl: r.previewUri.trim(),
+          amountWon: r.amountWon,
+          uploaderAppUserId: (r.uploaderAppUserId ?? hostNorm) || undefined,
+        }));
+    }
+    if (settlementParticipantMode && settlementHasUnsavedUserChanges) {
+      const others = fromServer.filter((r) => {
+        const u = (r.uploaderAppUserId ?? '').trim();
+        const norm = u ? normalizeParticipantId(u) ?? u : '';
+        return norm !== hostNorm;
+      });
+      const mine = receiptItems
+        .filter((r) => r.previewUri.trim())
+        .map((r) => ({
+          id: r.id,
+          imageUrl: r.previewUri.trim(),
+          amountWon: r.amountWon,
+          uploaderAppUserId: hostNorm,
+        }));
+      return [...others, ...mine];
+    }
+    return fromServer;
+  }, [
+    meeting?.settlementInfo?.draftReceipts,
+    canEditSettlement,
+    settlementParticipantMode,
+    settlementHasUnsavedUserChanges,
+    receiptItems,
+    hostNorm,
+  ]);
+
+  const useReceiptSplitDisplay = mergedDraftReceiptsForSplit.length > 0;
+
+  const receiptNetDisplayMap = useMemo(() => {
+    if (!useReceiptSplitDisplay) return new Map<string, number>();
+    const settledSnap = meeting?.settlementInfo?.participantNetWonById;
+    if (settlementReadOnly && settledSnap && Object.keys(settledSnap).length > 0) {
+      return new Map(
+        Object.entries(settledSnap).map(([k, v]) => [normalizeParticipantId(k) ?? k, Math.trunc(v)]),
+      );
+    }
+    return computeReceiptBasedSettlementNet(activeSplitParticipantIds, mergedDraftReceiptsForSplit);
+  }, [
+    useReceiptSplitDisplay,
+    meeting?.settlementInfo?.participantNetWonById,
+    settlementReadOnly,
+    activeSplitParticipantIds,
+    mergedDraftReceiptsForSplit,
+  ]);
+
+  const viewerSettlementNetWon = useMemo(() => {
+    if (useReceiptSplitDisplay) return receiptNetDisplayMap.get(hostNorm) ?? 0;
+    if (settlementAmountTab === 'split_n' && perPersonWon != null) return perPersonWon;
+    if (settlementAmountTab === 'manual') return parseWonDigits(manualAmountsByParticipant[hostNorm] ?? '');
+    return 0;
+  }, [
+    useReceiptSplitDisplay,
+    receiptNetDisplayMap,
+    hostNorm,
+    settlementAmountTab,
+    perPersonWon,
+    manualAmountsByParticipant,
+  ]);
+
+  const viewerSettlementSummary = useMemo(
+    () => formatSettlementNetWonSelfSummary(viewerSettlementNetWon),
+    [viewerSettlementNetWon],
+  );
+
+  const otherParticipantsReceipts = useMemo(() => {
+    if (!settlementParticipantMode) return [] as MeetingSettlementReceiptItem[];
+    return (meeting?.settlementInfo?.draftReceipts ?? []).filter((r) => {
+      const u = (r.uploaderAppUserId ?? '').trim();
+      const norm = u ? normalizeParticipantId(u) ?? u : '';
+      if (!norm || norm === hostNorm) return false;
+      return !isReceiptUploadedByMeetingHost(r, meetingHostNorm);
+    });
+  }, [settlementParticipantMode, meeting?.settlementInfo?.draftReceipts, hostNorm, meetingHostNorm]);
+  const receiptAnalysisFetchSig = useMemo(
+    () =>
+      [...receiptItems, ...hostCollaborationReceiptRows]
+        .map((r) => `${r.id}:${r.previewUri.trim()}`)
+        .join('|'),
+    [receiptItems, hostCollaborationReceiptRows],
+  );
+
+  useEffect(() => {
+    if (!meetingId.trim()) {
       setSettlementReceiptAnalysesById(new Map());
       setSettlementReceiptAnalysesByImageUrl(new Map());
       setSettlementReceiptAnalysesByImageKey(new Map());
@@ -670,16 +970,10 @@ export default function SettlementMeetingScreen() {
       try {
         const rows = await fetchSettlementReceiptAnalysesFromSupabase(meetingId);
         if (!alive) return;
-        setSettlementReceiptAnalysesById(new Map(rows.map((row) => [row.receiptId, row])));
-        setSettlementReceiptAnalysesByImageUrl(new Map(rows.map((row) => [row.imageUrl.trim(), row])));
-        const imageKeyEntries: [string, SettlementReceiptAnalysisRecord][] = [];
-        for (const row of rows) {
-          const key = settlementReceiptImageKey(row.imageUrl);
-          if (key) imageKeyEntries.push([key, row]);
-        }
-        setSettlementReceiptAnalysesByImageKey(
-          new Map(imageKeyEntries),
-        );
+        const maps = buildSettlementReceiptAnalysisMaps(rows);
+        setSettlementReceiptAnalysesById(maps.byId);
+        setSettlementReceiptAnalysesByImageUrl(maps.byUrl);
+        setSettlementReceiptAnalysesByImageKey(maps.byKey);
       } catch {
         if (alive) {
           setSettlementReceiptAnalysesById(new Map());
@@ -691,7 +985,7 @@ export default function SettlementMeetingScreen() {
     return () => {
       alive = false;
     };
-  }, [meetingId, receiptItems.length, settlementReadOnly]);
+  }, [meetingId, receiptAnalysisFetchSig]);
 
   const settlementAccountTextForReadOnly = useMemo(() => {
     const saved = meeting?.settlementInfo?.hostAccountText?.trim() ?? '';
@@ -711,26 +1005,56 @@ export default function SettlementMeetingScreen() {
     return masked.split(/\s+/).filter(Boolean).at(-1) ?? hostAccountHolder.trim();
   }, [selectedBank?.label, hostAccountNumber, hostAccountHolder]);
 
-  const settlementShareReceiptSummaries = useMemo<SettlementShareReceiptSummary[]>(() => {
-    return receiptItems.map((it) => {
-      const savedAnalysis =
-        settlementReceiptAnalysesById.get(it.id) ??
-        settlementReceiptAnalysesByImageUrl.get(it.previewUri.trim()) ??
-        settlementReceiptAnalysesByImageKey.get(settlementReceiptImageKey(it.previewUri));
-      const analysis = savedAnalysis?.analysis ?? it.analysis;
+  const settlementReceiptAnalysisMaps = useMemo<SettlementReceiptAnalysisMaps>(
+    () => ({
+      byId: settlementReceiptAnalysesById,
+      byUrl: settlementReceiptAnalysesByImageUrl,
+      byKey: settlementReceiptAnalysesByImageKey,
+    }),
+    [settlementReceiptAnalysesById, settlementReceiptAnalysesByImageUrl, settlementReceiptAnalysesByImageKey],
+  );
+
+  const settlementShareReceiptSummaries = useMemo<SettlementShareReceiptSummary[]>(
+    () =>
+      buildSettlementShareReceiptSummariesFromRows(receiptItems, settlementReceiptAnalysisMaps, {
+        hostNorm,
+        meeting,
+        participantProfiles,
+        authDisplayName: authProfile?.displayName,
+      }),
+    [receiptItems, settlementReceiptAnalysisMaps, hostNorm, meeting, participantProfiles, authProfile?.displayName],
+  );
+
+  const settlementShareParticipantAmounts = useMemo<SettlementShareParticipantAmount[]>(() => {
+    return activeSplitParticipantIds.map((pid) => {
+      let amountWon = 0;
+      if (useReceiptSplitDisplay) {
+        amountWon = receiptNetDisplayMap.get(pid) ?? 0;
+      } else if (settlementAmountTab === 'split_n') {
+        amountWon = splitDisplayMap.get(pid) ?? 0;
+      } else {
+        amountWon = parseWonDigits(manualAmountsByParticipant[pid] ?? '');
+      }
       return {
-        storeName: savedAnalysis?.storeName?.trim() || analysis?.verification.store_name?.trim() || null,
-        bizNum: savedAnalysis?.bizNum?.trim() || analysis?.verification.biz_num?.trim() || null,
-        visitedAt: savedAnalysis?.receiptDateText?.trim() || analysis?.verification.datetime?.trim() || null,
-        amountWon: analysis?.billing.total_amount ?? savedAnalysis?.amountWon ?? it.amountWon,
-        tags: receiptAnalysisTags(analysis),
+        displayName: resolveSettlementParticipantDisplayName(
+          pid,
+          meeting,
+          participantProfiles,
+          authProfile?.displayName,
+        ),
+        amountWon,
       };
     });
   }, [
-    receiptItems,
-    settlementReceiptAnalysesById,
-    settlementReceiptAnalysesByImageUrl,
-    settlementReceiptAnalysesByImageKey,
+    activeSplitParticipantIds,
+    useReceiptSplitDisplay,
+    receiptNetDisplayMap,
+    settlementAmountTab,
+    splitDisplayMap,
+    manualAmountsByParticipant,
+    meeting,
+    participantProfiles,
+    authProfile?.displayName,
   ]);
 
   const settlementModeSummaryLine = useMemo(() => {
@@ -757,6 +1081,36 @@ export default function SettlementMeetingScreen() {
         .filter((r) => r.id.length > 0 && r.imageUrl.length > 0),
     [meeting?.settlementInfo?.draftReceipts],
   );
+
+  const savedParticipantReceiptsForCompare = useMemo(
+    () =>
+      (meeting?.settlementInfo?.draftReceipts ?? [])
+        .map((r) => ({
+          id: (r.id ?? '').trim(),
+          imageUrl: (r.imageUrl ?? '').trim(),
+          amountWon: typeof r.amountWon === 'number' && Number.isFinite(r.amountWon) ? Math.trunc(r.amountWon) : 0,
+          uploaderAppUserId: (r.uploaderAppUserId ?? '').trim(),
+        }))
+        .filter((r) => {
+          if (!r.id || !r.imageUrl) return false;
+          const uploaderNorm = r.uploaderAppUserId
+            ? normalizeParticipantId(r.uploaderAppUserId) ?? r.uploaderAppUserId
+            : hostNorm;
+          return uploaderNorm === hostNorm;
+        }),
+    [meeting?.settlementInfo?.draftReceipts, hostNorm],
+  );
+
+  const isParticipantSettlementDraftSaved = useMemo(() => {
+    if (!settlementParticipantMode) return true;
+    if (savedParticipantReceiptsForCompare.length !== receiptItems.length) return false;
+    for (const row of receiptItems) {
+      const saved = savedParticipantReceiptsForCompare.find((r) => r.id === row.id);
+      if (!saved) return false;
+      if (saved.amountWon !== row.amountWon) return false;
+    }
+    return true;
+  }, [settlementParticipantMode, savedParticipantReceiptsForCompare, receiptItems]);
 
   const isCurrentSettlementDraftSavedForShare = useMemo(() => {
     const si = meeting?.settlementInfo;
@@ -807,14 +1161,19 @@ export default function SettlementMeetingScreen() {
   ]);
 
   const hasUnsavedSettlementChanges =
-    canEditSettlement && settlementHasUnsavedUserChanges && !isCurrentSettlementDraftSavedForShare;
+    settlementHasUnsavedUserChanges &&
+    ((canEditSettlement && !isCurrentSettlementDraftSavedForShare) ||
+      (settlementParticipantMode && !isParticipantSettlementDraftSaved));
 
   const requestSettlementBack = useCallback(() => {
     if (!hasUnsavedSettlementChanges) {
       safeRouterBack(router);
       return;
     }
-    Alert.alert('저장되지 않은 변경', '임시저장 또는 정산 완료 처리하지 않은 변경사항은 저장되지 않아요. 나가시겠어요?', [
+    const leaveMessage = settlementParticipantMode
+      ? '임시저장하지 않으면 올린 영수증이 반영되지 않아요. 나가시겠어요?'
+      : '임시저장 또는 정산 완료 처리하지 않은 변경사항은 저장되지 않아요. 나가시겠어요?';
+    Alert.alert('저장되지 않은 변경', leaveMessage, [
       { text: '계속 작성', style: 'cancel' },
       {
         text: '나가기',
@@ -822,18 +1181,9 @@ export default function SettlementMeetingScreen() {
         onPress: () => safeRouterBack(router),
       },
     ]);
-  }, [hasUnsavedSettlementChanges, router]);
+  }, [hasUnsavedSettlementChanges, settlementParticipantMode, router]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!hasUnsavedSettlementChanges) return undefined;
-      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-        requestSettlementBack();
-        return true;
-      });
-      return () => subscription.remove();
-    }, [hasUnsavedSettlementChanges, requestSettlementBack]),
-  );
+  useAndroidOverlayHardwareBack(requestSettlementBack);
 
   /** 최상단 바: `정산 방식 요약` + 한 칸 + `정산`(모임 미로드·id 불일치 시 `정산`만). */
   const settlementScreenTopBarTitle = useMemo(() => {
@@ -873,7 +1223,8 @@ export default function SettlementMeetingScreen() {
           naturalWidth: row.naturalWidth,
         });
       }
-      snapshots.push({ id: row.id, imageUrl, amountWon: row.amountWon });
+      const uploader = (row.uploaderAppUserId ?? hostNorm).trim() || hostNorm;
+      snapshots.push({ id: row.id, imageUrl, amountWon: row.amountWon, uploaderAppUserId: uploader });
       analysisReceipts.push({ receiptId: row.id, imageUrl, amountWon: row.amountWon, analysis: row.analysis });
     }
 
@@ -921,11 +1272,65 @@ export default function SettlementMeetingScreen() {
     reload,
   ]);
 
+  const persistParticipantDraftToServer = useCallback(async () => {
+    const uid = userId?.trim();
+    if (!meetingId || !uid) throw new Error('로그인이 필요해요.');
+    const uploaderNorm = normalizeParticipantId(uid) ?? uid;
+    const snapshots: MeetingSettlementReceiptItem[] = [];
+    const analysisReceipts: {
+      receiptId: string;
+      imageUrl: string;
+      amountWon: number;
+      analysis?: SettlementReceiptOcrAnalysis;
+    }[] = [];
+    for (const row of receiptItems) {
+      const rawUri = row.previewUri.trim();
+      if (!rawUri) continue;
+      let imageUrl = rawUri;
+      if (!isRemoteSettlementReceiptImageUri(imageUrl)) {
+        if (Platform.OS === 'web') {
+          throw new Error('웹에서는 영수증 이미지를 서버에 저장할 수 없어요.');
+        }
+        imageUrl = await uploadCompressedSettlementReceiptToSupabase({
+          meetingId,
+          uploaderUserId: uploaderNorm,
+          localImageUri: imageUrl,
+          naturalWidth: row.naturalWidth,
+        });
+      }
+      snapshots.push({
+        id: row.id,
+        imageUrl,
+        amountWon: row.amountWon,
+        uploaderAppUserId: uploaderNorm,
+      });
+      analysisReceipts.push({
+        receiptId: row.id,
+        imageUrl,
+        amountWon: row.amountWon,
+        analysis: row.analysis,
+      });
+    }
+    await persistParticipantSettlementReceipts(meetingId, uploaderNorm, snapshots);
+    await syncSettlementReceiptAnalysesToSupabase({
+      meetingId,
+      uploaderUserId: uploaderNorm,
+      receipts: analysisReceipts,
+    });
+    settlementSaveGenerationRef.current += 1;
+    lastHydratedSettlementKeyRef.current = null;
+    await reload();
+  }, [meetingId, userId, receiptItems, reload]);
+
   const onSaveDraft = useCallback(async () => {
     if (!meetingId || !meeting) return;
     setSaving(true);
     try {
-      await persistSettlementDraftToServer();
+      if (settlementParticipantMode) {
+        await persistParticipantDraftToServer();
+      } else {
+        await persistSettlementDraftToServer();
+      }
       setSettlementHasUnsavedUserChanges(false);
       Alert.alert('저장됨', '임시 저장했어요.');
     } catch (e) {
@@ -933,7 +1338,7 @@ export default function SettlementMeetingScreen() {
     } finally {
       setSaving(false);
     }
-  }, [meetingId, meeting, persistSettlementDraftToServer]);
+  }, [meetingId, meeting, settlementParticipantMode, persistParticipantDraftToServer, persistSettlementDraftToServer]);
 
   const onSendAppPush = useCallback(async () => {
     if (!meetingId || !meeting || !userId?.trim()) return;
@@ -969,6 +1374,13 @@ export default function SettlementMeetingScreen() {
     setPushing(true);
     try {
       await persistSettlementDraftToServer();
+      const netSnap: Record<string, number> = {};
+      if (useReceiptSplitDisplay) {
+        for (const [pid, won] of receiptNetDisplayMap.entries()) {
+          netSnap[pid] = won;
+        }
+        await persistMeetingSettlementInfoPatch(meetingId, { participantNetWonById: netSnap });
+      }
       const recipients = [...selectedParticipantIds]
         .filter((id) => id !== hostNorm)
         .slice(0, MAX_SETTLEMENT_PUSH_RECIPIENTS);
@@ -1029,35 +1441,10 @@ export default function SettlementMeetingScreen() {
     usesBankTransferSettlement,
     settlementPaymentMethod,
     persistSettlementDraftToServer,
+    useReceiptSplitDisplay,
+    receiptNetDisplayMap,
     router,
     queryClient,
-  ]);
-
-  const sharePayload = useCallback(() => {
-    if (!meeting) return;
-    return buildSettlementShareMessage({
-      meetingTitle: meeting.title ?? '',
-      participantCount: selectedCount,
-      settlementMethodText: settlementModeSummaryLine,
-      paymentMethod: settlementPaymentMethod,
-      bankName: selectedBank?.label ?? '',
-      accountNumber: hostAccountNumber,
-      accountHolder: hostAccountHolder,
-      perPersonWon,
-      totalWon: effectiveTotalWonParsed,
-      receiptSummaries: settlementShareReceiptSummaries,
-    });
-  }, [
-    meeting,
-    selectedCount,
-    settlementModeSummaryLine,
-    settlementPaymentMethod,
-    selectedBank?.label,
-    hostAccountNumber,
-    hostAccountHolder,
-    perPersonWon,
-    effectiveTotalWonParsed,
-    settlementShareReceiptSummaries,
   ]);
 
   const onShareSheet = useCallback(async () => {
@@ -1065,17 +1452,64 @@ export default function SettlementMeetingScreen() {
       Alert.alert('안내', '임시 저장 후 공유해주세요.');
       return;
     }
-    const msg = sharePayload();
-    if (!msg) return;
+    if (!meeting) return;
     setSharing(true);
     try {
+      let receiptSummaries = settlementShareReceiptSummaries;
+      const mid = meetingId.trim();
+      if (mid) {
+        try {
+          const rows = await fetchSettlementReceiptAnalysesFromSupabase(mid);
+          const maps = buildSettlementReceiptAnalysisMaps(rows);
+          setSettlementReceiptAnalysesById(maps.byId);
+          setSettlementReceiptAnalysesByImageUrl(maps.byUrl);
+          setSettlementReceiptAnalysesByImageKey(maps.byKey);
+          receiptSummaries = buildSettlementShareReceiptSummariesFromRows(receiptItems, maps, {
+            hostNorm,
+            meeting,
+            participantProfiles,
+            authDisplayName: authProfile?.displayName,
+          });
+        } catch {
+          /* 캐시된 분석·로컬 OCR로 공유 */
+        }
+      }
+      const msg = buildSettlementShareMessage({
+        meetingTitle: meeting.title ?? '',
+        participantCount: selectedCount,
+        settlementMethodText: settlementModeSummaryLine,
+        paymentMethod: settlementPaymentMethod,
+        bankName: selectedBank?.label ?? '',
+        accountNumber: hostAccountNumber,
+        accountHolder: hostAccountHolder,
+        totalWon: effectiveTotalWonParsed,
+        participantAmounts: settlementShareParticipantAmounts,
+        receiptSummaries,
+      });
       await shareSettlementText(msg);
     } catch {
       Alert.alert('오류', '공유를 완료하지 못했어요.');
     } finally {
       setSharing(false);
     }
-  }, [isCurrentSettlementDraftSavedForShare, sharePayload]);
+  }, [
+    isCurrentSettlementDraftSavedForShare,
+    meeting,
+    meetingId,
+    settlementShareReceiptSummaries,
+    settlementShareParticipantAmounts,
+    receiptItems,
+    hostNorm,
+    participantProfiles,
+    authProfile?.displayName,
+    selectedCount,
+    settlementModeSummaryLine,
+    settlementPaymentMethod,
+    selectedBank?.label,
+    hostAccountNumber,
+    hostAccountHolder,
+    effectiveTotalWonParsed,
+  ]);
 
   const toggleParticipant = useCallback((id: string) => {
     setSettlementHasUnsavedUserChanges(true);
@@ -1412,17 +1846,19 @@ export default function SettlementMeetingScreen() {
       return;
     }
     mergeAccountHint(receiptScanPreview.accountHint);
+    const uploader = hostNorm || normalizeParticipantId(userId?.trim() ?? '') || '';
     const rows: SettlementReceiptRow[] = receiptScanPreview.additions.map((x) => ({
       id: newSettlementReceiptId(),
       previewUri: x.uri,
       amountWon: x.amountWon,
+      uploaderAppUserId: uploader || undefined,
       naturalWidth: x.naturalWidth,
       analysis: x.analysis,
     }));
     setSettlementHasUnsavedUserChanges(true);
     setReceiptItems((prev) => [...prev, ...rows]);
     setReceiptScanPreview(null);
-  }, [mergeAccountHint, receiptScanPreview]);
+  }, [mergeAccountHint, receiptScanPreview, hostNorm, userId]);
 
   const pickReceiptImageAndOcr = useCallback(
     async (source: 'camera' | 'library') => {
@@ -1516,13 +1952,15 @@ export default function SettlementMeetingScreen() {
     );
   }
 
-  if (!canEditSettlement && !canViewSettledSettlement) {
+  if (!canEditSettlement && !canCollaborateSettlement && !canViewSettledSettlement) {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
           <SettlementAccountsScreenTopBar title={settlementScreenTopBarTitle} onBack={() => safeRouterBack(router)} />
           <View style={[styles.padded, { paddingTop: 12 }]}>
-            <Text style={styles.body}>이 모임에서는 정산을 진행할 수 없어요.(호스트만, 일정 확정 후 일정 시간이 지난 뒤 가능)</Text>
+            <Text style={styles.body}>
+              이 모임에서는 정산을 진행할 수 없어요. 참여 중인 모임이고 일정 확정·시작 후 일정 시간이 지나야 해요.
+            </Text>
             <GinitPressable onPress={() => safeRouterBack(router)} style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.88 }]}>
               <Text style={styles.primaryBtnText}>돌아가기</Text>
             </GinitPressable>
@@ -1561,6 +1999,19 @@ export default function SettlementMeetingScreen() {
                 <Text style={styles.totalHeroHint}>
                   {settlementModeSummaryLine} · {selectedCount.toLocaleString()}명
                 </Text>
+              </View>
+            ) : settlementParticipantMode ? (
+              <View style={styles.readonlyTotalBlock}>
+                <Text style={styles.sectionLabelInRow}>함께 정산하기</Text>
+                <Text style={styles.totalHeroHint}>
+                  내 영수증을 올리고 임시 저장해 주세요. 정산 완료는 호스트만 진행할 수 있어요.
+                </Text>
+                {useReceiptSplitDisplay ? (
+                  <Text style={[styles.totalHeroHint, { marginTop: 8 }]}>
+                    총 영수증 {mergedDraftReceiptsForSplit.reduce((s, r) => s + r.amountWon, 0).toLocaleString()}원 ·{' '}
+                    {selectedCount.toLocaleString()}명
+                  </Text>
+                ) : null}
               </View>
             ) : (
               <>
@@ -1648,22 +2099,27 @@ export default function SettlementMeetingScreen() {
               settlementParticipantDisplayIds.map((pid) => {
                 const createdBy = meeting.createdBy?.trim() ?? '';
                 const hostPid = normalizeParticipantId(createdBy) ?? createdBy;
-                const isHostRow = pid === hostPid;
+                const isMeetingHostRow = pid === hostPid;
+                const isSelfRow = pid === hostNorm;
                 const profile = participantProfiles.get(pid);
                 const nick =
                   profile?.nickname?.trim() ||
-                  (isHostRow ? authProfile?.displayName?.trim() ?? '' : '') ||
+                  (isMeetingHostRow ? authProfile?.displayName?.trim() ?? '' : '') ||
                   pid;
-                const displayName = isHostRow ? `${nick} (나)` : nick;
-                const photoUrl = profile?.photoUrl?.trim() || (isHostRow ? authProfile?.photoUrl?.trim() ?? '' : '');
+                const displayName = isSelfRow ? `${nick} (나)` : nick;
+                const photoUrl = profile?.photoUrl?.trim() || (isSelfRow ? authProfile?.photoUrl?.trim() ?? '' : '');
                 const avatarInitial = displayName.trim().slice(0, 1) || '친';
-                const on = settlementReadOnly ? true : selectedParticipantIds.has(pid);
+                const on =
+                  settlementReadOnly || settlementParticipantMode ? true : selectedParticipantIds.has(pid);
                 const splitWon = splitDisplayMap.get(pid);
+                const receiptNet = receiptNetDisplayMap.get(pid);
                 return (
                   <View key={pid} style={styles.participantAmountRow}>
                     <GinitPressable
-                      onPress={settlementReadOnly ? undefined : () => toggleParticipant(pid)}
-                      disabled={settlementReadOnly}
+                      onPress={
+                        settlementReadOnly || settlementParticipantMode ? undefined : () => toggleParticipant(pid)
+                      }
+                      disabled={settlementReadOnly || settlementParticipantMode}
                       style={({ pressed }) => [styles.participantRowLeft, pressed && { opacity: 0.86 }]}>
                       <View style={[styles.participantAvatarWrap, !on && styles.participantAvatarWrapOff]}>
                         {photoUrl ? (
@@ -1688,11 +2144,17 @@ export default function SettlementMeetingScreen() {
                         </Text>
                       </View>
                     </GinitPressable>
-                    {settlementAmountTab === 'split_n' ? (
+                    {useReceiptSplitDisplay ? (
+                      <Text style={styles.participantWonText} numberOfLines={2}>
+                        {settlementReadOnly
+                          ? formatSettlementReadonlyParticipantNet(receiptNet ?? 0)
+                          : formatSettlementNetWonLabel(receiptNet ?? 0)}
+                      </Text>
+                    ) : settlementAmountTab === 'split_n' ? (
                       <Text style={styles.participantWonText} numberOfLines={1}>
                         {splitWon != null ? `${splitWon.toLocaleString()}원` : '—'}
                       </Text>
-                    ) : (
+                    ) : canEditSettlement ? (
                       <TextInput
                         value={formatWonInput(manualAmountsByParticipant[pid] ?? '')}
                         onChangeText={(t) => {
@@ -1708,12 +2170,16 @@ export default function SettlementMeetingScreen() {
                         style={styles.participantWonInput}
                         textAlign="right"
                       />
+                    ) : (
+                      <Text style={styles.participantWonText} numberOfLines={1}>
+                        —
+                      </Text>
                     )}
                   </View>
                 );
               })
             )}
-      {Platform.OS !== 'web' && (!settlementReadOnly || receiptItems.length > 0) ? (
+      {Platform.OS !== 'web' && (!settlementReadOnly || receiptItems.length > 0 || otherParticipantsReceipts.length > 0) ? (
         <>
           {!settlementReadOnly ? (
             <>
@@ -1727,9 +2193,77 @@ export default function SettlementMeetingScreen() {
                 </View>
               </GinitPressable>
               <Text style={styles.ocrHint}>
-                여러 장 선택 가능합니다. 인식된 금액은 총액에 합산되며, 아래 썸네일의 X로 삭제하면 해당 금액만큼 차감됩니다. 결과는 반드시 확인해 주세요.
+                {settlementParticipantMode
+                  ? '내 영수증만 올릴 수 있어요. 여러 장 선택 가능하며, 임시 저장 후 다른 참여자와 분배가 갱신됩니다.'
+                  : '여러 장 선택 가능합니다. 인식된 금액은 총액에 합산되며, 아래 썸네일의 X로 삭제하면 해당 금액만큼 차감됩니다. 결과는 반드시 확인해 주세요.'}
               </Text>
             </>
+          ) : null}
+          {settlementParticipantMode && hostCollaborationReceiptRows.length > 0 ? (
+            <>
+              <Text style={[styles.sectionLabelInRow, styles.receiptSubtitle]}>호스트 영수증</Text>
+              <View style={styles.receiptReadonlyList}>
+                {hostCollaborationReceiptRows.map((it, index) => {
+                  const savedAnalysis = lookupSettlementReceiptAnalysis(it, settlementReceiptAnalysisMaps);
+                  const analysis = savedAnalysis?.analysis ?? it.analysis;
+                  const storeName =
+                    savedAnalysis?.storeName?.trim() || analysis?.verification.store_name?.trim() || '상호명 미인식';
+                  const bizNum = savedAnalysis?.bizNum?.trim() || analysis?.verification.biz_num?.trim() || '사업자번호 미인식';
+                  const visitedAt =
+                    savedAnalysis?.receiptDateText?.trim() || analysis?.verification.datetime?.trim() || '방문 시점 미인식';
+                  const amountWon = analysis?.billing.total_amount ?? savedAnalysis?.amountWon ?? it.amountWon;
+                  const viewerIndex = receiptItems.length + index;
+                  return (
+                    <View key={it.id} style={styles.receiptReadonlyCard}>
+                      <GinitPressable
+                        onPress={() => setReceiptImageViewerIndex(viewerIndex)}
+                        style={({ pressed }) => [styles.receiptReadonlyImagePressable, pressed && { opacity: 0.88 }]}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel="영수증 확대 보기">
+                        <Image source={{ uri: it.previewUri }} style={styles.receiptReadonlyImg} contentFit="contain" />
+                        <SettlementReceiptUploaderBadge
+                          uploaderAppUserId={it.uploaderAppUserId}
+                          hostNorm={hostNorm}
+                          meeting={meeting}
+                          participantProfiles={participantProfiles}
+                          authDisplayName={authProfile?.displayName}
+                          authPhotoUrl={authProfile?.photoUrl}
+                        />
+                      </GinitPressable>
+                      <View style={styles.receiptReadonlyInfo}>
+                        <View style={styles.receiptReadonlyTopRow}>
+                          <Text style={styles.receiptReadonlyStore} numberOfLines={1}>
+                            {storeName}
+                          </Text>
+                          <Text style={styles.receiptReadonlyAmount} numberOfLines={1}>
+                            {amountWon.toLocaleString()}원
+                          </Text>
+                        </View>
+                        <Text style={styles.receiptReadonlyMeta} numberOfLines={1}>
+                          {bizNum}
+                        </Text>
+                        <Text style={styles.receiptReadonlyMeta} numberOfLines={1}>
+                          {visitedAt}
+                        </Text>
+                        <Text style={styles.receiptReadonlyTags} numberOfLines={2}>
+                          {summarizeReceiptAnalysisTags(analysis)}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
+          {settlementParticipantMode && otherParticipantsReceipts.length > 0 ? (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={styles.sectionLabelInRow}>다른 참여자 영수증</Text>
+              <Text style={styles.muted}>
+                {otherParticipantsReceipts
+                  .map((r) => `${r.amountWon.toLocaleString()}원`)
+                  .join(' · ')}
+              </Text>
+            </View>
           ) : null}
           {receiptItems.length > 0 ? (
             <>
@@ -1737,10 +2271,7 @@ export default function SettlementMeetingScreen() {
               {settlementReadOnly ? (
                 <View style={styles.receiptReadonlyList}>
                   {receiptItems.map((it, index) => {
-                    const savedAnalysis =
-                      settlementReceiptAnalysesById.get(it.id) ??
-                      settlementReceiptAnalysesByImageUrl.get(it.previewUri.trim()) ??
-                      settlementReceiptAnalysesByImageKey.get(settlementReceiptImageKey(it.previewUri));
+                    const savedAnalysis = lookupSettlementReceiptAnalysis(it, settlementReceiptAnalysisMaps);
                     const analysis = savedAnalysis?.analysis ?? it.analysis;
                     const storeName =
                       savedAnalysis?.storeName?.trim() || analysis?.verification.store_name?.trim() || '상호명 미인식';
@@ -1756,6 +2287,14 @@ export default function SettlementMeetingScreen() {
                           accessibilityRole="imagebutton"
                           accessibilityLabel="영수증 확대 보기">
                           <Image source={{ uri: it.previewUri }} style={styles.receiptReadonlyImg} contentFit="contain" />
+                          <SettlementReceiptUploaderBadge
+                            uploaderAppUserId={it.uploaderAppUserId}
+                            hostNorm={hostNorm}
+                            meeting={meeting}
+                            participantProfiles={participantProfiles}
+                            authDisplayName={authProfile?.displayName}
+                            authPhotoUrl={authProfile?.photoUrl}
+                          />
                         </GinitPressable>
                         <View style={styles.receiptReadonlyInfo}>
                           <View style={styles.receiptReadonlyTopRow}>
@@ -1795,6 +2334,14 @@ export default function SettlementMeetingScreen() {
                           accessibilityRole="imagebutton"
                           accessibilityLabel="영수증 확대 보기">
                           <Image source={{ uri: it.previewUri }} style={styles.receiptThumbImg} contentFit="contain" />
+                          <SettlementReceiptUploaderBadge
+                            uploaderAppUserId={it.uploaderAppUserId}
+                            hostNorm={hostNorm}
+                            meeting={meeting}
+                            participantProfiles={participantProfiles}
+                            authDisplayName={authProfile?.displayName}
+                            authPhotoUrl={authProfile?.photoUrl}
+                          />
                         </GinitPressable>
                         <GinitPressable
                           onPress={() => removeReceiptItem(it.id)}
@@ -1822,10 +2369,8 @@ export default function SettlementMeetingScreen() {
             {settlementReadOnly ? (
               <View style={styles.readonlySettlementInfoList}>
                 <View style={styles.readonlySettlementInfoRow}>
-                  <Text style={styles.readonlySettlementLabel}>내가 지불할 금액</Text>
-                  <Text style={styles.readonlySettlementValue}>
-                    {perPersonWon != null ? `${perPersonWon.toLocaleString()}원` : '—'}
-                  </Text>
+                  <Text style={styles.readonlySettlementLabel}>{viewerSettlementSummary.label}</Text>
+                  <Text style={styles.readonlySettlementValue}>{viewerSettlementSummary.value}</Text>
                 </View>
                 <View style={styles.readonlySettlementInfoRow}>
                   <Text style={styles.readonlySettlementLabel}>정산 방식</Text>
@@ -1842,7 +2387,7 @@ export default function SettlementMeetingScreen() {
               </View>
             ) : null}
 
-            {!settlementReadOnly ? (
+            {canEditSettlement ? (
               <>
             <View style={styles.paymentMethodBlock}>
               <Text style={styles.sectionLabelInRow}>지불 방식</Text>
@@ -1937,35 +2482,43 @@ export default function SettlementMeetingScreen() {
                 </>
               )
             ) : null}
+              </>
+            ) : null}
 
-      <View style={styles.actionDivider} />
+            {(canEditSettlement || settlementParticipantMode) && !settlementReadOnly ? (
+              <>
+                <View style={styles.actionDivider} />
+                <GinitPressable
+                  onPress={onSaveDraft}
+                  disabled={saving}
+                  style={({ pressed }) => [styles.secondaryBtn, (pressed || saving) && { opacity: 0.86 }]}>
+                  <View style={styles.actionBtnContent}>
+                    <GinitSymbolicIcon name="save-outline" size={17} color={GinitTheme.colors.text} />
+                    <Text style={styles.secondaryBtnText}>{saving ? '저장 중…' : '임시저장'}</Text>
+                  </View>
+                </GinitPressable>
+              </>
+            ) : null}
 
-      <GinitPressable
-        onPress={onSaveDraft}
-        disabled={saving}
-        style={({ pressed }) => [styles.secondaryBtn, (pressed || saving) && { opacity: 0.86 }]}>
-        <View style={styles.actionBtnContent}>
-          <GinitSymbolicIcon name="save-outline" size={17} color={GinitTheme.colors.text} />
-          <Text style={styles.secondaryBtnText}>{saving ? '저장 중…' : '임시저장'}</Text>
-        </View>
-      </GinitPressable>
-
-      <GinitPressable
-        onPress={onSendAppPush}
-        disabled={pushing}
-        style={({ pressed }) => [styles.primaryBtn, (pressed || pushing) && { opacity: 0.88 }]}>
-        <Text style={styles.primaryBtnText}>{pushing ? '전송 중…' : '앱 알림 보내기(정산 완료 처리)'}</Text>
-      </GinitPressable>
-
-      <GinitPressable
-        onPress={onShareSheet}
-        disabled={sharing}
-        style={({ pressed }) => [styles.secondaryBtn, (pressed || sharing) && { opacity: 0.86 }]}>
-        <View style={styles.actionBtnContent}>
-          <GinitSymbolicIcon name="share-outline" size={17} color={GinitTheme.colors.text} />
-          <Text style={styles.secondaryBtnText}>{sharing ? '공유 중…' : '카카오톡 등으로 공유'}</Text>
-        </View>
-      </GinitPressable>
+            {canEditSettlement ? (
+              <>
+                <GinitPressable
+                  onPress={onSendAppPush}
+                  disabled={pushing}
+                  style={({ pressed }) => [styles.primaryBtn, (pressed || pushing) && { opacity: 0.88 }]}>
+                  <Text style={styles.primaryBtnText}>
+                    {pushing ? '전송 중…' : '앱 알림 보내기(정산 완료 처리)'}
+                  </Text>
+                </GinitPressable>
+                <GinitPressable
+                  onPress={onShareSheet}
+                  disabled={sharing}
+                  style={({ pressed }) => [styles.secondaryBtn, (pressed || sharing) && { opacity: 0.86 }]}>
+                  <View style={styles.actionBtnContent}>
+                    <GinitSymbolicIcon name="share-outline" size={17} color={GinitTheme.colors.text} />
+                    <Text style={styles.secondaryBtnText}>{sharing ? '공유 중…' : '카카오톡 등으로 공유'}</Text>
+                  </View>
+                </GinitPressable>
               </>
             ) : null}
           </View>
@@ -2689,6 +3242,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  receiptUploaderBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    zIndex: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: '#fff',
+    overflow: 'hidden',
+    backgroundColor: GinitTheme.colors.border,
+  },
+  receiptUploaderBadgeImg: { width: '100%', height: '100%' },
+  receiptUploaderBadgeFallback: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: GinitTheme.colors.noticeSurface,
+  },
+  receiptUploaderBadgeInitial: { fontSize: 10, fontWeight: '700', color: GinitTheme.colors.textSub },
   receiptThumbCaption: {
     fontSize: 11,
     fontWeight: '600',

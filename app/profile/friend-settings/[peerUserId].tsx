@@ -10,6 +10,7 @@ import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitS
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import {
   friendDisplayName,
@@ -79,6 +80,8 @@ function memoPreviewLine(memo: string): string {
 
 export default function FriendSettingsScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const editSheetScrollMaxH = useMemo(
@@ -368,7 +371,7 @@ export default function FriendSettingsScreen() {
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
           <View style={styles.topBar}>
-            <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
+            <GinitPressable onPress={handleHardwareBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
               <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
             </GinitPressable>
             <Text style={styles.topTitle}>친구 설정</Text>
@@ -386,7 +389,7 @@ export default function FriendSettingsScreen() {
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
-          <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
+          <GinitPressable onPress={handleHardwareBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="뒤로" style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </GinitPressable>
           <Text style={styles.topTitle}>친구 설정</Text>

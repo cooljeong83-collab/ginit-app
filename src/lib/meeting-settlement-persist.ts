@@ -1,7 +1,8 @@
 import { stripUndefinedDeep } from '@/src/lib/firestore-utils';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isLedgerMeetingId, ledgerMeetingPutRawDoc, ledgerTryLoadMeetingDoc } from '@/src/lib/meetings-ledger';
-import type { MeetingLifecycleStatus, MeetingSettlementInfo } from '@/src/lib/meetings';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import type { MeetingLifecycleStatus, MeetingSettlementInfo, MeetingSettlementReceiptItem } from '@/src/lib/meetings';
 import { parseMeetingSettlementDraftReceipts } from '@/src/lib/meetings';
 
 function settlementInfoToDocValue(info: MeetingSettlementInfo): Record<string, unknown> {
@@ -13,11 +14,19 @@ function settlementInfoToDocValue(info: MeetingSettlementInfo): Record<string, u
   if (info.hostAccountNumber != null) o.hostAccountNumber = info.hostAccountNumber;
   if (info.hostAccountHolder != null) o.hostAccountHolder = info.hostAccountHolder;
   if (info.draftReceipts != null) {
-    o.draftReceipts = info.draftReceipts.map((r) => ({
-      id: r.id,
-      imageUrl: r.imageUrl,
-      amountWon: r.amountWon,
-    }));
+    o.draftReceipts = info.draftReceipts.map((r) => {
+      const row: Record<string, unknown> = {
+        id: r.id,
+        imageUrl: r.imageUrl,
+        amountWon: r.amountWon,
+      };
+      const uploader = (r.uploaderAppUserId ?? '').trim();
+      if (uploader) row.uploaderAppUserId = uploader;
+      return row;
+    });
+  }
+  if (info.participantNetWonById != null && typeof info.participantNetWonById === 'object') {
+    o.participantNetWonById = info.participantNetWonById;
   }
   if (info.rawText != null) o.rawText = info.rawText;
   if (info.selectedParticipantIds != null) o.selectedParticipantIds = info.selectedParticipantIds;
@@ -59,7 +68,62 @@ function readSettlementInfoRaw(doc: Record<string, unknown>): MeetingSettlementI
   if (typeof l === 'string') out.linkedPlaceChipId = l;
   const f = o.finalizedAt ?? o.finalized_at;
   if (typeof f === 'string') out.finalizedAt = f;
+  const pn = o.participantNetWonById ?? o.participant_net_won_by_id;
+  if (pn != null && typeof pn === 'object' && !Array.isArray(pn)) {
+    const map: Record<string, number> = {};
+    for (const [k, v] of Object.entries(pn as Record<string, unknown>)) {
+      const key = normalizeParticipantId(String(k)) ?? String(k).trim();
+      if (!key) continue;
+      if (typeof v === 'number' && Number.isFinite(v)) map[key] = Math.trunc(v);
+    }
+    if (Object.keys(map).length > 0) out.participantNetWonById = map;
+  }
   return out;
+}
+
+function mergeDraftReceiptsForUploader(
+  prev: MeetingSettlementReceiptItem[],
+  uploaderNorm: string,
+  incoming: MeetingSettlementReceiptItem[],
+): MeetingSettlementReceiptItem[] {
+  const kept = prev.filter((r) => {
+    const u = (r.uploaderAppUserId ?? '').trim();
+    const norm = u ? normalizeParticipantId(u) ?? u : '';
+    return norm !== uploaderNorm;
+  });
+  const tagged = incoming.map((r) => ({
+    ...r,
+    uploaderAppUserId: uploaderNorm,
+  }));
+  return [...kept, ...tagged];
+}
+
+/** 참여자 본인 영수증만 병합 저장(호스트 설정·타인 영수증은 유지). */
+export async function persistParticipantSettlementReceipts(
+  meetingId: string,
+  uploaderAppUserId: string,
+  receipts: MeetingSettlementReceiptItem[],
+): Promise<void> {
+  const mid = meetingId.trim();
+  const uploaderNorm = normalizeParticipantId(uploaderAppUserId.trim()) ?? uploaderAppUserId.trim();
+  if (!mid || !uploaderNorm) throw new Error('meeting id and uploader required');
+
+  if (ledgerWritesToSupabase() && isLedgerMeetingId(mid)) {
+    const data = await ledgerTryLoadMeetingDoc(mid);
+    if (!data) throw new Error('모임을 찾을 수 없어요.');
+    const prev = readSettlementInfoRaw(data);
+    const prevReceipts = prev.draftReceipts ?? [];
+    const nextReceipts = mergeDraftReceiptsForUploader(prevReceipts, uploaderNorm, receipts);
+    const nextInfo: MeetingSettlementInfo = { ...prev, draftReceipts: nextReceipts };
+    const nextDoc = {
+      ...data,
+      settlementInfo: settlementInfoToDocValue(nextInfo),
+    };
+    await ledgerMeetingPutRawDoc(mid, stripUndefinedDeep(nextDoc) as Record<string, unknown>);
+    return;
+  }
+
+  throw new Error('[settlement] Supabase 원장(UUID) 모임만 지원합니다.');
 }
 
 function readLocationDataRaw(doc: Record<string, unknown>): Record<string, unknown> | null {

@@ -1,4 +1,4 @@
-import type { InfiniteData } from '@tanstack/react-query';
+import type { InfiniteData, QueryKey } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -27,6 +27,12 @@ const EMPTY_CALENDAR_MARKS: UserConfirmedScheduleCalendarMarks = {
   ymdSet: EMPTY_CONFIRMED_SCHEDULE_YMD_SET,
   timesByYmd: EMPTY_CONFIRMED_SCHEDULE_TIMES_BY_YMD,
 };
+
+function isMeetingsListCacheQueryKey(queryKey: QueryKey): boolean {
+  if (!Array.isArray(queryKey) || queryKey.length < 2) return false;
+  if (queryKey[0] !== 'meetings') return false;
+  return queryKey[1] === 'feed' || queryKey[1] === 'my-feed';
+}
 
 function confirmedScheduleCalendarSignature(
   timesByYmd: Readonly<Record<string, readonly string[]>>,
@@ -121,7 +127,11 @@ export function useUserConfirmedScheduleCalendarMarks(
 
   useEffect(() => {
     syncFromCache();
-    return queryClient.getQueryCache().subscribe(syncFromCache);
+    return queryClient.getQueryCache().subscribe((event) => {
+      const q = event?.query;
+      if (!q || !isMeetingsListCacheQueryKey(q.queryKey)) return;
+      syncFromCache();
+    });
   }, [queryClient, syncFromCache]);
 
   return marks;

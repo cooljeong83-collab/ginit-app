@@ -11,12 +11,13 @@ import {useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import {
   useCallback, useEffect, useMemo, useRef, useState, type ComponentProps
 } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Easing, InteractionManager, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type ViewStyle} from 'react-native';
+  ActivityIndicator, Alert, Animated, BackHandler, Easing, InteractionManager, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type ViewStyle} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
@@ -68,6 +69,8 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { homeBlurIntensity, shouldUseStaticGlassInsteadOfBlur } from '@/constants/home-glass-styles';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
+import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
+import { MEETING_CATEGORIES_QUERY_KEY } from '@/src/lib/meeting-categories-query-key';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useCreateMeetingAgentFabMeasure } from '@/src/hooks/use-create-meeting-agent-fab-measure';
 import { useCreateMeetingNluSessionRefs } from '@/src/hooks/use-create-meeting-nlu-session-refs';
@@ -256,6 +259,7 @@ function waitAgentStep1FabUnlocked(isAlive?: () => boolean): Promise<void> {
 
 export default function CreateDetailsScreen() {
   const router = useTransitionRouter();
+  const queryClient = useQueryClient();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -368,6 +372,20 @@ export default function CreateDetailsScreen() {
     useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const catError = catErrorRaw ?? null;
+
+  /** 홈 탭 이중 탭 종료 BackHandler가 포커스를 놓쳐도 생성 화면에서는 pop만 수행 */
+  useFocusEffect(
+    useCallback(() => {
+      if (categories.length === 0) {
+        void queryClient.refetchQueries({ queryKey: MEETING_CATEGORIES_QUERY_KEY, type: 'all' });
+      }
+      if (Platform.OS !== 'android') return undefined;
+      const popSuppress = pushAndroidTabHomeHardwareExitSuppress();
+      return () => {
+        popSuppress();
+      };
+    }, [categories.length, queryClient]),
+  );
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const meetingCreateRules = useMemo(
     () => resolveMeetingCreateRules(categories.find((c) => c.id === selectedCategoryId)?.majorCode ?? null),
@@ -2154,6 +2172,17 @@ export default function CreateDetailsScreen() {
   const handleBack = useCallback(() => {
     router.back();
   }, [router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return undefined;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        handleBack();
+        return true;
+      });
+      return () => sub.remove();
+    }, [handleBack]),
+  );
 
   const onFinalRegister = useCallback(async (opts?: { rethrowOnAddMeetingFailure?: boolean }) => {
     setWizardError(null);

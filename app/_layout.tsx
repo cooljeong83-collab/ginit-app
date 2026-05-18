@@ -63,8 +63,8 @@ export default function RootLayout() {
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
         <QueryClientPersistProvider>
-          <MeetingCategoriesProvider>
             <UserSessionProvider>
+              <MeetingCategoriesProvider>
               <AppForegroundMeetingsRefreshHost />
               <ScreenTransitionProvider>
                 <ShareShortcutsWatermelonBootstrap />
@@ -90,8 +90,8 @@ export default function RootLayout() {
                 </InAppAlarmsProvider>
                 <ScreenTransitionOverlay />
               </ScreenTransitionProvider>
+              </MeetingCategoriesProvider>
             </UserSessionProvider>
-          </MeetingCategoriesProvider>
         </QueryClientPersistProvider>
       </AppPoliciesProvider>
     </>

@@ -13,6 +13,7 @@ import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getSocialChatImageUploadQuality, setSocialChatImageUploadQuality } from '@/src/lib/social-chat-image-quality-preference';
 import { getSocialChatNotifyEnabledForUser, setSocialChatNotifyEnabledForUser } from '@/src/lib/social-chat-notify-preference';
 import { parsePeerFromSocialRoomId } from '@/src/lib/social-chat-rooms';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
@@ -165,6 +166,7 @@ export default function SocialChatSettingsScreen() {
   const onBack = useCallback(() => {
     router.back();
   }, [router]);
+  useAndroidOverlayHardwareBack(onBack);
 
   const openChatPhotos = useCallback(() => {
     router.push(`/social-chat/${encodeURIComponent(roomId)}/media?peerName=${encodeURIComponent(peerName)}`);

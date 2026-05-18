@@ -32,6 +32,7 @@ import {
   requestJoinMeeting,
 } from '@/src/lib/meetings';
 import {
+  applyMeetingParticipantJoinToFeedCaches,
   applyMeetingParticipantLeaveToFeedCaches,
   meetingSnapshotAfterParticipantLeave,
 } from '@/src/lib/meeting-sync-service';
@@ -196,14 +197,21 @@ export function useMeetingJoin({
         movieChipIds: effectiveMovieIds,
       };
       const pk = normalizeParticipantId(sessionPk) ?? sessionPk;
-      const { previous } = await patchMeetingDetailInWatermelon(meeting.id, (m) => {
+      const { previous, next: optimisticJoined } = await patchMeetingDetailInWatermelon(meeting.id, (m) => {
         const ids = new Set((m.participantIds ?? []).map((x) => String(x).trim()).filter(Boolean));
         ids.add(pk);
         return { ...m, participantIds: [...ids] };
       });
+      if (optimisticJoined) {
+        queryClient.setQueryData(meetingDetailQueryKey(meeting.id), optimisticJoined);
+      }
       try {
         await joinMeeting(meeting.id, sessionPk, joinVotes);
-        void refreshMeetingDetailCaches(queryClient, meeting.id);
+        markRecentSelfMeetingChange(meeting.id);
+        const refreshed = await refreshMeetingDetailCaches(queryClient, meeting.id);
+        if (refreshed) {
+          applyMeetingParticipantJoinToFeedCaches(queryClient, meeting.id, sessionPk, refreshed);
+        }
       } catch (joinErr) {
         if (isMeetingNotFoundError(joinErr)) {
           await purgeDeletedMeetingLocally(queryClient, meeting.id, sessionPk);

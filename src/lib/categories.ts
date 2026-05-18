@@ -2,7 +2,7 @@
  * 카테고리 마스터 — Supabase `public.meeting_categories` 단일 소스.
  * Supabase 컬럼: id, label, emoji, sort_order, major_code (`0006` + `0061`)
  */
-import { supabase } from '@/src/lib/supabase';
+import { publicEnv } from '@/src/config/public-env';
 
 export type Category = {
   id: string;
@@ -39,16 +39,52 @@ function mapSupabaseCategoryRow(row: Record<string, unknown>): Category {
   return { id, label, emoji, order, majorCode };
 }
 
+const MEETING_CATEGORIES_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * 공개 RLS 테이블이지만 기본 Supabase 클라이언트는 REST마다 `auth.getSession()` 락을 밟을 수 있어
+ * 로그인·프로필 RPC와 겹치면 카테고리 fetch가 끝나지 않습니다. anon REST만 사용합니다.
+ */
 export async function fetchMeetingCategoriesFromSupabase(): Promise<
   { ok: true; list: Category[] } | { ok: false; message: string }
 > {
-  const { data, error } = await supabase
-    .from('meeting_categories')
-    .select('id,label,emoji,sort_order,major_code')
-    .order('sort_order', { ascending: true });
-  if (error) return { ok: false, message: error.message };
-  const list = (data ?? [])
-    .map((r: unknown) => mapSupabaseCategoryRow(r as Record<string, unknown>))
-    .filter((c: Category) => c.id);
-  return { ok: true, list: sortCategories(list) };
+  const base = publicEnv.supabaseUrl.trim().replace(/\/$/, '');
+  const anon = publicEnv.supabaseAnonKey.trim();
+  if (!base || !anon) {
+    return { ok: false, message: 'Supabase URL·Anon Key가 설정되지 않았어요.' };
+  }
+
+  const url = `${base}/rest/v1/meeting_categories?select=id,label,emoji,sort_order,major_code&order=sort_order.asc`;
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), MEETING_CATEGORIES_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        apikey: anon,
+        Authorization: `Bearer ${anon}`,
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { ok: false, message: body.trim() || `HTTP ${res.status}` };
+    }
+    const data = (await res.json()) as unknown;
+    const rows = Array.isArray(data) ? data : [];
+    const list = rows
+      .map((r: unknown) => mapSupabaseCategoryRow(r as Record<string, unknown>))
+      .filter((c: Category) => c.id);
+    return { ok: true, list: sortCategories(list) };
+  } catch (e) {
+    const msg =
+      e instanceof Error && e.name === 'AbortError'
+        ? '카테고리 요청 시간이 초과됐어요.'
+        : e instanceof Error
+          ? e.message
+          : '카테고리를 불러오지 못했어요.';
+    return { ok: false, message: msg };
+  } finally {
+    clearTimeout(tid);
+  }
 }

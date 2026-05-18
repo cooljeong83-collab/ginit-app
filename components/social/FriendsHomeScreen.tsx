@@ -623,10 +623,6 @@ export function FriendsHomeScreen() {
     [me, profiles, reload],
   );
 
-  const goAddFriend = useCallback(() => {
-    if (!armFriendsTabOpenLock()) return;
-    router.push('/social/discovery');
-  }, [router, armFriendsTabOpenLock]);
   const goMyProfile = useCallback(() => {
     const t = me.trim();
     if (!t) return;
@@ -982,9 +978,6 @@ export function FriendsHomeScreen() {
             <View style={s.headerIcons}>
               <GinitPressable accessibilityLabel="검색" hitSlop={8} onPress={onToggleSearch} style={s.iconBtn}>
                 <GinitSymbolicIcon name="search-outline" size={22} color="#0f172a" />
-              </GinitPressable>
-              <GinitPressable accessibilityLabel="친구 추가" hitSlop={8} onPress={goAddFriend} style={s.iconBtn}>
-                <GinitSymbolicIcon name="person-add-outline" size={22} color="#0f172a" />
               </GinitPressable>
               <GinitPressable accessibilityLabel="친구 관리" hitSlop={8} onPress={goFriendManage} style={s.iconBtn}>
                 <GinitSymbolicIcon name="settings-outline" size={22} color="#0f172a" />

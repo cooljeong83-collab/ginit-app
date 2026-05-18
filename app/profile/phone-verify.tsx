@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
+import { safeRouterBack } from '@/src/lib/router-safe';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
@@ -19,6 +21,8 @@ function digitsOnly(s: string): string {
 
 export default function ProfilePhoneVerifyEntryScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const { userId, authProfile } = useUserSession();
   const [phoneDigits, setPhoneDigits] = useState('');
   const [busy, setBusy] = useState(false);
@@ -130,7 +134,7 @@ export default function ProfilePhoneVerifyEntryScreen() {
             </Text>
           </GinitPressable>
 
-          <GinitPressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
+          <GinitPressable onPress={handleHardwareBack} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
             <Text style={styles.cancelText}>취소</Text>
           </GinitPressable>
         </View>

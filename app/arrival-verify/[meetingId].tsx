@@ -13,6 +13,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { meetingDetailQueryKey, useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
@@ -109,6 +110,7 @@ export default function ArrivalVerifyMeetingScreen() {
   }, [showArrivalFlow, meeting?.id, userId]);
 
   const onBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(onBack);
 
   const refetchMeetingDetail = useCallback(() => {
     void refetch();

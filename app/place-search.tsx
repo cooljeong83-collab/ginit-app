@@ -37,6 +37,8 @@ import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
 import { gatePlaceAgainstRegisteredInterestRegions } from '@/src/lib/meeting-create-place-region';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
+import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 const PLACE_PAGE = 5;
@@ -71,6 +73,8 @@ function PlaceSearchScreenInner({
   createAutopilot,
 }: PlaceSearchScreenProps) {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const searchInputRef = useRef<TextInput>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   /** 첫 프레임은 BlurView 없이 정적 레이어로 그려 전환 직후 프레임 드랍을 줄입니다. */
@@ -369,7 +373,7 @@ function PlaceSearchScreenInner({
       <SafeAreaView style={GinitStyles.safeAreaPadded} edges={['top', 'bottom']}>
         <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <View style={GinitStyles.topBarRow}>
-            <GinitPressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
+            <GinitPressable onPress={handleHardwareBack} hitSlop={12} accessibilityRole="button">
               <Text style={GinitStyles.backLink}>← 닫기</Text>
             </GinitPressable>
             <Text style={GinitStyles.screenTitleLarge}>장소 검색</Text>

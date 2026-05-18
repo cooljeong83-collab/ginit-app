@@ -39,6 +39,10 @@ import {
   MeetingDetailTopNoticesPager,
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
+import {
+  MeetingDetailBottomBarRow,
+  meetingDetailBottomBarFallbackWidth,
+} from '@/components/meeting/MeetingDetailBottomBarRow';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { KeyboardAwareScreenScroll, ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -57,7 +61,7 @@ import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
 import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { useUserConfirmedScheduleCalendarMarks } from '@/src/hooks/use-user-confirmed-schedule-ymd-set';
 import { patchMeetingDetailLocal, refreshMeetingDetailCaches } from '@/src/lib/meeting-detail-cache-mutations';
-import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { isPlayAndVibeMajorCode, resolveSpecialtyKind, type SpecialtyKind } from '@/src/lib/category-specialty';
@@ -75,6 +79,12 @@ import {
   syncMeetingArrivalReminderLocalNotifications,
 } from '@/src/lib/meeting-arrival-verify-reminders';
 import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
+import {
+  computeBottomBarLabelMode,
+  meetingArrivalBottomLabels,
+  resolveBottomBarAvailableWidth,
+  type MeetingDetailBottomAction,
+} from '@/src/lib/meeting-detail-bottom-bar';
 import type { MeetingExtraData, SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 import {
@@ -86,7 +96,10 @@ import {
   isHostScheduleUnconfirmHiddenByStartProximity,
   meetingScheduleStartMs,
 } from '@/src/lib/meeting-schedule-times';
-import { isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
+import {
+  isMeetingSettlementCollaborationEligible,
+  isMeetingSettlementCtaEligibleForHost,
+} from '@/src/lib/settlement-eligibility';
 import {
   buildMeetingSharePageUrl,
   createMeetingShareLinkRpc,
@@ -962,16 +975,6 @@ export default function MeetingDetailScreen() {
     [meetingArrivalVerifiedByMe, userId, withinArrivalVerifyWindow],
   );
 
-  const arrivalVerifyBottomCtaLabel = useMemo(
-    () =>
-      meetingArrivalVerifiedByMe
-        ? '인증 완료'
-        : withinArrivalVerifyWindow
-          ? '인증'
-          : '시간 외',
-    [meetingArrivalVerifiedByMe, withinArrivalVerifyWindow],
-  );
-
   /** 참가자 전용: N분 전 이전이나 인증 가능 시간 밖에는 장소 인증 pill을 숨기고 퇴장 노출 */
   const showParticipantArrivalBottomSlot = useMemo(() => {
     if (!showMeetingArrivalVerify) return false;
@@ -1313,6 +1316,12 @@ export default function MeetingDetailScreen() {
   ]);
 
   const [shareWebBusy, setShareWebBusy] = useState(false);
+  const [hostBottomRowWidth, setHostBottomRowWidth] = useState(0);
+  const [participantBottomRowWidth, setParticipantBottomRowWidth] = useState(0);
+  const bottomBarFallbackWidth = useMemo(
+    () => meetingDetailBottomBarFallbackWidth(windowWidth),
+    [windowWidth],
+  );
   const handleShareWebMeeting = useCallback(async () => {
     if (!meeting || !userId?.trim()) return;
     if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) {
@@ -1567,12 +1576,6 @@ export default function MeetingDetailScreen() {
     };
   }, [sessionPk]);
 
-  /** 탭 피드의 Android 이중 탭 종료 `BackHandler`가 상세 위에서도 살아 있는 기기 대비 — 포커스 콜백보다 먼저 억제 */
-  useLayoutEffect(() => {
-    if (Platform.OS !== 'android') return undefined;
-    return pushAndroidTabHomeHardwareExitSuppress();
-  }, []);
-
   // join/vote 파생 로직은 각 훅으로 이동
 
   /** Alert로 나가기 확정 후 재진입하는 `beforeRemove`에서 동일 팝업이 두 번 뜨지 않도록 우회 */
@@ -1611,6 +1614,8 @@ export default function MeetingDetailScreen() {
     }
     proceedScreenBack();
   }, [votesDirty, isHost, alreadyJoinedMeeting, proceedScreenBack]);
+
+  useAndroidOverlayHardwareBack(safeBack);
 
   useEffect(() => {
     if (!meeting) return undefined;
@@ -1857,6 +1862,13 @@ export default function MeetingDetailScreen() {
     return isMeetingSettlementCtaEligibleForHost(meeting, uid, Date.now());
   }, [meeting, userId, appPoliciesVersion]);
 
+  const showSettlementParticipantBanner = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!meeting || !uid || isHost) return false;
+    void appPoliciesVersion;
+    return isMeetingSettlementCollaborationEligible(meeting, uid, Date.now());
+  }, [meeting, userId, isHost, appPoliciesVersion]);
+
   const meetingSettlementCompleted = meeting?.lifecycleStatus === 'SETTLED';
 
   const canViewMeetingSettlement = useMemo(() => {
@@ -1869,7 +1881,9 @@ export default function MeetingDetailScreen() {
   }, [meeting, sessionPk, meetingSettlementCompleted, isHost, alreadyJoinedMeeting]);
 
   const showHostSettlementBottomCta = Boolean(isHost && (showSettlementHostBanner || canViewMeetingSettlement));
-  const showParticipantSettlementBottomCta = Boolean(!isHost && canViewMeetingSettlement);
+  const showParticipantSettlementBottomCta = Boolean(
+    !isHost && (canViewMeetingSettlement || showSettlementParticipantBanner),
+  );
 
   const showMeetingArrivalVerifyTopBanner = useMemo(() => {
     void arrivalUiTick;
@@ -1947,6 +1961,21 @@ export default function MeetingDetailScreen() {
         ),
       });
     }
+    if (showSettlementParticipantBanner) {
+      slides.push({
+        key: 'settlement-collab',
+        element: (
+          <SettlementHostBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
+            ctaSuffix="함께 정산하기"
+            onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
+          />
+        ),
+      });
+    }
     if (showMeetingArrivalVerifyTopBanner) {
       slides.push({
         key: 'arrival',
@@ -1979,193 +2008,13 @@ export default function MeetingDetailScreen() {
   }, [
     meeting,
     showSettlementHostBanner,
+    showSettlementParticipantBanner,
     showMeetingArrivalVerifyTopBanner,
     meetingDetailScheduleNoticeParts,
     router,
     openArrivalVerifyMap,
     categories,
   ]);
-
-  const meetingFriendInvitePillEl = useMemo(() => {
-    if (!showMeetingFriendInvitePill) return null;
-    return (
-      <GinitPressable
-        onPress={openInviteModal}
-        disabled={inviteBusy}
-        style={({ pressed }) => [
-          styles.bottomPill,
-          styles.bottomIconPill,
-          styles.pillBlue,
-          (inviteBusy || pressed) && { opacity: 0.85 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="친구 초대">
-        <GinitSymbolicIcon name="person-add-outline" size={18} color="#fff" />
-      </GinitPressable>
-    );
-  }, [showMeetingFriendInvitePill, openInviteModal, inviteBusy]);
-
-  const hostArrivalBottomCtaEl = useMemo(() => {
-    if (!showHostArrivalBottomSlot) return null;
-    return (
-      <GinitPressable
-        onPress={() => void openArrivalVerifyMap()}
-        disabled={arrivalVerifyBottomCtaDisabled}
-        style={({ pressed }) => [
-          styles.bottomPill,
-          styles.bottomPillFlex,
-          { backgroundColor: GinitTheme.colors.deepPurple },
-          arrivalVerifyBottomCtaDisabled && { opacity: 0.7 },
-          pressed &&
-            !meetingArrivalVerifiedByMe &&
-            withinArrivalVerifyWindow &&
-            Boolean(userId?.trim()) && { opacity: 0.88 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={meetingArrivalVerifiedByMe ? '인증 완료' : '인증하기'}>
-        <GinitSymbolicIcon name="location-outline" size={18} color="#fff" />
-        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-          {arrivalVerifyBottomCtaLabel}
-        </Text>
-      </GinitPressable>
-    );
-  }, [
-    showHostArrivalBottomSlot,
-    meetingArrivalVerifiedByMe,
-    arrivalVerifyBottomCtaDisabled,
-    arrivalVerifyBottomCtaLabel,
-    withinArrivalVerifyWindow,
-    userId,
-    openArrivalVerifyMap,
-  ]);
-
-  const participantArrivalBottomCtaEl = useMemo(() => {
-    if (!showParticipantArrivalBottomSlot) return null;
-    return (
-      <GinitPressable
-        onPress={() => void openArrivalVerifyMap()}
-        disabled={arrivalVerifyBottomCtaDisabled}
-        style={({ pressed }) => [
-          styles.bottomPill,
-          styles.bottomPillFlex,
-          { backgroundColor: GinitTheme.colors.deepPurple },
-          arrivalVerifyBottomCtaDisabled && { opacity: 0.7 },
-          pressed &&
-            !meetingArrivalVerifiedByMe &&
-            withinArrivalVerifyWindow &&
-            Boolean(userId?.trim()) && { opacity: 0.88 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={meetingArrivalVerifiedByMe ? '인증 완료' : '인증하기'}>
-        <GinitSymbolicIcon name="location-outline" size={16} color="#fff" />
-        <Text
-          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          {arrivalVerifyBottomCtaLabel}
-        </Text>
-      </GinitPressable>
-    );
-  }, [
-    showParticipantArrivalBottomSlot,
-    meetingArrivalVerifiedByMe,
-    arrivalVerifyBottomCtaDisabled,
-    arrivalVerifyBottomCtaLabel,
-    withinArrivalVerifyWindow,
-    userId,
-    openArrivalVerifyMap,
-  ]);
-
-  const hostReviewBottomCtaEl = useMemo(() => {
-    if (!showMeetingReviewWriteCta) return null;
-    return (
-      <GinitPressable
-        disabled
-        style={[
-          styles.bottomPill,
-          styles.bottomPillFlex,
-          { backgroundColor: GinitTheme.colors.deepPurple, opacity: 0.55 },
-        ]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: true }}
-        accessibilityLabel="후기 작성 준비 중">
-        <GinitSymbolicIcon name="pencil" size={18} color="#fff" />
-        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-          후기
-        </Text>
-      </GinitPressable>
-    );
-  }, [showMeetingReviewWriteCta]);
-
-  const participantReviewBottomCtaEl = useMemo(() => {
-    if (!showMeetingReviewWriteCta) return null;
-    return (
-      <GinitPressable
-        disabled
-        style={[
-          styles.bottomPill,
-          styles.bottomPillFlex,
-          { backgroundColor: GinitTheme.colors.deepPurple, opacity: 0.55 },
-        ]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: true }}
-        accessibilityLabel="후기 작성 준비 중">
-        <GinitSymbolicIcon name="pencil" size={16} color="#fff" />
-        <Text
-          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          후기
-        </Text>
-      </GinitPressable>
-    );
-  }, [showMeetingReviewWriteCta]);
-
-  const hostSettlementBottomCtaEl = useMemo(() => {
-    if (!meeting || !showHostSettlementBottomCta) return null;
-    const completed = meeting.lifecycleStatus === 'SETTLED';
-    return (
-      <GinitPressable
-        onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
-        style={({ pressed }) => [
-          styles.bottomPill,
-          styles.bottomPillFlex,
-          { backgroundColor: GinitTheme.colors.deepPurple },
-          pressed && { opacity: 0.88 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="정산">
-        <GinitSymbolicIcon name="wallet-outline" size={18} color="#fff" />
-        <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-          정산
-        </Text>
-      </GinitPressable>
-    );
-  }, [meeting, showHostSettlementBottomCta, router]);
-
-  const participantSettlementBottomCtaEl = useMemo(() => {
-    if (!meeting || !showParticipantSettlementBottomCta) return null;
-    return (
-      <GinitPressable
-        onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
-        style={({ pressed }) => [
-          styles.bottomPill,
-          styles.bottomPillFlex,
-          { backgroundColor: GinitTheme.colors.deepPurple },
-          pressed && { opacity: 0.88 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="정산">
-        <GinitSymbolicIcon name="wallet-outline" size={16} color="#fff" />
-        <Text
-          style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          정산
-        </Text>
-      </GinitPressable>
-    );
-  }, [meeting, showParticipantSettlementBottomCta, router]);
 
   const onDateChipPress = useCallback(
     (chipId: string) => {
@@ -2586,6 +2435,337 @@ export default function MeetingDetailScreen() {
       setSaveCalendarBusy(false);
     }
   }, [meeting, saveCalendarBusy]);
+
+  const arrivalBottomLabels = useMemo(
+    () =>
+      meetingArrivalBottomLabels({
+        verified: meetingArrivalVerifiedByMe,
+        withinWindow: withinArrivalVerifyWindow,
+      }),
+    [meetingArrivalVerifiedByMe, withinArrivalVerifyWindow],
+  );
+
+  const showHostShareWebPill = Boolean(
+    meeting &&
+      ledgerWritesToSupabase() &&
+      isLedgerMeetingId(meeting.id) &&
+      meetingShareWebConfigured() &&
+      !isConfirmedMeetingEndedForDetail,
+  );
+
+  const showHostConfirmSchedulePill = Boolean(
+    meeting &&
+      ((meeting.scheduleConfirmed !== true && orderedParticipantIdsList.length >= 2) ||
+        (meeting.scheduleConfirmed === true && !hideHostScheduleUnconfirmPill)),
+  );
+
+  const hostBottomActions = useMemo((): MeetingDetailBottomAction[] => {
+    if (!meeting) return [];
+    const actions: MeetingDetailBottomAction[] = [];
+
+    if (showHostShareWebPill) {
+      actions.push({
+        id: 'share-web',
+        icon: 'share-outline',
+        labelFull: '공유',
+        labelCompact: '공유',
+        a11yLabel: '웹으로 공유',
+        variant: 'blue',
+        busy: shareWebBusy,
+        onPress: () => void handleShareWebMeeting(),
+      });
+    }
+    if (showMeetingFriendInvitePill) {
+      actions.push({
+        id: 'friend-invite',
+        icon: 'person-add-outline',
+        labelFull: '초대',
+        labelCompact: '초대',
+        a11yLabel: '친구 초대',
+        variant: 'blue',
+        busy: inviteBusy,
+        onPress: openInviteModal,
+      });
+    }
+    if (showBottomSaveScheduleCalendarCta) {
+      actions.push({
+        id: 'calendar-save',
+        icon: 'calendar-outline',
+        labelFull: '달력 저장',
+        labelCompact: '달력',
+        a11yLabel: '달력에 저장하기',
+        variant: 'blue',
+        busy: saveCalendarBusy,
+        onPress: () => void onPressSaveScheduleToCalendar(),
+      });
+    }
+    actions.push({
+      id: 'chat',
+      icon: 'chatbubbles-outline',
+      labelFull: '채팅',
+      labelCompact: '채팅',
+      a11yLabel: '모임 채팅',
+      variant: 'blue',
+      onPress: () => router.push(`/meeting-chat/${meeting.id}`),
+    });
+    if (meeting.scheduleConfirmed !== true) {
+      actions.push({
+        id: 'delete-meeting',
+        icon: 'trash-outline',
+        labelFull: '삭제',
+        labelCompact: '삭제',
+        a11yLabel: '모임 삭제',
+        variant: 'danger',
+        busy: deleteMeetingBusy,
+        disabled: deleteMeetingBusy || confirmScheduleBusy,
+        onPress: handleDeleteMeeting,
+      });
+    }
+    if (showHostConfirmSchedulePill) {
+      const confirmed = meeting.scheduleConfirmed === true;
+      actions.push({
+        id: 'confirm-schedule',
+        icon: confirmed ? 'close-circle-outline' : 'checkmark-circle',
+        labelFull: confirmed ? '확정 취소' : '확정',
+        labelCompact: confirmed ? '확정 취소' : '확정',
+        a11yLabel: confirmed ? '일정 확정 취소' : '모집 일정 확정',
+        variant: confirmed ? 'danger' : 'orange',
+        labelOnOrange: !confirmed,
+        iconColor: confirmed ? '#fff' : GinitTheme.colors.texWhite,
+        busy: confirmScheduleBusy,
+        disabled: confirmScheduleBusy || deleteMeetingBusy,
+        onPress: confirmed ? handleUnconfirmMeetingSchedule : handleConfirmSchedule,
+      });
+    }
+    if (showHostArrivalBottomSlot) {
+      actions.push({
+        id: 'arrival-verify',
+        icon: 'location-outline',
+        labelFull: arrivalBottomLabels.labelFull,
+        labelCompact: arrivalBottomLabels.labelCompact,
+        a11yLabel: arrivalBottomLabels.a11yLabel,
+        variant: 'purple',
+        disabled: arrivalVerifyBottomCtaDisabled,
+        mutedOpacity: arrivalVerifyBottomCtaDisabled ? 0.7 : undefined,
+        onPress: () => void openArrivalVerifyMap(),
+      });
+    }
+    if (showHostSettlementBottomCta) {
+      actions.push({
+        id: 'settlement',
+        icon: 'wallet-outline',
+        labelFull: '정산',
+        labelCompact: '정산',
+        a11yLabel: '정산',
+        variant: 'purple',
+        onPress: () => router.push(`/settlement/${encodeURIComponent(meeting.id)}`),
+      });
+    }
+    if (showMeetingReviewWriteCta) {
+      actions.push({
+        id: 'review',
+        icon: 'pencil',
+        labelFull: '후기',
+        labelCompact: '후기',
+        a11yLabel: '후기 작성 준비 중',
+        variant: 'purple',
+        disabled: true,
+        mutedOpacity: 0.55,
+      });
+    }
+    return actions;
+  }, [
+    meeting,
+    showHostShareWebPill,
+    showMeetingFriendInvitePill,
+    showBottomSaveScheduleCalendarCta,
+    showHostConfirmSchedulePill,
+    showHostArrivalBottomSlot,
+    showHostSettlementBottomCta,
+    showMeetingReviewWriteCta,
+    shareWebBusy,
+    inviteBusy,
+    saveCalendarBusy,
+    deleteMeetingBusy,
+    confirmScheduleBusy,
+    arrivalBottomLabels,
+    arrivalVerifyBottomCtaDisabled,
+    handleShareWebMeeting,
+    openInviteModal,
+    onPressSaveScheduleToCalendar,
+    router,
+    handleDeleteMeeting,
+    handleUnconfirmMeetingSchedule,
+    handleConfirmSchedule,
+    openArrivalVerifyMap,
+  ]);
+
+  const participantSettlementLabelFull = showSettlementParticipantBanner ? '함께 정산' : '정산';
+
+  const participantBottomActions = useMemo((): MeetingDetailBottomAction[] => {
+    if (!meeting) return [];
+    const actions: MeetingDetailBottomAction[] = [];
+
+    if (showBottomSaveScheduleCalendarCta) {
+      actions.push({
+        id: 'calendar-save',
+        icon: 'calendar-outline',
+        labelFull: '달력 저장',
+        labelCompact: '달력',
+        a11yLabel: '달력에 저장하기',
+        variant: 'blue',
+        busy: saveCalendarBusy,
+        onPress: () => void onPressSaveScheduleToCalendar(),
+      });
+    }
+    if (showMeetingFriendInvitePill) {
+      actions.push({
+        id: 'friend-invite',
+        icon: 'person-add-outline',
+        labelFull: '초대',
+        labelCompact: '초대',
+        a11yLabel: '친구 초대',
+        variant: 'blue',
+        busy: inviteBusy,
+        onPress: openInviteModal,
+      });
+    }
+    actions.push({
+      id: 'chat',
+      icon: 'chatbubbles-outline',
+      labelFull: '채팅',
+      labelCompact: '채팅',
+      a11yLabel: '모임 채팅',
+      variant: 'blue',
+      onPress: () => router.push(`/meeting-chat/${meeting.id}`),
+    });
+    if (!isScheduleConfirmed && hasSelectableVoteCandidates && recruitmentPhase !== 'full') {
+      actions.push({
+        id: 'save-votes',
+        icon: 'save-outline',
+        labelFull: '저장',
+        labelCompact: '저장',
+        a11yLabel: '저장',
+        variant: 'blue',
+        busy: participantVoteBusy || leaveBusy,
+        disabled: !votesDirty || participantVoteBusy || leaveBusy,
+        mutedOpacity:
+          !votesDirty && !participantVoteBusy && !leaveBusy ? 0.45 : undefined,
+        onPress: onPressSaveVotes,
+      });
+    }
+    if (!(isScheduleConfirmed && hideHostScheduleUnconfirmPill) && !showParticipantArrivalBottomSlot) {
+      actions.push({
+        id: 'leave',
+        icon: 'exit-outline',
+        labelFull: '나가기',
+        labelCompact: '나가기',
+        a11yLabel: '나가기',
+        variant: 'danger',
+        busy: participantVoteBusy || leaveBusy,
+        disabled: participantVoteBusy || leaveBusy,
+        onPress: handleLeaveParticipant,
+      });
+    }
+    if (showParticipantArrivalBottomSlot) {
+      actions.push({
+        id: 'arrival-verify',
+        icon: 'location-outline',
+        labelFull: arrivalBottomLabels.labelFull,
+        labelCompact: arrivalBottomLabels.labelCompact,
+        a11yLabel: arrivalBottomLabels.a11yLabel,
+        variant: 'purple',
+        disabled: arrivalVerifyBottomCtaDisabled,
+        mutedOpacity: arrivalVerifyBottomCtaDisabled ? 0.7 : undefined,
+        onPress: () => void openArrivalVerifyMap(),
+      });
+    }
+    if (showParticipantSettlementBottomCta) {
+      actions.push({
+        id: 'settlement',
+        icon: 'wallet-outline',
+        labelFull: participantSettlementLabelFull,
+        labelCompact: '정산',
+        a11yLabel: participantSettlementLabelFull,
+        variant: 'purple',
+        onPress: () => router.push(`/settlement/${encodeURIComponent(meeting.id)}`),
+      });
+    }
+    if (showMeetingReviewWriteCta) {
+      actions.push({
+        id: 'review',
+        icon: 'pencil',
+        labelFull: '후기',
+        labelCompact: '후기',
+        a11yLabel: '후기 작성 준비 중',
+        variant: 'purple',
+        disabled: true,
+        mutedOpacity: 0.55,
+      });
+    }
+    return actions;
+  }, [
+    meeting,
+    showBottomSaveScheduleCalendarCta,
+    showMeetingFriendInvitePill,
+    isScheduleConfirmed,
+    hasSelectableVoteCandidates,
+    recruitmentPhase,
+    hideHostScheduleUnconfirmPill,
+    showParticipantArrivalBottomSlot,
+    showParticipantSettlementBottomCta,
+    showMeetingReviewWriteCta,
+    saveCalendarBusy,
+    inviteBusy,
+    participantVoteBusy,
+    leaveBusy,
+    votesDirty,
+    arrivalBottomLabels,
+    arrivalVerifyBottomCtaDisabled,
+    participantSettlementLabelFull,
+    onPressSaveScheduleToCalendar,
+    openInviteModal,
+    router,
+    onPressSaveVotes,
+    handleLeaveParticipant,
+    openArrivalVerifyMap,
+  ]);
+
+  const cancelJoinBottomActions = useMemo((): MeetingDetailBottomAction[] => {
+    return [
+      {
+        id: 'cancel-join-request',
+        icon: 'close-circle-outline',
+        labelFull: '신청 취소',
+        labelCompact: '신청 취소',
+        a11yLabel: '참가 신청 취소',
+        variant: 'danger',
+        busy: joinBusy,
+        onPress: () => {
+          if (joinBusy) {
+            Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
+            return;
+          }
+          onCancelJoinRequestPress();
+        },
+      },
+    ];
+  }, [joinBusy, onCancelJoinRequestPress]);
+
+  const joinBottomLabelMode = useMemo(() => {
+    const actions: MeetingDetailBottomAction[] = [
+      {
+        id: 'join',
+        icon: 'hand-right-outline',
+        labelFull: needsHostApprovalJoin ? '참가 신청' : '참여',
+        labelCompact: needsHostApprovalJoin ? '참가 신청' : '참여',
+        a11yLabel: needsHostApprovalJoin ? '참가 신청' : '모임 참여',
+        variant: 'blue',
+      },
+    ];
+    const available = resolveBottomBarAvailableWidth(bottomBarFallbackWidth, bottomBarFallbackWidth, 1);
+    return computeBottomBarLabelMode(actions, available, { compactTypography: false });
+  }, [needsHostApprovalJoin, bottomBarFallbackWidth]);
 
   const notFound = !loading && !loadError && meeting === null;
 
@@ -3911,226 +4091,22 @@ export default function MeetingDetailScreen() {
           <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
             {isHost ? (
               <View style={styles.bottomBarCol}>
-                <View style={styles.bottomBarEqualRow}>
-                  {ledgerWritesToSupabase() &&
-                  isLedgerMeetingId(meeting.id) &&
-                  meetingShareWebConfigured() &&
-                  !isConfirmedMeetingEndedForDetail ? (
-                    <GinitPressable
-                      onPress={() => void handleShareWebMeeting()}
-                      disabled={shareWebBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.bottomIconPill,
-                        styles.pillBlue,
-                        (shareWebBusy || pressed) && { opacity: 0.85 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="웹으로 공유">
-                      <GinitSymbolicIcon name="share-outline" size={18} color="#fff" />
-                    </GinitPressable>
-                  ) : null}
-                  {meetingFriendInvitePillEl}
-                  {showBottomSaveScheduleCalendarCta ? (
-                    <GinitPressable
-                      onPress={() => void onPressSaveScheduleToCalendar()}
-                      disabled={saveCalendarBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.bottomIconPill,
-                        styles.pillBlue,
-                        saveCalendarBusy && { opacity: 0.7 },
-                        pressed && !saveCalendarBusy && { opacity: 0.88 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="달력에 저장하기">
-                      {saveCalendarBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="calendar-outline" size={18} color="#fff" />
-                      )}
-                    </GinitPressable>
-                  ) : null}
-                  <GinitPressable
-                    onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                    style={[
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      styles.bottomPillFlex,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="모임 채팅">
-                    <GinitSymbolicIcon name="chatbubbles-outline" size={18} color="#fff" />
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      채팅
-                    </Text>
-                  </GinitPressable>
-                  {meeting.scheduleConfirmed !== true ? (
-                    <GinitPressable
-                      onPress={handleDeleteMeeting}
-                      disabled={deleteMeetingBusy || confirmScheduleBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.pillDanger,
-                        styles.bottomPillFlex,
-                        (deleteMeetingBusy || confirmScheduleBusy) && { opacity: 0.75 },
-                        pressed && !deleteMeetingBusy && !confirmScheduleBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="모임 삭제">
-                      {deleteMeetingBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="trash-outline" size={18} color="#fff" />
-                      )}
-                      <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                        삭제
-                      </Text>
-                    </GinitPressable>
-                  ) : null}
-
-                  {((meeting.scheduleConfirmed !== true && orderedParticipantIdsList.length >= 2) ||
-                    (meeting.scheduleConfirmed === true && !hideHostScheduleUnconfirmPill)) ? (
-                    <GinitPressable
-                      onPress={
-                        meeting.scheduleConfirmed === true ? handleUnconfirmMeetingSchedule : handleConfirmSchedule
-                      }
-                      disabled={confirmScheduleBusy || deleteMeetingBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        meeting.scheduleConfirmed === true ? styles.pillDanger : styles.pillOrange,
-                        styles.bottomPillFlex,
-                        (confirmScheduleBusy || deleteMeetingBusy) && { opacity: 0.75 },
-                        pressed && !confirmScheduleBusy && !deleteMeetingBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel={meeting.scheduleConfirmed === true ? '일정 확정 취소' : '모집 일정 확정'}>
-                      {confirmScheduleBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon
-                          name={meeting.scheduleConfirmed === true ? 'close-circle-outline' : 'checkmark-circle'}
-                          size={18}
-                          color={meeting.scheduleConfirmed === true ? '#fff' : GinitTheme.colors.texWhite}
-                        />
-                      )}
-                      <Text
-                        style={[
-                          styles.pillText,
-                          meeting.scheduleConfirmed === true ? null : styles.pillTextOnOrange,
-                          styles.bottomPillLabel,
-                        ]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        {meeting.scheduleConfirmed === true ? '확정 취소' : '확정'}
-                      </Text>
-                    </GinitPressable>
-                  ) : null}
-                  {hostArrivalBottomCtaEl}
-                  {hostSettlementBottomCtaEl}
-                  {hostReviewBottomCtaEl}
-                </View>
+                <MeetingDetailBottomBarRow
+                  actions={hostBottomActions}
+                  rowWidth={hostBottomRowWidth}
+                  fallbackWidth={bottomBarFallbackWidth}
+                  onRowLayout={setHostBottomRowWidth}
+                />
               </View>
             ) : alreadyJoinedMeeting ? (
               <View style={styles.bottomBarCol}>
-                <View style={styles.bottomBarEqualRow}>
-                  {showBottomSaveScheduleCalendarCta ? (
-                    <GinitPressable
-                      onPress={() => void onPressSaveScheduleToCalendar()}
-                      disabled={saveCalendarBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.bottomIconPill,
-                        styles.pillBlue,
-                        saveCalendarBusy && { opacity: 0.7 },
-                        pressed && !saveCalendarBusy && { opacity: 0.88 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="달력에 저장하기">
-                      {saveCalendarBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="calendar-outline" size={16} color="#fff" />
-                      )}
-                    </GinitPressable>
-                  ) : null}
-                  {meetingFriendInvitePillEl}
-                  <GinitPressable
-                    onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
-                    style={[
-                      styles.bottomPill,
-                      styles.pillBlue,
-                      styles.bottomPillFlex,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="모임 채팅">
-                    <GinitSymbolicIcon name="chatbubbles-outline" size={16} color="#fff" />
-                    <Text
-                      style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail">
-                      채팅
-                    </Text>
-                  </GinitPressable>
-                  {!isScheduleConfirmed &&
-                  hasSelectableVoteCandidates &&
-                  recruitmentPhase !== 'full' ? (
-                    <GinitPressable
-                      onPress={onPressSaveVotes}
-                      disabled={!votesDirty || participantVoteBusy || leaveBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.pillBlue,
-                        styles.bottomPillFlex,
-                        (participantVoteBusy || leaveBusy) && { opacity: 0.75 },
-                        !votesDirty && !participantVoteBusy && !leaveBusy && { opacity: 0.45 },
-                        pressed &&
-                          votesDirty &&
-                          !participantVoteBusy &&
-                          !leaveBusy && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="저장"
-                      accessibilityState={{ disabled: !votesDirty || participantVoteBusy || leaveBusy }}>
-                      {participantVoteBusy || leaveBusy ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <GinitSymbolicIcon name="save-outline" size={16} color="#fff" />
-                      )}
-                      <Text
-                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        저장
-                      </Text>
-                    </GinitPressable>
-                  ) : null}
-                  {!(isScheduleConfirmed && hideHostScheduleUnconfirmPill) && !showParticipantArrivalBottomSlot ? (
-                    <GinitPressable
-                      onPress={handleLeaveParticipant}
-                      disabled={participantVoteBusy || leaveBusy}
-                      style={({ pressed }) => [
-                        styles.bottomPill,
-                        styles.pillDanger,
-                        styles.bottomPillFlex,
-                        (participantVoteBusy || leaveBusy) && { opacity: 0.75 },
-                        pressed && !(participantVoteBusy || leaveBusy) && { opacity: 0.9 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="나가기">
-                      <GinitSymbolicIcon name="exit-outline" size={16} color="#fff" />
-                      <Text
-                        style={[styles.pillText, styles.pillTextCompact, styles.bottomPillLabel]}
-                        numberOfLines={1}
-                        ellipsizeMode="tail">
-                        나가기
-                      </Text>
-                    </GinitPressable>
-                  ) : null}
-                  {participantArrivalBottomCtaEl}
-                  {participantSettlementBottomCtaEl}
-                  {participantReviewBottomCtaEl}
-                </View>
+                <MeetingDetailBottomBarRow
+                  actions={participantBottomActions}
+                  rowWidth={participantBottomRowWidth}
+                  fallbackWidth={bottomBarFallbackWidth}
+                  compactTypography
+                  onRowLayout={setParticipantBottomRowWidth}
+                />
               </View>
             ) : sessionKickedFromMeeting ? (
               <View style={styles.guestJoinBottomCol}>
@@ -4141,30 +4117,11 @@ export default function MeetingDetailScreen() {
             ) : hasPendingJoinRequest ? (
               <View style={styles.guestJoinBottomCol}>
                 <Text style={styles.joinOverlapCaption}>호스트 승인을 기다리는 중이에요.</Text>
-                <View style={styles.bottomBarEqualRow}>
-                  <GinitPressable
-                    onPress={() => {
-                      if (joinBusy) {
-                        Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
-                        return;
-                      }
-                      onCancelJoinRequestPress();
-                    }}
-                    style={({ pressed }) => [
-                      styles.bottomPill,
-                      styles.pillDanger,
-                      styles.bottomPillFlex,
-                      joinBusy && { opacity: 0.75 },
-                      pressed && !joinBusy && { opacity: 0.88 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="참가 신청 취소">
-                    <GinitSymbolicIcon name="close-circle-outline" size={18} color="#fff" />
-                    <Text style={[styles.pillText, styles.bottomPillLabel]} numberOfLines={1} ellipsizeMode="tail">
-                      신청 취소
-                    </Text>
-                  </GinitPressable>
-                </View>
+                <MeetingDetailBottomBarRow
+                  actions={cancelJoinBottomActions}
+                  rowWidth={bottomBarFallbackWidth}
+                  fallbackWidth={bottomBarFallbackWidth}
+                />
               </View>
             ) : (
               <View style={styles.guestJoinBottomCol}>
@@ -4209,9 +4166,11 @@ export default function MeetingDetailScreen() {
                       ) : (
                         <GinitSymbolicIcon name="hand-right-outline" size={18} color="#fff" />
                       )}
-                      <Text style={styles.joinCtaLabel} numberOfLines={1} ellipsizeMode="tail">
-                        {needsHostApprovalJoin ? '참가 신청' : '참여'}
-                      </Text>
+                      {joinBottomLabelMode !== 'iconOnly' ? (
+                        <Text style={styles.joinCtaLabel} numberOfLines={1} ellipsizeMode="tail">
+                          {needsHostApprovalJoin ? '참가 신청' : '참여'}
+                        </Text>
+                      ) : null}
                     </View>
                   </GinitPressable>
                 </View>
@@ -6046,7 +6005,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 3,
     paddingHorizontal: 16,
     paddingVertical: 13,
     minHeight: 50,

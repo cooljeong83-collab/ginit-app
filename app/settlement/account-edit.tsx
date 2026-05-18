@@ -11,6 +11,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { getSettlementBankById } from '@/src/lib/korean-banks-settlement';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -22,6 +23,8 @@ import {
 
 export default function SettlementAccountEditScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -92,7 +95,7 @@ export default function SettlementAccountEditScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
-          <SettlementAccountsScreenTopBar title="정산 계좌 등록" onBack={() => safeRouterBack(router)} />
+          <SettlementAccountsScreenTopBar title="정산 계좌 등록" onBack={handleHardwareBack} />
           <View style={[styles.center, styles.bodyGrow]}>
             <Text style={styles.muted}>로그인이 필요해요.</Text>
           </View>
@@ -105,7 +108,7 @@ export default function SettlementAccountEditScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
-          <SettlementAccountsScreenTopBar title="정산 계좌 등록" onBack={() => safeRouterBack(router)} />
+          <SettlementAccountsScreenTopBar title="정산 계좌 등록" onBack={handleHardwareBack} />
           <View style={[styles.center, styles.bodyGrow]}>
             <ActivityIndicator color={GinitTheme.colors.primary} />
           </View>
@@ -117,7 +120,7 @@ export default function SettlementAccountEditScreen() {
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SettlementAccountsScreenTopBar title="정산 계좌 등록" onBack={() => safeRouterBack(router)} />
+        <SettlementAccountsScreenTopBar title="정산 계좌 등록" onBack={handleHardwareBack} />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}

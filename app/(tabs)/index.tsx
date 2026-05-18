@@ -1,6 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useRootNavigationState } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
@@ -115,7 +116,11 @@ import {
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import { isMeetingHost, isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
+import {
+  isMeetingHost,
+  isMeetingSettlementCollaborationEligible,
+  isMeetingSettlementCtaEligibleForHost,
+} from '@/src/lib/settlement-eligibility';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
   ensureUserProfile,
@@ -130,17 +135,19 @@ type HomeMeetingTopTab = 'explore' | 'my' | 'private';
 /** 홈 상단 공지 모달 행 — `homeTopNoticeSlides`와 동일 순서·조건 */
 type HomeFeedNoticeRow =
   | { key: string; kind: 'settlement'; meetingId: string; meetingTitle: string }
+  | { key: string; kind: 'settlement_collab'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'arrival'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'schedule'; meetingId: string; titleLeft: string; timeRight: string };
 
 function homeFeedNoticeRowSubtitle(row: HomeFeedNoticeRow): string {
   if (row.kind === 'settlement') return '정산하기';
+  if (row.kind === 'settlement_collab') return '함께 정산하기';
   if (row.kind === 'arrival') return '장소 인증';
   return row.timeRight;
 }
 
 function homeFeedNoticeRowIcon(kind: HomeFeedNoticeRow['kind']): SymbolicIconName {
-  if (kind === 'settlement') return 'wallet-outline';
+  if (kind === 'settlement' || kind === 'settlement_collab') return 'wallet-outline';
   if (kind === 'arrival') return 'location-outline';
   return 'megaphone-outline';
 }
@@ -269,6 +276,12 @@ export default function FeedScreen() {
   const [feedCoords, setFeedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const isHomeMeetingsScreenFocused = useIsFocused();
+  const rootNavigationState = useRootNavigationState();
+  const isRootStackAtTabsHome = useMemo(() => {
+    const routes = rootNavigationState?.routes;
+    if (!routes?.length) return false;
+    return routes.length <= 1;
+  }, [rootNavigationState]);
   const [homeArrivalNoticeUiTick, setHomeArrivalNoticeUiTick] = useState(0);
   const [homeArrivalVerifiedCheckNonce, setHomeArrivalVerifiedCheckNonce] = useState(0);
   const [homeArrivalVerifiedMap, setHomeArrivalVerifiedMap] = useState<Record<string, boolean>>({});
@@ -293,7 +306,7 @@ export default function FeedScreen() {
   /** `useFocusEffect`만으로는 일부 기기(예: 구형 갤럭시)에서 모임 상세로 올라간 뒤에도 리스너가 남아 뒤로가기를 가로채는 경우가 있어 `isFocused`로 게이트합니다. */
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
-    if (!isHomeMeetingsScreenFocused) {
+    if (!isHomeMeetingsScreenFocused || !isRootStackAtTabsHome) {
       homeExitBackPressRef.current = 0;
       return undefined;
     }
@@ -321,6 +334,7 @@ export default function FeedScreen() {
     };
   }, [
     isHomeMeetingsScreenFocused,
+    isRootStackAtTabsHome,
     regionSearchModalOpen,
     regionModalOpen,
     feedListSettingsModalOpen,
@@ -584,6 +598,29 @@ export default function FeedScreen() {
     return out;
   }, [myTabsMeetings, userId, appPoliciesVersion]);
 
+  const settlementCollabBannerMeetings = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!uid) return [] as Meeting[];
+    void appPoliciesVersion;
+    const now = Date.now();
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of myTabsMeetings) {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      if (isMeetingHost(m, uid)) continue;
+      if (!isMeetingSettlementCollaborationEligible(m, uid, now)) continue;
+      seen.add(id);
+      out.push(m);
+    }
+    out.sort((a, b) => {
+      const ta = meetingScheduleStartMs(a) ?? 0;
+      const tb = meetingScheduleStartMs(b) ?? 0;
+      return ta - tb;
+    });
+    return out;
+  }, [myTabsMeetings, userId, appPoliciesVersion]);
+
   const arrivalVerifyPol = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
 
   const arrivalBannerCandidates = useMemo(() => {
@@ -695,6 +732,16 @@ export default function FeedScreen() {
     [settlementBannerMeetings],
   );
 
+  const settlementCollabNoticeIdSet = useMemo(
+    () =>
+      new Set(
+        settlementCollabBannerMeetings
+          .map((m) => (typeof m.id === 'string' ? m.id.trim() : ''))
+          .filter((id) => id.length > 0),
+      ),
+    [settlementCollabBannerMeetings],
+  );
+
   const arrivalNoticeIdSet = useMemo(
     () =>
       new Set(
@@ -713,18 +760,19 @@ export default function FeedScreen() {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
       if (!id || seen.has(id)) continue;
       const hasSettlement = settlementNoticeIdSet.has(id);
+      const hasSettlementCollab = settlementCollabNoticeIdSet.has(id);
       const hasArrival = arrivalNoticeIdSet.has(id);
       const hasScheduleLine = shouldShowConfirmedScheduleNoticeBar(m, Date.now(), {
         showArrivalVerifyBanner: hasArrival,
-        showSettlementHostBanner: hasSettlement,
+        showSettlementHostBanner: hasSettlement || hasSettlementCollab,
       });
-      if (!hasSettlement && !hasArrival && !hasScheduleLine) continue;
+      if (!hasSettlement && !hasSettlementCollab && !hasArrival && !hasScheduleLine) continue;
       seen.add(id);
       out.push(m);
     }
     out.sort((a, b) => (meetingScheduleStartMs(a) ?? 0) - (meetingScheduleStartMs(b) ?? 0));
     return out;
-  }, [myTabsMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick]);
+  }, [myTabsMeetings, settlementNoticeIdSet, settlementCollabNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick]);
 
   const homeTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     void homeArrivalNoticeUiTick;
@@ -742,6 +790,21 @@ export default function FeedScreen() {
               slideTrackFullBleed
               quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
               ctaSuffix="정산하기"
+              onPress={() => router.push(`/settlement/${encodeURIComponent(id)}`)}
+            />
+          ),
+        });
+      }
+      if (settlementCollabNoticeIdSet.has(id)) {
+        slides.push({
+          key: `settlement-collab-${id}`,
+          element: (
+            <SettlementHostBanner
+              hideTopBorder
+              pillCapsule
+              slideTrackFullBleed
+              quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
+              ctaSuffix="함께 정산하기"
               onPress={() => router.push(`/settlement/${encodeURIComponent(id)}`)}
             />
           ),
@@ -793,6 +856,7 @@ export default function FeedScreen() {
   }, [
     homeNoticeOrderedMeetings,
     settlementNoticeIdSet,
+    settlementCollabNoticeIdSet,
     arrivalNoticeIdSet,
     router,
     homeArrivalNoticeUiTick,
@@ -809,12 +873,20 @@ export default function FeedScreen() {
       if (settlementNoticeIdSet.has(id)) {
         rows.push({ key: `settlement-${id}`, kind: 'settlement', meetingId: id, meetingTitle: titleLine });
       }
+      if (settlementCollabNoticeIdSet.has(id)) {
+        rows.push({
+          key: `settlement-collab-${id}`,
+          kind: 'settlement_collab',
+          meetingId: id,
+          meetingTitle: titleLine,
+        });
+      }
       if (arrivalNoticeIdSet.has(id)) {
         rows.push({ key: `arrival-${id}`, kind: 'arrival', meetingId: id, meetingTitle: titleLine });
       }
       const scheduleOk = shouldShowConfirmedScheduleNoticeBar(m, now, {
         showArrivalVerifyBanner: arrivalNoticeIdSet.has(id),
-        showSettlementHostBanner: settlementNoticeIdSet.has(id),
+        showSettlementHostBanner: settlementNoticeIdSet.has(id) || settlementCollabNoticeIdSet.has(id),
       });
       const schedTitleLeft = scheduleOk ? buildConfirmedScheduleNoticeTitleLeft(m, categories) : '';
       const schedTimeRight = scheduleOk ? buildConfirmedScheduleNoticeTimeRight(m) : '';
@@ -829,7 +901,14 @@ export default function FeedScreen() {
       }
     }
     return rows;
-  }, [homeNoticeOrderedMeetings, settlementNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick, categories]);
+  }, [
+    homeNoticeOrderedMeetings,
+    settlementNoticeIdSet,
+    settlementCollabNoticeIdSet,
+    arrivalNoticeIdSet,
+    homeArrivalNoticeUiTick,
+    categories,
+  ]);
 
   const homeNoticesModalLayout = useMemo(() => {
     const topUsed = safeInsets.top + 8;
@@ -852,7 +931,7 @@ export default function FeedScreen() {
       setHomeNoticesModalOpen(false);
       const mid = row.meetingId.trim();
       InteractionManager.runAfterInteractions(() => {
-        if (row.kind === 'settlement') {
+        if (row.kind === 'settlement' || row.kind === 'settlement_collab') {
           router.push(`/settlement/${encodeURIComponent(mid)}`);
           return;
         }
@@ -1595,7 +1674,9 @@ export default function FeedScreen() {
                         <Text
                           style={[
                             styles.homeNoticesModalRowSub,
-                            (item.kind === 'settlement' || item.kind === 'arrival') &&
+                            (item.kind === 'settlement' ||
+                              item.kind === 'settlement_collab' ||
+                              item.kind === 'arrival') &&
                               styles.homeNoticesModalRowSubCta,
                           ]}
                           {...(item.kind === 'schedule' ? {} : { numberOfLines: 3 as const })}>

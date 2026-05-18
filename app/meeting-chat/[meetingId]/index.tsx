@@ -109,7 +109,11 @@ import {
   shouldShowConfirmedScheduleNoticeBar,
 } from '@/src/lib/meetings';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
-import { isMeetingSettlementCtaEligibleForHost } from '@/src/lib/settlement-eligibility';
+import {
+  isMeetingHost,
+  isMeetingSettlementCollaborationEligible,
+  isMeetingSettlementCtaEligibleForHost,
+} from '@/src/lib/settlement-eligibility';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfile, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -1209,6 +1213,14 @@ export default function MeetingChatRoomScreen() {
     return isMeetingSettlementCtaEligibleForHost(meeting, uid, Date.now());
   }, [meeting, userId, appPoliciesVersion]);
 
+  const showSettlementParticipantBanner = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!meeting || !uid) return false;
+    if (isMeetingHost(meeting, uid)) return false;
+    void appPoliciesVersion;
+    return isMeetingSettlementCollaborationEligible(meeting, uid, Date.now());
+  }, [meeting, userId, appPoliciesVersion]);
+
   const chatTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     void arrivalBannerUiTick;
     const slides: MeetingDetailTopNoticeSlide[] = [];
@@ -1225,6 +1237,21 @@ export default function MeetingChatRoomScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={noticeTitleLeft}
             ctaSuffix="정산하기"
+            onPress={() => router.push(`/settlement/${encodeURIComponent(mid)}`)}
+          />
+        ),
+      });
+    }
+    if (showSettlementParticipantBanner && mid) {
+      slides.push({
+        key: 'settlement-collab',
+        element: (
+          <SettlementHostBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={noticeTitleLeft}
+            ctaSuffix="함께 정산하기"
             onPress={() => router.push(`/settlement/${encodeURIComponent(mid)}`)}
           />
         ),
@@ -1276,6 +1303,7 @@ export default function MeetingChatRoomScreen() {
     meeting,
     meetingId,
     showSettlementHostBanner,
+    showSettlementParticipantBanner,
     showMeetingArrivalVerifyTopBanner,
     arrivalBannerUiTick,
     router,

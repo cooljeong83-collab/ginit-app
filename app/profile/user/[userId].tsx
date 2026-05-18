@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBod
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -17,6 +18,8 @@ const MORE_MENU_GAP = 0;
 
 export default function UserProfileStackScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -62,7 +65,7 @@ export default function UserProfileStackScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
         <GinitPressable
-          onPress={() => safeRouterBack(router)}
+          onPress={handleHardwareBack}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="뒤로"

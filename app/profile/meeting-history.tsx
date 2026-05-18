@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,6 +9,8 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
+import { safeRouterBack } from '@/src/lib/router-safe';
 import { filterJoinedMeetings } from '@/src/lib/joined-meetings';
 import { sweepStalePublicUnconfirmedMeetingsForHost } from '@/src/lib/meeting-expiry-sweep';
 import { isConfirmedMeetingPastListEndWindow, type Meeting } from '@/src/lib/meetings';
@@ -18,6 +20,8 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 
 export default function ProfileMeetingHistoryScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const { userId } = useUserSession();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -55,7 +59,7 @@ export default function ProfileMeetingHistoryScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
           <GinitPressable
-            onPress={() => router.back()}
+            onPress={handleHardwareBack}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로"

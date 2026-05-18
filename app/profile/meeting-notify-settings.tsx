@@ -8,6 +8,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
 import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-districts';
@@ -56,6 +57,8 @@ function matrixFromRefs(regionOnRef: { current: Set<string> }, catOnRef: { curre
 
 export default function MeetingNotifySettingsScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const navigation = useNavigation();
   const { userId, authProfile } = useUserSession();
   const profilePk = useMemo(() => {
@@ -296,7 +299,7 @@ export default function MeetingNotifySettingsScreen() {
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top']}>
           <View style={styles.topBar}>
-            <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
+            <GinitPressable onPress={handleHardwareBack} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
               <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
             </GinitPressable>
             <Text style={styles.topTitle} numberOfLines={1}>
@@ -316,7 +319,7 @@ export default function MeetingNotifySettingsScreen() {
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
-          <GinitPressable onPress={() => safeRouterBack(router)} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
+          <GinitPressable onPress={handleHardwareBack} hitSlop={12} accessibilityRole="button" style={styles.backBtn}>
             <GinitSymbolicIcon name="chevron-back" size={22} color="#0f172a" />
           </GinitPressable>
           <Text style={styles.topTitle} numberOfLines={1}>

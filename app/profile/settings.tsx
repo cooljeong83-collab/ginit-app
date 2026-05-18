@@ -29,6 +29,7 @@ import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitS
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import {
   accountDeletionRejoinPolicyNotice,
   deleteFirebaseAuthUserStrict,
@@ -124,6 +125,8 @@ type DndTimePick = { kind: 'start' | 'end'; draft: Date };
 
 export default function ProfileAppSettingsScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const insets = useSafeAreaInsets();
   const { registerInfo: registerInfoParam } = useLocalSearchParams<{ registerInfo?: string | string[] }>();
   const { userId, authProfile, signOutSession } = useUserSession();
@@ -563,7 +566,7 @@ export default function ProfileAppSettingsScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.topBar}>
           <GinitPressable
-            onPress={() => safeRouterBack(router)}
+            onPress={handleHardwareBack}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로"

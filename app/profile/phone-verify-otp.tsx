@@ -8,6 +8,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
+import { safeRouterBack } from '@/src/lib/router-safe';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -22,6 +24,8 @@ function paramToString(v: string | string[] | undefined): string {
 
 export default function ProfilePhoneVerifyOtpScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const params = useLocalSearchParams<{ verificationId?: string | string[]; phoneE164?: string | string[] }>();
   const verificationId = useMemo(() => paramToString(params.verificationId), [params.verificationId]);
   const phoneE164Param = useMemo(() => paramToString(params.phoneE164), [params.phoneE164]);
@@ -124,7 +128,7 @@ export default function ProfilePhoneVerifyOtpScreen() {
             <Text style={styles.verifyText}>{busy ? '확인 중…' : '인증 완료'}</Text>
           </GinitPressable>
 
-          <GinitPressable onPress={() => router.back()} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
+          <GinitPressable onPress={handleHardwareBack} style={({ pressed }) => [styles.cancelBtn, pressed && styles.pressed]}>
             <Text style={styles.cancelText}>뒤로</Text>
           </GinitPressable>
         </View>

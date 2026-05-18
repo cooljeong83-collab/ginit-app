@@ -14,6 +14,7 @@ import { ScreenShell } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useUserProfileQuery } from '@/src/hooks/use-user-profile-query';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { accountDeletionRejoinPolicyNotice, deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, validateAccountDeletionPreflight, wipeLocalAppData } from '@/src/lib/account-deletion';
@@ -54,6 +55,8 @@ const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainC
 
 export default function ProfileEditScreen() {
   const router = useTransitionRouter();
+  const handleHardwareBack = useCallback(() => safeRouterBack(router), [router]);
+  useAndroidOverlayHardwareBack(handleHardwareBack);
   const { userId, authProfile, signOutSession } = useUserSession();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -617,7 +620,7 @@ export default function ProfileEditScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.topBar}>
           <GinitPressable
-            onPress={() => safeRouterBack(router)}
+            onPress={handleHardwareBack}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="뒤로"
