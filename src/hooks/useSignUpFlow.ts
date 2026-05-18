@@ -178,7 +178,6 @@ export function useSignUpFlow(initialPhone: string) {
         const birthDateTs = Timestamp.fromDate(new Date(birthdate.year, birthdate.month - 1, birthdate.day));
         await applyGoogleSignupProfile(emailPk, {
           nickname,
-          photoUrl: null,
           phone: n,
           phoneVerifiedAt: serverTimestamp(),
           email: emailTrim || null,

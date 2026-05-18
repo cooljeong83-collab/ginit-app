@@ -20,6 +20,8 @@ import {
 } from '@/src/lib/user-profile-watermelon-cache';
 import { supabase } from '@/src/lib/supabase';
 
+import { avatarsObjectPathFromPublicUrlIfOwned } from '@/src/lib/profile-photo-history';
+
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from './meeting-phone-verification-ui';
 
 export const USERS_COLLECTION = 'users';
@@ -192,6 +194,29 @@ export function generateRandomNickname(): string {
   const a = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const b = NOUNS[Math.floor(Math.random() * NOUNS.length)];
   return `${a}${b}`;
+}
+
+/** `avatars` 버킷에 사용자가 직접 올린 프로필 사진 URL인지 */
+export function isAppUploadedProfilePhotoUrl(photoUrl: string, appUserId: string): boolean {
+  return avatarsObjectPathFromPublicUrlIfOwned(photoUrl, appUserId) != null;
+}
+
+/**
+ * Google·OTP 가입 병합 시 `profiles.photo_url`에 넣을 값.
+ * `undefined`면 RPC payload에 `photo_url`을 넣지 않아 기존(특히 앱 업로드 사진)을 유지합니다.
+ */
+export function photoUrlForAuthProfileMerge(
+  appUserId: string,
+  existingPhotoUrl: string | null | undefined,
+  incomingPhotoUrl: string | null | undefined,
+): string | undefined {
+  const existing = typeof existingPhotoUrl === 'string' ? existingPhotoUrl.trim() : '';
+  if (existing && isAppUploadedProfilePhotoUrl(existing, appUserId)) {
+    return undefined;
+  }
+  const incoming = typeof incomingPhotoUrl === 'string' ? incomingPhotoUrl.trim() : '';
+  if (!incoming) return undefined;
+  return incoming;
 }
 
 /** RPC·JSON 경로에서 int가 문자열로 올 때 `isDemographicsIncomplete` 오판을 막습니다. */
@@ -1023,7 +1048,8 @@ export async function applyGoogleSignupProfile(
   phoneUserId: string,
   patch: {
     nickname: string;
-    photoUrl: string | null;
+    /** Google 메타 등 — 앱 Storage 업로드 사진이 있으면 병합 시 무시됩니다. */
+    photoUrl?: string | null;
     /** E.164 전화 — 문서 ID가 이메일일 때 `phone` 필드로 저장 */
     phone?: string | null;
     /** 전화번호 인증 완료 시각(서버 타임스탬프 권장) */
@@ -1083,9 +1109,15 @@ export async function applyGoogleSignupProfile(
   }
 
   await rpcEnsureProfileMinimalWithRetry(id, rpcClient);
+  const existing = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
+  const photoForPayload = photoUrlForAuthProfileMerge(
+    id,
+    existing.ok ? existing.profile.photoUrl : null,
+    patch.photoUrl,
+  );
   const fields = profilePatchToSupabaseJsonb({
     nickname: patch.nickname,
-    photoUrl: patch.photoUrl,
+    ...(photoForPayload !== undefined ? { photoUrl: photoForPayload } : {}),
     phone: patch.phone ?? undefined,
     phoneVerifiedAt: patch.phoneVerifiedAt ?? undefined,
     email: patch.email ?? undefined,
@@ -1100,7 +1132,6 @@ export async function applyGoogleSignupProfile(
     signupProvider: patch.signupProvider ?? undefined,
     metadata: patch.metadata ?? undefined,
   });
-  const existing = await fetchUserProfileFromSupabaseRpcDetailed(id, rpcClient);
   if (existing.ok && existing.profile.isWithdrawn === true) {
     await rpcReactivateWithdrawnProfileForSignupWithRetry(id, fields, rpcClient);
   } else {
