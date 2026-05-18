@@ -46,7 +46,10 @@ import {
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { KeyboardAwareScreenScroll, ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
-import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
+import {
+  setTransientBottomMessageScreenInset,
+  showTransientBottomMessage,
+} from '@/components/ui/TransientBottomMessage';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
@@ -81,6 +84,7 @@ import {
 import { shouldShowMeetingArrivalVerifyTopBanner } from '@/src/lib/meeting-arrival-verify-banner';
 import {
   computeBottomBarLabelMode,
+  MEETING_DETAIL_TRANSIENT_BOTTOM_OFFSET_PX,
   meetingArrivalBottomLabels,
   resolveBottomBarAvailableWidth,
   type MeetingDetailBottomAction,
@@ -914,6 +918,12 @@ export default function MeetingDetailScreen() {
   const arrivalVerifyPol = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
 
   const [meetingDetailListEndUiTick, setMeetingDetailListEndUiTick] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setTransientBottomMessageScreenInset(MEETING_DETAIL_TRANSIENT_BOTTOM_OFFSET_PX);
+      return () => setTransientBottomMessageScreenInset(0);
+    }, []),
+  );
   useFocusEffect(
     useCallback(() => {
       const m = meeting;
@@ -5295,7 +5305,7 @@ const styles = StyleSheet.create({
     flexBasis: 0,
     paddingHorizontal: 0,
     paddingVertical: 6,
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'flex-start',
     minHeight: 44,
     borderRadius: 12,
@@ -5348,8 +5358,8 @@ const styles = StyleSheet.create({
   calendarCellDayOut: { color: GinitTheme.colors.textMuted },
   calendarTimesWrap: {
     flexDirection: 'column',
-    alignItems: 'stretch',
-    justifyContent: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'center',
     width: '100%',
     marginTop: 0,
     marginBottom: 0,
@@ -5358,7 +5368,7 @@ const styles = StyleSheet.create({
   calendarTimeVoteRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     width: '100%',
   },
   calendarTimeVoteRowConfirmed: {

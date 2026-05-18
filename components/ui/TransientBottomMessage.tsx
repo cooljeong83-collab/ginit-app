@@ -7,6 +7,19 @@ const DEFAULT_MS = 2000;
 type EmitFn = (message: string, durationMs: number, bottomOffsetPx: number) => void;
 
 let emit: EmitFn | undefined;
+let screenBottomInsetPx = 0;
+
+function clampBottomOffsetPx(px: number): number {
+  return Number.isFinite(px) ? Math.max(0, Math.min(240, Math.trunc(px))) : 0;
+}
+
+/**
+ * 화면별 하단 고정 UI(모임 상세 CTA 등) 위로 토스트를 올릴 때 포커스 구간에 설정합니다.
+ * `useFocusEffect` cleanup에서 `0`으로 되돌려 주세요.
+ */
+export function setTransientBottomMessageScreenInset(bottomOffsetPx: number) {
+  screenBottomInsetPx = clampBottomOffsetPx(bottomOffsetPx);
+}
 
 /**
  * 루트에 `<TransientBottomMessageHost />`가 마운트된 경우에만 동작합니다.
@@ -20,7 +33,7 @@ export function showTransientBottomMessage(
   const trimmed = message.trim();
   if (!trimmed) return;
   const ms = Math.max(800, Math.min(8000, durationMs));
-  const offset = Number.isFinite(bottomOffsetPx) ? Math.max(0, Math.min(240, Math.trunc(bottomOffsetPx))) : 0;
+  const offset = Math.max(clampBottomOffsetPx(bottomOffsetPx), screenBottomInsetPx);
   emit?.(trimmed, ms, offset);
 }
 

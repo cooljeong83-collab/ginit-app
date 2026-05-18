@@ -593,7 +593,7 @@ export function useMeetingVote({
       });
       setVotePersistNonce((n) => n + 1);
       void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-      showTransientBottomMessage('투표가 저장됐어요.', 1600, 74);
+      showTransientBottomMessage('투표가 저장됐어요.', 1600);
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
@@ -641,7 +641,7 @@ export function useMeetingVote({
       return;
     }
     if (!votesDirty) {
-      showTransientBottomMessage('변경된 투표가 없어요.', 1400, 74);
+      showTransientBottomMessage('변경된 투표가 없어요.', 1400);
       return;
     }
     void flushVoteSelectionsToServer();

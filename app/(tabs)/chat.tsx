@@ -2,7 +2,18 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { ActivityIndicator, Modal, RefreshControl, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
@@ -84,6 +95,12 @@ function profileForCreatedBy(
 }
 
 type ChatKind = 'gather' | 'social';
+
+const CHAT_KIND_TABS: readonly ChatKind[] = ['gather', 'social'];
+
+function chatKindTabIndex(k: ChatKind): number {
+  return k === 'gather' ? 0 : 1;
+}
 
 function coalesceUnreadCountByKeys(
   map: Record<string, number | null | undefined> | null | undefined,
@@ -225,6 +242,10 @@ export default function ChatTab() {
     [windowWidth],
   );
   const [chatKind, setChatKind] = useState<ChatKind>('gather');
+  const chatKindRef = useRef(chatKind);
+  chatKindRef.current = chatKind;
+  const tabPagerRef = useRef<ScrollView | null>(null);
+  const [tabPagerWidth, setTabPagerWidth] = useState(() => Math.max(1, Math.floor(windowWidth)));
   const gatherListRef = useRef<FlashListRef<Meeting> | null>(null);
   const socialListRef = useRef<FlashListRef<SocialChatRoomSummary> | null>(null);
   const didInitialFocusTopResetRef = useRef(false);
@@ -339,13 +360,34 @@ export default function ChatTab() {
     await fetchNextMeetingsFeedPage();
   }, [hasMoreMeetingsFeed, isFetchingMoreMeetingsFeed, fetchNextMeetingsFeedPage]);
 
-  const goToChatKind = useCallback((k: ChatKind) => {
-    setChatKind(k);
-    requestAnimationFrame(() => {
-      if (k === 'gather') scrollGatherListToTop();
-      else scrollSocialListToTop();
-    });
-  }, [scrollGatherListToTop, scrollSocialListToTop]);
+  const goToChatKind = useCallback(
+    (k: ChatKind) => {
+      setChatKind(k);
+      const idx = chatKindTabIndex(k);
+      requestAnimationFrame(() => {
+        tabPagerRef.current?.scrollTo({ x: idx * tabPagerWidth, animated: true });
+        if (k === 'gather') scrollGatherListToTop();
+        else scrollSocialListToTop();
+      });
+    },
+    [tabPagerWidth, scrollGatherListToTop, scrollSocialListToTop],
+  );
+
+  const onTabPagerMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const w = Math.max(1, tabPagerWidth);
+      const idx = Math.round(x / w);
+      setChatKind(idx <= 0 ? 'gather' : 'social');
+    },
+    [tabPagerWidth],
+  );
+
+  const onTabPagerLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.floor(e.nativeEvent.layout.width);
+    if (next <= 1) return;
+    setTabPagerWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+  }, []);
 
   useEffect(() => {
     const uid = userId?.trim();
@@ -831,6 +873,12 @@ export default function ChatTab() {
     scrollSocialListToTop();
   }, [displayedSocialRooms.length, scrollSocialListToTop, showSocialInitialSkeleton]);
 
+  useEffect(() => {
+    const k = chatKindRef.current;
+    const idx = chatKindTabIndex(k);
+    tabPagerRef.current?.scrollTo({ x: idx * tabPagerWidth, animated: false });
+  }, [tabPagerWidth]);
+
   const fixedChatHeader = (
     <View style={styles.feedHeader}>
       <View style={styles.feedHeaderTopRow}>
@@ -1038,233 +1086,251 @@ export default function ChatTab() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.feedColumn}>
           {fixedChatHeader}
-          <View style={styles.tabListMount}>
-            {chatKind === 'gather' ? (
-              showGatherInitialSkeleton ? (
-                <ScreenTransitionSkeleton variant="chat" rows={6} />
-              ) : (
-                <FlashList<Meeting>
-                  ref={gatherListRef}
-                  data={displayedGatherMeetings}
-                  extraData={{
-                    chatKind,
-                    appliedGatherTextQuery,
-                    gatherSearchBusy,
-                    gatherMsgHits: gatherMessageMatchIds.size,
-                    latestByMeetingId: effectiveLatestByMeetingId,
-                    hostProfiles,
-                    meetingCategories,
-                    gatherChatListFlashKey,
-                  }}
-                  keyExtractor={(m) => m.id}
-                  style={styles.listFlex}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  contentContainerStyle={styles.scroll}
-                  maintainVisibleContentPosition={{ disabled: true }}
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={refreshing}
-                      onRefresh={onPullRefresh}
-                      tintColor={GinitTheme.colors.primary}
-                      colors={[GinitTheme.colors.primary]}
-                    />
-                  }
-                  ListHeaderComponent={chatTabListAlerts('gather')}
-                  ListFooterComponent={gatherListFooter}
-                  onEndReached={() => handleEndReachedForKind('gather')}
-                  onEndReachedThreshold={0.6}
-                  onLoad={scrollGatherListToTop}
-                  renderItem={({ item: m }) => {
-                    const host = profileForCreatedBy(hostProfiles, m.createdBy);
-                    const unread = localMeetingRoomById.get(m.id)?.unreadCount ?? 0;
-                    return (
-                      <ChatMeetingListRow
-                        meeting={m}
-                        hostPhotoUrl={host?.photoUrl ?? null}
-                        hostNickname={host?.nickname ?? '주관자'}
-                        hostWithdrawn={isUserProfileWithdrawn(host)}
-                        latestMessage={effectiveLatestByMeetingId[m.id] ?? null}
-                        unreadCount={unread}
-                        categories={meetingCategories}
-                        onPress={() => {
-                          if (directSharePickMode) {
-                            const incoming = consumeIncomingDirectSharePayload();
-                            if (incoming) {
-                              if (incoming.kind === 'image') {
-                                setPendingDirectSharePayload({
-                                  kind: 'image',
-                                  imageUri: incoming.imageUri,
-                                  text: incoming.text,
-                                  targetType: 'meeting',
-                                  targetId: m.id,
-                                });
-                              } else {
-                                setPendingDirectSharePayload({
-                                  kind: 'text',
-                                  text: incoming.text,
-                                  targetType: 'meeting',
-                                  targetId: m.id,
-                                });
-                              }
-                            }
-                            setDirectSharePickMode(false);
-                          }
-                          router.push(`/meeting-chat/${m.id}`);
+          <View style={styles.tabPagerWrap} onLayout={onTabPagerLayout}>
+            <ScrollView
+              ref={tabPagerRef}
+              horizontal
+              pagingEnabled
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={onTabPagerMomentumEnd}
+              style={styles.tabPager}>
+              {CHAT_KIND_TABS.map((kind) => (
+                <View key={kind} style={[styles.tabPage, { width: tabPagerWidth }]}>
+                  {kind === 'gather' ? (
+                    showGatherInitialSkeleton ? (
+                      <ScreenTransitionSkeleton variant="chat" rows={6} />
+                    ) : (
+                      <FlashList<Meeting>
+                        ref={gatherListRef}
+                        data={displayedGatherMeetings}
+                        extraData={{
+                          chatKind,
+                          appliedGatherTextQuery,
+                          gatherSearchBusy,
+                          gatherMsgHits: gatherMessageMatchIds.size,
+                          latestByMeetingId: effectiveLatestByMeetingId,
+                          hostProfiles,
+                          meetingCategories,
+                          gatherChatListFlashKey,
+                        }}
+                        keyExtractor={(m) => m.id}
+                        style={styles.listFlex}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        contentContainerStyle={styles.scroll}
+                        maintainVisibleContentPosition={{ disabled: true }}
+                        nestedScrollEnabled
+                        refreshControl={
+                          <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onPullRefresh}
+                            tintColor={GinitTheme.colors.primary}
+                            colors={[GinitTheme.colors.primary]}
+                          />
+                        }
+                        ListHeaderComponent={chatTabListAlerts('gather')}
+                        ListFooterComponent={chatKind === 'gather' ? gatherListFooter : null}
+                        onEndReached={() => handleEndReachedForKind('gather')}
+                        onEndReachedThreshold={0.6}
+                        onLoad={scrollGatherListToTop}
+                        renderItem={({ item: m }) => {
+                          const host = profileForCreatedBy(hostProfiles, m.createdBy);
+                          const unread = localMeetingRoomById.get(m.id)?.unreadCount ?? 0;
+                          return (
+                            <ChatMeetingListRow
+                              meeting={m}
+                              hostPhotoUrl={host?.photoUrl ?? null}
+                              hostNickname={host?.nickname ?? '주관자'}
+                              hostWithdrawn={isUserProfileWithdrawn(host)}
+                              latestMessage={effectiveLatestByMeetingId[m.id] ?? null}
+                              unreadCount={unread}
+                              categories={meetingCategories}
+                              onPress={() => {
+                                if (directSharePickMode) {
+                                  const incoming = consumeIncomingDirectSharePayload();
+                                  if (incoming) {
+                                    if (incoming.kind === 'image') {
+                                      setPendingDirectSharePayload({
+                                        kind: 'image',
+                                        imageUri: incoming.imageUri,
+                                        text: incoming.text,
+                                        targetType: 'meeting',
+                                        targetId: m.id,
+                                      });
+                                    } else {
+                                      setPendingDirectSharePayload({
+                                        kind: 'text',
+                                        text: incoming.text,
+                                        targetType: 'meeting',
+                                        targetId: m.id,
+                                      });
+                                    }
+                                  }
+                                  setDirectSharePickMode(false);
+                                }
+                                router.push(`/meeting-chat/${m.id}`);
+                              }}
+                            />
+                          );
                         }}
                       />
-                    );
-                  }}
-                />
-              )
-            ) : showSocialInitialSkeleton ? (
-              <ScreenTransitionSkeleton variant="chat" rows={6} />
-            ) : (
-              <FlashList<SocialChatRoomSummary>
-                ref={socialListRef}
-                data={displayedSocialRooms}
-                extraData={{
-                  chatKind,
-                  appliedSocialTextQuery,
-                  socialSearchBusy,
-                  socialMsgHits: socialMessageMatchRoomIds.size,
-                  socialProfiles,
-                  latestBySocialRoomId: effectiveLatestBySocialRoomId,
-                  socialDmListFlashKey,
-                  socialListRenderRev,
-                }}
-                keyExtractor={(row) => row.roomId}
-                style={styles.listFlex}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={styles.scroll}
-                maintainVisibleContentPosition={{ disabled: true }}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onPullRefresh}
-                    tintColor={GinitTheme.colors.primary}
-                    colors={[GinitTheme.colors.primary]}
-                  />
-                }
-                ListHeaderComponent={chatTabListAlerts('social')}
-                ListFooterComponent={socialListFooter}
-                onEndReached={() => handleEndReachedForKind('social')}
-                onEndReachedThreshold={0.6}
-                onLoad={scrollSocialListToTop}
-                renderItem={({ item: row }) => {
-                  const me = userId?.trim() ?? '';
-                  const rid = me
-                    ? resolveSocialDmRoomIdForViewer(me, row.peerAppUserId, row.roomId)
-                    : row.roomId;
-                  if (!rid) return null;
-                  const prof = socialProfiles.get(row.peerAppUserId);
-                  const uri = prof?.photoUrl?.trim();
-                  const nick = prof?.nickname ?? '친구';
-                  const friendBio =
-                    prof && !isUserProfileWithdrawn(prof) ? (prof.bio?.trim() ?? '') : '';
-                  const loc = localSocialRoomById.get(row.roomId) as LocalChatRoomSummary | undefined;
-                  const latest = effectiveLatestBySocialRoomId[row.roomId];
-                  const messageMs = socialListLastMessageMs(loc ?? { lastMessageAtMs: 0 }, latest);
-                  const hasListableMessage = messageMs > 0;
-                  const preview = socialListPreviewFromLocalRoom(loc ?? { lastMessagePreview: null }, latest);
-                  const rightTime = hasListableMessage ? formatRelativeFromMs(messageMs) : '';
-                  const unread = loc?.unreadCount ?? 0;
-                  return (
-                    <GinitPressable
-                      onPress={() => {
-                        if (directSharePickMode) {
-                          const incoming = consumeIncomingDirectSharePayload();
-                          if (incoming) {
-                            if (incoming.kind === 'image') {
-                              setPendingDirectSharePayload({
-                                kind: 'image',
-                                imageUri: incoming.imageUri,
-                                text: incoming.text,
-                                targetType: 'dm',
-                                targetId: rid,
-                              });
-                            } else {
-                              setPendingDirectSharePayload({
-                                kind: 'text',
-                                text: incoming.text,
-                                targetType: 'dm',
-                                targetId: rid,
-                              });
-                            }
-                          }
-                          setDirectSharePickMode(false);
-                        }
-                        router.push(
-                          `/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}${
-                            uri ? `&peerPhotoUrl=${encodeURIComponent(uri)}` : ''
-                          }`,
-                        );
+                    )
+                  ) : showSocialInitialSkeleton ? (
+                    <ScreenTransitionSkeleton variant="chat" rows={6} />
+                  ) : (
+                    <FlashList<SocialChatRoomSummary>
+                      ref={socialListRef}
+                      data={displayedSocialRooms}
+                      extraData={{
+                        chatKind,
+                        appliedSocialTextQuery,
+                        socialSearchBusy,
+                        socialMsgHits: socialMessageMatchRoomIds.size,
+                        socialProfiles,
+                        latestBySocialRoomId: effectiveLatestBySocialRoomId,
+                        socialDmListFlashKey,
+                        socialListRenderRev,
                       }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${nick}와 채팅`}
-                      style={({ pressed }) => [styles.chatPressableRow, pressed && styles.chatPressablePressed]}>
-                      <View style={styles.socialZoneA}>
-                        <View style={styles.socialSymbolCol}>
-                          <View style={styles.socialAvatarBubble}>
-                            <View style={styles.socialAvatarMedia}>
-                              {uri ? (
-                                <Image
-                                  source={{ uri }}
-                                  style={styles.socialAvatarImg}
-                                  contentFit="cover"
-                                  cachePolicy="disk"
-                                  recyclingKey={`${row.peerAppUserId}:${uri}`}
-                                />
-                              ) : (
-                                <View style={styles.socialAvatarFallback}>
-                                  <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                      keyExtractor={(row) => row.roomId}
+                      style={styles.listFlex}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      contentContainerStyle={styles.scroll}
+                      maintainVisibleContentPosition={{ disabled: true }}
+                      nestedScrollEnabled
+                      refreshControl={
+                        <RefreshControl
+                          refreshing={refreshing}
+                          onRefresh={onPullRefresh}
+                          tintColor={GinitTheme.colors.primary}
+                          colors={[GinitTheme.colors.primary]}
+                        />
+                      }
+                      ListHeaderComponent={chatTabListAlerts('social')}
+                      ListFooterComponent={chatKind === 'social' ? socialListFooter : null}
+                      onEndReached={() => handleEndReachedForKind('social')}
+                      onEndReachedThreshold={0.6}
+                      onLoad={scrollSocialListToTop}
+                      renderItem={({ item: row }) => {
+                        const me = userId?.trim() ?? '';
+                        const rid = me
+                          ? resolveSocialDmRoomIdForViewer(me, row.peerAppUserId, row.roomId)
+                          : row.roomId;
+                        if (!rid) return null;
+                        const prof = socialProfiles.get(row.peerAppUserId);
+                        const uri = prof?.photoUrl?.trim();
+                        const nick = prof?.nickname ?? '친구';
+                        const friendBio =
+                          prof && !isUserProfileWithdrawn(prof) ? (prof.bio?.trim() ?? '') : '';
+                        const loc = localSocialRoomById.get(row.roomId) as LocalChatRoomSummary | undefined;
+                        const latest = effectiveLatestBySocialRoomId[row.roomId];
+                        const messageMs = socialListLastMessageMs(loc ?? { lastMessageAtMs: 0 }, latest);
+                        const hasListableMessage = messageMs > 0;
+                        const preview = socialListPreviewFromLocalRoom(loc ?? { lastMessagePreview: null }, latest);
+                        const rightTime = hasListableMessage ? formatRelativeFromMs(messageMs) : '';
+                        const unread = loc?.unreadCount ?? 0;
+                        return (
+                          <GinitPressable
+                            onPress={() => {
+                              if (directSharePickMode) {
+                                const incoming = consumeIncomingDirectSharePayload();
+                                if (incoming) {
+                                  if (incoming.kind === 'image') {
+                                    setPendingDirectSharePayload({
+                                      kind: 'image',
+                                      imageUri: incoming.imageUri,
+                                      text: incoming.text,
+                                      targetType: 'dm',
+                                      targetId: rid,
+                                    });
+                                  } else {
+                                    setPendingDirectSharePayload({
+                                      kind: 'text',
+                                      text: incoming.text,
+                                      targetType: 'dm',
+                                      targetId: rid,
+                                    });
+                                  }
+                                }
+                                setDirectSharePickMode(false);
+                              }
+                              router.push(
+                                `/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}${
+                                  uri ? `&peerPhotoUrl=${encodeURIComponent(uri)}` : ''
+                                }`,
+                              );
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${nick}와 채팅`}
+                            style={({ pressed }) => [styles.chatPressableRow, pressed && styles.chatPressablePressed]}>
+                            <View style={styles.socialZoneA}>
+                              <View style={styles.socialSymbolCol}>
+                                <View style={styles.socialAvatarBubble}>
+                                  <View style={styles.socialAvatarMedia}>
+                                    {uri ? (
+                                      <Image
+                                        source={{ uri }}
+                                        style={styles.socialAvatarImg}
+                                        contentFit="cover"
+                                        cachePolicy="disk"
+                                        recyclingKey={`${row.peerAppUserId}:${uri}`}
+                                      />
+                                    ) : (
+                                      <View style={styles.socialAvatarFallback}>
+                                        <Text style={styles.socialAvatarLetter}>{nick.slice(0, 1)}</Text>
+                                      </View>
+                                    )}
+                                  </View>
                                 </View>
-                              )}
-                            </View>
-                          </View>
-                        </View>
-                        <View style={styles.socialZoneMain}>
-                          <View style={styles.socialTitleRow}>
-                            <View style={styles.socialTitleBlock}>
-                              <Text style={styles.socialHeroTitle} numberOfLines={1}>
-                                {nick}
-                              </Text>
-                              {friendBio ? (
-                                <Text style={styles.socialMetaMuted} numberOfLines={1}>
-                                  {friendBio}
-                                </Text>
-                              ) : null}
-                            </View>
-                            {rightTime || unread > 0 ? (
-                              <View style={styles.socialTimeColumn}>
-                                {rightTime ? (
-                                  <Text style={styles.socialTimeRight} numberOfLines={1}>
-                                    {rightTime}
+                              </View>
+                              <View style={styles.socialZoneMain}>
+                                <View style={styles.socialTitleRow}>
+                                  <View style={styles.socialTitleBlock}>
+                                    <Text style={styles.socialHeroTitle} numberOfLines={1}>
+                                      {nick}
+                                    </Text>
+                                    {friendBio ? (
+                                      <Text style={styles.socialMetaMuted} numberOfLines={1}>
+                                        {friendBio}
+                                      </Text>
+                                    ) : null}
+                                  </View>
+                                  {rightTime || unread > 0 ? (
+                                    <View style={styles.socialTimeColumn}>
+                                      {rightTime ? (
+                                        <Text style={styles.socialTimeRight} numberOfLines={1}>
+                                          {rightTime}
+                                        </Text>
+                                      ) : null}
+                                      {unread > 0 ? (
+                                        <View
+                                          style={[styles.socialUnreadBadge, !rightTime && styles.socialUnreadBadgeSolo]}
+                                          accessibilityLabel={`읽지 않은 메시지 ${unread > 99 ? '99개 이상' : `${unread}개`}`}>
+                                          <Text style={styles.socialUnreadBadgeText}>
+                                            {unread > 99 ? '99+' : String(unread)}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  ) : null}
+                                </View>
+                                {preview ? (
+                                  <Text style={styles.socialPreviewLine} numberOfLines={2}>
+                                    {preview}
                                   </Text>
                                 ) : null}
-                                {unread > 0 ? (
-                                  <View
-                                    style={[styles.socialUnreadBadge, !rightTime && styles.socialUnreadBadgeSolo]}
-                                    accessibilityLabel={`읽지 않은 메시지 ${unread > 99 ? '99개 이상' : `${unread}개`}`}>
-                                    <Text style={styles.socialUnreadBadgeText}>{unread > 99 ? '99+' : String(unread)}</Text>
-                                  </View>
-                                ) : null}
                               </View>
-                            ) : null}
-                          </View>
-                          {preview ? (
-                            <Text style={styles.socialPreviewLine} numberOfLines={2}>
-                              {preview}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </View>
-                    </GinitPressable>
-                  );
-                }}
-              />
-            )}
+                            </View>
+                          </GinitPressable>
+                        );
+                      }}
+                    />
+                  )}
+                </View>
+              ))}
+            </ScrollView>
           </View>
         </View>
 
@@ -1338,7 +1404,16 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: GinitTheme.colors.bg },
   safe: { flex: 1 },
   feedColumn: { flex: 1 },
-  tabListMount: { flex: 1, minHeight: 0 },
+  tabPagerWrap: {
+    flex: 1,
+    position: 'relative',
+  },
+  tabPager: {
+    flex: 1,
+  },
+  tabPage: {
+    flex: 1,
+  },
   listFlex: { flex: 1 },
   scroll: {
     paddingHorizontal: 20,

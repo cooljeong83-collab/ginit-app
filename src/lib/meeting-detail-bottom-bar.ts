@@ -24,6 +24,8 @@ export type MeetingDetailBottomAction = {
 export const MEETING_DETAIL_BOTTOM_BAR_ROW_GAP = 10;
 export const MEETING_DETAIL_BOTTOM_BAR_HORIZONTAL_PADDING = 24;
 export const MEETING_DETAIL_BOTTOM_ICON_PILL_WIDTH = 50;
+/** `TransientBottomMessage`가 모임 상세 하단 CTA 위에 뜨도록 하는 추가 bottom 오프셋(px, safe area 제외) */
+export const MEETING_DETAIL_TRANSIENT_BOTTOM_OFFSET_PX = 74;
 const PILL_INNER_GAP = 3;
 const PILL_LABELED_PADDING_H = 12;
 
