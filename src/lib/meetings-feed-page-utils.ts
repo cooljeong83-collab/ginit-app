@@ -1,3 +1,5 @@
+import type { InfiniteData } from '@tanstack/react-query';
+
 import type { Meeting } from '@/src/lib/meetings';
 import {
   type MeetingChangeSummary,
@@ -66,4 +68,22 @@ export function buildMeetingsFeedInfinitePagesAndPageParams(
     pageParams.push(pages[i - 1]?.tailCursor);
   }
   return { pages, pageParams };
+}
+
+/** TanStack infinite query 캐시 `data` → 플랫 모임 목록(id dedupe) */
+export function flattenMeetingsFeedInfiniteData(
+  data: InfiniteData<MeetingsFeedPageSlice> | undefined,
+): Meeting[] {
+  const pages = data?.pages ?? [];
+  const seen = new Set<string>();
+  const out: Meeting[] = [];
+  for (const p of pages) {
+    for (const m of p.meetings) {
+      const id = typeof m.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(m);
+    }
+  }
+  return out;
 }

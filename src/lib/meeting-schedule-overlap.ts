@@ -2,7 +2,7 @@ import { publicEnv } from '@/src/config/public-env';
 import { isSupabaseRpcMissingOrStaleSchema } from '@/src/lib/supabase-rpc-schema';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
-import { getDateCandidateScheduleInstant } from '@/src/lib/date-candidate';
+import { fmtDateYmd, fmtTimeHm, getDateCandidateScheduleInstant } from '@/src/lib/date-candidate';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import type { DateCandidate } from '@/src/lib/meeting-place-bridge';
@@ -367,11 +367,14 @@ export type ConfirmedSlot = { meetingId: string; startMs: number };
 export function collectUserConfirmedScheduleSlots(
   meetings: readonly MeetingScheduleOverlapDoc[],
   appUserId: string | null | undefined,
+  excludeMeetingId?: string | null,
 ): ConfirmedSlot[] {
   const uid = appUserId?.trim() ?? '';
   if (!uid) return [];
+  const ex = excludeMeetingId?.trim() ?? '';
   const out: ConfirmedSlot[] = [];
   for (const m of meetings) {
+    if (ex && m.id === ex) continue;
     if (m.scheduleConfirmed !== true) continue;
     if (!isUserJoinedMeetingForScheduleOverlap(m, uid)) continue;
     const t = meetingScheduleStartMs(m);
@@ -379,6 +382,43 @@ export function collectUserConfirmedScheduleSlots(
     out.push({ meetingId: m.id, startMs: t });
   }
   return out;
+}
+
+const EMPTY_CONFIRMED_SCHEDULE_YMD_SET: ReadonlySet<string> = new Set();
+const EMPTY_CONFIRMED_SCHEDULE_TIMES_BY_YMD: Readonly<Record<string, readonly string[]>> = {};
+
+/** 참여·주최 모임 확정 일정 — 날짜별 `HH:mm` 목록(달력 busy 마킹·시간 표시) */
+export function collectUserConfirmedScheduleTimesByYmd(
+  meetings: readonly MeetingScheduleOverlapDoc[],
+  appUserId: string | null | undefined,
+  excludeMeetingId?: string | null,
+): Readonly<Record<string, readonly string[]>> {
+  const slots = collectUserConfirmedScheduleSlots(meetings, appUserId, excludeMeetingId);
+  if (slots.length === 0) return EMPTY_CONFIRMED_SCHEDULE_TIMES_BY_YMD;
+  const byYmd: Record<string, string[]> = {};
+  for (const s of slots) {
+    const d = new Date(s.startMs);
+    const ymd = fmtDateYmd(d);
+    const hm = fmtTimeHm(d);
+    if (!byYmd[ymd]) byYmd[ymd] = [];
+    if (!byYmd[ymd].includes(hm)) byYmd[ymd].push(hm);
+  }
+  for (const k of Object.keys(byYmd)) {
+    byYmd[k].sort((a, b) => a.localeCompare(b));
+  }
+  return byYmd;
+}
+
+/** 참여·주최 모임의 확정 일정이 있는 로컬 날짜(`YYYY-MM-DD`) 집합 — 달력 busy 마킹용 */
+export function collectUserConfirmedScheduleYmdSet(
+  meetings: readonly MeetingScheduleOverlapDoc[],
+  appUserId: string | null | undefined,
+  excludeMeetingId?: string | null,
+): ReadonlySet<string> {
+  const byYmd = collectUserConfirmedScheduleTimesByYmd(meetings, appUserId, excludeMeetingId);
+  const keys = Object.keys(byYmd);
+  if (keys.length === 0) return EMPTY_CONFIRMED_SCHEDULE_YMD_SET;
+  return new Set(keys);
 }
 
 export function meetingOverlapsUserConfirmedSlots(

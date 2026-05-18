@@ -168,6 +168,58 @@ export function removeMeetingFromMeetingsQueryCaches(
   );
 }
 
+/** 참여자 나가기 직후 로컬 피드·상세 스냅샷에서 본인 참여 흔적을 제거합니다(탐색 공개 피드 행은 유지). */
+export function meetingSnapshotAfterParticipantLeave(m: Meeting, viewerUserId: string): Meeting {
+  const pk = normalizeParticipantId(viewerUserId) ?? viewerUserId.trim();
+  if (!pk) return m;
+  const nextParticipantIds = (m.participantIds ?? []).filter(
+    (id) => (normalizeParticipantId(String(id)) ?? String(id).trim()) !== pk,
+  );
+  const nextJoinRequests = (m.joinRequests ?? []).filter(
+    (jr) => (normalizeParticipantId(jr.userId) ?? jr.userId.trim()) !== pk,
+  );
+  return {
+    ...m,
+    participantIds: nextParticipantIds,
+    joinRequests: nextJoinRequests.length > 0 ? nextJoinRequests : null,
+  };
+}
+
+/** 모임 나가기 성공 직후 홈 참여중·종료 탭이 즉시 갱신되도록 TanStack 모임 피드 캐시를 패치합니다. */
+export function applyMeetingParticipantLeaveToFeedCaches(
+  queryClient: QueryClient,
+  meetingId: string,
+  viewerUserId: string,
+  snapshot?: Meeting | null,
+): boolean {
+  const mid = meetingId.trim();
+  const uid = normalizeParticipantId(viewerUserId) ?? viewerUserId.trim();
+  if (!mid || !uid) return false;
+
+  const cacheKeys = {
+    feedKey: meetingsFeedInfiniteQueryKey(),
+    myFeedKey: myMeetingsFeedQueryKey(uid),
+  };
+
+  let mutated = false;
+  if (
+    removeMeetingsFromMeetingsFeedCaches(queryClient, [mid], cacheKeys, {
+      publicFeed: false,
+    })
+  ) {
+    mutated = true;
+  }
+
+  const base = snapshot?.id?.trim() === mid ? snapshot : null;
+  const patched = base ? meetingSnapshotAfterParticipantLeave(base, uid) : null;
+  if (patched) {
+    const upd = new Map<string, Meeting>([[mid, patched]]);
+    if (patchMeetingsInInfiniteFeedCache(queryClient, upd, [])) mutated = true;
+  }
+
+  return mutated;
+}
+
 export async function performMeetingsQuerySurgicalSync(
   queryClient: QueryClient,
   viewerUserId: string | null | undefined,

@@ -31,6 +31,10 @@ import {
   MEETING_JOIN_REQUEST_MESSAGE_MAX_LEN,
   requestJoinMeeting,
 } from '@/src/lib/meetings';
+import {
+  applyMeetingParticipantLeaveToFeedCaches,
+  meetingSnapshotAfterParticipantLeave,
+} from '@/src/lib/meeting-sync-service';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { ensureUserProfile, getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-profile';
 
@@ -502,6 +506,16 @@ export function useMeetingJoin({
             setLeaveBusy(true);
             try {
               await leaveMeeting(meeting.id, sessionPk);
+              const leftSnapshot = meetingSnapshotAfterParticipantLeave(meeting, sessionPk);
+              markRecentSelfMeetingChange(meeting.id);
+              applyMeetingParticipantLeaveToFeedCaches(
+                queryClient,
+                meeting.id,
+                sessionPk,
+                leftSnapshot,
+              );
+              await patchMeetingDetailInWatermelon(meeting.id, () => leftSnapshot);
+              queryClient.setQueryData(meetingDetailQueryKey(meeting.id), leftSnapshot);
               void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
               let penaltyLedgerOk = false;
               if (withinPenaltyWindow) {

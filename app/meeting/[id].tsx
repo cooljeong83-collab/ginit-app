@@ -53,6 +53,7 @@ import { useMeetingJoin } from '@/src/hooks/meeting/useMeetingJoin';
 import { useMeetingSocial } from '@/src/hooks/meeting/useMeetingSocial';
 import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
 import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
+import { useUserConfirmedScheduleCalendarMarks } from '@/src/hooks/use-user-confirmed-schedule-ymd-set';
 import { patchMeetingDetailLocal, refreshMeetingDetailCaches } from '@/src/lib/meeting-detail-cache-mutations';
 import { pushAndroidTabHomeHardwareExitSuppress } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -1722,6 +1723,9 @@ export default function MeetingDetailScreen() {
     if (ymd) setConfirmedScheduleCalMonth(monthStartYmd(ymd));
   }, [meeting?.id, confirmedScheduleVoteByYmd]);
 
+  const { ymdSet: confirmedBusyYmdSet, timesByYmd: confirmedBusyTimesByYmd } =
+    useUserConfirmedScheduleCalendarMarks(userId, id);
+
   // join 관련 로직은 `useMeetingJoin`로 이동
 
   // join 관련 로직은 `useMeetingJoin`로 이동
@@ -2174,14 +2178,19 @@ export default function MeetingDetailScreen() {
           <View style={styles.calendarGrid}>
             {Array.from({ length: 6 }).map((_, wi) => {
               const week = cells.slice(wi * 7, wi * 7 + 7);
-              const weekHasAny = week.some((c) => (dateVoteByYmd[c.ymd]?.length ?? 0) > 0);
+              const weekHasAny = week.some(
+                (c) =>
+                  (dateVoteByYmd[c.ymd]?.length ?? 0) > 0 || (confirmedBusyTimesByYmd[c.ymd]?.length ?? 0) > 0,
+              );
               return (
                 <View
                   key={`week-${monthAnchorYmd}-${wi}`}
                   style={[styles.calendarWeekRow, !weekHasAny && styles.calendarWeekRowEmpty, wi === 5 ? { marginBottom: 0 } : null]}>
                   {week.map((c) => {
                     const opts = dateVoteByYmd[c.ymd] ?? [];
+                    const busyTimes = confirmedBusyTimesByYmd[c.ymd] ?? [];
                     const has = opts.length > 0;
+                    const isBusy = !has && confirmedBusyYmdSet.has(c.ymd);
                     /** 후보 1건일 때 달력 셀을 확정 일정 달력과 같은 톤으로 표시 */
                     const fixedScheduleLikeCell = dateChips.length === 1 && has;
                     const isHostSelected = has && opts.some((o) => hostTieDateId === o.chipId);
@@ -2203,17 +2212,18 @@ export default function MeetingDetailScreen() {
                           !c.inMonth && styles.calendarCellOut,
                           fixedScheduleLikeCell && styles.calendarCellConfirmedSelected,
                           has && !fixedScheduleLikeCell && styles.calendarCellHas,
+                          isBusy && styles.calendarCellBusy,
                           isSelected && !fixedScheduleLikeCell && styles.calendarCellSelected,
-                          pressed && styles.calendarCellPressed,
+                          pressed && has && styles.calendarCellPressed,
                         ]}
                         accessibilityRole={dateHostPickMode ? 'radio' : 'button'}
-                        accessibilityLabel={`${formatYmdWithKoWeekday(c.ymd)}${has ? ` ${opts.length}개` : ''}`}>
-                        
+                        accessibilityLabel={`${formatYmdWithKoWeekday(c.ymd)}${has ? ` ${opts.length}개` : ''}${isBusy ? ` ${busyTimes.join(', ')} 확정된 나의 약속` : ''}`}>
                         <Text
                           style={[
                             styles.calendarCellDay,
                             !c.inMonth && !fixedScheduleLikeCell && styles.calendarCellDayOut,
                             fixedScheduleLikeCell && styles.calendarCellDayConfirmed,
+                            isBusy && styles.calendarCellDayBusy,
                           ]}
                           numberOfLines={1}>
                           {c.day}
@@ -2264,6 +2274,14 @@ export default function MeetingDetailScreen() {
                               );
                             })}
                           </View>
+                        ) : isBusy ? (
+                          <View style={styles.calendarTimesWrap} pointerEvents="none">
+                            {busyTimes.map((t) => (
+                              <Text key={`${c.ymd}-busy-${t}`} style={styles.calendarCellMetaBusy} numberOfLines={1}>
+                                {t}
+                              </Text>
+                            ))}
+                          </View>
                         ) : (
                           <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
                         )}
@@ -2277,7 +2295,16 @@ export default function MeetingDetailScreen() {
         </View>
       );
     },
-    [dateVoteByYmd, dateChips.length, dateHostPickMode, hostTieDateId, selectedDateIds, onDateChipPress],
+    [
+      confirmedBusyTimesByYmd,
+      confirmedBusyYmdSet,
+      dateVoteByYmd,
+      dateChips.length,
+      dateHostPickMode,
+      hostTieDateId,
+      selectedDateIds,
+      onDateChipPress,
+    ],
   );
 
   const renderConfirmedScheduleCalendarMonthGrid = useCallback(
@@ -2316,29 +2343,46 @@ export default function MeetingDetailScreen() {
           <View style={styles.calendarGrid}>
             {Array.from({ length: 6 }).map((_, wi) => {
               const week = cells.slice(wi * 7, wi * 7 + 7);
+              const weekHasAny =
+                week.some(
+                  (c) => (byYmd[c.ymd]?.length ?? 0) > 0 || (confirmedBusyTimesByYmd[c.ymd]?.length ?? 0) > 0,
+                );
               return (
-                <View key={`cf-week-${monthAnchorYmd}-${wi}`} style={styles.calendarWeekRow}>
+                <View
+                  key={`cf-week-${monthAnchorYmd}-${wi}`}
+                  style={[styles.calendarWeekRow, !weekHasAny && styles.calendarWeekRowEmpty]}>
                   {week.map((c) => {
                     const opts = byYmd[c.ymd] ?? [];
+                    const busyTimes = confirmedBusyTimesByYmd[c.ymd] ?? [];
                     const has = opts.length > 0;
+                    const isBusy = !has && confirmedBusyYmdSet.has(c.ymd);
                     const isSelected = has && opts.some((o) => o.chipId === confirmedChipId);
                     return (
                       <View
                         key={c.ymd}
                         style={[
                           styles.calendarCell,
+                          !weekHasAny && styles.calendarCellRowEmpty,
                           !c.inMonth && styles.calendarCellOut,
                           has && !isSelected && styles.calendarCellHas,
+                          isBusy && styles.calendarCellBusy,
                           isSelected && styles.calendarCellConfirmedSelected,
                         ]}
-                        accessibilityLabel={has ? `${formatYmdWithKoWeekday(c.ymd)} ${opts.length}개` : undefined}
-                        accessibilityElementsHidden={!has}
-                        importantForAccessibility={has ? 'yes' : 'no-hide-descendants'}>
+                        accessibilityLabel={
+                          has
+                            ? `${formatYmdWithKoWeekday(c.ymd)} ${opts.length}개`
+                            : isBusy
+                              ? `${formatYmdWithKoWeekday(c.ymd)} ${busyTimes.join(', ')} 확정된 나의 약속`
+                              : undefined
+                        }
+                        accessibilityElementsHidden={!has && !isBusy}
+                        importantForAccessibility={has || isBusy ? 'yes' : 'no-hide-descendants'}>
                         <Text
                           style={[
                             styles.calendarCellDay,
-                            !c.inMonth && !isSelected && styles.calendarCellDayOut,
+                            !c.inMonth && !isSelected && !isBusy && styles.calendarCellDayOut,
                             isSelected && styles.calendarCellDayConfirmed,
+                            isBusy && styles.calendarCellDayBusy,
                           ]}
                           numberOfLines={1}>
                           {c.day}
@@ -2375,6 +2419,14 @@ export default function MeetingDetailScreen() {
                               );
                             })}
                           </View>
+                        ) : isBusy ? (
+                          <View style={styles.calendarTimesWrap} pointerEvents="none">
+                            {busyTimes.map((t) => (
+                              <Text key={`${c.ymd}-busy-${t}`} style={styles.calendarCellMetaBusy} numberOfLines={1}>
+                                {t}
+                              </Text>
+                            ))}
+                          </View>
                         ) : (
                           <Text style={styles.calendarCellMetaEmpty}>{' '}</Text>
                         )}
@@ -2388,7 +2440,7 @@ export default function MeetingDetailScreen() {
         </View>
       );
     },
-    [meeting?.confirmedDateChipId, confirmedScheduleVoteByYmd],
+    [confirmedBusyTimesByYmd, confirmedBusyYmdSet, meeting?.confirmedDateChipId, confirmedScheduleVoteByYmd],
   );
 
   useLayoutEffect(() => {
@@ -5246,6 +5298,22 @@ const styles = StyleSheet.create({
   calendarCellHas: {
     backgroundColor: 'rgba(31, 42, 68, 0.10)',
     borderWidth: 0,
+  },
+  calendarCellBusy: {
+    backgroundColor: 'rgba(220, 38, 38, 0.10)',
+    borderWidth: 0,
+  },
+  calendarCellDayBusy: {
+    color: GinitTheme.colors.danger,
+  },
+  calendarCellMetaBusy: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: GinitTheme.colors.danger,
+    marginTop: 0,
+    marginBottom: 0,
+    textAlign: 'center',
+    alignSelf: 'stretch',
   },
   calendarCellSelected: {
     borderWidth: 0,

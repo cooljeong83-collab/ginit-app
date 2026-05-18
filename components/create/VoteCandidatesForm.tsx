@@ -32,6 +32,7 @@ import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessa
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useUserConfirmedScheduleCalendarMarks } from '@/src/hooks/use-user-confirmed-schedule-ymd-set';
 import { layoutAnimateMeetingCreateWizard } from '@/src/lib/android-layout-animation';
 import type { SpecialtyKind } from '@/src/lib/category-specialty';
 import {
@@ -531,6 +532,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
   const reduceHeavyEffects = !isFocused || stackTransitionCoversScreen;
   const { userId: sessionUserId } = useUserSession();
+  const { ymdSet: confirmedBusyYmdSet, timesByYmd: confirmedBusyTimesByYmd } =
+    useUserConfirmedScheduleCalendarMarks(sessionUserId);
 
   const guardDateCandidatesOverlapOrAlert = useCallback(async (nextDates: DateCandidate[]): Promise<boolean> => {
     try {
@@ -1917,7 +1920,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           <View style={styles.calendarGrid}>
             {Array.from({ length: 6 }).map((_, wi) => {
               const week = cells.slice(wi * 7, wi * 7 + 7);
-              const weekHasAnyTimes = week.some((c) => (byDay[c.ymd]?.length ?? 0) > 0);
+              const weekHasAnyTimes = week.some(
+                (c) =>
+                  (byDay[c.ymd]?.length ?? 0) > 0 || (confirmedBusyTimesByYmd[c.ymd]?.length ?? 0) > 0,
+              );
               return (
                 <View
                   key={`week-${monthAnchorYmd}-${wi}`}
@@ -1927,12 +1933,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     wi === 5 ? { marginBottom: 0 } : null,
                   ]}>
                   {week.map((c) => {
-                    const times = byDay[c.ymd] ?? [];
-                    const has = times.length > 0;
-                    const lastTime = times[times.length - 1] ?? '';
+                    const candidateTimes = byDay[c.ymd] ?? [];
+                    const busyTimes = confirmedBusyTimesByYmd[c.ymd] ?? [];
+                    const has = candidateTimes.length > 0;
                     const isPast = c.ymd < todayYmd;
                     const isAfterWindow = c.ymd > maxYmd;
                     const cellDisabled = isPast || isAfterWindow;
+                    const isBusy = !has && confirmedBusyYmdSet.has(c.ymd) && !cellDisabled;
+                    const displayTimes = has ? candidateTimes : busyTimes;
+                    const lastTime = displayTimes[displayTimes.length - 1] ?? '';
                     return (
                       <GinitPressable
                         key={c.ymd}
@@ -1947,26 +1956,31 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                           !weekHasAnyTimes && styles.calendarCellRowEmpty,
                           !c.inMonth && styles.calendarCellOut,
                           has && styles.calendarCellHas,
+                          isBusy && styles.calendarCellBusy,
                           agentScheduleDemoHighlightYmd === c.ymd && styles.calendarCellAgentDemo,
                           cellDisabled && styles.calendarCellDisabled,
                           pressed && !cellDisabled && styles.calendarCellPressed,
                         ]}
                         accessibilityRole="button"
-                        accessibilityLabel={`${formatYmdWithKoWeekday(c.ymd)}${has ? ` ${times.length}개` : ''}`}>
+                        accessibilityLabel={`${formatYmdWithKoWeekday(c.ymd)}${displayTimes.length > 0 ? ` ${displayTimes.join(', ')}` : ''}${isBusy ? ' 확정된 나의 약속' : ''}`}>
                         <Text
                           style={[
                             styles.calendarCellDay,
                             compactCalendar && styles.calendarCellDayCompact,
                             !c.inMonth && styles.calendarCellDayOut,
+                            isBusy && styles.calendarCellDayBusy,
                           ]}>
                           {c.day}
                         </Text>
-                        {has ? (
+                        {displayTimes.length > 0 ? (
                           <View style={styles.calendarTimesWrap} pointerEvents="none">
-                            {times.map((t) => (
+                            {displayTimes.map((t) => (
                               <Text
                                 key={`${c.ymd}-${t}`}
-                                style={[styles.calendarCellMeta, compactCalendar && styles.calendarCellMetaCompact]}>
+                                style={[
+                                  isBusy ? styles.calendarCellMetaBusy : styles.calendarCellMeta,
+                                  compactCalendar && styles.calendarCellMetaCompact,
+                                ]}>
                                 {t}
                               </Text>
                             ))}
@@ -1991,7 +2005,15 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         </View>
       );
     },
-    [agentScheduleDemoHighlightYmd, bare, dateCandidates, openTimePickerForDate, wizardSegment],
+    [
+      agentScheduleDemoHighlightYmd,
+      bare,
+      confirmedBusyTimesByYmd,
+      confirmedBusyYmdSet,
+      dateCandidates,
+      openTimePickerForDate,
+      wizardSegment,
+    ],
   );
 
   const scheduleSection = (

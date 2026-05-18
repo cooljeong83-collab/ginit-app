@@ -1,0 +1,7 @@
+expo.modules.ginitprocessexit.ginit-process-exit-pngs-0 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/build/generated/res/pngs/release
+expo.modules.ginitprocessexit.ginit-process-exit-resValues-1 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/build/generated/res/resValues/release
+expo.modules.ginitprocessexit.ginit-process-exit-mergeReleaseResources-2 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+expo.modules.ginitprocessexit.ginit-process-exit-mergeReleaseResources-3 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+expo.modules.ginitprocessexit.ginit-process-exit-release-4 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/build/intermediates/merged_res/release/mergeReleaseResources
+expo.modules.ginitprocessexit.ginit-process-exit-main-5 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/src/main/res
+expo.modules.ginitprocessexit.ginit-process-exit-release-6 /Users/clawagent/ginit-app/modules/ginit-process-exit/android/src/release/res

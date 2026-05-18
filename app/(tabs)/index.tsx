@@ -514,22 +514,11 @@ export default function FeedScreen() {
     return out;
   }, [meetings, myMeetings]);
 
-  /** Supabase RPC `ledger_list_my_meetings_for_feed` 결과 ID — 서버가 이미 호스트·참여로 거름 */
-  const rpcMyMeetingIdSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const m of myMeetings) {
-      const id = typeof m?.id === 'string' ? m.id.trim() : '';
-      if (id) s.add(id);
-    }
-    return s;
-  }, [myMeetings]);
-
   const joinedFilteredMeetings = useMemo(() => {
     // 참여중·종료 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
     const base = myTabsMeetings.filter((m) => {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
       if (!id) return false;
-      if (rpcMyMeetingIdSet?.has(id)) return true;
       return isUserJoinedMeeting(m, userId);
     });
     return base.filter((m) => {
@@ -540,7 +529,6 @@ export default function FeedScreen() {
     });
   }, [
     myTabsMeetings,
-    rpcMyMeetingIdSet,
     userId,
     selectedCategoryId,
     feedBarVisibleCategoryIds,

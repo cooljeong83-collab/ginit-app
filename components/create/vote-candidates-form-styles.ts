@@ -449,6 +449,15 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     borderWidth: 0,
     borderColor: 'transparent',
   },
+  /** 로컬 캐시 기준 확정된 나의 약속이 있는 날(일시 후보 없을 때) */
+  calendarCellBusy: {
+    backgroundColor: 'rgba(220, 38, 38, 0.10)',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  calendarCellDayBusy: {
+    color: GinitTheme.colors.danger,
+  },
   calendarCellAgentDemo: {
     backgroundColor: `${GinitTheme.colors.primary}22`,
   },
@@ -480,6 +489,12 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: GinitTheme.colors.primary,
+  },
+  calendarCellMetaBusy: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '600',
+    color: GinitTheme.colors.danger,
   },
   calendarCellMetaCompact: {
     marginTop: 1,

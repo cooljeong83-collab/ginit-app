@@ -5,7 +5,10 @@ import type { Meeting } from '@/src/lib/meetings';
 import { recordMeetingsListPageFetchedFromNetwork } from '@/src/lib/meetings-feed-deferred-sync';
 import { applyPublicMeetingsFeedSummarySync } from '@/src/lib/meetings-feed-incremental-sync-core';
 import { slimMeetingForFeedList } from '@/src/lib/meetings-feed-list-slim';
-import type { MeetingsFeedPageSlice } from '@/src/lib/meetings-feed-page-utils';
+import {
+  flattenMeetingsFeedInfiniteData,
+  type MeetingsFeedPageSlice,
+} from '@/src/lib/meetings-feed-page-utils';
 import { meetingsFeedInfiniteQueryKey } from '@/src/lib/meetings-query-keys';
 import {
   fetchPublicMeetingsPageFromSupabase,
@@ -27,21 +30,6 @@ export type UseMeetingsFeedInfiniteQueryOptions = {
 };
 
 export { meetingsFeedInfiniteQueryKey };
-
-function flattenPages(data: FeedInfiniteData | undefined): Meeting[] {
-  const pages = data?.pages ?? [];
-  const seen = new Set<string>();
-  const out: Meeting[] = [];
-  for (const p of pages) {
-    for (const m of p.meetings) {
-      const id = typeof m.id === 'string' ? m.id.trim() : '';
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      out.push(m);
-    }
-  }
-  return out;
-}
 
 async function fetchMeetingsFeedPage(pageParam: PublicMeetingsFeedCursor | undefined): Promise<Page> {
   const res = await fetchPublicMeetingsPageFromSupabase(pageParam ?? null);
@@ -90,7 +78,10 @@ export function useMeetingsFeedInfiniteQuery(options?: UseMeetingsFeedInfiniteQu
     await applyPublicMeetingsFeedSummarySync(queryClient);
   }, [enabled, queryClient]);
 
-  const meetings = useMemo(() => flattenPages(query.data as FeedInfiniteData | undefined), [query.data]);
+  const meetings = useMemo(
+    () => flattenMeetingsFeedInfiniteData(query.data as FeedInfiniteData | undefined),
+    [query.data],
+  );
 
   const listError =
     query.error instanceof Error ? query.error.message : query.error ? String(query.error) : null;
