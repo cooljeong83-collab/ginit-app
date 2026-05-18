@@ -17,6 +17,7 @@ import {
   setPublicMeetingsFeedLastSyncIso,
 } from '@/src/lib/meetings-sync-last-at-storage';
 import { syncMeetingDetailCachesFromMeetingsListUpdates } from '@/src/lib/meeting-detail-cache-mutations';
+import { removeMeetingFromMeetingsQueryCaches } from '@/src/lib/meeting-feed-query-cache-remove';
 import { removeMeetingsFromMeetingsFeedCaches } from '@/src/lib/meetings-feed-realtime-cache-patch';
 import {
   diffMeetingSummariesDelta,
@@ -151,24 +152,7 @@ export function patchMeetingsInMyFeedCache(
   return mutated;
 }
 
-/** 삭제·권한 상실 등으로 상세 fetch에 없는 id를 피드 캐시에서 제거합니다. */
-export function removeMeetingFromMeetingsQueryCaches(
-  queryClient: QueryClient,
-  meetingId: string,
-  viewerUserId?: string | null,
-): boolean {
-  const mid = meetingId.trim();
-  if (!mid) return false;
-  const uid = normalizeParticipantId(viewerUserId ?? '');
-  return removeMeetingsFromMeetingsFeedCaches(
-    queryClient,
-    [mid],
-    {
-      feedKey: meetingsFeedInfiniteQueryKey(),
-      myFeedKey: uid ? myMeetingsFeedQueryKey(uid) : null,
-    },
-  );
-}
+export { removeMeetingFromMeetingsQueryCaches };
 
 /** 참여자 나가기 직후 로컬 피드·상세 스냅샷에서 본인 참여 흔적을 제거합니다(탐색 공개 피드 행은 유지). */
 export function meetingSnapshotAfterParticipantLeave(m: Meeting, viewerUserId: string): Meeting {

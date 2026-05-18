@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { meetingDetailQueryKey } from '@/src/lib/meeting-detail-query-keys';
 import { upsertMeetingDetailToWatermelon } from '@/src/lib/meeting-detail-watermelon-cache';
-import { removeMeetingFromMeetingsQueryCaches } from '@/src/lib/meeting-sync-service';
+import { removeMeetingFromMeetingsQueryCaches } from '@/src/lib/meeting-feed-query-cache-remove';
 
 /** 서버·RPC에서 모임 문서가 없음을 나타내는 메시지(삭제·만료 등). */
 export function isMeetingNotFoundMessage(message: string): boolean {

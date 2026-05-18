@@ -1177,6 +1177,22 @@ export default function MeetingDetailScreen() {
     return isUserKickedFromMeeting(meeting, sessionPk);
   }, [meeting, sessionPk]);
 
+  /** 종료된 확정 모임: 미참여 게스트에게 참여·신청 CTA를 숨김(호스트·참여자·퇴장·승인 대기는 유지) */
+  const meetingDetailBottomBarVisible = useMemo(() => {
+    if (isHost) return true;
+    if (alreadyJoinedMeeting) return true;
+    if (sessionKickedFromMeeting) return true;
+    if (hasPendingJoinRequest) return true;
+    if (isConfirmedMeetingEndedForDetail) return false;
+    return true;
+  }, [
+    isHost,
+    alreadyJoinedMeeting,
+    sessionKickedFromMeeting,
+    hasPendingJoinRequest,
+    isConfirmedMeetingEndedForDetail,
+  ]);
+
   const {
     selectedDateIds,
     setSelectedDateIds,
@@ -4097,7 +4113,7 @@ export default function MeetingDetailScreen() {
 
         {/* 게스트 안내 문구는 배너로만 표시(버튼 영역 침범 방지) */}
 
-        {!loading && !loadError && meeting !== null ? (
+        {!loading && !loadError && meeting !== null && meetingDetailBottomBarVisible ? (
           <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
             {isHost ? (
               <View style={styles.bottomBarCol}>

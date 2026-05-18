@@ -1,7 +1,8 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native'
+import { Image as RNImage, Platform, StyleSheet, Text, View, type ImageStyle } from 'react-native';
+import { Grayscale } from 'react-native-color-matrix-image-filters';
 
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -37,6 +38,47 @@ import { useKakaoPlaceListThumbnail } from '@/src/lib/use-kakao-place-list-thumb
 
 const THUMB_SIZE = 70;
 const THUMB_RADIUS = 10;
+
+const SYMBOL_PHOTO_GRAYSCALE_WEB = Platform.select<ImageStyle>({
+  web: { filter: 'grayscale(100%)' } as ImageStyle,
+  default: {},
+});
+
+function HomeMeetingSymbolPhoto({ uri, grayscale }: { uri: string; grayscale?: boolean }) {
+  if (!grayscale) {
+    return (
+      <Image
+        source={{ uri }}
+        style={s.symbolPhoto}
+        contentFit="cover"
+        transition={140}
+        cachePolicy="disk"
+        recyclingKey={uri}
+        placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
+        accessibilityIgnoresInvertColors
+      />
+    );
+  }
+  if (Platform.OS === 'web') {
+    return (
+      <Image
+        source={{ uri }}
+        style={[s.symbolPhoto, SYMBOL_PHOTO_GRAYSCALE_WEB]}
+        contentFit="cover"
+        transition={140}
+        cachePolicy="disk"
+        recyclingKey={uri}
+        placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
+        accessibilityIgnoresInvertColors
+      />
+    );
+  }
+  return (
+    <Grayscale style={s.symbolPhotoGrayscaleWrap} pointerEvents="none">
+      <RNImage source={{ uri }} style={s.symbolPhoto} resizeMode="cover" accessibilityIgnoresInvertColors />
+    </Grayscale>
+  );
+}
 
 function settlementCornerLabel(cfg: PublicMeetingDetailsConfig): string {
   switch (cfg.settlement) {
@@ -145,6 +187,8 @@ type Props = {
   cornerViewerGTrust?: number | null;
   /** 기본 explore — 내 모임·비공개 탭에서 확정 시작 경과 배지 */
   statusBadgeListKind?: HomeMeetingStatusBadgeListKind;
+  /** 종료 모임 탭 등 — 리스트 썸네일만 흑백 */
+  thumbnailGrayscale?: boolean;
 };
 
 /**
@@ -163,6 +207,7 @@ export function HomeMeetingListItem({
   cornerViewerPhotoUrl = null,
   cornerViewerGTrust = null,
   statusBadgeListKind = 'explore',
+  thumbnailGrayscale = false,
 }: Props) {
   const visual = useMemo(() => getHomeCategoryVisual(m), [m]);
   const statusCorner = useMemo(
@@ -349,16 +394,7 @@ export function HomeMeetingListItem({
             {!symbolBox ? <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} /> : null}
             {symbolBox?.source === 'movie_poster' ? (
               <>
-                <Image
-                  source={{ uri: symbolBox.url }}
-                  style={s.symbolPhoto}
-                  contentFit="cover"
-                  transition={140}
-                  cachePolicy="disk"
-                  recyclingKey={symbolBox.url}
-                  placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
-                  accessibilityIgnoresInvertColors
-                />
+                <HomeMeetingSymbolPhoto uri={symbolBox.url} grayscale={thumbnailGrayscale} />
                 <View
                   style={[
                     s.symbolCornerEmojiBadge,
@@ -374,16 +410,7 @@ export function HomeMeetingListItem({
               </>
             ) : symbolBox?.source === 'host_profile' ? (
               <>
-                <Image
-                  source={{ uri: symbolBox.url }}
-                  style={s.symbolPhoto}
-                  contentFit="cover"
-                  transition={140}
-                  cachePolicy="disk"
-                  recyclingKey={symbolBox.url}
-                  placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
-                  accessibilityIgnoresInvertColors
-                />
+                <HomeMeetingSymbolPhoto uri={symbolBox.url} grayscale={thumbnailGrayscale} />
                 <View
                   style={[
                     s.symbolCornerEmojiBadge,
@@ -400,16 +427,7 @@ export function HomeMeetingListItem({
             ) : symbolBox?.source === 'place_with_host' ? (
               <>
                 {placeListMainUri ? (
-                  <Image
-                    source={{ uri: placeListMainUri }}
-                    style={s.symbolPhoto}
-                    contentFit="cover"
-                    transition={140}
-                    cachePolicy="disk"
-                    recyclingKey={placeListMainUri}
-                    placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
-                    accessibilityIgnoresInvertColors
-                  />
+                  <HomeMeetingSymbolPhoto uri={placeListMainUri} grayscale={thumbnailGrayscale} />
                 ) : (
                   <>
                     <View style={[s.symbolTint, { backgroundColor: visual.gradient[0] }]} />
@@ -431,16 +449,7 @@ export function HomeMeetingListItem({
               </>
             ) : !symbolBox && meetingImageThumbUri ? (
               <>
-                <Image
-                  source={{ uri: meetingImageThumbUri }}
-                  style={s.symbolPhoto}
-                  contentFit="cover"
-                  transition={140}
-                  cachePolicy="disk"
-                  recyclingKey={meetingImageThumbUri}
-                  placeholder={{ blurhash: MEETING_LIST_IMAGE_BLURHASH }}
-                  accessibilityIgnoresInvertColors
-                />
+                <HomeMeetingSymbolPhoto uri={meetingImageThumbUri} grayscale={thumbnailGrayscale} />
                 <View
                   style={[
                     s.symbolCornerEmojiBadge,
@@ -582,6 +591,10 @@ const s = StyleSheet.create({
   symbolPhoto: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: THUMB_RADIUS - 1,
+    zIndex: 2,
+  },
+  symbolPhotoGrayscaleWrap: {
+    ...StyleSheet.absoluteFillObject,
     zIndex: 2,
   },
   //jjg 썸네일 우측하단 심볼

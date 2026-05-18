@@ -21,7 +21,7 @@ import {
   chatMeetingSummaryForMeRpc,
 } from '@/src/lib/chat-supabase-delta';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
-import { isSocialDmChatRoomId } from '@/src/lib/social-chat-rooms';
+import { isSocialDmChatRoomId } from '@/src/lib/social-chat-types';
 import { upsertLocalChatRoomReadState } from '@/src/lib/offline-chat/offline-chat-rooms';
 import type { ChatRealtimeSubscribeCallbacks } from '@/src/lib/chat-realtime-subscribe-callbacks';
 import { voidSafe } from '@/src/lib/void-safe';
