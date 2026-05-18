@@ -54,6 +54,16 @@ import {
   stableSortedParticipantLine,
 } from '@/src/lib/in-app-alarms';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
+import type { NotificationDoc } from '@/src/lib/notifications';
+import {
+  fetchUnreadMeetingFriendInviteNotifications,
+  markMeetingFriendInviteNotificationRead,
+  markMeetingFriendInviteNotificationsReadForMeeting,
+  meetingFriendInviteAlarmSortMs,
+  meetingFriendInviteAlarmSubtitle,
+  parseMeetingFriendInvitePayload,
+  subscribeMeetingFriendInviteNotifications,
+} from '@/src/lib/meeting-friend-invite-notifications';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { clearMeetingChatUnreadForUser, candidateUserKeys, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
@@ -139,6 +149,8 @@ type InAppAlarmsContextValue = {
   markFriendRequestAlarmDismissed: (friendshipId: string) => void;
   /** 상대가 내 보낸 지닛을 수락했을 때 알람 확인 처리 — 푸시 탭 시 등 */
   markFriendAcceptedAlarmDismissed: (friendshipId: string) => void;
+  /** 모임 친구 초대 알림(`meeting_friend_invite`) 읽음 — 푸시 탭·모임 상세 진입 시 */
+  markMeetingInviteReadByMeetingId: (meetingId: string) => void;
 };
 
 const InAppAlarmsContext = createContext<InAppAlarmsContextValue | null>(null);
@@ -183,6 +195,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     {},
   );
   const [socialPeerNickByRoomId, setSocialPeerNickByRoomId] = useState<Map<string, string>>(() => new Map());
+  /** `public.notifications` type=meeting_friend_invite (읽지 않음만) */
+  const [meetingInviteInbox, setMeetingInviteInbox] = useState<NotificationDoc[]>([]);
   const friendHeadsUpNotifiedIdsRef = useRef<Set<string>>(new Set());
   const friendAcceptHeadsUpNotifiedIdsRef = useRef<Set<string>>(new Set());
   const prevOutboxFriendshipIdsRef = useRef<Set<string>>(new Set());
@@ -546,6 +560,43 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [friendInbox]);
+
+  const refreshMeetingInviteInbox = useCallback(() => {
+    const uid = normalizeParticipantId(userIdRef.current?.trim() ?? '') || userIdRef.current?.trim() || '';
+    if (!uid) {
+      setMeetingInviteInbox([]);
+      return;
+    }
+    void fetchUnreadMeetingFriendInviteNotifications(uid)
+      .then((items) => setMeetingInviteInbox(items))
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        ginitNotifyDbg('InAppAlarms', 'meeting_invite_notifications_error', { message: msg });
+        if (__DEV__) console.warn('[InAppAlarms] meeting_invite notifications', msg);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!userId?.trim()) {
+      setMeetingInviteInbox([]);
+      return;
+    }
+    const uid = normalizeParticipantId(userId.trim()) || userId.trim();
+    return subscribeMeetingFriendInviteNotifications(
+      uid,
+      (items) => setMeetingInviteInbox(items),
+      (msg) => {
+        ginitNotifyDbg('InAppAlarms', 'meeting_invite_notifications_error', { message: msg });
+        if (__DEV__) console.warn('[InAppAlarms] meeting_invite notifications', msg);
+      },
+    );
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId?.trim()) return;
+    const poll = setInterval(refreshMeetingInviteInbox, 28_000);
+    return () => clearInterval(poll);
+  }, [userId, refreshMeetingInviteInbox]);
 
   useEffect(() => {
     if (friendAcceptQueue.length === 0) {
@@ -1075,6 +1126,22 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         peerAppUserId: it.peerAppUserId,
       });
     }
+    for (const inv of meetingInviteInbox) {
+      const payload = parseMeetingFriendInvitePayload(inv.payload);
+      if (!payload) continue;
+      const nid = inv.id.trim();
+      if (!nid) continue;
+      rows.push({
+        id: `meeting_invite:${nid}`,
+        kind: 'meeting_invite',
+        meetingId: payload.meetingId,
+        meetingTitle: payload.meetingTitle,
+        subtitle: meetingFriendInviteAlarmSubtitle(payload),
+        sortMs: meetingFriendInviteAlarmSortMs(inv),
+        notificationId: nid,
+        inviterAppUserId: payload.inviterAppUserId || undefined,
+      });
+    }
     for (const sr of socialRooms) {
       const rid = sr.roomId.trim();
       if (!rid) continue;
@@ -1111,9 +1178,10 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     socialRooms,
     socialLatestByRoomId,
     socialPeerNickByRoomId,
+    meetingInviteInbox,
   ]);
 
-  const hasUnread = persistReady && alarms.length > 0;
+  const hasUnread = alarms.length > 0;
 
   /**
    * 새 소식 모달: 카드는 헤더·목록만큼만 높이를 쓰고, 화면에 넘치면 목록 영역만 스크롤합니다.
@@ -1251,7 +1319,13 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       delete next[mid];
       return next;
     });
-  }, []);
+    const uid = userId?.trim();
+    if (uid) {
+      void markMeetingFriendInviteNotificationsReadForMeeting(mid, uid).catch((e) => {
+        if (__DEV__) console.warn('[InAppAlarms] mark meeting invite read', e);
+      });
+    }
+  }, [userId]);
 
   const markFriendRequestAlarmDismissed = useCallback((friendshipId: string) => {
     const fid = friendshipId.trim();
@@ -1272,7 +1346,37 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     setFriendAcceptQueue((q) => q.filter((x) => x.friendshipId !== fid));
   }, []);
 
-  const openAlarmPanel = useCallback(() => setPanelOpen(true), []);
+  const markMeetingInviteReadByMeetingId = useCallback(
+    (meetingId: string) => {
+      const mid = meetingId.trim();
+      const uid = userId?.trim();
+      if (!mid || !uid) return;
+      void markMeetingFriendInviteNotificationsReadForMeeting(mid, uid).catch((e) => {
+        if (__DEV__) console.warn('[InAppAlarms] mark meeting invite read by meeting', e);
+      });
+    },
+    [userId],
+  );
+
+  const reloadFriendInbox = useCallback(() => {
+    const uid = normalizeParticipantId(userIdRef.current?.trim() ?? '') || userIdRef.current?.trim() || '';
+    if (!uid) {
+      setFriendInbox([]);
+      return;
+    }
+    void fetchFriendsPendingInbox(uid)
+      .then((inbox) => setFriendInbox(inbox))
+      .catch((e) => {
+        ginitNotifyDbg('InAppAlarms', 'friends_pending_inbox_failed', { message: String(e) });
+        if (__DEV__) console.warn('[InAppAlarms] friends_pending_inbox refresh', e);
+      });
+  }, []);
+
+  const openAlarmPanel = useCallback(() => {
+    setPanelOpen(true);
+    reloadFriendInbox();
+    refreshMeetingInviteInbox();
+  }, [reloadFriendInbox, refreshMeetingInviteInbox]);
   const closeAlarmPanel = useCallback(() => setPanelOpen(false), []);
 
   /** 홈 탐색 피드·내 모임 목록은 증분(summary→변경 ID만 fetch), 해당 모임 상세만 invalidate */
@@ -1304,10 +1408,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
           chatReadMessageId[mid] = latest?.id ?? '';
         }
       }
-      for (const fr of friendInbox) {
-        const frid = String(fr.id ?? '').trim();
-        if (frid) friendRequestDismissedIds[frid] = true;
-      }
       for (const sr of socialRooms) {
         const rid = sr.roomId.trim();
         if (!rid) continue;
@@ -1320,9 +1420,17 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       }
       return { ...prev, chatReadMessageId, meetingAckFingerprint, friendRequestDismissedIds, friendAcceptedDismissedIds };
     });
+    const uid = userId?.trim() ?? '';
+    if (uid) {
+      for (const inv of meetingInviteInbox) {
+        const nid = inv.id.trim();
+        if (!nid) continue;
+        void markMeetingFriendInviteNotificationRead(nid, uid).catch(() => {});
+      }
+    }
     setFriendAcceptQueue([]);
     setHostParticipantEventLog({});
-  }, [meetings, userId, latestById, friendInbox, friendAcceptQueue, socialRooms, socialLatestByRoomId]);
+  }, [meetings, userId, latestById, friendInbox, friendAcceptQueue, socialRooms, socialLatestByRoomId, meetingInviteInbox]);
 
   const onPressAlarmRow = useCallback(
     (row: InAppAlarmRow) => {
@@ -1379,6 +1487,19 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${peerName}`);
         return;
       }
+      if (row.kind === 'meeting_invite') {
+        const uid = userId?.trim() ?? '';
+        const nid = row.notificationId?.trim() ?? '';
+        if (uid && nid) {
+          void markMeetingFriendInviteNotificationRead(nid, uid).catch(() => {});
+        }
+        requestHomeMeetingsAndDetailRefresh(row.meetingId);
+        closeAlarmPanel();
+        InteractionManager.runAfterInteractions(() => {
+          router.push(`/meeting/${row.meetingId}`);
+        });
+        return;
+      }
       const m = meetings.find((x) => x.id === row.meetingId);
       if (m) {
         const fp = meetingInfoFingerprint(m);
@@ -1407,6 +1528,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       meetings,
       requestHomeMeetingsAndDetailRefresh,
       router,
+      userId,
     ],
   );
 
@@ -1425,6 +1547,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       markMeetingAlarmsReadByPushTap,
       markFriendRequestAlarmDismissed,
       markFriendAcceptedAlarmDismissed,
+      markMeetingInviteReadByMeetingId,
     }),
     [
       hasUnread,
@@ -1440,6 +1563,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
       markMeetingAlarmsReadByPushTap,
       markFriendRequestAlarmDismissed,
       markFriendAcceptedAlarmDismissed,
+      markMeetingInviteReadByMeetingId,
     ],
   );
 
@@ -1500,7 +1624,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                         name={
                           item.kind === 'chat' || item.kind === 'social_dm'
                             ? 'chatbubble-ellipses-outline'
-                            : item.kind === 'friend_request'
+                            : item.kind === 'friend_request' || item.kind === 'meeting_invite'
                               ? 'person-add-outline'
                               : item.kind === 'friend_accepted'
                                 ? 'checkmark-done-outline'

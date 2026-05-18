@@ -25,8 +25,12 @@ export function PendingPushNavigationFlush() {
   const pathname = usePathname();
   const segments = useSegments();
   const { userId, isHydrated } = useUserSession();
-  const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =
-    useInAppAlarms();
+  const {
+    markMeetingAlarmsReadByPushTap,
+    markFriendRequestAlarmDismissed,
+    markFriendAcceptedAlarmDismissed,
+    markMeetingInviteReadByMeetingId,
+  } = useInAppAlarms();
   const prevPathRef = useRef<string | null>(null);
 
   const consumePendingPushIfAny = useCallback(
@@ -43,6 +47,7 @@ export function PendingPushNavigationFlush() {
         markMeetingAlarmsReadByPushTap,
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
+        markMeetingInviteReadByMeetingId,
       );
       return true;
     },
@@ -52,6 +57,7 @@ export function PendingPushNavigationFlush() {
       markMeetingAlarmsReadByPushTap,
       markFriendRequestAlarmDismissed,
       markFriendAcceptedAlarmDismissed,
+      markMeetingInviteReadByMeetingId,
     ],
   );
 

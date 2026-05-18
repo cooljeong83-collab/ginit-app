@@ -33,6 +33,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
+import { MeetingInviteFriendsModal } from '@/components/meeting/MeetingInviteFriendsModal';
 import {
   MeetingDetailStaticNoticeRow,
   MeetingDetailTopNoticesPager,
@@ -49,6 +50,7 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useMeetingHost } from '@/src/hooks/meeting/useMeetingHost';
+import { useMeetingFriendInvite } from '@/src/hooks/meeting/useMeetingFriendInvite';
 import { useMeetingJoin } from '@/src/hooks/meeting/useMeetingJoin';
 import { useMeetingSocial } from '@/src/hooks/meeting/useMeetingSocial';
 import { useMeetingVote } from '@/src/hooks/meeting/useMeetingVote';
@@ -1375,6 +1377,23 @@ export default function MeetingDetailScreen() {
     scrollToVoteBlock,
   });
 
+  const {
+    inviteModalOpen,
+    inviteBusy,
+    openInviteModal,
+    closeInviteModal,
+    submitInvite,
+  } = useMeetingFriendInvite({
+    meetingId: meeting?.id,
+    inviterAppUserId: sessionPk || userId,
+  });
+
+  const showMeetingFriendInvitePill = useMemo(() => {
+    if (!meeting || !userId?.trim()) return false;
+    if (isConfirmedMeetingEndedForDetail) return false;
+    return isHost || alreadyJoinedMeeting;
+  }, [meeting, userId, isConfirmedMeetingEndedForDetail, isHost, alreadyJoinedMeeting]);
+
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
     const places: PlaceCandidate[] = meeting.placeCandidates?.length
@@ -1966,6 +1985,25 @@ export default function MeetingDetailScreen() {
     openArrivalVerifyMap,
     categories,
   ]);
+
+  const meetingFriendInvitePillEl = useMemo(() => {
+    if (!showMeetingFriendInvitePill) return null;
+    return (
+      <GinitPressable
+        onPress={openInviteModal}
+        disabled={inviteBusy}
+        style={({ pressed }) => [
+          styles.bottomPill,
+          styles.bottomIconPill,
+          styles.pillBlue,
+          (inviteBusy || pressed) && { opacity: 0.85 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="친구 초대">
+        <GinitSymbolicIcon name="person-add-outline" size={18} color="#fff" />
+      </GinitPressable>
+    );
+  }, [showMeetingFriendInvitePill, openInviteModal, inviteBusy]);
 
   const hostArrivalBottomCtaEl = useMemo(() => {
     if (!showHostArrivalBottomSlot) return null;
@@ -3892,6 +3930,7 @@ export default function MeetingDetailScreen() {
                       <GinitSymbolicIcon name="share-outline" size={18} color="#fff" />
                     </GinitPressable>
                   ) : null}
+                  {meetingFriendInvitePillEl}
                   {showBottomSaveScheduleCalendarCta ? (
                     <GinitPressable
                       onPress={() => void onPressSaveScheduleToCalendar()}
@@ -4015,6 +4054,7 @@ export default function MeetingDetailScreen() {
                       )}
                     </GinitPressable>
                   ) : null}
+                  {meetingFriendInvitePillEl}
                   <GinitPressable
                     onPress={() => router.push(`/meeting-chat/${meeting.id}`)}
                     style={[
@@ -4748,6 +4788,15 @@ export default function MeetingDetailScreen() {
               void refetchMeetingDetail();
             }
           }}
+        />
+
+        <MeetingInviteFriendsModal
+          visible={inviteModalOpen}
+          meeting={meeting}
+          inviterAppUserId={sessionPk || userId || ''}
+          busy={inviteBusy}
+          onRequestClose={closeInviteModal}
+          onSubmit={submitInvite}
         />
 
         <NaverPlaceWebViewModal

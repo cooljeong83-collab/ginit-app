@@ -212,8 +212,11 @@ export function navigateFromPushData(
     navigateToChatRoomWithChatTabUnderneath(router, `/social-chat/${encodeURIComponent(meetingId)}`, opts);
     return;
   }
-  if (meetingId && action === 'in_app_meeting') {
-    ginitNotifyDbg('push-open-nav', 'branch_meeting_detail', { meetingIdLen: meetingId.length });
+  if (meetingId && (action === 'in_app_meeting' || action === 'meeting_friend_invite')) {
+    ginitNotifyDbg('push-open-nav', 'branch_meeting_detail', {
+      meetingIdLen: meetingId.length,
+      action,
+    });
     navTo(`/meeting/${meetingId}`);
     return;
   }
@@ -244,6 +247,7 @@ export async function markAlarmReadFromPushData(
   markMeetingAlarmsReadByPushTap: (m: Meeting) => void,
   markFriendRequestAlarmDismissed: (friendshipId: string) => void,
   markFriendAcceptedAlarmDismissed: (friendshipId: string) => void,
+  markMeetingInviteReadByMeetingId?: (meetingId: string) => void,
 ): Promise<void> {
   if (!data || typeof data !== 'object') return;
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
@@ -261,6 +265,7 @@ export async function markAlarmReadFromPushData(
   if (!meetingId) return;
   const shouldAckMeeting =
     action === 'in_app_meeting' ||
+    action === 'meeting_friend_invite' ||
     action === 'participant_joined' ||
     action === 'participant_left' ||
     action === 'participant_join_requested' ||
@@ -271,7 +276,12 @@ export async function markAlarmReadFromPushData(
   if (!shouldAckMeeting) return;
   const m = await getMeetingById(meetingId);
   if (!m) {
-    ginitNotifyDbg('push-open-nav', 'mark_meeting_ack_skip_no_meeting', { meetingId, action });
+    if (action === 'meeting_friend_invite' && markMeetingInviteReadByMeetingId) {
+      ginitNotifyDbg('push-open-nav', 'mark_meeting_invite_read_no_meeting_doc', { meetingId });
+      markMeetingInviteReadByMeetingId(meetingId);
+    } else {
+      ginitNotifyDbg('push-open-nav', 'mark_meeting_ack_skip_no_meeting', { meetingId, action });
+    }
     return;
   }
   ginitNotifyDbg('push-open-nav', 'mark_meeting_ack', { meetingId, action });

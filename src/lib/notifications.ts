@@ -2,6 +2,7 @@
  * 앱 사용자별 알림 행 — `public.notifications` (Supabase Realtime).
  * `user_id`는 앱 PK(`app_user_id`) 문자열입니다.
  */
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { formatRealtimeSubscribeDetail } from '@/src/lib/supabase-realtime-resilience';
 import { supabase } from '@/src/lib/supabase';
 
@@ -30,19 +31,38 @@ function mapNotificationRow(id: string, data: Record<string, unknown>): Notifica
   };
 }
 
+function mapNotificationRowsFromUnknown(data: unknown): NotificationDoc[] {
+  const rows = Array.isArray(data) ? data : [];
+  return rows.map((r) => {
+    const row = (r ?? {}) as Record<string, unknown>;
+    const rid = typeof row.id === 'string' ? row.id : String(row.id ?? '');
+    return mapNotificationRow(rid, row);
+  });
+}
+
+export async function fetchNotificationsForUser(appUserId: string, maxRows = 80): Promise<NotificationDoc[]> {
+  const uid = normalizeParticipantId(appUserId.trim()) || appUserId.trim();
+  if (!uid) return [];
+  return pullNotifications(uid, maxRows);
+}
+
 async function pullNotifications(uid: string, maxRows: number): Promise<NotificationDoc[]> {
+  const limit = Math.max(1, Math.min(200, Math.trunc(maxRows)));
+  const { data: rpcData, error: rpcError } = await supabase.rpc('list_app_notifications', {
+    p_me: uid,
+    p_limit: limit,
+  });
+  if (!rpcError) {
+    return mapNotificationRowsFromUnknown(rpcData);
+  }
   const { data, error } = await supabase
     .from(NOTIFICATIONS_TABLE)
     .select('id,user_id,type,payload,created_at,read_at')
     .eq('user_id', uid)
     .order('created_at', { ascending: false })
-    .limit(Math.max(1, Math.min(200, Math.trunc(maxRows))));
+    .limit(limit);
   if (error) throw new Error(error.message);
-  const rows = (data ?? []) as Record<string, unknown>[];
-  return rows.map((r) => {
-    const rid = typeof r.id === 'string' ? r.id : String(r.id ?? '');
-    return mapNotificationRow(rid, r);
-  });
+  return mapNotificationRowsFromUnknown(data);
 }
 
 function randomRealtimeChannelSuffix(): string {
@@ -62,7 +82,7 @@ export function subscribeNotificationsForUser(
   onError?: (message: string) => void,
   maxRows = 80,
 ): () => void {
-  const uid = appUserId.trim();
+  const uid = normalizeParticipantId(appUserId.trim()) || appUserId.trim();
   if (!uid) {
     onData([]);
     return () => {};

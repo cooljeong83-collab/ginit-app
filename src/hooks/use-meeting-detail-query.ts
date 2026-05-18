@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useMeetingDetailFeedReconcile } from '@/src/hooks/use-meeting-detail-feed-reconcile';
 import { useObserveMeetingDetail } from '@/src/hooks/use-observe-meeting-detail';
 import { purgeDeletedMeetingLocally } from '@/src/lib/meeting-deleted-local-purge';
 import { meetingDetailQueryKey } from '@/src/lib/meeting-detail-query-keys';
@@ -111,6 +112,8 @@ export function useMeetingDetailQuery(meetingId: string, opts?: UseMeetingDetail
       : fetchedMeeting !== undefined
         ? fetchedMeeting
         : null;
+
+  useMeetingDetailFeedReconcile(id, userId, meeting ?? undefined);
 
   const loading =
     Boolean(id) &&

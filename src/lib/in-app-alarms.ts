@@ -5,7 +5,13 @@ import type { Meeting } from '@/src/lib/meetings';
 import { meetingParticipantCount } from '@/src/lib/meetings';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 
-export type InAppAlarmKind = 'chat' | 'meeting_change' | 'friend_request' | 'friend_accepted' | 'social_dm';
+export type InAppAlarmKind =
+  | 'chat'
+  | 'meeting_change'
+  | 'friend_request'
+  | 'friend_accepted'
+  | 'social_dm'
+  | 'meeting_invite';
 
 export type InAppAlarmRow = {
   /** FlatList 키(누적 알람 지원) */
@@ -23,6 +29,10 @@ export type InAppAlarmRow = {
   peerAppUserId?: string;
   /** kind === 'social_dm' — `chat_rooms` 문서 id */
   socialRoomId?: string;
+  /** kind === 'meeting_invite' — `public.notifications.id` */
+  notificationId?: string;
+  /** kind === 'meeting_invite' — 초대한 사용자 PK */
+  inviterAppUserId?: string;
 };
 
 export type InAppAlarmReadState = {

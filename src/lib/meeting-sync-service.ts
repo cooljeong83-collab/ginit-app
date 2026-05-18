@@ -15,6 +15,7 @@ import {
   setMyMeetingsFeedLastSyncIso,
   setPublicMeetingsFeedLastSyncIso,
 } from '@/src/lib/meetings-sync-last-at-storage';
+import { syncMeetingDetailCachesFromMeetingsListUpdates } from '@/src/lib/meeting-detail-cache-mutations';
 import { removeMeetingsFromMeetingsFeedCaches } from '@/src/lib/meetings-feed-realtime-cache-patch';
 import {
   diffMeetingSummariesDelta,
@@ -366,6 +367,11 @@ export async function performMeetingsQuerySurgicalSync(
 
   if (runMy && uid && (flatMy.length > 0 || prepMy.length > 0 || updMy.size > 0)) {
     if (patchMeetingsInMyFeedCache(queryClient, uid, updMy, prepMy)) patchedAny = true;
+  }
+
+  if (detail.length > 0) {
+    const detailPatched = await syncMeetingDetailCachesFromMeetingsListUpdates(queryClient, detail);
+    if (detailPatched > 0) patchedAny = true;
   }
 
   const isoWatermark =

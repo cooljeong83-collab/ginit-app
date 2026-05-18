@@ -53,7 +53,13 @@ function hasActionableFcmOpenData(data: Record<string, unknown> | undefined): bo
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const url = typeof data.url === 'string' ? data.url.trim() : '';
   if (url.toLowerCase().startsWith('ginitapp://')) return true;
-  if (action && (action.startsWith('in_app_') || action.includes('participant') || action === 'new_meeting_in_feed_region'))
+  if (
+    action &&
+    (action.startsWith('in_app_') ||
+      action.includes('participant') ||
+      action === 'new_meeting_in_feed_region' ||
+      action === 'meeting_friend_invite')
+  )
     return true;
   if (meetingId && action) return true;
   return false;
@@ -68,8 +74,12 @@ export function FcmPushRoutingBootstrap() {
   const router = useTransitionRouter();
   const pathname = usePathname();
   const { userId, isHydrated } = useUserSession();
-  const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =
-    useInAppAlarms();
+  const {
+    markMeetingAlarmsReadByPushTap,
+    markFriendRequestAlarmDismissed,
+    markFriendAcceptedAlarmDismissed,
+    markMeetingInviteReadByMeetingId,
+  } = useInAppAlarms();
   const coldOpenHandledRef = useRef(false);
   /** `pathname`·`userId` 등으로 effect가 여러 번 돌아도 `getInitialNotification` 조회·로그는 1회만 */
   const coldInitialProbeScheduledRef = useRef(false);
@@ -104,6 +114,7 @@ export function FcmPushRoutingBootstrap() {
         markMeetingAlarmsReadByPushTap,
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
+        markMeetingInviteReadByMeetingId,
       );
       ginitNotifyDbg('FcmPushRouting', 'navigate_immediate_done', { source });
     };

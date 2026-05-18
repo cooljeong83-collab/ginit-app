@@ -78,8 +78,12 @@ export function PushNotificationBootstrap() {
   const router = useTransitionRouter();
   const pathname = usePathname();
   const { userId, isHydrated } = useUserSession();
-  const { markMeetingAlarmsReadByPushTap, markFriendRequestAlarmDismissed, markFriendAcceptedAlarmDismissed } =
-    useInAppAlarms();
+  const {
+    markMeetingAlarmsReadByPushTap,
+    markFriendRequestAlarmDismissed,
+    markFriendAcceptedAlarmDismissed,
+    markMeetingInviteReadByMeetingId,
+  } = useInAppAlarms();
   const bootHandled = useRef(false);
 
   useEffect(() => {
@@ -149,6 +153,7 @@ export function PushNotificationBootstrap() {
         markMeetingAlarmsReadByPushTap,
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
+        markMeetingInviteReadByMeetingId,
       );
       ginitNotifyDbg('ExpoPushRouting', 'notification_response_navigate_done', {});
     });
@@ -158,6 +163,7 @@ export function PushNotificationBootstrap() {
     markMeetingAlarmsReadByPushTap,
     markFriendRequestAlarmDismissed,
     markFriendAcceptedAlarmDismissed,
+    markMeetingInviteReadByMeetingId,
     pathname,
     isHydrated,
     userId,
@@ -196,6 +202,7 @@ export function PushNotificationBootstrap() {
         markMeetingAlarmsReadByPushTap,
         markFriendRequestAlarmDismissed,
         markFriendAcceptedAlarmDismissed,
+        markMeetingInviteReadByMeetingId,
       );
       ginitNotifyDbg('ExpoPushRouting', 'getLastNotification_navigate_done', {});
     })();
@@ -204,6 +211,7 @@ export function PushNotificationBootstrap() {
     markMeetingAlarmsReadByPushTap,
     markFriendRequestAlarmDismissed,
     markFriendAcceptedAlarmDismissed,
+    markMeetingInviteReadByMeetingId,
     pathname,
     isHydrated,
     userId,
