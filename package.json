@@ -81,6 +81,7 @@
     "expo-text-extractor": "^2.0.0",
     "expo-web-browser": "~15.0.10",
     "ginit-process-exit": "file:./modules/ginit-process-exit",
+    "lottie-react-native": "~7.3.1",
     "md5": "^2.3.0",
     "naver-mobile-place-scrape": "file:./modules/naver-mobile-place-scrape",
     "react": "19.1.0",
