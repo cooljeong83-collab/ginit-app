@@ -16,6 +16,7 @@ import {
 import {
   AppState,
   type AppStateStatus,
+  DeviceEventEmitter,
   FlatList,
   InteractionManager,
   Modal,
@@ -64,6 +65,15 @@ import {
   parseMeetingFriendInvitePayload,
   subscribeMeetingFriendInviteNotifications,
 } from '@/src/lib/meeting-friend-invite-notifications';
+import {
+  fetchUnreadMeetingPlaceReviewNotifications,
+  markMeetingPlaceReviewNotificationRead,
+  meetingPlaceReviewAlarmSortMs,
+  meetingPlaceReviewAlarmSubtitle,
+  parseMeetingPlaceReviewPayload,
+  subscribeMeetingPlaceReviewNotifications,
+} from '@/src/lib/meeting-place-review-notifications';
+import { GINIT_MEETING_PLACE_REVIEW_SUBMITTED_EVENT } from '@/src/lib/meeting-place-review-dismiss';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import { clearMeetingChatUnreadForUser, candidateUserKeys, type MeetingChatRoomSummaryDoc } from '@/src/lib/meeting-chat-rooms-summary';
@@ -212,6 +222,8 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   const [socialPeerNickByRoomId, setSocialPeerNickByRoomId] = useState<Map<string, string>>(() => new Map());
   /** `public.notifications` type=meeting_friend_invite (읽지 않음만) */
   const [meetingInviteInbox, setMeetingInviteInbox] = useState<NotificationDoc[]>([]);
+  /** `public.notifications` type=meeting_place_review (읽지 않음만) */
+  const [meetingPlaceReviewInbox, setMeetingPlaceReviewInbox] = useState<NotificationDoc[]>([]);
   /** 미확정·일시 경과 자동 파기 — 모임 삭제 후에도 새 소식에 남김 */
   const [autoCancelUnconfirmedAlarms, setAutoCancelUnconfirmedAlarms] = useState<
     MeetingAutoCancelUnconfirmedAlarm[]
@@ -636,6 +648,53 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     const poll = setInterval(refreshMeetingInviteInbox, 28_000);
     return () => clearInterval(poll);
   }, [userId, refreshMeetingInviteInbox]);
+
+  const refreshMeetingPlaceReviewInbox = useCallback(() => {
+    const uid = normalizeParticipantId(userIdRef.current?.trim() ?? '') || userIdRef.current?.trim() || '';
+    if (!uid) {
+      setMeetingPlaceReviewInbox([]);
+      return;
+    }
+    void fetchUnreadMeetingPlaceReviewNotifications(uid)
+      .then((items) => setMeetingPlaceReviewInbox(items))
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        ginitNotifyDbg('InAppAlarms', 'meeting_place_review_notifications_error', { message: msg });
+        if (__DEV__) console.warn('[InAppAlarms] meeting_place_review notifications', msg);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!userId?.trim()) {
+      setMeetingPlaceReviewInbox([]);
+      return;
+    }
+    const uid = normalizeParticipantId(userId.trim()) || userId.trim();
+    return subscribeMeetingPlaceReviewNotifications(
+      uid,
+      (items) => setMeetingPlaceReviewInbox(items),
+      (msg) => {
+        ginitNotifyDbg('InAppAlarms', 'meeting_place_review_notifications_error', { message: msg });
+        if (__DEV__) console.warn('[InAppAlarms] meeting_place_review notifications', msg);
+      },
+    );
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId?.trim()) return;
+    const poll = setInterval(refreshMeetingPlaceReviewInbox, 28_000);
+    return () => clearInterval(poll);
+  }, [userId, refreshMeetingPlaceReviewInbox]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(
+      GINIT_MEETING_PLACE_REVIEW_SUBMITTED_EVENT,
+      () => {
+        refreshMeetingPlaceReviewInbox();
+      },
+    );
+    return () => sub.remove();
+  }, [refreshMeetingPlaceReviewInbox]);
 
   useEffect(() => {
     if (friendAcceptQueue.length === 0) {
@@ -1181,6 +1240,21 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         inviterAppUserId: payload.inviterAppUserId || undefined,
       });
     }
+    for (const rev of meetingPlaceReviewInbox) {
+      const payload = parseMeetingPlaceReviewPayload(rev.payload);
+      if (!payload) continue;
+      const nid = rev.id.trim();
+      if (!nid) continue;
+      rows.push({
+        id: `meeting_place_review:${nid}`,
+        kind: 'meeting_place_review',
+        meetingId: payload.meetingId,
+        meetingTitle: payload.meetingTitle,
+        subtitle: meetingPlaceReviewAlarmSubtitle(payload),
+        sortMs: meetingPlaceReviewAlarmSortMs(rev),
+        placeReviewNotificationId: nid,
+      });
+    }
     for (const ac of autoCancelUnconfirmedAlarms) {
       rows.push({
         id: ac.id,
@@ -1228,6 +1302,7 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
     socialLatestByRoomId,
     socialPeerNickByRoomId,
     meetingInviteInbox,
+    meetingPlaceReviewInbox,
     autoCancelUnconfirmedAlarms,
   ]);
 
@@ -1477,11 +1552,16 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (!nid) continue;
         void markMeetingFriendInviteNotificationRead(nid, uid).catch(() => {});
       }
+      for (const rev of meetingPlaceReviewInbox) {
+        const nid = rev.id.trim();
+        if (!nid) continue;
+        void markMeetingPlaceReviewNotificationRead(nid, uid).catch(() => {});
+      }
       void dismissAllMeetingAutoCancelUnconfirmedAlarms(uid);
     }
     setFriendAcceptQueue([]);
     setHostParticipantEventLog({});
-  }, [meetings, userId, latestById, friendInbox, friendAcceptQueue, socialRooms, socialLatestByRoomId, meetingInviteInbox]);
+  }, [meetings, userId, latestById, friendInbox, friendAcceptQueue, socialRooms, socialLatestByRoomId, meetingInviteInbox, meetingPlaceReviewInbox]);
 
   const onPressAlarmRow = useCallback(
     (row: InAppAlarmRow) => {
@@ -1556,6 +1636,21 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
             router.push(`/meeting/${mid}`);
           });
         })();
+        return;
+      }
+      if (row.kind === 'meeting_place_review') {
+        const uid = userId?.trim() ?? '';
+        const nid = row.placeReviewNotificationId?.trim() ?? '';
+        if (uid && nid) {
+          void markMeetingPlaceReviewNotificationRead(nid, uid).catch(() => {});
+        }
+        closeAlarmPanel();
+        const mid = row.meetingId.trim();
+        if (!mid) return;
+        requestHomeMeetingsAndDetailRefresh(mid);
+        InteractionManager.runAfterInteractions(() => {
+          router.push(`/meeting-review/${mid}`);
+        });
         return;
       }
       if (row.kind === 'meeting_auto_cancelled') {
@@ -1698,9 +1793,11 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
                             ? 'chatbubble-ellipses-outline'
                             : item.kind === 'friend_request' || item.kind === 'meeting_invite'
                               ? 'person-add-outline'
-                              : item.kind === 'friend_accepted'
-                                ? 'checkmark-done-outline'
-                                : 'calendar-outline'
+                              : item.kind === 'meeting_place_review'
+                                ? 'pencil'
+                                : item.kind === 'friend_accepted'
+                                  ? 'checkmark-done-outline'
+                                  : 'calendar-outline'
                         }
                         size={22}
                         color={GinitTheme.themeMainColor}

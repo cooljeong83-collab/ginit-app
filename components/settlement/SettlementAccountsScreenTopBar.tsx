@@ -9,12 +9,15 @@ export function SettlementAccountsScreenTopBar({
   onBack,
   onShare,
   sharing,
+  onEdit,
 }: {
   title: string;
   onBack: () => void;
   /** 정산 완료 화면 등 — 우측 공유(카카오톡 등 OS 공유 시트) */
   onShare?: () => void;
   sharing?: boolean;
+  /** 장소 리뷰 등 — 우측 수정(연필) */
+  onEdit?: () => void;
 }) {
   return (
     <View style={styles.topBar}>
@@ -42,6 +45,15 @@ export function SettlementAccountsScreenTopBar({
           ) : (
             <GinitSymbolicIcon name="share-outline" size={22} color="#0f172a" />
           )}
+        </GinitPressable>
+      ) : onEdit ? (
+        <GinitPressable
+          onPress={onEdit}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="후기 수정"
+          style={styles.backBtn}>
+          <GinitSymbolicIcon name="pencil" size={22} color="#0f172a" />
         </GinitPressable>
       ) : (
         <View style={styles.topBarSpacer} />

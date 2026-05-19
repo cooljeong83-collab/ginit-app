@@ -36,6 +36,7 @@ import {
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
+import { MeetingPlaceReviewBanner } from '@/components/meeting/MeetingPlaceReviewBanner';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
 import { meetingImageViewerMeta, profileForSender } from '@/components/chat/meeting-chat-ui-helpers';
@@ -118,6 +119,8 @@ import {
   isMeetingSettlementCollaborationEligible,
   isMeetingSettlementCtaEligibleForHost,
 } from '@/src/lib/settlement-eligibility';
+import { fetchMeetingPlaceReviewSummary } from '@/src/lib/meeting-review/meeting-review-api';
+import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfile, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -1225,12 +1228,66 @@ export default function MeetingChatRoomScreen() {
     return isMeetingSettlementCollaborationEligible(meeting, uid, Date.now());
   }, [meeting, userId, appPoliciesVersion]);
 
+  const showMeetingPlaceReviewNotice = useMemo(
+    () => isMeetingPlaceReviewEligible(meeting, userId),
+    [meeting, userId],
+  );
+
+  const [myPlaceReviewSubmitted, setMyPlaceReviewSubmitted] = useState<boolean | null>(null);
+
+  const refreshMyPlaceReviewSubmitted = useCallback(() => {
+    const mid = meetingId?.trim() ?? '';
+    const uid = userId?.trim() ?? '';
+    if (!mid || !uid || meeting?.lifecycleStatus !== 'SETTLED') {
+      setMyPlaceReviewSubmitted(null);
+      return;
+    }
+    void fetchMeetingPlaceReviewSummary(mid, uid).then((res) => {
+      if (!res.ok) {
+        setMyPlaceReviewSubmitted(false);
+        return;
+      }
+      const pk = normalizeParticipantId(uid) ?? uid;
+      const me = res.summary.participants.find(
+        (p) => (normalizeParticipantId(p.appUserId) ?? p.appUserId) === pk,
+      );
+      setMyPlaceReviewSubmitted(res.summary.myReview != null || me?.hasReviewed === true);
+    });
+  }, [meetingId, meeting?.lifecycleStatus, userId]);
+
+  useEffect(() => {
+    refreshMyPlaceReviewSubmitted();
+  }, [refreshMyPlaceReviewSubmitted]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshMyPlaceReviewSubmitted();
+    }, [refreshMyPlaceReviewSubmitted]),
+  );
+
+  const showMeetingPlaceReviewWriteNotice = showMeetingPlaceReviewNotice && myPlaceReviewSubmitted === false;
+
   const chatTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     void arrivalBannerUiTick;
     const slides: MeetingDetailTopNoticeSlide[] = [];
     if (!meeting) return slides;
     const mid = meetingId?.trim() ?? '';
     const noticeTitleLeft = buildMeetingTopNoticeTitleLeft(meeting, categories);
+    if (showMeetingPlaceReviewWriteNotice && mid) {
+      slides.push({
+        key: 'place-review',
+        element: (
+          <MeetingPlaceReviewBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={noticeTitleLeft}
+            ctaSuffix="후기 남기기"
+            onPress={() => router.push(`/meeting-review/${encodeURIComponent(mid)}`)}
+          />
+        ),
+      });
+    }
     if (showSettlementHostBanner && mid) {
       slides.push({
         key: 'settlement',
@@ -1337,6 +1394,7 @@ export default function MeetingChatRoomScreen() {
   }, [
     meeting,
     meetingId,
+    showMeetingPlaceReviewWriteNotice,
     showSettlementHostBanner,
     showSettlementParticipantBanner,
     showMeetingArrivalVerifyTopBanner,

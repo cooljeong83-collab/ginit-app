@@ -17,6 +17,12 @@ export type SettlementReceiptAnalysisRpcPayloadItem = {
   analysis: SettlementReceiptOcrAnalysis | Record<string, never>;
 };
 
+export type SettlementReceiptAnalysisStatus =
+  | 'active'
+  | 'inactive'
+  | 'vendor_verified'
+  | 'vendor_rejected';
+
 export type SettlementReceiptAnalysisRecord = {
   receiptId: string;
   imageUrl: string;
@@ -26,6 +32,7 @@ export type SettlementReceiptAnalysisRecord = {
   bizNum: string | null;
   receiptDateText: string | null;
   isVerified: boolean;
+  status: SettlementReceiptAnalysisStatus;
 };
 
 function isHttpUrl(raw: string): boolean {
@@ -96,6 +103,12 @@ function asBoolean(raw: unknown): boolean {
   return false;
 }
 
+function asReceiptStatus(raw: unknown): SettlementReceiptAnalysisStatus {
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  if (t === 'vendor_verified' || t === 'vendor_rejected' || t === 'inactive') return t;
+  return 'active';
+}
+
 export async function fetchSettlementReceiptAnalysesFromSupabase(meetingIdRaw: string): Promise<SettlementReceiptAnalysisRecord[]> {
   const meetingId = meetingIdRaw.trim();
   if (!meetingId) return [];
@@ -126,6 +139,7 @@ export async function fetchSettlementReceiptAnalysesFromSupabase(meetingIdRaw: s
       bizNum: asStringOrNull(row.biz_num ?? row.bizNum),
       receiptDateText: asStringOrNull(row.receipt_date_text ?? row.receiptDateText),
       isVerified: asBoolean(row.is_verified ?? row.isVerified),
+      status: asReceiptStatus(row.status),
     });
   }
   return out;

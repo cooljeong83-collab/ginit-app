@@ -63,6 +63,8 @@ import {
   type MeetingSettlementReceiptItem,
 } from '@/src/lib/meetings';
 import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
+import { insertMeetingPlaceReviewNotifications } from '@/src/lib/meeting-place-review-notifications';
+import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import {
@@ -858,6 +860,11 @@ export default function SettlementMeetingScreen() {
     return allSettlementParticipantIds.includes(viewer);
   }, [meeting, userId, allSettlementParticipantIds]);
 
+  const showSettlementReviewCard = useMemo(
+    () => Boolean(meeting && canViewSettledSettlement && isMeetingPlaceReviewEligible(meeting, userId)),
+    [meeting, canViewSettledSettlement, userId],
+  );
+
   const settlementReadOnly =
     canViewSettledSettlement && !canEditSettlement && !canCollaborateSettlement;
   const settlementParticipantDisplayIds = settlementReadOnly ? activeSplitParticipantIds : allSettlementParticipantIds;
@@ -1425,8 +1432,43 @@ export default function SettlementMeetingScreen() {
       void runMeetingsListIncrementalReconcile(queryClient, userId?.trim() ?? null);
       const fresh = await getMeetingById(meetingId);
       if (fresh) setMeeting(fresh);
+
+      const meetingTitle = (meeting.title ?? '').trim() || '모임';
+      const reviewRecipientSet = new Set<string>();
+      for (const id of selectedParticipantIds) {
+        const norm = normalizeParticipantId(String(id)) ?? String(id).trim();
+        if (norm && !isGinitWebGuestParticipantId(norm)) reviewRecipientSet.add(norm);
+      }
+      if (hostNorm && !isGinitWebGuestParticipantId(hostNorm)) reviewRecipientSet.add(hostNorm);
+      const reviewRecipients = [...reviewRecipientSet];
+      if (reviewRecipients.length > 0) {
+        const reviewTitle = '후기를 남겨 주세요';
+        const reviewBody = `「${meetingTitle}」장소 후기를 남기고 결과를 확인해 보세요.`;
+        const reviewData: Record<string, unknown> = {
+          action: 'meeting_place_review',
+          type: 'MEETING_REVIEW',
+          meeting_id: meetingId,
+          meetingId,
+        };
+        void dispatchRemotePushToRecipientsWithApproxDelivered({
+          toUserIds: reviewRecipients,
+          title: reviewTitle,
+          body: reviewBody,
+          data: reviewData,
+        });
+        void insertMeetingPlaceReviewNotifications({
+          meetingId,
+          meetingTitle,
+          recipientAppUserIds: reviewRecipients,
+        });
+      }
+
       Alert.alert('완료', '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.', [
         { text: '확인', onPress: () => router.back() },
+        {
+          text: '후기 남기기',
+          onPress: () => router.push(`/meeting-review/${encodeURIComponent(meetingId)}`),
+        },
       ]);
     } catch (e) {
       Alert.alert('오류', e instanceof Error ? e.message : String(e));
@@ -2536,6 +2578,18 @@ export default function SettlementMeetingScreen() {
                 </GinitPressable>
               </>
             ) : null}
+
+            {showSettlementReviewCard ? (
+              <View style={styles.reviewPromptCard}>
+                <Text style={styles.reviewPromptTitle}>이번 모임 장소는 어땠나요?</Text>
+                <Text style={styles.reviewPromptSub}>한 줄 평가로 추억을 남겨 보세요</Text>
+                <GinitPressable
+                  onPress={() => router.push(`/meeting-review/${encodeURIComponent(meetingId)}`)}
+                  style={({ pressed }) => [styles.primaryBtn, styles.reviewPromptBtn, pressed && { opacity: 0.88 }]}>
+                  <Text style={styles.primaryBtnText}>후기 남기기</Text>
+                </GinitPressable>
+              </View>
+            ) : null}
           </View>
         </ScrollView>
         <Modal
@@ -3301,4 +3355,27 @@ const styles = StyleSheet.create({
   defaultBadgeInline: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.primary },
   defaultBadgeSpacer: { width: 28 },
   bankPlaceholder: { flex: 1, fontSize: 15, color: GinitTheme.colors.textMuted },
+  reviewPromptCard: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: GinitTheme.radius.card,
+    backgroundColor: GinitTheme.colors.noticeSurface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GinitTheme.colors.border,
+    gap: 8,
+  },
+  reviewPromptTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: GinitTheme.colors.deepPurple,
+    textAlign: 'center',
+  },
+  reviewPromptSub: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  reviewPromptBtn: { marginTop: 4 },
 });

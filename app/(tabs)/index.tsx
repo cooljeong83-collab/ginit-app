@@ -45,11 +45,13 @@ import {
   MeetingDetailTopNoticesPager,
   type MeetingDetailTopNoticeSlide,
 } from '@/components/meeting/MeetingDetailTopNoticesPager';
+import { MeetingPlaceReviewBanner } from '@/components/meeting/MeetingPlaceReviewBanner';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useAppPolicies } from '@/src/context/AppPoliciesContext';
+import { usePendingMeetingPlaceReviewIds } from '@/src/hooks/use-pending-meeting-place-review-ids';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-region-controls';
@@ -85,7 +87,10 @@ import {
   type FeedSearchFilters,
   type MeetingListSortMode,
 } from '@/src/lib/feed-meeting-utils';
-import { getPolicyNumeric } from '@/src/lib/app-policies-store';
+import {
+  homeMeetingListOngoingWindowMs,
+  isMeetingEndedForHomeList,
+} from '@/src/lib/feed-home-visual';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -125,6 +130,7 @@ import {
   isMeetingSettlementCollaborationEligible,
   isMeetingSettlementCtaEligibleForHost,
 } from '@/src/lib/settlement-eligibility';
+import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
   ensureUserProfile,
@@ -140,6 +146,7 @@ type HomeMeetingTopTab = 'explore' | 'my' | 'private';
 type HomeFeedNoticeRow =
   | { key: string; kind: 'settlement'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'settlement_collab'; meetingId: string; meetingTitle: string }
+  | { key: string; kind: 'meeting_review'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'arrival'; meetingId: string; meetingTitle: string }
   | { key: string; kind: 'schedule'; meetingId: string; titleLeft: string; timeRight: string }
   | { key: string; kind: 'unconfirmed_auto_cancel'; meetingId: string; titleLeft: string; timeRight: string };
@@ -147,12 +154,14 @@ type HomeFeedNoticeRow =
 function homeFeedNoticeRowSubtitle(row: HomeFeedNoticeRow): string {
   if (row.kind === 'settlement') return '정산하기';
   if (row.kind === 'settlement_collab') return '함께 정산하기';
+  if (row.kind === 'meeting_review') return '후기 남기기';
   if (row.kind === 'arrival') return '장소 인증';
   return row.timeRight;
 }
 
 function homeFeedNoticeRowIcon(kind: HomeFeedNoticeRow['kind']): SymbolicIconName {
   if (kind === 'settlement' || kind === 'settlement_collab') return 'wallet-outline';
+  if (kind === 'meeting_review') return 'pencil';
   if (kind === 'arrival') return 'location-outline';
   return 'megaphone-outline';
 }
@@ -163,17 +172,6 @@ function homeMeetingTopTabIndex(t: HomeMeetingTopTab): number {
   if (t === 'explore') return 0;
   if (t === 'my') return 1;
   return 2;
-}
-
-function homeMeetingOngoingWindowMs(): number {
-  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 6);
-  return Math.max(1, hours) * 60 * 60 * 1000;
-}
-
-function isEndedForHomeEndedTab(m: Meeting, nowMs: number, windowMs: number): boolean {
-  const startMs = meetingScheduleStartMs(m);
-  if (startMs == null || !Number.isFinite(startMs)) return false;
-  return startMs < nowMs - windowMs;
 }
 
 function sortHomeEndedMeetingsLatestFirst(meetings: Meeting[]): Meeting[] {
@@ -559,16 +557,16 @@ export default function FeedScreen() {
     void appPoliciesVersion;
     void homeArrivalNoticeUiTick;
     const now = Date.now();
-    const windowMs = homeMeetingOngoingWindowMs();
-    return joinedFilteredMeetings.filter((m) => !isEndedForHomeEndedTab(m, now, windowMs));
+    const windowMs = homeMeetingListOngoingWindowMs();
+    return joinedFilteredMeetings.filter((m) => !isMeetingEndedForHomeList(m, now, windowMs));
   }, [joinedFilteredMeetings, appPoliciesVersion, homeArrivalNoticeUiTick]);
 
   const endedJoinedFilteredMeetings = useMemo(() => {
     void appPoliciesVersion;
     void homeArrivalNoticeUiTick;
     const now = Date.now();
-    const windowMs = homeMeetingOngoingWindowMs();
-    return joinedFilteredMeetings.filter((m) => isEndedForHomeEndedTab(m, now, windowMs));
+    const windowMs = homeMeetingListOngoingWindowMs();
+    return joinedFilteredMeetings.filter((m) => isMeetingEndedForHomeList(m, now, windowMs));
   }, [joinedFilteredMeetings, appPoliciesVersion, homeArrivalNoticeUiTick]);
 
   const sortedJoinedMeetings = useMemo(
@@ -625,6 +623,31 @@ export default function FeedScreen() {
     });
     return out;
   }, [myTabsMeetings, userId, appPoliciesVersion]);
+
+  const settledReviewBannerMeetings = useMemo(() => {
+    const uid = userId?.trim() ?? '';
+    if (!uid) return [] as Meeting[];
+    const seen = new Set<string>();
+    const out: Meeting[] = [];
+    for (const m of myTabsMeetings) {
+      const id = typeof m?.id === 'string' ? m.id.trim() : '';
+      if (!id || seen.has(id)) continue;
+      if (!isMeetingPlaceReviewEligible(m, uid)) continue;
+      seen.add(id);
+      out.push(m);
+    }
+    out.sort((a, b) => {
+      const ta = meetingScheduleStartMs(a) ?? 0;
+      const tb = meetingScheduleStartMs(b) ?? 0;
+      return ta - tb;
+    });
+    return out;
+  }, [myTabsMeetings, userId]);
+
+  const { pendingIds: placeReviewPendingIdSet } = usePendingMeetingPlaceReviewIds(
+    settledReviewBannerMeetings,
+    userId,
+  );
 
   const arrivalVerifyPol = useMemo(() => getMeetingArrivalVerifyPolicy(), [appPoliciesVersion]);
 
@@ -766,6 +789,7 @@ export default function FeedScreen() {
       if (!id || seen.has(id)) continue;
       const hasSettlement = settlementNoticeIdSet.has(id);
       const hasSettlementCollab = settlementCollabNoticeIdSet.has(id);
+      const hasPlaceReview = placeReviewPendingIdSet.has(id);
       const hasArrival = arrivalNoticeIdSet.has(id);
       const hasScheduleLine = shouldShowConfirmedScheduleNoticeBar(m, Date.now(), {
         showArrivalVerifyBanner: hasArrival,
@@ -776,14 +800,29 @@ export default function FeedScreen() {
         Boolean(uid) &&
         isMeetingHost(m, uid) &&
         shouldShowUnconfirmedAutoCancelWarningNotice(m, Date.now());
-      if (!hasSettlement && !hasSettlementCollab && !hasArrival && !hasScheduleLine && !hasAutoCancelWarning)
+      if (
+        !hasSettlement &&
+        !hasSettlementCollab &&
+        !hasPlaceReview &&
+        !hasArrival &&
+        !hasScheduleLine &&
+        !hasAutoCancelWarning
+      )
         continue;
       seen.add(id);
       out.push(m);
     }
     out.sort((a, b) => (meetingScheduleStartMs(a) ?? 0) - (meetingScheduleStartMs(b) ?? 0));
     return out;
-  }, [myTabsMeetings, settlementNoticeIdSet, settlementCollabNoticeIdSet, arrivalNoticeIdSet, homeArrivalNoticeUiTick, userId]);
+  }, [
+    myTabsMeetings,
+    settlementNoticeIdSet,
+    settlementCollabNoticeIdSet,
+    placeReviewPendingIdSet,
+    arrivalNoticeIdSet,
+    homeArrivalNoticeUiTick,
+    userId,
+  ]);
 
   const homeTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     void homeArrivalNoticeUiTick;
@@ -791,6 +830,21 @@ export default function FeedScreen() {
     const now = Date.now();
     for (const m of homeNoticeOrderedMeetings) {
       const id = m.id.trim();
+      if (placeReviewPendingIdSet.has(id)) {
+        slides.push({
+          key: `meeting-review-${id}`,
+          element: (
+            <MeetingPlaceReviewBanner
+              hideTopBorder
+              pillCapsule
+              slideTrackFullBleed
+              quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
+              ctaSuffix="후기 남기기"
+              onPress={() => router.push(`/meeting-review/${encodeURIComponent(id)}`)}
+            />
+          ),
+        });
+      }
       if (settlementNoticeIdSet.has(id)) {
         slides.push({
           key: `settlement-${id}`,
@@ -896,6 +950,7 @@ export default function FeedScreen() {
     homeNoticeOrderedMeetings,
     settlementNoticeIdSet,
     settlementCollabNoticeIdSet,
+    placeReviewPendingIdSet,
     arrivalNoticeIdSet,
     router,
     homeArrivalNoticeUiTick,
@@ -917,6 +972,14 @@ export default function FeedScreen() {
         rows.push({
           key: `settlement-collab-${id}`,
           kind: 'settlement_collab',
+          meetingId: id,
+          meetingTitle: titleLine,
+        });
+      }
+      if (placeReviewPendingIdSet.has(id)) {
+        rows.push({
+          key: `meeting-review-${id}`,
+          kind: 'meeting_review',
           meetingId: id,
           meetingTitle: titleLine,
         });
@@ -959,6 +1022,7 @@ export default function FeedScreen() {
     homeNoticeOrderedMeetings,
     settlementNoticeIdSet,
     settlementCollabNoticeIdSet,
+    placeReviewPendingIdSet,
     arrivalNoticeIdSet,
     homeArrivalNoticeUiTick,
     categories,
@@ -988,6 +1052,10 @@ export default function FeedScreen() {
       InteractionManager.runAfterInteractions(() => {
         if (row.kind === 'settlement' || row.kind === 'settlement_collab') {
           router.push(`/settlement/${encodeURIComponent(mid)}`);
+          return;
+        }
+        if (row.kind === 'meeting_review') {
+          router.push(`/meeting-review/${encodeURIComponent(mid)}`);
           return;
         }
         if (row.kind === 'arrival') {
@@ -1741,6 +1809,7 @@ export default function FeedScreen() {
                             styles.homeNoticesModalRowSub,
                             (item.kind === 'settlement' ||
                               item.kind === 'settlement_collab' ||
+                              item.kind === 'meeting_review' ||
                               item.kind === 'arrival') &&
                               styles.homeNoticesModalRowSubCta,
                             item.kind === 'unconfirmed_auto_cancel' && styles.homeNoticesModalRowSubDanger,

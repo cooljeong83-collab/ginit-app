@@ -1,12 +1,20 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import type { Timestamp } from '@/src/lib/ginit-timestamp';
-import {StyleSheet, Text, View} from 'react-native';
+import { useMemo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { MeetingListThumbnailImage } from '@/components/feed/MeetingListThumbnailImage';
+import { useAppPolicies } from '@/src/context/AppPoliciesContext';
 import type { Category } from '@/src/lib/categories';
 import { formatDateWithKoWeekday } from '@/src/lib/date-display';
+import {
+  homeMeetingListOngoingWindowMs,
+  homeMeetingStatusBadgeLabel,
+  homeMeetingStatusBadgeTextStyle,
+  isMeetingEndedForHomeList,
+} from '@/src/lib/feed-home-visual';
 import { categoryEmojiForMeeting } from '@/src/lib/friend-presence-activity';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 import type { Meeting } from '@/src/lib/meetings';
@@ -70,6 +78,7 @@ export function ChatMeetingListRow({
   categories = null,
   onPress,
 }: Props) {
+  const { version: appPoliciesVersion } = useAppPolicies();
   const title = meeting.title?.trim() || '모임';
   const schedule = formatMeetingScheduleListLabel(meeting);
   const place = placeLine(meeting);
@@ -78,13 +87,32 @@ export function ChatMeetingListRow({
   const capFill = capacity > 0 ? Math.min(1, Math.max(0, pCount / capacity)) : 0;
   const showCapacityBar = capacity > 0;
 
+  const statusLabel = useMemo(
+    () => homeMeetingStatusBadgeLabel(meeting, { listKind: 'my_private' }),
+    [meeting, appPoliciesVersion],
+  );
+  const statusStyle = useMemo(() => {
+    switch (homeMeetingStatusBadgeTextStyle(statusLabel)) {
+      case 'confirmed':
+        return styles.statusConfirmed;
+      case 'open':
+        return styles.statusOpen;
+      case 'full':
+        return styles.statusFull;
+      default:
+        return styles.statusDefault;
+    }
+  }, [statusLabel]);
+  const thumbnailGrayscale = useMemo(() => {
+    void appPoliciesVersion;
+    const windowMs = homeMeetingListOngoingWindowMs();
+    return isMeetingEndedForHomeList(meeting, Date.now(), windowMs);
+  }, [meeting, appPoliciesVersion]);
+
   const hasMessage = latestMessage != null;
   const rightTime =
     hasMessage && latestMessage.createdAt ? formatRelativeFrom(latestMessage.createdAt) : '';
-  const scheduleMetaBits = [
-    meeting.lifecycleStatus === 'SETTLED' ? '정산 완료' : '',
-    schedule,
-  ].filter(Boolean);
+  const scheduleMetaBits = [schedule].filter(Boolean);
   const scheduleMetaText = scheduleMetaBits.join(' · ');
   const showScheduleMeta = scheduleMetaText.length > 0;
   const showPlaceMeta = place.length > 0;
@@ -105,7 +133,12 @@ export function ChatMeetingListRow({
       <View style={styles.zoneA}>
         <View style={styles.symbolCol}>
           <View style={styles.meetingThumbRing} accessibilityLabel="모임 썸네일">
-            <MeetingListThumbnailImage meeting={meeting} style={styles.meetingThumbImg} recyclingKey={meeting.id} />
+            <MeetingListThumbnailImage
+              meeting={meeting}
+              style={styles.meetingThumbImg}
+              recyclingKey={meeting.id}
+              grayscale={thumbnailGrayscale}
+            />
             <View style={styles.meetingThumbCornerEmojiBadge} accessibilityLabel="카테고리">
               <Text style={styles.meetingThumbCornerEmojiText} allowFontScaling={false}>
                 {categoryEmoji}
@@ -149,6 +182,9 @@ export function ChatMeetingListRow({
                 </Text>
               ) : null}
             </View>
+            <Text style={[styles.status, statusStyle]} numberOfLines={2} accessibilityLabel={`모임 상태 ${statusLabel}`}>
+              {statusLabel}
+            </Text>
             {rightTime || unreadCount > 0 ? (
               <View style={styles.timeColumn}>
                 {rightTime ? (
@@ -302,6 +338,28 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     lineHeight: 18,
     color: GinitTheme.colors.text,
+  },
+  status: {
+    flexShrink: 0,
+    maxWidth: '30%',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: -0.12,
+    textAlign: 'right',
+    lineHeight: 14,
+    marginTop: 1,
+  },
+  statusDefault: {
+    color: GinitTheme.colors.textMuted,
+  },
+  statusOpen: {
+    color: '#16A34A',
+  },
+  statusFull: {
+    color: '#ff8800',
+  },
+  statusConfirmed: {
+    color: GinitTheme.colors.primary,
   },
   metaMuted: {
     fontSize: 11,

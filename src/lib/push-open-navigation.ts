@@ -204,6 +204,11 @@ export function navigateFromPushData(
     navTo(`/settlement/${meetingId}`);
     return;
   }
+  if (meetingId && (action === 'meeting_place_review' || typeRaw === 'MEETING_REVIEW')) {
+    ginitNotifyDbg('push-open-nav', 'branch_meeting_place_review', { meetingIdLen: meetingId.length });
+    navTo(`/meeting-review/${meetingId}`);
+    return;
+  }
   if (meetingId && action === 'new_meeting_in_feed_region') {
     ginitNotifyDbg('push-open-nav', 'branch_new_meeting_feed', { meetingIdLen: meetingId.length });
     navTo(`/meeting/${meetingId}`);

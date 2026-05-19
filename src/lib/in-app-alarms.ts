@@ -12,7 +12,8 @@ export type InAppAlarmKind =
   | 'friend_request'
   | 'friend_accepted'
   | 'social_dm'
-  | 'meeting_invite';
+  | 'meeting_invite'
+  | 'meeting_place_review';
 
 export type InAppAlarmRow = {
   /** FlatList 키(누적 알람 지원) */
@@ -34,6 +35,8 @@ export type InAppAlarmRow = {
   notificationId?: string;
   /** kind === 'meeting_invite' — 초대한 사용자 PK */
   inviterAppUserId?: string;
+  /** kind === 'meeting_place_review' — `public.notifications.id` */
+  placeReviewNotificationId?: string;
 };
 
 export type InAppAlarmReadState = {

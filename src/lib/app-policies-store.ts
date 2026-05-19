@@ -44,6 +44,12 @@ const DEFAULTS: Record<string, Record<string, unknown>> = {
       reminder_max_count: 1,
       reminder_after_scheduled_min: 0,
     },
+    /** `0172_meeting_place_review_rewards_policy.sql` — 정산 완료 후 장소 후기 최초 제출 보상 */
+    place_review: {
+      xp_reward: 10,
+      trust_reward: 3,
+      trust_cap: 100,
+    },
   },
   meeting_create: {
     /** `0123_meeting_create_min_schedule_lead_policy.sql` 시드와 동일 — 0이면 과거 시각만 차단 */

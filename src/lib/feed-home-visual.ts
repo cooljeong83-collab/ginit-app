@@ -1,4 +1,6 @@
+import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import { getMeetingRecruitmentPhase, isConfirmedMeetingPastListEndWindow, meetingPrimaryStartMs, type Meeting } from '@/src/lib/meetings';
+import { meetingScheduleStartMs } from '@/src/lib/meeting-schedule-times';
 import type { SymbolicIconName } from '@/src/lib/ginit-symbolic-icon-map';
 
 /** 2026 홈 글래스 스펙 — Trust Blue / Energetic Orange */
@@ -176,6 +178,32 @@ export function homeMeetingStatusBadgeLabel(
   if (m.scheduleConfirmed === true) return '일정 확정';
   if (getMeetingRecruitmentPhase(m) === 'full') return '정원 마감';
   return '모집 중';
+}
+
+/** 홈·채팅 모임 목록 — 종료 탭·흑백 썸네일 기준(시작 후 `list_ongoing_duration_hours` 경과) */
+export function homeMeetingListOngoingWindowMs(): number {
+  const hours = getPolicyNumeric('meeting', 'list_ongoing_duration_hours', 6);
+  return Math.max(1, hours) * 60 * 60 * 1000;
+}
+
+export function isMeetingEndedForHomeList(
+  m: Meeting,
+  nowMs: number,
+  ongoingWindowMs: number = homeMeetingListOngoingWindowMs(),
+): boolean {
+  const startMs = meetingScheduleStartMs(m);
+  if (startMs == null || !Number.isFinite(startMs)) return false;
+  return startMs < nowMs - ongoingWindowMs;
+}
+
+export type HomeMeetingStatusBadgeTextStyle = 'default' | 'open' | 'full' | 'confirmed';
+
+/** `HomeMeetingListItem`·채팅 모임 행 우측 상태 문구 색상 키 */
+export function homeMeetingStatusBadgeTextStyle(label: string): HomeMeetingStatusBadgeTextStyle {
+  if (label === '일정 확정' || label === '모임 중') return 'confirmed';
+  if (label === '모집 중') return 'open';
+  if (label === '정원 마감') return 'full';
+  return 'default';
 }
 
 /** 참가자 id → gLevel 대용 컬러(프로필 미조회 시 시각적 구분) */

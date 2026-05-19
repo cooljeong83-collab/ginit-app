@@ -43,6 +43,7 @@ import {
   MeetingDetailBottomBarRow,
   meetingDetailBottomBarFallbackWidth,
 } from '@/components/meeting/MeetingDetailBottomBarRow';
+import { MeetingPlaceReviewBanner } from '@/components/meeting/MeetingPlaceReviewBanner';
 import { SettlementHostBanner } from '@/components/meeting/SettlementHostBanner';
 import { KeyboardAwareScreenScroll, ScreenShell, ScreenTransitionSkeleton } from '@/components/ui';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
@@ -100,6 +101,8 @@ import {
   isHostScheduleUnconfirmHiddenByStartProximity,
   meetingScheduleStartMs,
 } from '@/src/lib/meeting-schedule-times';
+import { fetchMeetingPlaceReviewSummary } from '@/src/lib/meeting-review/meeting-review-api';
+import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import {
   isMeetingSettlementCollaborationEligible,
   isMeetingSettlementCtaEligibleForHost,
@@ -475,6 +478,7 @@ export default function MeetingDetailScreen() {
     Math.max(280, Math.floor(windowWidth)),
   );
   const mainScrollRef = useRef<ScrollView>(null);
+  const [myPlaceReviewSubmitted, setMyPlaceReviewSubmitted] = useState<boolean | null>(null);
 
   const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, {
     refetchOnMount: 'always',
@@ -970,9 +974,49 @@ export default function MeetingDetailScreen() {
     return true;
   }, [meeting, alreadyJoinedMeeting, isHost, isConfirmedMeetingEndedForDetail]);
 
+  const showMeetingPlaceReviewNotice = useMemo(
+    () => isMeetingPlaceReviewEligible(meeting, userId),
+    [meeting, userId],
+  );
+
+  const refreshMyPlaceReviewSubmitted = useCallback(() => {
+    const mid = meeting?.id?.trim() ?? '';
+    const uid = userId?.trim() ?? '';
+    if (!mid || !uid || meeting?.lifecycleStatus !== 'SETTLED') {
+      setMyPlaceReviewSubmitted(null);
+      return;
+    }
+    void fetchMeetingPlaceReviewSummary(mid, uid).then((res) => {
+      if (!res.ok) {
+        setMyPlaceReviewSubmitted(false);
+        return;
+      }
+      const pk = normalizeParticipantId(uid) ?? uid;
+      const me = res.summary.participants.find(
+        (p) => (normalizeParticipantId(p.appUserId) ?? p.appUserId) === pk,
+      );
+      setMyPlaceReviewSubmitted(res.summary.myReview != null || me?.hasReviewed === true);
+    });
+  }, [meeting?.id, meeting?.lifecycleStatus, userId]);
+
+  useEffect(() => {
+    refreshMyPlaceReviewSubmitted();
+  }, [refreshMyPlaceReviewSubmitted]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshMyPlaceReviewSubmitted();
+    }, [refreshMyPlaceReviewSubmitted]),
+  );
+
   const showMeetingReviewWriteCta = useMemo(
-    () => isConfirmedMeetingEndedForDetail && (alreadyJoinedMeeting || isHost),
-    [isConfirmedMeetingEndedForDetail, alreadyJoinedMeeting, isHost],
+    () => showMeetingPlaceReviewNotice && myPlaceReviewSubmitted === false,
+    [showMeetingPlaceReviewNotice, myPlaceReviewSubmitted],
+  );
+
+  const showMeetingReviewViewCta = useMemo(
+    () => showMeetingPlaceReviewNotice && myPlaceReviewSubmitted === true,
+    [showMeetingPlaceReviewNotice, myPlaceReviewSubmitted],
   );
 
   const showBottomSaveScheduleCalendarCta = showBottomSaveScheduleCalendar && !isConfirmedMeetingEndedForDetail;
@@ -1431,9 +1475,17 @@ export default function MeetingDetailScreen() {
 
   const showMeetingFriendInvitePill = useMemo(() => {
     if (!meeting || !userId?.trim()) return false;
+    if (isScheduleConfirmed) return false;
     if (isConfirmedMeetingEndedForDetail) return false;
     return isHost || alreadyJoinedMeeting;
-  }, [meeting, userId, isConfirmedMeetingEndedForDetail, isHost, alreadyJoinedMeeting]);
+  }, [
+    meeting,
+    userId,
+    isScheduleConfirmed,
+    isConfirmedMeetingEndedForDetail,
+    isHost,
+    alreadyJoinedMeeting,
+  ]);
 
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
@@ -1993,6 +2045,21 @@ export default function MeetingDetailScreen() {
   const meetingDetailTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     if (!meeting) return [];
     const slides: MeetingDetailTopNoticeSlide[] = [];
+    if (showMeetingReviewWriteCta) {
+      slides.push({
+        key: 'place-review',
+        element: (
+          <MeetingPlaceReviewBanner
+            hideTopBorder
+            pillCapsule
+            slideTrackFullBleed
+            quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
+            ctaSuffix="후기 남기기"
+            onPress={() => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`)}
+          />
+        ),
+      });
+    }
     if (showSettlementHostBanner) {
       slides.push({
         key: 'settlement',
@@ -2068,6 +2135,7 @@ export default function MeetingDetailScreen() {
     return slides;
   }, [
     meeting,
+    showMeetingReviewWriteCta,
     showSettlementHostBanner,
     showSettlementParticipantBanner,
     showMeetingArrivalVerifyTopBanner,
@@ -2629,10 +2697,20 @@ export default function MeetingDetailScreen() {
         icon: 'pencil',
         labelFull: '후기',
         labelCompact: '후기',
-        a11yLabel: '후기 작성 준비 중',
+        a11yLabel: '후기 남기기',
         variant: 'purple',
-        disabled: true,
-        mutedOpacity: 0.55,
+        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
+      });
+    }
+    if (showMeetingReviewViewCta) {
+      actions.push({
+        id: 'review-view',
+        icon: 'star',
+        labelFull: '후기 보기',
+        labelCompact: '후기',
+        a11yLabel: '후기 결과 보기',
+        variant: 'purple',
+        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
       });
     }
     return actions;
@@ -2645,6 +2723,7 @@ export default function MeetingDetailScreen() {
     showHostArrivalBottomSlot,
     showHostSettlementBottomCta,
     showMeetingReviewWriteCta,
+    showMeetingReviewViewCta,
     shareWebBusy,
     inviteBusy,
     saveCalendarBusy,
@@ -2759,10 +2838,20 @@ export default function MeetingDetailScreen() {
         icon: 'pencil',
         labelFull: '후기',
         labelCompact: '후기',
-        a11yLabel: '후기 작성 준비 중',
+        a11yLabel: '후기 남기기',
         variant: 'purple',
-        disabled: true,
-        mutedOpacity: 0.55,
+        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
+      });
+    }
+    if (showMeetingReviewViewCta) {
+      actions.push({
+        id: 'review-view',
+        icon: 'star',
+        labelFull: '후기 보기',
+        labelCompact: '후기',
+        a11yLabel: '후기 결과 보기',
+        variant: 'purple',
+        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
       });
     }
     return actions;
@@ -2777,6 +2866,7 @@ export default function MeetingDetailScreen() {
     showParticipantArrivalBottomSlot,
     showParticipantSettlementBottomCta,
     showMeetingReviewWriteCta,
+    showMeetingReviewViewCta,
     saveCalendarBusy,
     inviteBusy,
     participantVoteBusy,
