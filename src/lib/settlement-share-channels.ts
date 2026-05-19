@@ -26,6 +26,8 @@ export type SettlementShareParticipantAmount = {
 
 export type SettlementShareMessageParams = {
   meetingTitle: string;
+  /** `2026-05-19(화) 10:00` — 모임 제목 아래 `일시 : …` 행 */
+  scheduleLine?: string | null;
   participantCount: number;
   settlementMethodText: string;
   paymentMethod?: 'cash' | 'bank_transfer' | null;
@@ -59,8 +61,10 @@ export function buildSettlementShareMessage(p: SettlementShareMessageParams): st
   const formatWon = (value: number | null) =>
     value != null && Number.isFinite(value) ? `${Math.trunc(value).toLocaleString('ko-KR')}원` : '';
   const paymentMethodText = buildPaymentMethodText(p);
+  const schedule = (p.scheduleLine ?? '').trim();
   const lines = [
     `[지닛 정산] ${title}`,
+    ...(schedule ? [`일시 : ${schedule}`] : []),
     `인원 : ${Math.max(0, Math.trunc(p.participantCount)).toLocaleString('ko-KR')}명`,
     `총 금액 : ${formatWon(p.totalWon)}`,
     ...buildParticipantAmountShareLines(p.participantAmounts ?? []),

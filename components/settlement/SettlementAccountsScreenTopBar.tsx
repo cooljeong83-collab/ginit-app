@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -7,9 +7,14 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 export function SettlementAccountsScreenTopBar({
   title,
   onBack,
+  onShare,
+  sharing,
 }: {
   title: string;
   onBack: () => void;
+  /** 정산 완료 화면 등 — 우측 공유(카카오톡 등 OS 공유 시트) */
+  onShare?: () => void;
+  sharing?: boolean;
 }) {
   return (
     <View style={styles.topBar}>
@@ -24,7 +29,23 @@ export function SettlementAccountsScreenTopBar({
       <Text style={styles.topTitle} numberOfLines={1} ellipsizeMode="tail">
         {title}
       </Text>
-      <View style={styles.topBarSpacer} />
+      {onShare ? (
+        <GinitPressable
+          onPress={onShare}
+          disabled={sharing}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="카카오톡으로 공유"
+          style={styles.backBtn}>
+          {sharing ? (
+            <ActivityIndicator size="small" color="#0f172a" />
+          ) : (
+            <GinitSymbolicIcon name="share-outline" size={22} color="#0f172a" />
+          )}
+        </GinitPressable>
+      ) : (
+        <View style={styles.topBarSpacer} />
+      )}
     </View>
   );
 }

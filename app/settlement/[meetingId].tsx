@@ -54,8 +54,10 @@ import {
 } from '@/src/lib/meeting-settlement-persist';
 import {
   buildMeetingTopNoticeTitleLeft,
+  formatMeetingScheduleListLabel,
   formatPublicMeetingSettlementSummary,
   getMeetingById,
+  isGinitWebGuestParticipantId,
   parsePublicMeetingDetailsConfig,
   type Meeting,
   type MeetingSettlementReceiptItem,
@@ -1193,6 +1195,9 @@ export default function SettlementMeetingScreen() {
     return lead ? `${lead} 정산` : '정산';
   }, [meetingId, meeting?.id, settlementModeSummaryLine]);
 
+  const showSettlementTopBarShare =
+    meeting?.lifecycleStatus === 'SETTLED' && canViewSettledSettlement && Platform.OS !== 'web';
+
   const persistSettlementDraftToServer = useCallback(async () => {
     if (!meetingId || !meeting) throw new Error('모임을 찾을 수 없어요.');
     const uid = (userId ?? '').trim();
@@ -1388,29 +1393,32 @@ export default function SettlementMeetingScreen() {
         Alert.alert('알림', '앱 알림을 받을 다른 참석자가 없어요. 참석자를 초대한 뒤 다시 시도해 주세요.');
         return;
       }
-      const title = '정산 안내';
-      const body = `「${(meeting.title ?? '').trim() || '모임'}」인당 ${perPersonWon != null ? `${perPersonWon.toLocaleString()}원` : ''} 정산 안내가 도착했어요.`;
-      const amountStr = perPersonWon != null ? String(perPersonWon) : String(effectiveTotalWonParsed);
-      const data: Record<string, unknown> = {
-        action: 'settlement_share',
-        type: 'SETTLEMENT',
-        settlement_payment_method: settlementPaymentMethod,
-        meeting_id: meetingId,
-        meetingId,
-        amount: amountStr,
-      };
-      if (usesBankTransferSettlement) {
-        data.host_account = maskHolderInHostAccountTextForShare(hostAccount);
-      }
-      const approx = await dispatchRemotePushToRecipientsWithApproxDelivered({
-        toUserIds: recipients,
-        title,
-        body,
-        data,
-      });
-      if (approx <= 0) {
-        Alert.alert('알림', '푸시가 전달되지 않았어요. 네트워크를 확인한 뒤 다시 시도해 주세요.');
-        return;
+      const pushRecipients = recipients.filter((id) => !isGinitWebGuestParticipantId(id));
+      if (pushRecipients.length > 0) {
+        const title = '정산 안내';
+        const body = `「${(meeting.title ?? '').trim() || '모임'}」인당 ${perPersonWon != null ? `${perPersonWon.toLocaleString()}원` : ''} 정산 안내가 도착했어요.`;
+        const amountStr = perPersonWon != null ? String(perPersonWon) : String(effectiveTotalWonParsed);
+        const data: Record<string, unknown> = {
+          action: 'settlement_share',
+          type: 'SETTLEMENT',
+          settlement_payment_method: settlementPaymentMethod,
+          meeting_id: meetingId,
+          meetingId,
+          amount: amountStr,
+        };
+        if (usesBankTransferSettlement) {
+          data.host_account = maskHolderInHostAccountTextForShare(hostAccount);
+        }
+        const approx = await dispatchRemotePushToRecipientsWithApproxDelivered({
+          toUserIds: pushRecipients,
+          title,
+          body,
+          data,
+        });
+        if (approx <= 0) {
+          Alert.alert('알림', '푸시가 전달되지 않았어요. 네트워크를 확인한 뒤 다시 시도해 주세요.');
+          return;
+        }
       }
       await markMeetingLifecycleSettled(meetingId);
       setSettlementHasUnsavedUserChanges(false);
@@ -1448,7 +1456,8 @@ export default function SettlementMeetingScreen() {
   ]);
 
   const onShareSheet = useCallback(async () => {
-    if (!isCurrentSettlementDraftSavedForShare) {
+    const settled = meeting?.lifecycleStatus === 'SETTLED';
+    if (!settled && !isCurrentSettlementDraftSavedForShare) {
       Alert.alert('안내', '임시 저장 후 공유해주세요.');
       return;
     }
@@ -1476,6 +1485,7 @@ export default function SettlementMeetingScreen() {
       }
       const msg = buildSettlementShareMessage({
         meetingTitle: meeting.title ?? '',
+        scheduleLine: formatMeetingScheduleListLabel(meeting) || null,
         participantCount: selectedCount,
         settlementMethodText: settlementModeSummaryLine,
         paymentMethod: settlementPaymentMethod,
@@ -1973,7 +1983,12 @@ export default function SettlementMeetingScreen() {
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SettlementAccountsScreenTopBar title={settlementScreenTopBarTitle} onBack={requestSettlementBack} />
+        <SettlementAccountsScreenTopBar
+          title={settlementScreenTopBarTitle}
+          onBack={requestSettlementBack}
+          onShare={showSettlementTopBarShare ? onShareSheet : undefined}
+          sharing={showSettlementTopBarShare ? sharing : false}
+        />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}

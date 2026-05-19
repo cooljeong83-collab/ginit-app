@@ -10,9 +10,25 @@ import {
   meetingParticipantListCacheSignature,
 } from '@/src/lib/meeting-detail-cache-mutations';
 import { meetingDetailQueryKey } from '@/src/lib/meeting-detail-query-keys';
+import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
-import type { Meeting } from '@/src/lib/meetings';
+import { isGinitWebGuestParticipantId, type Meeting } from '@/src/lib/meetings';
 import { wasRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
+
+/** 목록 RPC(회원-only participantIds)가 상세 원장 fs보다 새 updatedAt일 때 웹 게스트가 빠지는 것 방지 */
+function listSnapshotWouldDropWebGuests(detail: Meeting, fromList: Meeting): boolean {
+  const listNorm = new Set(
+    (fromList.participantIds ?? [])
+      .map((x) => normalizeParticipantId(String(x)) || String(x).trim())
+      .filter(Boolean),
+  );
+  for (const raw of detail.participantIds ?? []) {
+    const id = normalizeParticipantId(String(raw)) || String(raw).trim();
+    if (!id || !isGinitWebGuestParticipantId(id)) continue;
+    if (!listNorm.has(id)) return true;
+  }
+  return false;
+}
 
 function meetingUpdatedAtMs(m: Meeting): number {
   try {
@@ -68,6 +84,7 @@ export function useMeetingDetailFeedReconcile(
       return;
     }
     if (lastAppliedListSigRef.current === listSig) return;
+    if (listSnapshotWouldDropWebGuests(detailMeeting, fromList)) return;
 
     lastAppliedListSigRef.current = listSig;
     void applyMeetingDetailSnapshotFromListUpdate(queryClient, fromList);

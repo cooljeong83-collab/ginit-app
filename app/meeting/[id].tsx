@@ -476,7 +476,9 @@ export default function MeetingDetailScreen() {
   );
   const mainScrollRef = useRef<ScrollView>(null);
 
-  const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id);
+  const { meeting, loading, loadError, refetch: refetchMeetingDetail } = useMeetingDetailQuery(id, {
+    refetchOnMount: 'always',
+  });
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
