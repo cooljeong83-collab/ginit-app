@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { LayoutAnimation, Platform, UIManager } from 'react-native';
 
 let legacyExperimentalEnabled = false;
@@ -6,13 +7,19 @@ function isFabricRuntime(): boolean {
   return Boolean((globalThis as { nativeFabricUIManager?: unknown }).nativeFabricUIManager);
 }
 
+/** app.json `newArchEnabled` 또는 Fabric 런타임 — 둘 중 하나면 experimental API 호출 금지 */
+function isNewArchitectureEnabled(): boolean {
+  if (Constants.expoConfig?.newArchEnabled === true) return true;
+  return isFabricRuntime();
+}
+
 /**
  * Android에서 `LayoutAnimation`이 legacy bridge에서 동작하도록 experimental 플래그를 켭니다.
  * New Architecture(Fabric)에서는 해당 API가 no-op이며 호출 시 경고만 출력되므로 호출하지 않습니다.
  */
 export function ensureAndroidLayoutAnimationExperimental(): void {
   if (Platform.OS !== 'android') return;
-  if (isFabricRuntime()) return;
+  if (isNewArchitectureEnabled()) return;
   if (legacyExperimentalEnabled) return;
   legacyExperimentalEnabled = true;
   if (typeof UIManager.setLayoutAnimationEnabledExperimental === 'function') {

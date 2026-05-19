@@ -67,6 +67,7 @@ export function QueryClientPersistProvider({ children }: { children: ReactNode }
             Array.isArray(query.queryKey) &&
             ((query.queryKey[0] === 'meetings' && query.queryKey[1] === 'feed') ||
               (query.queryKey[0] === 'meetings' && query.queryKey[1] === 'my-feed') ||
+              (query.queryKey[0] === 'feed' && query.queryKey[1] === 'meeting-reviews') ||
               (query.queryKey[0] === 'meeting-chat' && query.queryKey[1] === 'messages') ||
               (query.queryKey[0] === 'social-chat' && query.queryKey[1] === 'messages') ||
               (query.queryKey[0] === 'chat' && query.queryKey[1] === 'rooms') ||

@@ -14,9 +14,23 @@ describe('mapNaverCategoryToReviewCategory', () => {
     expect(mapNaverCategoryToReviewCategory('와인바')).toBe('bar');
   });
 
-  it('defaults to restaurant', () => {
+  it('maps restaurant labels', () => {
     expect(mapNaverCategoryToReviewCategory('한식')).toBe('restaurant');
-    expect(mapNaverCategoryToReviewCategory('')).toBe('restaurant');
+  });
+
+  it('maps screen golf to sports', () => {
+    expect(mapNaverCategoryToReviewCategory('스크린골프장')).toBe('sports');
+    expect(mapNaverCategoryToReviewCategory(null, '판교 스크린골프존')).toBe('sports');
+  });
+
+  it('maps entertainment venues', () => {
+    expect(mapNaverCategoryToReviewCategory('PC방')).toBe('entertainment');
+    expect(mapNaverCategoryToReviewCategory('노래방')).toBe('entertainment');
+  });
+
+  it('defaults to common when unknown', () => {
+    expect(mapNaverCategoryToReviewCategory('')).toBe('common');
+    expect(mapNaverCategoryToReviewCategory(null, 'OO 모임룸')).toBe('common');
   });
 });
 
@@ -25,6 +39,17 @@ describe('getKeywordsForCategory', () => {
     const list = getKeywordsForCategory('restaurant');
     expect(list).toContain('모임 장소로 딱!');
     expect(list.length).toBeGreaterThan(5);
+  });
+
+  it('uses sports-specific keywords for screen golf category', () => {
+    const list = getKeywordsForCategory('sports');
+    expect(list).toContain('장비·룸 상태가 좋아요');
+    expect(list).not.toContain('음식이 맛있어요');
+  });
+
+  it('common category has only shared keywords', () => {
+    const list = getKeywordsForCategory('common');
+    expect(list).toEqual(['모임 장소로 딱!', '친구들이랑 다시 올래', '결제하기 편함']);
   });
 
   it('enforces max selection constant', () => {

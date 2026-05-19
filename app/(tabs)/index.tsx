@@ -30,6 +30,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { FlashList } from '@shopify/flash-list';
 
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
+import { FeedMeetingReviewSection } from '@/components/feed/meeting-review-carousel/FeedMeetingReviewSection';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
 import { InterestRegionHeaderCluster } from '@/components/feed/InterestRegionHeaderCluster';
 import {
@@ -55,6 +56,7 @@ import { usePendingMeetingPlaceReviewIds } from '@/src/hooks/use-pending-meeting
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-region-controls';
+import { useFeedMeetingReviewsForRegion } from '@/src/hooks/use-feed-meeting-reviews-for-region';
 import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
@@ -91,6 +93,11 @@ import {
   homeMeetingListOngoingWindowMs,
   isMeetingEndedForHomeList,
 } from '@/src/lib/feed-home-visual';
+import {
+  buildExploreFeedRows,
+  homeFeedRowKey,
+  type HomeFeedRow,
+} from '@/src/lib/feed-home-list-rows';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -130,6 +137,7 @@ import {
   isMeetingSettlementCollaborationEligible,
   isMeetingSettlementCtaEligibleForHost,
 } from '@/src/lib/settlement-eligibility';
+import { GINIT_MEETING_PLACE_REVIEW_SUBMITTED_EVENT } from '@/src/lib/meeting-place-review-dismiss';
 import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import {
@@ -261,7 +269,12 @@ export default function FeedScreen() {
       void runMeetingsUserActionDeltaSync(queryClient, userId, 'foreground').catch((err) =>
         console.log('Meetings focus sync failed:', err),
       );
-    }, [queryClient, userId, feedLocationReady]),
+      if (exploreActiveRegionNorm.trim()) {
+        void feedMeetingReviews.runDeltaSync('foreground').catch((err) =>
+          console.log('Feed reviews focus sync failed:', err),
+        );
+      }
+    }, [queryClient, userId, feedLocationReady, exploreActiveRegionNorm, feedMeetingReviews]),
   );
 
   useFocusEffect(
@@ -510,6 +523,15 @@ export default function FeedScreen() {
   const exploreFeedMeetings = useMemo(
     () => applyHomeExploreFeedVisibility(sortedFilteredMeetings),
     [sortedFilteredMeetings],
+  );
+
+  const feedMeetingReviews = useFeedMeetingReviewsForRegion(exploreActiveRegionNorm, {
+    enabled: feedLocationReady && Boolean(exploreActiveRegionNorm.trim()),
+  });
+
+  const exploreFeedRows = useMemo(
+    () => buildExploreFeedRows(exploreFeedMeetings, feedMeetingReviews.reviews),
+    [exploreFeedMeetings, feedMeetingReviews.reviews],
   );
 
   const myTabsMeetings = useMemo(() => {
@@ -1227,10 +1249,13 @@ export default function FeedScreen() {
     setRefreshing(true);
     try {
       await runMeetingsUserActionDeltaSync(queryClient, userId?.trim() ?? null, 'pull_refresh');
+      if (exploreActiveRegionNorm.trim()) {
+        await feedMeetingReviews.runDeltaSync('pull_refresh');
+      }
     } finally {
       setRefreshing(false);
     }
-  }, [feedLocationReady, queryClient, userId]);
+  }, [feedLocationReady, queryClient, userId, exploreActiveRegionNorm, feedMeetingReviews]);
 
   useEffect(() => {
     if (!feedLocationReady) return;
@@ -1244,6 +1269,14 @@ export default function FeedScreen() {
     });
     return () => sub.remove();
   }, [refreshFromStorage]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(GINIT_MEETING_PLACE_REVIEW_SUBMITTED_EVENT, () => {
+      if (!exploreActiveRegionNorm.trim()) return;
+      void feedMeetingReviews.syncChangedReviews();
+    });
+    return () => sub.remove();
+  }, [exploreActiveRegionNorm, feedMeetingReviews]);
 
   const listFooter = useMemo(
     () =>
@@ -1329,6 +1362,13 @@ export default function FeedScreen() {
     [],
   );
 
+  const onPressFeedReview = useCallback(
+    (meetingId: string) => {
+      router.push(`/meeting-review/${encodeURIComponent(meetingId)}`);
+    },
+    [router],
+  );
+
   const renderHomeItemForList = useCallback(
     (item: Meeting, tab: HomeMeetingTopTab) => {
       const pk = userId?.trim() ?? '';
@@ -1362,6 +1402,16 @@ export default function FeedScreen() {
       categories,
       onPressMeetingFromGrid,
     ],
+  );
+
+  const renderExploreFeedRow = useCallback(
+    (row: HomeFeedRow) => {
+      if (row.type === 'REVIEW_SECTION') {
+        return <FeedMeetingReviewSection reviews={row.reviews} onPressReview={onPressFeedReview} />;
+      }
+      return renderHomeItemForList(row.meeting, 'explore');
+    },
+    [onPressFeedReview, renderHomeItemForList],
   );
 
   const feedListEmptyCentered = useCallback(
@@ -1658,52 +1708,97 @@ export default function FeedScreen() {
               {HOME_MEETING_TOP_TABS.map((tab) => {
               const tabData =
                 tab === 'explore'
-                  ? exploreFeedMeetings
+                  ? exploreFeedRows
                   : tab === 'my'
                     ? sortedJoinedMeetings
                     : sortedEndedMeetings;
               return (
                 <View key={tab} style={[styles.tabPage, { width: tabPagerWidth }]}>
-                  <FlashList<Meeting>
-                    data={tabData}
-                    keyExtractor={(m) => m.id}
-                    extraData={{
-                      homeTab,
-                      tab,
-                      listSortMode,
-                      recruitingOnly,
-                      selectedCategoryId,
-                      feedBarVisibleCategoryIds,
-                      appliedFeedSearch,
-                      exploreLen: exploreFeedMeetings.length,
-                      endedLen: sortedEndedMeetings.length,
-                      feedLocationReady,
-                      registeredRegionsLen: registeredRegions.length,
-                      exploreActiveRegionNorm,
-                    }}
-                    renderItem={({ item }) => renderHomeItemForList(item, tab)}
-                    ItemSeparatorComponent={renderHomeMeetingListSeparator}
-                    ListHeaderComponent={tabListAlerts(tab)}
-                    ListFooterComponent={homeTab === tab ? listFooter : null}
-                    contentContainerStyle={styles.scroll}
-                    style={styles.listFlex}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    maintainVisibleContentPosition={{ disabled: true }}
-                    nestedScrollEnabled
-                    onScroll={onMainScroll}
-                    scrollEventThrottle={16}
-                    onEndReached={() => handleEndReachedForTab(tab)}
-                    onEndReachedThreshold={0.6}
-                    refreshControl={
-                      <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={onPullRefresh}
-                        tintColor={GinitTheme.colors.primary}
-                        colors={[GinitTheme.colors.primary]}
-                      />
-                    }
-                  />
+                  {tab === 'explore' ? (
+                    <FlashList<HomeFeedRow>
+                      data={tabData as HomeFeedRow[]}
+                      keyExtractor={homeFeedRowKey}
+                      getItemType={(row) => row.type}
+                      extraData={{
+                        homeTab,
+                        tab,
+                        listSortMode,
+                        recruitingOnly,
+                        selectedCategoryId,
+                        feedBarVisibleCategoryIds,
+                        appliedFeedSearch,
+                        exploreLen: exploreFeedMeetings.length,
+                        feedReviewsLen: feedMeetingReviews.reviews.length,
+                        endedLen: sortedEndedMeetings.length,
+                        feedLocationReady,
+                        registeredRegionsLen: registeredRegions.length,
+                        exploreActiveRegionNorm,
+                      }}
+                      renderItem={({ item }) => renderExploreFeedRow(item)}
+                      ItemSeparatorComponent={renderHomeMeetingListSeparator}
+                      ListHeaderComponent={tabListAlerts(tab)}
+                      ListFooterComponent={homeTab === tab ? listFooter : null}
+                      contentContainerStyle={styles.scroll}
+                      style={styles.listFlex}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      maintainVisibleContentPosition={{ disabled: true }}
+                      nestedScrollEnabled
+                      onScroll={onMainScroll}
+                      scrollEventThrottle={16}
+                      onEndReached={() => handleEndReachedForTab(tab)}
+                      onEndReachedThreshold={0.6}
+                      refreshControl={
+                        <RefreshControl
+                          refreshing={refreshing}
+                          onRefresh={onPullRefresh}
+                          tintColor={GinitTheme.colors.primary}
+                          colors={[GinitTheme.colors.primary]}
+                        />
+                      }
+                    />
+                  ) : (
+                    <FlashList<Meeting>
+                      data={tabData as Meeting[]}
+                      keyExtractor={(m) => m.id}
+                      extraData={{
+                        homeTab,
+                        tab,
+                        listSortMode,
+                        recruitingOnly,
+                        selectedCategoryId,
+                        feedBarVisibleCategoryIds,
+                        appliedFeedSearch,
+                        exploreLen: exploreFeedMeetings.length,
+                        endedLen: sortedEndedMeetings.length,
+                        feedLocationReady,
+                        registeredRegionsLen: registeredRegions.length,
+                        exploreActiveRegionNorm,
+                      }}
+                      renderItem={({ item }) => renderHomeItemForList(item, tab)}
+                      ItemSeparatorComponent={renderHomeMeetingListSeparator}
+                      ListHeaderComponent={tabListAlerts(tab)}
+                      ListFooterComponent={homeTab === tab ? listFooter : null}
+                      contentContainerStyle={styles.scroll}
+                      style={styles.listFlex}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      maintainVisibleContentPosition={{ disabled: true }}
+                      nestedScrollEnabled
+                      onScroll={onMainScroll}
+                      scrollEventThrottle={16}
+                      onEndReached={() => handleEndReachedForTab(tab)}
+                      onEndReachedThreshold={0.6}
+                      refreshControl={
+                        <RefreshControl
+                          refreshing={refreshing}
+                          onRefresh={onPullRefresh}
+                          tintColor={GinitTheme.colors.primary}
+                          colors={[GinitTheme.colors.primary]}
+                        />
+                      }
+                    />
+                  )}
                 </View>
               );
               })}

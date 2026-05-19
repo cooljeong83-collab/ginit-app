@@ -89,6 +89,6 @@ export function resolveMeetingReviewPlaceContext(meeting: Meeting): MeetingRevie
     photoUrl,
     placeId: buildPlaceId(mid, placeKey, chip.id),
     chipId: chip.id,
-    keywordCategory: mapNaverCategoryToReviewCategory(chip.category),
+    keywordCategory: mapNaverCategoryToReviewCategory(chip.category, chip.title),
   };
 }

@@ -1,16 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  LayoutAnimation,
-  Platform,
-  StyleSheet,
-  Text,
-  UIManager,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
@@ -36,14 +27,11 @@ import {
   type MeetingReviewMyReview,
 } from '@/src/lib/meeting-review/meeting-review-api';
 import { resolveMeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
+import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { safeRouterBack } from '@/src/lib/router-safe';
 
 type ReviewPhase = 'form' | 'summary';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 function orderedParticipantIds(meeting: {
   createdBy?: string | null;
@@ -153,7 +141,7 @@ export default function MeetingReviewScreen() {
   }, [summaryQuery.data?.myReview]);
 
   const switchToSummary = useCallback(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    layoutAnimateEaseInEaseOut();
     setPhaseOverride('summary');
   }, []);
 
@@ -162,7 +150,7 @@ export default function MeetingReviewScreen() {
     if (myReview) {
       applyMyReviewToForm(myReview, { setRating, setSelectedKeywords, setComment });
     }
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    layoutAnimateEaseInEaseOut();
     setPhaseOverride('form');
   }, [summaryQuery.data?.myReview]);
 
