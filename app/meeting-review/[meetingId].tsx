@@ -233,7 +233,7 @@ export default function MeetingReviewScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {topBar('장소 후기')}
+          {topBar('모임 후기')}
           <View style={styles.centered}>
             <ActivityIndicator color={GinitTheme.colors.primary} />
           </View>
@@ -246,7 +246,7 @@ export default function MeetingReviewScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {topBar('장소 후기')}
+          {topBar('모임 후기')}
           <View style={styles.centered}>
             <Text style={styles.muted}>모임 정보를 불러오지 못했어요.</Text>
             <GinitPressable onPress={() => void refetch()} style={({ pressed }) => [styles.retryBtn, pressed && { opacity: 0.88 }]}>
@@ -267,7 +267,7 @@ export default function MeetingReviewScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {topBar('장소 후기')}
+          {topBar('모임 후기')}
           <View style={styles.centered}>
             <Text style={styles.muted}>{reason}</Text>
           </View>
@@ -280,7 +280,7 @@ export default function MeetingReviewScreen() {
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {topBar('장소 후기')}
+          {topBar('모임 후기')}
           <View style={styles.centered}>
             <ActivityIndicator color={GinitTheme.colors.primary} />
           </View>
@@ -290,7 +290,7 @@ export default function MeetingReviewScreen() {
   }
 
   const isEditing = phase === 'form' && hasReviewed;
-  const screenTitle = phase === 'form' ? (isEditing ? '후기 수정' : '장소 후기') : '리뷰 결과';
+  const screenTitle = '모임 후기';
   const submitLabel = isEditing ? '수정 내용 저장' : '후기 제출하고 결과 보기';
 
   return (

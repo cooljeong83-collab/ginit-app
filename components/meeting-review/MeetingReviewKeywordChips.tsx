@@ -57,8 +57,8 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: GinitTheme.colors.primary,
-    backgroundColor: GinitTheme.colors.primarySoft,
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
     maxWidth: '100%',
   },
   chipSelected: {
@@ -68,7 +68,7 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: GinitTheme.colors.primary,
+    color: GinitTheme.colors.textSub,
   },
   chipTextSelected: {
     color: GinitTheme.colors.deepPurple,

@@ -37,6 +37,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
+import { useMeetingPlaceReviewSummary } from '@/src/hooks/use-meeting-place-review-summary';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -63,6 +64,7 @@ import {
   type MeetingSettlementReceiptItem,
 } from '@/src/lib/meetings';
 import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
+import { meetingPlaceReviewSummaryQueryKey } from '@/src/lib/meeting-review/meeting-review-api';
 import { insertMeetingPlaceReviewNotifications } from '@/src/lib/meeting-place-review-notifications';
 import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
@@ -860,9 +862,37 @@ export default function SettlementMeetingScreen() {
     return allSettlementParticipantIds.includes(viewer);
   }, [meeting, userId, allSettlementParticipantIds]);
 
-  const showSettlementReviewCard = useMemo(
+  const placeReviewEligible = useMemo(
     () => Boolean(meeting && canViewSettledSettlement && isMeetingPlaceReviewEligible(meeting, userId)),
     [meeting, canViewSettledSettlement, userId],
+  );
+
+  const placeReviewSummaryQuery = useMeetingPlaceReviewSummary(meetingId, userId, {
+    enabled: placeReviewEligible,
+  });
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!placeReviewEligible || !meetingId.trim()) return;
+      void queryClient.invalidateQueries({ queryKey: meetingPlaceReviewSummaryQueryKey(meetingId) });
+    }, [placeReviewEligible, meetingId, queryClient]),
+  );
+
+  const myPlaceReviewSubmitted = useMemo(() => {
+    if (!placeReviewSummaryQuery.isSuccess) return null;
+    const summary = placeReviewSummaryQuery.data;
+    const uid = userId?.trim() ?? '';
+    if (!uid) return false;
+    if (summary.myReview) return true;
+    const pk = normalizeParticipantId(uid) ?? uid;
+    return summary.participants.some(
+      (p) => (normalizeParticipantId(p.appUserId) ?? p.appUserId) === pk && p.hasReviewed,
+    );
+  }, [placeReviewSummaryQuery.isSuccess, placeReviewSummaryQuery.data, userId]);
+
+  const showSettlementReviewCard = useMemo(
+    () => placeReviewEligible && myPlaceReviewSubmitted === false,
+    [placeReviewEligible, myPlaceReviewSubmitted],
   );
 
   const settlementReadOnly =
