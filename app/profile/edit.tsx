@@ -11,6 +11,7 @@ import { GinitButton, GinitCard } from '@/components/ginit';
 import { ProfilePhotoCropModal } from '@/components/profile/ProfilePhotoCropModal';
 import { ProfileSquareAvatar } from '@/components/profile/ProfileSquareAvatar';
 import { ScreenShell } from '@/components/ui';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { HomeGlassStyles } from '@/constants/home-glass-styles';
 import { useUserSession } from '@/src/context/UserSessionContext';
@@ -49,6 +50,7 @@ import {
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from '@/src/lib/ginit-timestamp';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 /** `Switch.trackColor` */
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
@@ -210,7 +212,7 @@ export default function ProfileEditScreen() {
           if (Platform.OS === 'android') ToastAndroid.show('프로필 사진이 반영됐어요.', ToastAndroid.SHORT);
         } catch (e) {
           const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-          Alert.alert('업로드 실패', msg);
+          presentAppDialogAlert({ title: '업로드 실패', body: msg });
         } finally {
           setPhotoUploadBusy(false);
         }
@@ -221,13 +223,13 @@ export default function ProfileEditScreen() {
 
   const onPickAndUploadPhoto = useCallback(async () => {
     if (!profilePk) {
-      Alert.alert('안내', '로그인 후 업로드할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 업로드할 수 있어요.' });
       return;
     }
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('권한 필요', '사진을 선택하려면 사진 보관함 권한이 필요합니다.');
+        presentAppDialogAlert({ title: '권한 필요', body: '사진을 선택하려면 사진 보관함 권한이 필요합니다.' });
         return;
       }
       const result = await launchImageLibraryAsyncSafe({
@@ -258,7 +260,7 @@ export default function ProfileEditScreen() {
           });
         } catch (e) {
           const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-          Alert.alert('업로드 실패', msg);
+          presentAppDialogAlert({ title: '업로드 실패', body: msg });
         } finally {
           setPhotoUploadBusy(false);
         }
@@ -268,13 +270,13 @@ export default function ProfileEditScreen() {
       setCropSession({ uri, w: asset?.width, h: asset?.height });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-      Alert.alert('업로드 실패', msg);
+      presentAppDialogAlert({ title: '업로드 실패', body: msg });
     }
   }, [profilePk]);
 
   const onSaveProfile = useCallback(async () => {
     if (!profilePk) {
-      Alert.alert('안내', '로그인 후 프로필을 저장할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 프로필을 저장할 수 있어요.' });
       return;
     }
     setProfileBusy(true);
@@ -305,11 +307,11 @@ export default function ProfileEditScreen() {
       }
       await updateUserProfile(profilePk, patch);
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('저장됨', '프로필을 반영했어요.');
+      showTransientBottomMessage('프로필을 반영했어요.');
       safeRouterBack(router);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
-      Alert.alert('저장 실패', msg);
+      presentAppDialogAlert({ title: '저장 실패', body: msg });
     } finally {
       setProfileBusy(false);
     }
@@ -338,12 +340,12 @@ export default function ProfileEditScreen() {
 
   const onSendOtp = useCallback(async () => {
     if (!profilePk) {
-      Alert.alert('안내', '로그인 후 인증할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 인증할 수 있어요.' });
       return;
     }
     const normalized = normalizePhoneUserId(phoneField);
     if (!normalized) {
-      Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '전화번호를 정확히 입력해 주세요.' });
       return;
     }
     otpSmsUserConsent.stop();
@@ -359,7 +361,7 @@ export default function ProfileEditScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증번호 전송에 실패했습니다.';
       setOtpError(msg);
-      Alert.alert('인증 실패', msg);
+      presentAppDialogAlert({ title: '인증 실패', body: msg });
     } finally {
       setOtpBusy(false);
     }
@@ -367,18 +369,18 @@ export default function ProfileEditScreen() {
 
   const onConfirmOtp = useCallback(async () => {
     if (!profilePk) {
-      Alert.alert('안내', '로그인 후 인증할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 인증할 수 있어요.' });
       return;
     }
     if (!otpVerificationId) return;
     const normalized = normalizePhoneUserId(phoneField);
     if (!normalized) {
-      Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '전화번호를 정확히 입력해 주세요.' });
       return;
     }
     const code = otpCode.replace(/\D/g, '').slice(0, 6);
     if (code.length !== 6) {
-      Alert.alert('입력 확인', '인증번호 6자리를 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '인증번호 6자리를 입력해 주세요.' });
       return;
     }
     setOtpError(null);
@@ -392,11 +394,11 @@ export default function ProfileEditScreen() {
       setOtpVerificationId(null);
       setOtpCode('');
       if (Platform.OS === 'android') ToastAndroid.show('전화번호 인증이 완료됐어요.', ToastAndroid.SHORT);
-      else Alert.alert('인증 완료', '전화번호 인증이 완료됐어요.');
+      else presentAppDialogAlert({ title: '인증 완료', body: '전화번호 인증이 완료됐어요.' });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증 확인에 실패했습니다.';
       setOtpError(msg);
-      Alert.alert('인증 실패', msg);
+      presentAppDialogAlert({ title: '인증 실패', body: msg });
     } finally {
       setOtpBusy(false);
     }
@@ -425,39 +427,32 @@ export default function ProfileEditScreen() {
 
   const onSubmitMeetingCompliance = useCallback(async () => {
     if (!profilePk) {
-      Alert.alert('안내', '로그인 후 진행할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 진행할 수 있어요.' });
       return;
     }
 
     const ok = await new Promise<boolean>((resolve) => {
-      Alert.alert(
-        '저장 전 확인',
-        '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?',
-        [
-          { text: '취소', style: 'cancel', onPress: () => resolve(false) },
-          { text: '저장', style: 'destructive', onPress: () => resolve(true) },
-        ],
-      );
+      presentAppDialogConfirm({ title: '저장 전 확인', body: '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?', confirmLabel: '저장', confirmVariant: 'destructive', onConfirm: () => resolve(true), onCancel: () => resolve(false) });
     });
     if (!ok) return;
 
     const p0 = cachedProfile ?? (await getUserProfile(profilePk));
     if (!p0) {
-      Alert.alert('안내', '프로필을 불러오지 못했습니다.');
+      presentAppDialogAlert({ title: '안내', body: '프로필을 불러오지 못했습니다.' });
       return;
     }
     if (!hasTermsAgreementRecorded(p0) && !termsConsentChecked) {
-      Alert.alert('동의 필요', '모임 이용 정보 수집 및 이용에 동의해 주세요.');
+      presentAppDialogAlert({ title: '동의 필요', body: '모임 이용 정보 수집 및 이용에 동의해 주세요.' });
       return;
     }
     if (isDemographicsIncomplete(p0)) {
       if (!genderDemo || !birthDemo.year || !birthDemo.month || !birthDemo.day) {
-        Alert.alert('입력 확인', '성별과 생년월일을 모두 선택해 주세요.');
+        presentAppDialogAlert({ title: '입력 확인', body: '성별과 생년월일을 모두 선택해 주세요.' });
         return;
       }
     }
     if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
-      Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
+      presentAppDialogAlert({ title: '전화 인증', body: '전화번호 인증을 먼저 완료해 주세요.' });
       return;
     }
     setComplianceBusy(true);
@@ -492,16 +487,16 @@ export default function ProfileEditScreen() {
         termsAgreedAtIso: termsDate.toISOString(),
       });
       if (!sync.ok) {
-        Alert.alert('동기화 안내', `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}`);
+        presentAppDialogAlert({ title: '동기화 안내', body: `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}` });
       }
       await refreshEditProfile();
       setAuthSheetVisible(false);
       const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
       if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-      else Alert.alert('완료', doneMsg);
+      else presentAppDialogAlert({ title: '완료', body: doneMsg });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
-      Alert.alert('저장 실패', msg);
+      presentAppDialogAlert({ title: '저장 실패', body: msg });
     } finally {
       setComplianceBusy(false);
     }
@@ -525,31 +520,28 @@ export default function ProfileEditScreen() {
       await signOutSession({ exitApp: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
-      Alert.alert('로그아웃 실패', msg);
+      presentAppDialogAlert({ title: '로그아웃 실패', body: msg });
     } finally {
       setBusy(false);
     }
   }, [signOutSession]);
 
   const onRequestSignOut = useCallback(() => {
-    Alert.alert('로그아웃', '이 기기에서 로그아웃할까요?', [
-      { text: '취소', style: 'cancel' },
-      { text: '로그아웃', style: 'destructive', onPress: () => void runSignOut() },
-    ]);
+    presentAppDialogConfirm({ title: '로그아웃', body: '이 기기에서 로그아웃할까요?', confirmLabel: '로그아웃', confirmVariant: 'destructive', onConfirm: () => void runSignOut() });
   }, [runSignOut]);
 
   const runDeleteAccount = useCallback(async () => {
     const sessionUserId = userId?.trim() ?? '';
     const authUid = authProfile?.supabaseUserId?.trim() ?? '';
     if (!sessionUserId && !authUid) {
-      Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인된 계정만 탈퇴할 수 있어요.' });
       return;
     }
     setDeleteBusy(true);
     try {
       const preflight = await validateAccountDeletionPreflight(sessionUserId, authUid);
       if (!preflight.ok) {
-        Alert.alert('탈퇴를 진행할 수 없어요', preflight.message);
+        presentAppDialogAlert({ title: '탈퇴를 진행할 수 없어요', body: preflight.message });
         return;
       }
       if (preflight.mode === 'full_deletion') {
@@ -557,20 +549,20 @@ export default function ProfileEditScreen() {
           ? await purgeUserAccountRemote(sessionUserId)
           : await purgeUserAccountRemoteByFirebaseUid(authUid);
         if (!res.ok) {
-          Alert.alert('탈퇴를 완료하지 못했어요', res.message);
+          presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: res.message });
           return;
         }
       }
       const authDel = await deleteFirebaseAuthUserStrict();
       if (!authDel.ok) {
-        Alert.alert('탈퇴를 완료하지 못했어요', authDel.message);
+        presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: authDel.message });
         return;
       }
       await wipeLocalAppData();
       await signOutSession({ exitApp: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
-      Alert.alert('탈퇴 실패', msg);
+      presentAppDialogAlert({ title: '탈퇴 실패', body: msg });
     } finally {
       setDeleteBusy(false);
     }
@@ -580,7 +572,7 @@ export default function ProfileEditScreen() {
     const sessionUserId = userId?.trim() ?? '';
     const authUid = authProfile?.supabaseUserId?.trim() ?? '';
     if (!sessionUserId && !authUid) {
-      Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인된 계정만 탈퇴할 수 있어요.' });
       return;
     }
     const rejoinNotice = accountDeletionRejoinPolicyNotice();

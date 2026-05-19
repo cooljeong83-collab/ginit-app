@@ -1,8 +1,9 @@
 import * as MediaLibrary from 'expo-media-library';
-import { Alert, Platform, ToastAndroid } from 'react-native';
+import { Platform, ToastAndroid } from 'react-native';
 
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 function guessFilenameFromUrl(url: string): string {
   try {
@@ -62,7 +63,7 @@ export async function saveRemoteImageUrlToLibrary(url: string): Promise<void> {
   if (!u) return;
   const notify = (msg: string) => {
     if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
-    else Alert.alert('안내', msg);
+    else presentAppDialogAlert({ title: '안내', body: msg });
   };
   try {
     // 권한 확인 (필수)
@@ -73,7 +74,7 @@ export async function saveRemoteImageUrlToLibrary(url: string): Promise<void> {
           await (MediaLibrary.requestPermissionsAsync as any)(true, ['photo'])
         : await (MediaLibrary.requestPermissionsAsync as any)(true);
     if (!perm.granted) {
-      Alert.alert('권한 필요', '사진을 저장하려면 사진(미디어) 접근 권한이 필요해요.');
+      presentAppDialogAlert({ title: '권한 필요', body: '사진을 저장하려면 사진(미디어) 접근 권한이 필요해요.' });
       return;
     }
 

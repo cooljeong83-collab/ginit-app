@@ -1,6 +1,6 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -14,6 +14,7 @@ import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-v
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getUserProfile, isUserPhoneVerified, type UserProfile } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 function digitsOnly(s: string): string {
   return s.replace(/\D/g, '');
@@ -79,7 +80,7 @@ export default function ProfilePhoneVerifyEntryScreen() {
       router.push({ pathname: '/profile/phone-verify-otp', params: { verificationId, phoneE164 } });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('인증 실패', msg);
+      presentAppDialogAlert({ title: '인증 실패', body: msg });
     } finally {
       setBusy(false);
     }

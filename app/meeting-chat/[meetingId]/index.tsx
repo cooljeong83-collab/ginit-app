@@ -4,22 +4,7 @@ import {useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/na
 import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-    ActivityIndicator,
-    Alert,
-    DeviceEventEmitter,
-    InteractionManager,
-    Keyboard,
-    type LayoutChangeEvent,
-    Modal,
-    type NativeScrollEvent,
-    type NativeSyntheticEvent,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from 'react-native';
+import { ActivityIndicator, DeviceEventEmitter, InteractionManager, Keyboard, type LayoutChangeEvent, Modal, type NativeScrollEvent, type NativeSyntheticEvent, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   getChatComposerBottomPadding,
@@ -124,6 +109,7 @@ import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-not
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, getUserProfile, getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 /** 검색 결과 한 줄 미리보기 — 검색어 주변만 잘라 표시 */
 function splitSearchSnippet(full: string, needle: string): { head: string; mid: string; tail: string } {
@@ -543,7 +529,7 @@ export default function MeetingChatRoomScreen() {
           meetingId: meetingId.trim(),
           message: e instanceof Error ? e.message : String(e),
         });
-        Alert.alert('공유 전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '공유 전송 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
       } finally {
         setSending(false);
         markPendingStickToLatest();
@@ -825,7 +811,7 @@ export default function MeetingChatRoomScreen() {
       const uid = userId?.trim() ?? '';
       const rid = meetingId.trim();
       if (!uid || !rid) {
-        Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '대화 위치', body: '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.' });
         return;
       }
       for (let i = 0; i < 10; i += 1) {
@@ -842,7 +828,7 @@ export default function MeetingChatRoomScreen() {
           break;
         }
       }
-      Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
+      presentAppDialogAlert({ title: '대화 위치', body: '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.' });
     },
     [meetingId, userId, scrollToMessageIndexBestEffort],
   );
@@ -997,7 +983,7 @@ export default function MeetingChatRoomScreen() {
 
   const onPressAttach = useCallback(() => {
     if (Platform.OS === 'web') {
-      Alert.alert('안내', '웹에서는 사진을 보낼 수 없어요.');
+      presentAppDialogAlert({ title: '안내', body: '웹에서는 사진을 보낼 수 없어요.' });
       return;
     }
     setMediaPickerOpen(true);
@@ -1006,7 +992,7 @@ export default function MeetingChatRoomScreen() {
   const handleMediaPickerConfirmMeeting = useCallback(
     async ({ uris, widths }: { uris: string[]; widths: (number | undefined)[] }) => {
       if (!meetingId || !userId?.trim()) {
-        Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
+        presentAppDialogAlert({ title: '안내', body: '로그인 후 메시지를 보낼 수 있어요.' });
         return;
       }
       if (uris.length === 0 || sending) return;
@@ -1025,7 +1011,7 @@ export default function MeetingChatRoomScreen() {
         });
         setMediaPickerOpen(false);
       } catch (e) {
-        Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
       } finally {
         setSending(false);
         markPendingStickToLatest();
@@ -1037,7 +1023,7 @@ export default function MeetingChatRoomScreen() {
 
   const onSend = useCallback(async () => {
     if (!meetingId || !userId?.trim()) {
-      Alert.alert('안내', '로그인 후 메시지를 보낼 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 메시지를 보낼 수 있어요.' });
       return;
     }
     const body = draft.trim();
@@ -1069,7 +1055,7 @@ export default function MeetingChatRoomScreen() {
       setDraft('');
       setReplyTo(null);
     } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+      presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
     } finally {
       setSending(false);
       markPendingStickToLatest();
@@ -1138,7 +1124,7 @@ export default function MeetingChatRoomScreen() {
 
       const uid = userId?.trim() ?? '';
       if (!uid) {
-        Alert.alert('원글 위치', '로그인이 필요합니다.');
+        presentAppDialogAlert({ title: '원글 위치', body: '로그인이 필요합니다.' });
         return;
       }
 
@@ -1158,7 +1144,7 @@ export default function MeetingChatRoomScreen() {
             break;
           }
         }
-        Alert.alert('원글 위치', '불러올 수 있는 범위 안에서 원글을 찾지 못했어요.');
+        presentAppDialogAlert({ title: '원글 위치', body: '불러올 수 있는 범위 안에서 원글을 찾지 못했어요.' });
       } finally {
         setSearchNavigateLoading(false);
       }
@@ -1643,7 +1629,7 @@ export default function MeetingChatRoomScreen() {
                         try {
                           await shareRemoteImageUrl(u);
                         } catch (e) {
-                          Alert.alert('공유 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                          presentAppDialogAlert({ title: '공유 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
                         } finally {
                           setImageViewerBusy(false);
                         }
@@ -1665,7 +1651,7 @@ export default function MeetingChatRoomScreen() {
                         try {
                           await saveRemoteImageUrlToLibrary(u);
                         } catch (e) {
-                          Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                          presentAppDialogAlert({ title: '저장 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
                         } finally {
                           setImageViewerBusy(false);
                         }
@@ -1686,26 +1672,28 @@ export default function MeetingChatRoomScreen() {
                         const msgId = imageViewerEntry?.id.trim() ?? '';
                         if (!u || !mid || !msgId) return;
                         if (imageViewerBusy) return;
-                        Alert.alert('사진 삭제', '이 사진을 채팅방에서 삭제할까요?', [
-                          { text: '취소', style: 'cancel' },
-                          {
-                            text: '삭제',
-                            style: 'destructive',
-                            onPress: () => {
-                              void (async () => {
-                                setImageViewerBusy(true);
-                                try {
-                                  await deleteMeetingChatImageMessageBestEffort(mid, msgId, u);
-                                  setImageViewer(null);
-                                } catch (e) {
-                                  Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-                                } finally {
-                                  setImageViewerBusy(false);
-                                }
-                              })();
-                            },
+                        presentAppDialogConfirm({
+                          title: '사진 삭제',
+                          body: '이 사진을 채팅방에서 삭제할까요?',
+                          confirmLabel: '삭제',
+                          confirmVariant: 'destructive',
+                          onConfirm: () => {
+                            void (async () => {
+                              setImageViewerBusy(true);
+                              try {
+                                await deleteMeetingChatImageMessageBestEffort(mid, msgId, u);
+                                setImageViewer(null);
+                              } catch (e) {
+                                presentAppDialogAlert({
+                                  title: '삭제 실패',
+                                  body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+                                });
+                              } finally {
+                                setImageViewerBusy(false);
+                              }
+                            })();
                           },
-                        ]);
+                        });
                       }}
                       hitSlop={10}
                       disabled={imageViewerBusy}

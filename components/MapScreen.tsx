@@ -9,24 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  DeviceEventEmitter,
-  InteractionManager,
-  LayoutAnimation,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  UIManager,
-  View,
-  useWindowDimensions,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native';
+import { ActivityIndicator, DeviceEventEmitter, InteractionManager, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, UIManager, View, useWindowDimensions, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import MapView from 'react-native-map-clustering';
 import { Marker, type Region } from 'react-native-maps';
@@ -129,6 +112,7 @@ import { centerRegionToNaverRegion } from '@/src/lib/naver-map-region';
 import { applyNearbySearchBiasFromMapNavigation } from '@/src/lib/nearby-search-bias';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { getUserProfile, getUserProfilesForIds, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 // RN New Architecture(Fabric)에서는 setLayoutAnimationEnabledExperimental이 no-op이며
 // "currently a no-op in the New Architecture" 워닝을 발생시킵니다. (기능엔 영향 없음)
@@ -1468,7 +1452,7 @@ export default function MapScreen() {
     void (async () => {
       if (locatingUser) return;
       if (Platform.OS === 'web') {
-        Alert.alert('위치 권한', '웹에서는 내 위치 이동을 지원하지 않습니다.');
+        presentAppDialogAlert({ title: '위치 권한', body: '웹에서는 내 위치 이동을 지원하지 않습니다.' });
         return;
       }
 
@@ -1479,10 +1463,7 @@ export default function MapScreen() {
           const ctx = await resolveFeedLocationWithGrantedPermission();
           const c = ctx.coords;
           if (!c) {
-            Alert.alert(
-              '위치를 가져올 수 없어요',
-              '권한은 허용되었지만 현재 위치 좌표를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.',
-            );
+            presentAppDialogAlert({ title: '위치를 가져올 수 없어요', body: '권한은 허용되었지만 현재 위치 좌표를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.' });
             return;
           }
           userCoordsRef.current = c;
@@ -1507,9 +1488,7 @@ export default function MapScreen() {
         try {
           const p = await getUserProfile(pk);
           if (!isMeetingServiceComplianceComplete(p, pk)) {
-            Alert.alert('인증 정보 등록', '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', [
-              { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
-            ]);
+            presentAppDialogAlert({ title: '인증 정보 등록', body: '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', onPrimary: () => pushProfileOpenRegisterInfo(router) });
             return;
           }
         } catch {

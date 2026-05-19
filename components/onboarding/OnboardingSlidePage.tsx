@@ -12,6 +12,7 @@ import {
   ONBOARDING_SLIDE_OPACITY_INACTIVE,
   ONBOARDING_SLIDE_SCALE_ACTIVE,
   ONBOARDING_SLIDE_SCALE_INACTIVE,
+  ONBOARDING_USE_LOTTIE_BACKGROUND,
 } from '@/components/onboarding/onboarding-motion';
 import type { OnboardingSlide } from '@/components/onboarding/onboarding-slides';
 import { OnboardingSlideScene } from '@/components/onboarding/scenes/OnboardingSlideScene';
@@ -59,7 +60,7 @@ export function OnboardingSlidePage({
       style={[styles.slide, { width: screenWidth, minHeight: slideHeight }, containerStyle]}
       accessibilityLabel={item.accessibilitySummary}>
       <View style={styles.heroStack}>
-        {item.lottieAsset != null ? (
+        {ONBOARDING_USE_LOTTIE_BACKGROUND && item.lottieAsset != null ? (
           <OnboardingLottiePlayer
             lottieAsset={item.lottieAsset}
             isActive={isActive}

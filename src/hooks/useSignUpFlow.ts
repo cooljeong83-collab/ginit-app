@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, ToastAndroid } from 'react-native';
+import { Platform, ToastAndroid } from 'react-native';
 
 import { type AuthProfileSnapshot, useUserSession } from '@/src/context/UserSessionContext';
 import { normalizeUserId } from '@/src/lib/app-user-id';
@@ -14,6 +14,7 @@ import {
   recordTermsAgreement,
 } from '@/src/lib/user-profile';
 import { Timestamp, serverTimestamp } from '@/src/lib/ginit-timestamp';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 /** 전화번호 입력이 멈춘 뒤 짧게 기다렸다가 회원 조회(과도한 호출·레이스 완화) */
 const PHONE_MEMBER_CHECK_DEBOUNCE_MS = 220;
@@ -121,27 +122,27 @@ export function useSignUpFlow(initialPhone: string) {
       const emailTrim = emailField.trim();
       const emailPk = normalizeUserId(emailTrim);
       if (!emailPk) {
-        Alert.alert('안내', '이메일 형식을 확인해 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '이메일 형식을 확인해 주세요.' });
         return;
       }
       if (!name) {
-        Alert.alert('안내', '이름을 입력해 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '이름을 입력해 주세요.' });
         return;
       }
       if (!n) {
-        Alert.alert('안내', '전화번호를 확인해 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '전화번호를 확인해 주세요.' });
         return;
       }
       if (!uid) {
-        Alert.alert('안내', '전화번호 인증(OTP)을 먼저 완료해 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '전화번호 인증(OTP)을 먼저 완료해 주세요.' });
         return;
       }
       if (memberStatus === 'member') {
-        Alert.alert('안내', '이미 가입된 번호예요. 로그인 화면으로 돌아가 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '이미 가입된 번호예요. 로그인 화면으로 돌아가 주세요.' });
         return;
       }
       if (memberStatus !== 'guest') {
-        Alert.alert('안내', '회원 여부를 확인하는 중이에요. 잠시만 기다려 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '회원 여부를 확인하는 중이에요. 잠시만 기다려 주세요.' });
         return;
       }
       if (!genderCode) {
@@ -206,7 +207,7 @@ export function useSignUpFlow(initialPhone: string) {
         const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
         const message = e instanceof Error ? e.message : '알 수 없는 오류';
         setErrorText(`${message}${code ? ` (${code})` : ''}`);
-        Alert.alert('가입 실패', code ? `${code}\n${message}` : message);
+        presentAppDialogAlert({ title: '가입 실패', body: code ? `${code}\n${message}` : message });
       } finally {
         setBusy(false);
       }

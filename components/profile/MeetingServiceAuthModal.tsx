@@ -1,8 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import { serverTimestamp, Timestamp } from '@/src/lib/ginit-timestamp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View} from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BirthdateWheel } from '@/components/auth/BirthdateWheel';
@@ -33,6 +32,7 @@ import {
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { supabase } from '@/src/lib/supabase';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 export type MeetingServiceAuthModalProps = {
   visible: boolean;
@@ -248,20 +248,13 @@ export function MeetingServiceAuthModal({
       skipConfirmDialog?: boolean;
     }) => {
       if (!pk) {
-        Alert.alert('안내', '로그인 후 진행할 수 있어요.');
+        presentAppDialogAlert({ title: '안내', body: '로그인 후 진행할 수 있어요.' });
         return;
       }
 
       if (!args.skipConfirmDialog) {
         const ok = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            '저장 전 확인',
-            '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?',
-            [
-              { text: '취소', style: 'cancel', onPress: () => resolve(false) },
-              { text: '저장', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          );
+          presentAppDialogConfirm({ title: '저장 전 확인', body: '모임 이용을 위한 인증정보는 한 번 저장하면 이후 변경할 수 없어요.\n\n계속 저장할까요?', confirmLabel: '저장', confirmVariant: 'destructive', onConfirm: () => resolve(true), onCancel: () => resolve(false) });
         });
         if (!ok) return;
       }
@@ -269,12 +262,12 @@ export function MeetingServiceAuthModal({
       const p0 = await ensureUserProfile(pk);
       if (isDemographicsIncomplete(p0)) {
         if (!args.gender || !args.birth.year || !args.birth.month || !args.birth.day) {
-          Alert.alert('입력 확인', '성별과 생년월일을 모두 선택해 주세요.');
+          presentAppDialogAlert({ title: '입력 확인', body: '성별과 생년월일을 모두 선택해 주세요.' });
           return;
         }
       }
       if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
-        Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
+        presentAppDialogAlert({ title: '전화 인증', body: '전화번호 인증을 먼저 완료해 주세요.' });
         return;
       }
       setComplianceBusy(true);
@@ -321,7 +314,7 @@ export function MeetingServiceAuthModal({
           termsAgreedAtIso: termsDate.toISOString(),
         });
         if (!sync.ok) {
-          Alert.alert('동기화 안내', `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}`);
+          presentAppDialogAlert({ title: '동기화 안내', body: `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}` });
         }
 
         if (args.gender && args.birth.year && args.birth.month && args.birth.day) {
@@ -333,7 +326,7 @@ export function MeetingServiceAuthModal({
             birthDay: args.birth.day,
           });
           if (!demoSync.ok) {
-            Alert.alert('동기화 안내', `성별/생년월일 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${demoSync.message}`);
+            presentAppDialogAlert({ title: '동기화 안내', body: `성별/생년월일 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${demoSync.message}` });
           }
         }
         setHydratedProfile(p);
@@ -342,10 +335,10 @@ export function MeetingServiceAuthModal({
         onRequestClose();
         const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
         if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-        else Alert.alert('완료', doneMsg);
+        else presentAppDialogAlert({ title: '완료', body: doneMsg });
       } catch (e) {
         const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
-        Alert.alert('저장 실패', msg);
+        presentAppDialogAlert({ title: '저장 실패', body: msg });
       } finally {
         setComplianceBusy(false);
       }
@@ -363,7 +356,7 @@ export function MeetingServiceAuthModal({
 
   const onGoogleDemographicsImport = useCallback(async () => {
     if (!pk) {
-      Alert.alert('안내', '로그인 후 진행할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 진행할 수 있어요.' });
       return;
     }
     const {
@@ -371,12 +364,12 @@ export function MeetingServiceAuthModal({
     } = await supabase.auth.getSession();
     const hasGoogle = session?.user?.identities?.some((i) => i.provider === 'google') ?? false;
     if (!hasGoogle) {
-      Alert.alert('안내', 'Google로 로그인한 계정에서만 사용할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: 'Google로 로그인한 계정에서만 사용할 수 있어요.' });
       return;
     }
     const p0 = await ensureUserProfile(pk);
     if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
-      Alert.alert('전화 인증', '전화번호 인증을 먼저 완료해 주세요.');
+      presentAppDialogAlert({ title: '전화 인증', body: '전화번호 인증을 먼저 완료해 주세요.' });
       return;
     }
     setGoogleDemographicsBusy(true);
@@ -393,10 +386,7 @@ export function MeetingServiceAuthModal({
         const email = user.email?.trim() ?? '';
         const emailPk = email ? normalizeUserId(email) : null;
         if (!emailPk || emailPk !== pk) {
-          Alert.alert(
-            '계정 확인',
-            '현재 이 프로필과 동일한 Google 계정으로 다시 로그인해 주세요.',
-          );
+          presentAppDialogAlert({ title: '계정 확인', body: '현재 이 프로필과 동일한 Google 계정으로 다시 로그인해 주세요.' });
           return;
         }
       }
@@ -404,10 +394,7 @@ export function MeetingServiceAuthModal({
         const email = session?.user?.email?.trim() ?? '';
         const emailPk = email ? normalizeUserId(email) : null;
         if (!emailPk || emailPk !== pk) {
-          Alert.alert(
-            '계정 확인',
-            '현재 이 프로필과 동일한 Google 계정으로 로그인돼 있어야 해요.',
-          );
+          presentAppDialogAlert({ title: '계정 확인', body: '현재 이 프로필과 동일한 Google 계정으로 로그인돼 있어야 해요.' });
           return;
         }
       }
@@ -417,10 +404,7 @@ export function MeetingServiceAuthModal({
       const pm = people?.birthMonth ?? null;
       const pd = people?.birthDay ?? null;
       if (!genderFs || py == null || pm == null || pd == null) {
-        Alert.alert(
-          'Google 정보',
-          '성별과 생년월일을 Google에서 받지 못했어요. Google 계정에 정보가 있고, 동의 화면에서 모두 허용했는지 확인해 주세요.',
-        );
+        presentAppDialogAlert({ title: 'Google 정보', body: '성별과 생년월일을 Google에서 받지 못했어요. Google 계정에 정보가 있고, 동의 화면에서 모두 허용했는지 확인해 주세요.' });
         return;
       }
       const googleDemoMeta = buildGooglePeopleDemographicsMetadataPatch({
@@ -439,7 +423,7 @@ export function MeetingServiceAuthModal({
       const code = e && typeof e === 'object' && 'code' in e ? String((e as { code?: string }).code) : '';
       if (code === REDIRECT_STARTED) return;
       const msg = e instanceof Error ? e.message : 'Google 연동에 실패했습니다.';
-      Alert.alert('Google 연동 실패', msg);
+      presentAppDialogAlert({ title: 'Google 연동 실패', body: msg });
     } finally {
       setGoogleDemographicsBusy(false);
     }
@@ -464,12 +448,12 @@ export function MeetingServiceAuthModal({
 
   const onSendOtp = useCallback(async () => {
     if (!pk) {
-      Alert.alert('안내', '로그인 후 인증할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 인증할 수 있어요.' });
       return;
     }
     const normalized = normalizePhoneUserId(phoneField);
     if (!normalized) {
-      Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '전화번호를 정확히 입력해 주세요.' });
       return;
     }
     otpSmsUserConsent.stop();
@@ -485,7 +469,7 @@ export function MeetingServiceAuthModal({
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증번호 전송에 실패했습니다.';
       setOtpError(msg);
-      Alert.alert('인증 실패', msg);
+      presentAppDialogAlert({ title: '인증 실패', body: msg });
     } finally {
       setOtpBusy(false);
     }
@@ -493,18 +477,18 @@ export function MeetingServiceAuthModal({
 
   const onConfirmOtp = useCallback(async () => {
     if (!pk) {
-      Alert.alert('안내', '로그인 후 인증할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 인증할 수 있어요.' });
       return;
     }
     if (!otpVerificationId) return;
     const normalized = normalizePhoneUserId(phoneField);
     if (!normalized) {
-      Alert.alert('입력 확인', '전화번호를 정확히 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '전화번호를 정확히 입력해 주세요.' });
       return;
     }
     const code = otpCode.replace(/\D/g, '').slice(0, 6);
     if (code.length !== 6) {
-      Alert.alert('입력 확인', '인증번호 6자리를 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '인증번호 6자리를 입력해 주세요.' });
       return;
     }
     setOtpError(null);
@@ -521,11 +505,11 @@ export function MeetingServiceAuthModal({
       setOtpVerificationId(null);
       setOtpCode('');
       if (Platform.OS === 'android') ToastAndroid.show('전화번호 인증이 완료됐어요.', ToastAndroid.SHORT);
-      else Alert.alert('인증 완료', '전화번호 인증이 완료됐어요.');
+      else presentAppDialogAlert({ title: '인증 완료', body: '전화번호 인증이 완료됐어요.' });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '인증 확인에 실패했습니다.';
       setOtpError(msg);
-      Alert.alert('인증 실패', msg);
+      presentAppDialogAlert({ title: '인증 실패', body: msg });
     } finally {
       setOtpBusy(false);
     }

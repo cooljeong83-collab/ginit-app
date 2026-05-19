@@ -3,8 +3,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -26,6 +25,7 @@ import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-h
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 function RowSep() {
   return <View style={styles.sep} />;
@@ -201,14 +201,8 @@ export default function MeetingChatSettingsScreen() {
   }, [router, meetingId]);
 
   const openLeaveInfo = useCallback(() => {
-    Alert.alert(
-      '모임 나가기',
-      '채팅방을 나가려면 모임 상세 화면에서 나가기를 진행해 주세요. 일정이 확정된 모임은 패널티 안내가 있을 수 있어요.',
-      [
-        { text: '닫기', style: 'cancel' },
-        { text: '모임 상세로', onPress: () => router.push(`/meeting/${meetingId}`) },
-      ],
-    );
+    presentAppDialogConfirm({ title: '모임 나가기', body: '채팅방을 나가려면 모임 상세 화면에서 나가기를 진행해 주세요. 일정이 확정된 모임은 패널티 안내가 있을 수 있어요.', cancelLabel: '닫기', confirmLabel: '모임 상세로', onConfirm: () => router.push(`/meeting/${meetingId}`),
+    });
   }, [router, meetingId]);
 
   if (!meetingId) {

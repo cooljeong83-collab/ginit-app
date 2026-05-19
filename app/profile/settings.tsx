@@ -25,6 +25,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { MeetingServiceAuthModal } from '@/components/profile/MeetingServiceAuthModal';
 import { ScreenShell } from '@/components/ui';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -41,6 +42,7 @@ import {
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { isProfileRegisterInfoParamOn, PROFILE_REGISTER_INFO_QUERY } from '@/src/lib/profile-register-info';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { ensureGinitFcmNotifeeChannel } from '@/src/lib/fcm-notifee-display';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
@@ -318,7 +320,7 @@ export default function ProfileAppSettingsScreen() {
       await playProfileNotificationSoundPreview(id);
       void Haptics.selectionAsync();
     } catch {
-      Alert.alert('알림음', '재생할 수 없어요.');
+      showTransientBottomMessage('재생할 수 없어요.');
     }
   }, []);
 
@@ -360,7 +362,7 @@ export default function ProfileAppSettingsScreen() {
   const onToggleNotify = useCallback(
     async (next: boolean) => {
       if (Platform.OS === 'web') {
-        Alert.alert('안내', '웹에서는 브라우저/OS 설정에서 알림을 관리해 주세요.');
+        presentAppDialogAlert({ title: '안내', body: '웹에서는 브라우저/OS 설정에서 알림을 관리해 주세요.' });
         return;
       }
       if (next) {
@@ -374,16 +376,22 @@ export default function ProfileAppSettingsScreen() {
         });
         setNotifyGranted(status === 'granted');
         if (status !== 'granted') {
-          Alert.alert('알림', '알림을 켜려면 기기 설정에서 권한을 허용해 주세요.', [
-            { text: '닫기', style: 'cancel' },
-            { text: '설정 열기', onPress: () => void Linking.openSettings() },
-          ]);
+          presentAppDialogConfirm({
+            title: '알림',
+            body: '알림을 켜려면 기기 설정에서 권한을 허용해 주세요.',
+            cancelLabel: '닫기',
+            confirmLabel: '설정 열기',
+            onConfirm: () => void Linking.openSettings(),
+          });
         }
       } else {
-        Alert.alert('알림 끄기', '푸시·배너 알림을 끄려면 기기 설정에서 지닛 알림을 꺼 주세요.', [
-          { text: '닫기', style: 'cancel' },
-          { text: '설정 열기', onPress: () => void Linking.openSettings() },
-        ]);
+        presentAppDialogConfirm({
+          title: '알림 끄기',
+          body: '푸시·배너 알림을 끄려면 기기 설정에서 지닛 알림을 꺼 주세요.',
+          cancelLabel: '닫기',
+          confirmLabel: '설정 열기',
+          onConfirm: () => void Linking.openSettings(),
+        });
         void refreshNotify();
       }
     },
@@ -434,31 +442,34 @@ export default function ProfileAppSettingsScreen() {
       await signOutSession({ exitApp: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
-      Alert.alert('로그아웃 실패', msg);
+      presentAppDialogAlert({ title: '로그아웃 실패', body: msg });
     } finally {
       setBusy(false);
     }
   }, [signOutSession]);
 
   const onRequestSignOut = useCallback(() => {
-    Alert.alert('로그아웃', '이 기기에서 로그아웃할까요?', [
-      { text: '취소', style: 'cancel' },
-      { text: '로그아웃', style: 'destructive', onPress: () => void runSignOut() },
-    ]);
+    presentAppDialogConfirm({
+      title: '로그아웃',
+      body: '이 기기에서 로그아웃할까요?',
+      confirmLabel: '로그아웃',
+      confirmVariant: 'destructive',
+      onConfirm: () => void runSignOut(),
+    });
   }, [runSignOut]);
 
   const runDeleteAccount = useCallback(async () => {
     const sessionUserId = userId?.trim() ?? '';
     const authUid = authProfile?.supabaseUserId?.trim() ?? '';
     if (!sessionUserId && !authUid) {
-      Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인된 계정만 탈퇴할 수 있어요.' });
       return;
     }
     setDeleteBusy(true);
     try {
       const preflight = await validateAccountDeletionPreflight(sessionUserId, authUid);
       if (!preflight.ok) {
-        Alert.alert('탈퇴를 진행할 수 없어요', preflight.message);
+        presentAppDialogAlert({ title: '탈퇴를 진행할 수 없어요', body: preflight.message });
         return;
       }
       if (preflight.mode === 'full_deletion') {
@@ -466,20 +477,20 @@ export default function ProfileAppSettingsScreen() {
           ? await purgeUserAccountRemote(sessionUserId)
           : await purgeUserAccountRemoteByFirebaseUid(authUid);
         if (!res.ok) {
-          Alert.alert('탈퇴를 완료하지 못했어요', res.message);
+          presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: res.message });
           return;
         }
       }
       const authDel = await deleteFirebaseAuthUserStrict();
       if (!authDel.ok) {
-        Alert.alert('탈퇴를 완료하지 못했어요', authDel.message);
+        presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: authDel.message });
         return;
       }
       await wipeLocalAppData();
       await signOutSession({ exitApp: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
-      Alert.alert('탈퇴 실패', msg);
+      presentAppDialogAlert({ title: '탈퇴 실패', body: msg });
     } finally {
       setDeleteBusy(false);
     }
@@ -489,7 +500,7 @@ export default function ProfileAppSettingsScreen() {
     const sessionUserId = userId?.trim() ?? '';
     const authUid = authProfile?.supabaseUserId?.trim() ?? '';
     if (!sessionUserId && !authUid) {
-      Alert.alert('안내', '로그인된 계정만 탈퇴할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인된 계정만 탈퇴할 수 있어요.' });
       return;
     }
     const rejoinNotice = accountDeletionRejoinPolicyNotice();
@@ -528,7 +539,7 @@ export default function ProfileAppSettingsScreen() {
 
   const onPressTestCrash = useCallback(() => {
     if (Platform.OS === 'web') {
-      Alert.alert('안내', '웹에서는 테스트 크래시를 지원하지 않아요.');
+      presentAppDialogAlert({ title: '안내', body: '웹에서는 테스트 크래시를 지원하지 않아요.' });
       return;
     }
     Alert.alert('테스트 크래시', '앱이 즉시 종료됩니다. 계속할까요?', [

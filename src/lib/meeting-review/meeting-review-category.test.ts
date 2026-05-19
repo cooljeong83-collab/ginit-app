@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { mapNaverCategoryToReviewCategory } from '@/src/lib/meeting-review/meeting-review-category';
-import { getKeywordsForCategory, MAX_MEETING_REVIEW_KEYWORDS } from '@/src/lib/meeting-review/meeting-review-keywords';
+import {
+  getKeywordsForCategory,
+  getPinnedFormKeywords,
+  getReviewFormKeywordOptions,
+  MAX_MEETING_REVIEW_KEYWORDS,
+} from '@/src/lib/meeting-review/meeting-review-keywords';
 
 describe('mapNaverCategoryToReviewCategory', () => {
   it('maps cafe labels', () => {
@@ -54,5 +59,19 @@ describe('getKeywordsForCategory', () => {
 
   it('enforces max selection constant', () => {
     expect(MAX_MEETING_REVIEW_KEYWORDS).toBe(3);
+  });
+
+  it('appends pinned keywords missing from current category chips', () => {
+    const pinned = getPinnedFormKeywords('common', ['음식이 맛있어요', '모임 장소로 딱!']);
+    expect(pinned).toEqual(['음식이 맛있어요']);
+    const options = getReviewFormKeywordOptions('common', pinned);
+    expect(options).toContain('모임 장소로 딱!');
+    expect(options).toContain('음식이 맛있어요');
+  });
+
+  it('keeps pinned chips visible after user deselects them', () => {
+    const pinned = getPinnedFormKeywords('common', ['음식이 맛있어요']);
+    const options = getReviewFormKeywordOptions('common', pinned);
+    expect(options).toContain('음식이 맛있어요');
   });
 });

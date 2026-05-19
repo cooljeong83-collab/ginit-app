@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { Alert } from 'react-native';
+;
 
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { inviteFriendsToMeeting } from '@/src/lib/meeting-friend-invite';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 export function useMeetingFriendInvite(params: {
   meetingId: string | null | undefined;
@@ -13,7 +14,7 @@ export function useMeetingFriendInvite(params: {
 
   const openInviteModal = useCallback(() => {
     if (!params.meetingId?.trim() || !params.inviterAppUserId?.trim()) {
-      Alert.alert('안내', '로그인 후 친구를 초대할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 친구를 초대할 수 있어요.' });
       return;
     }
     setInviteModalOpen(true);
@@ -29,7 +30,7 @@ export function useMeetingFriendInvite(params: {
       const meetingId = params.meetingId?.trim() ?? '';
       const inviter = params.inviterAppUserId?.trim() ?? '';
       if (!meetingId || !inviter) {
-        Alert.alert('안내', '로그인 후 친구를 초대할 수 있어요.');
+        presentAppDialogAlert({ title: '안내', body: '로그인 후 친구를 초대할 수 있어요.' });
         return;
       }
       setInviteBusy(true);
@@ -40,7 +41,7 @@ export function useMeetingFriendInvite(params: {
           inviteeAppUserIds,
         });
         if (!res.ok) {
-          Alert.alert('초대 실패', res.message);
+          presentAppDialogAlert({ title: '초대 실패', body: res.message });
           return;
         }
         if (res.sent <= 0) {
@@ -48,10 +49,7 @@ export function useMeetingFriendInvite(params: {
           const s = res.skipped;
           if (s?.already_joined) parts.push(`이미 참여 중 ${s.already_joined}명`);
           if (s?.not_friend) parts.push(`친구 아님 ${s.not_friend}명`);
-          Alert.alert(
-            '초대할 수 없어요',
-            parts.length > 0 ? parts.join('\n') : '선택한 친구에게 초대를 보낼 수 없어요.',
-          );
+          presentAppDialogAlert({ title: '초대할 수 없어요', body: parts.length > 0 ? parts.join('\n') : '선택한 친구에게 초대를 보낼 수 없어요.' });
           return;
         }
         setInviteModalOpen(false);
@@ -61,7 +59,7 @@ export function useMeetingFriendInvite(params: {
             : '';
         showTransientBottomMessage(`친구 ${res.sent}명에게 초대 알림을 보냈어요.${suffix}`);
       } catch (e) {
-        Alert.alert('초대 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '초대 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
       } finally {
         setInviteBusy(false);
       }

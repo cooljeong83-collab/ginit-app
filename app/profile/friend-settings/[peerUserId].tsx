@@ -1,8 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator, Alert, Keyboard, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View} from 'react-native';
+import { ActivityIndicator, Keyboard, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -35,6 +34,7 @@ import { blockPeerServerSynced } from '@/src/lib/user-blocks';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getUserProfile, isUserProfileWithdrawn, WITHDRAWN_NICKNAME, type UserProfile } from '@/src/lib/user-profile';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 const MEMO_MAX_LEN = 2000;
 const DISPLAY_NAME_MAX_LEN = 40;
@@ -253,115 +253,110 @@ export default function FriendSettingsScreen() {
 
   const onHide = useCallback(() => {
     if (!me || !peerNorm || busy) return;
-    Alert.alert('숨기기', `${displayNick}님을 친구 목록에서 숨길까요?`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '숨기기',
-        onPress: () => {
-          void (async () => {
-            setBusy(true);
-            try {
-              const s = await loadHiddenPeerIds(me);
-              s.add(friendPeerStorageKey(peerNorm));
-              await saveHiddenPeerIds(me, s);
-              setHidden(true);
-              showTransientBottomMessage('목록에서 숨겼어요.');
-              safeRouterBack(router);
-            } finally {
-              setBusy(false);
-            }
-          })();
-        },
+    presentAppDialogConfirm({
+      title: '숨기기',
+      body: `${displayNick}님을 친구 목록에서 숨길까요?`,
+      confirmLabel: '숨기기',
+      onConfirm: () => {
+        void (async () => {
+          setBusy(true);
+          try {
+            const s = await loadHiddenPeerIds(me);
+            s.add(friendPeerStorageKey(peerNorm));
+            await saveHiddenPeerIds(me, s);
+            setHidden(true);
+            showTransientBottomMessage('목록에서 숨겼어요.');
+            safeRouterBack(router);
+          } finally {
+            setBusy(false);
+          }
+        })();
       },
-    ]);
+    });
   }, [busy, displayNick, me, peerNorm, router]);
 
   const onBlock = useCallback(() => {
     if (!me || !peerNorm || busy) return;
-    Alert.alert(
-      '차단',
-      `${displayNick}님을 차단할까요?\n친구 목록에서 보이지 않으며, 이후 상호작용이 제한될 수 있어요.`,
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '차단',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setBusy(true);
-              try {
-                const pk = friendPeerStorageKey(peerNorm);
-                const blockedSet = await loadBlockedPeerIds(me);
-                blockedSet.add(pk);
-                await saveBlockedPeerIds(me, blockedSet);
-                try {
-                  await blockPeerServerSynced(me, pk);
-                } catch {
-                  // 서버 동기화 실패 시에도 로컬은 유지(기존 UX 호환)
-                }
-                const hiddenSet = await loadHiddenPeerIds(me);
-                hiddenSet.delete(pk);
-                await saveHiddenPeerIds(me, hiddenSet);
-                setBlocked(true);
-                setHidden(false);
-                showTransientBottomMessage('차단했어요.');
-                safeRouterBack(router);
-              } finally {
-                setBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    presentAppDialogConfirm({
+      title: '차단',
+      body: `${displayNick}님을 차단할까요?\n친구 목록에서 보이지 않으며, 이후 상호작용이 제한될 수 있어요.`,
+      confirmLabel: '차단',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        void (async () => {
+          setBusy(true);
+          try {
+            const pk = friendPeerStorageKey(peerNorm);
+            const blockedSet = await loadBlockedPeerIds(me);
+            blockedSet.add(pk);
+            await saveBlockedPeerIds(me, blockedSet);
+            try {
+              await blockPeerServerSynced(me, pk);
+            } catch {
+              // 서버 동기화 실패 시에도 로컬은 유지(기존 UX 호환)
+            }
+            const hiddenSet = await loadHiddenPeerIds(me);
+            hiddenSet.delete(pk);
+            await saveHiddenPeerIds(me, hiddenSet);
+            setBlocked(true);
+            setHidden(false);
+            showTransientBottomMessage('차단했어요.');
+            safeRouterBack(router);
+          } finally {
+            setBusy(false);
+          }
+        })();
+      },
+    });
   }, [busy, displayNick, me, peerNorm, router]);
 
   const onDeleteFriend = useCallback(() => {
     if (!me || !peerNorm || busy) return;
     const fid = friendshipId?.trim() ?? '';
     if (!fid || !relationAccepted) {
-      Alert.alert('알림', '수락된 친구 관계가 없어 삭제할 수 없어요.');
+      presentAppDialogAlert({ title: '알림', body: '수락된 친구 관계가 없어 삭제할 수 없어요.' });
       return;
     }
-    Alert.alert('친구 삭제', `${displayNick}님과의 지닛 친구 관계를 삭제할까요?`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setBusy(true);
-            try {
-              await removeAcceptedFriend(me, fid);
-              await saveFriendDisplayAlias(me, peerNorm, '');
-              await saveFriendPeerMemo(me, peerNorm, '');
-              const fav = await loadFavoritePeerKeys(me);
-              fav.delete(friendPeerStorageKey(peerNorm));
-              await saveFavoritePeerKeys(me, fav);
-              showTransientBottomMessage('친구 관계를 삭제했어요.');
-              safeRouterBack(router);
-            } catch (e) {
-              Alert.alert('삭제 실패', e instanceof Error ? e.message : String(e));
-            } finally {
-              setBusy(false);
-            }
-          })();
-        },
+    presentAppDialogConfirm({
+      title: '친구 삭제',
+      body: `${displayNick}님과의 지닛 친구 관계를 삭제할까요?`,
+      confirmLabel: '삭제',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        void (async () => {
+          setBusy(true);
+          try {
+            await removeAcceptedFriend(me, fid);
+            await saveFriendDisplayAlias(me, peerNorm, '');
+            await saveFriendPeerMemo(me, peerNorm, '');
+            const fav = await loadFavoritePeerKeys(me);
+            fav.delete(friendPeerStorageKey(peerNorm));
+            await saveFavoritePeerKeys(me, fav);
+            showTransientBottomMessage('친구 관계를 삭제했어요.');
+            safeRouterBack(router);
+          } catch (e) {
+            presentAppDialogAlert({
+              title: '삭제 실패',
+              body: e instanceof Error ? e.message : String(e),
+            });
+          } finally {
+            setBusy(false);
+          }
+        })();
       },
-    ]);
+    });
   }, [busy, displayNick, friendshipId, me, peerNorm, relationAccepted, router]);
 
   const onReport = useCallback(() => {
-    Alert.alert('신고', `${displayNick}님을 신고할까요?\n운영 정책에 따라 검토합니다.`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '신고하기',
-        style: 'destructive',
-        onPress: () => {
-          showTransientBottomMessage('신고가 접수되었어요. 검토 후 조치됩니다.');
-        },
+    presentAppDialogConfirm({
+      title: '신고',
+      body: `${displayNick}님을 신고할까요?\n운영 정책에 따라 검토합니다.`,
+      confirmLabel: '신고하기',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        showTransientBottomMessage('신고가 접수되었어요. 검토 후 조치됩니다.');
       },
-    ]);
+    });
   }, [displayNick]);
 
   const memoPreview = memoPreviewLine(memoSaved);

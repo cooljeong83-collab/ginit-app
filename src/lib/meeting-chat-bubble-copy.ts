@@ -1,7 +1,8 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { Alert, Platform, ToastAndroid } from 'react-native';
+import { Platform, ToastAndroid } from 'react-native';
 
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import type { MeetingChatListRow } from '@/src/lib/meeting-chat-list-rows';
 import type { MeetingChatMessage } from '@/src/lib/meeting-chat';
 
@@ -28,12 +29,8 @@ export function copyTextForMeetingChatListRow(row: MeetingChatListRow): string {
 
 export async function copyMeetingChatListRowToClipboard(row: MeetingChatListRow): Promise<void> {
   const text = copyTextForMeetingChatListRow(row).trim();
-  const notifyEmpty = () => {
-    if (Platform.OS === 'android') ToastAndroid.show('복사할 내용이 없어요.', ToastAndroid.SHORT);
-    else Alert.alert('복사', '복사할 내용이 없어요.');
-  };
   if (!text) {
-    notifyEmpty();
+    showTransientBottomMessage('복사할 내용이 없어요.');
     return;
   }
   try {
@@ -44,6 +41,6 @@ export async function copyMeetingChatListRowToClipboard(row: MeetingChatListRow)
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   } catch {
-    Alert.alert('복사', '클립보드에 복사하지 못했어요.');
+    showTransientBottomMessage('클립보드에 복사하지 못했어요.');
   }
 }

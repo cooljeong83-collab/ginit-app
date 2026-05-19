@@ -3,7 +3,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from 'react';
-import { ActivityIndicator, Alert, Keyboard, StyleSheet, Text, TextInput, View} from 'react-native';
+import { ActivityIndicator, Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -48,6 +48,7 @@ import {
   upsertLocalChatRoomReadState,
 } from '@/src/lib/offline-chat/offline-chat-rooms';
 import { backfillOlderRoomMessagesToLocal } from '@/src/lib/offline-chat/offline-chat-sync';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 export default function SocialChatRoomScreen() {
   const router = useTransitionRouter();
@@ -250,7 +251,7 @@ export default function SocialChatRoomScreen() {
       try {
         const blockedByMe = await isPeerBlockedByMe(userId.trim(), peerId).catch(() => false);
         if (blockedByMe) {
-          Alert.alert('차단된 사용자', '차단된 사용자와는 메시지를 주고받을 수 없어요.');
+          presentAppDialogAlert({ title: '차단된 사용자', body: '차단된 사용자와는 메시지를 주고받을 수 없어요.' });
           if (!cancelled) router.back();
           return;
         }
@@ -380,7 +381,7 @@ export default function SocialChatRoomScreen() {
           break;
         }
       }
-      Alert.alert('대화 위치', '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.');
+      presentAppDialogAlert({ title: '대화 위치', body: '로컬에는 있지만 아직 이 화면에 불러와지지 않은 메시지예요.\n위로 스크롤해 조금 더 불러온 뒤 다시 시도해 주세요.' });
     },
     [roomId, userId],
   );
@@ -479,7 +480,7 @@ export default function SocialChatRoomScreen() {
             }
             setTimeout(() => {
               const ok2 = dmBodyRef.current?.scrollToMessageId(tid) ?? false;
-              if (!ok2) Alert.alert('위치 이동', '해당 메시지를 목록에서 찾지 못했어요.');
+              if (!ok2) presentAppDialogAlert({ title: '위치 이동', body: '해당 메시지를 목록에서 찾지 못했어요.' });
             }, 80);
           } finally {
             setSearchNavigateLoading(false);

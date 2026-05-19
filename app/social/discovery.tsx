@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text} from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SocialDiscovery, type DiscoveryCardProfile } from '@/components/social/SocialDiscovery';
@@ -12,6 +12,7 @@ import { notifyFriendRequestReceivedFireAndForget } from '@/src/lib/friend-push-
 import { sendGinitRequest } from '@/src/lib/friends';
 import { friendsAllowRecommendationsStorageKey, loadFriendBoolPref } from '@/src/lib/friends-privacy-local';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 const DEMO: DiscoveryCardProfile[] = [
   {
@@ -64,7 +65,7 @@ export default function SocialDiscoveryScreen() {
     async (peerId: string) => {
       const me = userId?.trim();
       if (!me) {
-        Alert.alert('안내', '로그인 후 지닛을 보낼 수 있어요.');
+        presentAppDialogAlert({ title: '안내', body: '로그인 후 지닛을 보낼 수 있어요.' });
         return;
       }
       try {
@@ -75,9 +76,9 @@ export default function SocialDiscoveryScreen() {
           requesterAppUserId: me,
           requesterDisplayName: card?.displayName,
         });
-        Alert.alert('지닛 전송', '상대에게 친구 요청을 보냈어요.');
+        presentAppDialogAlert({ title: '지닛 전송', body: '상대에게 친구 요청을 보냈어요.' });
       } catch (e) {
-        Alert.alert('오류', e instanceof Error ? e.message : String(e));
+        presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
       }
       setDeck((d) => d.filter((x) => x.userId !== peerId));
     },

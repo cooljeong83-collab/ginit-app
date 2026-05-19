@@ -1,13 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SettlementBankLogo } from '@/components/settlement/SettlementBankLogo';
@@ -29,6 +22,7 @@ import {
 } from '@/src/lib/user-settlement-accounts';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 export default function SettlementAccountsScreen() {
   const router = useTransitionRouter();
@@ -71,7 +65,7 @@ export default function SettlementAccountsScreen() {
         await setDefaultUserSettlementAccount(uid, id);
         await reload();
       } catch (e) {
-        Alert.alert('오류', e instanceof Error ? e.message : String(e));
+        presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
       }
     },
     [userId, reload],
@@ -79,23 +73,22 @@ export default function SettlementAccountsScreen() {
 
   const onDelete = useCallback(
     (item: UserSettlementAccountItem) => {
-      Alert.alert('삭제', '이 정산 계좌를 삭제할까요?', [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: async () => {
-            const uid = (userId ?? '').trim();
-            if (!uid) return;
-            try {
-              await deleteUserSettlementAccount(uid, item.id);
-              await reload();
-            } catch (e) {
-              Alert.alert('오류', e instanceof Error ? e.message : String(e));
-            }
-          },
+      presentAppDialogConfirm({
+        title: '삭제',
+        body: '이 정산 계좌를 삭제할까요?',
+        confirmLabel: '삭제',
+        confirmVariant: 'destructive',
+        onConfirm: async () => {
+          const uid = (userId ?? '').trim();
+          if (!uid) return;
+          try {
+            await deleteUserSettlementAccount(uid, item.id);
+            await reload();
+          } catch (e) {
+            presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
+          }
         },
-      ]);
+      });
     },
     [userId, reload],
   );

@@ -24,13 +24,13 @@ import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { purgeDeletedMeetingLocally } from '@/src/lib/meeting-deleted-local-purge';
 import { removeMeetingFromMeetingsQueryCaches } from '@/src/lib/meeting-sync-service';
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
 import { ensureUserProfile } from '@/src/lib/user-profile';
 import { getMeetingArrivalVerifyPolicy } from '@/src/lib/meeting-arrival-verify';
 
 import type { QueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, Platform } from 'react-native';
 
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 
@@ -83,7 +83,10 @@ export function useMeetingHost({
           void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
           showTransientBottomMessage('참가 신청을 승인했어요.');
         } catch (e) {
-          Alert.alert('승인 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+          presentAppDialogAlert({
+            title: '승인 실패',
+            body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+          });
         } finally {
           setHostJoinRequestBusyId(null);
           hostJoinRequestActionInFlightRef.current = false;
@@ -107,7 +110,10 @@ export function useMeetingHost({
           void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
           showTransientBottomMessage('참가 신청을 거절했어요.');
         } catch (e) {
-          Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+          presentAppDialogAlert({
+            title: '처리 실패',
+            body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+          });
         } finally {
           setHostJoinRequestBusyId(null);
           hostJoinRequestActionInFlightRef.current = false;
@@ -129,38 +135,36 @@ export function useMeetingHost({
       if (hostKickParticipantInFlightRef.current) return;
       const prof = participantProfiles[tid];
       const nickname = (prof?.nickname ?? '').trim() || '이 참여자';
-      Alert.alert(
-        '강제 퇴장',
-        `${nickname}님을 이 모임에서 퇴장시킬까요?\n이후에는 이 모임에 다시 들어오거나 신청할 수 없어요.`,
-        [
-          { text: '취소', style: 'cancel' },
-          {
-            text: '퇴장',
-            style: 'destructive',
-            onPress: () => {
-              void (async () => {
-                hostKickParticipantInFlightRef.current = true;
-                try {
-                  await hostRemoveParticipant(meeting.id, userId.trim(), tid);
-                  void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-                  showTransientBottomMessage('참여자를 퇴장시켰어요.');
-                } catch (e) {
-                  Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-                } finally {
-                  hostKickParticipantInFlightRef.current = false;
-                }
-              })();
-            },
-          },
-        ],
-      );
+      presentAppDialogConfirm({
+        title: '강제 퇴장',
+        body: `${nickname}님을 이 모임에서 퇴장시킬까요?\n이후에는 이 모임에 다시 들어오거나 신청할 수 없어요.`,
+        confirmLabel: '퇴장',
+        confirmVariant: 'destructive',
+        onConfirm: () => {
+          void (async () => {
+            hostKickParticipantInFlightRef.current = true;
+            try {
+              await hostRemoveParticipant(meeting.id, userId.trim(), tid);
+              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+              showTransientBottomMessage('참여자를 퇴장시켰어요.');
+            } catch (e) {
+              presentAppDialogAlert({
+                title: '처리 실패',
+                body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+              });
+            } finally {
+              hostKickParticipantInFlightRef.current = false;
+            }
+          })();
+        },
+      });
     },
     [meeting, userId, queryClient, participantProfiles],
   );
 
   const handleUnconfirmMeetingSchedule = useCallback(() => {
     if (!meeting || !userId?.trim()) {
-      Alert.alert('안내', '로그인한 주관자만 확정을 취소할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인한 주관자만 확정을 취소할 수 있어요.' });
       return;
     }
     if (meeting.scheduleConfirmed !== true) return;
@@ -172,9 +176,10 @@ export function useMeetingHost({
         arrivalPol.guest_arrival_pill_visible_before_min,
       )
     ) {
-      Alert.alert('안내', `모임 시작 ${arrivalPol.guest_arrival_pill_visible_before_min}분 전부터는 일정 확정을 취소할 수 없어요.`, [
-        { text: '확인' },
-      ]);
+      presentAppDialogAlert({
+        title: '안내',
+        body: `모임 시작 ${arrivalPol.guest_arrival_pill_visible_before_min}분 전부터는 일정 확정을 취소할 수 없어요.`,
+      });
       return;
     }
     const winPolicyRaw = getPolicy<unknown>('trust', 'penalty_near_meeting_cancel_window_hours', {
@@ -213,12 +218,13 @@ export function useMeetingHost({
         ? `\n\n예정 시작 ${ih}시간 이내예요. 확정을 취소하면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
         : `\n\n예정 시작 ${oh}시간 이내·${ih}시간 전보다는 일찍 취소해요. 확정을 취소하면 gTrust가 약 ${trustDrop}점 낮아지고, XP가 ${xpDrop} 감소하며 누적 패널티가 1회 늘어납니다.`
       : `\n\n예정 시작 ${oh}시간 전보다 일찍 취소하면 신뢰·XP 패널티는 적용되지 않아요.`;
-    Alert.alert('확정 취소', baseUnconfirm + penaltyHint, [
-      { text: '닫기', style: 'cancel' },
-      {
-        text: '확정 취소',
-        style: 'destructive',
-        onPress: () => {
+    presentAppDialogConfirm({
+      title: '확정 취소',
+      body: baseUnconfirm + penaltyHint,
+      cancelLabel: '닫기',
+      confirmLabel: '확정 취소',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
           void (async () => {
             setConfirmScheduleBusy(true);
             let hostPenaltyApplied = false;
@@ -234,12 +240,13 @@ export function useMeetingHost({
                   await applyTrustPenaltyHostUnconfirmConfirmedMeeting(userId.trim(), meeting.id);
                   hostPenaltyApplied = true;
                 } catch (e) {
-                  Alert.alert(
-                    '처리 실패',
-                    e instanceof Error
-                      ? e.message
-                      : '신뢰 패널티 반영에 실패했어요. 잠시 후 다시 시도해 주세요.',
-                  );
+                  presentAppDialogAlert({
+                    title: '처리 실패',
+                    body:
+                      e instanceof Error
+                        ? e.message
+                        : '신뢰 패널티 반영에 실패했어요. 잠시 후 다시 시도해 주세요.',
+                  });
                   return;
                 }
               }
@@ -247,112 +254,105 @@ export function useMeetingHost({
               await unconfirmMeetingSchedule(meeting.id, userId.trim());
               void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
               if (hostPenaltyApplied) {
-                if (Platform.OS === 'web') {
-                  setTimeout(() => {
-                    Alert.alert(
-                      '신뢰 패널티가 반영됐어요',
-                      `gTrust ${trustDrop}점·XP ${xpDrop}가 차감됐고, 누적 패널티가 1회 늘었어요.`,
-                      [{ text: '확인' }],
-                    );
-                  }, 400);
-                } else {
-                  notifyTrustPenaltyAppliedFireAndForget({ trustPoints: trustDrop, xpPoints: xpDrop });
-                }
+                notifyTrustPenaltyAppliedFireAndForget({ trustPoints: trustDrop, xpPoints: xpDrop });
               }
             } catch (e) {
-              Alert.alert('처리 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+              presentAppDialogAlert({
+                title: '처리 실패',
+                body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+              });
             } finally {
               setConfirmScheduleBusy(false);
             }
           })();
-        },
       },
-    ]);
+    });
   }, [meeting, userId, queryClient]);
 
   const handleConfirmSchedule = useCallback(() => {
     if (!meeting || !userId?.trim()) {
-      Alert.alert('안내', '로그인한 주관자만 확정할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인한 주관자만 확정할 수 있어요.' });
       return;
     }
     if (meeting.scheduleConfirmed === true) return;
     const analysis = computeMeetingConfirmAnalysis(meeting, hostTiePicks);
     if (!analysis.allReady && analysis.firstBlock) {
       const { section, message } = analysis.firstBlock;
-      Alert.alert('동점 후보 선택 필요', message, [{ text: '확인', onPress: () => scrollToVoteBlock(section) }]);
+      presentAppDialogAlert({
+        title: '동점 후보 선택 필요',
+        body: message,
+        onPrimary: () => scrollToVoteBlock(section),
+      });
       return;
     }
-    Alert.alert(
-      '일정 확정',
-      '집계된 투표를 반영해 모임을 확정할까요? 이후 우측 상단에는「확정」으로 표시됩니다.',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '확정',
-          onPress: () => {
-            void (async () => {
-              setConfirmScheduleBusy(true);
-              try {
-                markRecentSelfMeetingChange(meeting.id);
-                await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
-                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-                const hasWebGuest = (meeting.participantIds ?? []).some((id) =>
-                  typeof id === 'string' && isGinitWebGuestParticipantId(id),
-                );
-                if (hasWebGuest) {
-                  Alert.alert('확정 완료', '게스트 참여자가 있어요. 확정된 일정을 공유해 주세요.', [{ text: '확인' }]);
-                }
-              } catch (e) {
-                const msg = e instanceof Error ? e.message : '';
-                if (isConfirmedScheduleOverlapErrorMessage(msg)) {
-                  showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
-                } else {
-                  Alert.alert('확정 실패', msg || '다시 시도해 주세요.');
-                }
-              } finally {
-                setConfirmScheduleBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    presentAppDialogConfirm({
+      title: '일정 확정',
+      body: '집계된 투표를 반영해 모임을 확정할까요? 이후 우측 상단에는「확정」으로 표시됩니다.',
+      confirmLabel: '확정',
+      confirmVariant: 'primary',
+      onConfirm: () => {
+        void (async () => {
+          setConfirmScheduleBusy(true);
+          try {
+            markRecentSelfMeetingChange(meeting.id);
+            await confirmMeetingSchedule(meeting.id, userId.trim(), hostTiePicks);
+            void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+            const hasWebGuest = (meeting.participantIds ?? []).some((id) =>
+              typeof id === 'string' && isGinitWebGuestParticipantId(id),
+            );
+            if (hasWebGuest) {
+              presentAppDialogAlert({
+                title: '확정 완료',
+                body: '게스트 참여자가 있어요. 확정된 일정을 공유해 주세요.',
+              });
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : '';
+            if (isConfirmedScheduleOverlapErrorMessage(msg)) {
+              showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
+            } else {
+              presentAppDialogAlert({ title: '확정 실패', body: msg || '다시 시도해 주세요.' });
+            }
+          } finally {
+            setConfirmScheduleBusy(false);
+          }
+        })();
+      },
+    });
   }, [meeting, userId, hostTiePicks, scrollToVoteBlock, queryClient]);
 
   const handleDeleteMeeting = useCallback(() => {
     if (!meeting || !userId?.trim()) {
-      Alert.alert('안내', '로그인한 주관자만 삭제할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인한 주관자만 삭제할 수 있어요.' });
       return;
     }
     if (meeting.scheduleConfirmed === true) return;
-    Alert.alert(
-      '모임 삭제',
-      '이 모임을 삭제하면 참여자·투표 등 모든 정보가 사라지며 되돌릴 수 없습니다. 삭제할까요?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setDeleteMeetingBusy(true);
-              try {
-                markRecentSelfMeetingChange(meeting.id);
-                await deleteMeetingByHost(meeting.id, userId.trim());
-                await purgeDeletedMeetingLocally(queryClient, meeting.id, userId.trim());
-                removeMeetingFromMeetingsQueryCaches(queryClient, meeting.id, userId.trim());
-                void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-                router.push('/(tabs)');
-              } catch (e) {
-                Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-              } finally {
-                setDeleteMeetingBusy(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
+    presentAppDialogConfirm({
+      title: '모임 삭제',
+      body: '이 모임을 삭제하면 참여자·투표 등 모든 정보가 사라지며 되돌릴 수 없습니다. 삭제할까요?',
+      confirmLabel: '삭제',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        void (async () => {
+          setDeleteMeetingBusy(true);
+          try {
+            markRecentSelfMeetingChange(meeting.id);
+            await deleteMeetingByHost(meeting.id, userId.trim());
+            await purgeDeletedMeetingLocally(queryClient, meeting.id, userId.trim());
+            removeMeetingFromMeetingsQueryCaches(queryClient, meeting.id, userId.trim());
+            void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+            router.push('/(tabs)');
+          } catch (e) {
+            presentAppDialogAlert({
+              title: '삭제 실패',
+              body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+            });
+          } finally {
+            setDeleteMeetingBusy(false);
+          }
+        })();
+      },
+    });
   }, [meeting, userId, router, queryClient]);
 
   return {

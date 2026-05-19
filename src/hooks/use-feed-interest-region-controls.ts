@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Platform } from 'react-native';
+import { Keyboard, Platform } from 'react-native';
 
 import { normalizeFeedRegionLabel } from '@/src/lib/feed-region-match';
 import { readStoredUserId } from '@/src/lib/app-user-id';
@@ -17,6 +17,7 @@ import { emitFeedInterestRegionSelectionChanged } from '@/src/lib/feed-interest-
 import { closestRegisteredFeedRegionNorm } from '@/src/lib/feed-region-map-center';
 import type { LatLng } from '@/src/lib/geo-distance';
 import { getInterestRegionDisplayLabel, searchKoreaInterestDistricts } from '@/src/lib/korea-interest-districts';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 function resolveExploreActiveRegionNorm(
   registeredRegions: readonly string[],
@@ -147,10 +148,7 @@ export function useFeedInterestRegionControls() {
 
   const closeRegionModal = useCallback(() => {
     if (registeredRegionsRef.current.length === 0) {
-      Alert.alert(
-        '관심 지역 필요',
-        '탐색을 사용하려면 관심 지역을 한 곳 이상 추가한 뒤 「적용」을 눌러 주세요.',
-      );
+      presentAppDialogAlert({ title: '관심 지역 필요', body: '탐색을 사용하려면 관심 지역을 한 곳 이상 추가한 뒤 「적용」을 눌러 주세요.' });
       return;
     }
     setRegionSearchModalOpen(false);
@@ -164,7 +162,7 @@ export function useFeedInterestRegionControls() {
 
   const openRegionSearchModal = useCallback(() => {
     if (draftRegisteredRegions.length >= FEED_REGISTERED_REGIONS_MAX) {
-      Alert.alert('알림', `관심 지역은 최대 ${FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.`);
+      presentAppDialogAlert({ title: '알림', body: `관심 지역은 최대 ${FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.` });
       return;
     }
     setRegionSearchQuery('');
@@ -211,7 +209,7 @@ export function useFeedInterestRegionControls() {
     setDraftRegisteredRegions((prev) => {
       if (prev.some((x) => normalizeFeedRegionLabel(x) === norm)) return prev;
       if (prev.length >= FEED_REGISTERED_REGIONS_MAX) {
-        Alert.alert('알림', `관심 지역은 최대 ${FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.`);
+        presentAppDialogAlert({ title: '알림', body: `관심 지역은 최대 ${FEED_REGISTERED_REGIONS_MAX}곳까지 등록할 수 있어요.` });
         return prev;
       }
       const next = [...prev, norm];
@@ -253,7 +251,7 @@ export function useFeedInterestRegionControls() {
       if (dedup.length >= FEED_REGISTERED_REGIONS_MAX) break;
     }
     if (dedup.length < 1) {
-      Alert.alert('관심 지역 필요', '한 곳 이상 추가해 주세요.');
+      presentAppDialogAlert({ title: '관심 지역 필요', body: '한 곳 이상 추가해 주세요.' });
       return;
     }
     const setNorms = new Set(dedup.map((r) => normalizeFeedRegionLabel(r)));

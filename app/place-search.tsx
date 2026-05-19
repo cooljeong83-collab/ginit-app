@@ -5,17 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  InteractionManager,
-  Keyboard,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, InteractionManager, Keyboard, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -40,6 +30,7 @@ import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 const PLACE_PAGE = 5;
 
@@ -284,7 +275,7 @@ function PlaceSearchScreenInner({
       registeredInterestRegionsRef.current,
     );
     if (!regionGate.ok) {
-      Alert.alert(regionGate.title, regionGate.message);
+      presentAppDialogAlert({ title: regionGate.title, body: regionGate.message });
       setError(regionGate.message);
       if (createAutopilot === '1') {
         setCreateMeetingPlaceAutopilotError(regionGate.message);

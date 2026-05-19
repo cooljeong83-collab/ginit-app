@@ -3,22 +3,7 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  ActivityIndicator,
-  Alert,
-  Animated,
-  BackHandler,
-  Easing,
-  InteractionManager,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View
-} from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Animated, BackHandler, Easing, InteractionManager, Platform, StyleSheet, Text, TextInput, ToastAndroid, useWindowDimensions, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -53,6 +38,7 @@ import {
 import { createSupabaseClientWithAccessToken, supabase } from '@/src/lib/supabase';
 import { AuthService } from '@/src/services/AuthService';
 import { serverTimestamp, Timestamp } from '@/src/lib/ginit-timestamp';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 const UI_LOG = '[GinitAuth:LoginUI]';
 
@@ -352,7 +338,7 @@ export default function LoginScreen() {
           setAuthProfile(snapshotFromSupabaseUser(meta.user));
         } else if (meta.status === 'error') {
           setLoginError(meta.message + (meta.code ? ` (${meta.code})` : ''));
-          Alert.alert('리다이렉트 로그인 실패', meta.code ? `${meta.code}\n${meta.message}` : meta.message);
+          presentAppDialogAlert({ title: '리다이렉트 로그인 실패', body: meta.code ? `${meta.code}\n${meta.message}` : meta.message });
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -535,7 +521,7 @@ export default function LoginScreen() {
       }
       setPendingConsentAction(null);
       setLoginError(`${message}${code ? ` (${code})` : ''}`);
-      Alert.alert('Google 연동 실패', code ? `${code}\n${message}` : message);
+      presentAppDialogAlert({ title: 'Google 연동 실패', body: code ? `${code}\n${message}` : message });
     } finally {
       setBusyGoogle(false);
     }

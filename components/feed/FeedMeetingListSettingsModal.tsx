@@ -2,22 +2,13 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import Feather from '@expo/vector-icons/Feather';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 
@@ -237,7 +228,7 @@ export function FeedMeetingListSettingsModal({
   const onPressSave = useCallback(() => {
     const ordered = sortedCategoryMaster.map((c) => c.id);
     if (ordered.length > 0 && visibilityDraft.length === 0) {
-      Alert.alert('선택 필요', '피드에서 고를 카테고리를 최소 하나 이상 선택해 주세요.');
+      presentAppDialogAlert({ title: '선택 필요', body: '피드에서 고를 카테고리를 최소 하나 이상 선택해 주세요.' });
       return;
     }
     const nextVisible =

@@ -4,8 +4,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { type ElementRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-    AccessibilityInfo, ActivityIndicator, Alert, Animated, findNodeHandle, InteractionManager, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, type TextInput as TextInputRefType, UIManager, View} from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Animated, findNodeHandle, InteractionManager, Keyboard, Modal, Platform, StyleSheet, Text, TextInput, type TextInput as TextInputRefType, UIManager, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -26,6 +25,7 @@ import { sanitizeSignUpDisplayName, sanitizeSignUpEmail } from '@/src/lib/sign-u
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import { hasLoginableUserForPhoneE164 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 function paramToString(v: string | string[] | undefined): string {
   if (v == null) return '';
@@ -214,7 +214,7 @@ export default function SignUpScreen() {
       if (alreadyMember) {
         const msg = '이 번호는 이미 가입되어 있어요. 로그인 화면으로 돌아가 주세요.';
         setOtpError(msg);
-        Alert.alert('안내', msg);
+        presentAppDialogAlert({ title: '안내', body: msg });
         return;
       }
       const { verificationId } = await AuthService.verifyPhoneNumber(normalizedPhone);

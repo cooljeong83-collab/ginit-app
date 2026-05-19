@@ -16,8 +16,7 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import {
   useCallback, useEffect, useMemo, useRef, useState, type ComponentProps
 } from 'react';
-import {
-  ActivityIndicator, Alert, Animated, BackHandler, Easing, InteractionManager, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type ViewStyle} from 'react-native';
+import { ActivityIndicator, Animated, BackHandler, Easing, InteractionManager, Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type DateTimePickerEvent = Parameters<NonNullable<ComponentProps<typeof DateTimePicker>['onChange']>>[0];
@@ -163,6 +162,7 @@ import { addMeeting, DEFAULT_PUBLIC_MEETING_DETAILS_CONFIG, normalizeProfileGend
 import { ensureNearbySearchBias, invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import {
   getUserProfile,
   isMeetingServiceComplianceComplete,
@@ -453,7 +453,7 @@ export default function CreateDetailsScreen() {
     setVoiceDescriptionRecognizing(false);
     setVoiceNluDraftRecognizing(false);
     voiceCreateTargetRef.current = null;
-    Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
+    presentAppDialogAlert({ title: '음성 입력 오류', body: humanizeSpeechRecognitionError(event) });
   });
   useSpeechRecognitionEvent('result', (event) => {
     const t = String(event?.results?.[0]?.transcript ?? '').trim();
@@ -479,7 +479,7 @@ export default function CreateDetailsScreen() {
     }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      presentAppDialogAlert({ title: '권한 필요', body: '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.' });
       return;
     }
     voiceCreateTargetRef.current = 'title';
@@ -498,7 +498,7 @@ export default function CreateDetailsScreen() {
     }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      presentAppDialogAlert({ title: '권한 필요', body: '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.' });
       return;
     }
     voiceCreateTargetRef.current = 'description';
@@ -517,7 +517,7 @@ export default function CreateDetailsScreen() {
     }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      presentAppDialogAlert({ title: '권한 필요', body: '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.' });
       return;
     }
     voiceCreateTargetRef.current = 'nluDraft';
@@ -720,29 +720,28 @@ export default function CreateDetailsScreen() {
     (id: string) => {
       if (id === selectedCategoryId) return;
       if (currentStep > 1) {
-        Alert.alert('카테고리 변경', '카테고리 변경 시 입력 내용이 초기화됩니다.', [
-          { text: '취소', style: 'cancel' },
-          {
-            text: '확인',
-            onPress: () => {
-              layoutAnimateMeetingCreateWizard();
-              suppressStepLayoutAnimateFromCategoryRef.current = true;
-              resetWizardState();
-              setSelectedCategoryId(id);
-              setCurrentStep(1);
-              nluComposerDismissOpacity.setValue(1);
-              setNluComposerUserDismissed(false);
-              requestAnimationFrame(() => {
-                const scroller = mainScrollRef.current as any;
-                if (typeof scroller?.scrollToPosition === 'function') {
-                  scroller.scrollToPosition(0, 0, true);
-                  return;
-                }
-                scroller?.scrollTo?.({ y: 0, animated: true });
-              });
-            },
+        presentAppDialogConfirm({
+          title: '카테고리 변경',
+          body: '카테고리 변경 시 입력 내용이 초기화됩니다.',
+          confirmLabel: '확인',
+          onConfirm: () => {
+            layoutAnimateMeetingCreateWizard();
+            suppressStepLayoutAnimateFromCategoryRef.current = true;
+            resetWizardState();
+            setSelectedCategoryId(id);
+            setCurrentStep(1);
+            nluComposerDismissOpacity.setValue(1);
+            setNluComposerUserDismissed(false);
+            requestAnimationFrame(() => {
+              const scroller = mainScrollRef.current as any;
+              if (typeof scroller?.scrollToPosition === 'function') {
+                scroller.scrollToPosition(0, 0, true);
+                return;
+              }
+              scroller?.scrollTo?.({ y: 0, animated: true });
+            });
           },
-        ]);
+        });
         return;
       }
       // Step 1에서는 선택 즉시 UI가 바뀌도록 애니메이션으로 피드백을 강화합니다.
@@ -1633,16 +1632,16 @@ export default function CreateDetailsScreen() {
   const onPressAnalyzeNaturalLanguage = useCallback(async () => {
     const raw = naturalLanguageDraft.trim();
     if (!raw) {
-      Alert.alert('입력', '모임 내용을 입력하거나 음성으로 말해 주세요.');
+      presentAppDialogAlert({ title: '입력', body: '모임 내용을 입력하거나 음성으로 말해 주세요.' });
       return;
     }
     if (catLoading || categories.length === 0) {
-      Alert.alert('잠시만요', '카테고리를 불러오는 중입니다.');
+      presentAppDialogAlert({ title: '잠시만요', body: '카테고리를 불러오는 중입니다.' });
       return;
     }
     const blockedLocal = isMeetingCreateNaturalLanguageBlocked(raw);
     if (blockedLocal.blocked) {
-      Alert.alert('모임 생성', blockedLocal.message);
+      presentAppDialogAlert({ title: '모임 생성', body: blockedLocal.message });
       return;
     }
     /** 하단 채팅 전송 시 말풍선이 접혀 있으면 자동으로 펼쳐 대화가 이어지게 함 */
@@ -1726,7 +1725,7 @@ export default function CreateDetailsScreen() {
         );
         surf?.setIntelligentSuggestionDirect(MEETING_CREATE_AGENT_NLU_ERROR_RETRY_BUBBLE);
         if ('blocked' in inv && inv.blocked) {
-          Alert.alert('모임 생성', inv.error);
+          presentAppDialogAlert({ title: '모임 생성', body: inv.error });
         } else {
           setWizardError(inv.error);
           showTransientBottomMessage(inv.error);
@@ -2187,13 +2186,13 @@ export default function CreateDetailsScreen() {
   const onFinalRegister = useCallback(async (opts?: { rethrowOnAddMeetingFailure?: boolean }) => {
     setWizardError(null);
     if (meetingCreateNluConfirmPhaseRef.current !== 'none') {
-      Alert.alert('확인 필요', 'AI 요약을 확인한 뒤 말풍선의 수락을 눌러 주세요.');
+      presentAppDialogAlert({ title: '확인 필요', body: 'AI 요약을 확인한 뒤 말풍선의 수락을 눌러 주세요.' });
       return;
     }
     const cid = selectedCategory?.id?.trim() ?? '';
     const clabel = selectedCategory?.label?.trim() ?? '';
     if (!cid || !clabel) {
-      Alert.alert('오류', '카테고리를 선택해 주세요.');
+      presentAppDialogAlert({ title: '오류', body: '카테고리를 선택해 주세요.' });
       return;
     }
     const capMax = meetingCreateRules.capacityMax;
@@ -2201,7 +2200,7 @@ export default function CreateDetailsScreen() {
     const feeMax = meetingCreateRules.membershipFeeWonMax;
     if (!Number.isFinite(minParticipants) || minParticipants < minFloor || minParticipants > capMax) {
       setWizardError('최소 인원을 선택해 주세요.');
-      Alert.alert('입력 확인', '최소 인원을 선택해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '최소 인원을 선택해 주세요.' });
       return;
     }
     if (
@@ -2211,7 +2210,7 @@ export default function CreateDetailsScreen() {
       (maxParticipants > capMax && maxParticipants !== CAPACITY_UNLIMITED)
     ) {
       setWizardError('최대 인원을 선택해 주세요.');
-      Alert.alert('입력 확인', '최대 인원을 선택해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '최대 인원을 선택해 주세요.' });
       return;
     }
     if (
@@ -2222,51 +2221,51 @@ export default function CreateDetailsScreen() {
         meetingConfig.membershipFeeWon < 1)
     ) {
       setWizardError('회비 금액을 입력해 주세요.');
-      Alert.alert('입력 확인', '회비를 선택한 경우 1원 이상의 금액을 입력해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '회비를 선택한 경우 1원 이상의 금액을 입력해 주세요.' });
       return;
     }
     if (isPublicMeeting && meetingConfig.settlement === 'MEMBERSHIP_FEE' && typeof meetingConfig.membershipFeeWon === 'number') {
       if (meetingConfig.membershipFeeWon > feeMax) {
         const wonLabel = `${feeMax.toLocaleString('ko-KR')}원`;
         setWizardError(`회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
-        Alert.alert('입력 확인', `회비는 최대 ${wonLabel}까지 입력할 수 있어요.`);
+        presentAppDialogAlert({ title: '입력 확인', body: `회비는 최대 ${wonLabel}까지 입력할 수 있어요.` });
         return;
       }
     }
     if (specialtyKind === 'movie' && movieCandidates.length === 0) {
       setWizardError('영화 후보를 한 개 이상 선택해 주세요.');
-      Alert.alert('입력 확인', '영화 후보를 한 개 이상 선택해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '영화 후보를 한 개 이상 선택해 주세요.' });
       return;
     }
     if (specialtyKind === 'food' && menuPreferences.length === 0) {
       setWizardError('메뉴 성향을 한 가지 이상 선택해 주세요.');
-      Alert.alert('입력 확인', '메뉴 성향을 한 가지 이상 선택해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '메뉴 성향을 한 가지 이상 선택해 주세요.' });
       return;
     }
     if (specialtyKind === 'sports' && activeLifeMajor && activityKinds.length === 0) {
       setWizardError('활동 종류를 한 가지 선택해 주세요.');
-      Alert.alert('입력 확인', '활동 종류를 한 가지 선택해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '활동 종류를 한 가지 선택해 주세요.' });
       return;
     }
     if (specialtyKind === 'sports' && (playAndVibeMajor || pcGameMajor) && gameKinds.length === 0) {
       const msg = pcGameMajor ? 'PC 게임을 한 가지 선택해 주세요.' : '게임 종류를 한 가지 선택해 주세요.';
       setWizardError(msg);
-      Alert.alert('입력 확인', msg);
+      presentAppDialogAlert({ title: '입력 확인', body: msg });
       return;
     }
     if (specialtyKind === 'knowledge' && focusKnowledgePreferences.length === 0) {
       setWizardError('모임 성격을 한 가지 선택해 주세요.');
-      Alert.alert('입력 확인', '모임 성격을 한 가지 선택해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: '모임 성격을 한 가지 선택해 주세요.' });
       return;
     }
     const built = (placesFormRef.current ?? scheduleFormRef.current)?.buildPayload();
     if (!built?.ok) {
       setWizardError(built?.error ?? '일시·장소 후보를 확인해 주세요.');
-      Alert.alert('입력 확인', built?.error ?? '일시·장소 후보를 확인해 주세요.');
+      presentAppDialogAlert({ title: '입력 확인', body: built?.error ?? '일시·장소 후보를 확인해 주세요.' });
       return;
     }
     if (!userId?.trim()) {
-      Alert.alert('전화번호 필요', '모임을 등록하려면 로그인 화면에서 전화번호로 시작해 주세요.');
+      presentAppDialogAlert({ title: '전화번호 필요', body: '모임을 등록하려면 로그인 화면에서 전화번호로 시작해 주세요.' });
       router.replace('/login');
       return;
     }
@@ -2276,9 +2275,7 @@ export default function CreateDetailsScreen() {
       hostProfile = await getUserProfile(userId.trim());
       const uid = userId.trim();
       if (!hostProfile || !isMeetingServiceComplianceComplete(hostProfile, uid)) {
-        Alert.alert('인증 정보 등록', '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', [
-          { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
-        ]);
+        presentAppDialogAlert({ title: '인증 정보 등록', body: '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', onPrimary: () => pushProfileOpenRegisterInfo(router) });
         return;
       }
     } catch {
@@ -2363,7 +2360,7 @@ export default function CreateDetailsScreen() {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
       setWizardError(msg);
       if (!opts?.rethrowOnAddMeetingFailure) {
-        Alert.alert('등록 실패', msg);
+        presentAppDialogAlert({ title: '등록 실패', body: msg });
       }
       if (opts?.rethrowOnAddMeetingFailure) {
         throw e instanceof Error ? e : new Error(msg);

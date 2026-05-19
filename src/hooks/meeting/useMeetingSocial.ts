@@ -15,7 +15,8 @@ import {
 } from '@/src/lib/user-profile';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert } from 'react-native';
+;
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 function orderedParticipantIds(m: Meeting): string[] {
   const hostRaw = m.createdBy?.trim() ?? '';
@@ -115,7 +116,7 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
       const pid = peerAppUserId.trim();
       if (!pid) return;
       if (isGinitWebGuestParticipantId(pid)) {
-        Alert.alert('웹 참여자', '웹 링크로 참여한 분은 지닛 프로필이 없어요.');
+        presentAppDialogAlert({ title: '웹 참여자', body: '웹 링크로 참여한 분은 지닛 프로필이 없어요.' });
         return;
       }
       router.push(`/profile/user/${encodeURIComponent(pid)}`);
@@ -177,7 +178,7 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
     const peer = profilePopupUserId?.trim() ?? '';
     if (!peer) return;
     if (!me) {
-      Alert.alert('로그인이 필요해요', '친구 요청은 로그인 후 보낼 수 있어요.');
+      presentAppDialogAlert({ title: '로그인이 필요해요', body: '친구 요청은 로그인 후 보낼 수 있어요.' });
       return;
     }
     if (normalizeParticipantId(me) === normalizeParticipantId(peer)) return;
@@ -186,14 +187,7 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
       await ensureUserProfile(me);
       const profGate = await getUserProfile(me);
       if (meetingDemographicsIncomplete(profGate, me)) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ],
-        );
+        presentAppDialogConfirm({ title: '프로필을 먼저 완성해 주세요', body: '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.', cancelLabel: '닫기', confirmLabel: '정보 등록하기', onConfirm: () => pushProfileOpenRegisterInfo(router) });
         return;
       }
       const pre = await fetchFriendRelationStatus(me, peer).catch(() => null);
@@ -234,7 +228,7 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
           }),
         );
     } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setFriendRequestBusy(false);
     }
@@ -258,7 +252,7 @@ export function useMeetingSocial({ meeting, userId, router }: UseMeetingSocialAr
       closeParticipantProfile();
       router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
     } catch (e) {
-      Alert.alert('수락 실패', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '수락 실패', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setFriendRequestBusy(false);
     }

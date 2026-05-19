@@ -1,4 +1,5 @@
-import { Alert, Linking } from 'react-native';
+import { Linking } from 'react-native';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 export type ChatTextSegment =
   | { kind: 'text'; value: string }
@@ -68,11 +69,11 @@ export async function openChatLinkInBrowser(url: string): Promise<void> {
   try {
     const ok = await Linking.canOpenURL(href);
     if (!ok) {
-      Alert.alert('링크', '이 주소를 열 수 없어요.');
+      presentAppDialogAlert({ title: '링크', body: '이 주소를 열 수 없어요.' });
       return;
     }
     await Linking.openURL(href);
   } catch {
-    Alert.alert('링크', '브라우저로 열지 못했어요.');
+    presentAppDialogAlert({ title: '링크', body: '브라우저로 열지 못했어요.' });
   }
 }

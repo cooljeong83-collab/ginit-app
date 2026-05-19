@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { Q } from '@nozbe/watermelondb';
 import { withObservables } from '@nozbe/watermelondb/react';
 import { memo, useCallback, useMemo, useState, type RefObject } from 'react';
-import { Alert, Share, Text, View } from 'react-native';
+import { Share, Text, View } from 'react-native';
 import { of } from 'rxjs';
 
 import { MeetingChatBubbleActionMenu } from '@/components/chat/MeetingChatBubbleActionMenu';
@@ -38,6 +38,7 @@ import { database } from '@/src/watermelon';
 import type { ChatMessage } from '@/src/watermelon/models/ChatMessage';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 function rowSenderNorm(row: MeetingChatListRow): string {
   if (row.type === 'message') {
@@ -174,14 +175,7 @@ const MeetingChatBubbleRow = memo(function MeetingChatBubbleRow(props: MeetingCh
               key: 'delete' as const,
               label: '삭제',
               onPress: () => {
-                Alert.alert('삭제', '이 메시지를 삭제할까요?', [
-                  { text: '취소', style: 'cancel' },
-                  {
-                    text: '삭제',
-                    style: 'destructive',
-                    onPress: () => void deleteMessageBestEffort?.(anchorMsg),
-                  },
-                ]);
+                presentAppDialogConfirm({ title: '삭제', body: '이 메시지를 삭제할까요?', confirmLabel: '삭제', confirmVariant: 'destructive', onConfirm: () => void deleteMessageBestEffort?.(anchorMsg) });
               },
             },
           ] as const)

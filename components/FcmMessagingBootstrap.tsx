@@ -2,7 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { getMessaging, onMessage, onTokenRefresh, type FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
-import { Alert, AppState, type AppStateStatus, Platform } from 'react-native';
+import { AppState, type AppStateStatus, Platform } from 'react-native';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { getCurrentChatRoomId } from '@/src/lib/current-chat-room';
@@ -165,7 +166,7 @@ export function FcmMessagingBootstrap() {
           return;
         }
         const { title, body } = formatForegroundAlert(rm);
-        Alert.alert(title, body);
+        presentAppDialogAlert({ title, body });
       });
     } catch {
       /* ignore */

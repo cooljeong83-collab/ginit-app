@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
@@ -12,6 +12,7 @@ import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-h
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 const TOP_BAR_HEIGHT = 45;
 const MORE_MENU_GAP = 0;
@@ -49,16 +50,15 @@ export default function UserProfileStackScreen() {
 
   const openReportFromMenu = () => {
     setMoreOpen(false);
-    Alert.alert('신고', '이 사용자를 신고할까요?\n운영 정책에 따라 검토합니다.', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '신고하기',
-        style: 'destructive',
-        onPress: () => {
-          showTransientBottomMessage('신고가 접수되었어요. 검토 후 조치됩니다.');
-        },
+    presentAppDialogConfirm({
+      title: '신고',
+      body: '이 사용자를 신고할까요?\n운영 정책에 따라 검토합니다.',
+      confirmLabel: '신고하기',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        showTransientBottomMessage('신고가 접수되었어요. 검토 후 조치됩니다.');
       },
-    ]);
+    });
   };
 
   return (

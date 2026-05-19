@@ -10,9 +10,10 @@
  */
 
 import * as Location from 'expo-location';
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 import { assertSupabasePublicReady } from '@/src/lib/hybrid-data-source';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import { getPolicy } from '@/src/lib/app-policies-store';
 import { meetingScheduleStartMs, type MeetingScheduleTimeFields } from '@/src/lib/meeting-schedule-times';
 import { ensureForegroundLocationPermissionWithSettingsFallback } from '@/src/lib/location-permission';
@@ -259,10 +260,10 @@ export async function verifyMeetingArrivalWithCoords(opts: {
 
   if (opts.isMockLocation) {
     if (!suppress) {
-      Alert.alert(
-        '위치 인증 불가',
-        '모의(mock) 위치가 감지됐어요. 실제 위치에서 다시 시도해 주세요.\n\n(gTrust·XP는 위치 스푸핑 방지를 위해 부여되지 않습니다.)',
-      );
+      presentAppDialogAlert({
+        title: '위치 인증 불가',
+        body: '모의(mock) 위치가 감지됐어요. 실제 위치에서 다시 시도해 주세요.\n\n(gTrust·XP는 위치 스푸핑 방지를 위해 부여되지 않습니다.)',
+      });
     }
     return { rpc: null, errorMessage: 'mock_location' };
   }
@@ -270,10 +271,10 @@ export async function verifyMeetingArrivalWithCoords(opts: {
   const acc = opts.clientAccuracyM;
   if (acc != null && acc > pol.min_accuracy_m) {
     if (!suppress) {
-      Alert.alert(
-        '위치 정확도 부족',
-        `현재 위치 정확도(약 ${Math.round(acc)}m)가 정책 기준(${pol.min_accuracy_m}m)보다 낮아요. GPS가 안정된 뒤 다시 시도해 주세요.`,
-      );
+      presentAppDialogAlert({
+        title: '위치 정확도 부족',
+        body: `현재 위치 정확도(약 ${Math.round(acc)}m)가 정책 기준(${pol.min_accuracy_m}m)보다 낮아요. GPS가 안정된 뒤 다시 시도해 주세요.`,
+      });
     }
     return { rpc: null, errorMessage: 'accuracy_too_low' };
   }

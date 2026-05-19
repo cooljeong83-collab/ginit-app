@@ -21,3 +21,6 @@ export const ONBOARDING_FADE_MS = 280;
 export const ONBOARDING_FADE_EASE = Easing.out(Easing.quad);
 
 export const ONBOARDING_STAGGER_MS = 90;
+
+/** placeholder Lottie(펄스 원·사각형) — 전경 씬만 표시 */
+export const ONBOARDING_USE_LOTTIE_BACKGROUND = false;

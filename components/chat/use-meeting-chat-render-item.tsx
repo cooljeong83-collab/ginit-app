@@ -3,7 +3,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { type RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Share, Text, View, useWindowDimensions } from 'react-native';
+import { Share, Text, View, useWindowDimensions } from 'react-native';
 
 import { MeetingChatGinitImageCluster } from '@/components/chat/MeetingChatGinitImageCluster';
 import { MeetingChatBubbleActionMenu } from '@/components/chat/MeetingChatBubbleActionMenu';
@@ -33,6 +33,7 @@ import type { UserProfile } from '@/src/lib/user-profile';
 import { WITHDRAWN_NICKNAME, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { LinkableChatText } from '@/components/ui/LinkableChatText';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 function rowSenderNorm(row: MeetingChatListRow): string {
   if (row.type === 'message') {
@@ -168,14 +169,7 @@ export function useMeetingChatRenderItem({
               key: 'delete' as const,
               label: '삭제',
               onPress: () => {
-                Alert.alert('삭제', '이 메시지를 삭제할까요?', [
-                  { text: '취소', style: 'cancel' },
-                  {
-                    text: '삭제',
-                    style: 'destructive',
-                    onPress: () => void deleteMessageBestEffort?.(anchorMsg),
-                  },
-                ]);
+                presentAppDialogConfirm({ title: '삭제', body: '이 메시지를 삭제할까요?', confirmLabel: '삭제', confirmVariant: 'destructive', onConfirm: () => void deleteMessageBestEffort?.(anchorMsg) });
               },
             },
           ] as const)

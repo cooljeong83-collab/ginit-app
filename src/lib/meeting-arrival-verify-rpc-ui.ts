@@ -1,5 +1,7 @@
-import { Alert, DeviceEventEmitter } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
+import { presentGamificationReward } from '@/src/lib/gamification-stat-change-present';
 import { alertBodyForArrivalRpc, type MeetingArrivalRpcResult } from '@/src/lib/meeting-arrival-verify';
 import { cancelMeetingArrivalReminderLocalNotifications } from '@/src/lib/meeting-arrival-verify-reminders';
 import type { Meeting } from '@/src/lib/meetings';
@@ -40,26 +42,24 @@ export function presentMeetingArrivalVerifyRpcOutcome(
   const uid = ctx.userId.trim();
   if (!m?.id?.trim() || !uid) return;
   if (errorMessage && errorMessage !== 'mock_location' && errorMessage !== 'accuracy_too_low') {
-    Alert.alert('장소 인증', errorMessage);
+    presentAppDialogAlert({ title: '장소 인증', body: errorMessage });
     return;
   }
   if (!rpc) return;
   if (rpc.ok) {
     emitMeetingArrivalVerifiedForUi(m.id);
     void cancelMeetingArrivalReminderLocalNotifications(m.id, uid);
-    Alert.alert(
-      '인증 완료',
-      `도착이 확인됐어요.\nXP +${rpc.xp_granted} · 신뢰 +${rpc.trust_granted}\n\n(gTrust·XP는 서버 정책에 따라만 반영됩니다.)`,
-      [
-        {
-          text: '확인',
-          onPress: () => {
-            void ctx.refetchMeetingDetail();
-            ctx.onAfterResolved();
-          },
-        },
-      ],
-    );
+    presentGamificationReward({
+      title: '인증 완료',
+      body: '도착이 확인됐어요.',
+      xp: rpc.xp_granted,
+      trust: rpc.trust_granted,
+      footnote: '(gTrust·XP는 서버 정책에 따라만 반영됩니다.)',
+      onPrimary: () => {
+        void ctx.refetchMeetingDetail();
+        ctx.onAfterResolved();
+      },
+    });
     return;
   }
   if (rpc.ok === false && rpc.code === 'already_verified') {
@@ -69,5 +69,5 @@ export function presentMeetingArrivalVerifyRpcOutcome(
     ctx.onAfterResolved();
     return;
   }
-  Alert.alert('장소 인증', alertBodyForArrivalRpc(rpc));
+  presentAppDialogAlert({ title: '장소 인증', body: alertBodyForArrivalRpc(rpc) });
 }

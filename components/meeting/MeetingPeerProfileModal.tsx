@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {Image } from 'expo-image';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, StyleSheet, Text, View} from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -27,6 +27,7 @@ import {
   type UserProfile,
 } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 function nicknameInitial(nickname: string): string {
   const t = nickname.trim();
@@ -169,7 +170,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
     const peer = peerNorm;
     if (!peer) return;
     if (!me) {
-      Alert.alert('로그인이 필요해요', '친구 요청은 로그인 후 보낼 수 있어요.');
+      presentAppDialogAlert({ title: '로그인이 필요해요', body: '친구 요청은 로그인 후 보낼 수 있어요.' });
       return;
     }
     if (normalizeParticipantId(me) === peer) return;
@@ -178,14 +179,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
       await ensureUserProfile(me);
       const profGate = await getUserProfile(me);
       if (meetingDemographicsIncomplete(profGate, me)) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ],
-        );
+        presentAppDialogConfirm({ title: '프로필을 먼저 완성해 주세요', body: '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.', cancelLabel: '닫기', confirmLabel: '정보 등록하기', onConfirm: () => pushProfileOpenRegisterInfo(router) });
         return;
       }
       const pre = await fetchFriendRelationStatus(me, peer).catch(() => null);
@@ -232,7 +226,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
           }),
         );
     } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setFriendRequestBusy(false);
     }
@@ -263,7 +257,7 @@ export function MeetingPeerProfileModal({ visible, peerAppUserId, onClose }: Mee
       onClose();
       router.push(`/social-chat/${encodeURIComponent(rid)}?peerName=${encodeURIComponent(nick)}`);
     } catch (e) {
-      Alert.alert('수락 실패', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '수락 실패', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setFriendRequestBusy(false);
     }

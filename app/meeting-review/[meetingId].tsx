@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
@@ -21,11 +22,15 @@ import { useMeetingDetailQuery } from '@/src/hooks/use-meeting-detail-query';
 import { useMeetingPlaceReviewSummary } from '@/src/hooks/use-meeting-place-review-summary';
 import { useMeetingSettlementReceiptPlaceVerified } from '@/src/hooks/use-meeting-settlement-receipt-place-verified';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
+import { presentGamificationReward } from '@/src/lib/gamification-stat-change-present';
 import {
+  fetchMeetingPlaceReviewSummary,
   meetingPlaceReviewSummaryQueryKey,
   submitMeetingPlaceReview,
   type MeetingReviewMyReview,
+  type MeetingReviewSummary,
 } from '@/src/lib/meeting-review/meeting-review-api';
+import { getPinnedFormKeywords } from '@/src/lib/meeting-review/meeting-review-keywords';
 import { resolveMeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -89,7 +94,8 @@ export default function MeetingReviewScreen() {
   );
   const isSettled = meeting?.lifecycleStatus === 'SETTLED';
   const placeContext = useMemo(() => (meeting ? resolveMeetingReviewPlaceContext(meeting) : null), [meeting]);
-  const canAccess = Boolean(meeting && isParticipant && isSettled && placeContext);
+  const canViewReview = Boolean(meeting && isSettled && placeContext);
+  const canWriteReview = canViewReview && isParticipant;
 
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
   const onOpenPlaceUrl = useCallback((url: string, title: string) => {
@@ -97,14 +103,14 @@ export default function MeetingReviewScreen() {
   }, []);
 
   const summaryQuery = useMeetingPlaceReviewSummary(meetingId, userId, {
-    enabled: canAccess,
+    enabled: canViewReview,
   });
 
   const receiptPlaceVerifiedQuery = useMeetingSettlementReceiptPlaceVerified(
     meetingId,
     placeContext,
     meeting,
-    canAccess,
+    canViewReview,
   );
   const receiptPlaceVerified = receiptPlaceVerifiedQuery.data === true;
 
@@ -119,11 +125,14 @@ export default function MeetingReviewScreen() {
   const [phaseOverride, setPhaseOverride] = useState<ReviewPhase | null>(null);
   const [rating, setRating] = useState(0);
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
+  const [pinnedFormKeywords, setPinnedFormKeywords] = useState<string[]>([]);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const initialPhaseResolved = summaryQuery.isSuccess || summaryQuery.isError;
-  const phase: ReviewPhase = phaseOverride ?? (hasReviewed ? 'summary' : 'form');
+  const phase: ReviewPhase = !canWriteReview
+    ? 'summary'
+    : (phaseOverride ?? (hasReviewed ? 'summary' : 'form'));
 
   const onBack = useCallback(() => safeRouterBack(router), [router]);
   useAndroidOverlayHardwareBack(onBack);
@@ -135,24 +144,48 @@ export default function MeetingReviewScreen() {
   }, [meetingId, router]);
 
   useEffect(() => {
-    const myReview = summaryQuery.data?.myReview;
-    if (!myReview) return;
-    applyMyReviewToForm(myReview, { setRating, setSelectedKeywords, setComment });
-  }, [summaryQuery.data?.myReview]);
+    setPinnedFormKeywords([]);
+  }, [meetingId]);
 
   const switchToSummary = useCallback(() => {
     layoutAnimateEaseInEaseOut();
+    setPinnedFormKeywords([]);
     setPhaseOverride('summary');
   }, []);
 
-  const switchToForm = useCallback(() => {
-    const myReview = summaryQuery.data?.myReview;
-    if (myReview) {
-      applyMyReviewToForm(myReview, { setRating, setSelectedKeywords, setComment });
+  const switchToForm = useCallback(async () => {
+    const uid = userId?.trim() ?? '';
+    if (meetingId && uid) {
+      try {
+        const summary = await queryClient.fetchQuery({
+          queryKey: meetingPlaceReviewSummaryQueryKey(meetingId),
+          queryFn: async (): Promise<MeetingReviewSummary> => {
+            const res = await fetchMeetingPlaceReviewSummary(meetingId, uid);
+            if (!res.ok) throw new Error(res.message);
+            return res.summary;
+          },
+        });
+        if (summary.myReview && placeContext) {
+          applyMyReviewToForm(summary.myReview, { setRating, setSelectedKeywords, setComment });
+          setPinnedFormKeywords(
+            getPinnedFormKeywords(placeContext.keywordCategory, summary.myReview.selectedKeywords),
+          );
+        }
+      } catch {
+        const cached = queryClient.getQueryData<MeetingReviewSummary>(
+          meetingPlaceReviewSummaryQueryKey(meetingId),
+        );
+        if (cached?.myReview && placeContext) {
+          applyMyReviewToForm(cached.myReview, { setRating, setSelectedKeywords, setComment });
+          setPinnedFormKeywords(
+            getPinnedFormKeywords(placeContext.keywordCategory, cached.myReview.selectedKeywords),
+          );
+        }
+      }
     }
     layoutAnimateEaseInEaseOut();
     setPhaseOverride('form');
-  }, [summaryQuery.data?.myReview]);
+  }, [meetingId, userId, queryClient, placeContext]);
 
   const onToggleKeyword = useCallback((keyword: string) => {
     setSelectedKeywords((prev) => {
@@ -162,9 +195,9 @@ export default function MeetingReviewScreen() {
   }, []);
 
   const onSubmit = useCallback(async () => {
-    if (!meetingId || !userId?.trim() || !placeContext) return;
+    if (!canWriteReview || !meetingId || !userId?.trim() || !placeContext) return;
     if (rating < 1) {
-      Alert.alert('별점', '별점을 선택해 주세요.');
+      presentAppDialogAlert({ title: '별점', body: '별점을 선택해 주세요.' });
       return;
     }
     setSubmitting(true);
@@ -178,20 +211,21 @@ export default function MeetingReviewScreen() {
         comment: comment.trim() || null,
       });
       if (!res.ok) {
-        Alert.alert('리뷰', res.message);
+        presentAppDialogAlert({ title: '리뷰', body: res.message });
         return;
       }
       void onMeetingPlaceReviewSubmitted(meetingId, userId.trim());
       void queryClient.invalidateQueries({ queryKey: meetingPlaceReviewSummaryQueryKey(meetingId) });
       if (res.result.rewardsApplied && (res.result.xpGranted > 0 || res.result.trustGranted > 0)) {
-        const parts: string[] = [];
-        if (res.result.xpGranted > 0) parts.push(`XP +${res.result.xpGranted}`);
-        if (res.result.trustGranted > 0) parts.push(`신뢰 +${res.result.trustGranted}`);
-        Alert.alert(
-          '리뷰 완료',
-          `후기를 남겼어요.${parts.length > 0 ? `\n${parts.join(' · ')}` : ''}\n\n(보상은 서버 정책에 따라 최초 1회만 지급됩니다.)`,
-          [{ text: '결과 보기', onPress: switchToSummary }],
-        );
+        presentGamificationReward({
+          title: '리뷰 완료',
+          body: '후기를 남겼어요.',
+          xp: res.result.xpGranted,
+          trust: res.result.trustGranted,
+          footnote: '(보상은 서버 정책에 따라 최초 1회만 지급됩니다.)',
+          primaryLabel: '결과 보기',
+          onPrimary: switchToSummary,
+        });
       } else {
         switchToSummary();
       }
@@ -207,6 +241,7 @@ export default function MeetingReviewScreen() {
     comment,
     queryClient,
     switchToSummary,
+    canWriteReview,
   ]);
 
   if (!meetingId) {
@@ -246,12 +281,10 @@ export default function MeetingReviewScreen() {
     );
   }
 
-  if (!canAccess) {
-    const reason = !isParticipant
-      ? '모임 참여자만 리뷰를 남길 수 있어요.'
-      : !isSettled
-        ? '정산이 완료된 모임에서만 리뷰를 남길 수 있어요.'
-        : '확정된 장소 정보가 없어 리뷰를 남길 수 없어요.';
+  if (!canViewReview) {
+    const reason = !isSettled
+      ? '정산이 완료된 모임에서만 후기를 확인할 수 있어요.'
+      : '확정된 장소 정보가 없어 후기를 확인할 수 없어요.';
     return (
       <ScreenShell padded={false} style={styles.rootShell}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -284,7 +317,10 @@ export default function MeetingReviewScreen() {
   return (
     <ScreenShell padded={false} style={styles.rootShell}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        {topBar(screenTitle, phase === 'summary' && hasReviewed ? switchToForm : undefined)}
+        {topBar(
+          screenTitle,
+          canWriteReview && phase === 'summary' && hasReviewed ? () => void switchToForm() : undefined,
+        )}
         <View style={styles.body}>
           {phase === 'form' ? (
             <ReviewForm
@@ -296,6 +332,7 @@ export default function MeetingReviewScreen() {
               rating={rating}
               onRatingChange={setRating}
               selectedKeywords={selectedKeywords}
+              pinnedKeywords={pinnedFormKeywords}
               onToggleKeyword={onToggleKeyword}
               onKeywordMaxReached={() => showTransientBottomMessage('키워드는 최대 3개까지 선택할 수 있어요.', 2200)}
               comment={comment}
@@ -313,7 +350,7 @@ export default function MeetingReviewScreen() {
             />
           )}
         </View>
-        {phase === 'form' ? (
+        {phase === 'form' && canWriteReview ? (
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             <GinitPressable
               onPress={() => void onSubmit()}

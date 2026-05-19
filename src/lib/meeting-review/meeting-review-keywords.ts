@@ -98,3 +98,37 @@ export function getKeywordsForCategory(category: MeetingReviewKeywordCategory): 
   const merged = [...specific, ...MEETING_REVIEW_KEYWORDS_BY_CATEGORY.common];
   return [...new Set(merged)];
 }
+
+/** 저장·수정 진입 시점 키워드 중 현재 업종 칩 목록에 없는 항목(해제해도 칩은 유지) */
+export function getPinnedFormKeywords(
+  category: MeetingReviewKeywordCategory,
+  savedKeywords: readonly string[],
+): string[] {
+  const baseSet = new Set(getKeywordsForCategory(category));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of savedKeywords) {
+    const k = raw.trim();
+    if (!k || baseSet.has(k) || seen.has(k)) continue;
+    seen.add(k);
+    out.push(k);
+  }
+  return out;
+}
+
+/**
+ * 수정 폼 칩 목록: 현재 업종 키워드 + pinned(저장 시점에서 벗어난 키워드).
+ * pinned는 선택 해제해도 수정 세션 동안 칩으로 남습니다.
+ */
+export function getReviewFormKeywordOptions(
+  category: MeetingReviewKeywordCategory,
+  pinnedKeywords: readonly string[],
+): readonly string[] {
+  const base = getKeywordsForCategory(category);
+  const baseSet = new Set(base);
+  const extras = pinnedKeywords
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0 && !baseSet.has(k));
+  if (extras.length === 0) return base;
+  return [...base, ...extras];
+}

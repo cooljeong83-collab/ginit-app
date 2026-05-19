@@ -4,8 +4,7 @@ import {FlashList } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator, Alert, Modal, Platform, StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent} from 'react-native';
+import { ActivityIndicator, Modal, Platform, StyleSheet, Text, useWindowDimensions, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
@@ -21,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { meetingChatBodyStyles } from '@/components/chat/meeting-chat-body-styles';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 const MAX_SELECT = 20;
 const PAGE_SIZE = 60;
@@ -376,7 +376,7 @@ export function MeetingChatMediaPickerModal({
         widths: resolved.map((r) => r.width),
       });
     } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+      presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
     } finally {
       setResolvingSend(false);
     }

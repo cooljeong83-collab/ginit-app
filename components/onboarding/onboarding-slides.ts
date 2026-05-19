@@ -34,12 +34,12 @@ export const ONBOARDING_SLIDES: readonly OnboardingSlide[] = [
     id: '1',
     title: '모임의 시작과 끝, 지닛',
     subtitle: 'Gather + Init = 지닛',
-    body: '생성 → 만남 → 정산 → 후기까지,\n모임 전 과정을 한곳에서.',
+    body: '모임 생성 → 조율 → 만남 → 정산까지,\n모임 전 과정을 한곳에서.',
     sceneKind: 'lifecycle',
     showLogo: true,
     lottieAsset: LOTTIE.slide01,
     accessibilitySummary:
-      '모임의 시작과 끝, 지닛. 생성부터 만남, 정산, 후기까지 모임 전 과정을 한곳에서 준비합니다.',
+      '모임의 시작과 끝, 지닛. 모임 생성부터 조율, 만남, 정산까지 모임 전 과정을 한곳에서 준비합니다.',
   },
   {
     id: '2',

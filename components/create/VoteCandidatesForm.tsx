@@ -13,7 +13,7 @@ import {
   forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, } from 'react';
 import { Image } from 'expo-image';
 import {
-  ActivityIndicator, Alert, Animated, Easing, InteractionManager, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type ViewStyle} from 'react-native';
+  ActivityIndicator, Animated, Easing, InteractionManager, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, type ViewStyle} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
@@ -96,6 +96,7 @@ import {
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import {
   buildDefaultPlaceSearchQuery,
   buildPlaceSuggestedSearchQueries,
@@ -342,7 +343,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     if (!voiceTarget) return;
     setVoiceRecognizing(false);
     setVoiceTarget(null);
-    Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
+    presentAppDialogAlert({ title: '음성 입력 오류', body: humanizeSpeechRecognitionError(event) });
   });
   useSpeechRecognitionEvent('result', (event) => {
     const t = String(event?.results?.[0]?.transcript ?? '').trim();
@@ -378,7 +379,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       }
       const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+        presentAppDialogAlert({ title: '권한 필요', body: '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.' });
         return;
       }
       setVoiceTarget(target);
@@ -486,7 +487,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const alertIfPlaceOutsideInterestRegions = useCallback((place: PlaceRegionCheckInput): boolean => {
     const gate = gatePlaceForInterestRegions(place);
     if (gate.ok) return true;
-    Alert.alert(gate.title, gate.message);
+    presentAppDialogAlert({ title: gate.title, body: gate.message });
     return false;
   }, [gatePlaceForInterestRegions]);
 
@@ -662,7 +663,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       } as DateCandidate);
       const pk = dateCandidateDupKey(patched);
       if (prev.slice(1).some((d) => dateCandidateDupKey(d) === pk)) {
-        Alert.alert('동일한 일정 후보가 있습니다.');
+        showTransientBottomMessage('동일한 일정 후보가 있습니다.');
         return;
       }
       if (dateCandidateDupKey(first) === pk) {
@@ -674,10 +675,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       for (let i = 0; i < next.length; i += 1) {
         const err = validateDateCandidate(next[i], i);
         if (err) {
-          Alert.alert(
-            '일시 확인',
-            `${err}\n\n자연어로 추가할 때도 오늘 이후이며, ${meetingCreateMinScheduleLeadDescription()}`,
-          );
+          presentAppDialogAlert({ title: '일시 확인', body: `${err}\n\n자연어로 추가할 때도 오늘 이후이며, ${meetingCreateMinScheduleLeadDescription()}` });
           return;
         }
       }
@@ -691,17 +689,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
     const dup = prev.some((d) => dateCandidateDupKey(d) === nextKey);
     if (dup) {
-      Alert.alert('동일한 일정 후보가 있습니다.');
+      showTransientBottomMessage('동일한 일정 후보가 있습니다.');
       return;
     }
     const { next, expandRowId, shouldAutoExpand, didAppend } = computeNlpApply(prev, parsedPoint);
     for (let i = 0; i < next.length; i += 1) {
       const err = validateDateCandidate(next[i], i);
       if (err) {
-        Alert.alert(
-          '일시 확인',
-          `${err}\n\n자연어로 추가할 때도 오늘 이후이며, ${meetingCreateMinScheduleLeadDescription()}`,
-        );
+        presentAppDialogAlert({ title: '일시 확인', body: `${err}\n\n자연어로 추가할 때도 오늘 이후이며, ${meetingCreateMinScheduleLeadDescription()}` });
         return;
       }
     }
@@ -765,7 +760,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         } as DateCandidate);
         const key = dateCandidateDupKey(patched);
         if (prev.slice(1).some((d) => dateCandidateDupKey(d) === key)) {
-          Alert.alert('동일한 일정 후보가 있습니다.');
+          showTransientBottomMessage('동일한 일정 후보가 있습니다.');
           return;
         }
         if (dateCandidateDupKey(first) === key) {
@@ -778,7 +773,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         for (let i = 0; i < next.length; i += 1) {
           const err = validateDateCandidate(next[i], i);
           if (err) {
-            Alert.alert('일시 확인', err);
+            presentAppDialogAlert({ title: '일시 확인', body: err });
             return;
           }
         }
@@ -798,14 +793,14 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       } as DateCandidate);
       const key = dateCandidateDupKey(candidate);
       if (prev.some((d) => dateCandidateDupKey(d) === key)) {
-        Alert.alert('동일한 일정 후보가 있습니다.');
+        showTransientBottomMessage('동일한 일정 후보가 있습니다.');
         return;
       }
       const next = [...prev, candidate];
       for (let i = 0; i < next.length; i += 1) {
         const err = validateDateCandidate(next[i], i);
         if (err) {
-          Alert.alert('일시 확인', err);
+          presentAppDialogAlert({ title: '일시 확인', body: err });
           return;
         }
       }
@@ -1329,7 +1324,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           registeredInterestRegionsRef.current,
         );
         if (!gate.ok) {
-          Alert.alert(gate.title, gate.message);
+          presentAppDialogAlert({ title: gate.title, body: gate.message });
           return;
         }
         pendingEphemeralPlaceRowIdRef.current = null;
@@ -1521,7 +1516,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           : row;
     const err = validateDateCandidate(next, Math.max(0, idx));
     if (err) {
-      Alert.alert('일시 확인', err);
+      presentAppDialogAlert({ title: '일시 확인', body: err });
       return;
     }
     const nextDates = dates.map((d) => (d.id === rowId ? next : d));
@@ -2444,10 +2439,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
 
                               const filledNow = placeCandidatesRef.current.filter(isFilled).length;
                               if (filledNow >= INLINE_PLACE_PICK_MAX_SELECTED) {
-                                Alert.alert(
-                                  '장소 후보',
-                                  `검색 결과에서 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 담을 수 있어요.`,
-                                );
+                                presentAppDialogAlert({ title: '장소 후보', body: `검색 결과에서 최대 ${INLINE_PLACE_PICK_MAX_SELECTED}곳까지 담을 수 있어요.` });
                                 return;
                               }
 
@@ -2910,7 +2902,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                   : row;
             const err = validateDateCandidate(next, Math.max(0, idx));
             if (err) {
-              Alert.alert('일시 확인', err);
+              presentAppDialogAlert({ title: '일시 확인', body: err });
               return;
             }
             const nextDates = dates.map((d) => (d.id === rowId ? next : d));

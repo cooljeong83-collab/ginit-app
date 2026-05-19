@@ -1,4 +1,6 @@
-/** 웹: 로컬 푸시 미사용 — `expo-notifications`를 로드하지 않습니다. */
+import { InteractionManager } from 'react-native';
+
+import { presentGamificationPenaltyResult } from '@/src/lib/gamification-stat-change-present';
 
 export const TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION = 'trust_penalty_profile';
 
@@ -7,4 +9,18 @@ export type TrustPenaltyNotifyParams = {
   xpPoints: number;
 };
 
-export function notifyTrustPenaltyAppliedFireAndForget(_params: TrustPenaltyNotifyParams): void {}
+export function notifyTrustPenaltyAppliedFireAndForget(params: TrustPenaltyNotifyParams): void {
+  InteractionManager.runAfterInteractions(() => {
+    presentGamificationPenaltyResult({
+      trustDrop: params.trustPoints,
+      xpDrop: params.xpPoints,
+      onGoProfile: () => {
+        void import('expo-router')
+          .then(({ router }) => {
+            router.push('/(tabs)/profile');
+          })
+          .catch(() => {});
+      },
+    });
+  });
+}

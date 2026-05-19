@@ -6,7 +6,7 @@ import {
   meetingPlaceReviewSummaryQueryKey,
   type MeetingReviewSummary,
 } from '@/src/lib/meeting-review/meeting-review-api';
-import { supabase } from '@/src/lib/supabase';
+import { startPostgresRealtimeSubscription } from '@/src/lib/supabase-realtime-resilience';
 
 const STALE_MS = 3000;
 
@@ -38,24 +38,32 @@ export function useMeetingPlaceReviewSummary(
 
   useEffect(() => {
     if (!enabled) return;
-    const channel = supabase
-      .channel(`meeting-review:${mid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'meeting_reviews',
-          filter: `meeting_id=eq.${mid}`,
-        },
-        () => {
-          void queryClient.invalidateQueries({ queryKey: meetingPlaceReviewSummaryQueryKey(mid) });
-        },
-      )
-      .subscribe();
+    let stopped = false;
+    const stopRealtime = startPostgresRealtimeSubscription({
+      channelBaseName: 'meeting-review',
+      uniqueKey: mid,
+      configure: (ch) => {
+        ch.on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'meeting_reviews',
+            filter: `meeting_id=eq.${mid}`,
+          },
+          () => {
+            void queryClient.invalidateQueries({ queryKey: meetingPlaceReviewSummaryQueryKey(mid) });
+          },
+        );
+      },
+      shouldStop: () => stopped,
+      logLabel: 'meeting-place-review-summary',
+      userErrorMessage: '모임 장소 리뷰 요약 실시간 연결 오류',
+    });
 
     return () => {
-      void supabase.removeChannel(channel);
+      stopped = true;
+      stopRealtime();
     };
   }, [enabled, mid, queryClient]);
 

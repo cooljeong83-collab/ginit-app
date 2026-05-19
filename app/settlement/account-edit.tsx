@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SettlementBankLogo } from '@/components/settlement/SettlementBankLogo';
@@ -15,6 +15,7 @@ import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-h
 import { getSettlementBankById } from '@/src/lib/korean-banks-settlement';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import {
   getUserSettlementAccountById,
   loadUserSettlementAccounts,
@@ -72,7 +73,7 @@ export default function SettlementAccountEditScreen() {
   const onSave = useCallback(async () => {
     const uid = (userId ?? '').trim();
     if (!uid) {
-      Alert.alert('오류', '로그인이 필요합니다.');
+      presentAppDialogAlert({ title: '오류', body: '로그인이 필요합니다.' });
       return;
     }
     setSaving(true);
@@ -85,7 +86,7 @@ export default function SettlementAccountEditScreen() {
       });
       router.back();
     } catch (e) {
-      Alert.alert('오류', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setSaving(false);
     }

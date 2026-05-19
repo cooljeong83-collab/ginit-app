@@ -22,12 +22,13 @@ import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, type ScrollView } from 'react-native';
+import { Animated, type ScrollView } from 'react-native';
 import type { QueryClient } from '@tanstack/react-query';
 
 import type { VoteCandidatesFormHandle } from '@/components/create/VoteCandidatesForm';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { fmtDateYmd, normalizeTimeInput } from '@/src/lib/date-candidate';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 type VoteSection = 'date' | 'movie' | 'place';
 
@@ -262,7 +263,7 @@ export function useMeetingVote({
     if (!meeting) return;
     const cap = voteFormRef.current?.captureWizardPayloadAfterSchedule();
     if (!cap?.ok) {
-      Alert.alert('확인', cap?.error ?? '일정 후보를 확인해 주세요.');
+      presentAppDialogAlert({ title: '확인', body: cap?.error ?? '일정 후보를 확인해 주세요.' });
       return;
     }
     const existing = meeting.dateCandidates ?? [];
@@ -270,7 +271,7 @@ export function useMeetingVote({
     const { merged, additions } = mergeAppendNewDateCandidatesWithoutDup(existing, fromForm);
 
     if (additions.length === 0) {
-      Alert.alert('알림', '기존 일시와 겹치는 날짜만 있어 추가된 항목이 없습니다.');
+      presentAppDialogAlert({ title: '알림', body: '기존 일시와 겹치는 날짜만 있어 추가된 항목이 없습니다.' });
       setProposeOpen(false);
       return;
     }
@@ -316,7 +317,7 @@ export function useMeetingVote({
       setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
       setProposeOpen(false);
     } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '일정 후보를 저장하지 못했습니다.');
+      presentAppDialogAlert({ title: '저장 실패', body: e instanceof Error ? e.message : '일정 후보를 저장하지 못했습니다.' });
     } finally {
       setProposeSaving(false);
     }
@@ -326,7 +327,7 @@ export function useMeetingVote({
     if (!meeting) return;
     const cap = placeVoteFormRef.current?.capturePlaceCandidatesOnly();
     if (!cap?.ok) {
-      Alert.alert('확인', cap?.error ?? '장소 후보를 확인해 주세요.');
+      presentAppDialogAlert({ title: '확인', body: cap?.error ?? '장소 후보를 확인해 주세요.' });
       return;
     }
     const existing = (meeting.placeCandidates ?? []) as PlaceCandidate[];
@@ -334,7 +335,7 @@ export function useMeetingVote({
     const { merged, additions } = mergeAppendNewPlaceCandidatesWithoutDup(existing, fromForm);
 
     if (additions.length === 0) {
-      Alert.alert('알림', '기존 장소와 겹치는 장소만 있어 추가된 항목이 없습니다.');
+      presentAppDialogAlert({ title: '알림', body: '기존 장소와 겹치는 장소만 있어 추가된 항목이 없습니다.' });
       setPlaceProposeOpen(false);
       return;
     }
@@ -364,7 +365,7 @@ export function useMeetingVote({
       setSelectedPlaceIds(additions.map((p, j) => String(p.id ?? '').trim() || `pc-${existing.length + j}`));
       setPlaceProposeOpen(false);
     } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '장소 후보를 저장하지 못했습니다.');
+      presentAppDialogAlert({ title: '저장 실패', body: e instanceof Error ? e.message : '장소 후보를 저장하지 못했습니다.' });
     } finally {
       setPlaceProposeSaving(false);
     }
@@ -532,7 +533,7 @@ export function useMeetingVote({
   const flushVoteSelectionsToServer = useCallback(async (): Promise<boolean> => {
     if (!meeting) return false;
     if (!sessionPk) {
-      Alert.alert('안내', '로그인 후 투표를 반영할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 투표를 반영할 수 있어요.' });
       return false;
     }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : selectedDateIds;
@@ -552,20 +553,19 @@ export function useMeetingVote({
             : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
               ? 'place'
               : null;
-      Alert.alert(
-        '투표를 완료해 주세요',
-        parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.',
-        firstScrollSection != null ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }] : [{ text: '확인' }],
-      );
+      presentAppDialogAlert({
+        title: '투표를 완료해 주세요',
+        body:
+          parts.length > 0
+            ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.`
+            : '각 투표에서 최소 한 가지 이상 선택한 뒤 반영할 수 있어요.',
+        onPrimary:
+          firstScrollSection != null ? () => scrollToVoteBlock(firstScrollSection) : undefined,
+      });
       return false;
     }
     if (!isHost && !getParticipantVoteSnapshot(meeting, sessionPk)) {
-      Alert.alert(
-        '투표 내역을 불러올 수 없어요',
-        '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.',
-      );
+      presentAppDialogAlert({ title: '투표 내역을 불러올 수 없어요', body: '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.' });
       return false;
     }
 
@@ -600,7 +600,7 @@ export function useMeetingVote({
       if (isConfirmedScheduleOverlapErrorMessage(msg)) {
         showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
       } else {
-        Alert.alert('저장 실패', msg || '다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '저장 실패', body: msg || '다시 시도해 주세요.' });
       }
       return false;
     } finally {
@@ -630,14 +630,11 @@ export function useMeetingVote({
 
   const onPressSaveVotes = useCallback(() => {
     if (participantVoteBusy) {
-      Alert.alert('안내', '저장 중이에요. 잠시만 기다려 주세요.');
+      presentAppDialogAlert({ title: '안내', body: '저장 중이에요. 잠시만 기다려 주세요.' });
       return;
     }
     if (participantVoteLogMissing) {
-      Alert.alert(
-        '투표 내역을 불러올 수 없어요',
-        '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.',
-      );
+      presentAppDialogAlert({ title: '투표 내역을 불러올 수 없어요', body: '예전 방식으로 참여된 모임이에요. 투표를 바꾸려면 탈퇴한 뒤 다시 참여해 주세요.' });
       return;
     }
     if (!votesDirty) {

@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Platform,
   ScrollView,
@@ -32,6 +31,7 @@ import { SettlementAccountsScreenTopBar } from '@/components/settlement/Settleme
 import { SettlementBankLogo } from '@/components/settlement/SettlementBankLogo';
 import { ScreenShell } from '@/components/ui';
 import { GinitPressable } from '@/components/ui/GinitPressable';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
@@ -99,6 +99,7 @@ import {
   shareSettlementText,
 } from '@/src/lib/settlement-share-channels';
 import { getUserProfilesForIds, type UserProfile } from '@/src/lib/user-profile';
+import { presentAppDialogAlert, presentAppDialogConfirm, presentAppDialogThreeButton } from '@/src/lib/app-dialog-present';
 import {
   getUserSettlementAccountById,
   loadUserSettlementAccounts,
@@ -1212,14 +1213,7 @@ export default function SettlementMeetingScreen() {
     const leaveMessage = settlementParticipantMode
       ? '임시저장하지 않으면 올린 영수증이 반영되지 않아요. 나가시겠어요?'
       : '임시저장 또는 정산 완료 처리하지 않은 변경사항은 저장되지 않아요. 나가시겠어요?';
-    Alert.alert('저장되지 않은 변경', leaveMessage, [
-      { text: '계속 작성', style: 'cancel' },
-      {
-        text: '나가기',
-        style: 'destructive',
-        onPress: () => safeRouterBack(router),
-      },
-    ]);
+    presentAppDialogConfirm({ title: '저장되지 않은 변경', body: leaveMessage, cancelLabel: '계속 작성', confirmLabel: '나가기', confirmVariant: 'destructive', onConfirm: () => safeRouterBack(router) });
   }, [hasUnsavedSettlementChanges, settlementParticipantMode, router]);
 
   useAndroidOverlayHardwareBack(requestSettlementBack);
@@ -1374,9 +1368,9 @@ export default function SettlementMeetingScreen() {
         await persistSettlementDraftToServer();
       }
       setSettlementHasUnsavedUserChanges(false);
-      Alert.alert('저장됨', '임시 저장했어요.');
+      showTransientBottomMessage('임시 저장했어요.');
     } catch (e) {
-      Alert.alert('오류', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setSaving(false);
     }
@@ -1385,32 +1379,32 @@ export default function SettlementMeetingScreen() {
   const onSendAppPush = useCallback(async () => {
     if (!meetingId || !meeting || !userId?.trim()) return;
     if (meeting.lifecycleStatus === 'SETTLED') {
-      Alert.alert('안내', '이미 정산 완료된 모임이에요.');
+      presentAppDialogAlert({ title: '안내', body: '이미 정산 완료된 모임이에요.' });
       return;
     }
     if (selectedCount === 0) {
-      Alert.alert('알림', '정산에 포함할 사람을 한 명 이상 선택해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '정산에 포함할 사람을 한 명 이상 선택해 주세요.' });
       return;
     }
     if (effectiveTotalWonParsed == null) {
-      Alert.alert('알림', '총액을 숫자로 입력해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '총액을 숫자로 입력해 주세요.' });
       return;
     }
     const hostAccount = composedHostAccountText.trim();
     if (usesBankTransferSettlement && !getSettlementBankById(hostBankId)) {
-      Alert.alert('알림', '입금 은행을 선택해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '입금 은행을 선택해 주세요.' });
       return;
     }
     if (usesBankTransferSettlement && !hostAccountNumber.replace(/\D/g, '').trim()) {
-      Alert.alert('알림', '계좌번호를 입력해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '계좌번호를 입력해 주세요.' });
       return;
     }
     if (usesBankTransferSettlement && !hostAccountHolder.trim()) {
-      Alert.alert('알림', '예금주 이름을 입력해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '예금주 이름을 입력해 주세요.' });
       return;
     }
     if (usesBankTransferSettlement && !hostAccount) {
-      Alert.alert('알림', '입금 계좌 정보를 확인해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '입금 계좌 정보를 확인해 주세요.' });
       return;
     }
     setPushing(true);
@@ -1427,7 +1421,7 @@ export default function SettlementMeetingScreen() {
         .filter((id) => id !== hostNorm)
         .slice(0, MAX_SETTLEMENT_PUSH_RECIPIENTS);
       if (recipients.length === 0) {
-        Alert.alert('알림', '앱 알림을 받을 다른 참석자가 없어요. 참석자를 초대한 뒤 다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '알림', body: '앱 알림을 받을 다른 참석자가 없어요. 참석자를 초대한 뒤 다시 시도해 주세요.' });
         return;
       }
       const pushRecipients = recipients.filter((id) => !isGinitWebGuestParticipantId(id));
@@ -1453,7 +1447,7 @@ export default function SettlementMeetingScreen() {
           data,
         });
         if (approx <= 0) {
-          Alert.alert('알림', '푸시가 전달되지 않았어요. 네트워크를 확인한 뒤 다시 시도해 주세요.');
+          presentAppDialogAlert({ title: '알림', body: '푸시가 전달되지 않았어요. 네트워크를 확인한 뒤 다시 시도해 주세요.' });
           return;
         }
       }
@@ -1493,15 +1487,9 @@ export default function SettlementMeetingScreen() {
         });
       }
 
-      Alert.alert('완료', '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.', [
-        { text: '확인', onPress: () => router.back() },
-        {
-          text: '후기 남기기',
-          onPress: () => router.push(`/meeting-review/${encodeURIComponent(meetingId)}`),
-        },
-      ]);
+      presentAppDialogConfirm({ title: '완료', body: '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.', cancelLabel: '확인', confirmLabel: '확인', onConfirm: () => router.back(), onCancel: () => router.back() });
     } catch (e) {
-      Alert.alert('오류', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setPushing(false);
     }
@@ -1530,7 +1518,7 @@ export default function SettlementMeetingScreen() {
   const onShareSheet = useCallback(async () => {
     const settled = meeting?.lifecycleStatus === 'SETTLED';
     if (!settled && !isCurrentSettlementDraftSavedForShare) {
-      Alert.alert('안내', '임시 저장 후 공유해주세요.');
+      presentAppDialogAlert({ title: '안내', body: '임시 저장 후 공유해주세요.' });
       return;
     }
     if (!meeting) return;
@@ -1570,7 +1558,7 @@ export default function SettlementMeetingScreen() {
       });
       await shareSettlementText(msg);
     } catch {
-      Alert.alert('오류', '공유를 완료하지 못했어요.');
+      presentAppDialogAlert({ title: '오류', body: '공유를 완료하지 못했어요.' });
     } finally {
       setSharing(false);
     }
@@ -1630,7 +1618,7 @@ export default function SettlementMeetingScreen() {
   const applyBulkManualAmount = useCallback(() => {
     const v = parseWonDigits(bulkAmountDraft);
     if (!bulkAmountDraft.trim() || v <= 0) {
-      Alert.alert('알림', '0보다 큰 금액을 입력해 주세요.');
+      presentAppDialogAlert({ title: '알림', body: '0보다 큰 금액을 입력해 주세요.' });
       return;
     }
     const ids = allSettlementParticipantIds.filter((id) => selectedParticipantIds.has(id));
@@ -1945,7 +1933,7 @@ export default function SettlementMeetingScreen() {
   const pickReceiptImageAndOcr = useCallback(
     async (source: 'camera' | 'library') => {
       if (Platform.OS === 'web') {
-        Alert.alert('안내', '영수증 촬영 인식은 iOS·Android 앱에서만 지원해요.');
+        presentAppDialogAlert({ title: '안내', body: '영수증 촬영 인식은 iOS·Android 앱에서만 지원해요.' });
         return;
       }
       const perm =
@@ -1953,7 +1941,7 @@ export default function SettlementMeetingScreen() {
           ? await ImagePicker.requestCameraPermissionsAsync()
           : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (perm.status !== 'granted') {
-        Alert.alert('권한', source === 'camera' ? '카메라 권한이 필요해요.' : '사진 접근 권한이 필요해요.');
+        presentAppDialogAlert({ title: '권한', body: source === 'camera' ? '카메라 권한이 필요해요.' : '사진 접근 권한이 필요해요.' });
         return;
       }
       const launched =
@@ -1976,11 +1964,14 @@ export default function SettlementMeetingScreen() {
       void pickReceiptImageAndOcr('library');
       return;
     }
-    Alert.alert('영수증 인식', '촬영 또는 앨범에서 영수증을 선택해 주세요.', [
-      { text: '취소', style: 'cancel' },
-      { text: '촬영', onPress: () => void pickReceiptImageAndOcr('camera') },
-      { text: '앨범', onPress: () => void pickReceiptImageAndOcr('library') },
-    ]);
+    presentAppDialogThreeButton({
+    title: '영수증 인식', body: '촬영 또는 앨범에서 영수증을 선택해 주세요.',
+    buttons: [
+      { label: '취소', variant: 'secondary' },
+      { label: '촬영', variant: 'primary', onPress: () => void pickReceiptImageAndOcr('camera') },
+      { label: '앨범', variant: 'primary', onPress: () => void pickReceiptImageAndOcr('library') },
+    ],
+  });
   }, [pickReceiptImageAndOcr]);
 
   const receiptScanPageWidth = Math.max(280, windowWidth - 36);

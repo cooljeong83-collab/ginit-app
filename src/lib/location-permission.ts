@@ -1,5 +1,6 @@
 import * as Linking from 'expo-linking';
-import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import * as Location from 'expo-location';
 
 let didPromptSettingsOnce = false;
@@ -47,10 +48,13 @@ export async function ensureForegroundLocationPermissionWithSettingsFallback(opt
     if (androidPerm.granted) return androidPerm;
     if (!androidPerm.canAskAgain && (!promptOnce || !didPromptSettingsOnce)) {
       didPromptSettingsOnce = true;
-      Alert.alert(title, message, [
-        { text: '닫기', style: 'cancel' },
-        { text: '설정 열기', onPress: () => void Linking.openSettings() },
-      ]);
+      presentAppDialogConfirm({
+        title,
+        body: message,
+        cancelLabel: '닫기',
+        confirmLabel: '설정 열기',
+        onConfirm: () => void Linking.openSettings(),
+      });
     }
     return androidPerm;
   }
@@ -64,10 +68,13 @@ export async function ensureForegroundLocationPermissionWithSettingsFallback(opt
   if (!canAskAgain) {
     if (!promptOnce || !didPromptSettingsOnce) {
       didPromptSettingsOnce = true;
-      Alert.alert(title, message, [
-        { text: '닫기', style: 'cancel' },
-        { text: '설정 열기', onPress: () => void Linking.openSettings() },
-      ]);
+      presentAppDialogConfirm({
+        title,
+        body: message,
+        cancelLabel: '닫기',
+        confirmLabel: '설정 열기',
+        onConfirm: () => void Linking.openSettings(),
+      });
     }
   }
 
@@ -106,12 +113,12 @@ export async function ensureForegroundLocationPermissionLikeMyLocation(): Promis
 /** 권한 거부 후 «내 위치»와 동일한 안내 Alert (`canAskAgain`일 때만). */
 export function alertForegroundLocationPermissionDeniedLikeMyLocation(canAskAgain: boolean): void {
   if (Platform.OS === 'web') {
-    Alert.alert('위치 권한', '웹에서는 내 위치 이동을 지원하지 않습니다.');
+    presentAppDialogAlert({ title: '위치 권한', body: '웹에서는 내 위치 이동을 지원하지 않습니다.' });
     return;
   }
   if (canAskAgain) {
     const { title, deniedCanAskAgainMessage } = foregroundLocationPermissionAlertContent();
-    Alert.alert(title, deniedCanAskAgainMessage);
+    presentAppDialogAlert({ title, body: deniedCanAskAgainMessage });
   }
 }
 

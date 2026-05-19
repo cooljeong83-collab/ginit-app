@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, View, Alert } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -10,6 +10,7 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { consumePendingConsentAction } from '@/src/lib/terms-consent-flow';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 type TermKey = 'tos' | 'privacy';
 
@@ -78,11 +79,7 @@ export default function TermsAgreementScreen() {
     try {
       const fn = consumePendingConsentAction();
       if (!fn && !next) {
-        Alert.alert(
-          '진행이 중단됐어요',
-          '로그인 화면에서 [Google로 시작하기]를 다시 눌러 약관 동의 후 진행해 주세요.',
-          [{ text: '확인', onPress: () => expoRouter.replace('/login') }],
-        );
+        presentAppDialogAlert({ title: '진행이 중단됐어요', body: '로그인 화면에서 [Google로 시작하기]를 다시 눌러 약관 동의 후 진행해 주세요.', onPrimary: () => expoRouter.replace('/login') });
         return;
       }
       if (fn) {
@@ -90,7 +87,7 @@ export default function TermsAgreementScreen() {
           await fn();
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          Alert.alert('로그인 처리 실패', msg);
+          presentAppDialogAlert({ title: '로그인 처리 실패', body: msg });
           return;
         }
         if (next) {

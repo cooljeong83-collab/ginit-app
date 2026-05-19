@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View} from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,6 +13,7 @@ import { friendPeerStorageKey, loadBlockedPeerIds, saveBlockedPeerIds } from '@/
 import { fetchBlockedPeerIds, unblockPeerServerSynced } from '@/src/lib/user-blocks';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds } from '@/src/lib/user-profile';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 type Row = { peerId: string; profile: UserProfile | null };
 
@@ -55,26 +56,25 @@ export default function BlockedFriendsScreen() {
   const onUnblock = useCallback(
     (peerId: string, label: string) => {
       if (!me) return;
-      Alert.alert('차단 해제', `${label}님 차단을 해제할까요?`, [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '해제',
-          onPress: () => {
-            void (async () => {
-              const pk = friendPeerStorageKey(peerId);
-              try {
-                await unblockPeerServerSynced(me, pk);
-              } catch {
-                // 서버 동기화 실패 시에도 로컬은 유지(기존 UX 호환)
-              }
-              const next = await loadBlockedPeerIds(me);
-              next.delete(pk);
-              await saveBlockedPeerIds(me, next);
-              void reload();
-            })();
-          },
+      presentAppDialogConfirm({
+        title: '차단 해제',
+        body: `${label}님 차단을 해제할까요?`,
+        confirmLabel: '해제',
+        onConfirm: () => {
+          void (async () => {
+            const pk = friendPeerStorageKey(peerId);
+            try {
+              await unblockPeerServerSynced(me, pk);
+            } catch {
+              // 서버 동기화 실패 시에도 로컬은 유지(기존 UX 호환)
+            }
+            const next = await loadBlockedPeerIds(me);
+            next.delete(pk);
+            await saveBlockedPeerIds(me, next);
+            void reload();
+          })();
         },
-      ]);
+      });
     },
     [me, reload],
   );

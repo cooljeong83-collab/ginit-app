@@ -4,7 +4,7 @@ import {Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Modal, Platform, StyleSheet, Text, View} from 'react-native';
+import { ActivityIndicator, Animated, Easing, Modal, Platform, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -47,6 +47,7 @@ import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { useObserveUserProfile } from '@/src/hooks/use-observe-user-profile';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import {
   ensureUserProfile,
   getPeerUserProfile,
@@ -420,19 +421,16 @@ export function UserProfilePublicBody({
     const viewingUrl = (profileImageGallery[delIx]?.imageUrl ?? '').trim();
     if (!viewingUrl) return;
     if (!isAvatarsStorageUploadedByUser(viewingUrl, me)) {
-      Alert.alert('삭제 불가', 'Supabase에 올린 사진만 여기서 삭제할 수 있어요.');
+      presentAppDialogAlert({ title: '삭제 불가', body: 'Supabase에 올린 사진만 여기서 삭제할 수 있어요.' });
       return;
     }
     const isCurrent = viewingUrl === photo.trim();
-    Alert.alert(
-      isCurrent ? '프로필 사진 삭제' : '과거 사진 삭제',
-      isCurrent ? '현재 프로필 사진을 삭제할까요?' : '목록에서 이 사진을 삭제할까요?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: () => {
+    presentAppDialogConfirm({
+      title: isCurrent ? '프로필 사진 삭제' : '과거 사진 삭제',
+      body: isCurrent ? '현재 프로필 사진을 삭제할까요?' : '목록에서 이 사진을 삭제할까요?',
+      confirmLabel: '삭제',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
             void (async () => {
               setProfilePhotoDeleteBusy(true);
               try {
@@ -447,12 +445,12 @@ export function UserProfilePublicBody({
                     ]
                       .filter(Boolean)
                       .join('\n');
-                    Alert.alert(
-                      '삭제 실패',
-                      isProfilePhotoDeleteDebugEnabled()
+                    presentAppDialogAlert({
+                      title: '삭제 실패',
+                      body: isProfilePhotoDeleteDebugEnabled()
                         ? detail
                         : '사진 파일 또는 이력 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-                    );
+                    });
                   }
                   return;
                 }
@@ -488,15 +486,13 @@ export function UserProfilePublicBody({
                   .catch(() => {});
                 if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               } catch (e) {
-                Alert.alert('삭제 실패', e instanceof Error ? e.message : '프로필 사진을 삭제하지 못했습니다.');
+                presentAppDialogAlert({ title: '삭제 실패', body: e instanceof Error ? e.message : '프로필 사진을 삭제하지 못했습니다.' });
               } finally {
                 setProfilePhotoDeleteBusy(false);
               }
             })();
           },
-        },
-      ],
-    );
+    });
   }, [isMe, photo, profileImageGallery, profileImageViewer, targetNorm]);
 
   const onPressAvatar = useCallback(() => {
@@ -536,14 +532,7 @@ export function UserProfilePublicBody({
       await ensureUserProfile(me);
       const profGate = await getUserProfile(me);
       if (meetingDemographicsIncomplete(profGate, me)) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ],
-        );
+        presentAppDialogConfirm({ title: '프로필을 먼저 완성해 주세요', body: '친구 요청은 모임을 위한 사용자 정보 등록(성별·연령대) 완료 후 보낼 수 있어요.', cancelLabel: '닫기', confirmLabel: '정보 등록하기', onConfirm: () => pushProfileOpenRegisterInfo(router) });
         return;
       }
 
@@ -606,7 +595,7 @@ export function UserProfilePublicBody({
         );
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
-      Alert.alert('처리 실패', e instanceof Error ? e.message : safeText(e));
+      presentAppDialogAlert({ title: '처리 실패', body: e instanceof Error ? e.message : safeText(e) });
     } finally {
       setFriendBusy(false);
     }

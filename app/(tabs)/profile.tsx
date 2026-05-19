@@ -2,19 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Animated,
-  Easing,
-  LayoutChangeEvent,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  ToastAndroid,
-  View,
-} from 'react-native';
+import { Platform, RefreshControl, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitCard } from '@/components/ginit';
@@ -41,6 +29,7 @@ import { uploadProfilePhoto } from '@/src/lib/profile-photo';
 import { updateUserProfile, type UserProfile } from '@/src/lib/user-profile';
 
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 export default function ProfileTab() {
   const router = useTransitionRouter();
@@ -63,11 +52,6 @@ export default function ProfileTab() {
   const [gLevel, setGLevel] = useState(1);
   const [penaltyCount, setPenaltyCount] = useState(0);
   const [isRestricted, setIsRestricted] = useState(false);
-  const prevTrustRef = useRef<number | null>(null);
-  const [trustDropFx, setTrustDropFx] = useState<{ delta: number; id: number } | null>(null);
-  const trustDropOpacity = useRef(new Animated.Value(0)).current;
-  const trustDropTranslate = useRef(new Animated.Value(0)).current;
-  const [trustSectionY, setTrustSectionY] = useState<number | null>(null);
   const [profileBodyRefreshTrigger, setProfileBodyRefreshTrigger] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const {
@@ -111,35 +95,6 @@ export default function ProfileTab() {
     { enabled: Boolean(profilePk) },
   );
 
-  useEffect(() => {
-    const prev = prevTrustRef.current;
-    if (prev != null && gTrust < prev) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      setTrustDropFx({ delta: prev - gTrust, id: Date.now() });
-    }
-    prevTrustRef.current = gTrust;
-  }, [gTrust]);
-
-  useEffect(() => {
-    if (!trustDropFx) return;
-    trustDropOpacity.setValue(1);
-    trustDropTranslate.setValue(0);
-    Animated.parallel([
-      Animated.timing(trustDropTranslate, {
-        toValue: -28,
-        duration: 900,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(trustDropOpacity, {
-        toValue: 0,
-        duration: 900,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start(() => setTrustDropFx(null));
-  }, [trustDropFx, trustDropOpacity, trustDropTranslate]);
-
   const xpBar = useMemo(
     () => xpProgressWithinLevel({ nickname: '', photoUrl: null, gLevel, gXp, gTrust } as UserProfile),
     [gLevel, gXp, gTrust],
@@ -179,7 +134,7 @@ export default function ProfileTab() {
             setProfileBodyRefreshTrigger((n) => n + 1);
           } catch (e) {
             const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-            Alert.alert('업로드 실패', msg);
+            presentAppDialogAlert({ title: '업로드 실패', body: msg });
           } finally {
             setPhotoUploadBusy(false);
           }
@@ -192,13 +147,13 @@ export default function ProfileTab() {
 
   const onPickHeaderProfilePhoto = useCallback(async () => {
     if (!profilePk) {
-      Alert.alert('안내', '로그인 후 사진을 바꿀 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 사진을 바꿀 수 있어요.' });
       return;
     }
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('권한 필요', '사진을 선택하려면 사진 보관함 권한이 필요합니다.');
+        presentAppDialogAlert({ title: '권한 필요', body: '사진을 선택하려면 사진 보관함 권한이 필요합니다.' });
         return;
       }
       const result = await launchImageLibraryAsyncSafe({
@@ -230,7 +185,7 @@ export default function ProfileTab() {
           setProfileBodyRefreshTrigger((n) => n + 1);
         } catch (e) {
           const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-          Alert.alert('업로드 실패', msg);
+          presentAppDialogAlert({ title: '업로드 실패', body: msg });
         } finally {
           setPhotoUploadBusy(false);
         }
@@ -240,14 +195,9 @@ export default function ProfileTab() {
       setCropSession({ uri, w: asset?.width, h: asset?.height });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '업로드에 실패했습니다.';
-      Alert.alert('업로드 실패', msg);
+      presentAppDialogAlert({ title: '업로드 실패', body: msg });
     }
   }, [profilePk, refreshProfile]);
-
-  const onGoTrust = useCallback(() => {
-    if (trustSectionY == null) return;
-    scrollRef.current?.scrollTo({ y: Math.max(0, trustSectionY - 8), animated: true });
-  }, [trustSectionY]);
 
   // 프로필 편집(닉네임/사진 업로드 등)은 `/profile/edit`에서 수행합니다.
 
@@ -598,16 +548,6 @@ const styles = StyleSheet.create({
   levelFill: {
     height: '100%',
     borderRadius: 6,
-  },
-  trustDropFx: {
-    position: 'absolute',
-    right: 10,
-    top: 44,
-  },
-  trustDropFxText: {
-    fontSize: 28,
-    fontWeight: '600',
-    color: '#FF3B30',
   },
   screenTitle: {
     fontSize: 22,

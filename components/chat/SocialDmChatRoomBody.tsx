@@ -3,8 +3,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { Image } from 'expo-image';
 import { useQueryClient } from '@tanstack/react-query';
 import {forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator, Alert, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
+import { ActivityIndicator, InteractionManager, type LayoutChangeEvent, Modal, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   getChatComposerBottomPadding,
@@ -43,6 +42,7 @@ import { getPeerUserProfilesForIds } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useChatInvertedStickToLatest } from '@/src/hooks/use-chat-inverted-stick-to-latest';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 export type SocialDmChatRoomBodyHandle = {
   /** 모임 채팅과 동일하게 `data`는 최신이 index 0(inverted 기준). */
@@ -288,7 +288,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
           roomId: rid,
           message: e instanceof Error ? e.message : String(e),
         });
-        Alert.alert('공유 전송 실패', e instanceof Error ? e.message : String(e));
+        presentAppDialogAlert({ title: '공유 전송 실패', body: e instanceof Error ? e.message : String(e) });
       } finally {
         setSending(false);
         markPendingStickToLatest();
@@ -420,7 +420,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       const rowIdx = findMeetingChatListRowIndexByMessageId(chatListRows, rid);
       const idx = rowIdx >= 0 ? rowIdx : messages.findIndex((m) => m.id === rid);
       if (idx >= 0) scrollToMessageIndexBestEffort(idx);
-      else Alert.alert('원글 위치', '해당 메시지를 찾지 못했어요.');
+      else presentAppDialogAlert({ title: '원글 위치', body: '해당 메시지를 찾지 못했어요.' });
     },
     [messages, chatListRows, scrollToMessageIndexBestEffort],
   );
@@ -483,7 +483,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
 
   const onPressAttach = useCallback(() => {
     if (Platform.OS === 'web') {
-      Alert.alert('안내', '웹에서는 사진을 보낼 수 없어요.');
+      presentAppDialogAlert({ title: '안내', body: '웹에서는 사진을 보낼 수 없어요.' });
       return;
     }
     setMediaPickerOpen(true);
@@ -501,7 +501,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
         });
         setMediaPickerOpen(false);
       } catch (e) {
-        Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
+        presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : String(e) });
       } finally {
         setSending(false);
         markPendingStickToLatest();
@@ -526,7 +526,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
       setDraft('');
       setReplyTo(null);
     } catch (e) {
-      Alert.alert('전송 실패', e instanceof Error ? e.message : String(e));
+      presentAppDialogAlert({ title: '전송 실패', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setSending(false);
       markPendingStickToLatest();
@@ -762,7 +762,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                         try {
                           await shareRemoteImageUrl(u);
                         } catch (e) {
-                          Alert.alert('공유 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                          presentAppDialogAlert({ title: '공유 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
                         } finally {
                           setImageViewerBusy(false);
                         }
@@ -784,7 +784,7 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                         try {
                           await saveRemoteImageUrlToLibrary(u);
                         } catch (e) {
-                          Alert.alert('저장 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+                          presentAppDialogAlert({ title: '저장 실패', body: e instanceof Error ? e.message : '다시 시도해 주세요.' });
                         } finally {
                           setImageViewerBusy(false);
                         }
@@ -805,26 +805,28 @@ export const SocialDmChatRoomBody = forwardRef<SocialDmChatRoomBodyHandle, Socia
                         const msgId = imageViewerEntry?.id.trim() ?? '';
                         if (!u || !rid || !msgId) return;
                         if (imageViewerBusy) return;
-                        Alert.alert('사진 삭제', '이 사진을 채팅방에서 삭제할까요?', [
-                          { text: '취소', style: 'cancel' },
-                          {
-                            text: '삭제',
-                            style: 'destructive',
-                            onPress: () => {
-                              void (async () => {
-                                setImageViewerBusy(true);
-                                try {
-                                  await deleteSocialChatImageMessageBestEffort(rid, msgId, u);
-                                  setImageViewer(null);
-                                } catch (e) {
-                                  Alert.alert('삭제 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
-                                } finally {
-                                  setImageViewerBusy(false);
-                                }
-                              })();
-                            },
+                        presentAppDialogConfirm({
+                          title: '사진 삭제',
+                          body: '이 사진을 채팅방에서 삭제할까요?',
+                          confirmLabel: '삭제',
+                          confirmVariant: 'destructive',
+                          onConfirm: () => {
+                            void (async () => {
+                              setImageViewerBusy(true);
+                              try {
+                                await deleteSocialChatImageMessageBestEffort(rid, msgId, u);
+                                setImageViewer(null);
+                              } catch (e) {
+                                presentAppDialogAlert({
+                                  title: '삭제 실패',
+                                  body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+                                });
+                              } finally {
+                                setImageViewerBusy(false);
+                              }
+                            })();
                           },
-                        ]);
+                        });
                       }}
                       hitSlop={10}
                       disabled={imageViewerBusy}

@@ -6,26 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import {
-  ActivityIndicator,
-  Alert,
-  BackHandler,
-  DeviceEventEmitter,
-  FlatList,
-  InteractionManager,
-  Keyboard,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  ToastAndroid,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, BackHandler, DeviceEventEmitter, FlatList, InteractionManager, Keyboard, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, ToastAndroid, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
@@ -140,6 +121,7 @@ import {
 import { GINIT_MEETING_PLACE_REVIEW_SUBMITTED_EVENT } from '@/src/lib/meeting-place-review-dismiss';
 import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { emitTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -1312,7 +1294,7 @@ export default function FeedScreen() {
 
       const pk = userId?.trim() ?? '';
       if (!pk) {
-        Alert.alert('로그인이 필요해요', '모임 상세는 로그인 후 볼 수 있어요.');
+        presentAppDialogAlert({ title: '로그인이 필요해요', body: '모임 상세는 로그인 후 볼 수 있어요.' });
         clearTimeout(tRelease);
         lockRelease();
         if (cancelPendingMeetingOpenFromFeedRef.current === cancelThisOpen) {
@@ -1333,10 +1315,7 @@ export default function FeedScreen() {
             const detailMsg = MEETING_PHONE_VERIFICATION_UI_ENABLED
               ? '모임 상세를 보려면 모임 이용을 위한 인증 정보 등록(약관 동의·전화 인증·성별/생년월일)을 먼저 완료해 주세요.'
               : '모임 상세를 보려면 모임 이용을 위한 인증 정보 등록(약관 동의·성별/생년월일)을 먼저 완료해 주세요.';
-            Alert.alert('프로필을 완성해 주세요', detailMsg, [
-              { text: '닫기', style: 'cancel' },
-              { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-            ]);
+            presentAppDialogConfirm({ title: '프로필을 완성해 주세요', body: detailMsg, cancelLabel: '닫기', confirmLabel: '정보 등록하기', onConfirm: () => pushProfileOpenRegisterInfo(router) });
             return;
           }
           if (cancelled) return;

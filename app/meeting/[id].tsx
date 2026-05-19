@@ -11,23 +11,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Animated, Easing, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
@@ -154,6 +138,7 @@ import { saveConfirmedMeetingToDeviceCalendar } from '@/src/lib/save-confirmed-m
 import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { supabase } from '@/src/lib/supabase';
 import { formatRealtimeSubscribeDetail } from '@/src/lib/supabase-realtime-resilience';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import {
   ensureUserProfile,
   getUserProfile,
@@ -1145,7 +1130,7 @@ export default function MeetingDetailScreen() {
     if (meetingArrivalVerifiedByMe) return;
     if (Platform.OS === 'web') return;
     if (!confirmedPlaceCoords) {
-      Alert.alert('장소 인증', '확정 장소 좌표가 없어 지도를 열 수 없어요.');
+      presentAppDialogAlert({ title: '장소 인증', body: '확정 장소 좌표가 없어 지도를 열 수 없어요.' });
       return;
     }
     router.push(`/arrival-verify/${encodeURIComponent(meeting.id)}` as Href);
@@ -1401,11 +1386,11 @@ export default function MeetingDetailScreen() {
   const handleShareWebMeeting = useCallback(async () => {
     if (!meeting || !userId?.trim()) return;
     if (!ledgerWritesToSupabase() || !isLedgerMeetingId(meeting.id)) {
-      Alert.alert('웹 공유', 'Supabase 레저 모임만 웹 공유 링크를 만들 수 있어요.');
+      presentAppDialogAlert({ title: '웹 공유', body: 'Supabase 레저 모임만 웹 공유 링크를 만들 수 있어요.' });
       return;
     }
     if (!meetingShareWebConfigured()) {
-      Alert.alert('웹 공유', 'EXPO_PUBLIC_MEETING_SHARE_WEB_URL 이 설정되지 않았어요.');
+      presentAppDialogAlert({ title: '웹 공유', body: 'EXPO_PUBLIC_MEETING_SHARE_WEB_URL 이 설정되지 않았어요.' });
       return;
     }
     setShareWebBusy(true);
@@ -1417,7 +1402,7 @@ export default function MeetingDetailScreen() {
         ...(Platform.OS !== 'web' ? { url } : {}),
       });
     } catch (e) {
-      Alert.alert('웹 공유', e instanceof Error ? e.message : '링크를 만들지 못했어요.');
+      presentAppDialogAlert({ title: '웹 공유', body: e instanceof Error ? e.message : '링크를 만들지 못했어요.' });
     } finally {
       setShareWebBusy(false);
     }
@@ -1516,7 +1501,7 @@ export default function MeetingDetailScreen() {
     if (!meeting) return;
     const cap = voteFormRef.current?.captureWizardPayloadAfterSchedule();
     if (!cap?.ok) {
-      Alert.alert('확인', cap?.error ?? '일정 후보를 확인해 주세요.');
+      presentAppDialogAlert({ title: '확인', body: cap?.error ?? '일정 후보를 확인해 주세요.' });
       return;
     }
     const existing = meeting.dateCandidates ?? [];
@@ -1524,7 +1509,7 @@ export default function MeetingDetailScreen() {
     const { merged, additions } = mergeAppendNewDateCandidatesWithoutDup(existing, fromForm);
 
     if (additions.length === 0) {
-      Alert.alert('알림', '기존 일시와 겹치는 날짜만 있어 추가된 항목이 없습니다.');
+      presentAppDialogAlert({ title: '알림', body: '기존 일시와 겹치는 날짜만 있어 추가된 항목이 없습니다.' });
       setProposeOpen(false);
       return;
     }
@@ -1570,7 +1555,7 @@ export default function MeetingDetailScreen() {
       setSelectedDateIds(additions.map((d, j) => dateCandidateChipId(d, existing.length + j)));
       setProposeOpen(false);
     } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '일정 후보를 저장하지 못했습니다.');
+      presentAppDialogAlert({ title: '저장 실패', body: e instanceof Error ? e.message : '일정 후보를 저장하지 못했습니다.' });
     } finally {
       setProposeSaving(false);
     }
@@ -1580,7 +1565,7 @@ export default function MeetingDetailScreen() {
     if (!meeting) return;
     const cap = placeVoteFormRef.current?.capturePlaceCandidatesOnly();
     if (!cap?.ok) {
-      Alert.alert('확인', cap?.error ?? '장소 후보를 확인해 주세요.');
+      presentAppDialogAlert({ title: '확인', body: cap?.error ?? '장소 후보를 확인해 주세요.' });
       return;
     }
     const existing = (meeting.placeCandidates ?? []) as PlaceCandidate[];
@@ -1588,7 +1573,7 @@ export default function MeetingDetailScreen() {
     const { merged, additions } = mergeAppendNewPlaceCandidatesWithoutDup(existing, fromForm);
 
     if (additions.length === 0) {
-      Alert.alert('알림', '기존 장소와 겹치는 장소만 있어 추가된 항목이 없습니다.');
+      presentAppDialogAlert({ title: '알림', body: '기존 장소와 겹치는 장소만 있어 추가된 항목이 없습니다.' });
       setPlaceProposeOpen(false);
       return;
     }
@@ -1618,7 +1603,7 @@ export default function MeetingDetailScreen() {
       setSelectedPlaceIds(additions.map((p, j) => placeCandidateChipId(p, existing.length + j)));
       setPlaceProposeOpen(false);
     } catch (e) {
-      Alert.alert('저장 실패', e instanceof Error ? e.message : '장소 후보를 저장하지 못했습니다.');
+      presentAppDialogAlert({ title: '저장 실패', body: e instanceof Error ? e.message : '장소 후보를 저장하지 못했습니다.' });
     } finally {
       setPlaceProposeSaving(false);
     }
@@ -1679,21 +1664,17 @@ export default function MeetingDetailScreen() {
 
   const safeBack = useCallback(() => {
     if (votesDirty && alreadyJoinedMeeting && !isHost) {
-      Alert.alert(
-        '투표 미저장',
-        '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
-        [
-          { text: '머무르기', style: 'cancel' },
-          {
-            text: '나가기',
-            style: 'destructive',
-            onPress: () => {
-              voteDirtyLeaveBypassRef.current = true;
-              proceedScreenBack();
-            },
-          },
-        ],
-      );
+      presentAppDialogConfirm({
+        title: '투표 미저장',
+        body: '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
+        cancelLabel: '머무르기',
+        confirmLabel: '나가기',
+        confirmVariant: 'destructive',
+        onConfirm: () => {
+          voteDirtyLeaveBypassRef.current = true;
+          proceedScreenBack();
+        },
+      });
       return;
     }
     proceedScreenBack();
@@ -1707,21 +1688,17 @@ export default function MeetingDetailScreen() {
       if (voteDirtyLeaveBypassRef.current) return;
       if (!votesDirty || !alreadyJoinedMeeting || isHost) return;
       e.preventDefault();
-      Alert.alert(
-        '투표 미저장',
-        '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
-        [
-          { text: '머무르기', style: 'cancel' },
-          {
-            text: '나가기',
-            style: 'destructive',
-            onPress: () => {
-              voteDirtyLeaveBypassRef.current = true;
-              navigation.dispatch(e.data.action);
-            },
-          },
-        ],
-      );
+      presentAppDialogConfirm({
+        title: '투표 미저장',
+        body: '저장하지 않고 나가면 투표가 반영되지 않아요.\n\n그래도 나갈까요?',
+        cancelLabel: '머무르기',
+        confirmLabel: '나가기',
+        confirmVariant: 'destructive',
+        onConfirm: () => {
+          voteDirtyLeaveBypassRef.current = true;
+          navigation.dispatch(e.data.action);
+        },
+      });
     });
     return () => {
       voteDirtyLeaveBypassRef.current = false;
@@ -2540,7 +2517,7 @@ export default function MeetingDetailScreen() {
       meeting.placeName?.trim() ||
       meeting.location?.trim();
     void openNaverMapAt(confirmedPlaceCoords.latitude, confirmedPlaceCoords.longitude, name).then((ok) => {
-      if (!ok) Alert.alert('안내', '네이버 지도를 열 수 없어요.');
+      if (!ok) presentAppDialogAlert({ title: '안내', body: '네이버 지도를 열 수 없어요.' });
     });
   }, [meeting, confirmedPlaceCoords, confirmedPlaceChipResolved?.title]);
 
@@ -2559,7 +2536,7 @@ export default function MeetingDetailScreen() {
           showTransientBottomMessage('캘린더에서 내용을 확인한 뒤 저장해 주세요.');
         }
       } else {
-        Alert.alert('일정 저장', res.message);
+        presentAppDialogAlert({ title: '일정 저장', body: res.message });
       }
     } finally {
       setSaveCalendarBusy(false);
@@ -2895,7 +2872,7 @@ export default function MeetingDetailScreen() {
         busy: joinBusy,
         onPress: () => {
           if (joinBusy) {
-            Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
+            presentAppDialogAlert({ title: '안내', body: '처리 중이에요. 잠시만 기다려 주세요.' });
             return;
           }
           onCancelJoinRequestPress();
@@ -3962,7 +3939,7 @@ export default function MeetingDetailScreen() {
                         onPress={() => {
                           const name = placeChips[0]?.title?.trim();
                           void openNaverMapAt(singlePlaceCoords.latitude, singlePlaceCoords.longitude, name).then((ok) => {
-                            if (!ok) Alert.alert('안내', '네이버 지도를 열 수 없어요.');
+                            if (!ok) presentAppDialogAlert({ title: '안내', body: '네이버 지도를 열 수 없어요.' });
                           });
                         }}
                         style={({ pressed }) => [
@@ -4281,14 +4258,11 @@ export default function MeetingDetailScreen() {
                   <GinitPressable
                     onPress={() => {
                       if (joinBusy) {
-                        Alert.alert('안내', '처리 중이에요. 잠시만 기다려 주세요.');
+                        presentAppDialogAlert({ title: '안내', body: '처리 중이에요. 잠시만 기다려 주세요.' });
                         return;
                       }
                       if (joinScheduleOverlapBlock) {
-                        Alert.alert(
-                          '일정 겹침',
-                          `이미 확정된 다른 모임과 시간이 겹칠 수 있어요. (겹침 방지 ${joinOverlapBufferHours}시간)`,
-                        );
+                        presentAppDialogAlert({ title: '일정 겹침', body: `이미 확정된 다른 모임과 시간이 겹칠 수 있어요. (겹침 방지 ${joinOverlapBufferHours}시간)` });
                         return;
                       }
                       if (needsHostApprovalJoin) {

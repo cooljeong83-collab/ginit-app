@@ -3,8 +3,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -18,6 +17,7 @@ import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { UserProfile } from '@/src/lib/user-profile';
 import { getUserProfilesForIds, isUserProfileWithdrawn } from '@/src/lib/user-profile';
 import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 type IonIconName = SymbolicIconName;
 
@@ -175,14 +175,14 @@ export default function SocialChatSettingsScreen() {
   const openPeerProfileInfo = useCallback(() => {
     const pid = peerId.trim();
     if (!pid) {
-      Alert.alert('프로필', '상대 프로필을 불러올 수 없어요.');
+      presentAppDialogAlert({ title: '프로필', body: '상대 프로필을 불러올 수 없어요.' });
       return;
     }
     router.push(`/profile/user/${encodeURIComponent(pid)}`);
   }, [peerId]);
 
   const openLeaveInfo = useCallback(() => {
-    Alert.alert('채팅방 나가기', '1:1 채팅 나가기(숨기기/차단 포함)는 준비 중이에요. 곧 연결할게요.');
+    presentAppDialogAlert({ title: '채팅방 나가기', body: '1:1 채팅 나가기(숨기기/차단 포함)는 준비 중이에요. 곧 연결할게요.' });
   }, []);
 
   if (!roomId) {

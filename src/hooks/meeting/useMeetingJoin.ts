@@ -18,6 +18,7 @@ import {
 } from '@/src/lib/meeting-schedule-times';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { resetStackToTabsAfterMeetingLeave } from '@/src/lib/router-safe';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import { notifyTrustPenaltyAppliedFireAndForget } from '@/src/lib/trust-penalty-notify';
 import type { SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
 import type { Meeting } from '@/src/lib/meetings';
@@ -41,7 +42,6 @@ import { ensureUserProfile, getUserProfile, meetingDemographicsIncomplete } from
 
 import type { QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform } from 'react-native';
 
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 
@@ -54,7 +54,11 @@ function movieCandidateChipId(mv: SelectedMovieExtra, index: number): string {
 }
 
 function alertMeetingDeletedAndGoBack(router: UseMeetingJoinArgs['router']): void {
-  Alert.alert('삭제된 모임', '이 모임은 더 이상 존재하지 않아요.', [{ text: '확인', onPress: () => router.back() }]);
+  presentAppDialogAlert({
+    title: '삭제된 모임',
+    body: '이 모임은 더 이상 존재하지 않아요.',
+    onPrimary: () => router.back(),
+  });
 }
 
 type UseMeetingJoinArgs = {
@@ -139,15 +143,15 @@ export function useMeetingJoin({
   const handleJoinMeeting = useCallback(async () => {
     if (!meeting) return;
     if (!sessionPk) {
-      Alert.alert('안내', '로그인 후 참여할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 참여할 수 있어요.' });
       return;
     }
     if (meeting.scheduleConfirmed === true) {
-      Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참여할 수 없어요.');
+      presentAppDialogAlert({ title: '참여 불가', body: '이미 일정이 확정된 모임이라 참여할 수 없어요.' });
       return;
     }
     if (getMeetingRecruitmentPhase(meeting) === 'full') {
-      Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 참여할 수 없어요.');
+      presentAppDialogAlert({ title: '정원 마감', body: '이미 정원이 가득 찬 모임이라 참여할 수 없어요.' });
       return;
     }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : [...selectedDateIds];
@@ -167,13 +171,14 @@ export function useMeetingJoin({
             : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
               ? 'place'
               : null;
-      Alert.alert(
-        '투표를 완료해 주세요',
-        parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.',
-        firstScrollSection != null ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }] : [{ text: '확인' }],
-      );
+      presentAppDialogAlert({
+        title: '투표를 완료해 주세요',
+        body:
+          parts.length > 0
+            ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.`
+            : '각 투표에서 최소 한 가지 이상 선택한 뒤 참여할 수 있어요.',
+        onPrimary: firstScrollSection != null ? () => scrollToVoteBlock(firstScrollSection) : undefined,
+      });
       return;
     }
     setJoinBusy(true);
@@ -181,14 +186,13 @@ export function useMeetingJoin({
       await ensureUserProfile(sessionPk);
       const profGate = await getUserProfile(sessionPk);
       if (meetingDemographicsIncomplete(profGate, sessionPk)) {
-        Alert.alert(
-          '프로필을 먼저 완성해 주세요',
-          'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
-          [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router as any) },
-          ],
-        );
+        presentAppDialogConfirm({
+          title: '프로필을 먼저 완성해 주세요',
+          body: 'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
+          cancelLabel: '닫기',
+          confirmLabel: '정보 등록하기',
+          onConfirm: () => pushProfileOpenRegisterInfo(router as any),
+        });
         return;
       }
       const joinVotes = {
@@ -230,7 +234,7 @@ export function useMeetingJoin({
       if (isConfirmedScheduleOverlapErrorMessage(msg)) {
         showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
       } else {
-        Alert.alert('참여 실패', msg || '다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '참여 실패', body: msg || '다시 시도해 주세요.' });
       }
     } finally {
       setJoinBusy(false);
@@ -260,19 +264,28 @@ export function useMeetingJoin({
     async (messageFromModal: string | null) => {
       if (!meeting) return;
       if (!sessionPk) {
-        Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+        presentAppDialogAlert({ title: '안내', body: '로그인 후 신청할 수 있어요.' });
         return;
       }
       if (meeting.scheduleConfirmed === true) {
-        Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.');
+        presentAppDialogAlert({
+          title: '참여 불가',
+          body: '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.',
+        });
         return;
       }
       if (getMeetingRecruitmentPhase(meeting) === 'full') {
-        Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 참가 신청할 수 없어요.');
+        presentAppDialogAlert({
+          title: '정원 마감',
+          body: '이미 정원이 가득 찬 모임이라 참가 신청할 수 없어요.',
+        });
         return;
       }
       if (isUserKickedFromMeeting(meeting, sessionPk)) {
-        Alert.alert('안내', '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
+        presentAppDialogAlert({
+          title: '안내',
+          body: '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.',
+        });
         return;
       }
       const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : [...selectedDateIds];
@@ -292,13 +305,14 @@ export function useMeetingJoin({
               : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
                 ? 'place'
                 : null;
-        Alert.alert(
-          '투표를 완료해 주세요',
-          parts.length > 0
-            ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
-            : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
-          firstScrollSection != null ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }] : [{ text: '확인' }],
-        );
+        presentAppDialogAlert({
+          title: '투표를 완료해 주세요',
+          body:
+            parts.length > 0
+              ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
+              : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
+          onPrimary: firstScrollSection != null ? () => scrollToVoteBlock(firstScrollSection) : undefined,
+        });
         return;
       }
       setJoinBusy(true);
@@ -306,14 +320,13 @@ export function useMeetingJoin({
         await ensureUserProfile(sessionPk);
         const profGate = await getUserProfile(sessionPk);
         if (meetingDemographicsIncomplete(profGate, sessionPk)) {
-          Alert.alert(
-            '프로필을 먼저 완성해 주세요',
-            'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
-            [
-              { text: '닫기', style: 'cancel' },
-              { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router as any) },
-            ],
-          );
+          presentAppDialogConfirm({
+            title: '프로필을 먼저 완성해 주세요',
+            body: 'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임에 참여할 수 있어요.',
+            cancelLabel: '닫기',
+            confirmLabel: '정보 등록하기',
+            onConfirm: () => pushProfileOpenRegisterInfo(router as any),
+          });
           return;
         }
         const joinVotes = {
@@ -340,7 +353,7 @@ export function useMeetingJoin({
         if (isConfirmedScheduleOverlapErrorMessage(msg)) {
           showTransientBottomMessage(`${GINIT_AGENT_SCHEDULE_OVERLAP_SUGGESTION}\n\n${msg}`);
         } else {
-          Alert.alert('신청 실패', msg || '다시 시도해 주세요.');
+          presentAppDialogAlert({ title: '신청 실패', body: msg || '다시 시도해 주세요.' });
         }
       } finally {
         setJoinBusy(false);
@@ -371,19 +384,28 @@ export function useMeetingJoin({
 
   const onPressRequestJoin = useCallback(() => {
     if (!meeting || !sessionPk) {
-      Alert.alert('안내', '로그인 후 신청할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 신청할 수 있어요.' });
       return;
     }
     if (meeting.scheduleConfirmed === true) {
-      Alert.alert('참여 불가', '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.');
+      presentAppDialogAlert({
+        title: '참여 불가',
+        body: '이미 일정이 확정된 모임이라 참가 신청할 수 없어요.',
+      });
       return;
     }
     if (getMeetingRecruitmentPhase(meeting) === 'full') {
-      Alert.alert('정원 마감', '이미 정원이 가득 찬 모임이라 참가 신청할 수 없어요.');
+      presentAppDialogAlert({
+        title: '정원 마감',
+        body: '이미 정원이 가득 찬 모임이라 참가 신청할 수 없어요.',
+      });
       return;
     }
     if (isUserKickedFromMeeting(meeting, sessionPk)) {
-      Alert.alert('안내', '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.');
+      presentAppDialogAlert({
+        title: '안내',
+        body: '이 모임에서는 호스트에 의해 퇴장되어 다시 참여하거나 신청할 수 없어요.',
+      });
       return;
     }
     const effectiveDateIds = autoDatePick && dateChips[0]?.id ? [dateChips[0].id] : [...selectedDateIds];
@@ -403,13 +425,14 @@ export function useMeetingJoin({
             : needsPlacePick && !autoPlacePick && effectivePlaceIds.length === 0
               ? 'place'
               : null;
-      Alert.alert(
-        '투표를 완료해 주세요',
-        parts.length > 0
-          ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
-          : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
-        firstScrollSection != null ? [{ text: '확인', onPress: () => scrollToVoteBlock(firstScrollSection) }] : [{ text: '확인' }],
-      );
+      presentAppDialogAlert({
+        title: '투표를 완료해 주세요',
+        body:
+          parts.length > 0
+            ? `${parts.join(', ')}에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.`
+            : '각 투표에서 최소 한 가지 이상 선택한 뒤 신청할 수 있어요.',
+        onPrimary: firstScrollSection != null ? () => scrollToVoteBlock(firstScrollSection) : undefined,
+      });
       return;
     }
     if (publicMeetingDetails?.requestMessageEnabled === true) {
@@ -441,32 +464,35 @@ export function useMeetingJoin({
 
   const onCancelJoinRequestPress = useCallback(() => {
     if (!meeting || !sessionPk) return;
-    Alert.alert('신청 취소', '참가 신청을 취소할까요?', [
-      { text: '닫기', style: 'cancel' },
-      {
-        text: '취소하기',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setJoinBusy(true);
-            try {
-              await cancelJoinRequest(meeting.id, sessionPk);
-              void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
-              showTransientBottomMessage('참가 신청을 취소했어요.');
-            } catch (e) {
-              Alert.alert('안내', e instanceof Error ? e.message : '다시 시도해 주세요.');
-            } finally {
-              setJoinBusy(false);
-            }
-          })();
-        },
+    presentAppDialogConfirm({
+      title: '신청 취소',
+      body: '참가 신청을 취소할까요?',
+      cancelLabel: '닫기',
+      confirmLabel: '취소하기',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        void (async () => {
+          setJoinBusy(true);
+          try {
+            await cancelJoinRequest(meeting.id, sessionPk);
+            void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meeting.id) });
+            showTransientBottomMessage('참가 신청을 취소했어요.');
+          } catch (e) {
+            presentAppDialogAlert({
+              title: '안내',
+              body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+            });
+          } finally {
+            setJoinBusy(false);
+          }
+        })();
       },
-    ]);
+    });
   }, [meeting, sessionPk, queryClient]);
 
   const handleLeaveParticipant = useCallback(() => {
     if (!meeting || !sessionPk) {
-      Alert.alert('안내', '로그인 후 탈퇴할 수 있어요.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 후 탈퇴할 수 있어요.' });
       return;
     }
     const confirmed = meeting.scheduleConfirmed === true;
@@ -504,12 +530,12 @@ export function useMeetingJoin({
       : confirmed
         ? `\n\n일정이 확정된 모임이에요. 예정 시작 ${oh}시간 전보다 일찍 나가면 신뢰·XP 패널티는 적용되지 않아요.`
         : '';
-    Alert.alert('모임에서 나가기', baseMsg + penaltyMsg, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '퇴장',
-        style: 'destructive',
-        onPress: () => {
+    presentAppDialogConfirm({
+      title: '모임에서 나가기',
+      body: baseMsg + penaltyMsg,
+      confirmLabel: '퇴장',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
           void (async () => {
             setLeaveBusy(true);
             try {
@@ -537,38 +563,27 @@ export function useMeetingJoin({
                     // eslint-disable-next-line no-console
                     console.warn('[useMeetingJoin] applyTrustPenaltyLeaveConfirmedMeeting failed after leave', e);
                   }
-                  Alert.alert(
-                    '안내',
-                    '모임에서는 나갔지만 신뢰 점수 반영이 잠시 실패했어요. 프로필을 새로고침한 뒤에도 이상하면 고객 지원에 문의해 주세요.',
-                  );
+                  presentAppDialogAlert({
+                    title: '안내',
+                    body: '모임에서는 나갔지만 신뢰 점수 반영이 잠시 실패했어요. 프로필을 새로고침한 뒤에도 이상하면 고객 지원에 문의해 주세요.',
+                  });
                 }
               }
               resetStackToTabsAfterMeetingLeave(router as any, { tab: 'index' });
               if (penaltyLedgerOk) {
-                if (Platform.OS === 'web') {
-                  setTimeout(() => {
-                    Alert.alert(
-                      '신뢰 패널티가 반영됐어요',
-                      `gTrust ${trustDrop}점·XP ${xpDrop}가 차감됐고, 누적 패널티가 1회 늘었어요.`,
-                      [
-                        { text: '닫기', style: 'cancel' },
-                        { text: '프로필로', onPress: () => (router as any).push?.('/(tabs)/profile') },
-                      ],
-                    );
-                  }, 400);
-                } else {
-                  notifyTrustPenaltyAppliedFireAndForget({ trustPoints: trustDrop, xpPoints: xpDrop });
-                }
+                notifyTrustPenaltyAppliedFireAndForget({ trustPoints: trustDrop, xpPoints: xpDrop });
               }
             } catch (e) {
-              Alert.alert('탈퇴 실패', e instanceof Error ? e.message : '다시 시도해 주세요.');
+              presentAppDialogAlert({
+                title: '탈퇴 실패',
+                body: e instanceof Error ? e.message : '다시 시도해 주세요.',
+              });
             } finally {
               setLeaveBusy(false);
             }
           })();
-        },
       },
-    ]);
+    });
   }, [meeting, sessionPk, router, queryClient]);
 
   return {

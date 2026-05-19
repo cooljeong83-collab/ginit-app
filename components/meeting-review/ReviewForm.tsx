@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,7 +9,10 @@ import { MeetingReviewTopSummary } from '@/components/meeting-review/MeetingRevi
 import { KeyboardAwareScreenScroll } from '@/components/ui';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
-import { getKeywordsForCategory, MAX_MEETING_REVIEW_KEYWORDS } from '@/src/lib/meeting-review/meeting-review-keywords';
+import {
+  getReviewFormKeywordOptions,
+  MAX_MEETING_REVIEW_KEYWORDS,
+} from '@/src/lib/meeting-review/meeting-review-keywords';
 import type { MeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
 import type { Meeting } from '@/src/lib/meetings';
 
@@ -21,6 +25,8 @@ export type ReviewFormProps = {
   rating: number;
   onRatingChange: (rating: number) => void;
   selectedKeywords: string[];
+  /** 수정 진입 시 저장돼 있던·현재 업종 칩에 없는 키워드(해제해도 칩 유지) */
+  pinnedKeywords?: readonly string[];
   onToggleKeyword: (keyword: string) => void;
   onKeywordMaxReached?: () => void;
   comment: string;
@@ -36,12 +42,16 @@ export function ReviewForm({
   rating,
   onRatingChange,
   selectedKeywords,
+  pinnedKeywords = [],
   onToggleKeyword,
   onKeywordMaxReached,
   comment,
   onCommentChange,
 }: ReviewFormProps) {
-  const keywords = getKeywordsForCategory(place.keywordCategory);
+  const keywords = useMemo(
+    () => getReviewFormKeywordOptions(place.keywordCategory, pinnedKeywords),
+    [place.keywordCategory, pinnedKeywords],
+  );
   const insets = useSafeAreaInsets();
   /** 화면 하단 고정 제출 버튼 영역(패딩·버튼 높이) */
   const footerBarHeight = 10 + 14 * 2 + 22;

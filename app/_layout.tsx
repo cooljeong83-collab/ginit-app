@@ -15,6 +15,8 @@ import { PendingPushNavigationFlush } from '@/components/PendingPushNavigationFl
 import { PushNotificationBootstrap } from '@/components/PushNotificationBootstrap';
 import { ShareShortcutsWatermelonBootstrap } from '@/components/ShareShortcutsWatermelonBootstrap';
 import { ScreenTransitionOverlay } from '@/components/ui';
+import { AppDialogHost } from '@/components/dialog/AppDialogHost';
+import { GamificationStatChangeHost } from '@/components/gamification/GamificationStatChangeHost';
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
@@ -87,6 +89,8 @@ export default function RootLayout() {
                     }}
                   />
                   <TransientBottomMessageHost />
+                  <AppDialogHost />
+                  <GamificationStatChangeHost />
                 </InAppAlarmsProvider>
                 <ScreenTransitionOverlay />
               </ScreenTransitionProvider>

@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import {useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Modal, Platform, StyleSheet, Text, TextInput, View} from 'react-native';
+import { Modal, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -21,6 +21,7 @@ import {
 import { AuthService } from '@/src/services/AuthService';
 import { supabase } from '@/src/lib/supabase';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 type TermKey = 'tos' | 'privacy' | 'safety';
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
@@ -83,7 +84,7 @@ export default function OtpVerifyScreen() {
       const e164 = cred.phoneNumber ?? phoneE164;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
-        Alert.alert('인증 실패', '전화번호를 확인할 수 없습니다. 다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '인증 실패', body: '전화번호를 확인할 수 없습니다. 다시 시도해 주세요.' });
         return;
       }
 
@@ -102,7 +103,7 @@ export default function OtpVerifyScreen() {
       setTermsOpen(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('오류', msg);
+      presentAppDialogAlert({ title: '오류', body: msg });
     } finally {
       setBusy(false);
     }
@@ -118,7 +119,7 @@ export default function OtpVerifyScreen() {
       const e164 = session?.user?.phone?.trim() ?? phoneE164;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
-        Alert.alert('오류', '전화번호 세션을 확인할 수 없습니다.');
+        presentAppDialogAlert({ title: '오류', body: '전화번호 세션을 확인할 수 없습니다.' });
         return;
       }
       const docId = pendingProfileDocId?.trim() || normalized;
@@ -127,7 +128,7 @@ export default function OtpVerifyScreen() {
       await proceedToHome(docId);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('오류', msg);
+      presentAppDialogAlert({ title: '오류', body: msg });
     } finally {
       setBusy(false);
       setTermsOpen(false);

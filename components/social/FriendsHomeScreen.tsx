@@ -4,8 +4,7 @@ import {useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import { Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 
@@ -48,6 +47,7 @@ import { socialDmRoomId } from '@/src/lib/social-chat-rooms';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { subscribeFriendsPostgresChanged } from '@/src/lib/friends-postgres-sync-bus';
 import type { UserProfile } from '@/src/lib/user-profile';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 import {
   getPeerUserProfilesForIds,
   getUserProfile,
@@ -598,23 +598,23 @@ export function FriendsHomeScreen() {
     (row: FriendInboxRow) => {
       if (row.status !== 'pending') return;
       const nick = profileFromMap(profiles, row.addressee_app_user_id)?.nickname?.trim() ?? '상대';
-      Alert.alert('요청 취소', `${nick}님에게 보낸 지닛 요청을 취소할까요?`, [
-        { text: '아니오', style: 'cancel' },
-        {
-          text: '취소하기',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              try {
-                await cancelOutgoingGinitRequest(me, row.id);
-                await reload();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
-              }
-            })();
-          },
+      presentAppDialogConfirm({
+        title: '요청 취소',
+        body: `${nick}님에게 보낸 지닛 요청을 취소할까요?`,
+        cancelLabel: '아니오',
+        confirmLabel: '취소하기',
+        confirmVariant: 'destructive',
+        onConfirm: () => {
+          void (async () => {
+            try {
+              await cancelOutgoingGinitRequest(me, row.id);
+              await reload();
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            }
+          })();
         },
-      ]);
+      });
     },
     [me, profiles, reload],
   );
@@ -650,42 +650,37 @@ export function FriendsHomeScreen() {
     const nick = row.profile.nickname?.trim() || '친구';
     const fid = row.row.id;
     const peerPk = friendAppUserKey(row.row.peer_app_user_id);
-    Alert.alert(
-      '친구 삭제',
-      `${nick}님과의 지닛 친구 관계를 삭제할까요?\n채팅 기록은 그대로이며, 이후 다시 지닛을 보낼 수 있어요.`,
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              try {
-                await removeAcceptedFriend(me, fid);
-                setHiddenPeerIds((prev) => {
-                  if (!prev.has(peerPk)) return prev;
-                  const next = new Set(prev);
-                  next.delete(peerPk);
-                  void persistHidden(next);
-                  return next;
-                });
-                setBlockedPeerIds((prev) => {
-                  if (!prev.has(peerPk)) return prev;
-                  const next = new Set(prev);
-                  next.delete(peerPk);
-                  void saveBlockedPeerIds(me, next);
-                  return next;
-                });
-                setSheetFriend(null);
-                await reload();
-              } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
-              }
-            })();
-          },
-        },
-      ],
-    );
+    presentAppDialogConfirm({
+      title: '친구 삭제',
+      body: `${nick}님과의 지닛 친구 관계를 삭제할까요?\n채팅 기록은 그대로이며, 이후 다시 지닛을 보낼 수 있어요.`,
+      confirmLabel: '삭제',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await removeAcceptedFriend(me, fid);
+            setHiddenPeerIds((prev) => {
+              if (!prev.has(peerPk)) return prev;
+              const next = new Set(prev);
+              next.delete(peerPk);
+              void persistHidden(next);
+              return next;
+            });
+            setBlockedPeerIds((prev) => {
+              if (!prev.has(peerPk)) return prev;
+              const next = new Set(prev);
+              next.delete(peerPk);
+              void saveBlockedPeerIds(me, next);
+              return next;
+            });
+            setSheetFriend(null);
+            await reload();
+          } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+          }
+        })();
+      },
+    });
   }, [me, sheetFriend, reload, persistHidden]);
 
   const onHideFriendFromSheet = useCallback(() => {
@@ -704,27 +699,26 @@ export function FriendsHomeScreen() {
     if (!sheetFriend || !me) return;
     const row = sheetFriend;
     const nick = row.profile.nickname?.trim() || '상대';
-    Alert.alert('차단', `${nick}님을 차단할까요?\n친구 목록에서 보이지 않으며, 이후 상호작용이 제한될 수 있어요.`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '차단',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            const pk = friendAppUserKey(row.row.peer_app_user_id);
-            const blocked = await loadBlockedPeerIds(me);
-            blocked.add(pk);
-            await saveBlockedPeerIds(me, blocked);
-            setBlockedPeerIds(blocked);
-            const hidden = await loadHiddenPeerIds(me);
-            hidden.delete(pk);
-            await saveHiddenPeerIds(me, hidden);
-            setHiddenPeerIds(hidden);
-            setSheetFriend(null);
-          })();
-        },
+    presentAppDialogConfirm({
+      title: '차단',
+      body: `${nick}님을 차단할까요?\n친구 목록에서 보이지 않으며, 이후 상호작용이 제한될 수 있어요.`,
+      confirmLabel: '차단',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        void (async () => {
+          const pk = friendAppUserKey(row.row.peer_app_user_id);
+          const blocked = await loadBlockedPeerIds(me);
+          blocked.add(pk);
+          await saveBlockedPeerIds(me, blocked);
+          setBlockedPeerIds(blocked);
+          const hidden = await loadHiddenPeerIds(me);
+          hidden.delete(pk);
+          await saveHiddenPeerIds(me, hidden);
+          setHiddenPeerIds(hidden);
+          setSheetFriend(null);
+        })();
       },
-    ]);
+    });
   }, [sheetFriend, me]);
 
   const onToggleSearch = useCallback(() => {

@@ -18,7 +18,6 @@ import {
 } from './meetings-ledger';
 import { appendMeetingAutoCancelUnconfirmedAlarm } from './meeting-auto-cancel-unconfirmed-alarm';
 import { purgeMeetingStorageBestEffort } from './meeting-delete-cleanup';
-import { purgeLocalMeetingChatWatermelon } from './meeting-deleted-local-purge';
 import {
   notifyMeetingJoinRequestApplicantDecisionFireAndForget,
   notifyMeetingNewHostAssignedFireAndForget,
@@ -97,6 +96,7 @@ async function deleteMeetingLedgerWithArtifacts(params: {
     imageUrl: params.imageUrl,
   });
   await ledgerMeetingDelete(ledgerMeetingId);
+  const { purgeLocalMeetingChatWatermelon } = await import('./meeting-deleted-local-purge');
   await purgeLocalMeetingChatWatermelon(routeMeetingId, ledgerMeetingId);
 }
 

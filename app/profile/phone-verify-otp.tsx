@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useLocalSearchParams } from 'expo-router';
 import { serverTimestamp } from '@/src/lib/ginit-timestamp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View} from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -16,6 +16,7 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { ensureUserProfile, updateUserProfile } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 function paramToString(v: string | string[] | undefined): string {
   if (v == null) return '';
@@ -54,7 +55,7 @@ export default function ProfilePhoneVerifyOtpScreen() {
   const onVerify = useCallback(async () => {
     if (!canVerify) return;
     if (!profilePk) {
-      Alert.alert('안내', '로그인 상태를 확인할 수 없습니다.');
+      presentAppDialogAlert({ title: '안내', body: '로그인 상태를 확인할 수 없습니다.' });
       return;
     }
     setBusy(true);
@@ -63,12 +64,12 @@ export default function ProfilePhoneVerifyOtpScreen() {
       const e164 = cred.phoneNumber ?? phoneE164Param;
       const normalized = e164 ? normalizePhoneUserId(e164) : null;
       if (!normalized) {
-        Alert.alert('인증 실패', '전화번호를 확인할 수 없습니다. 다시 시도해 주세요.');
+        presentAppDialogAlert({ title: '인증 실패', body: '전화번호를 확인할 수 없습니다. 다시 시도해 주세요.' });
         return;
       }
       await ensureUserProfile(profilePk);
       await updateUserProfile(profilePk, { phone: normalized, phoneVerifiedAt: serverTimestamp() });
-      Alert.alert('인증 완료', '전화번호 인증이 완료되었습니다.');
+      presentAppDialogAlert({ title: '인증 완료', body: '전화번호 인증이 완료되었습니다.' });
       router.replace('/(tabs)/profile');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -76,16 +77,16 @@ export default function ProfilePhoneVerifyOtpScreen() {
       if (hay.includes('provider-already-linked')) {
         const normalized = phoneE164Param ? normalizePhoneUserId(phoneE164Param) : null;
         if (!normalized) {
-          Alert.alert('인증 실패', msg);
+          presentAppDialogAlert({ title: '인증 실패', body: msg });
           return;
         }
         await ensureUserProfile(profilePk);
         await updateUserProfile(profilePk, { phone: normalized, phoneVerifiedAt: serverTimestamp() });
-        Alert.alert('인증 완료', '전화번호 인증이 완료되었습니다.');
+        presentAppDialogAlert({ title: '인증 완료', body: '전화번호 인증이 완료되었습니다.' });
         router.replace('/(tabs)/profile');
         return;
       }
-      Alert.alert('인증 실패', msg);
+      presentAppDialogAlert({ title: '인증 실패', body: msg });
     } finally {
       setBusy(false);
     }

@@ -15,10 +15,10 @@ import { getUserProfile, meetingDemographicsIncomplete } from '@/src/lib/user-pr
 import { LinearGradient } from 'expo-linear-gradient';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { type ElementRef, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import {
-  ActivityIndicator, Alert, Animated, findNodeHandle, Keyboard, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, UIManager, useWindowDimensions, View, type KeyboardEvent} from 'react-native';
+import { ActivityIndicator, Animated, findNodeHandle, Keyboard, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, UIManager, useWindowDimensions, View, type KeyboardEvent } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 const INPUT_PLACEHOLDER = '#94a3b8';
 
@@ -263,7 +263,7 @@ export function MeetingBasicInfoEditModal({
     setVoiceTitleRecognizing(false);
     setVoiceDescriptionRecognizing(false);
     voiceEditTargetRef.current = null;
-    Alert.alert('음성 입력 오류', humanizeSpeechRecognitionError(event));
+    presentAppDialogAlert({ title: '음성 입력 오류', body: humanizeSpeechRecognitionError(event) });
   });
   useSpeechRecognitionEvent('result', (event) => {
     const t = String(event?.results?.[0]?.transcript ?? '').trim();
@@ -293,7 +293,7 @@ export function MeetingBasicInfoEditModal({
     }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      presentAppDialogAlert({ title: '권한 필요', body: '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.' });
       return;
     }
     voiceEditTargetRef.current = 'title';
@@ -313,7 +313,7 @@ export function MeetingBasicInfoEditModal({
     }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('권한 필요', '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.');
+      presentAppDialogAlert({ title: '권한 필요', body: '음성 입력을 사용하려면 마이크/음성 인식 권한이 필요합니다.' });
       return;
     }
     voiceEditTargetRef.current = 'description';
@@ -626,21 +626,11 @@ export function MeetingBasicInfoEditModal({
       }
       if (meetingConfigDraft.genderRatio === 'SAME_GENDER_ONLY') {
         if (meetingDemographicsIncomplete(hostProfile, hostUserId.trim())) {
-          Alert.alert(
-            '프로필을 먼저 완성해 주세요',
-            'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.',
-            [
-              { text: '닫기', style: 'cancel' },
-              { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-            ],
-          );
+          presentAppDialogConfirm({ title: '프로필을 먼저 완성해 주세요', body: 'SNS 간편 가입 계정은 프로필에서 성별과 연령대를 입력한 뒤 모임을 만들 수 있어요.', cancelLabel: '닫기', confirmLabel: '정보 등록하기', onConfirm: () => pushProfileOpenRegisterInfo(router) });
           return;
         }
         if (normalizeProfileGenderToHostSnapshot(hostProfile?.gender ?? null) == null) {
-          Alert.alert('프로필 확인', '동성 모집은 프로필에 성별을 입력한 뒤 저장할 수 있어요.', [
-            { text: '닫기', style: 'cancel' },
-            { text: '정보 등록하기', onPress: () => pushProfileOpenRegisterInfo(router) },
-          ]);
+          presentAppDialogConfirm({ title: '프로필 확인', body: '동성 모집은 프로필에 성별을 입력한 뒤 저장할 수 있어요.', cancelLabel: '닫기', confirmLabel: '정보 등록하기', onConfirm: () => pushProfileOpenRegisterInfo(router) });
           return;
         }
       }

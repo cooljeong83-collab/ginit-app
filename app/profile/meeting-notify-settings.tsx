@@ -1,7 +1,7 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import {useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Switch, Text, View} from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -19,6 +19,7 @@ import {
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { supabase } from '@/src/lib/supabase';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 
 const meetingCreateSwitchTrack = { false: '#cbd5e1', true: GinitTheme.themeMainColor } as const;
 /** «전체» 행 id — UI 전용. 서버 `region_norms` / `category_ids`에는 넣지 않음. 레거시 `*` 는 get 시 해당 섹션 전부 켠 것으로 펼침. */
@@ -247,7 +248,7 @@ export default function MeetingNotifySettingsScreen() {
       const { regions, cats } = matrixFromRefs(regionOnRef, catOnRef);
       if (isMeetingAreaNotifyMatrixValid(regions, cats)) return;
       e.preventDefault();
-      Alert.alert('알림 설정', '카테고리를 최소 하나 이상 선택해 주세요.', [{ text: '확인' }]);
+      presentAppDialogAlert({ title: '알림 설정', body: '카테고리를 최소 하나 이상 선택해 주세요.' });
     });
     return unsub;
   }, [navigation]);

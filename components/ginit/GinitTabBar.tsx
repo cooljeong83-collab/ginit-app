@@ -7,7 +7,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { usePathname } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Alert, Platform, StyleSheet, Text, View} from 'react-native';
+import { Platform, StyleSheet, Text, View} from 'react-native';
+import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import Animated, {
   Easing,
   Extrapolation,
@@ -174,9 +175,11 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
         try {
           const p = await getUserProfile(pk);
           if (!isMeetingServiceComplianceComplete(p, pk)) {
-            Alert.alert('인증 정보 등록', '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.', [
-              { text: '확인', onPress: () => pushProfileOpenRegisterInfo(router) },
-            ]);
+            presentAppDialogAlert({
+              title: '인증 정보 등록',
+              body: '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.',
+              onPrimary: () => pushProfileOpenRegisterInfo(router),
+            });
             return;
           }
         } catch {
