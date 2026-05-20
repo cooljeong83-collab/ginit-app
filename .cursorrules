@@ -32,6 +32,7 @@ You are an expert AI coding assistant building "Ginit", a local gathering and so
 
 # AI Behavior Guidelines
 - **모임 목록 vs 모임 채팅 목록:** 용어·데이터 소스·동기화 대상을 혼동하지 않는다. 상세 규칙은 `.cursor/rules/meetings-list-vs-meeting-chat-list.mdc`를 따른다. (모임 목록 = 홈 피드 등 `Meeting` 카탈로그; 모임 채팅 목록 = 채팅 탭 진입·채팅 방·읽음/미리보기 중심.)
+- **`app.config.ts`:** Expo 설정은 Node에서만 평가된다. `./constants/ginit-theme` 등 **로컬 TS import 금지** — 색·plugin 옵션은 hex 리터럴 인라인. 상세는 `.cursor/rules/app-config-expo-eval.mdc`.
 - Write modular, clean, and typed code (TypeScript).
 - Before suggesting large architectural changes, explain the cost implications (Supabase Egress/Compute) of your suggestion.
 - Favor client-side computation and local caching over constant server polling.

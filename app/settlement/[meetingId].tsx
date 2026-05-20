@@ -1965,13 +1965,24 @@ export default function SettlementMeetingScreen() {
       return;
     }
     presentAppDialogThreeButton({
-    title: '영수증 인식', body: '촬영 또는 앨범에서 영수증을 선택해 주세요.',
-    buttons: [
-      { label: '취소', variant: 'secondary' },
-      { label: '촬영', variant: 'primary', onPress: () => void pickReceiptImageAndOcr('camera') },
-      { label: '앨범', variant: 'primary', onPress: () => void pickReceiptImageAndOcr('library') },
-    ],
-  });
+      title: '영수증 인식',
+      body: '촬영 또는 앨범에서 영수증을 선택해 주세요.',
+      buttons: [
+        {
+          label: '촬영',
+          icon: 'camera',
+          variant: 'primary',
+          onPress: () => void pickReceiptImageAndOcr('camera'),
+        },
+        {
+          label: '앨범',
+          icon: 'images-outline',
+          variant: 'primary',
+          onPress: () => void pickReceiptImageAndOcr('library'),
+        },
+        { label: '취소', icon: 'close', variant: 'secondary' },
+      ],
+    });
   }, [pickReceiptImageAndOcr]);
 
   const receiptScanPageWidth = Math.max(280, windowWidth - 36);

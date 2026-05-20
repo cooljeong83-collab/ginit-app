@@ -1,8 +1,11 @@
+import type { SymbolicIconName } from '@/components/ui/GinitSymbolicIcon';
+
 export type AppDialogButtonVariant = 'primary' | 'destructive' | 'secondary';
 
 export type AppDialogButton = {
   label: string;
   variant?: AppDialogButtonVariant;
+  icon?: SymbolicIconName;
   onPress?: () => void;
 };
 

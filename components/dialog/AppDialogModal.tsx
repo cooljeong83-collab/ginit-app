@@ -1,4 +1,5 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useEffect, useRef } from 'react';
 import { Animated, Modal, Platform, StyleSheet, Text, View } from 'react-native';
@@ -60,28 +61,31 @@ export function AppDialogModal({ visible, payload, onDismiss }: Props) {
             ) : null}
 
             <View style={[styles.actions, stacked && styles.actionsStacked]}>
-              {buttons.map((btn, index) => (
-                <GinitPressable
-                  key={`${btn.label}-${index}`}
-                  onPress={() => pressButton(btn)}
-                  style={({ pressed }) => [
-                    styles.btn,
-                    stacked ? styles.btnStacked : index === 0 && buttons.length === 2 ? styles.btnHalf : styles.btnFull,
-                    btnStyle(btn.variant ?? defaultVariantForIndex(index, buttons.length)),
-                    pressed && styles.btnPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={btn.label}>
-                  <Text
-                    style={[
-                      styles.btnLabel,
-                      isFilledVariant(btn.variant ?? defaultVariantForIndex(index, buttons.length)) &&
-                        styles.btnLabelOnFill,
-                    ]}>
-                    {btn.label}
-                  </Text>
-                </GinitPressable>
-              ))}
+              {buttons.map((btn, index) => {
+                const variant = btn.variant ?? defaultVariantForIndex(index, buttons.length);
+                const filled = isFilledVariant(variant);
+                const iconColor = filled ? '#FFFFFF' : GinitTheme.colors.textSub;
+                return (
+                  <GinitPressable
+                    key={`${btn.label}-${index}`}
+                    onPress={() => pressButton(btn)}
+                    style={({ pressed }) => [
+                      styles.btn,
+                      stacked ? styles.btnStacked : index === 0 && buttons.length === 2 ? styles.btnHalf : styles.btnFull,
+                      btnStyle(variant),
+                      pressed && styles.btnPressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={btn.label}>
+                    <View style={styles.btnContent}>
+                      {btn.icon ? (
+                        <GinitSymbolicIcon name={btn.icon} size={18} color={iconColor} />
+                      ) : null}
+                      <Text style={[styles.btnLabel, filled && styles.btnLabelOnFill]}>{btn.label}</Text>
+                    </View>
+                  </GinitPressable>
+                );
+              })}
             </View>
           </Animated.View>
         </GinitPressable>
@@ -170,6 +174,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
+  },
+  btnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   btnHalf: {
     flex: 1,

@@ -98,6 +98,13 @@ import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-can
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import {
+  datePickerDisplay,
+  isNativePickerDismiss,
+  nativePickerEventType,
+  timePickerDisplay,
+  timePickerNativeProps,
+} from '@/src/lib/datetime-picker-display';
+import {
   buildDefaultPlaceSearchQuery,
   buildPlaceSuggestedSearchQueries,
 } from '@/src/lib/place-query-builder';
@@ -2645,22 +2652,24 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                 timeManageSheetBottomLift > 0 && { marginBottom: timeManageSheetBottomLift },
               ]}>
               <View style={GinitStyles.modalHeader}>
-                <GinitPressable
-                  onPress={() => {
-                    setAndroidTimeDialogOpen(false);
-                    setTimePick(null);
-                  }}
-                  hitSlop={10}
-                  accessibilityRole="button">
-                  <Text style={GinitStyles.modalCancel}>닫기</Text>
-                </GinitPressable>
-                <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
+                <View style={styles.timeManageHeaderSide} />
+                <View style={styles.timeManageHeaderCenter}>
                   <Text style={GinitStyles.modalTitle}>시간 추가</Text>
                   <Text style={styles.timePickHint} numberOfLines={1}>
                     {formatYmdWithKoWeekday(timePick.ymd)}
                   </Text>
                 </View>
-                <View style={styles.timeManageHeaderSpacer} />
+                <GinitPressable
+                  onPress={() => {
+                    setAndroidTimeDialogOpen(false);
+                    setTimePick(null);
+                  }}
+                  hitSlop={12}
+                  style={({ pressed }) => [styles.timeManageCloseBtn, pressed && styles.timeManagePressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기">
+                  <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.textSub} />
+                </GinitPressable>
               </View>
 
               <View style={styles.timeManageInputRow}>
@@ -2677,11 +2686,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                     <DateTimePicker
                       value={timePick.draft}
                       mode="time"
-                      display="spinner"
-                      is24Hour
-                      themeVariant="light"
-                      locale="ko-KR"
                       style={styles.timeManagePicker}
+                      {...(timePickerNativeProps() as object)}
                       onChange={(_event, d) => {
                         if (!d) return;
                         setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
@@ -2728,19 +2734,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               <DateTimePicker
                 value={timePick.draft}
                 mode="time"
-                display="spinner"
-                is24Hour
-                {...({ accentColor: GinitTheme.colors.primary } as any)}
+                {...(timePickerNativeProps() as object)}
                 onChange={(event, d) => {
-                  const t = (event as unknown as { type?: string } | null)?.type ?? '';
-                  if (t === 'dismissed') {
+                  const t = nativePickerEventType(event);
+                  if (isNativePickerDismiss(t)) {
                     setAndroidTimeDialogOpen(false);
                     return;
                   }
-                  if (d) {
+                  if (t === 'set' && d) {
                     setTimePick((prev) => (prev ? { ...prev, draft: d } : prev));
+                    setAndroidTimeDialogOpen(false);
                   }
-                  setAndroidTimeDialogOpen(false);
                 }}
               />
             ) : null}
@@ -2752,7 +2756,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <DateTimePicker
           value={scheduleCalendarYmPick.draft}
           mode="date"
-          display="spinner"
+          display={datePickerDisplay()}
           minimumDate={(() => {
             const s = new Date();
             return new Date(s.getFullYear(), s.getMonth(), 1);
@@ -2817,7 +2821,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               <DateTimePicker
                 value={scheduleCalendarYmPick.draft}
                 mode="date"
-                display="spinner"
+                display={datePickerDisplay()}
                 locale="ko-KR"
                 themeVariant="light"
                 minimumDate={(() => {
@@ -2860,15 +2864,16 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               <DateTimePicker
                 value={iosDraft}
                 mode={picker.field === 'startDate' ? 'date' : 'time'}
-                display="spinner"
-                is24Hour
+                display={picker.field === 'startDate' ? datePickerDisplay() : timePickerDisplay()}
                 onChange={(_, date) => {
                   if (date) setIosDraft(date);
                 }}
                 minimumDate={iosPickerMinimumDate}
                 maximumDate={iosPickerMaximumDate}
                 locale="ko-KR"
-                themeVariant="dark"
+                {...(picker.field === 'startTime'
+                  ? (timePickerNativeProps() as object)
+                  : { themeVariant: 'light' as const })}
               />
             </View>
           </View>
@@ -2879,15 +2884,24 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <DateTimePicker
           value={iosDraft}
           mode={picker.field === 'startDate' ? 'date' : 'time'}
-          display="spinner"
-          is24Hour
+          display={picker.field === 'startDate' ? datePickerDisplay() : timePickerDisplay()}
           minimumDate={iosPickerMinimumDate}
           maximumDate={iosPickerMaximumDate}
-          {...({ accentColor: GinitTheme.colors.primary } as any)}
+          {...(picker.field === 'startTime'
+            ? (timePickerNativeProps() as object)
+            : ({ accentColor: GinitTheme.colors.primary } as object))}
           onChange={(event: DateTimePickerEvent, date) => {
             const { rowId, field } = picker;
+            const t = nativePickerEventType(event);
+            if (isNativePickerDismiss(t)) {
+              setPicker(null);
+              return;
+            }
+            if (t !== 'set' || !date) {
+              setPicker(null);
+              return;
+            }
             setPicker(null);
-            if (event.type === 'dismissed' || !date) return;
             const ymd = fmtDate(date);
             const hm = fmtTime(date);
             const dates = dateCandidatesRef.current;

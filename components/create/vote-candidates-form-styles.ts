@@ -518,8 +518,21 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     maxHeight: 520,
     paddingBottom: 18,
   },
-  timeManageHeaderSpacer: {
-    width: 42,
+  /** 닫기 버튼(36)과 폭을 맞춰 제목·하단 일시를 시트 가운데 정렬 */
+  timeManageHeaderSide: {
+    width: 36,
+  },
+  timeManageHeaderCenter: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+  },
+  timeManageCloseBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
   },
   timeManageInputRow: {
     flexDirection: 'row',
@@ -539,6 +552,10 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     borderColor: GinitTheme.colors.border,
     backgroundColor: GinitTheme.colors.surface,
     overflow: 'hidden',
+  },
+  timeManagePickerWrapClock: {
+    minHeight: 280,
+    paddingVertical: 8,
   },
   timeManagePicker: {
     alignSelf: 'center',

@@ -43,6 +43,11 @@ import { normalizeUserId } from '@/src/lib/app-user-id';
 import { fetchMeetingAreaNotifyMatrix } from '@/src/lib/meeting-area-notify-rules';
 import { isProfileRegisterInfoParamOn, PROFILE_REGISTER_INFO_QUERY } from '@/src/lib/profile-register-info';
 import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
+import {
+  isNativePickerDismiss,
+  nativePickerEventType,
+  timePickerNativeProps,
+} from '@/src/lib/datetime-picker-display';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { ensureGinitFcmNotifeeChannel } from '@/src/lib/fcm-notifee-display';
 import { ensureGinitInAppAndroidChannel } from '@/src/lib/in-app-alarm-push';
@@ -116,11 +121,8 @@ function dateFromMinutesOfDay(min: number): Date {
 }
 
 function formatDndTimeLabel(min: number): string {
-  return dateFromMinutesOfDay(min).toLocaleTimeString('ko-KR', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  const d = dateFromMinutesOfDay(min);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 type DndTimePick = { kind: 'start' | 'end'; draft: Date };
@@ -850,11 +852,10 @@ export default function ProfileAppSettingsScreen() {
           <DateTimePicker
             value={dndPick.draft}
             mode="time"
-            display="spinner"
-            {...({ accentColor: GinitTheme.colors.primary } as object)}
+            {...(timePickerNativeProps() as object)}
             onChange={(event, d) => {
-              const t = (event as unknown as { type?: string } | null)?.type ?? '';
-              if (t === 'dismissed') {
+              const t = nativePickerEventType(event);
+              if (isNativePickerDismiss(t)) {
                 setDndPick(null);
                 return;
               }
@@ -994,9 +995,7 @@ export default function ProfileAppSettingsScreen() {
                 <DateTimePicker
                   value={dndPick.draft}
                   mode="time"
-                  display="spinner"
-                  themeVariant="light"
-                  locale="ko-KR"
+                  {...(timePickerNativeProps() as object)}
                   onChange={(_ev, date) => {
                     if (!date) return;
                     setDndPick((prev) => (prev ? { ...prev, draft: date } : prev));

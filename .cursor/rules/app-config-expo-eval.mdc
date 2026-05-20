@@ -1,0 +1,46 @@
+---
+description: app.config.ts — Expo 설정은 Node에서 평가되며 로컬 TS import 불가
+globs: app.config.ts
+alwaysApply: false
+---
+
+# app.config.ts (Expo config) 작성 규칙
+
+`app.config.ts`는 Metro/앱 번들이 아니라 **`@expo/config`가 Node에서 `require`로 평가**한다. 일반 앱 소스와 동일하게 `import`·경로 별칭을 쓰면 안 된다.
+
+## 금지
+
+- `./constants/*`, `./src/*`, `./components/*` 등 **프로젝트 내부 TS/TSX 모듈 import** (예: `import { GinitTheme } from './constants/ginit-theme'`)
+- `Cannot find module './constants/...'` — 빌드·`expo run:*` 전에 설정 로드 단계에서 즉시 실패한다.
+
+## 허용
+
+- Node 내장·npm 패키지: `fs`, `path`, `dotenv`, `expo/config` 타입 등
+- **리터럴 인라인**: hex 문자열, 문자열 상수, `as const` 객체
+- 설정 파일만 읽는 동기 로직 (`fs.existsSync`, `path.resolve(__dirname, …)`)
+
+## 테마·색상을 앱과 맞출 때
+
+- 앱 UI는 `constants/ginit-theme.ts`(또는 `GinitTheme`)를 쓴다.
+- `app.config.ts`의 config plugin(예: `@react-native-community/datetimepicker` `android` 테마)에는 **동일 hex를 인라인**하고, 주석으로 출처를 적는다 (`values mirror constants/ginit-theme.ts`).
+- `ginit-theme` 색을 바꾸면 **app.config.ts 인라인 값도 함께** 맞춘다.
+
+## config plugin / 네이티브 테마
+
+- plugin `android`·`ios` 옵션 변경은 **네이티브 재빌드** 후에만 반영된다 (`npx expo run:android` / `run:ios`). Metro 새로고침만으로는 부족하다.
+- plugin 적용 후 `npx expo prebuild --platform android --no-install` 로 `android/.../styles.xml`에 `TimePickerTheme` 등이 생겼는지 확인한다.
+- 런타임 JS의 DateTimePicker `accentColor` 등은 **Android NativeProps에 없을 수 있음** — Android 딥 퍼플 등은 plugin 빌드 타임 설정을 우선한다.
+
+## DateTimePicker `design: 'material'` (JS)
+
+- `Theme.AppCompat.*` 인 `AppTheme`에서는 **`design: 'material'` 금지** — `MaterialTimePicker`가 테마 속성(colorPrimary 등)을 resolve하지 못해 즉시 크래시한다.
+- Material 피커를 쓰려면 `android/app/src/main/res/values/styles.xml`의 `AppTheme` parent를 `Theme.Material3.DayNight.NoActionBar`로 바꾸는 등 **앱 전체 테마 마이그레이션**이 선행되어야 한다.
+- 현재 프로젝트는 **기본 피커 + `display: 'clock'`(네이티브는 `default`로 매핑)** + datetimepicker config plugin 색상을 사용한다 (`src/lib/datetime-picker-display.ts`).
+
+## 수정 후 확인
+
+```bash
+npx expo config --type public
+```
+
+위 명령이 오류 없이 끝나야 `expo run:*` / EAS 빌드를 진행한다.

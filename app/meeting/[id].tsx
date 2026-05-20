@@ -1472,6 +1472,9 @@ export default function MeetingDetailScreen() {
     alreadyJoinedMeeting,
   ]);
 
+  /** 일시·장소 제안 — 모임 참여자(호스트 포함)만 */
+  const canProposeMeetingVoteCandidates = isHost || alreadyJoinedMeeting;
+
   const proposeInitialPayload = useMemo((): VoteCandidatesPayload | null => {
     if (!meeting || !proposeOpen) return null;
     const places: PlaceCandidate[] = meeting.placeCandidates?.length
@@ -3664,14 +3667,16 @@ export default function MeetingDetailScreen() {
               ) : null}
             </>
 
-            <GinitPressable
-              style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="날짜 제안"
-              onPress={openDateProposeModal}>
-              <GinitSymbolicIcon name="calendar-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
-            </GinitPressable>
+            {canProposeMeetingVoteCandidates ? (
+              <GinitPressable
+                style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="날짜 제안"
+                onPress={openDateProposeModal}>
+                <GinitSymbolicIcon name="calendar-outline" size={20} color="#FFFFFF" />
+                <Text style={styles.addOutlineTextActive}>날짜 제안</Text>
+              </GinitPressable>
+            ) : null}
                   </View>
             </View>
 
@@ -4052,14 +4057,16 @@ export default function MeetingDetailScreen() {
             )}
             
 
-            <GinitPressable
-              style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="장소 제안"
-              onPress={openPlaceProposeModal}>
-              <GinitSymbolicIcon name="location-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.addOutlineTextActive}>장소 제안</Text>
-            </GinitPressable>
+            {canProposeMeetingVoteCandidates ? (
+              <GinitPressable
+                style={({ pressed }) => [styles.addOutlineBtn, pressed && styles.dateChipPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="장소 제안"
+                onPress={openPlaceProposeModal}>
+                <GinitSymbolicIcon name="location-outline" size={20} color="#FFFFFF" />
+                <Text style={styles.addOutlineTextActive}>장소 제안</Text>
+              </GinitPressable>
+            ) : null}
               </View>
                 </View>
               </>

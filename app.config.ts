@@ -3,6 +3,19 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
+/** Android 네이티브 DateTimePicker — values mirror `constants/ginit-theme.ts` (no import: Expo config runs in plain Node) */
+const ANDROID_DATE_TIME_PICKER_THEME = {
+  timePicker: {
+    numbersSelectorColor: { light: '#4527A0', dark: '#4527A0' },
+    headerBackground: { light: '#4527A0', dark: '#4527A0' },
+    numbersTextColor: { light: '#0F172A', dark: '#F8FAFC' },
+  },
+  datePicker: {
+    colorAccent: { light: '#4527A0', dark: '#4527A0' },
+    colorControlActivated: { light: '#4527A0', dark: '#4527A0' },
+  },
+} as const;
+
 loadEnv({ path: path.resolve(__dirname, 'env/.env'), quiet: true });
 
 /** iOS `@react-native-firebase/*` — plist가 있을 때만 네이티브에 연결합니다. */
@@ -194,6 +207,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           client_id: naverClientId,
         },
       ],
+      [
+        '@react-native-community/datetimepicker',
+        {
+          android: ANDROID_DATE_TIME_PICKER_THEME,
+        },
+      ],
+      './plugins/withAndroidGinitTimePickerExtras.js',
       [
         'expo-build-properties',
         {
