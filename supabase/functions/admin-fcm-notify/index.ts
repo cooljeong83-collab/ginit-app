@@ -83,21 +83,30 @@ serve(async (req) => {
   }
 
   const isUrgent = payload.priority === 'urgent';
-  const path = String(payload.path ?? '/reports').trim();
+  const path = String(payload.path ?? '/admin/reports').trim();
+  const reportId = String(payload.reportId ?? '').trim();
+  const adminUrl = reportId
+    ? `ginitapp://admin/reports/${encodeURIComponent(reportId)}`
+    : path.startsWith('/')
+      ? `ginitapp://${path.replace(/^\//, '')}`
+      : `ginitapp://${path}`;
   const data: Record<string, string> = isUrgent
     ? {
         action: 'admin_open',
         priority: 'urgent',
         path,
+        url: adminUrl,
         title,
         body,
-        ...(payload.reportId ? { report_id: payload.reportId } : {}),
+        ...(reportId ? { report_id: reportId } : {}),
       }
     : {
         action: 'admin_message',
         path,
+        url: adminUrl,
         title,
         body,
+        ...(reportId ? { report_id: reportId } : {}),
       };
 
   const { data: invokeData, error: invokeErr } = await supabase.functions.invoke('fcm-push-send', {

@@ -20,6 +20,7 @@ import {
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { getPolicyNumeric } from '@/src/lib/app-policies-store';
 import { purgeProfilePhotosForWithdrawal } from '@/src/lib/profile-photo-history';
+import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
 
 function isMeetingHost(meeting: Meeting, sessionUserIdNorm: string): boolean {
   const c = meeting.createdBy?.trim() ?? '';
@@ -181,7 +182,7 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
 
   const listRes = await fetchMeetingsForAccountDeletionHybrid(raw);
   if (!listRes.ok) {
-    return { ok: false, message: listRes.message };
+    return { ok: false, message: toUserFacingErrorMessage(listRes.message) };
   }
   const meetings = listRes.meetings;
 
@@ -214,7 +215,9 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
       await leaveMeeting(mid, raw);
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
@@ -222,7 +225,9 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
   try {
     await leaveGuestMeetingsForUser(meetings, raw, (m) => isMeetingHost(m, ns));
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '참여 모임에서 나가는 중 오류가 발생했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '참여 모임에서 나가는 중 오류가 발생했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
@@ -230,7 +235,9 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
   try {
     await purgeAllFollowRelations(raw);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
@@ -238,17 +245,21 @@ export async function purgeUserAccountRemote(phoneUserId: string): Promise<Accou
   try {
     const photos = await purgeProfilePhotosForWithdrawal(raw);
     if (!photos.ok) {
-      return { ok: false, message: photos.message };
+      return { ok: false, message: toUserFacingErrorMessage(photos.message) };
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '프로필 사진 삭제에 실패했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '프로필 사진 삭제에 실패했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
   try {
     await withdrawAnonymizeUserProfile(raw);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '프로필 익명화에 실패했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '프로필 익명화에 실패했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
@@ -265,7 +276,7 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
 
   const listRes = await fetchMeetingsForAccountDeletionHybrid(uid);
   if (!listRes.ok) {
-    return { ok: false, message: listRes.message };
+    return { ok: false, message: toUserFacingErrorMessage(listRes.message) };
   }
   const meetings = listRes.meetings;
   const hosted = meetings.filter((m) => isMeetingHostByFirebaseUid(m, uid));
@@ -295,38 +306,48 @@ export async function purgeUserAccountRemoteByFirebaseUid(firebaseUid: string): 
       await leaveMeeting(mid, uid);
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '모임 정리 중 오류가 발생했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
   try {
     await leaveGuestMeetingsForUser(meetings, uid, (m) => isMeetingHostByFirebaseUid(m, uid));
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '참여 모임에서 나가는 중 오류가 발생했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '참여 모임에서 나가는 중 오류가 발생했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
   try {
     await purgeAllFollowRelations(uid);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '팔로우 관계 삭제에 실패했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
   try {
     const photos = await purgeProfilePhotosForWithdrawal(uid);
     if (!photos.ok) {
-      return { ok: false, message: photos.message };
+      return { ok: false, message: toUserFacingErrorMessage(photos.message) };
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '프로필 사진 삭제에 실패했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '프로필 사진 삭제에 실패했습니다.',
+    );
     return { ok: false, message: msg };
   }
 
   try {
     await withdrawAnonymizeUserProfileByFirebaseUid(uid);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '프로필 익명화에 실패했습니다.';
+    const msg = toUserFacingErrorMessage(
+      e instanceof Error ? e.message : '프로필 익명화에 실패했습니다.',
+    );
     return { ok: false, message: msg };
   }
   return { ok: true };
@@ -340,7 +361,7 @@ function humanizeAuthDeleteError(e: unknown): string {
   if (hay.includes('requires-recent-login')) {
     return '보안을 위해 최근 로그인 확인이 필요합니다.\n로그아웃 후 다시 로그인한 뒤, 회원 탈퇴를 다시 시도해 주세요.';
   }
-  return message || '인증 세션 종료에 실패했습니다.';
+  return toUserFacingErrorMessage(message || '인증 세션 종료에 실패했습니다.');
 }
 
 /**

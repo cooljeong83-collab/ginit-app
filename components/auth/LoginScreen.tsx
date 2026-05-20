@@ -26,6 +26,7 @@ import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
+import { enforceAccountGate } from '@/src/features/account-suspension/enforce-account-gate';
 import {
   applyGoogleSignupProfile,
   buildGooglePeopleDemographicsMetadataPatch,
@@ -279,6 +280,8 @@ export default function LoginScreen() {
         status: 'ACTIVE',
       });
       setAuthProfile(snapshotFromPhoneOtp(uid));
+      const allowed = await enforceAccountGate(docId, { router: expoRouter, signOutSession });
+      if (!allowed) return;
       expoRouter.replace('/(tabs)');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -293,6 +296,7 @@ export default function LoginScreen() {
     normalizedPhone,
     setUserId,
     setAuthProfile,
+    signOutSession,
     expoRouter,
   ]);
 
@@ -504,6 +508,11 @@ export default function LoginScreen() {
 
       const introSeen = await readAppIntroComplete();
       logUi('googlePostSignIn', { step: 'navigate', introSeen });
+      const allowed = await enforceAccountGate(canonicalProfilePk, {
+        router: expoRouter,
+        signOutSession,
+      });
+      if (!allowed) return;
       if (introSeen) {
         expoRouter.replace('/(tabs)');
       } else {

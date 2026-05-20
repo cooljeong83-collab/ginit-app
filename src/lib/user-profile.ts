@@ -19,6 +19,7 @@ import {
   upsertUserProfileToWatermelon,
 } from '@/src/lib/user-profile-watermelon-cache';
 import { supabase } from '@/src/lib/supabase';
+import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
 
 import { avatarsObjectPathFromPublicUrlIfOwned } from '@/src/lib/profile-photo-history';
 
@@ -935,7 +936,7 @@ async function rpcEnsureProfileMinimalWithRetry(id: string, client: SupabaseRpcF
     const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
     const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
     if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
-      throw new Error(lastMessage);
+      throw new Error(toUserFacingErrorMessage(lastMessage));
     }
   }
 }
@@ -974,7 +975,7 @@ async function rpcUpsertProfilePayloadWithRetry(
     const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
     const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
     if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
-      throw new Error(lastMessage);
+      throw new Error(toUserFacingErrorMessage(lastMessage));
     }
   }
 }
@@ -993,7 +994,7 @@ async function rpcWithdrawAnonymizeProfileWithRetry(id: string): Promise<void> {
     const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
     const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
     if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
-      throw new Error(lastMessage);
+      throw new Error(toUserFacingErrorMessage(lastMessage));
     }
   }
 }
@@ -1019,7 +1020,7 @@ async function rpcReactivateWithdrawnProfileForSignupWithRetry(
     const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
     const retryable = isPostgrestSchemaCacheOrMissingRpcError(lastMessage, code);
     if (!retryable || i === RPC_SCHEMA_CACHE_RETRY_WAITS_MS.length - 1) {
-      throw new Error(lastMessage);
+      throw new Error(toUserFacingErrorMessage(lastMessage));
     }
   }
 }

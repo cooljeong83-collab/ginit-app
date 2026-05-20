@@ -6,13 +6,12 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { UserProfilePublicBody } from '@/components/profile/UserProfilePublicBody';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
-import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
-import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
+import { openUserReportScreen } from '@/src/features/user-report/open-user-report-screen';
 
 const TOP_BAR_HEIGHT = 45;
 const MORE_MENU_GAP = 0;
@@ -50,15 +49,7 @@ export default function UserProfileStackScreen() {
 
   const openReportFromMenu = () => {
     setMoreOpen(false);
-    presentAppDialogConfirm({
-      title: '신고',
-      body: '이 사용자를 신고할까요?\n운영 정책에 따라 검토합니다.',
-      confirmLabel: '신고하기',
-      confirmVariant: 'destructive',
-      onConfirm: () => {
-        showTransientBottomMessage('신고가 접수되었어요. 검토 후 조치됩니다.');
-      },
-    });
+    openUserReportScreen(router, targetNorm);
   };
 
   return (

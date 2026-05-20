@@ -22,6 +22,7 @@ import { AuthService } from '@/src/services/AuthService';
 import { supabase } from '@/src/lib/supabase';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
+import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
 
 type TermKey = 'tos' | 'privacy' | 'safety';
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
@@ -102,7 +103,7 @@ export default function OtpVerifyScreen() {
       setPendingProfileDocId(normalized);
       setTermsOpen(true);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = toUserFacingErrorMessage(e instanceof Error ? e.message : String(e));
       presentAppDialogAlert({ title: '오류', body: msg });
     } finally {
       setBusy(false);
@@ -127,7 +128,7 @@ export default function OtpVerifyScreen() {
       await recordTermsAgreement(docId);
       await proceedToHome(docId);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = toUserFacingErrorMessage(e instanceof Error ? e.message : String(e));
       presentAppDialogAlert({ title: '오류', body: msg });
     } finally {
       setBusy(false);

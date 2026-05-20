@@ -4,6 +4,13 @@ import type { User } from '@supabase/supabase-js';
 import { publicEnv } from '@/src/config/public-env';
 import { signOutSupabase, supabase } from '@/src/lib/supabase';
 
+import {
+  googlePeopleScopesForFields,
+  GOOGLE_OAUTH_SCOPE_BIRTHDAY,
+  GOOGLE_OAUTH_SCOPE_GENDER,
+} from '@/src/lib/google-people-oauth-scopes';
+import type { GooglePeopleDemographicField } from '@/src/lib/google-sign-in-result';
+
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
 import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 
@@ -82,10 +89,11 @@ function ensureConfigured(gs: GoogleSigninApi, options?: SignInWithGoogleOptions
     'https://www.googleapis.com/auth/userinfo.profile',
   ];
   if (options?.forRegistration) {
-    scopes.push(
-      'https://www.googleapis.com/auth/user.birthday.read',
-      'https://www.googleapis.com/auth/user.gender.read',
-    );
+    scopes.push(GOOGLE_OAUTH_SCOPE_BIRTHDAY, GOOGLE_OAUTH_SCOPE_GENDER);
+  } else if (options?.peopleDemographicFields?.length) {
+    for (const s of googlePeopleScopesForFields(options.peopleDemographicFields)) {
+      if (!scopes.includes(s)) scopes.push(s);
+    }
   }
   const sig = `${webClientId}|${scopes.join(',')}`;
   if (configureSignature === sig) return;
@@ -93,16 +101,36 @@ function ensureConfigured(gs: GoogleSigninApi, options?: SignInWithGoogleOptions
   configureSignature = sig;
 }
 
-const GOOGLE_PEOPLE_SCOPES = [
-  'https://www.googleapis.com/auth/user.birthday.read',
-  'https://www.googleapis.com/auth/user.gender.read',
-] as const;
+/**
+ * 네이티브 Google Sign-In access token (추가 동의 없이). 세션 없으면 null.
+ */
+export async function getGoogleAccessTokenIfAvailable(): Promise<string | null> {
+  if (isExpoGo()) return null;
+  const GoogleSignin = requireGoogleSignin();
+  ensureConfigured(GoogleSignin, { forRegistration: false });
+  if (!GoogleSignin.getCurrentUser?.()) return null;
+  try {
+    const t = await GoogleSignin.getTokens();
+    return (t.accessToken ?? '').trim() || null;
+  } catch (e) {
+    const { message } = pickErr(e);
+    log('Warn:getGoogleAccessTokenIfAvailable', { message });
+    return null;
+  }
+}
 
 /**
  * 이미 Google+Supabase 로그인된 상태에서 People API용 스코프만 추가 동의.
+ * @param fields 생략 시 성별·생년월일 모두 요청. 지정 시 해당 스코프만 재요청.
  */
-export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
-  log('addGooglePeopleScopesAndGetAccessToken → start', { expoGo: isExpoGo() });
+export async function addGooglePeopleScopesAndGetAccessToken(
+  fields?: readonly GooglePeopleDemographicField[],
+): Promise<string | null> {
+  const scopes =
+    fields && fields.length > 0
+      ? googlePeopleScopesForFields(fields)
+      : [GOOGLE_OAUTH_SCOPE_BIRTHDAY, GOOGLE_OAUTH_SCOPE_GENDER];
+  log('addGooglePeopleScopesAndGetAccessToken → start', { expoGo: isExpoGo(), scopes });
   if (isExpoGo()) {
     throw new Error(
       'Expo Go에는 Google 네이티브 로그인 모듈이 포함되어 있지 않습니다. `npx expo run:android` / `run:ios`로 개발 빌드를 만든 뒤 테스트하세요.',
@@ -114,7 +142,7 @@ export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string |
     throw new Error('Google 로그인 세션이 없습니다. 먼저 Google로 로그인해 주세요.');
   }
   try {
-    const res = await GoogleSignin.addScopes({ scopes: [...GOOGLE_PEOPLE_SCOPES] });
+    const res = await GoogleSignin.addScopes({ scopes });
     if (res == null) {
       throw new Error('Google 추가 동의를 진행할 수 없습니다. 다시 로그인해 주세요.');
     }

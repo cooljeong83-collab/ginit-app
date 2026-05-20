@@ -1,6 +1,10 @@
 import * as Linking from 'expo-linking';
 import type { Router } from 'expo-router';
 
+import {
+  adminPushOpenNavigationSignal,
+  tryNavigateAdminFromPushData,
+} from '@/src/features/admin-reports/push-open-admin';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import {
   dismissMeetingAutoCancelUnconfirmedAlarm,
@@ -141,6 +145,7 @@ export function hasPushOpenNavigationSignal(data: Record<string, unknown> | unde
   const url = typeof data.url === 'string' ? data.url.trim() : '';
   if (action || meetingId) return true;
   if (url) return true;
+  if (adminPushOpenNavigationSignal(data)) return true;
   return false;
 }
 
@@ -153,6 +158,7 @@ export function navigateFromPushData(
     ginitNotifyDbg('push-open-nav', 'navigate_skip_no_data', {});
     return;
   }
+  if (tryNavigateAdminFromPushData(router, data, opts)) return;
   ginitNotifyDbg('push-open-nav', 'navigate_begin', {
     ...summarizePushNavData(data),
     currentPath: stripRouteQueryHash(opts?.currentPathname ?? '') || '(empty)',

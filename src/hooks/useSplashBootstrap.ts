@@ -8,6 +8,7 @@ import { isPhoneRegistered } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { readSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { writeSecureGoogleSession } from '@/src/lib/secure-google-session';
+import { enforceAccountGate } from '@/src/features/account-suspension/enforce-account-gate';
 import { ensureUserProfile, resolveSessionUserIdFromVerifiedPhone } from '@/src/lib/user-profile';
 import { supabase } from '@/src/lib/supabase';
 import type { User } from '@supabase/supabase-js';
@@ -53,7 +54,8 @@ function snapshotFromSupabaseUser(u: User) {
  */
 export function useSplashBootstrap() {
   const router = useTransitionRouter();
-  const { isHydrated, setUserId, clearStoredUserSession, setAuthProfile } = useUserSession();
+  const { isHydrated, setUserId, clearStoredUserSession, setAuthProfile, signOutSession } =
+    useUserSession();
   const [statusLabel, setStatusLabel] = useState('시작하는 중…');
   const [hintMessage, setHintMessage] = useState<string | null>(null);
   const finishedRef = useRef(false);
@@ -121,6 +123,13 @@ export function useSplashBootstrap() {
       if (!ok) return false;
       await setUserId(pk);
       await tryEnsureProfileDuringBoot(pk);
+      if (cancelled) return false;
+      const allowed = await enforceAccountGate(pk, { router, signOutSession });
+      if (cancelled) return false;
+      if (!allowed) {
+        finishedRef.current = true;
+        return true;
+      }
       if (!cancelled) {
         finishedRef.current = true;
         goTabs();
@@ -158,8 +167,11 @@ export function useSplashBootstrap() {
           if (pk) {
             await setUserId(pk);
             await tryEnsureProfileDuringBoot(pk);
+            if (cancelled) return;
+            const allowed = await enforceAccountGate(pk, { router, signOutSession });
+            if (cancelled) return;
             finishedRef.current = true;
-            goTabs();
+            if (allowed) goTabs();
             return;
           }
           try {
@@ -183,10 +195,11 @@ export function useSplashBootstrap() {
           }
           await setUserId(pk);
           await tryEnsureProfileDuringBoot(pk);
-          if (!cancelled) {
-            finishedRef.current = true;
-            goTabs();
-          }
+          if (cancelled) return;
+          const allowed = await enforceAccountGate(pk, { router, signOutSession });
+          if (cancelled) return;
+          finishedRef.current = true;
+          if (allowed) goTabs();
           return;
         }
 
@@ -226,7 +239,16 @@ export function useSplashBootstrap() {
     return () => {
       cancelled = true;
     };
-  }, [isHydrated, setUserId, clearStoredUserSession, setAuthProfile, goTabs, goLogin]);
+  }, [
+    isHydrated,
+    setUserId,
+    clearStoredUserSession,
+    setAuthProfile,
+    signOutSession,
+    router,
+    goTabs,
+    goLogin,
+  ]);
 
   return {
     readyForUi: isHydrated,

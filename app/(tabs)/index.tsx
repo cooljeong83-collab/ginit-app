@@ -13,6 +13,7 @@ import { FlashList } from '@shopify/flash-list';
 import { FeedSearchFilterModal } from '@/components/feed/FeedSearchFilterModal';
 import { FeedMeetingReviewSection } from '@/components/feed/meeting-review-carousel/FeedMeetingReviewSection';
 import { HomeMeetingListItem } from '@/components/feed/HomeMeetingListItem';
+import { HomeMeetingListRowSeparator } from '@/components/feed/HomeMeetingListRowSeparator';
 import { InterestRegionHeaderCluster } from '@/components/feed/InterestRegionHeaderCluster';
 import {
   FeedMeetingListSettingsModal,
@@ -63,7 +64,7 @@ import {
   listSortModeLabel,
   applyHomeExploreFeedVisibility,
   filterMeetingsForHomeExploreList,
-  meetingMatchesFeedCategoryBarAndFilter,
+  meetingMatchesJoinedTabCategoryFilter,
   meetingMatchesFeedSearch,
   meetingWithinHomeFeedRadius,
   sortMeetingsForFeed,
@@ -238,8 +239,9 @@ export default function FeedScreen() {
 
   const {
     meetings: myMeetings,
+    refetchFull: refetchMyMeetingsFull,
   } = useMyMeetingsFeedSync({
-    enabled: feedLocationReady,
+    enabled: Boolean(userId?.trim()),
     userId,
   });
 
@@ -536,23 +538,30 @@ export default function FeedScreen() {
   }, [meetings, myMeetings]);
 
   const joinedFilteredMeetings = useMemo(() => {
-    // 참여중·종료 탭은 “현재 접속 지역”과 무관하게 내가 만든/참여한 모임을 모두 보여줍니다.
-    const base = myTabsMeetings.filter((m) => {
+    // 참여중·종료 탭: ledger_list_my_meetings_for_feed(비공개 포함) + 공개 피드 보완. RPC 결과는 isUserJoinedMeeting 재검증 없이 포함.
+    if (!userId?.trim()) return [];
+    const seen = new Set<string>();
+    const base: Meeting[] = [];
+    const push = (m: Meeting) => {
       const id = typeof m?.id === 'string' ? m.id.trim() : '';
-      if (!id) return false;
-      return isUserJoinedMeeting(m, userId);
-    });
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      base.push(m);
+    };
+    for (const m of myMeetings) push(m);
+    for (const m of meetings) {
+      if (isUserJoinedMeeting(m, userId)) push(m);
+    }
     return base.filter((m) => {
-      if (!meetingMatchesFeedCategoryBarAndFilter(m, selectedCategoryId, feedBarVisibleCategoryIds, categories))
-        return false;
-      if (!meetingMatchesFeedSearch(m, appliedFeedSearch)) return false;
+      if (!meetingMatchesJoinedTabCategoryFilter(m, selectedCategoryId, categories)) return false;
+      if (!meetingMatchesFeedSearch(m, appliedFeedSearch, { forJoinedTabs: true })) return false;
       return true;
     });
   }, [
-    myTabsMeetings,
+    myMeetings,
+    meetings,
     userId,
     selectedCategoryId,
-    feedBarVisibleCategoryIds,
     categories,
     appliedFeedSearch,
   ]);
@@ -1230,14 +1239,17 @@ export default function FeedScreen() {
     if (!feedLocationReady) return;
     setRefreshing(true);
     try {
-      await runMeetingsUserActionDeltaSync(queryClient, userId?.trim() ?? null, 'pull_refresh');
+      await Promise.all([
+        runMeetingsUserActionDeltaSync(queryClient, userId?.trim() ?? null, 'pull_refresh'),
+        refetchMyMeetingsFull(),
+      ]);
       if (exploreActiveRegionNorm.trim()) {
         await feedMeetingReviews.runDeltaSync('pull_refresh');
       }
     } finally {
       setRefreshing(false);
     }
-  }, [feedLocationReady, queryClient, userId, exploreActiveRegionNorm, feedMeetingReviews]);
+  }, [feedLocationReady, queryClient, userId, exploreActiveRegionNorm, feedMeetingReviews, refetchMyMeetingsFull]);
 
   useEffect(() => {
     if (!feedLocationReady) return;
@@ -1336,10 +1348,7 @@ export default function FeedScreen() {
     [router, userId],
   );
 
-  const renderHomeMeetingListSeparator = useCallback(
-    () => <View style={styles.homeMeetingListSeparator} />,
-    [],
-  );
+  const renderHomeMeetingListSeparator = useCallback(() => <HomeMeetingListRowSeparator />, []);
 
   const onPressFeedReview = useCallback(
     (meetingId: string) => {
@@ -2012,10 +2021,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 28,
     flexGrow: 1,
-  },
-  homeMeetingListSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: GinitTheme.colors.border,
   },
   tabCategoryBar: {
     flexDirection: 'row',

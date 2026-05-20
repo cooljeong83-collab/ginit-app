@@ -34,6 +34,7 @@ import { blockPeerServerSynced } from '@/src/lib/user-blocks';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { getUserProfile, isUserProfileWithdrawn, WITHDRAWN_NICKNAME, type UserProfile } from '@/src/lib/user-profile';
+import { openUserReportScreen } from '@/src/features/user-report/open-user-report-screen';
 import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 const MEMO_MAX_LEN = 2000;
@@ -348,16 +349,8 @@ export default function FriendSettingsScreen() {
   }, [busy, displayNick, friendshipId, me, peerNorm, relationAccepted, router]);
 
   const onReport = useCallback(() => {
-    presentAppDialogConfirm({
-      title: '신고',
-      body: `${displayNick}님을 신고할까요?\n운영 정책에 따라 검토합니다.`,
-      confirmLabel: '신고하기',
-      confirmVariant: 'destructive',
-      onConfirm: () => {
-        showTransientBottomMessage('신고가 접수되었어요. 검토 후 조치됩니다.');
-      },
-    });
-  }, [displayNick]);
+    openUserReportScreen(router, peerNorm, displayNick);
+  }, [displayNick, peerNorm, router]);
 
   const memoPreview = memoPreviewLine(memoSaved);
 

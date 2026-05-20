@@ -393,6 +393,10 @@ verify_jwt = false
 [functions.chat-user-notifications-broadcast]
 verify_jwt = false
 
+# submit_user_report → pg_net(service role) → 어드민 FCM. 핸들러는 service role Bearer만 사용.
+[functions.admin-fcm-notify]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

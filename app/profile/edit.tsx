@@ -19,6 +19,7 @@ import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-h
 import { useUserProfileQuery } from '@/src/hooks/use-user-profile-query';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { accountDeletionRejoinPolicyNotice, deleteFirebaseAuthUserStrict, purgeUserAccountRemote, purgeUserAccountRemoteByFirebaseUid, validateAccountDeletionPreflight, wipeLocalAppData } from '@/src/lib/account-deletion';
+import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
 import { normalizeUserId } from '@/src/lib/app-user-id';
 import { launchImageLibraryAsyncSafe } from '@/src/lib/expo-image-picker-safe-launch';
 import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
@@ -541,7 +542,10 @@ export default function ProfileEditScreen() {
     try {
       const preflight = await validateAccountDeletionPreflight(sessionUserId, authUid);
       if (!preflight.ok) {
-        presentAppDialogAlert({ title: '탈퇴를 진행할 수 없어요', body: preflight.message });
+        presentAppDialogAlert({
+          title: '탈퇴를 진행할 수 없어요',
+          body: toUserFacingErrorMessage(preflight.message),
+        });
         return;
       }
       if (preflight.mode === 'full_deletion') {
@@ -549,19 +553,25 @@ export default function ProfileEditScreen() {
           ? await purgeUserAccountRemote(sessionUserId)
           : await purgeUserAccountRemoteByFirebaseUid(authUid);
         if (!res.ok) {
-          presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: res.message });
+          presentAppDialogAlert({
+            title: '탈퇴를 완료하지 못했어요',
+            body: toUserFacingErrorMessage(res.message),
+          });
           return;
         }
       }
       const authDel = await deleteFirebaseAuthUserStrict();
       if (!authDel.ok) {
-        presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: authDel.message });
+        presentAppDialogAlert({
+          title: '탈퇴를 완료하지 못했어요',
+          body: toUserFacingErrorMessage(authDel.message),
+        });
         return;
       }
       await wipeLocalAppData();
       await signOutSession({ exitApp: true });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '알 수 없는 오류';
+      const msg = toUserFacingErrorMessage(e instanceof Error ? e.message : '알 수 없는 오류');
       presentAppDialogAlert({ title: '탈퇴 실패', body: msg });
     } finally {
       setDeleteBusy(false);

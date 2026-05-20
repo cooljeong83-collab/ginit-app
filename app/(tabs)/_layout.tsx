@@ -6,6 +6,8 @@ import { ScreenTransitionSkeleton } from '@/components/ui';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { enforceAccountGate } from '@/src/features/account-suspension/enforce-account-gate';
+import { useRecordAppActiveUser } from '@/src/hooks/use-record-app-active-user';
 import { ensureUserProfile } from '@/src/lib/user-profile';
 
 /*
@@ -21,10 +23,13 @@ import { ensureUserProfile } from '@/src/lib/user-profile';
 
 export default function TabsLayout() {
   const router = useTransitionRouter();
-  const { userId, authProfile, isHydrated } = useUserSession();
+  const { userId, authProfile, isHydrated, signOutSession } = useUserSession();
   const hasSession = Boolean(userId?.trim() || authProfile?.supabaseUserId?.trim());
   const hasSessionRef = useRef(hasSession);
   hasSessionRef.current = hasSession;
+  const accountGateRanForRef = useRef<string | null>(null);
+
+  useRecordAppActiveUser(userId);
 
   /** 스플래시에서 프로필 RPC가 실패해도 탭 진입 후 한 번 더 보강 */
   useEffect(() => {
@@ -41,6 +46,16 @@ export default function TabsLayout() {
       router.replace('/login');
     }
   }, [isHydrated, hasSession, router]);
+
+  /** 이미 로그인된 상태에서 이용 중지된 경우 — 다음 탭 진입·포그라운드 방어 */
+  useEffect(() => {
+    const id = userId?.trim();
+    if (!isHydrated || !id || !hasSession) return;
+    if (accountGateRanForRef.current === id) return;
+    accountGateRanForRef.current = id;
+    void enforceAccountGate(id, { router, signOutSession });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 1회/유저 PK
+  }, [isHydrated, hasSession, userId]);
 
   useEffect(() => {
     if (!isHydrated) return;

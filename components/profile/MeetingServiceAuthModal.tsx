@@ -11,8 +11,16 @@ import { GinitTheme } from '@/constants/ginit-theme';
 import { useOtpSmsRetriever } from '@/src/hooks/useOtpSmsRetriever';
 import { type SignUpGenderCode } from '@/src/hooks/useSignUpFlow';
 import { normalizeUserId } from '@/src/lib/app-user-id';
-import { fetchGooglePeopleExtras, mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
-import { addGooglePeopleScopesAndGetAccessToken, REDIRECT_STARTED, signInWithGoogle } from '@/src/lib/google-sign-in';
+import { mapGooglePeopleGenderToProfileGender } from '@/src/lib/google-people-extras';
+import {
+  googlePeopleDemographicsFailureMessage,
+  googlePeopleDemographicsPartialSavedMessage,
+  type GooglePeopleDemographicField,
+  importGooglePeopleDemographicsWithIncrementalConsent,
+  profileHasCompleteBirth,
+  profileHasCompleteGender,
+  REDIRECT_STARTED,
+} from '@/src/lib/google-people-demographics-consent';
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from '@/src/lib/meeting-phone-verification-ui';
 import { requestPhoneNumberHint } from '@/src/lib/phone-number-hint';
 import { formatNormalizedPhoneKrDisplay, normalizePhoneUserId } from '@/src/lib/phone-user-id';
@@ -32,6 +40,7 @@ import {
 } from '@/src/lib/user-profile';
 import { AuthService } from '@/src/services/AuthService';
 import { supabase } from '@/src/lib/supabase';
+import { presentGooglePeopleDemographicsSupportDialog } from '@/src/features/support/support-inquiry-google-auth';
 import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
 
 export type MeetingServiceAuthModalProps = {
@@ -53,6 +62,26 @@ export function MeetingServiceAuthModal({
   const router = useTransitionRouter();
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+
+  const presentGoogleDemographicsInquiryDialog = useCallback(
+    (
+      title: string,
+      body: string,
+      stillMissing: readonly GooglePeopleDemographicField[],
+    ) => {
+      if (!pk.trim()) {
+        presentAppDialogAlert({ title, body });
+        return;
+      }
+      presentGooglePeopleDemographicsSupportDialog(router, {
+        appUserId: pk,
+        title,
+        body,
+        stillMissing,
+      });
+    },
+    [pk, router],
+  );
 
   const [profileBusy] = useState(false);
   const [genderDemo, setGenderDemo] = useState<SignUpGenderCode | null>(null);
@@ -246,6 +275,11 @@ export function MeetingServiceAuthModal({
       birth: { year: number; month: number; day: number };
       metadata?: Record<string, unknown> | null;
       skipConfirmDialog?: boolean;
+      /** Google 점진적 동의 — 받은 항목만 저장하고 모달 유지 */
+      allowPartialGoogleSave?: boolean;
+      /** false면 해당 필드를 프로필 패치에 넣지 않음(부분 Google 저장용) */
+      applyGender?: boolean;
+      applyBirth?: boolean;
     }) => {
       if (!pk) {
         presentAppDialogAlert({ title: '안내', body: '로그인 후 진행할 수 있어요.' });
@@ -260,11 +294,19 @@ export function MeetingServiceAuthModal({
       }
 
       const p0 = await ensureUserProfile(pk);
-      if (isDemographicsIncomplete(p0)) {
+      if (isDemographicsIncomplete(p0) && !args.allowPartialGoogleSave) {
         if (!args.gender || !args.birth.year || !args.birth.month || !args.birth.day) {
           presentAppDialogAlert({ title: '입력 확인', body: '성별과 생년월일을 모두 선택해 주세요.' });
           return;
         }
+      }
+      if (
+        args.allowPartialGoogleSave &&
+        isDemographicsIncomplete(p0) &&
+        !args.gender &&
+        !(args.birth.year && args.birth.month && args.birth.day)
+      ) {
+        return;
       }
       if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
         presentAppDialogAlert({ title: '전화 인증', body: '전화번호 인증을 먼저 완료해 주세요.' });
@@ -280,10 +322,12 @@ export function MeetingServiceAuthModal({
         ) {
           compliancePatch.signupProvider = 'google_sns';
         }
-        if (args.gender) {
+        const applyGender = args.applyGender !== false;
+        const applyBirth = args.applyBirth !== false;
+        if (applyGender && args.gender) {
           compliancePatch.gender = args.gender;
         }
-        if (args.birth.year && args.birth.month && args.birth.day) {
+        if (applyBirth && args.birth.year && args.birth.month && args.birth.day) {
           compliancePatch.birthDate = Timestamp.fromDate(
             new Date(args.birth.year, args.birth.month - 1, args.birth.day),
           );
@@ -317,7 +361,14 @@ export function MeetingServiceAuthModal({
           presentAppDialogAlert({ title: '동기화 안내', body: `Supabase 반영에 실패했어요. 잠시 후 다시 시도해 주세요.\n${sync.message}` });
         }
 
-        if (args.gender && args.birth.year && args.birth.month && args.birth.day) {
+        if (
+          applyGender &&
+          applyBirth &&
+          args.gender &&
+          args.birth.year &&
+          args.birth.month &&
+          args.birth.day
+        ) {
           const demoSync = await syncMeetingDemographicsToSupabase({
             appUserId: pk,
             gender: args.gender,
@@ -330,12 +381,24 @@ export function MeetingServiceAuthModal({
           }
         }
         setHydratedProfile(p);
-        setMeetingAuthComplete(isMeetingServiceComplianceComplete(p, pk));
-        await onAfterComplianceSuccess?.();
-        onRequestClose();
-        const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
-        if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
-        else presentAppDialogAlert({ title: '완료', body: doneMsg });
+        const complete = isMeetingServiceComplianceComplete(p, pk);
+        setMeetingAuthComplete(complete);
+        if (complete) {
+          await onAfterComplianceSuccess?.();
+          onRequestClose();
+          const doneMsg = '이제 모든 모임 기능을 이용할 수 있습니다';
+          if (Platform.OS === 'android') ToastAndroid.show(doneMsg, ToastAndroid.LONG);
+          else presentAppDialogAlert({ title: '완료', body: doneMsg });
+        } else if (args.allowPartialGoogleSave) {
+          const stillMissing: ('gender' | 'birth')[] = [];
+          if (!profileHasCompleteGender(p)) stillMissing.push('gender');
+          if (!profileHasCompleteBirth(p)) stillMissing.push('birth');
+          presentGoogleDemographicsInquiryDialog(
+            '일부 저장됨',
+            googlePeopleDemographicsPartialSavedMessage(stillMissing),
+            stillMissing,
+          );
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
         presentAppDialogAlert({ title: '저장 실패', body: msg });
@@ -343,7 +406,7 @@ export function MeetingServiceAuthModal({
         setComplianceBusy(false);
       }
     },
-    [pk, isPhoneVerified, phoneField, onAfterComplianceSuccess, onRequestClose],
+    [pk, isPhoneVerified, phoneField, onAfterComplianceSuccess, onRequestClose, presentGoogleDemographicsInquiryDialog],
   );
 
   const onSubmitMeetingCompliance = useCallback(async () => {
@@ -353,6 +416,17 @@ export function MeetingServiceAuthModal({
       skipConfirmDialog: false,
     });
   }, [persistMeetingComplianceCore, genderDemo, birthDemo]);
+
+  const googleAuthButtonTitle = useMemo(() => {
+    if (googleDemographicsBusy) return 'Google 연동 중…';
+    const p = hydratedProfile;
+    if (!p) return 'Google 인증하기';
+    const hasG = profileHasCompleteGender(p);
+    const hasB = profileHasCompleteBirth(p);
+    if (!hasG && hasB) return 'Google에서 성별 가져오기';
+    if (hasG && !hasB) return 'Google에서 생년월일 가져오기';
+    return 'Google 인증하기';
+  }, [googleDemographicsBusy, hydratedProfile]);
 
   const onGoogleDemographicsImport = useCallback(async () => {
     if (!pk) {
@@ -367,6 +441,18 @@ export function MeetingServiceAuthModal({
       presentAppDialogAlert({ title: '안내', body: 'Google로 로그인한 계정에서만 사용할 수 있어요.' });
       return;
     }
+    const email = session?.user?.email?.trim() ?? '';
+    const emailPk = email ? normalizeUserId(email) : null;
+    if (!emailPk || emailPk !== pk) {
+      presentAppDialogAlert({
+        title: '계정 확인',
+        body:
+          Platform.OS === 'web'
+            ? '현재 이 프로필과 동일한 Google 계정으로 다시 로그인해 주세요.'
+            : '현재 이 프로필과 동일한 Google 계정으로 로그인돼 있어야 해요.',
+      });
+      return;
+    }
     const p0 = await ensureUserProfile(pk);
     if (MEETING_PHONE_VERIFICATION_UI_ENABLED && !isPhoneVerified) {
       presentAppDialogAlert({ title: '전화 인증', body: '전화번호 인증을 먼저 완료해 주세요.' });
@@ -374,49 +460,60 @@ export function MeetingServiceAuthModal({
     }
     setGoogleDemographicsBusy(true);
     try {
-      let googleAccessToken: string | null = null;
-      if (Platform.OS !== 'web') {
-        googleAccessToken = await addGooglePeopleScopesAndGetAccessToken();
-      } else {
-        const { user, googleAccessToken: at, supabaseAccessToken: _sbAt } = await signInWithGoogle({
-          forRegistration: true,
-          promptSelectAccount: false,
-        });
-        googleAccessToken = at;
-        const email = user.email?.trim() ?? '';
-        const emailPk = email ? normalizeUserId(email) : null;
-        if (!emailPk || emailPk !== pk) {
-          presentAppDialogAlert({ title: '계정 확인', body: '현재 이 프로필과 동일한 Google 계정으로 다시 로그인해 주세요.' });
-          return;
+      const resolved = await importGooglePeopleDemographicsWithIncrementalConsent(p0);
+      if (resolved.gender) setGenderDemo(resolved.gender);
+      if (resolved.birth) setBirthDemo(resolved.birth);
+
+      const googleDemoMeta = buildGooglePeopleDemographicsMetadataPatch({
+        genderFromGoogle: resolved.genderFromGoogle,
+        birthFromGoogle: resolved.birthFromGoogle,
+      });
+      const meta =
+        Object.keys(googleDemoMeta).length > 0 ? googleDemoMeta : null;
+
+      if (resolved.stillMissing.length > 0) {
+        const gotNewFromGoogle = resolved.genderFromGoogle || resolved.birthFromGoogle;
+        if (gotNewFromGoogle) {
+          await persistMeetingComplianceCore({
+            gender: resolved.gender,
+            birth: resolved.birth ?? birthDemo,
+            applyGender: resolved.genderFromGoogle,
+            applyBirth: resolved.birthFromGoogle,
+            metadata: meta,
+            skipConfirmDialog: true,
+            allowPartialGoogleSave: true,
+          });
+          const pRefresh = await ensureUserProfile(pk);
+          const locks = readGooglePeopleDemographicsLocks(pRefresh);
+          setGoogleDemoGenderLocked(locks.genderLocked);
+          setGoogleDemoBirthLocked(locks.birthLocked);
+          setProfileHasStoredGender(profileHasCompleteGender(pRefresh));
+          setProfileHasStoredBirth(profileHasCompleteBirth(pRefresh));
+        } else {
+          presentGoogleDemographicsInquiryDialog(
+            'Google 정보',
+            googlePeopleDemographicsFailureMessage(resolved.stillMissing),
+            resolved.stillMissing,
+          );
         }
-      }
-      if (Platform.OS !== 'web') {
-        const email = session?.user?.email?.trim() ?? '';
-        const emailPk = email ? normalizeUserId(email) : null;
-        if (!emailPk || emailPk !== pk) {
-          presentAppDialogAlert({ title: '계정 확인', body: '현재 이 프로필과 동일한 Google 계정으로 로그인돼 있어야 해요.' });
-          return;
-        }
-      }
-      const people = await fetchGooglePeopleExtras(googleAccessToken);
-      const genderFs = mapGooglePeopleGenderToProfileGender(people?.gender ?? null);
-      const py = people?.birthYear ?? null;
-      const pm = people?.birthMonth ?? null;
-      const pd = people?.birthDay ?? null;
-      if (!genderFs || py == null || pm == null || pd == null) {
-        presentAppDialogAlert({ title: 'Google 정보', body: '성별과 생년월일을 Google에서 받지 못했어요. Google 계정에 정보가 있고, 동의 화면에서 모두 허용했는지 확인해 주세요.' });
         return;
       }
-      const googleDemoMeta = buildGooglePeopleDemographicsMetadataPatch({
-        genderFromGoogle: true,
-        birthFromGoogle: true,
-      });
-      setGenderDemo(genderFs);
-      setBirthDemo({ year: py, month: pm, day: pd });
+
+      if (!resolved.gender || !resolved.birth) {
+        presentGoogleDemographicsInquiryDialog(
+          'Google 정보',
+          googlePeopleDemographicsFailureMessage(['gender', 'birth']),
+          ['gender', 'birth'],
+        );
+        return;
+      }
+
       await persistMeetingComplianceCore({
-        gender: genderFs,
-        birth: { year: py, month: pm, day: pd },
-        metadata: Object.keys(googleDemoMeta).length > 0 ? googleDemoMeta : null,
+        gender: resolved.gender,
+        birth: resolved.birth,
+        applyGender: true,
+        applyBirth: true,
+        metadata: meta,
         skipConfirmDialog: true,
       });
     } catch (e) {
@@ -427,7 +524,7 @@ export function MeetingServiceAuthModal({
     } finally {
       setGoogleDemographicsBusy(false);
     }
-  }, [pk, isPhoneVerified, persistMeetingComplianceCore]);
+  }, [pk, isPhoneVerified, persistMeetingComplianceCore, birthDemo]);
 
   const canSendOtp = useMemo(() => {
     const normalized = normalizePhoneUserId(phoneField);
@@ -781,7 +878,7 @@ export function MeetingServiceAuthModal({
 
                 {showGoogleDemographicsCta ? (
                   <GinitButton
-                    title={googleDemographicsBusy ? 'Google 연동 중…' : 'Google 인증하기'}
+                    title={googleAuthButtonTitle}
                     variant="primary"
                     onPress={() => void onGoogleDemographicsImport()}
                     disabled={complianceBusy || googleDemographicsBusy || otpBusy || profileBusy}

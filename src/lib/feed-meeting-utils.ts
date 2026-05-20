@@ -149,10 +149,19 @@ function ageIncludeMatchesMeeting(selected: PublicMeetingAgeLimit[], cfg: Public
   return selected.some((s) => s !== 'NONE' && m.includes(s));
 }
 
+export type MeetingMatchesFeedSearchOptions = {
+  /** 참여중·종료 탭: 비공개 모임은 공개 상세 필터(연령·정산 등) 대상에서 제외 */
+  forJoinedTabs?: boolean;
+};
+
 /**
  * 카테고리·모집중 필터와 별개로 적용. 상세 조건이 하나라도 켜져 있으면 `meetingConfig`가 있는 공개 모임만 통과합니다.
  */
-export function meetingMatchesFeedSearch(m: Meeting, f: FeedSearchFilters): boolean {
+export function meetingMatchesFeedSearch(
+  m: Meeting,
+  f: FeedSearchFilters,
+  options?: MeetingMatchesFeedSearchOptions,
+): boolean {
   const q = f.textQuery.trim().toLowerCase();
   if (q) {
     const hay = [m.title, m.description, m.categoryLabel, m.location, m.placeName, m.address ?? '']
@@ -165,6 +174,8 @@ export function meetingMatchesFeedSearch(m: Meeting, f: FeedSearchFilters): bool
   const detailActive =
     f.ageInclude.length > 0 || f.genderRatio != null || f.settlement != null || f.approvalType != null;
   if (!detailActive) return true;
+
+  if (options?.forJoinedTabs && m.isPublic !== true) return true;
 
   const cfg = parsePublicMeetingDetailsConfig(m.meetingConfig);
   if (!cfg || m.isPublic === false) return false;
@@ -210,6 +221,16 @@ export function meetingMatchesFeedCategoryBarAndFilter(
     return true;
   }
   return barVisibleCategoryIds.some((id) => meetingMatchesCategoryFilter(m, id, categories));
+}
+
+/** 참여중·종료 탭 — 탐색용 `barVisibleCategoryIds` 제외, 상단 단일 종류 칩만 적용 */
+export function meetingMatchesJoinedTabCategoryFilter(
+  m: Meeting,
+  selectedCategoryId: string | null,
+  categories: Category[],
+): boolean {
+  if (selectedCategoryId == null) return true;
+  return meetingMatchesCategoryFilter(m, selectedCategoryId, categories);
 }
 
 export function listSortModeLabel(mode: MeetingListSortMode): string {

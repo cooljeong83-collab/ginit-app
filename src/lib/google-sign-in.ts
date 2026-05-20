@@ -8,6 +8,7 @@ export {
   addGooglePeopleScopesAndGetAccessToken,
   consumeGoogleRedirectResult,
   consumeGoogleRedirectResultWithMeta,
+  getGoogleAccessTokenIfAvailable,
   REDIRECT_STARTED,
   signInWithGoogle,
   signOutGoogle,

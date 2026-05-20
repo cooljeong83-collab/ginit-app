@@ -2,7 +2,6 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { FeedMeetingReviewCarouselCard } from '@/components/feed/meeting-review-carousel/FeedMeetingReviewCarouselCard';
 import {
-  REVIEW_CARD_GAP,
   REVIEW_SNAP_INTERVAL,
   REVIEW_SECTION_TOTAL_HEIGHT,
 } from '@/src/lib/feed-meeting-review-carousel-layout';

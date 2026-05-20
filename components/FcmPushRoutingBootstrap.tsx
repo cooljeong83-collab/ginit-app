@@ -11,6 +11,7 @@ import { Platform } from 'react-native';
 import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { handleChatPushNotificationAction } from '@/src/lib/chat-push-notification-actions';
+import { isAdminPushOpenData } from '@/src/features/admin-reports/push-open-admin';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import {
   explainShouldDeferPushOpenNavigation,
@@ -52,6 +53,7 @@ function hasActionableFcmOpenData(data: Record<string, unknown> | undefined): bo
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const url = typeof data.url === 'string' ? data.url.trim() : '';
+  if (isAdminPushOpenData(data)) return true;
   if (url.toLowerCase().startsWith('ginitapp://')) return true;
   if (
     action &&

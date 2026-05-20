@@ -42,7 +42,7 @@ export function useMyMeetingsFeedSync({
     enabled: shouldRun,
     queryFn: () => fetchMyMeetingsFull(normalizedUserId),
     staleTime: 0,
-    refetchOnMount: false,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
   });

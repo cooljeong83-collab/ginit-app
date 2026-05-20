@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AdminSettingsSection } from '@/components/admin-console/AdminSettingsSection';
 import { MeetingServiceAuthModal } from '@/components/profile/MeetingServiceAuthModal';
 import { ScreenShell } from '@/components/ui';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
@@ -30,6 +31,8 @@ import { GinitSymbolicIcon, type SymbolicIconName } from '@/components/ui/GinitS
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
+import { useAdminSettingsVisible } from '@/src/features/admin-console/use-admin-settings-visible';
+import { openAdminReportsListScreen } from '@/src/features/admin-console/open-admin-reports-list-screen';
 import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import {
   accountDeletionRejoinPolicyNotice,
@@ -72,6 +75,7 @@ import {
   saveProfileDndQuietHoursWindow,
 } from '@/src/lib/profile-settings-local';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
 import { ensureUserProfile, isMeetingServiceComplianceComplete, updateUserProfile } from '@/src/lib/user-profile';
 
 function RowSep() {
@@ -160,6 +164,7 @@ export default function ProfileAppSettingsScreen() {
   }, []);
 
   const isSignedIn = Boolean(userId?.trim() || authProfile?.supabaseUserId?.trim());
+  const { adminSectionVisible, refreshAdminGate } = useAdminSettingsVisible(isSignedIn);
 
   const profilePk = useMemo(() => {
     const u = userId?.trim();
@@ -334,6 +339,7 @@ export default function ProfileAppSettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      void refreshAdminGate();
       void refreshNotify();
       void loadDnd();
       void loadNotificationSound();
@@ -358,8 +364,21 @@ export default function ProfileAppSettingsScreen() {
         cancelled = true;
         if (clearParamTimer) clearTimeout(clearParamTimer);
       };
-    }, [refreshNotify, loadDnd, loadNotificationSound, refreshMeetingNotify, refreshMeetingAuth, registerInfoParam, router]),
+    }, [
+      refreshAdminGate,
+      refreshNotify,
+      loadDnd,
+      loadNotificationSound,
+      refreshMeetingNotify,
+      refreshMeetingAuth,
+      registerInfoParam,
+      router,
+    ]),
   );
+
+  const onOpenAdminReports = useCallback(() => {
+    openAdminReportsListScreen(router);
+  }, [router]);
 
   const onToggleNotify = useCallback(
     async (next: boolean) => {
@@ -471,7 +490,10 @@ export default function ProfileAppSettingsScreen() {
     try {
       const preflight = await validateAccountDeletionPreflight(sessionUserId, authUid);
       if (!preflight.ok) {
-        presentAppDialogAlert({ title: '탈퇴를 진행할 수 없어요', body: preflight.message });
+        presentAppDialogAlert({
+          title: '탈퇴를 진행할 수 없어요',
+          body: toUserFacingErrorMessage(preflight.message),
+        });
         return;
       }
       if (preflight.mode === 'full_deletion') {
@@ -479,7 +501,10 @@ export default function ProfileAppSettingsScreen() {
           ? await purgeUserAccountRemote(sessionUserId)
           : await purgeUserAccountRemoteByFirebaseUid(authUid);
         if (!res.ok) {
-          presentAppDialogAlert({ title: '탈퇴를 완료하지 못했어요', body: res.message });
+          presentAppDialogAlert({
+            title: '탈퇴를 완료하지 못했어요',
+            body: toUserFacingErrorMessage(res.message),
+          });
           return;
         }
       }
@@ -491,7 +516,7 @@ export default function ProfileAppSettingsScreen() {
       await wipeLocalAppData();
       await signOutSession({ exitApp: true });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '알 수 없는 오류';
+      const msg = toUserFacingErrorMessage(e instanceof Error ? e.message : '알 수 없는 오류');
       presentAppDialogAlert({ title: '탈퇴 실패', body: msg });
     } finally {
       setDeleteBusy(false);
@@ -771,6 +796,41 @@ export default function ProfileAppSettingsScreen() {
               </GinitPressable>
             </View>
           ) : null}
+
+          {adminSectionVisible ? (
+            <View style={[styles.block, styles.blockGap]}>
+              <AdminSettingsSection onOpenReports={onOpenAdminReports} />
+            </View>
+          ) : null}
+
+          <View style={[styles.block, styles.blockGap]}>
+            {sectionTitle('고객지원')}
+            <GinitPressable
+              onPress={() => router.push('/support/announcements')}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="공지사항">
+              <SettingsRowLeadIcon name="megaphone-outline" />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>공지사항</Text>
+                <Text style={styles.rowSub}>서비스 소식과 업데이트를 확인해요.</Text>
+              </View>
+              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+            </GinitPressable>
+            <RowSep />
+            <GinitPressable
+              onPress={() => router.push('/support/inquiry')}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="문의하기">
+              <SettingsRowLeadIcon name="mail-outline" />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>문의하기</Text>
+                <Text style={styles.rowSub}>이용 중 궁금한 점을 보내 주세요.</Text>
+              </View>
+              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+            </GinitPressable>
+          </View>
 
           <View style={[styles.block, styles.blockGap]}>
             {sectionTitle('기타')}

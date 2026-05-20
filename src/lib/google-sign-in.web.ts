@@ -1,5 +1,7 @@
 import { signOutSupabase, supabase } from '@/src/lib/supabase';
 
+import { googlePeopleScopesForFields } from '@/src/lib/google-people-oauth-scopes';
+
 import type { RedirectConsumeMeta } from './google-sign-in-redirect-meta';
 import type { GoogleSignInResult, SignInWithGoogleOptions } from './google-sign-in-result';
 
@@ -60,8 +62,14 @@ function isMobileUserAgent(): boolean {
 
 function googleScopes(options?: SignInWithGoogleOptions): string {
   const base = 'email profile';
-  if (!options?.forRegistration) return base;
-  return `${base} https://www.googleapis.com/auth/user.birthday.read https://www.googleapis.com/auth/user.gender.read`;
+  const fields = options?.peopleDemographicFields;
+  if (options?.forRegistration) {
+    return `${base} https://www.googleapis.com/auth/user.birthday.read https://www.googleapis.com/auth/user.gender.read`;
+  }
+  if (fields?.length) {
+    return [base, ...googlePeopleScopesForFields(fields)].join(' ');
+  }
+  return base;
 }
 
 async function waitForSessionFromOAuthPopup(maxMs: number): Promise<import('@supabase/supabase-js').Session | null> {
@@ -182,12 +190,17 @@ export async function signInWithGoogle(options?: SignInWithGoogleOptions): Promi
   return { user: session.user, googleAccessToken, supabaseAccessToken };
 }
 
-/** 네이티브 전용 API와 시그니처를 맞추기 위한 웹 스텁 */
-export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
+/** Supabase 세션의 Google provider access token (없으면 null). */
+export async function getGoogleAccessTokenIfAvailable(): Promise<string | null> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  return session?.provider_token ?? null;
+  return session?.provider_token?.trim() ?? null;
+}
+
+/** 웹: 추가 스코프는 `signInWithGoogle({ peopleDemographicFields })`로 처리. 세션 토큰만 반환. */
+export async function addGooglePeopleScopesAndGetAccessToken(): Promise<string | null> {
+  return getGoogleAccessTokenIfAvailable();
 }
 
 export async function signOutGoogle(): Promise<void> {
