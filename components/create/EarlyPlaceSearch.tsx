@@ -26,6 +26,7 @@ import {
 } from '@/src/lib/naver-local-place-search-text';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { resolvePlaceSearchRowThumbnail } from '@/src/lib/place-search-thumbnail-resolve';
 
 import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
 
@@ -439,7 +440,8 @@ export function EarlyPlaceSearch({
         if (resolved.latitude == null || resolved.longitude == null) throw new Error('좌표 없음');
         const linkFromApi =
           sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
-        const thumb = (resolved.thumbnailUrl ?? '').trim();
+        const thumbResolved = await resolvePlaceSearchRowThumbnail(resolved);
+        const thumb = (thumbResolved ?? resolved.thumbnailUrl ?? '').trim();
         const cat = (resolved.category ?? item.category ?? '').trim();
         onPickCandidate({
           id: resolved.id,

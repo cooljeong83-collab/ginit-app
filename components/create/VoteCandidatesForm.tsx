@@ -88,7 +88,7 @@ import {
   getScheduleOverlapBufferHours,
 } from '@/src/lib/meeting-schedule-overlap';
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
-import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
+import { resolvePlaceSearchRowThumbnailsParallel } from '@/src/lib/place-search-thumbnail-resolve';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import {
   derivePlaceKeyFromSearchRow,
@@ -1888,41 +1888,36 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     const visible = placeSearchRows;
     let alive = true;
     const t = setTimeout(() => {
-      void (async () => {
-        for (const row of visible) {
-          if (!alive) return;
-          if (placeThumbById[row.id] !== undefined) continue;
-          const pre = row.thumbnailUrl?.trim() ?? '';
-          if (isUsableRemoteImageUrl(pre)) {
-            setPlaceThumbById((prev) => {
-              if (prev[row.id] !== undefined) return prev;
-              return { ...prev, [row.id]: pre };
-            });
-            continue;
-          }
-          try {
-            const thumb = await searchNaverPlaceImageThumbnail({
-              title: row.title,
-              roadAddress: row.roadAddress,
-              address: row.address,
-              category: row.category,
-              preferredPhotoMediaUrl: undefined,
-              kakaoPlaceDetailPageUrl: row.link ?? undefined,
-            });
-            if (!alive) return;
-            setPlaceThumbById((prev) => {
-              if (prev[row.id] !== undefined) return prev;
-              return { ...prev, [row.id]: thumb };
-            });
-          } catch {
-            if (!alive) return;
-            setPlaceThumbById((prev) => {
-              if (prev[row.id] !== undefined) return prev;
-              return { ...prev, [row.id]: null };
-            });
-          }
+      const pending = visible.filter((row) => {
+        if (placeThumbById[row.id] !== undefined) return false;
+        const pre = row.thumbnailUrl?.trim() ?? '';
+        return !isUsableRemoteImageUrl(pre);
+      });
+      for (const row of visible) {
+        const pre = row.thumbnailUrl?.trim() ?? '';
+        if (isUsableRemoteImageUrl(pre)) {
+          setPlaceThumbById((prev) => {
+            if (prev[row.id] !== undefined) return prev;
+            return { ...prev, [row.id]: pre };
+          });
         }
-      })();
+      }
+      void resolvePlaceSearchRowThumbnailsParallel(pending, {
+        isCancelled: () => !alive,
+        onRowResolved: (rowId, thumb) => {
+          if (!alive) return;
+          const row = visible.find((r) => r.id === rowId);
+          const resolved = isUsableRemoteImageUrl(thumb)
+            ? thumb!.trim()
+            : row && isUsableRemoteImageUrl(row.thumbnailUrl)
+              ? row.thumbnailUrl!.trim()
+              : thumb;
+          setPlaceThumbById((prev) => {
+            if (prev[rowId] !== undefined) return prev;
+            return { ...prev, [rowId]: resolved };
+          });
+        },
+      });
     }, 220);
 
     return () => {
@@ -2467,7 +2462,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                       const addressOnly = (item.roadAddress || item.address || '').trim();
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
-                      const thumb = placeThumbById[item.id] ?? null;
+                      const thumbFromState = placeThumbById[item.id];
+                      const thumb = isUsableRemoteImageUrl(thumbFromState)
+                        ? thumbFromState.trim()
+                        : isUsableRemoteImageUrl(item.thumbnailUrl)
+                          ? item.thumbnailUrl!.trim()
+                          : null;
                       const rowPlaceKey = derivePlaceKeyFromSearchRow({
                         title: item.title,
                         link: item.link,

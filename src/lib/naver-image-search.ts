@@ -4,6 +4,8 @@ import { publicEnv } from '@/src/config/public-env';
 import { fetchKakaoPlacePageThumbnailUrl, isKakaoMapPlacePageUrl } from '@/src/lib/kakao-place-page-image';
 import { withCorsProxyForWeb } from '@/src/lib/naver-ncp-maps';
 import { withNaverOpenApiClientRateLimit } from '@/src/lib/naver-openapi-rate-limit';
+import { derivePlaceKeyFromSearchRow } from '@/src/lib/places/place-key';
+import { getCachedPlaceThumbnail, setCachedPlaceThumbnail } from '@/src/lib/place-thumbnail-cache';
 
 type NaverOpenApiImageJson = {
   items?: {
@@ -210,14 +212,28 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
   const cacheKey = `p|${cacheKeyForQuery(q)}|k:${cacheKeyForQuery(kakaoPage)}`;
   if (placeThumbnailCache.has(cacheKey)) return placeThumbnailCache.get(cacheKey) ?? null;
 
+  const placeKey = derivePlaceKeyFromSearchRow({
+    title: f.title,
+    link: f.kakaoPlaceDetailPageUrl,
+    roadAddress: f.roadAddress,
+    address: f.address ?? f.addressLine,
+  });
+  const diskCached = await getCachedPlaceThumbnail(placeKey);
+  if (diskCached.hit && diskCached.url) {
+    placeThumbnailCache.set(cacheKey, diskCached.url);
+    return diskCached.url;
+  }
+
   const pref = typeof f.preferredPhotoMediaUrl === 'string' ? f.preferredPhotoMediaUrl.trim() : '';
   if (pref.startsWith('https://')) {
     placeThumbnailCache.set(cacheKey, pref);
+    void setCachedPlaceThumbnail(placeKey, pref);
     return pref;
   }
 
   if (!q && !canKakaoOg) {
     placeThumbnailCache.set(cacheKey, null);
+    void setCachedPlaceThumbnail(placeKey, null);
     return null;
   }
 
@@ -226,6 +242,7 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
       const og = await fetchKakaoPlacePageThumbnailUrl(kakaoPage);
       if (og?.startsWith('https://')) {
         placeThumbnailCache.set(cacheKey, og);
+        void setCachedPlaceThumbnail(placeKey, og);
         return og;
       }
     } catch {
@@ -235,6 +252,7 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
 
   if (!q) {
     placeThumbnailCache.set(cacheKey, null);
+    void setCachedPlaceThumbnail(placeKey, null);
     return null;
   }
 
@@ -255,11 +273,13 @@ export async function searchNaverPlaceImageThumbnail(f: NaverPlaceImageSearchFie
 
   if (ranked.length === 0) {
     placeThumbnailCache.set(cacheKey, null);
+    void setCachedPlaceThumbnail(placeKey, null);
     return null;
   }
 
   ranked.sort((a, b) => b.score - a.score);
   const best = ranked[0]!.thumb;
   placeThumbnailCache.set(cacheKey, best);
+  void setCachedPlaceThumbnail(placeKey, best);
   return best;
 }

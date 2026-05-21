@@ -437,7 +437,7 @@ export default function MeetingReviewScreen() {
               onOpenPlaceUrl={onOpenPlaceUrl}
               receiptPlaceVerified={receiptPlaceVerified}
               summary={summaryQuery.data}
-              loading={summaryQuery.isLoading || summaryQuery.isFetching}
+              loading={summaryQuery.isLoading && !summaryQuery.data}
             />
           )}
         </View>

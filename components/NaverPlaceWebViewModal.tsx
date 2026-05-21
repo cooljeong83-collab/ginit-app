@@ -17,10 +17,15 @@ import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge
 import { GinitPlaceReviewTimeline } from '@/components/places/GinitPlaceReviewTimeline';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { normalizeNaverPlaceDetailWebUrl } from '@/src/lib/naver-local-search';
+import {
+  buildPlaceWebViewCacheKey,
+  isPlaceWebViewLoaded,
+  markPlaceWebViewLoaded,
+} from '@/src/lib/place-detail-webview-session-cache';
 import { buildPlaceLookupKeys } from '@/src/lib/places/place-lookup-keys';
 import type { PlaceLookupInput } from '@/src/lib/places/place-lookup-keys';
 import { fetchPlaceMasterByLookup } from '@/src/lib/places/place-master-api';
-import { normalizeNaverPlaceDetailWebUrl } from '@/src/lib/naver-local-search';
 
 /** 네이버 모바일 검색·플레이스 페이지가 인앱 UA에서 어긋나지 않도록 쓰는 모바일 Safari UA */
 const NAVER_PLACE_WEBVIEW_USER_AGENT =
@@ -72,6 +77,12 @@ export function NaverPlaceWebViewModal({
 
   const safeUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : null;
   const webViewUri = safeUrl ? normalizeNaverPlaceDetailWebUrl(safeUrl) : null;
+  const cacheKey = webViewUri
+    ? buildPlaceWebViewCacheKey(webViewUri, placeReviewLookup?.placeKey)
+    : null;
+
+  const maxSheet = Math.max(280, windowHeight - insets.top - insets.bottom - 24);
+  const sheetHeight = Math.round(Math.min(windowHeight * 0.9, maxSheet));
 
   useEffect(() => {
     if (!visible) {
@@ -80,12 +91,17 @@ export function NaverPlaceWebViewModal({
       setGinitReviewCount(0);
       return;
     }
-    if (visible && webViewUri) {
+    if (!webViewUri || !cacheKey) return;
+
+    setLoadError(null);
+    if (isPlaceWebViewLoaded(cacheKey)) {
+      initialLoadSettledRef.current = true;
+      setWebLoading(false);
+    } else {
       initialLoadSettledRef.current = false;
       setWebLoading(true);
-      setLoadError(null);
     }
-  }, [visible, webViewUri]);
+  }, [visible, webViewUri, cacheKey]);
 
   useEffect(() => {
     if (!visible || !placeReviewLookup) return;
@@ -102,161 +118,163 @@ export function NaverPlaceWebViewModal({
   }, [visible, placeReviewLookup]);
 
   useEffect(() => {
-    if (!visible || !webViewUri || !webLoading) return;
+    if (!visible || !webViewUri || !cacheKey || !webLoading) return;
     const timeout = setTimeout(() => {
       initialLoadSettledRef.current = true;
+      markPlaceWebViewLoaded(cacheKey);
       setWebLoading(false);
     }, 8000);
     return () => clearTimeout(timeout);
-  }, [visible, webViewUri, webLoading]);
+  }, [visible, webViewUri, cacheKey, webLoading]);
 
   const handleClose = useCallback(() => {
-    initialLoadSettledRef.current = false;
-    setWebLoading(true);
     setLoadError(null);
     setTab('web');
     onClose();
   }, [onClose]);
 
   const settleInitialLoad = useCallback(() => {
+    if (!cacheKey) return;
     initialLoadSettledRef.current = true;
+    markPlaceWebViewLoaded(cacheKey);
     setWebLoading(false);
-  }, []);
+  }, [cacheKey]);
 
-  const maxSheet = Math.max(280, windowHeight - insets.top - insets.bottom - 24);
-  const sheetHeight = Math.round(Math.min(windowHeight * 0.9, maxSheet));
+  const showWebTab = !showGinitTabs || tab === 'web';
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <GestureHandlerRootView style={styles.gestureRoot}>
-        <View style={[styles.modalRootCentered, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
-          <GinitPressable
-            style={GinitStyles.modalBackdrop}
-            onPress={handleClose}
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
-          />
-          <View
-            style={[
-              GinitStyles.modalSheet,
-              styles.sheetChrome,
-              {
-                height: sheetHeight,
-                maxHeight: sheetHeight,
-                paddingBottom: Math.max(12, insets.bottom + 6),
-                paddingHorizontal: 0,
-              },
-            ]}>
-            <View style={[GinitStyles.modalHeader, styles.sheetHeaderPad]}>
-              <View style={styles.headerLeftSlot}>
-                <GinitPressable onPress={handleClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-                  <Text style={GinitStyles.modalCancel}>닫기</Text>
-                </GinitPressable>
-              </View>
-              <View style={styles.headerTitleWrap}>
-                <Text style={styles.headerPlaceTitle} numberOfLines={1}>
-                  {pageTitle}
-                </Text>
-              </View>
-              <View style={styles.headerRightSlot}>
-                {showGinitTabs && ginitReviewCount > 0 ? (
-                  <GinitPlaceRatingBadge
-                    averageRating={ginitAvg}
-                    reviewCount={ginitReviewCount}
-                    style={styles.headerRatingBadge}
-                  />
-                ) : null}
-              </View>
-            </View>
-
-            {showGinitTabs ? (
-              <View style={styles.tabBar}>
-                <GinitPressable
-                  onPress={() => setTab('web')}
-                  style={[styles.tabBtn, tab === 'web' && styles.tabBtnActive]}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: tab === 'web' }}>
-                  <Text style={[styles.tabText, tab === 'web' && styles.tabTextActive]}>네이버 플레이스</Text>
-                </GinitPressable>
-                <GinitPressable
-                  onPress={() => setTab('comments')}
-                  style={[styles.tabBtn, tab === 'comments' && styles.tabBtnActive]}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: tab === 'comments' }}>
-                  <Text style={[styles.tabText, tab === 'comments' && styles.tabTextActive]}>
-                    코멘트{ginitReviewCount > 0 ? ` (${ginitReviewCount})` : ''}
+        <GestureHandlerRootView style={styles.gestureRoot}>
+          <View style={[styles.modalRootCentered, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }]}>
+            <GinitPressable
+              style={GinitStyles.modalBackdrop}
+              onPress={handleClose}
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+            />
+            <View
+              style={[
+                GinitStyles.modalSheet,
+                styles.sheetChrome,
+                {
+                  height: sheetHeight,
+                  maxHeight: sheetHeight,
+                  paddingBottom: Math.max(12, insets.bottom + 6),
+                  paddingHorizontal: 0,
+                },
+              ]}>
+              <View style={[GinitStyles.modalHeader, styles.sheetHeaderPad]}>
+                <View style={styles.headerLeftSlot}>
+                  <GinitPressable onPress={handleClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
+                    <Text style={GinitStyles.modalCancel}>닫기</Text>
+                  </GinitPressable>
+                </View>
+                <View style={styles.headerTitleWrap}>
+                  <Text style={styles.headerPlaceTitle} numberOfLines={1}>
+                    {pageTitle}
                   </Text>
-                </GinitPressable>
+                </View>
+                <View style={styles.headerRightSlot}>
+                  {showGinitTabs && ginitReviewCount > 0 ? (
+                    <GinitPlaceRatingBadge
+                      averageRating={ginitAvg}
+                      reviewCount={ginitReviewCount}
+                      style={styles.headerRatingBadge}
+                    />
+                  ) : null}
+                </View>
               </View>
-            ) : null}
 
-            {showGinitTabs && tab === 'comments' && reviewLookupBundle ? (
-              <View style={styles.commentsBody}>
-                <GinitPlaceReviewTimeline
-                  placeKey={reviewLookupBundle.placeKey}
-                  lookupKeys={reviewLookupBundle.lookupKeys}
-                  placeName={reviewLookupBundle.placeName}
-                  roadAddress={reviewLookupBundle.roadAddress}
-                />
-              </View>
-            ) : webViewUri ? (
-              <View style={styles.webOuter}>
-                <WebView
-                  key={webViewUri}
-                  source={{ uri: webViewUri }}
-                  userAgent={NAVER_PLACE_WEBVIEW_USER_AGENT}
-                  style={styles.webview}
-                  onLoadStart={() => {
-                    if (!initialLoadSettledRef.current) {
-                      setWebLoading(true);
-                    }
-                    setLoadError(null);
-                  }}
-                  onLoadProgress={({ nativeEvent }) => {
-                    if (nativeEvent.progress >= 0.85) settleInitialLoad();
-                  }}
-                  onLoadEnd={settleInitialLoad}
-                  onHttpError={() => {
-                    settleInitialLoad();
-                    setLoadError('페이지를 불러오지 못했습니다.');
-                  }}
-                  onError={() => {
-                    settleInitialLoad();
-                    setLoadError('페이지를 불러오지 못했습니다.');
-                  }}
-                  startInLoadingState={false}
-                  allowsBackForwardNavigationGestures={Platform.OS === 'ios'}
-                  setSupportMultipleWindows={false}
-                  mixedContentMode="compatibility"
-                  originWhitelist={['http://', 'https://']}
-                />
-                {webLoading ? (
-                  <View style={styles.loadingOverlay} pointerEvents="none">
-                    <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
-                  </View>
-                ) : null}
-                {loadError ? (
-                  <View style={styles.errorBanner}>
-                    <Text style={styles.errorText}>{loadError}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : (
-              <View style={styles.emptyBody}>
-                <Text style={styles.emptyText}>표시할 링크가 없어요.</Text>
-                <GinitPressable
-                  onPress={handleClose}
-                  style={({ pressed }) => [styles.emptyClose, pressed && { opacity: 0.88 }]}
-                  accessibilityRole="button"
-                  accessibilityLabel="닫기">
-                  <Text style={GinitStyles.modalCancel}>닫기</Text>
-                </GinitPressable>
-              </View>
-            )}
+              {showGinitTabs ? (
+                <View style={styles.tabBar}>
+                  <GinitPressable
+                    onPress={() => setTab('web')}
+                    style={[styles.tabBtn, tab === 'web' && styles.tabBtnActive]}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: tab === 'web' }}>
+                    <Text style={[styles.tabText, tab === 'web' && styles.tabTextActive]}>네이버 플레이스</Text>
+                  </GinitPressable>
+                  <GinitPressable
+                    onPress={() => setTab('comments')}
+                    style={[styles.tabBtn, tab === 'comments' && styles.tabBtnActive]}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: tab === 'comments' }}>
+                    <Text style={[styles.tabText, tab === 'comments' && styles.tabTextActive]}>
+                      코멘트{ginitReviewCount > 0 ? ` (${ginitReviewCount})` : ''}
+                    </Text>
+                  </GinitPressable>
+                </View>
+              ) : null}
+
+              {showGinitTabs && tab === 'comments' && reviewLookupBundle ? (
+                <View style={styles.commentsBody}>
+                  <GinitPlaceReviewTimeline
+                    placeKey={reviewLookupBundle.placeKey}
+                    lookupKeys={reviewLookupBundle.lookupKeys}
+                    placeName={reviewLookupBundle.placeName}
+                    roadAddress={reviewLookupBundle.roadAddress}
+                  />
+                </View>
+              ) : webViewUri && showWebTab ? (
+                <View style={styles.webOuter}>
+                  <WebView
+                    key={cacheKey ?? webViewUri}
+                    source={{ uri: webViewUri }}
+                    userAgent={NAVER_PLACE_WEBVIEW_USER_AGENT}
+                    style={styles.webview}
+                    cacheEnabled
+                    cacheMode={Platform.OS === 'android' ? 'LOAD_CACHE_ELSE_NETWORK' : undefined}
+                    onLoadStart={() => {
+                      if (!initialLoadSettledRef.current && cacheKey && !isPlaceWebViewLoaded(cacheKey)) {
+                        setWebLoading(true);
+                      }
+                      setLoadError(null);
+                    }}
+                    onLoadProgress={({ nativeEvent }) => {
+                      if (nativeEvent.progress >= 0.85) settleInitialLoad();
+                    }}
+                    onLoadEnd={settleInitialLoad}
+                    onHttpError={() => {
+                      settleInitialLoad();
+                      setLoadError('페이지를 불러오지 못했습니다.');
+                    }}
+                    onError={() => {
+                      settleInitialLoad();
+                      setLoadError('페이지를 불러오지 못했습니다.');
+                    }}
+                    startInLoadingState={false}
+                    allowsBackForwardNavigationGestures={Platform.OS === 'ios'}
+                    setSupportMultipleWindows={false}
+                    mixedContentMode="compatibility"
+                    originWhitelist={['http://', 'https://']}
+                  />
+                  {webLoading ? (
+                    <View style={styles.loadingOverlay} pointerEvents="none">
+                      <ActivityIndicator size="large" color={GinitTheme.colors.primary} />
+                    </View>
+                  ) : null}
+                  {loadError ? (
+                    <View style={styles.errorBanner}>
+                      <Text style={styles.errorText}>{loadError}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : (
+                <View style={styles.emptyBody}>
+                  <Text style={styles.emptyText}>표시할 링크가 없어요.</Text>
+                  <GinitPressable
+                    onPress={handleClose}
+                    style={({ pressed }) => [styles.emptyClose, pressed && { opacity: 0.88 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="닫기">
+                    <Text style={GinitStyles.modalCancel}>닫기</Text>
+                  </GinitPressable>
+                </View>
+              )}
+            </View>
           </View>
-        </View>
-      </GestureHandlerRootView>
-    </Modal>
+        </GestureHandlerRootView>
+      </Modal>
   );
 }
 
@@ -268,7 +286,6 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     paddingHorizontal: GinitTheme.spacing.md,
   },
-  /** `modalSheet` 상단만 둥근 기본값을 카드형으로 보이도록 네 모서리 통일 */
   sheetChrome: {
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 18,

@@ -69,7 +69,6 @@ import {
   type MeetingSettlementReceiptItem,
 } from '@/src/lib/meetings';
 import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-incremental-sync-core';
-import { meetingPlaceReviewSummaryQueryKey } from '@/src/lib/meeting-review/meeting-review-api';
 import { insertMeetingPlaceReviewNotifications } from '@/src/lib/meeting-place-review-notifications';
 import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
@@ -876,13 +875,6 @@ export default function SettlementMeetingScreen() {
   const placeReviewSummaryQuery = useMeetingPlaceReviewSummary(meetingId, userId, {
     enabled: placeReviewEligible,
   });
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!placeReviewEligible || !meetingId.trim()) return;
-      void queryClient.invalidateQueries({ queryKey: meetingPlaceReviewSummaryQueryKey(meetingId) });
-    }, [placeReviewEligible, meetingId, queryClient]),
-  );
 
   const myPlaceReviewSubmitted = useMemo(() => {
     if (!placeReviewSummaryQuery.isSuccess) return null;

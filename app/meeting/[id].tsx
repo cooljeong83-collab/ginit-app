@@ -148,13 +148,10 @@ import { markRecentSelfMeetingChange } from '@/src/lib/self-meeting-change';
 import { supabase } from '@/src/lib/supabase';
 import { formatRealtimeSubscribeDetail } from '@/src/lib/supabase-realtime-resilience';
 import { presentAppDialogAlert, presentAppDialogConfirm } from '@/src/lib/app-dialog-present';
-import {
-  ensureUserProfile,
-  getUserProfile,
-  isMeetingServiceComplianceComplete,
-  isUserProfileWithdrawn,
-  WITHDRAWN_NICKNAME
-} from '@/src/lib/user-profile';
+import { useMeetingServiceComplianceGate } from '@/src/hooks/use-meeting-service-compliance-gate';
+import { MEETING_LOAD_TRANSIENT_MESSAGE } from '@/src/lib/meetings';
+import { isTransientNetworkErrorMessage } from '@/src/lib/supabase-realtime-resilience';
+import { isUserProfileWithdrawn, WITHDRAWN_NICKNAME } from '@/src/lib/user-profile';
 
 const WEEK_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
 /** 가로 달력 월 스와이프 전환 중에만 가운데 그리드 opacity를 낮춘 뒤 1로 복귀 */
@@ -501,8 +498,6 @@ export default function MeetingDetailScreen() {
   /** 레저 확정 모임: 장소 인증 완료한 참가자 PK(`normalizeParticipantId` 기준) */
   const [ledgerArrivalVerifiedParticipantIds, setLedgerArrivalVerifiedParticipantIds] = useState<string[]>([]);
   const [arrivalUiTick, setArrivalUiTick] = useState(0);
-  const [meetingAuthGateReady, setMeetingAuthGateReady] = useState(false);
-  const [meetingAuthComplete, setMeetingAuthComplete] = useState(false);
 
   useEffect(() => {
     if (!isFocused || !meeting || !userId?.trim()) return;
@@ -907,6 +902,17 @@ export default function MeetingDetailScreen() {
     () => (userId?.trim() ? normalizeParticipantId(userId.trim()) : ''),
     [userId],
   );
+
+  const { viewBlockedByCompliance } = useMeetingServiceComplianceGate(sessionPk);
+
+  const loadErrorIsTransient = Boolean(
+    loadError &&
+      (loadError === MEETING_LOAD_TRANSIENT_MESSAGE || isTransientNetworkErrorMessage(loadError)),
+  );
+  const showCachedMeetingDespiteLoadError = Boolean(loadErrorIsTransient && meeting);
+  const showFullPageLoadError = Boolean(loadError && !showCachedMeetingDespiteLoadError);
+  const showComplianceBlock = viewBlockedByCompliance && !showFullPageLoadError;
+  const showOfflineCacheNotice = showCachedMeetingDespiteLoadError;
 
   const alreadyJoinedMeeting = useMemo(() => {
     if (!sessionPk) return false;
@@ -1659,35 +1665,6 @@ export default function MeetingDetailScreen() {
     setSelectedPlaceIds,
   ]);
 
-  // 모임 상세 열람 게이트: 모임 이용 인증(약관+전화+성별/생년월일)이 완료되지 않으면 상세를 숨깁니다.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!sessionPk) {
-        setMeetingAuthComplete(false);
-        setMeetingAuthGateReady(true);
-        return;
-      }
-      try {
-        await ensureUserProfile(sessionPk);
-        const p = await getUserProfile(sessionPk);
-        const ok = isMeetingServiceComplianceComplete(p, sessionPk);
-        if (!cancelled) {
-          setMeetingAuthComplete(ok);
-          setMeetingAuthGateReady(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setMeetingAuthComplete(false);
-          setMeetingAuthGateReady(true);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionPk]);
-
   // join/vote 파생 로직은 각 훅으로 이동
 
   /** Alert로 나가기 확정 후 재진입하는 `beforeRemove`에서 동일 팝업이 두 번 뜨지 않도록 우회 */
@@ -2065,6 +2042,19 @@ export default function MeetingDetailScreen() {
   const meetingDetailTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     if (!meeting) return [];
     const slides: MeetingDetailTopNoticeSlide[] = [];
+    if (showOfflineCacheNotice) {
+      slides.push({
+        key: 'offline-cache',
+        element: (
+          <MeetingDetailStaticNoticeRow
+            text="연결을 확인해 주세요. 아래는 저장된 모임 정보예요."
+            textColor={GinitTheme.colors.textMuted}
+            slideTrackFullBleed
+            accessibilityLabel="오프라인 안내. 저장된 모임 정보를 표시 중"
+          />
+        ),
+      });
+    }
     if (showMeetingReviewWriteCta) {
       slides.push({
         key: 'place-review',
@@ -2164,6 +2154,7 @@ export default function MeetingDetailScreen() {
     router,
     openArrivalVerifyMap,
     categories,
+    showOfflineCacheNotice,
   ]);
 
   const onDateChipPress = useCallback(
@@ -2939,9 +2930,7 @@ export default function MeetingDetailScreen() {
     return computeBottomBarLabelMode(actions, available, { compactTypography: false });
   }, [needsHostApprovalJoin, bottomBarFallbackWidth]);
 
-  const notFound = !loading && !loadError && meeting === null;
-
-  const viewBlockedByCompliance = meetingAuthGateReady && !meetingAuthComplete;
+  const notFound = !loading && !showFullPageLoadError && meeting === null;
 
   return (
     <ScreenShell padded={false} style={styles.root}>
@@ -2974,7 +2963,7 @@ export default function MeetingDetailScreen() {
           <ScreenTransitionSkeleton variant="detail" rows={4} />
         ) : null}
 
-        {loadError ? (
+        {showFullPageLoadError ? (
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>문제가 생겼어요</Text>
             <Text style={styles.muted}>{loadError}</Text>
@@ -2996,7 +2985,7 @@ export default function MeetingDetailScreen() {
           </View>
         ) : null}
 
-        {viewBlockedByCompliance ? (
+        {showComplianceBlock ? (
           <View style={styles.centerFill}>
             <Text style={styles.errorTitle}>프로필 인증이 필요해요</Text>
             <Text style={styles.muted}>
@@ -3035,7 +3024,7 @@ export default function MeetingDetailScreen() {
           </View>
         ) : null}
 
-        {!loading && !loadError && meeting !== null ? (
+        {!loading && meeting !== null && !showFullPageLoadError && !showComplianceBlock ? (
           <ScrollView
             ref={mainScrollRef}
             style={styles.scroll}
@@ -4285,7 +4274,7 @@ export default function MeetingDetailScreen() {
 
         {/* 게스트 안내 문구는 배너로만 표시(버튼 영역 침범 방지) */}
 
-        {!loading && !loadError && meeting !== null && meetingDetailBottomBarVisible ? (
+        {!loading && meeting !== null && !showFullPageLoadError && !showComplianceBlock && meetingDetailBottomBarVisible ? (
           <View style={[styles.bottomBar, { paddingBottom: 12 + insets.bottom }]}>
             {isHost ? (
               <View style={styles.bottomBarCol}>

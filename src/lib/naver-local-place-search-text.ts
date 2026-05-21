@@ -10,6 +10,15 @@ import {
   searchNaverLocalKeywordPlacesPaginated,
 } from '@/src/lib/naver-local-search';
 import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-districts';
+import {
+  buildPlaceSearchQueryCacheKey,
+  getCachedPlaceSearchPage,
+  setCachedPlaceSearchPage,
+} from '@/src/lib/place-search-query-cache';
+import {
+  mergeCachedThumbnailsIntoRows,
+  persistPlaceThumbnailsFromSearchRows,
+} from '@/src/lib/place-thumbnail-cache';
 import type { PlaceSearchRow } from '@/src/lib/place-search-row';
 import { ScrapingBusinessSearchService } from '@/src/lib/scraping-business-search-service';
 
@@ -130,6 +139,26 @@ function parseBusinessScrapeVirtualPageToken(token: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/** Android 상세 스크래핑은 목록 반환 후 백그라운드 — 체감 검색 속도 우선 */
+function scheduleAndroidThumbnailEnrich(rows: PlaceSearchRow[]): void {
+  if (rows.length === 0) return;
+  void ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(rows)
+    .then(() => persistPlaceThumbnailsFromSearchRows(rows))
+    .catch(() => {
+      /* ignore */
+    });
+}
+
+function finalizeSearchResult(
+  places: PlaceSearchRow[],
+  nextPageToken: string | null,
+  cacheKey: string,
+): { places: PlaceSearchRow[]; nextPageToken: string | null } {
+  const merged = mergeCachedThumbnailsIntoRows(places);
+  void setCachedPlaceSearchPage(cacheKey, { places: merged, nextPageToken });
+  return { places: merged, nextPageToken };
+}
+
 function naverLocalToPlaceSearchRow(p: NaverLocalPlace): PlaceSearchRow {
   return {
     id: p.id,
@@ -159,6 +188,11 @@ export async function searchPlacesText(
 
   const pageSize = Math.min(5, Math.max(1, Math.floor(options?.maxResultCount ?? 5)));
   const rawTok = (options?.pageToken ?? '').trim();
+  const queryCacheKey = buildPlaceSearchQueryCacheKey(query, bias, rawTok || '1');
+  const queryCached = await getCachedPlaceSearchPage(queryCacheKey);
+  if (queryCached) {
+    return { places: queryCached.places, nextPageToken: queryCached.nextPageToken };
+  }
 
   // Android(비지니스 우선): 모든 카테고리에 대해 순서대로 시도합니다.
   // 1) ScrapingBusinessSearchService(m.map 스크랩) 2) OpenAPI(local.json)
@@ -181,7 +215,7 @@ export async function searchPlacesText(
         return { places: [], nextPageToken: null };
       }
       const slice = buf.rows.slice(virtOffBiz, virtOffBiz + pageSize);
-      await ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(slice);
+      scheduleAndroidThumbnailEnrich(slice);
       if (__DEV__) {
         // eslint-disable-next-line no-console
         console.log('[NaverMobileBusinessScrape]', {
@@ -206,7 +240,7 @@ export async function searchPlacesText(
           userCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
         });
       }
-      return { places: slice, nextPageToken: nextTok };
+      return finalizeSearchResult(slice, nextTok, queryCacheKey);
     }
   }
 
@@ -221,7 +255,7 @@ export async function searchPlacesText(
         if (scraped && scraped.length > 0) {
           scrapeBusinessInfiniteBuffer = { norm: qNorm, rows: scraped };
           const slice = scraped.slice(0, pageSize);
-          await ScrapingBusinessSearchService.enrichRowsNeedingThumbnail(slice);
+          scheduleAndroidThumbnailEnrich(slice);
           if (__DEV__) {
             // eslint-disable-next-line no-console
             console.log('[NaverMobileBusinessScrape]', {
@@ -245,7 +279,7 @@ export async function searchPlacesText(
               totalMs: Date.now() - scrapeT0,
             });
           }
-          return { places: slice, nextPageToken: nextTok };
+          return finalizeSearchResult(slice, nextTok, queryCacheKey);
         }
         scrapeBusinessInfiniteBuffer = null;
         if (__DEV__) {
@@ -295,7 +329,7 @@ export async function searchPlacesText(
     });
   }
 
-  return { places, nextPageToken };
+  return finalizeSearchResult(places, nextPageToken, queryCacheKey);
 }
 
 function hasPlaceSearchRowCoordinates(row: PlaceSearchRow): boolean {
