@@ -10,7 +10,11 @@ import {
   GINIT_PUSH_OPEN_PENDING_SET,
   peekPendingPushOpenPayload,
 } from '@/src/lib/pending-push-navigation';
-import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
+import {
+  markAlarmReadFromPushData,
+  markNoticeInboxReadFromPushData,
+  navigateFromPushData,
+} from '@/src/lib/push-open-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { GINIT_SPLASH_REPLACED_TO_TABS } from '@/src/lib/splash-to-tabs-navigation';
 
@@ -42,6 +46,7 @@ export function PendingPushNavigationFlush() {
       }
       ginitNotifyDbg('PendingPushFlush', 'consume_hit_navigate', { phase });
       navigateFromPushData(router, pending, { replace: true, currentPathname: pathname });
+      void markNoticeInboxReadFromPushData(pending);
       void markAlarmReadFromPushData(
         pending,
         markMeetingAlarmsReadByPushTap,

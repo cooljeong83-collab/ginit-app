@@ -5,6 +5,8 @@ import {
   adminPushOpenNavigationSignal,
   tryNavigateAdminFromPushData,
 } from '@/src/features/admin-reports/push-open-admin';
+import { markNoticeInboxReadByNoticeId } from '@/src/features/notices/notices-api';
+import { navigateFromNoticeLink } from '@/src/features/notices/notice-link-navigation';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import {
   dismissMeetingAutoCancelUnconfirmedAlarm,
@@ -138,8 +140,21 @@ export function navigateToChatRoomWithChatTabUnderneath(
  * Expo `Notifications` 응답의 `content.data`에 Notifee 래퍼 키만 오는 경우가 있어,
  * pending 적재·즉시 네비 전에 호출해 FCM과 동일한 “열 수 있는” payload 인지 판별합니다.
  */
+export function isNoticePushData(data: Record<string, unknown> | undefined): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const typeRaw = typeof data.type === 'string' ? data.type.trim().toLowerCase() : '';
+  const noticeId =
+    typeof data.notice_id === 'string'
+      ? data.notice_id.trim()
+      : typeof data.noticeId === 'string'
+        ? data.noticeId.trim()
+        : '';
+  return typeRaw === 'notice' && noticeId.length > 0;
+}
+
 export function hasPushOpenNavigationSignal(data: Record<string, unknown> | undefined): boolean {
   if (!data || typeof data !== 'object') return false;
+  if (isNoticePushData(data)) return true;
   const action = typeof data.action === 'string' ? data.action.trim() : '';
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const url = typeof data.url === 'string' ? data.url.trim() : '';
@@ -147,6 +162,26 @@ export function hasPushOpenNavigationSignal(data: Record<string, unknown> | unde
   if (url) return true;
   if (adminPushOpenNavigationSignal(data)) return true;
   return false;
+}
+
+/** FCM `type=notice` 탭 시 수신함(`user_notifications` 테이블) 읽음 — 채팅 Realtime 토픽과 무관 */
+export async function markNoticeInboxReadFromPushData(
+  data: Record<string, unknown> | undefined,
+): Promise<void> {
+  if (!isNoticePushData(data) || !data) return;
+  const noticeId =
+    typeof data.notice_id === 'string'
+      ? data.notice_id.trim()
+      : typeof data.noticeId === 'string'
+        ? data.noticeId.trim()
+        : '';
+  if (!noticeId) return;
+  try {
+    await markNoticeInboxReadByNoticeId(noticeId);
+    ginitNotifyDbg('push-open-nav', 'mark_notice_inbox_read', { noticeIdSuffix: noticeId.slice(-8) });
+  } catch {
+    ginitNotifyDbg('push-open-nav', 'mark_notice_inbox_read_failed', { noticeIdSuffix: noticeId.slice(-8) });
+  }
 }
 
 export function navigateFromPushData(
@@ -159,6 +194,28 @@ export function navigateFromPushData(
     return;
   }
   if (tryNavigateAdminFromPushData(router, data, opts)) return;
+  if (isNoticePushData(data)) {
+    const noticeId =
+      typeof data.notice_id === 'string'
+        ? data.notice_id.trim()
+        : typeof data.noticeId === 'string'
+          ? data.noticeId.trim()
+          : '';
+    const linkUrl =
+      typeof data.link_url === 'string'
+        ? data.link_url.trim()
+        : typeof data.linkUrl === 'string'
+          ? data.linkUrl.trim()
+          : '';
+    ginitNotifyDbg('push-open-nav', 'branch_notice', {
+      noticeIdSuffix: noticeId.slice(-8),
+      hasLink: Boolean(linkUrl),
+    });
+    if (noticeId) {
+      navigateFromNoticeLink(router, { noticeId, linkUrl: linkUrl || null });
+    }
+    return;
+  }
   ginitNotifyDbg('push-open-nav', 'navigate_begin', {
     ...summarizePushNavData(data),
     currentPath: stripRouteQueryHash(opts?.currentPathname ?? '') || '(empty)',

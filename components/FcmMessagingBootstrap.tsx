@@ -29,6 +29,7 @@ import {
 import { prewarmChatRoomMessagesFromPushData } from '@/src/lib/offline-chat/offline-chat-prewarm';
 import { appendMeetingAutoCancelUnconfirmedAlarm } from '@/src/lib/meeting-auto-cancel-unconfirmed-alarm';
 import { MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION } from '@/src/lib/meeting-host-push-notify';
+import { NOTICES_QUERY_KEY_ROOT } from '@/src/features/notices/notices-api';
 import { applyMeetingPushTargetedRefresh, normalizeFcmStringMap } from '@/src/lib/meeting-push-cache-refresh';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
@@ -102,6 +103,13 @@ export function FcmMessagingBootstrap() {
           return;
         }
         applyMeetingPushTargetedRefresh(queryClient, normalizeFcmStringMap(rm.data), 'fcm_foreground', userIdRef.current);
+        const typeRaw = String(rm?.data?.type ?? '').trim().toLowerCase();
+        if (typeRaw === 'notice') {
+          void queryClient.invalidateQueries({ queryKey: NOTICES_QUERY_KEY_ROOT });
+          ginitNotifyDbg('FcmMessaging', 'on_message_notice_invalidate', {
+            messageId: rm.messageId,
+          });
+        }
         const action = String(rm?.data?.action ?? '').trim();
         const meetingId = String(rm?.data?.meetingId ?? '').trim();
         ginitNotifyDbg('FcmMessaging', 'on_message', {
@@ -123,6 +131,20 @@ export function FcmMessagingBootstrap() {
             meetingId,
             meetingTitle,
           }).catch(() => {});
+        }
+        if (typeRaw === 'notice') {
+          if (Platform.OS === 'android') {
+            await displayFcmRemoteMessageWithNotifeeAndroid(rm);
+            ginitNotifyDbg('FcmMessaging', 'foreground_notifee_notice', { messageId: rm.messageId });
+            return;
+          }
+          if (await isProfileFcmQuietHoursActive()) {
+            ginitNotifyDbg('FcmMessaging', 'foreground_skip_notice_quiet_hours', { messageId: rm.messageId });
+            return;
+          }
+          const { title, body } = formatForegroundAlert(rm);
+          presentAppDialogAlert({ title, body });
+          return;
         }
         if (action === 'in_app_chat' && meetingId) {
           const notifyOn = await isMeetingChatNotifyEnabled(meetingId);

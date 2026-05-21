@@ -12,6 +12,7 @@ import { AdsVisibilityHost } from '@/components/ads/AdsVisibilityHost';
 import { AppOpenAdHost } from '@/components/ads/AppOpenAdHost';
 import { DevMemoryDebug } from '@/components/DevMemoryDebug';
 import { BackgroundExecutionBootstrap } from '@/components/BackgroundExecutionBootstrap';
+import { NoticePopupGate } from '@/components/notices/NoticePopupGate';
 import { FcmMessagingBootstrap } from '@/components/FcmMessagingBootstrap';
 import { FcmPushRoutingBootstrap } from '@/components/FcmPushRoutingBootstrap';
 import { PendingPushNavigationFlush } from '@/components/PendingPushNavigationFlush';
@@ -80,6 +81,7 @@ export default function RootLayout() {
                   <DevMemoryDebug />
                   <BackgroundExecutionBootstrap />
                   <FcmMessagingBootstrap />
+                  <NoticePopupGate />
                   <FcmPushRoutingBootstrap />
                   <PendingPushNavigationFlush />
                   <PushNotificationBootstrap />

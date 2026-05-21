@@ -22,6 +22,7 @@ import {
 } from '@/components/feed/FeedMeetingListSettingsModal';
 import { InterestRegionModals } from '@/components/feed/InterestRegionModals';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
+import { HomeNoticeBanner } from '@/components/notices/HomeNoticeBanner';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import {
   MeetingDetailStaticNoticeRow,
@@ -41,6 +42,7 @@ import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-reg
 import { useFeedMeetingReviewsForRegion } from '@/src/hooks/use-feed-meeting-reviews-for-region';
 import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
 import { useShouldShowAds } from '@/src/hooks/use-should-show-ads';
+import { useActiveNoticesQuery } from '@/src/hooks/use-active-notices-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
@@ -184,6 +186,8 @@ export default function FeedScreen() {
   const router = useTransitionRouter();
   const queryClient = useQueryClient();
   const { userId, authProfile } = useUserSession();
+  const homeBannerNoticesQuery = useActiveNoticesQuery('home_banner', Boolean(userId?.trim()));
+  const homeBannerNotices = homeBannerNoticesQuery.data ?? [];
   const { shouldShowAds } = useShouldShowAds();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -1619,6 +1623,7 @@ export default function FeedScreen() {
       {homeTopNoticeSlides.length > 0 ? (
         <MeetingDetailTopNoticesPager slides={homeTopNoticeSlides} hideTopTrackDivider />
       ) : null}
+      <HomeNoticeBanner items={homeBannerNotices} />
     </View>
   );
 

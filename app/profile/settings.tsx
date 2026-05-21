@@ -32,6 +32,7 @@ import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useAdminSettingsVisible } from '@/src/features/admin-console/use-admin-settings-visible';
+import { useNoticeInboxUnreadCountQuery } from '@/src/hooks/use-notice-inbox-unread-count-query';
 import { openAdminReportsListScreen } from '@/src/features/admin-console/open-admin-reports-list-screen';
 import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import {
@@ -138,6 +139,15 @@ export default function ProfileAppSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { registerInfo: registerInfoParam } = useLocalSearchParams<{ registerInfo?: string | string[] }>();
   const { userId, authProfile, signOutSession } = useUserSession();
+  const noticeInboxUnreadQuery = useNoticeInboxUnreadCountQuery(Boolean(userId?.trim()));
+  const noticeInboxUnread = noticeInboxUnreadQuery.data ?? 0;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId?.trim()) return;
+      void noticeInboxUnreadQuery.refetch();
+    }, [userId, noticeInboxUnreadQuery]),
+  );
 
   const [busy, setBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -806,6 +816,22 @@ export default function ProfileAppSettingsScreen() {
           <View style={[styles.block, styles.blockGap]}>
             {sectionTitle('고객지원')}
             <GinitPressable
+              onPress={() => router.push('/notices/inbox')}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                noticeInboxUnread > 0 ? `알림함, 읽지 않은 공지 ${noticeInboxUnread}건` : '알림함'
+              }>
+              <SettingsRowLeadIcon name="notifications-outline" />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>알림함</Text>
+                <Text style={styles.rowSub}>운영 공지·이벤트 알림을 모아봐요.</Text>
+              </View>
+              {noticeInboxUnread > 0 ? <View style={styles.noticeInboxUnreadDot} /> : null}
+              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
+            </GinitPressable>
+            <RowSep />
+            <GinitPressable
               onPress={() => router.push('/support/announcements')}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
@@ -1224,4 +1250,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   soundPickSpacer: { width: 22, height: 22 },
+  noticeInboxUnreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#673AB7',
+    marginRight: 6,
+  },
 });

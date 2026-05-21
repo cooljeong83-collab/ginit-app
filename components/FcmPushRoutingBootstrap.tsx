@@ -18,7 +18,12 @@ import {
   setPendingPushOpenPayload,
   shouldDeferPushOpenNavigation,
 } from '@/src/lib/pending-push-navigation';
-import { markAlarmReadFromPushData, navigateFromPushData } from '@/src/lib/push-open-navigation';
+import {
+  isNoticePushData,
+  markAlarmReadFromPushData,
+  markNoticeInboxReadFromPushData,
+  navigateFromPushData,
+} from '@/src/lib/push-open-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 
 function notifeePayloadToData(
@@ -54,6 +59,7 @@ function hasActionableFcmOpenData(data: Record<string, unknown> | undefined): bo
   const meetingId = typeof data.meetingId === 'string' ? data.meetingId.trim() : '';
   const url = typeof data.url === 'string' ? data.url.trim() : '';
   if (isAdminPushOpenData(data)) return true;
+  if (isNoticePushData(data)) return true;
   if (url.toLowerCase().startsWith('ginitapp://')) return true;
   if (
     action &&
@@ -111,6 +117,7 @@ export function FcmPushRoutingBootstrap() {
         return;
       }
       navigateFromPushData(router, data, { replace: true, currentPathname: pathname });
+      void markNoticeInboxReadFromPushData(data);
       void markAlarmReadFromPushData(
         data,
         markMeetingAlarmsReadByPushTap,
