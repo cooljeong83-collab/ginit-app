@@ -277,6 +277,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       './plugins/withAndroidSplashLauncherForeground.js',
       /** Google Maps SDK API key (`com.google.android.geo.API_KEY`) */
       './plugins/withAndroidGoogleMapsApiKey.js',
+      [
+        'react-native-google-mobile-ads',
+        {
+          androidAppId: 'ca-app-pub-9261880911862776~6775566027',
+          iosAppId: 'ca-app-pub-9261880911862776~6775566027',
+        },
+      ],
     ],
     extra: {
       ...baseExtra,

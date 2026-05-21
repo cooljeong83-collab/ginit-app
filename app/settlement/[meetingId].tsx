@@ -20,6 +20,7 @@ import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTim
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { preloadSettlementInterstitial, showSettlementInterstitial } from '@/src/lib/ads/settlement-interstitial-service';
 import {
   MeetingChatImageViewerGallery,
   type ImageViewerGalleryItem,
@@ -896,6 +897,10 @@ export default function SettlementMeetingScreen() {
     [placeReviewEligible, myPlaceReviewSubmitted],
   );
 
+  useEffect(() => {
+    preloadSettlementInterstitial();
+  }, []);
+
   const settlementReadOnly =
     canViewSettledSettlement && !canEditSettlement && !canCollaborateSettlement;
   const settlementParticipantDisplayIds = settlementReadOnly ? activeSplitParticipantIds : allSettlementParticipantIds;
@@ -1487,7 +1492,24 @@ export default function SettlementMeetingScreen() {
         });
       }
 
-      presentAppDialogConfirm({ title: '완료', body: '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.', cancelLabel: '확인', confirmLabel: '확인', onConfirm: () => router.back(), onCancel: () => router.back() });
+      const settledMeeting = fresh ?? meeting;
+      const navigateAfterSettlementComplete = () => {
+        if (isMeetingPlaceReviewEligible(settledMeeting, userId)) {
+          router.push(`/meeting-review/${encodeURIComponent(meetingId)}`);
+        } else {
+          router.back();
+        }
+      };
+      showSettlementInterstitial(() => {
+        presentAppDialogConfirm({
+          title: '완료',
+          body: '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.',
+          cancelLabel: '확인',
+          confirmLabel: '확인',
+          onConfirm: navigateAfterSettlementComplete,
+          onCancel: navigateAfterSettlementComplete,
+        });
+      });
     } catch (e) {
       presentAppDialogAlert({ title: '오류', body: e instanceof Error ? e.message : String(e) });
     } finally {

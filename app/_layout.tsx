@@ -7,6 +7,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { StatusBar } from 'expo-status-bar';
 
+import { AdMobBootstrap } from '@/components/ads/AdMobBootstrap';
+import { AdsVisibilityHost } from '@/components/ads/AdsVisibilityHost';
+import { AppOpenAdHost } from '@/components/ads/AppOpenAdHost';
 import { DevMemoryDebug } from '@/components/DevMemoryDebug';
 import { BackgroundExecutionBootstrap } from '@/components/BackgroundExecutionBootstrap';
 import { FcmMessagingBootstrap } from '@/components/FcmMessagingBootstrap';
@@ -64,8 +67,11 @@ export default function RootLayout() {
     <>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
+        <AdMobBootstrap />
+        <AppOpenAdHost />
         <QueryClientPersistProvider>
             <UserSessionProvider>
+              <AdsVisibilityHost />
               <MeetingCategoriesProvider>
               <AppForegroundMeetingsRefreshHost />
               <ScreenTransitionProvider>

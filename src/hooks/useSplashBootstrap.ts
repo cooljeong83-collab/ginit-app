@@ -8,6 +8,9 @@ import { isPhoneRegistered } from '@/src/lib/phone-registry';
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { readSecureAuthSession } from '@/src/lib/secure-auth-session';
 import { writeSecureGoogleSession } from '@/src/lib/secure-google-session';
+import { isProfileAdFree } from '@/src/lib/ads/is-profile-ad-free';
+import { tryShowColdStartAppOpenAd } from '@/src/lib/ads/app-open-ad-service';
+import { readUserProfileFromWatermelon } from '@/src/lib/user-profile-watermelon-cache';
 import { enforceAccountGate } from '@/src/features/account-suspension/enforce-account-gate';
 import { ensureUserProfile, resolveSessionUserIdFromVerifiedPhone } from '@/src/lib/user-profile';
 import { supabase } from '@/src/lib/supabase';
@@ -60,7 +63,16 @@ export function useSplashBootstrap() {
   const [hintMessage, setHintMessage] = useState<string | null>(null);
   const finishedRef = useRef(false);
 
-  const goTabs = useCallback(() => {
+  const goTabs = useCallback(async (userPk?: string) => {
+    const pk = userPk?.trim() ?? '';
+    let skipAppOpen = false;
+    if (pk) {
+      const local = await readUserProfileFromWatermelon(pk);
+      if (isProfileAdFree(local)) skipAppOpen = true;
+    }
+    if (!skipAppOpen) {
+      await tryShowColdStartAppOpenAd();
+    }
     router.replace('/(tabs)');
     notifySplashReplacedToTabs();
   }, [router]);
@@ -132,7 +144,7 @@ export function useSplashBootstrap() {
       }
       if (!cancelled) {
         finishedRef.current = true;
-        goTabs();
+        void goTabs(pk);
       }
       return true;
     };
@@ -171,7 +183,7 @@ export function useSplashBootstrap() {
             const allowed = await enforceAccountGate(pk, { router, signOutSession });
             if (cancelled) return;
             finishedRef.current = true;
-            if (allowed) goTabs();
+            if (allowed) await goTabs(pk);
             return;
           }
           try {
@@ -199,7 +211,7 @@ export function useSplashBootstrap() {
           const allowed = await enforceAccountGate(pk, { router, signOutSession });
           if (cancelled) return;
           finishedRef.current = true;
-          if (allowed) goTabs();
+          if (allowed) await goTabs(pk);
           return;
         }
 

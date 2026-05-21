@@ -21,6 +21,7 @@ import {
 import { supabase } from '@/src/lib/supabase';
 import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
 
+import { adFreeUntilToIsoString } from '@/src/lib/ads/is-profile-ad-free';
 import { avatarsObjectPathFromPublicUrlIfOwned } from '@/src/lib/profile-photo-history';
 
 import { MEETING_PHONE_VERIFICATION_UI_ENABLED } from './meeting-phone-verification-ui';
@@ -160,6 +161,8 @@ export type UserProfile = {
   pointBalance?: number | null;
   couponCount?: number | null;
   billingCustomerId?: string | null;
+  /** 이 시각(UTC ISO)까지 AdMob 미노출 — `profiles.ad_free_until` */
+  adFreeUntil?: string | null;
 
   /** 마케팅 및 성장 */
   referralCode?: string | null;
@@ -314,6 +317,7 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
   const joinPath = typeof data.joinPath === 'string' ? data.joinPath.trim() : '';
   const appVersion = typeof data.appVersion === 'string' ? data.appVersion.trim() : '';
   const metadata = isPlainObject(data.metadata) ? (data.metadata as Record<string, unknown>) : null;
+  const adFreeUntil = adFreeUntilToIsoString(data);
   const base: UserProfile = {
     nickname: nick || '모임친구',
     photoUrl: photo || null,
@@ -363,6 +367,7 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
     joinPath: joinPath || null,
     appVersion: appVersion || null,
     metadata,
+    adFreeUntil,
     isWithdrawn,
   };
   if (isWithdrawn) {
@@ -416,6 +421,7 @@ export function mapUserDoc(data: Record<string, unknown>): UserProfile {
       joinPath: null,
       appVersion: null,
       metadata: null,
+      adFreeUntil: null,
       isWithdrawn: true,
     };
   }
@@ -632,6 +638,7 @@ function supabaseProfileJsonToFirestoreShape(row: Record<string, unknown>): Reco
       row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
         ? (row.metadata as Record<string, unknown>)
         : null,
+    adFreeUntil: adFreeUntilToIsoString(row),
   };
 }
 

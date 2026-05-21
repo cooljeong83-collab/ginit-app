@@ -94,6 +94,10 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "react-native-google-mobile-ads": {
+      "android_app_id": "ca-app-pub-9261880911862776~6775566027",
+      "ios_app_id": "ca-app-pub-9261880911862776~6775566027"
     }
   }
 }

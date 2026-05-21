@@ -40,6 +40,7 @@ import { useUserSession } from '@/src/context/UserSessionContext';
 import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-region-controls';
 import { useFeedMeetingReviewsForRegion } from '@/src/hooks/use-feed-meeting-reviews-for-region';
 import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
+import { useShouldShowAds } from '@/src/hooks/use-should-show-ads';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
@@ -75,11 +76,16 @@ import {
   homeMeetingListOngoingWindowMs,
   isMeetingEndedForHomeList,
 } from '@/src/lib/feed-home-visual';
+import { MEETING_TAB_LIST_SCROLL_BOTTOM_EXTRA } from '@/components/create/meetingCreateFabShared';
+import { FeedNativeAdCard } from '@/components/ads/FeedNativeAdCard';
+import { FEED_NATIVE_AD_INTERVAL, FEED_NATIVE_AD_ROW_HEIGHT } from '@/src/constants/adsConfig';
+import { injectFeedNativeAdRows } from '@/src/lib/ads/inject-feed-native-ad-rows';
 import {
   buildExploreFeedRows,
   homeFeedRowKey,
   type HomeFeedRow,
 } from '@/src/lib/feed-home-list-rows';
+import { REVIEW_SECTION_TOTAL_HEIGHT } from '@/src/lib/feed-meeting-review-carousel-layout';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -178,6 +184,7 @@ export default function FeedScreen() {
   const router = useTransitionRouter();
   const queryClient = useQueryClient();
   const { userId, authProfile } = useUserSession();
+  const { shouldShowAds } = useShouldShowAds();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
@@ -513,10 +520,11 @@ export default function FeedScreen() {
     enabled: feedLocationReady && Boolean(exploreActiveRegionNorm.trim()),
   });
 
-  const exploreFeedRows = useMemo(
-    () => buildExploreFeedRows(exploreFeedMeetings, feedMeetingReviews.reviews),
-    [exploreFeedMeetings, feedMeetingReviews.reviews],
-  );
+  const exploreFeedRows = useMemo(() => {
+    const base = buildExploreFeedRows(exploreFeedMeetings, feedMeetingReviews.reviews);
+    if (!shouldShowAds) return base;
+    return injectFeedNativeAdRows(base, FEED_NATIVE_AD_INTERVAL);
+  }, [exploreFeedMeetings, feedMeetingReviews.reviews, shouldShowAds]);
 
   const myTabsMeetings = useMemo(() => {
     if (myMeetings.length === 0) return meetings;
@@ -1397,9 +1405,31 @@ export default function FeedScreen() {
       if (row.type === 'REVIEW_SECTION') {
         return <FeedMeetingReviewSection reviews={row.reviews} onPressReview={onPressFeedReview} />;
       }
+      if (row.type === 'NATIVE_AD') {
+        return shouldShowAds ? <FeedNativeAdCard /> : null;
+      }
       return renderHomeItemForList(row.meeting, 'explore');
     },
-    [onPressFeedReview, renderHomeItemForList],
+    [onPressFeedReview, renderHomeItemForList, shouldShowAds],
+  );
+
+  const exploreFeedItemType = useCallback((row: HomeFeedRow) => {
+    if (row.type === 'NATIVE_AD') return 'ad';
+    if (row.type === 'REVIEW_SECTION') return 'review';
+    return 'item';
+  }, []);
+
+  const overrideExploreFeedItemLayout = useCallback(
+    (layout: { size?: number; span?: number }, row: HomeFeedRow) => {
+      if (row.type === 'NATIVE_AD') {
+        layout.size = FEED_NATIVE_AD_ROW_HEIGHT;
+        return;
+      }
+      if (row.type === 'REVIEW_SECTION') {
+        layout.size = REVIEW_SECTION_TOTAL_HEIGHT;
+      }
+    },
+    [],
   );
 
   const feedListEmptyCentered = useCallback(
@@ -1706,7 +1736,8 @@ export default function FeedScreen() {
                     <FlashList<HomeFeedRow>
                       data={tabData as HomeFeedRow[]}
                       keyExtractor={homeFeedRowKey}
-                      getItemType={(row) => row.type}
+                      getItemType={exploreFeedItemType}
+                      overrideItemLayout={overrideExploreFeedItemLayout}
                       extraData={{
                         homeTab,
                         tab,
@@ -2019,7 +2050,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingHorizontal: 20,
-    paddingBottom: 28,
+    paddingBottom: 28 + MEETING_TAB_LIST_SCROLL_BOTTOM_EXTRA,
     flexGrow: 1,
   },
   tabCategoryBar: {

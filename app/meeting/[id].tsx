@@ -1,3 +1,4 @@
+import { MeetingDetailNativeAdCard } from '@/components/ads/MeetingDetailNativeAdCard';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
 import { CAPACITY_UNLIMITED } from '@/components/create/GlassDualCapacityWheel';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
@@ -4110,6 +4111,8 @@ export default function MeetingDetailScreen() {
                 ) : null}
               </View>
             ) : null}
+
+            <MeetingDetailNativeAdCard />
 
             <View style={styles.infoCard}>
               <View style={styles.sectionHeaderRow}>

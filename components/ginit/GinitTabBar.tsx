@@ -26,6 +26,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  MEETING_CREATE_FAB_BTN_SIZE,
   MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT,
   MEETING_CREATE_FAB_GRADIENT_COLORS,
   MEETING_CREATE_FAB_HIT_SLOP,
@@ -57,6 +58,14 @@ const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
 /** 모임 탭 생성 FAB(버튼+바닥 그림자)를 탭바 기준으로 추가로 위로 올리는 거리(px) */
 const MEETING_TAB_CREATE_FAB_LIFT_PX = 8;
+/** FAB가 탭바 밖으로 올라가는 영역 — 리스트(네이티브 광고) 터치가 FAB를 가리지 않도록 */
+const MEETING_TAB_FAB_TOUCH_ZONE_W = 132;
+const MEETING_TAB_FAB_TOUCH_ZONE_H =
+  MEETING_CREATE_FAB_BTN_SIZE +
+  MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT +
+  MEETING_CREATE_FAB_RISE_FROM +
+  MEETING_TAB_CREATE_FAB_LIFT_PX +
+  28;
 /** 상승 스프링이 끝나기 전에 알약 펼침을 시작해 동그라미 정착~확장 사이 공백을 줄임 */
 const MEETING_TAB_CREATE_FAB_INTRO_START_DELAY_MS = 1300;
 /** 상승 완료 후 원 → 알약 펼침(스크롤 도킹 중에는 intro=1이어도 원 유지). overshootClamping으로 1 초과 진동 시 라벨 opacity·레이아웃 미세 깜빡임 방지 */
@@ -434,13 +443,23 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
       </View>
 
       {showMeetingFab ? (
+        <View
+          pointerEvents="auto"
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: fabSafeBottom - MEETING_CREATE_FAB_RISE_FROM,
+            width: MEETING_TAB_FAB_TOUCH_ZONE_W,
+            height: MEETING_TAB_FAB_TOUCH_ZONE_H,
+            zIndex: 100,
+            elevation: 100,
+            alignItems: 'flex-end',
+            paddingRight: 18,
+          }}>
         <Animated.View
           pointerEvents="box-none"
           style={[
             {
-              position: 'absolute',
-              right: 18,
-              bottom: fabSafeBottom - MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT + MEETING_TAB_CREATE_FAB_LIFT_PX,
               overflow: 'visible',
             },
             fabShellOuterStyle,
@@ -487,6 +506,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             </GinitPressable>
           </Animated.View>
         </Animated.View>
+        </View>
       ) : null}
     </View>
   );

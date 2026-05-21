@@ -3,7 +3,8 @@ import type { Meeting } from '@/src/lib/meetings';
 
 export type HomeFeedRow =
   | { type: 'MEETING_CARD'; meeting: Meeting }
-  | { type: 'REVIEW_SECTION'; reviews: FeedMeetingReviewCarouselItem[] };
+  | { type: 'REVIEW_SECTION'; reviews: FeedMeetingReviewCarouselItem[] }
+  | { type: 'NATIVE_AD'; adKey: string };
 
 export const HOME_FEED_REVIEW_SECTION_ROW_KEY = 'feed-review-section';
 
@@ -26,5 +27,7 @@ export function buildExploreFeedRows(
 }
 
 export function homeFeedRowKey(row: HomeFeedRow): string {
-  return row.type === 'MEETING_CARD' ? row.meeting.id : HOME_FEED_REVIEW_SECTION_ROW_KEY;
+  if (row.type === 'MEETING_CARD') return row.meeting.id;
+  if (row.type === 'NATIVE_AD') return row.adKey;
+  return HOME_FEED_REVIEW_SECTION_ROW_KEY;
 }

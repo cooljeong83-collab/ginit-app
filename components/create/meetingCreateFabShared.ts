@@ -6,6 +6,9 @@ export const MEETING_CREATE_FAB_BTN_SIZE = 56;
 export const MEETING_CREATE_FAB_HIT_SLOP = { top: 16, bottom: 24, left: 18, right: 18 } as const;
 /** 버튼 아래 타원 그림자 슬롯 높이 */
 export const MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT = 14;
+/** 모임 탭 FlashList — FAB·탭바와 겹치지 않도록 `contentContainerStyle.paddingBottom`에 더함 */
+export const MEETING_TAB_LIST_SCROLL_BOTTOM_EXTRA =
+  MEETING_CREATE_FAB_BTN_SIZE + MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT + MEETING_CREATE_FAB_RISE_FROM + 16;
 /** 아래에서 올라오는 거리 */
 export const MEETING_CREATE_FAB_RISE_FROM = 52;
 /** FAB 스택(버튼 + 바닥 그림자) 높이 — 말풍선 `bottom` 기준(에이전트 FAB 전용) */
