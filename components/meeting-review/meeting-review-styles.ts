@@ -60,6 +60,22 @@ export const meetingReviewStyles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  /** 후기 써머리 — 이 장소로 모임 만들기 CTA */
+  createMeetingAtPlaceBtn: {
+    backgroundColor: GinitTheme.colors.deepPurple,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  createMeetingAtPlaceBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   muted: {
     fontSize: 14,
     color: GinitTheme.colors.textMuted,

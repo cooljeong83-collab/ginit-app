@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,9 +34,20 @@ import {
 } from '@/src/lib/meeting-review/meeting-review-api';
 import { getPinnedFormKeywords } from '@/src/lib/meeting-review/meeting-review-keywords';
 import { resolveMeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
+import { buildPresetPlaceCandidateFromReviewSummary } from '@/src/lib/meeting-review/meeting-review-place-for-create';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
+import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import { gatePlaceAgainstRegisteredInterestRegions } from '@/src/lib/meeting-create-place-region';
+import { setPendingPresetPlaceCandidate } from '@/src/lib/meeting-place-bridge';
+import { generateUuidV4 } from '@/src/lib/generate-uuid-v4';
+import { logPresetPlaceMeetingCreateIntent } from '@/src/lib/meeting-preset-place-create-attribution';
+import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { safeRouterBack } from '@/src/lib/router-safe';
+import {
+  getUserProfile,
+  isMeetingServiceComplianceComplete,
+} from '@/src/lib/user-profile';
 
 type ReviewPhase = 'form' | 'summary';
 
@@ -101,6 +114,68 @@ export default function MeetingReviewScreen() {
   const onOpenPlaceUrl = useCallback((url: string, title: string) => {
     setNaverPlaceWebModal({ url, title });
   }, []);
+
+  const onCreateMeetingAtPlace = useCallback(() => {
+    void (async () => {
+      if (!meeting || !placeContext) return;
+      const pk = userId?.trim();
+      if (pk) {
+        try {
+          const p = await getUserProfile(pk);
+          if (!isMeetingServiceComplianceComplete(p, pk)) {
+            presentAppDialogAlert({
+              title: '인증 정보 등록',
+              body: '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.',
+              onPrimary: () => pushProfileOpenRegisterInfo(router),
+            });
+            return;
+          }
+        } catch {
+          /* 등록 시 재검증 */
+        }
+      }
+
+      const intentId = generateUuidV4();
+      const preset = buildPresetPlaceCandidateFromReviewSummary(meeting, placeContext, intentId);
+      if (!preset) {
+        showTransientBottomMessage('이 장소의 위치 정보가 없어 모임을 만들 수 없어요.', 2600);
+        return;
+      }
+
+      const regions = await loadRegisteredFeedRegions();
+      const regionGate = gatePlaceAgainstRegisteredInterestRegions(
+        {
+          placeName: preset.placeName,
+          address: preset.address,
+          latitude: preset.latitude,
+          longitude: preset.longitude,
+        },
+        regions,
+      );
+      if (!regionGate.ok) {
+        presentAppDialogAlert({ title: regionGate.title, body: regionGate.message });
+        return;
+      }
+
+      if (pk) {
+        void logPresetPlaceMeetingCreateIntent({
+          intentId,
+          entrySource: 'meeting_place_review_summary',
+          analyticsPlaceId: preset.attribution.analyticsPlaceId,
+          entryContext: preset.attribution.entryContext,
+          creatorAppUserId: pk,
+        });
+      }
+
+      setPendingPresetPlaceCandidate(preset);
+      const d = new Date();
+      const scheduleDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      router.push({
+        pathname: '/create/details',
+        params: { scheduleDate, scheduleTime: '15:00' },
+      });
+    })();
+  }, [meeting, placeContext, router, userId]);
 
   const summaryQuery = useMeetingPlaceReviewSummary(meetingId, userId, {
     enabled: canViewReview,
@@ -365,6 +440,21 @@ export default function MeetingReviewScreen() {
               ) : (
                 <Text style={meetingReviewStyles.primaryBtnText}>{submitLabel}</Text>
               )}
+            </GinitPressable>
+          </View>
+        ) : null}
+        {phase === 'summary' && canViewReview ? (
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <GinitPressable
+              onPress={onCreateMeetingAtPlace}
+              style={({ pressed }) => [
+                meetingReviewStyles.createMeetingAtPlaceBtn,
+                pressed && { opacity: 0.88 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="이 장소로 모임 만들기">
+              <GinitSymbolicIcon name="add-circle-outline" size={20} color="#fff" />
+              <Text style={meetingReviewStyles.createMeetingAtPlaceBtnText}>이 장소로 모임 만들기</Text>
             </GinitPressable>
           </View>
         ) : null}

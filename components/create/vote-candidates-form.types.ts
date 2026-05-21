@@ -2,7 +2,7 @@ import type { LayoutChangeEvent } from 'react-native';
 import type { ReactNode, RefObject } from 'react';
 
 import type { SpecialtyKind } from '@/src/lib/category-specialty';
-import type { VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import type { PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
 
 export type MeetingCreatePlacesAutoAssistSnapshot = {
   searchLoading: boolean;
@@ -63,6 +63,11 @@ export type VoteCandidatesFormProps = {
   onNaverPlaceWebOpen?: (url: string, title: string) => void;
   /** AI 자동 등록으로 장소 검색어가 주입된 뒤 — 검색·선택 상태(확인 버튼·3초 타임아웃) */
   onPlacesAutoAssistSnapshot?: (s: MeetingCreatePlacesAutoAssistSnapshot) => void;
+  /** 선택장소 preset — 인라인 검색 UI 대신 확정 장소 카드만 표시 */
+  lockedPlacePresetMode?: boolean;
+  lockedPlacePreset?: PlaceCandidate | null;
+  lockedPlacePresetHint?: string;
+  onLockedPlacePresetChangePlace?: () => void;
 };
 
 export type VoteCandidatesBuildResult =

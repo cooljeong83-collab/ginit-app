@@ -99,3 +99,42 @@ export function consumePendingVoteCandidates(): VoteCandidatesPayload | null {
   pendingVote = null;
   return v;
 }
+
+/** 선택장소로 모임 생성 — 유입 채널 */
+export type PresetPlaceCreateEntrySource = 'meeting_place_review_summary' | 'store_promo';
+
+export type MeetingPlaceReviewSummaryEntryContext = {
+  sourceMeetingId: string;
+  sourcePlaceId: string;
+  sourceChipId?: string | null;
+};
+
+export type StorePromoEntryContext = {
+  campaignId: string;
+  placeKey?: string | null;
+};
+
+export type PresetPlaceCreateAttribution = {
+  intentId: string;
+  entrySource: PresetPlaceCreateEntrySource;
+  /** BI·장소 롤업용 (후기 placeId, 광고 placeKey 등) */
+  analyticsPlaceId: string;
+  entryContext: MeetingPlaceReviewSummaryEntryContext | StorePromoEntryContext;
+};
+
+/** 인메모리 브리지: 선택장소 preset + 집계 어트리뷰션 */
+export type PresetPlaceCandidateForCreate = PlaceCandidate & {
+  attribution: PresetPlaceCreateAttribution;
+};
+
+let pendingPresetPlace: PresetPlaceCandidateForCreate | null = null;
+
+export function setPendingPresetPlaceCandidate(selection: PresetPlaceCandidateForCreate) {
+  pendingPresetPlace = selection;
+}
+
+export function consumePendingPresetPlaceCandidate(): PresetPlaceCandidateForCreate | null {
+  const v = pendingPresetPlace;
+  pendingPresetPlace = null;
+  return v;
+}

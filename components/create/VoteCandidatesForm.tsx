@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
+import { LockedPlacePresetCard } from '@/components/create/LockedPlacePresetCard';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { voteCandidatesFormStyles as styles } from '@/components/create/vote-candidates-form-styles';
 import type {
@@ -325,6 +326,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     scheduleAiReplacesFirstCandidate = false,
     onNaverPlaceWebOpen,
     onPlacesAutoAssistSnapshot,
+    lockedPlacePresetMode = false,
+    lockedPlacePreset = null,
+    lockedPlacePresetHint = '선택한 장소로 모임 장소 후보가 설정됐어요.',
+    onLockedPlacePresetChangePlace,
   },
   ref,
 ) {
@@ -2283,6 +2288,19 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       {/* <View style={[styles.sectionHeader, wizardSegment === 'places' ? undefined : styles.sectionGap]}>
         <Text style={styles.sectionTitle}>장소 후보</Text>
       </View> */}
+      {lockedPlacePresetMode && lockedPlacePreset ? (
+        <LockedPlacePresetCard
+          place={lockedPlacePreset}
+          hintText={lockedPlacePresetHint}
+          onOpenPlaceUrl={
+            onNaverPlaceWebOpen
+              ? (url, t) => onNaverPlaceWebOpen(url, t)
+              : (url, t) => setNaverPlaceWebModal({ url, title: t })
+          }
+          onChangePlace={onLockedPlacePresetChangePlace}
+        />
+      ) : (
+        <>
       <Text style={styles.sectionHint}>
         {placesListOnly
           ? '확정한 장소 후보예요. 필요하면 카드를 탭해 장소를 다시 고를 수 있어요.'
@@ -2601,6 +2619,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           ))}
         </View>
       ) : null}
+        </>
+      )}
     </>
   );
 

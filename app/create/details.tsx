@@ -146,10 +146,19 @@ import {
 import { resolveMeetingCreateRules, type ResolvedMeetingCreateRules } from '@/src/lib/meeting-create-rules';
 import { fmtDate, humanizeSpeechRecognitionError, pickParam } from '@/src/lib/meeting-create-vote-candidates-utils';
 import { buildMeetingExtraData, type SelectedMovieExtra } from '@/src/lib/meeting-extra-data';
-import type { VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
-import {
-  consumePendingMeetingPlace
+import type {
+  PlaceCandidate,
+  PresetPlaceCreateAttribution,
+  VoteCandidatesPayload,
 } from '@/src/lib/meeting-place-bridge';
+import {
+  consumePendingMeetingPlace,
+  consumePendingPresetPlaceCandidate,
+} from '@/src/lib/meeting-place-bridge';
+import {
+  convertPresetPlaceMeetingCreateIntent,
+  placeSnapshotFromCandidate,
+} from '@/src/lib/meeting-preset-place-create-attribution';
 import {
   generateAiMeetingDescription,
   generateSuggestedMeetingTitle,
@@ -535,6 +544,9 @@ export default function CreateDetailsScreen() {
   const titleSuggestionsGenRef = useRef(0);
   const [votePayload, setVotePayload] = useState<VoteCandidatesPayload | null>(null);
   const [voteHydrateKey, setVoteHydrateKey] = useState(0);
+  /** 선택장소 preset — 장소 후보 스텝 UI·집계용 */
+  const [lockedPlacePreset, setLockedPlacePreset] = useState<PlaceCandidate | null>(null);
+  const presetPlaceAttributionRef = useRef<PresetPlaceCreateAttribution | null>(null);
   const [movieCandidates, setMovieCandidates] = useState<SelectedMovieExtra[]>([]);
   const [menuPreferences, setMenuPreferences] = useState<string[]>([]);
   const [activityKinds, setActivityKinds] = useState<string[]>([]);
@@ -712,9 +724,18 @@ export default function CreateDetailsScreen() {
     setVotePayload(null);
     setPlaceSearchSeed('');
     setVoteHydrateKey((k) => k + 1);
+    setLockedPlacePreset(null);
+    presetPlaceAttributionRef.current = null;
     setWizardError(null);
     setIsPublicMeeting(pickParam(isPublicParam) !== '0');
   }, [isPublicParam]);
+
+  const clearLockedPlacePreset = useCallback(() => {
+    setLockedPlacePreset(null);
+    presetPlaceAttributionRef.current = null;
+    setVotePayload(null);
+    setVoteHydrateKey((k) => k + 1);
+  }, []);
 
   const requestCategorySelect = useCallback(
     (id: string) => {
@@ -783,6 +804,16 @@ export default function CreateDetailsScreen() {
   useFocusEffect(
     useCallback(() => {
       // 포커스마다 scrollTo(0) 하지 않음 — 장소 검색(`/place-search`)에서 돌아올 때 스크롤 위치 유지
+      const preset = consumePendingPresetPlaceCandidate();
+      if (preset) {
+        const { attribution, ...placeOnly } = preset;
+        presetPlaceAttributionRef.current = attribution;
+        setLockedPlacePreset(placeOnly);
+        setVotePayload({ placeCandidates: [placeOnly], dateCandidates: [] });
+        setVoteHydrateKey((k) => k + 1);
+        setPlaceSearchSeed('');
+        return;
+      }
       const mp = consumePendingMeetingPlace();
       if (mp?.placeName?.trim()) {
         setPlaceSearchSeed(mp.placeName.trim());
@@ -1510,7 +1541,7 @@ export default function CreateDetailsScreen() {
           }
 
           const placeQ = (sugg.placeAutoPickQuery ?? sugg.placeSearchHint ?? '').trim();
-          if (placeQ) {
+          if (placeQ && !presetPlaceAttributionRef.current) {
             setPlacesAiAssistGate(true);
             placesFormRef.current?.setPlaceQueryFromAgent(placeQ);
             showTransientBottomMessage(
@@ -2355,6 +2386,18 @@ export default function CreateDetailsScreen() {
         extraData,
         meetingConfig: meetingConfigForSave,
       });
+      const attr = presetPlaceAttributionRef.current;
+      const uid = userId?.trim();
+      if (attr && uid) {
+        void convertPresetPlaceMeetingCreateIntent({
+          intentId: attr.intentId,
+          createdMeetingId,
+          creatorAppUserId: uid,
+          placeSnapshot: placeSnapshotFromCandidate(p0),
+        });
+      }
+      presetPlaceAttributionRef.current = null;
+      setLockedPlacePreset(null);
       router.replace(`/meeting/${createdMeetingId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장에 실패했습니다.';
@@ -3020,6 +3063,10 @@ export default function CreateDetailsScreen() {
                           wizardSegment="places"
                           scheduleListOnly={true}
                           placesListOnly={false}
+                          lockedPlacePresetMode={lockedPlacePreset != null}
+                          lockedPlacePreset={lockedPlacePreset}
+                          lockedPlacePresetHint="후기에 방문한 장소로 모임 장소 후보가 설정됐어요."
+                          onLockedPlacePresetChangePlace={clearLockedPlacePreset}
                           onPlacesBlockLayout={onPlacesBlockLayout}
                           onPlacesAutoAssistSnapshot={onPlacesAutoAssistSnapshot}
                         />
