@@ -11,7 +11,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import {
+  placeDetailPopupStateFromSearchRow,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
@@ -86,7 +90,7 @@ function PlaceSearchScreenInner({
   const [selected, setSelected] = useState<PlaceSearchRow | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [resolving, setResolving] = useState(false);
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
   const [registeredInterestRegions, setRegisteredInterestRegions] = useState<string[]>([]);
   const registeredInterestRegionsRef = useRef<string[]>([]);
   registeredInterestRegionsRef.current = registeredInterestRegions;
@@ -493,7 +497,10 @@ function PlaceSearchScreenInner({
                         addressLine={addrLine}
                         disabled={resolving}
                         containerStyle={{ marginTop: 8, marginHorizontal: 12, marginBottom: 10 }}
-                        onOpenUrl={(url, t) => setNaverPlaceWebModal({ url, title: t })}
+                        onOpenUrl={(url, t) => {
+                          const state = placeDetailPopupStateFromSearchRow(item, url, t);
+                          if (state) setPlaceDetailPopup(state);
+                        }}
                       />
                     </View>
                     {showInlineMap ? (
@@ -528,12 +535,7 @@ function PlaceSearchScreenInner({
             <Text style={GinitStyles.ctaButtonLabel}>확인</Text>
           </GinitPressable>
 
-          <NaverPlaceWebViewModal
-            visible={naverPlaceWebModal != null}
-            url={naverPlaceWebModal?.url}
-            pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
-            onClose={() => setNaverPlaceWebModal(null)}
-          />
+          <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
         </KeyboardAvoidingView>
         </SafeAreaView>
     </View>

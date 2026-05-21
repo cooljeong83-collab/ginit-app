@@ -7,7 +7,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
 import { ReviewForm } from '@/components/meeting-review/ReviewForm';
 import { SummaryBoard } from '@/components/meeting-review/SummaryBoard';
 import { meetingReviewStyles } from '@/components/meeting-review/meeting-review-styles';
@@ -34,6 +34,10 @@ import {
 } from '@/src/lib/meeting-review/meeting-review-api';
 import { getPinnedFormKeywords } from '@/src/lib/meeting-review/meeting-review-keywords';
 import { resolveMeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
+import {
+  placeDetailPopupStateFromMeeting,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
 import { buildPresetPlaceCandidateFromReviewSummary } from '@/src/lib/meeting-review/meeting-review-place-for-create';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
@@ -110,10 +114,15 @@ export default function MeetingReviewScreen() {
   const canViewReview = Boolean(meeting && isSettled && placeContext);
   const canWriteReview = canViewReview && isParticipant;
 
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
-  const onOpenPlaceUrl = useCallback((url: string, title: string) => {
-    setNaverPlaceWebModal({ url, title });
-  }, []);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const onOpenPlaceUrl = useCallback(
+    (url: string, title: string) => {
+      if (!meeting) return;
+      const state = placeDetailPopupStateFromMeeting(meeting, url, title);
+      if (state) setPlaceDetailPopup(state);
+    },
+    [meeting],
+  );
 
   const onCreateMeetingAtPlace = useCallback(() => {
     void (async () => {
@@ -280,7 +289,14 @@ export default function MeetingReviewScreen() {
       const res = await submitMeetingPlaceReview({
         meetingId,
         appUserId: userId.trim(),
-        placeId: placeContext.placeId,
+        placeKey: placeContext.placeKey,
+        placeName: placeContext.placeName,
+        address: placeContext.address ?? '',
+        latitude: placeContext.latitude,
+        longitude: placeContext.longitude,
+        category: placeContext.category,
+        naverPlaceLink: placeContext.naverPlaceLink,
+        preferredPhotoMediaUrl: placeContext.preferredPhotoMediaUrl,
         rating,
         selectedKeywords,
         comment: comment.trim() || null,
@@ -458,12 +474,7 @@ export default function MeetingReviewScreen() {
             </GinitPressable>
           </View>
         ) : null}
-        <NaverPlaceWebViewModal
-          visible={naverPlaceWebModal != null}
-          url={naverPlaceWebModal?.url ?? ''}
-          title={naverPlaceWebModal?.title ?? '장소'}
-          onClose={() => setNaverPlaceWebModal(null)}
-        />
+        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
       </SafeAreaView>
     </ScreenShell>
   );

@@ -57,10 +57,6 @@ export type VoteCandidatesFormProps = {
   parentScrollYRef?: RefObject<number>;
   /** true면 AI 미리보기/주말 미리보기 탭 시 새 행이 아니라 첫 번째 일정 후보만 덮어씀(날짜 제안 모달 등). `+ 일자 후보 등록` 버튼도 숨김 */
   scheduleAiReplacesFirstCandidate?: boolean;
-  /**
-   * 설정 시 장소「카카오 / 네이버」상세 링크는 내부 WebView 모달 대신 상위에서 연다(모임 상세 장소 제안 등 **Modal 중첩** 방지).
-   */
-  onNaverPlaceWebOpen?: (url: string, title: string) => void;
   /** AI 자동 등록으로 장소 검색어가 주입된 뒤 — 검색·선택 상태(확인 버튼·3초 타임아웃) */
   onPlacesAutoAssistSnapshot?: (s: MeetingCreatePlacesAutoAssistSnapshot) => void;
   /** 선택장소 preset — 인라인 검색 UI 대신 확정 장소 카드만 표시 */

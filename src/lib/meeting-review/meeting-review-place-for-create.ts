@@ -8,6 +8,7 @@ import { buildMeetingReviewSummaryAttribution } from '@/src/lib/meeting-preset-p
 import type { MeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
 import type { Meeting } from '@/src/lib/meetings';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { derivePlaceKey } from '@/src/lib/places/place-key';
 
 function resolveRawPlaceRow(meeting: Meeting, chipId: string) {
   const chips = buildArrivalVerifyPlaceChips(meeting);
@@ -60,10 +61,11 @@ export function buildPresetPlaceCandidateFromReviewSummary(
     sanitizeNaverLocalPlaceLink(place.naverPlaceLink ?? undefined);
   const prefRaw = (raw?.preferredPhotoMediaUrl ?? chip.preferredPhotoMediaUrl ?? place.photoUrl ?? '').trim();
   const preferredPhotoMediaUrl = prefRaw.startsWith('https://') ? prefRaw : undefined;
-  const placeKey =
-    (raw as { placeKey?: string | null } | undefined)?.placeKey?.trim() ||
-    meeting.placeKey?.trim() ||
-    null;
+  const placeKey = derivePlaceKey({
+    naverPlaceLink: nl,
+    placeName,
+    address,
+  });
 
   const attribution = buildMeetingReviewSummaryAttribution(intentId, place.placeId, {
     sourceMeetingId: mid,
@@ -80,7 +82,7 @@ export function buildPresetPlaceCandidateFromReviewSummary(
     ...(cat ? { category: cat } : {}),
     ...(nl ? { naverPlaceLink: nl } : {}),
     ...(preferredPhotoMediaUrl ? { preferredPhotoMediaUrl } : {}),
-    ...(placeKey ? { placeKey } : {}),
+    placeKey,
     attribution,
   };
 }

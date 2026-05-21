@@ -735,6 +735,13 @@ export const voteCandidatesFormStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.55)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
+    position: 'relative',
+  },
+  placeResultGinitRatingBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 2,
   },
   placeResultImage: {
     width: '100%',

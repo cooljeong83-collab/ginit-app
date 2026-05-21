@@ -16,6 +16,8 @@ import { ActivityIndicator, Animated, Easing, FlatList, KeyboardAvoidingView, Mo
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { MeetingInviteFriendsModal } from '@/components/meeting/MeetingInviteFriendsModal';
@@ -132,6 +134,12 @@ import {
 import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import { derivePlaceKey } from '@/src/lib/places/place-key';
+import {
+  placeDetailPopupStateFromMeetingChip,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
+import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -321,6 +329,19 @@ function buildPlaceChipsFromMeeting(m: Meeting): PlaceChip[] {
   return [];
 }
 
+function resolvePlaceChipKey(chip: PlaceChip, meeting: Meeting): string {
+  const chips = buildPlaceChipsFromMeeting(meeting);
+  const idx = chips.findIndex((c) => c.id === chip.id);
+  const raw = meeting.placeCandidates?.[idx >= 0 ? idx : 0];
+  const stored = (raw as { placeKey?: string | null } | undefined)?.placeKey?.trim();
+  if (stored) return stored;
+  return derivePlaceKey({
+    naverPlaceLink: chip.naverPlaceLink ?? raw?.naverPlaceLink,
+    placeName: chip.title,
+    address: chip.sub ?? raw?.address ?? meeting.address ?? '',
+  });
+}
+
 function formatTopScheduleLine(m: Meeting): string | null {
   const d = m.scheduleDate?.trim();
   const t = m.scheduleTime?.trim();
@@ -472,6 +493,7 @@ export default function MeetingDetailScreen() {
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
   const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
   const [saveCalendarBusy, setSaveCalendarBusy] = useState(false);
   /** `meeting_arrival_verifications`에 현재 사용자 행이 있으면 true */
@@ -527,6 +549,23 @@ export default function MeetingDetailScreen() {
       })
       .map((x) => x.chip);
   }, [meeting?.voteTallies?.places, placeChips]);
+
+  const placeRatingKeys = useMemo(() => {
+    if (!meeting) return [] as string[];
+    return sortedPlaceChips.map((chip) => resolvePlaceChipKey(chip, meeting));
+  }, [meeting, sortedPlaceChips]);
+
+  const placeRatingsQuery = usePlaceRatingsByKeys(placeRatingKeys);
+
+  const openPlaceWebForChip = useCallback(
+    (chip: PlaceChip, url: string, title: string) => {
+      if (!meeting) return;
+      setPlaceDetailPopup(
+        placeDetailPopupStateFromMeetingChip(meeting, chip, url, title.trim() || chip.title.trim() || '장소'),
+      );
+    },
+    [meeting],
+  );
 
   const specialtyKind = useMemo(() => (meeting ? getExtraDataSpecialtyKind(meeting) : null), [meeting]);
   /** 장소 제안 모달 — `VoteCandidatesForm.placeThemeLabel`로 주변 검색 기본어(영화=영화관 등) 시드 */
@@ -3376,7 +3415,7 @@ export default function MeetingDetailScreen() {
                                 link={confirmedPlaceChipResolved.naverPlaceLink}
                                 addressLine={confirmedPlaceChipResolved.sub}
                                 containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
-                                onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+                                onOpenUrl={(url, t) => openPlaceWebForChip(confirmedPlaceChipResolved, url, t)}
                               />
                             </View>
                           </View>
@@ -3892,6 +3931,8 @@ export default function MeetingDetailScreen() {
                 {(() => {
                   const chip = placeChips[0];
                   const thumb = placeThumbByChipId[chip.id] ?? null;
+                  const singleKey = meeting ? resolvePlaceChipKey(chip, meeting) : '';
+                  const singleRating = pickPlaceRating(placeRatingsQuery.data, singleKey);
                   return (
                     <View style={styles.placeDetailBlock}>
                       <View style={styles.placeDetailHeroRow}>
@@ -3904,9 +3945,17 @@ export default function MeetingDetailScreen() {
                         </View>
                         <View style={styles.placeDetailRightCol}>
                           <View style={styles.placeDetailRightColTop}>
-                            <Text style={styles.placeVoteTitle} numberOfLines={3}>
-                              {chip.title}
-                            </Text>
+                            <View style={styles.placeVoteTitleRow}>
+                              <Text style={[styles.placeVoteTitle, styles.placeVoteTitleFlex]} numberOfLines={3}>
+                                {chip.title}
+                              </Text>
+                              {singleRating && singleRating.reviewCount > 0 ? (
+                                <GinitPlaceRatingBadge
+                                  averageRating={singleRating.averageRating}
+                                  reviewCount={singleRating.reviewCount}
+                                />
+                              ) : null}
+                            </View>
                             {chip.category ? (
                               <Text style={styles.placeVoteSub} numberOfLines={2}>
                                 {chip.category}
@@ -3923,7 +3972,7 @@ export default function MeetingDetailScreen() {
                             link={chip.naverPlaceLink}
                             addressLine={chip.sub}
                             containerStyle={{ alignSelf: 'stretch', marginTop: 0 }}
-                            onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+                            onOpenUrl={(url, t) => openPlaceWebForChip(chip, url, t)}
                           />
                         </View>
                       </View>
@@ -3977,6 +4026,8 @@ export default function MeetingDetailScreen() {
                       : selectedPlaceIds.includes(chip.id);
                     const tally = meeting.voteTallies?.places?.[chip.id] ?? 0;
                     const thumb = placeThumbByChipId[chip.id] ?? null;
+                    const chipPlaceKey = meeting ? resolvePlaceChipKey(chip, meeting) : '';
+                    const chipRating = pickPlaceRating(placeRatingsQuery.data, chipPlaceKey);
                     return (
                       <View
                         key={chip.id}
@@ -4008,9 +4059,17 @@ export default function MeetingDetailScreen() {
                                 </View>
                               ) : null}
                             </View>
-                            <Text style={styles.placeVoteTitle} numberOfLines={2}>
-                              {chip.title}
-                            </Text>
+                            <View style={styles.placeVoteTitleRow}>
+                              <Text style={[styles.placeVoteTitle, styles.placeVoteTitleFlex]} numberOfLines={2}>
+                                {chip.title}
+                              </Text>
+                              {chipRating && chipRating.reviewCount > 0 ? (
+                                <GinitPlaceRatingBadge
+                                  averageRating={chipRating.averageRating}
+                                  reviewCount={chipRating.reviewCount}
+                                />
+                              ) : null}
+                            </View>
                             {chip.category ? (
                               <Text style={styles.placeVoteSub} numberOfLines={2}>
                                 {chip.category}
@@ -4028,7 +4087,7 @@ export default function MeetingDetailScreen() {
                           link={chip.naverPlaceLink}
                           addressLine={chip.sub}
                           containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
-                          onOpenUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+                          onOpenUrl={(url, t) => openPlaceWebForChip(chip, url, t)}
                         />
                       </View>
                     );
@@ -4546,7 +4605,6 @@ export default function MeetingDetailScreen() {
                     initialPayload={placeProposeInitialPayload}
                     bare
                     wizardSegment="places"
-                    onNaverPlaceWebOpen={(url, title) => setNaverPlaceWebModal({ url, title })}
                   />
                 </KeyboardAwareScreenScroll>
               ) : null}
@@ -4893,6 +4951,8 @@ export default function MeetingDetailScreen() {
           onRequestClose={closeInviteModal}
           onSubmit={submitInvite}
         />
+
+        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
 
         <NaverPlaceWebViewModal
           visible={naverPlaceWebModal != null}
@@ -5633,6 +5693,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 1,
     shadowRadius: 3,
     elevation: 3,
+  },
+  placeVoteTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    alignSelf: 'stretch',
+  },
+  placeVoteTitleFlex: {
+    flex: 1,
+    minWidth: 0,
   },
   placeVoteTitle: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
   placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },

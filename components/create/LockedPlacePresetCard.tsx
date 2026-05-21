@@ -3,11 +3,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
+import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
 import { voteCandidatesFormStyles as styles } from '@/components/create/vote-candidates-form-styles';
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
 import { arrivalVerifyPlaceChipToNaverImageFields } from '@/src/lib/meeting-arrival-verify-place-summary-data';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
+import { enrichPlaceCandidateWithKey } from '@/src/lib/places/place-key';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 
 type LockedPlacePresetCardProps = {
@@ -25,20 +28,25 @@ export function LockedPlacePresetCard({
   onChangePlace,
   changePlaceLabel = '장소 변경',
 }: LockedPlacePresetCardProps) {
-  const preferred = place.preferredPhotoMediaUrl?.trim() || null;
+  const enriched = useMemo(() => enrichPlaceCandidateWithKey(place), [place]);
+  const placeKey = enriched.placeKey ?? '';
+  const ratingsQuery = usePlaceRatingsByKeys(placeKey ? [placeKey] : []);
+  const rating = pickPlaceRating(ratingsQuery.data, placeKey);
+
+  const preferred = enriched.preferredPhotoMediaUrl?.trim() || null;
   const [fallbackThumb, setFallbackThumb] = useState<string | null | undefined>(undefined);
 
   const naverFields = useMemo(
     () =>
       arrivalVerifyPlaceChipToNaverImageFields({
         id: 'preset-place',
-        title: place.placeName,
-        sub: place.address,
-        category: place.category ?? undefined,
+        title: enriched.placeName,
+        sub: enriched.address,
+        category: enriched.category ?? undefined,
         preferredPhotoMediaUrl: preferred ?? undefined,
-        naverPlaceLink: place.naverPlaceLink ?? undefined,
+        naverPlaceLink: enriched.naverPlaceLink ?? undefined,
       }),
-    [place, preferred],
+    [enriched, preferred],
   );
 
   useEffect(() => {
@@ -66,7 +74,7 @@ export function LockedPlacePresetCard({
   }, [preferred, naverFields]);
 
   const thumb = preferred ?? (fallbackThumb && fallbackThumb !== undefined ? fallbackThumb : null);
-  const cat = place.category?.trim();
+  const cat = enriched.category?.trim();
 
   return (
     <View style={localStyles.wrap}>
@@ -81,24 +89,32 @@ export function LockedPlacePresetCard({
             )}
           </View>
           <View style={localStyles.col}>
-            <Text style={styles.placeResultTitle} numberOfLines={2}>
-              {place.placeName}
-            </Text>
+            <View style={localStyles.titleRow}>
+              <Text style={[styles.placeResultTitle, localStyles.titleFlex]} numberOfLines={2}>
+                {enriched.placeName}
+              </Text>
+              {rating && rating.reviewCount > 0 ? (
+                <GinitPlaceRatingBadge
+                  averageRating={rating.averageRating}
+                  reviewCount={rating.reviewCount}
+                />
+              ) : null}
+            </View>
             {cat ? (
               <Text style={styles.placeResultAddr} numberOfLines={2}>
                 {cat}
               </Text>
             ) : null}
-            {place.address?.trim() ? (
+            {enriched.address?.trim() ? (
               <Text style={styles.placeResultAddr} numberOfLines={3}>
-                {place.address.trim()}
+                {enriched.address.trim()}
               </Text>
             ) : null}
             {onOpenPlaceUrl ? (
               <PlaceCandidateDetailLinkRow
-                title={place.placeName}
-                link={place.naverPlaceLink}
-                addressLine={place.address}
+                title={enriched.placeName}
+                link={enriched.naverPlaceLink}
+                addressLine={enriched.address}
                 containerStyle={localStyles.detailLinks}
                 onOpenUrl={onOpenPlaceUrl}
               />
@@ -153,6 +169,16 @@ const localStyles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     gap: 4,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  titleFlex: {
+    flex: 1,
+    minWidth: 0,
   },
   detailLinks: {
     alignSelf: 'stretch',

@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import {
+  placeDetailPopupStateFromMeeting,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
 import { MeetingArrivalVerifyMapBody } from '@/components/meeting/MeetingArrivalVerifyMapBody';
 import { MeetingArrivalVerifyTopSummary } from '@/components/meeting/MeetingArrivalVerifyTopSummary';
 import { SettlementAccountsScreenTopBar } from '@/components/settlement/SettlementAccountsScreenTopBar';
@@ -117,7 +121,7 @@ export default function ArrivalVerifyMeetingScreen() {
     void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meetingId) });
   }, [refetch, queryClient, meetingId]);
 
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
 
   const onRpcResult = useCallback(
     (payload: MeetingArrivalVerifyRpcUiPayload) => {
@@ -228,7 +232,10 @@ export default function ArrivalVerifyMeetingScreen() {
         <View style={styles.verifyMain}>
           <MeetingArrivalVerifyTopSummary
             meeting={pinMeeting}
-            onOpenPlaceUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+            onOpenPlaceUrl={(url, title) => {
+              const state = placeDetailPopupStateFromMeeting(pinMeeting, url, title);
+              if (state) setPlaceDetailPopup(state);
+            }}
           />
           <MeetingArrivalVerifyMapBody
             active
@@ -247,12 +254,7 @@ export default function ArrivalVerifyMeetingScreen() {
             onRpcResult={onRpcResult}
           />
         </View>
-        <NaverPlaceWebViewModal
-          visible={naverPlaceWebModal != null}
-          url={naverPlaceWebModal?.url}
-          pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
-          onClose={() => setNaverPlaceWebModal(null)}
-        />
+        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
       </SafeAreaView>
     </ScreenShell>
   );

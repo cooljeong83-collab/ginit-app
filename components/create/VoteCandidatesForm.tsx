@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DateCandidateEditorCard, type DatePickerField } from '@/components/create/DateCandidateEditorCard';
 import { LockedPlacePresetCard } from '@/components/create/LockedPlacePresetCard';
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
+import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
 import { voteCandidatesFormStyles as styles } from '@/components/create/vote-candidates-form-styles';
 import type {
   MeetingCreatePlacesAutoAssistSnapshot,
@@ -27,7 +28,7 @@ import type {
   VoteCandidatesFormProps,
   VoteCandidatesGateResult,
 } from '@/components/create/vote-candidates-form.types';
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -89,6 +90,16 @@ import {
 import { parseSmartNaturalSchedule, type SmartNlpResult } from '@/src/lib/natural-language-schedule';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
+import {
+  derivePlaceKeyFromSearchRow,
+  enrichPlaceCandidateWithKey,
+} from '@/src/lib/places/place-key';
+import {
+  placeDetailPopupStateFromCandidate,
+  placeDetailPopupStateFromSearchRow,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
+import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
 import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
 import {
   gatePlaceAgainstRegisteredInterestRegions,
@@ -324,7 +335,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     parentScrollRef,
     parentScrollYRef,
     scheduleAiReplacesFirstCandidate = false,
-    onNaverPlaceWebOpen,
     onPlacesAutoAssistSnapshot,
     lockedPlacePresetMode = false,
     lockedPlacePreset = null,
@@ -465,7 +475,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [placeResolvingById, setPlaceResolvingById] = useState<Record<string, boolean>>({});
   /** 인라인 검색 한 사이클이 끝난 뒤의 쿼리(로딩 false 직후) — 자동 모드가 결과를 기다릴 때 사용 */
   const [placeSearchLastSettledQueryTrim, setPlaceSearchLastSettledQueryTrim] = useState<string | null>(null);
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
 
   const placeQueryRef = useRef(placeQuery);
   placeQueryRef.current = placeQuery;
@@ -1048,7 +1058,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         sanitizeNaverLocalPlaceLink(resolved.link) ?? sanitizeNaverLocalPlaceLink(item.link);
       const thumb = (resolved.thumbnailUrl ?? '').trim();
       const cat = (resolved.category ?? item.category ?? '').trim();
-      const p: PlaceCandidate = {
+      const p = enrichPlaceCandidateWithKey({
         id: newId('place'),
         placeName,
         address,
@@ -1057,7 +1067,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         ...(cat ? { category: cat } : {}),
         ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
         ...(isUsableRemoteImageUrl(thumb) ? { preferredPhotoMediaUrl: thumb } : {}),
-      };
+      });
       setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
       setPlaceCandidates((prev) => {
         const hit = prev.some((r) => r.placeName === p.placeName && r.address === p.address);
@@ -1188,6 +1198,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               ...(isUsableRemoteImageUrl(r.preferredPhotoMediaUrl)
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
                 : {}),
+              ...(r.placeKey?.trim() ? { placeKey: r.placeKey.trim() } : {}),
             }) as PlaceCandidate,
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
@@ -1266,6 +1277,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               ...(isUsableRemoteImageUrl(r.preferredPhotoMediaUrl)
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
                 : {}),
+              ...(r.placeKey?.trim() ? { placeKey: r.placeKey.trim() } : {}),
             }) as PlaceCandidate,
         );
         const dateCandidatesOut = dates.map((d) => stripUndefinedDeep({ ...d }) as DateCandidate);
@@ -1298,6 +1310,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
               ...(isUsableRemoteImageUrl(r.preferredPhotoMediaUrl)
                 ? { preferredPhotoMediaUrl: r.preferredPhotoMediaUrl.trim() }
                 : {}),
+              ...(r.placeKey?.trim() ? { placeKey: r.placeKey.trim() } : {}),
             }) as PlaceCandidate,
         );
         return { ok: true, payload: { placeCandidates: placeCandidatesOut, dateCandidates: [] } };
@@ -1570,6 +1583,38 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placeGameKindLabels,
     placeFocusKnowledgePreferenceLabels,
   ]);
+
+  const placeRatingKeys = useMemo(() => {
+    if (!showPlaces) return [] as string[];
+    const keys: string[] = [];
+    for (const item of placeSearchRows) {
+      keys.push(
+        derivePlaceKeyFromSearchRow({
+          title: item.title,
+          link: item.link,
+          roadAddress: item.roadAddress,
+          address: item.address,
+        }),
+      );
+    }
+    for (const row of placeCandidates) {
+      if (row.placeKey?.trim()) keys.push(row.placeKey.trim());
+      else if (isFilled(row)) {
+        keys.push(
+          derivePlaceKeyFromSearchRow({
+            title: row.placeName,
+            link: row.naverPlaceLink,
+            roadAddress: row.address,
+            address: row.address,
+          }),
+        );
+      }
+    }
+    if (lockedPlacePreset?.placeKey?.trim()) keys.push(lockedPlacePreset.placeKey.trim());
+    return keys;
+  }, [showPlaces, placeSearchRows, placeCandidates, lockedPlacePreset]);
+
+  const placeRatingsQuery = usePlaceRatingsByKeys(placeRatingKeys);
 
   useEffect(() => {
     let alive = true;
@@ -2292,11 +2337,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         <LockedPlacePresetCard
           place={lockedPlacePreset}
           hintText={lockedPlacePresetHint}
-          onOpenPlaceUrl={
-            onNaverPlaceWebOpen
-              ? (url, t) => onNaverPlaceWebOpen(url, t)
-              : (url, t) => setNaverPlaceWebModal({ url, title: t })
-          }
+          onOpenPlaceUrl={(url, t) => {
+            const state = placeDetailPopupStateFromCandidate(lockedPlacePreset, url, t);
+            if (state) setPlaceDetailPopup(state);
+          }}
           onChangePlace={onLockedPlacePresetChangePlace}
         />
       ) : (
@@ -2424,6 +2468,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
                       const thumb = placeThumbById[item.id] ?? null;
+                      const rowPlaceKey = derivePlaceKeyFromSearchRow({
+                        title: item.title,
+                        link: item.link,
+                        roadAddress: item.roadAddress,
+                        address: item.address,
+                      });
+                      const rowRating = pickPlaceRating(placeRatingsQuery.data, rowPlaceKey);
                       return (
                         <View
                           key={item.id}
@@ -2503,7 +2554,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                     ? resolvedPhoto.trim()
                                     : undefined;
                                   const catPick = (resolved.category ?? item.category ?? '').trim();
-                                  const p: PlaceCandidate = {
+                                  const p = enrichPlaceCandidateWithKey({
                                     id: newId('place'),
                                     placeName,
                                     address,
@@ -2512,7 +2563,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                                     ...(catPick ? { category: catPick } : {}),
                                     ...(linkFromApi ? { naverPlaceLink: linkFromApi } : {}),
                                     ...(preferredPhotoMediaUrl ? { preferredPhotoMediaUrl } : {}),
-                                  };
+                                  });
 
                                   setPlaceSelectedById((prev) => ({ ...prev, [item.id]: { placeName, address } }));
                                   setPlaceCandidates((prev) => {
@@ -2535,6 +2586,13 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             accessibilityLabel={title}>
                             <View style={styles.placeResultProposalPressInner}>
                               <View style={styles.placeResultImageWrap}>
+                                {rowRating && rowRating.reviewCount > 0 ? (
+                                  <GinitPlaceRatingBadge
+                                    averageRating={rowRating.averageRating}
+                                    reviewCount={rowRating.reviewCount}
+                                    style={styles.placeResultGinitRatingBadge}
+                                  />
+                                ) : null}
                                 {thumb ? (
                                   <Image
                                     source={{ uri: thumb }}
@@ -2578,11 +2636,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             disabled={resolving}
                             containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
                             onOpenUrl={(url, t) => {
-                              if (onNaverPlaceWebOpen) {
-                                onNaverPlaceWebOpen(url, t);
-                              } else {
-                                setNaverPlaceWebModal({ url, title: t });
-                              }
+                              const state = placeDetailPopupStateFromSearchRow(item, url, t);
+                              if (state) setPlaceDetailPopup(state);
                             }}
                           />
                         </View>
@@ -2949,14 +3004,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         />
       ) : null}
 
-      {onNaverPlaceWebOpen ? null : (
-        <NaverPlaceWebViewModal
-          visible={naverPlaceWebModal != null}
-          url={naverPlaceWebModal?.url}
-          pageTitle={naverPlaceWebModal?.title ?? '장소 상세'}
-          onClose={() => setNaverPlaceWebModal(null)}
-        />
-      )}
+      <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
     </>
   );
 });

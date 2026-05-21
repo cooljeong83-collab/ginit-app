@@ -1,13 +1,25 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
-import {useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Modal, Platform, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+  ActivityIndicator,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
+import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
+import { GinitPlaceReviewTimeline } from '@/components/places/GinitPlaceReviewTimeline';
 import { GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
+import { buildPlaceLookupKeys } from '@/src/lib/places/place-lookup-keys';
+import type { PlaceLookupInput } from '@/src/lib/places/place-lookup-keys';
+import { fetchPlaceMasterByLookup } from '@/src/lib/places/place-master-api';
 import { normalizeNaverPlaceDetailWebUrl } from '@/src/lib/naver-local-search';
 
 /** 네이버 모바일 검색·플레이스 페이지가 인앱 UA에서 어긋나지 않도록 쓰는 모바일 Safari UA */
@@ -19,29 +31,75 @@ export type NaverPlaceWebViewModalProps = {
   url: string | null | undefined;
   pageTitle?: string;
   onClose: () => void;
+  /** 지닛 후기 탭·타이틀 💜 평점 (모임 상세 장소 팝업 등) */
+  placeReviewLookup?: PlaceLookupInput | null;
 };
+
+type PlaceWebModalTab = 'web' | 'comments';
 
 /**
  * 네이버 모바일 **통합검색** 등 장소 관련 URL을 앱 내 WebView로 표시합니다.
  * 화면 세로 **90%** 높이의 중앙 팝업(등록 마법사·모임 상세·장소 검색 등 공통).
  */
-export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정보', onClose }: NaverPlaceWebViewModalProps) {
+export function NaverPlaceWebViewModal({
+  visible,
+  url,
+  pageTitle = '상세 정보',
+  onClose,
+  placeReviewLookup = null,
+}: NaverPlaceWebViewModalProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [webLoading, setWebLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<PlaceWebModalTab>('web');
+  const [ginitAvg, setGinitAvg] = useState(0);
+  const [ginitReviewCount, setGinitReviewCount] = useState(0);
   const initialLoadSettledRef = useRef(false);
+
+  const showGinitTabs = placeReviewLookup != null && placeReviewLookup.placeKey.trim().length > 0;
+
+  const reviewLookupBundle = useMemo(() => {
+    if (!placeReviewLookup) return null;
+    const keys = buildPlaceLookupKeys(placeReviewLookup);
+    return {
+      placeKey: placeReviewLookup.placeKey,
+      lookupKeys: keys,
+      placeName: placeReviewLookup.placeName,
+      roadAddress: placeReviewLookup.roadAddress,
+    };
+  }, [placeReviewLookup]);
 
   const safeUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : null;
   const webViewUri = safeUrl ? normalizeNaverPlaceDetailWebUrl(safeUrl) : null;
 
   useEffect(() => {
+    if (!visible) {
+      setTab('web');
+      setGinitAvg(0);
+      setGinitReviewCount(0);
+      return;
+    }
     if (visible && webViewUri) {
       initialLoadSettledRef.current = false;
       setWebLoading(true);
       setLoadError(null);
     }
   }, [visible, webViewUri]);
+
+  useEffect(() => {
+    if (!visible || !placeReviewLookup) return;
+    let alive = true;
+    void (async () => {
+      const master = await fetchPlaceMasterByLookup(placeReviewLookup);
+      if (!alive || !master) return;
+      setGinitAvg(master.averageRating);
+      setGinitReviewCount(master.reviewCount);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [visible, placeReviewLookup]);
 
   useEffect(() => {
     if (!visible || !webViewUri || !webLoading) return;
@@ -56,6 +114,7 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
     initialLoadSettledRef.current = false;
     setWebLoading(true);
     setLoadError(null);
+    setTab('web');
     onClose();
   }, [onClose]);
 
@@ -89,18 +148,58 @@ export function NaverPlaceWebViewModal({ visible, url, pageTitle = '상세 정�
               },
             ]}>
             <View style={[GinitStyles.modalHeader, styles.sheetHeaderPad]}>
-              <GinitPressable onPress={handleClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-                <Text style={GinitStyles.modalCancel}>닫기</Text>
-              </GinitPressable>
+              <View style={styles.headerLeftSlot}>
+                <GinitPressable onPress={handleClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
+                  <Text style={GinitStyles.modalCancel}>닫기</Text>
+                </GinitPressable>
+              </View>
               <View style={styles.headerTitleWrap}>
-                <Text style={GinitStyles.modalTitle} numberOfLines={1}>
+                <Text style={styles.headerPlaceTitle} numberOfLines={1}>
                   {pageTitle}
                 </Text>
               </View>
-              <View style={styles.headerRightSpacer} />
+              <View style={styles.headerRightSlot}>
+                {showGinitTabs && ginitReviewCount > 0 ? (
+                  <GinitPlaceRatingBadge
+                    averageRating={ginitAvg}
+                    reviewCount={ginitReviewCount}
+                    style={styles.headerRatingBadge}
+                  />
+                ) : null}
+              </View>
             </View>
 
-            {webViewUri ? (
+            {showGinitTabs ? (
+              <View style={styles.tabBar}>
+                <GinitPressable
+                  onPress={() => setTab('web')}
+                  style={[styles.tabBtn, tab === 'web' && styles.tabBtnActive]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: tab === 'web' }}>
+                  <Text style={[styles.tabText, tab === 'web' && styles.tabTextActive]}>네이버 플레이스</Text>
+                </GinitPressable>
+                <GinitPressable
+                  onPress={() => setTab('comments')}
+                  style={[styles.tabBtn, tab === 'comments' && styles.tabBtnActive]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: tab === 'comments' }}>
+                  <Text style={[styles.tabText, tab === 'comments' && styles.tabTextActive]}>
+                    코멘트{ginitReviewCount > 0 ? ` (${ginitReviewCount})` : ''}
+                  </Text>
+                </GinitPressable>
+              </View>
+            ) : null}
+
+            {showGinitTabs && tab === 'comments' && reviewLookupBundle ? (
+              <View style={styles.commentsBody}>
+                <GinitPlaceReviewTimeline
+                  placeKey={reviewLookupBundle.placeKey}
+                  lookupKeys={reviewLookupBundle.lookupKeys}
+                  placeName={reviewLookupBundle.placeName}
+                  roadAddress={reviewLookupBundle.roadAddress}
+                />
+              </View>
+            ) : webViewUri ? (
               <View style={styles.webOuter}>
                 <WebView
                   key={webViewUri}
@@ -174,19 +273,72 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 18,
     overflow: 'hidden',
+    flexDirection: 'column',
   },
   sheetHeaderPad: {
     paddingHorizontal: 16,
     marginBottom: 0,
   },
+  headerLeftSlot: {
+    minWidth: 48,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
   headerTitleWrap: {
     flex: 1,
     minWidth: 0,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 8,
   },
-  /** 왼쪽 `닫기`와 폭을 맞춰 제목을 가운데 정렬 */
-  headerRightSpacer: { minWidth: 44 },
+  headerPlaceTitle: {
+    width: '100%',
+    fontSize: 16,
+    fontWeight: '800',
+    color: GinitTheme.colors.text,
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  headerRightSlot: {
+    minWidth: 48,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  headerRatingBadge: {
+    flexShrink: 0,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    flexShrink: 0,
+    marginHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(15, 23, 42, 0.12)',
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabBtnActive: {
+    borderBottomColor: GinitTheme.colors.deepPurple,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GinitTheme.colors.textMuted,
+  },
+  tabTextActive: {
+    color: GinitTheme.colors.deepPurple,
+    fontWeight: '800',
+  },
+  commentsBody: {
+    flex: 1,
+    minHeight: 0,
+    marginHorizontal: 12,
+    marginBottom: 4,
+  },
   webOuter: {
     flex: 1,
     minHeight: 200,

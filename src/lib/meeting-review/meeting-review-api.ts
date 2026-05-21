@@ -49,13 +49,23 @@ export type MeetingReviewSummary = {
 export type MeetingReviewSubmitPayload = {
   meetingId: string;
   appUserId: string;
-  placeId: string;
+  /** 레거시 UUID — 스냅샷 없을 때만 */
+  placeId?: string | null;
+  placeKey: string;
+  placeName: string;
+  address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  category?: string | null;
+  naverPlaceLink?: string | null;
+  preferredPhotoMediaUrl?: string | null;
   rating: number;
   selectedKeywords: string[];
   comment?: string | null;
 };
 
 export type MeetingPlaceReviewSubmitResult = {
+  placeId: string | null;
   rewardsApplied: boolean;
   xpGranted: number;
   trustGranted: number;
@@ -63,7 +73,10 @@ export type MeetingPlaceReviewSubmitResult = {
 
 function parseSubmitResult(data: unknown): MeetingPlaceReviewSubmitResult {
   const o = (data ?? {}) as Record<string, unknown>;
+  const placeId =
+    typeof o.place_id === 'string' && o.place_id.trim() ? o.place_id.trim() : null;
   return {
+    placeId,
     rewardsApplied: o.rewards_applied === true,
     xpGranted: typeof o.xp_granted === 'number' ? o.xp_granted : Number(o.xp_granted) || 0,
     trustGranted:
@@ -161,13 +174,27 @@ function parseSummaryRow(data: unknown): MeetingReviewSummary {
 export async function submitMeetingPlaceReview(
   payload: MeetingReviewSubmitPayload,
 ): Promise<{ ok: true; result: MeetingPlaceReviewSubmitResult } | { ok: false; message: string }> {
+  const addr = payload.address.trim();
+  if (!addr) {
+    return { ok: false, message: '장소 정보가 없어 리뷰를 남길 수 없어요.' };
+  }
   const { data, error } = await supabase.rpc('upsert_meeting_place_review', {
     p_meeting_id: payload.meetingId.trim(),
     p_app_user_id: payload.appUserId.trim(),
-    p_place_id: payload.placeId.trim(),
+    p_place_id: payload.placeId?.trim() ? payload.placeId.trim() : null,
     p_rating: payload.rating,
     p_selected_keywords: payload.selectedKeywords,
     p_comment: payload.comment?.trim() ? payload.comment.trim() : null,
+    p_place_key: payload.placeKey.trim(),
+    p_place_name: payload.placeName.trim(),
+    p_road_address: addr,
+    p_latitude: payload.latitude ?? null,
+    p_longitude: payload.longitude ?? null,
+    p_category: payload.category?.trim() ? payload.category.trim() : null,
+    p_naver_place_link: payload.naverPlaceLink?.trim() ? payload.naverPlaceLink.trim() : null,
+    p_preferred_photo_media_url: payload.preferredPhotoMediaUrl?.trim()
+      ? payload.preferredPhotoMediaUrl.trim()
+      : null,
   });
   if (error) {
     return { ok: false, message: mapReviewApiError(error.message) };

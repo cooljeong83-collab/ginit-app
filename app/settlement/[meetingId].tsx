@@ -19,7 +19,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import {
+  placeDetailPopupStateFromMeeting,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
 import { preloadSettlementInterstitial, showSettlementInterstitial } from '@/src/lib/ads/settlement-interstitial-service';
 import {
   MeetingChatImageViewerGallery,
@@ -511,7 +515,7 @@ export default function SettlementMeetingScreen() {
   const [accountPickerAnimationType, setAccountPickerAnimationType] = useState<'none' | 'slide'>('slide');
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<Set<string>>(new Set());
   const [participantProfiles, setParticipantProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
   const [settlementAmountTab, setSettlementAmountTab] = useState<SettlementAmountTab>('split_n');
   const [settlementPaymentMethod, setSettlementPaymentMethod] = useState<SettlementPaymentMethod>('bank_transfer');
   const [manualAmountsByParticipant, setManualAmountsByParticipant] = useState<Record<string, string>>({});
@@ -2095,7 +2099,11 @@ export default function SettlementMeetingScreen() {
             hidePlaceDetails
             titleText={settlementMeetingTitleLine}
             titleStyle={styles.settlementMeetingTitle}
-            onOpenPlaceUrl={(url, title) => setNaverPlaceWebModal({ url, title })}
+            onOpenPlaceUrl={(url, title) => {
+              if (!meeting) return;
+              const state = placeDetailPopupStateFromMeeting(meeting, url, title);
+              if (state) setPlaceDetailPopup(state);
+            }}
           />
           <View style={styles.settlementFormBlock}>
             {settlementReadOnly ? (
@@ -2878,12 +2886,7 @@ export default function SettlementMeetingScreen() {
             </View>
           </GestureHandlerRootView>
         </Modal>
-        <NaverPlaceWebViewModal
-          visible={naverPlaceWebModal != null}
-          url={naverPlaceWebModal?.url}
-          pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
-          onClose={() => setNaverPlaceWebModal(null)}
-        />
+        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
         <Modal
           visible={receiptImageViewerIndex !== null && receiptImageGallery.length > 0}
           transparent

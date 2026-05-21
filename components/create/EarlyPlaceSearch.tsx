@@ -8,7 +8,11 @@ import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
-import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import {
+  placeDetailPopupStateFromSearchRow,
+  type PlaceDetailPopupState,
+} from '@/src/lib/places/place-detail-popup-state';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
@@ -170,7 +174,7 @@ export function EarlyPlaceSearch({
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [nearbyHint, setNearbyHint] = useState<string | null>(null);
   const [locationReady, setLocationReady] = useState(false);
-  const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
+  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
   const expandedPickerRef = useRef<View>(null);
   const earlyPlaceQueryInputRef = useRef<TextInput>(null);
   const earlyPlaceQueryDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(earlyPlaceQueryInputRef), []);
@@ -659,7 +663,10 @@ export function EarlyPlaceSearch({
                       addressLine={detailAddrLine}
                       disabled={disabled || loading}
                       containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
-                      onOpenUrl={(url, t) => setNaverPlaceWebModal({ url, title: t })}
+                      onOpenUrl={(url, t) => {
+                        const state = placeDetailPopupStateFromSearchRow(item, url, t);
+                        if (state) setPlaceDetailPopup(state);
+                      }}
                     />
                   </View>
                 </Animated.View>
@@ -720,12 +727,7 @@ export function EarlyPlaceSearch({
           {cinemaScrollBlock}
           {listScrollOrNull}
         </View>
-        <NaverPlaceWebViewModal
-          visible={naverPlaceWebModal != null}
-          url={naverPlaceWebModal?.url}
-          pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
-          onClose={() => setNaverPlaceWebModal(null)}
-        />
+        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
       </Fragment>
     );
   }
@@ -787,12 +789,7 @@ export function EarlyPlaceSearch({
         </View>
       ) : null}
     </View>
-    <NaverPlaceWebViewModal
-      visible={naverPlaceWebModal != null}
-      url={naverPlaceWebModal?.url}
-      pageTitle={naverPlaceWebModal?.title ?? '상세 정보'}
-      onClose={() => setNaverPlaceWebModal(null)}
-    />
+    <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
     </Fragment>
   );
 }

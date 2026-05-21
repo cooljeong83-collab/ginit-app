@@ -4,6 +4,7 @@ import {
   fmtDateYmd,
 } from '@/src/lib/date-candidate';
 import type { DateCandidate, PlaceCandidate, VoteCandidatesPayload } from '@/src/lib/meeting-place-bridge';
+import { enrichPlaceCandidateWithKey } from '@/src/lib/places/place-key';
 
 export function clampHm(raw: string): string {
   const t = raw.trim();
@@ -202,6 +203,8 @@ export type PlaceRowModel = {
   address: string;
   latitude: number | null;
   longitude: number | null;
+  /** `places.place_key` */
+  placeKey?: string;
   /** 네이버 검색·스크랩 업종 라벨 */
   category?: string;
   naverPlaceLink?: string;
@@ -225,16 +228,18 @@ export function isFilled(p: PlaceRowModel) {
 }
 
 export function placeRowFromCandidate(p: PlaceCandidate): PlaceRowModel {
-  const link = (p.naverPlaceLink ?? '').trim();
-  const pref = typeof p.preferredPhotoMediaUrl === 'string' ? p.preferredPhotoMediaUrl.trim() : '';
-  const cat = typeof p.category === 'string' ? p.category.trim() : '';
+  const enriched = enrichPlaceCandidateWithKey(p);
+  const link = (enriched.naverPlaceLink ?? '').trim();
+  const pref = typeof enriched.preferredPhotoMediaUrl === 'string' ? enriched.preferredPhotoMediaUrl.trim() : '';
+  const cat = typeof enriched.category === 'string' ? enriched.category.trim() : '';
   return {
-    id: p.id,
-    query: p.placeName,
-    placeName: p.placeName,
-    address: p.address,
-    latitude: p.latitude,
-    longitude: p.longitude,
+    id: enriched.id,
+    query: enriched.placeName,
+    placeName: enriched.placeName,
+    address: enriched.address,
+    latitude: enriched.latitude,
+    longitude: enriched.longitude,
+    placeKey: enriched.placeKey,
     ...(cat ? { category: cat } : {}),
     ...(link ? { naverPlaceLink: link } : {}),
     ...(pref.startsWith('https://') ? { preferredPhotoMediaUrl: pref } : {}),
