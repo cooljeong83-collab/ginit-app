@@ -63,6 +63,23 @@ export type MeetingFlowRouteTarget =
   | { kind: 'settlement'; meetingId: string }
   | { kind: 'meeting-review'; meetingId: string };
 
+/** 탐색 피드 모임 후기 캐러셀(목록)에서 summary 화면으로 진입 */
+export const MEETING_REVIEW_ENTRY_FEED_LIST = 'feed_review_list' as const;
+
+export type MeetingReviewEntry = typeof MEETING_REVIEW_ENTRY_FEED_LIST;
+
+const MEETING_REVIEW_ENTRY_VALUES = new Set<string>([MEETING_REVIEW_ENTRY_FEED_LIST]);
+
+export function readMeetingReviewEntryFromParams(
+  params: Record<string, unknown> | { entry?: string | string[] },
+): MeetingReviewEntry | null {
+  const raw = (params as { entry?: string | string[] }).entry;
+  const single = Array.isArray(raw) ? raw[0] : raw;
+  const value = typeof single === 'string' ? single.trim() : '';
+  if (!value || !MEETING_REVIEW_ENTRY_VALUES.has(value)) return null;
+  return value as MeetingReviewEntry;
+}
+
 export function buildMeetingDetailHref(
   meetingId: string,
   returnTo: MeetingFlowReturnTo = '/(tabs)',
@@ -74,9 +91,15 @@ export function buildMeetingDetailHref(
   } as Href;
 }
 
+export type BuildMeetingFlowHrefOptions = {
+  /** `meeting-review` 전용 — 탐색 피드 후기 목록 등 진입 출처 */
+  reviewEntry?: MeetingReviewEntry;
+};
+
 export function buildMeetingFlowHref(
   target: MeetingFlowRouteTarget,
   returnTo: MeetingFlowReturnTo,
+  options?: BuildMeetingFlowHrefOptions,
 ): Href {
   const meetingId = target.meetingId.trim();
   const safeReturn = sanitizeMeetingFlowReturnTo(returnTo);
@@ -84,9 +107,15 @@ export function buildMeetingFlowHref(
     target.kind === 'settlement'
       ? `/settlement/${encodeURIComponent(meetingId)}`
       : `/meeting-review/${encodeURIComponent(meetingId)}`;
+  const params: { returnTo: MeetingFlowReturnTo; entry?: MeetingReviewEntry } = {
+    returnTo: safeReturn,
+  };
+  if (target.kind === 'meeting-review' && options?.reviewEntry) {
+    params.entry = options.reviewEntry;
+  }
   return {
     pathname,
-    params: { returnTo: safeReturn },
+    params,
   } as Href;
 }
 

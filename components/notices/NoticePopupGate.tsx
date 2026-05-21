@@ -9,6 +9,7 @@ import {
   isNoticePopupSnoozedToday,
   snoozeNoticePopupForToday,
 } from '@/src/features/notices/notice-popup-storage';
+import type { ActiveNoticeItem } from '@/src/features/notices/notices-api';
 import { useActiveNoticesQuery } from '@/src/hooks/use-active-notices-query';
 import { useMarkNoticeInboxReadMutation } from '@/src/hooks/use-mark-notice-read-mutation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -25,28 +26,31 @@ export function NoticePopupGate() {
   const { data: popupItems } = useActiveNoticesQuery('popup', enabled);
   const markRead = useMarkNoticeInboxReadMutation();
 
-  const [visibleNoticeId, setVisibleNoticeId] = useState<string | null>(null);
+  const [visibleNotices, setVisibleNotices] = useState<ActiveNoticeItem[]>([]);
   const sessionShownRef = useRef<Set<string>>(new Set());
   const evaluatingRef = useRef(false);
 
   const pickAndShow = useCallback(async () => {
-    if (evaluatingRef.current || !enabled) return;
+    if (evaluatingRef.current || !enabled || visibleNotices.length > 0) return;
     const items = popupItems ?? [];
     if (items.length === 0) return;
 
     evaluatingRef.current = true;
     try {
+      const eligible: ActiveNoticeItem[] = [];
       for (const item of items) {
         if (sessionShownRef.current.has(item.id)) continue;
         if (await isNoticePopupSnoozedToday(item.id)) continue;
         sessionShownRef.current.add(item.id);
-        setVisibleNoticeId(item.id);
-        return;
+        eligible.push(item);
+      }
+      if (eligible.length > 0) {
+        setVisibleNotices(eligible);
       }
     } finally {
       evaluatingRef.current = false;
     }
-  }, [enabled, popupItems]);
+  }, [enabled, popupItems, visibleNotices.length]);
 
   useEffect(() => {
     void pickAndShow();
@@ -63,19 +67,17 @@ export function NoticePopupGate() {
     return () => sub.remove();
   }, [enabled, pickAndShow, queryClient]);
 
-  const activeNotice = (popupItems ?? []).find((n) => n.id === visibleNoticeId) ?? null;
-
   const dismiss = useCallback(() => {
-    setVisibleNoticeId(null);
+    setVisibleNotices([]);
   }, []);
 
   const ackRead = useCallback(
-    async (noticeId: string, inboxId: string | null) => {
+    async (notice: ActiveNoticeItem) => {
       try {
-        if (inboxId) {
-          await markRead.mutateAsync({ inboxId });
+        if (notice.inboxId) {
+          await markRead.mutateAsync({ inboxId: notice.inboxId });
         } else {
-          await markRead.mutateAsync({ noticeId });
+          await markRead.mutateAsync({ noticeId: notice.id });
         }
       } catch {
         /* best-effort */
@@ -84,29 +86,37 @@ export function NoticePopupGate() {
     [markRead],
   );
 
-  const onConfirm = useCallback(() => {
-    if (!activeNotice) return;
-    void ackRead(activeNotice.id, activeNotice.inboxId);
-    dismiss();
-    navigateFromNoticeLink(router, { noticeId: activeNotice.id, linkUrl: activeNotice.linkUrl });
-  }, [activeNotice, ackRead, dismiss, router]);
+  const onConfirm = useCallback(
+    (notice: ActiveNoticeItem) => {
+      void ackRead(notice);
+      dismiss();
+      navigateFromNoticeLink(router, { noticeId: notice.id, linkUrl: notice.linkUrl });
+    },
+    [ackRead, dismiss, router],
+  );
 
-  const onClose = useCallback(() => {
-    if (activeNotice) void ackRead(activeNotice.id, activeNotice.inboxId);
-    dismiss();
-  }, [activeNotice, ackRead, dismiss]);
+  const onClose = useCallback(
+    (notice: ActiveNoticeItem) => {
+      void ackRead(notice);
+      dismiss();
+    },
+    [ackRead, dismiss],
+  );
 
-  const onSnoozeToday = useCallback(() => {
-    if (activeNotice) void snoozeNoticePopupForToday(activeNotice.id);
-    dismiss();
-  }, [activeNotice, dismiss]);
+  const onSnoozeToday = useCallback(
+    (notice: ActiveNoticeItem) => {
+      void snoozeNoticePopupForToday(notice.id);
+      dismiss();
+    },
+    [dismiss],
+  );
 
-  if (!activeNotice) return null;
+  if (visibleNotices.length === 0) return null;
 
   return (
     <NoticePopupModal
-      notice={activeNotice}
-      visible={Boolean(visibleNoticeId)}
+      notices={visibleNotices}
+      visible
       onClose={onClose}
       onConfirm={onConfirm}
       onSnoozeToday={onSnoozeToday}

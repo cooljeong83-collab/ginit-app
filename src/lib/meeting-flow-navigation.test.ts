@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildMeetingFlowHref,
+  MEETING_REVIEW_ENTRY_FEED_LIST,
+  readMeetingReviewEntryFromParams,
   readReturnToFromParams,
   sanitizeMeetingFlowReturnTo,
 } from '@/src/lib/meeting-flow-navigation';
@@ -39,5 +41,23 @@ describe('meeting-flow-navigation', () => {
       pathname: `/meeting-review/${encodeURIComponent(SAMPLE_ID)}`,
       params: { returnTo: '/(tabs)' },
     });
+  });
+
+  it('buildMeetingFlowHref embeds review entry for feed list', () => {
+    const href = buildMeetingFlowHref(
+      { kind: 'meeting-review', meetingId: SAMPLE_ID },
+      '/(tabs)',
+      { reviewEntry: MEETING_REVIEW_ENTRY_FEED_LIST },
+    );
+    expect(href).toMatchObject({
+      params: { returnTo: '/(tabs)', entry: MEETING_REVIEW_ENTRY_FEED_LIST },
+    });
+  });
+
+  it('readMeetingReviewEntryFromParams whitelists feed list entry', () => {
+    expect(readMeetingReviewEntryFromParams({ entry: MEETING_REVIEW_ENTRY_FEED_LIST })).toBe(
+      MEETING_REVIEW_ENTRY_FEED_LIST,
+    );
+    expect(readMeetingReviewEntryFromParams({ entry: 'other' })).toBeNull();
   });
 });

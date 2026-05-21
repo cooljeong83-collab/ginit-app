@@ -3,7 +3,6 @@ import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -48,6 +47,8 @@ import { logPresetPlaceMeetingCreateIntent } from '@/src/lib/meeting-preset-plac
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import {
   exitMeetingReviewFlow,
+  MEETING_REVIEW_ENTRY_FEED_LIST,
+  readMeetingReviewEntryFromParams,
   readReturnToFromParams,
 } from '@/src/lib/meeting-flow-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
@@ -98,13 +99,19 @@ export default function MeetingReviewScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
-  const params = useLocalSearchParams<{ meetingId: string | string[]; returnTo?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    meetingId: string | string[];
+    returnTo?: string | string[];
+    entry?: string | string[];
+  }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()
     : typeof params.meetingId === 'string'
       ? params.meetingId.trim()
       : '';
   const flowReturnTo = readReturnToFromParams(params);
+  const showNextMeetingSection =
+    readMeetingReviewEntryFromParams(params) === MEETING_REVIEW_ENTRY_FEED_LIST;
 
   const { categories } = useMeetingCategories();
   const { meeting, loading, loadError, refetch } = useMeetingDetailQuery(meetingId);
@@ -449,6 +456,8 @@ export default function MeetingReviewScreen() {
               receiptPlaceVerified={receiptPlaceVerified}
               summary={summaryQuery.data}
               loading={summaryQuery.isLoading && !summaryQuery.data}
+              showNextMeetingSection={showNextMeetingSection}
+              onCreateMeetingAtPlace={showNextMeetingSection ? onCreateMeetingAtPlace : undefined}
             />
           )}
         </View>
@@ -467,21 +476,6 @@ export default function MeetingReviewScreen() {
               ) : (
                 <Text style={meetingReviewStyles.primaryBtnText}>{submitLabel}</Text>
               )}
-            </GinitPressable>
-          </View>
-        ) : null}
-        {phase === 'summary' && canViewReview ? (
-          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            <GinitPressable
-              onPress={onCreateMeetingAtPlace}
-              style={({ pressed }) => [
-                meetingReviewStyles.createMeetingAtPlaceBtn,
-                pressed && { opacity: 0.88 },
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="이 장소로 모임 만들기">
-              <GinitSymbolicIcon name="add-circle-outline" size={20} color="#fff" />
-              <Text style={meetingReviewStyles.createMeetingAtPlaceBtnText}>이 장소로 모임 만들기</Text>
             </GinitPressable>
           </View>
         ) : null}

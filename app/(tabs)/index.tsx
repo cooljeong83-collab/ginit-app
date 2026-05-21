@@ -51,6 +51,7 @@ import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
 import {
   buildMeetingDetailHref,
   buildMeetingFlowHref,
+  MEETING_REVIEW_ENTRY_FEED_LIST,
 } from '@/src/lib/meeting-flow-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { Category } from '@/src/lib/categories';
@@ -1393,7 +1394,13 @@ export default function FeedScreen() {
 
   const onPressFeedReview = useCallback(
     (meetingId: string) => {
-      router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId }, '/(tabs)'));
+      router.push(
+        buildMeetingFlowHref(
+          { kind: 'meeting-review', meetingId },
+          '/(tabs)',
+          { reviewEntry: MEETING_REVIEW_ENTRY_FEED_LIST },
+        ),
+      );
     },
     [router],
   );

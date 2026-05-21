@@ -1,10 +1,13 @@
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MeetingReviewKeywordSummaryBadges } from '@/components/meeting-review/MeetingReviewKeywordSummaryBadges';
 import { MeetingReviewParticipantCard } from '@/components/meeting-review/MeetingReviewParticipantCard';
 import { meetingReviewStyles as s } from '@/components/meeting-review/meeting-review-styles';
 import { MeetingReviewStarRating } from '@/components/meeting-review/MeetingReviewStarRating';
 import { MeetingReviewTopSummary } from '@/components/meeting-review/MeetingReviewTopSummary';
+import { GinitPressable } from '@/components/ui/GinitPressable';
+import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { Category } from '@/src/lib/categories';
 import type { MeetingReviewSummary } from '@/src/lib/meeting-review/meeting-review-api';
@@ -19,6 +22,9 @@ type SummaryBoardProps = {
   receiptPlaceVerified?: boolean;
   summary: MeetingReviewSummary | undefined;
   loading?: boolean;
+  /** 탐색 피드 모임 후기 목록에서 진입한 경우에만 true */
+  showNextMeetingSection?: boolean;
+  onCreateMeetingAtPlace?: () => void;
 };
 
 export function SummaryBoard({
@@ -29,7 +35,10 @@ export function SummaryBoard({
   receiptPlaceVerified,
   summary,
   loading,
+  showNextMeetingSection = false,
+  onCreateMeetingAtPlace,
 }: SummaryBoardProps) {
+  const insets = useSafeAreaInsets();
   if (loading && !summary) {
     return (
       <View style={styles.loadingWrap}>
@@ -61,7 +70,10 @@ export function SummaryBoard({
         : '';
 
   return (
-    <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={s.scroll}
+      contentContainerStyle={[s.scrollContent, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}
+      showsVerticalScrollIndicator={false}>
       <MeetingReviewTopSummary
         meeting={meeting}
         place={place}
@@ -106,6 +118,24 @@ export function SummaryBoard({
             ))}
           </View>
         )}
+
+        {showNextMeetingSection && onCreateMeetingAtPlace ? (
+          <>
+            <View style={styles.nextMeetingDivider} />
+            <View style={styles.nextMeetingSection}>
+              <Text style={s.sectionLabel}>다음 모임</Text>
+              <Text style={s.sectionHint}>이 장소로 새 모임을 열 수 있어요</Text>
+              <GinitPressable
+                onPress={onCreateMeetingAtPlace}
+                style={({ pressed }) => [s.createMeetingAtPlaceBtn, pressed && { opacity: 0.88 }]}
+                accessibilityRole="button"
+                accessibilityLabel="이 장소로 모임 만들기">
+                <GinitSymbolicIcon name="add-circle-outline" size={20} color="#fff" />
+                <Text style={s.createMeetingAtPlaceBtnText}>이 장소로 모임 만들기</Text>
+              </GinitPressable>
+            </View>
+          </>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -153,5 +183,14 @@ const styles = StyleSheet.create({
   },
   reviewsList: {
     marginTop: 4,
+  },
+  nextMeetingDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GinitTheme.colors.border,
+    marginTop: 20,
+  },
+  nextMeetingSection: {
+    marginTop: 8,
+    gap: 8,
   },
 });

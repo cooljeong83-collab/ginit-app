@@ -56,23 +56,23 @@ import {
   stableSortedParticipantLine,
 } from '@/src/lib/in-app-alarms';
 import { loadInAppAlarmReadState, saveInAppAlarmReadState } from '@/src/lib/in-app-alarms-persistence';
-import type { NotificationDoc } from '@/src/lib/notifications';
+import { subscribeNotificationsForUser, type NotificationDoc } from '@/src/lib/notifications';
 import {
   fetchUnreadMeetingFriendInviteNotifications,
+  filterUnreadMeetingFriendInviteNotifications,
   markMeetingFriendInviteNotificationRead,
   markMeetingFriendInviteNotificationsReadForMeeting,
   meetingFriendInviteAlarmSortMs,
   meetingFriendInviteAlarmSubtitle,
   parseMeetingFriendInvitePayload,
-  subscribeMeetingFriendInviteNotifications,
 } from '@/src/lib/meeting-friend-invite-notifications';
 import {
   fetchUnreadMeetingPlaceReviewNotifications,
+  filterUnreadMeetingPlaceReviewNotifications,
   markMeetingPlaceReviewNotificationRead,
   meetingPlaceReviewAlarmSortMs,
   meetingPlaceReviewAlarmSubtitle,
   parseMeetingPlaceReviewPayload,
-  subscribeMeetingPlaceReviewNotifications,
 } from '@/src/lib/meeting-place-review-notifications';
 import { GINIT_MEETING_PLACE_REVIEW_SUBMITTED_EVENT } from '@/src/lib/meeting-place-review-dismiss';
 import { filterJoinedMeetings, isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -643,15 +643,19 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!userId?.trim()) {
       setMeetingInviteInbox([]);
+      setMeetingPlaceReviewInbox([]);
       return;
     }
     const uid = normalizeParticipantId(userId.trim()) || userId.trim();
-    return subscribeMeetingFriendInviteNotifications(
+    return subscribeNotificationsForUser(
       uid,
-      (items) => setMeetingInviteInbox(items),
+      (items) => {
+        setMeetingInviteInbox(filterUnreadMeetingFriendInviteNotifications(items));
+        setMeetingPlaceReviewInbox(filterUnreadMeetingPlaceReviewNotifications(items));
+      },
       (msg) => {
-        ginitNotifyDbg('InAppAlarms', 'meeting_invite_notifications_error', { message: msg });
-        if (__DEV__) console.warn('[InAppAlarms] meeting_invite notifications', msg);
+        ginitNotifyDbg('InAppAlarms', 'app_notifications_realtime_error', { message: msg });
+        if (__DEV__) console.warn('[InAppAlarms] app notifications realtime', msg);
       },
     );
   }, [userId]);
@@ -708,22 +712,6 @@ export function InAppAlarmsProvider({ children }: { children: ReactNode }) {
         if (__DEV__) console.warn('[InAppAlarms] meeting_place_review notifications', msg);
       });
   }, []);
-
-  useEffect(() => {
-    if (!userId?.trim()) {
-      setMeetingPlaceReviewInbox([]);
-      return;
-    }
-    const uid = normalizeParticipantId(userId.trim()) || userId.trim();
-    return subscribeMeetingPlaceReviewNotifications(
-      uid,
-      (items) => setMeetingPlaceReviewInbox(items),
-      (msg) => {
-        ginitNotifyDbg('InAppAlarms', 'meeting_place_review_notifications_error', { message: msg });
-        if (__DEV__) console.warn('[InAppAlarms] meeting_place_review notifications', msg);
-      },
-    );
-  }, [userId]);
 
   useEffect(() => {
     if (!userId?.trim()) return;
