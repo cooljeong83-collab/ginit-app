@@ -46,6 +46,10 @@ import { setPendingPresetPlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import { generateUuidV4 } from '@/src/lib/generate-uuid-v4';
 import { logPresetPlaceMeetingCreateIntent } from '@/src/lib/meeting-preset-place-create-attribution';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
+import {
+  exitMeetingReviewFlow,
+  readReturnToFromParams,
+} from '@/src/lib/meeting-flow-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import {
@@ -94,12 +98,13 @@ export default function MeetingReviewScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { userId } = useUserSession();
-  const params = useLocalSearchParams<{ meetingId: string | string[] }>();
+  const params = useLocalSearchParams<{ meetingId: string | string[]; returnTo?: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()
     : typeof params.meetingId === 'string'
       ? params.meetingId.trim()
       : '';
+  const flowReturnTo = readReturnToFromParams(params);
 
   const { categories } = useMeetingCategories();
   const { meeting, loading, loadError, refetch } = useMeetingDetailQuery(meetingId);
@@ -218,7 +223,13 @@ export default function MeetingReviewScreen() {
     ? 'summary'
     : (phaseOverride ?? (hasReviewed ? 'summary' : 'form'));
 
-  const onBack = useCallback(() => safeRouterBack(router), [router]);
+  const onBack = useCallback(() => {
+    if (phase === 'summary') {
+      exitMeetingReviewFlow(router, flowReturnTo);
+      return;
+    }
+    safeRouterBack(router);
+  }, [phase, flowReturnTo, router]);
   useAndroidOverlayHardwareBack(onBack);
 
   useEffect(() => {

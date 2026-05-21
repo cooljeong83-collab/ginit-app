@@ -1,7 +1,7 @@
 import * as Linking from 'expo-linking';
 import type { Router } from 'expo-router';
 
-import { parseGinitAppChatDestination } from '@/src/lib/push-open-navigation';
+import { parseGinitAppChatDestination } from '@/src/lib/ginit-app-destination';
 
 /**
  * 공지 `link_url` 처리 — `ginitapp://` 는 기존 채팅·모임 파서 재사용.

@@ -1,8 +1,16 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image as RNImage,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
+import { noticeInboxDisplayStyles } from '@/components/notices/noticeInboxDisplay';
 import { SupportScreenChrome } from '@/components/support/SupportScreenChrome';
 import { supportScreenStyles as styles } from '@/components/support/supportScreenStyles';
 import { GinitPressable } from '@/components/ui/GinitPressable';
@@ -33,6 +41,31 @@ export default function NoticeDetailScreen() {
   const markRead = useMarkNoticeInboxReadMutation();
   const detail = query.data;
 
+  const imageUri = detail?.imageUrl?.trim() ?? '';
+  const [imageAspect, setImageAspect] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!imageUri) {
+      setImageAspect(null);
+      return;
+    }
+    let alive = true;
+    RNImage.getSize(
+      imageUri,
+      (iw, ih) => {
+        if (!alive || iw <= 0 || ih <= 0) return;
+        setImageAspect(iw / ih);
+      },
+      () => {
+        if (!alive) return;
+        setImageAspect(null);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [imageUri]);
+
   useEffect(() => {
     if (!detail || detail.isRead) return;
     const inboxId = detail.inboxId?.trim();
@@ -54,40 +87,69 @@ export default function NoticeDetailScreen() {
     navigateFromNoticeLink(router, { noticeId: detail.id, linkUrl: detail.linkUrl });
   }, [detail, router]);
 
+  const imageOnly = Boolean(detail?.isImageOnly && imageUri);
+  const dateLabel = detail ? formatNoticeDate(detail.createdAt) : '';
+  const titleText = detail?.title.trim() ?? '';
+  const bodyContent = detail?.content.trim() ?? '';
+  const headerTitle = detail?.isImageOnly
+    ? titleText || (bodyContent ? '' : '이미지 공지')
+    : titleText;
+  const showBody = Boolean(bodyContent);
+  const showHeader = Boolean(dateLabel || headerTitle);
+
   return (
-    <SupportScreenChrome title="공지" onBack={handleHardwareBack}>
+    <SupportScreenChrome title="공지사항" onBack={handleHardwareBack}>
       {query.isLoading || !detail ? (
         <View style={styles.centerLoad}>
           <ActivityIndicator color={GinitTheme.colors.primary} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {detail.imageUrl ? (
-            <Image source={{ uri: detail.imageUrl }} style={styles.detailHero} contentFit="cover" />
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            imageOnly && localStyles.scrollContentImageOnly,
+          ]}
+          showsVerticalScrollIndicator={false}>
+          {showHeader ? (
+            <View style={noticeInboxDisplayStyles.headerBlock}>
+              {dateLabel ? (
+                <Text style={noticeInboxDisplayStyles.date}>{dateLabel}</Text>
+              ) : null}
+              {headerTitle ? (
+                <Text style={noticeInboxDisplayStyles.headline}>{headerTitle}</Text>
+              ) : null}
+            </View>
           ) : null}
-          <Text style={styles.detailTitle}>{detail.title}</Text>
-          <Text style={styles.detailDate}>{formatNoticeDate(detail.createdAt)}</Text>
-          <View style={styles.detailDivider} />
-          <Text style={styles.detailBody}>{detail.content}</Text>
+
+          {imageUri ? (
+            <View style={localStyles.detailImageWrap}>
+              <Image
+                source={{ uri: imageUri }}
+                style={[
+                  localStyles.detailImage,
+                  imageAspect != null ? { aspectRatio: imageAspect } : localStyles.detailImageLoading,
+                ]}
+                contentFit="contain"
+              />
+            </View>
+          ) : null}
+
+          {showBody ? (
+            <>
+              <View style={styles.detailDivider} />
+              <Text style={[styles.detailBody, localStyles.detailBody]}>{bodyContent}</Text>
+            </>
+          ) : null}
           {detail.linkUrl ? (
             <GinitPressable
               onPress={onOpenLink}
               style={({ pressed }) => [
-                {
-                  marginTop: 20,
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: ACCENT,
-                  backgroundColor: '#F3E5F5',
-                  alignItems: 'center',
-                },
+                localStyles.linkBtn,
                 pressed && { opacity: 0.9 },
               ]}
               accessibilityRole="button"
               accessibilityLabel="링크 열기">
-              <Text style={{ fontSize: 15, fontWeight: '700', color: ACCENT }}>링크 열기</Text>
+              <Text style={localStyles.linkBtnText}>링크 열기</Text>
             </GinitPressable>
           ) : null}
         </ScrollView>
@@ -95,3 +157,41 @@ export default function NoticeDetailScreen() {
     </SupportScreenChrome>
   );
 }
+
+const localStyles = StyleSheet.create({
+  scrollContentImageOnly: {
+    flexGrow: 1,
+  },
+  detailImageWrap: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  detailImage: {
+    width: '100%',
+    backgroundColor: GinitTheme.colors.bgAlt,
+    borderRadius: 8,
+  },
+  detailImageLoading: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    minHeight: 120,
+  },
+  detailBody: {
+    fontWeight: '400',
+  },
+  linkBtn: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: ACCENT,
+    backgroundColor: '#F3E5F5',
+    alignItems: 'center',
+  },
+  linkBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: ACCENT,
+  },
+});

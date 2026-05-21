@@ -6,7 +6,12 @@ import {
   tryNavigateAdminFromPushData,
 } from '@/src/features/admin-reports/push-open-admin';
 import { markNoticeInboxReadByNoticeId } from '@/src/features/notices/notices-api';
+import {
+  invalidateNoticeInboxQueries,
+  requestNoticeInboxAlarmsRefresh,
+} from '@/src/lib/notice-inbox-alarms';
 import { navigateFromNoticeLink } from '@/src/features/notices/notice-link-navigation';
+import { parseGinitAppChatDestination } from '@/src/lib/ginit-app-destination';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
 import {
   dismissMeetingAutoCancelUnconfirmedAlarm,
@@ -16,6 +21,7 @@ import {
   MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION,
   MEETING_REMOVED_BY_HOST_PUSH_ACTION,
 } from '@/src/lib/meeting-host-push-notify';
+import { buildMeetingFlowHref } from '@/src/lib/meeting-flow-navigation';
 import { getMeetingById, type Meeting } from '@/src/lib/meetings';
 import { TRUST_PENALTY_PROFILE_NOTIFICATION_ACTION } from '@/src/lib/trust-penalty-notify';
 
@@ -41,46 +47,6 @@ function stripRouteQueryHash(path: string): string {
   if (!t) return '';
   const noHash = t.split('#')[0] ?? '';
   return (noHash.split('?')[0] ?? '').trim();
-}
-
-/**
- * 푸시 `data.url` 이 `ginitapp://social-chat/...` 또는 `ginitapp://meeting-chat/...` 일 때 파싱.
- * (FCM/Notifee 경로에서 `action` 키가 비거나 달라져도 채팅으로 보내기 위함)
- */
-export function parseGinitAppChatDestination(
-  url: string,
-):
-  | { type: 'social_dm'; roomId: string }
-  | { type: 'meeting_chat'; meetingId: string }
-  | { type: 'meeting_detail'; meetingId: string }
-  | null {
-  const u = url.trim();
-  if (!u.toLowerCase().startsWith('ginitapp://')) return null;
-  const rest = (u.slice('ginitapp://'.length).split(/[?#]/)[0] ?? '').trim();
-  const segs = rest.split('/').filter(Boolean);
-  const head = (segs[0] ?? '').toLowerCase();
-  if (head === 'social-chat' && segs[1]) {
-    try {
-      return { type: 'social_dm', roomId: decodeURIComponent(segs[1]) };
-    } catch {
-      return { type: 'social_dm', roomId: segs[1] };
-    }
-  }
-  if (head === 'meeting-chat' && segs[1]) {
-    try {
-      return { type: 'meeting_chat', meetingId: decodeURIComponent(segs[1]) };
-    } catch {
-      return { type: 'meeting_chat', meetingId: segs[1] };
-    }
-  }
-  if (head === 'meeting' && segs[1]) {
-    try {
-      return { type: 'meeting_detail', meetingId: decodeURIComponent(segs[1]) };
-    } catch {
-      return { type: 'meeting_detail', meetingId: segs[1] };
-    }
-  }
-  return null;
 }
 
 function tryNavigateChatFromGinitPushUrl(
@@ -179,6 +145,8 @@ export async function markNoticeInboxReadFromPushData(
   try {
     await markNoticeInboxReadByNoticeId(noticeId);
     ginitNotifyDbg('push-open-nav', 'mark_notice_inbox_read', { noticeIdSuffix: noticeId.slice(-8) });
+    invalidateNoticeInboxQueries();
+    requestNoticeInboxAlarmsRefresh();
   } catch {
     ginitNotifyDbg('push-open-nav', 'mark_notice_inbox_read_failed', { noticeIdSuffix: noticeId.slice(-8) });
   }
@@ -264,12 +232,20 @@ export function navigateFromPushData(
   const urlRaw = typeof data.url === 'string' ? data.url.trim() : '';
   if (meetingId && (action === 'settlement_share' || typeRaw === 'SETTLEMENT')) {
     ginitNotifyDbg('push-open-nav', 'branch_settlement', { meetingIdLen: meetingId.length });
-    navTo(`/settlement/${meetingId}`);
+    if (replace) {
+      router.replace(buildMeetingFlowHref({ kind: 'settlement', meetingId }, '/(tabs)'));
+    } else {
+      router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId }, '/(tabs)'));
+    }
     return;
   }
   if (meetingId && (action === 'meeting_place_review' || typeRaw === 'MEETING_REVIEW')) {
     ginitNotifyDbg('push-open-nav', 'branch_meeting_place_review', { meetingIdLen: meetingId.length });
-    navTo(`/meeting-review/${meetingId}`);
+    if (replace) {
+      router.replace(buildMeetingFlowHref({ kind: 'meeting-review', meetingId }, '/(tabs)'));
+    } else {
+      router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId }, '/(tabs)'));
+    }
     return;
   }
   if (meetingId && action === 'new_meeting_in_feed_region') {

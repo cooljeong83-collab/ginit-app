@@ -1,6 +1,6 @@
 # 공지 시스템 — 앱 연동 (PART 2)
 
-운영 공지(`notices` / `user_notifications`)는 레거시 고객센터 공지(`app_announcements`, `/support/announcements`)와 **별도**입니다.
+운영 공지(`notices` / `user_notifications`)가 설정·홈·FCM·새 소식의 단일 공지 채널입니다.
 
 ## 이름 구분 (필수)
 
@@ -15,7 +15,7 @@
 |-----|------|
 | `list_active_notices_for_me(p_channel)` | `home_banner` \| `popup` |
 | `list_my_notice_inbox(p_limit, p_cursor)` | 수신함 목록 |
-| `count_my_notice_inbox_unread()` | 설정 알림함 배지 |
+| `count_my_notice_inbox_unread()` | 설정 공지사항 배지 |
 | `mark_notice_inbox_read(p_inbox_id)` | 읽음 (inbox row) |
 | `mark_notice_inbox_read_by_notice_id(p_notice_id)` | 읽음 (FCM·상세) |
 | `get_notice_detail_for_me(p_notice_id)` | 상세 |
@@ -34,6 +34,7 @@ Direct `select` on `notices` / `user_notifications` 금지 (RLS revoke).
 
 - 탭 시: `push-open-navigation` → `link_url` 또는 `/notices/{id}`
 - 읽음: `mark_notice_inbox_read_by_notice_id`
+- **새 소식**(홈 종 아이콘): `InAppAlarmsContext` + `list_my_notice_inbox` 미읽음 → `kind: notice` 카드. FCM 수신 시 `requestNoticeInboxAlarmsRefresh()`로 목록 갱신.
 
 ## 화면 진입점
 
@@ -41,9 +42,8 @@ Direct `select` on `notices` / `user_notifications` 금지 (RLS revoke).
 |------|------|
 | 홈 상단 | `HomeNoticeBanner` (`list_active_notices_for_me('home_banner')`) |
 | 앱 전역 | `NoticePopupGate` (`popup` 채널) |
-| 설정 > 알림함 | `/notices/inbox` |
+| 설정 > 공지사항 | `/notices/inbox` |
 | 공지 상세 | `/notices/[id]` |
-| 설정 > 공지사항 (레거시) | `/support/announcements` — `app_announcements` |
 
 ## 클라이언트 모듈
 

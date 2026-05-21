@@ -30,6 +30,7 @@ import { prewarmChatRoomMessagesFromPushData } from '@/src/lib/offline-chat/offl
 import { appendMeetingAutoCancelUnconfirmedAlarm } from '@/src/lib/meeting-auto-cancel-unconfirmed-alarm';
 import { MEETING_AUTO_CANCELLED_UNCONFIRMED_PUSH_ACTION } from '@/src/lib/meeting-host-push-notify';
 import { NOTICES_QUERY_KEY_ROOT } from '@/src/features/notices/notices-api';
+import { requestNoticeInboxAlarmsRefresh } from '@/src/lib/notice-inbox-alarms';
 import { applyMeetingPushTargetedRefresh, normalizeFcmStringMap } from '@/src/lib/meeting-push-cache-refresh';
 import { isPeerBlockedByMe } from '@/src/lib/user-blocks';
 
@@ -106,6 +107,7 @@ export function FcmMessagingBootstrap() {
         const typeRaw = String(rm?.data?.type ?? '').trim().toLowerCase();
         if (typeRaw === 'notice') {
           void queryClient.invalidateQueries({ queryKey: NOTICES_QUERY_KEY_ROOT });
+          requestNoticeInboxAlarmsRefresh();
           ginitNotifyDbg('FcmMessaging', 'on_message_notice_invalidate', {
             messageId: rm.messageId,
           });

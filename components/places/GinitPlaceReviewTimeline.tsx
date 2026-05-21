@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -53,7 +54,12 @@ function TimelineRow({ item }: { item: PlaceReviewTimelineItem }) {
           </Text>
         ) : null}
         {keywords.length > 0 ? (
-          <View style={styles.chipWrap}>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipScroll}
+            contentContainerStyle={styles.chipScrollContent}>
             {keywords.map((kw) => (
               <View key={kw} style={styles.chip}>
                 <Text style={styles.chipText} numberOfLines={1}>
@@ -61,7 +67,7 @@ function TimelineRow({ item }: { item: PlaceReviewTimelineItem }) {
                 </Text>
               </View>
             ))}
-          </View>
+          </ScrollView>
         ) : null}
       </View>
     </View>
@@ -241,12 +247,18 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: GinitTheme.colors.textSub,
   },
-  chipWrap: {
+  chipScroll: {
+    flexGrow: 0,
+    marginHorizontal: -4,
+  },
+  chipScrollContent: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 6,
+    paddingHorizontal: 4,
   },
   chip: {
+    flexShrink: 0,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 6,

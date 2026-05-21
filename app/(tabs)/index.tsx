@@ -22,7 +22,6 @@ import {
 } from '@/components/feed/FeedMeetingListSettingsModal';
 import { InterestRegionModals } from '@/components/feed/InterestRegionModals';
 import { InAppAlarmsBellButton } from '@/components/in-app-alarms/InAppAlarmsBellButton';
-import { HomeNoticeBanner } from '@/components/notices/HomeNoticeBanner';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import {
   MeetingDetailStaticNoticeRow,
@@ -42,12 +41,17 @@ import { useFeedInterestRegionControls } from '@/src/hooks/use-feed-interest-reg
 import { useFeedMeetingReviewsForRegion } from '@/src/hooks/use-feed-meeting-reviews-for-region';
 import { FEED_INTEREST_REGION_SELECTION_CHANGED } from '@/src/lib/feed-interest-region-events';
 import { useShouldShowAds } from '@/src/hooks/use-should-show-ads';
+import { navigateFromNoticeLink } from '@/src/features/notices/notice-link-navigation';
 import { useActiveNoticesQuery } from '@/src/hooks/use-active-notices-query';
 import { useMeetingsFeedInfiniteQuery } from '@/src/hooks/use-meetings-feed-infinite-query';
 import { useMeetingsTableRealtimeDeferred } from '@/src/hooks/use-meetings-table-realtime-deferred';
 import { useMyMeetingsFeedSync } from '@/src/hooks/use-my-meetings-feed-sync';
 import { isAndroidTabHomeHardwareExitSuppressed } from '@/src/lib/android-tab-home-hardware-exit-suppress';
 import { normalizeParticipantId, normalizeUserId } from '@/src/lib/app-user-id';
+import {
+  buildMeetingDetailHref,
+  buildMeetingFlowHref,
+} from '@/src/lib/meeting-flow-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import type { Category } from '@/src/lib/categories';
 import {
@@ -852,6 +856,24 @@ export default function FeedScreen() {
   const homeTopNoticeSlides = useMemo((): MeetingDetailTopNoticeSlide[] => {
     void homeArrivalNoticeUiTick;
     const slides: MeetingDetailTopNoticeSlide[] = [];
+    for (const item of homeBannerNotices) {
+      const noticeId = item.id.trim();
+      if (!noticeId) continue;
+      const title = item.isImageOnly ? item.title.trim() || '이미지 공지' : item.title.trim();
+      if (!title) continue;
+      slides.push({
+        key: `home-banner-notice-${noticeId}`,
+        element: (
+          <GinitPressable
+            onPress={() => navigateFromNoticeLink(router, { noticeId, linkUrl: item.linkUrl })}
+            accessibilityRole="button"
+            accessibilityLabel={`공지 ${title}`}
+            style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
+            <MeetingDetailStaticNoticeRow text={title} slideTrackFullBleed />
+          </GinitPressable>
+        ),
+      });
+    }
     const now = Date.now();
     for (const m of homeNoticeOrderedMeetings) {
       const id = m.id.trim();
@@ -865,7 +887,9 @@ export default function FeedScreen() {
               slideTrackFullBleed
               quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
               ctaSuffix="후기 남기기"
-              onPress={() => router.push(`/meeting-review/${encodeURIComponent(id)}`)}
+              onPress={() =>
+                router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: id }, '/(tabs)'))
+              }
             />
           ),
         });
@@ -880,7 +904,9 @@ export default function FeedScreen() {
               slideTrackFullBleed
               quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
               ctaSuffix="정산하기"
-              onPress={() => router.push(`/settlement/${encodeURIComponent(id)}`)}
+              onPress={() =>
+                router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: id }, '/(tabs)'))
+              }
             />
           ),
         });
@@ -895,7 +921,9 @@ export default function FeedScreen() {
               slideTrackFullBleed
               quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(m, categories)}
               ctaSuffix="함께 정산하기"
-              onPress={() => router.push(`/settlement/${encodeURIComponent(id)}`)}
+              onPress={() =>
+                router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: id }, '/(tabs)'))
+              }
             />
           ),
         });
@@ -927,7 +955,7 @@ export default function FeedScreen() {
           key: `schedule-${id}`,
           element: (
             <GinitPressable
-              onPress={() => router.push(`/meeting/${encodeURIComponent(id)}`)}
+              onPress={() => router.push(buildMeetingDetailHref(id, '/(tabs)'))}
               accessibilityRole="link"
               accessibilityLabel={scheduleA11y.trim() || '모임 상세'}
               style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
@@ -954,7 +982,7 @@ export default function FeedScreen() {
           key: `unconfirmed-auto-cancel-${id}`,
           element: (
             <GinitPressable
-              onPress={() => router.push(`/meeting/${encodeURIComponent(id)}`)}
+              onPress={() => router.push(buildMeetingDetailHref(id, '/(tabs)'))}
               accessibilityRole="link"
               accessibilityLabel={unconfA11y.trim() || '모임 상세'}
               style={({ pressed }) => [pressed && { opacity: 0.88 }]}>
@@ -972,6 +1000,7 @@ export default function FeedScreen() {
     }
     return slides;
   }, [
+    homeBannerNotices,
     homeNoticeOrderedMeetings,
     settlementNoticeIdSet,
     settlementCollabNoticeIdSet,
@@ -1076,18 +1105,18 @@ export default function FeedScreen() {
       const mid = row.meetingId.trim();
       InteractionManager.runAfterInteractions(() => {
         if (row.kind === 'settlement' || row.kind === 'settlement_collab') {
-          router.push(`/settlement/${encodeURIComponent(mid)}`);
+          router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: mid }, '/(tabs)'));
           return;
         }
         if (row.kind === 'meeting_review') {
-          router.push(`/meeting-review/${encodeURIComponent(mid)}`);
+          router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: mid }, '/(tabs)'));
           return;
         }
         if (row.kind === 'arrival') {
           router.push(`/arrival-verify/${encodeURIComponent(mid)}`);
           return;
         }
-        router.push(`/meeting/${encodeURIComponent(mid)}`);
+        router.push(buildMeetingDetailHref(mid, '/(tabs)'));
       });
     },
     [router],
@@ -1343,11 +1372,11 @@ export default function FeedScreen() {
             return;
           }
           if (cancelled) return;
-          router.push(`/meeting/${m.id}`);
+          router.push(buildMeetingDetailHref(m.id, '/(tabs)'));
         } catch {
           // 네트워크 실패 등으로 프로필을 못 읽어도, "미인증"으로 단정해 막지 않습니다.
           if (cancelled) return;
-          router.push(`/meeting/${m.id}`);
+          router.push(buildMeetingDetailHref(m.id, '/(tabs)'));
         } finally {
           clearTimeout(tRelease);
           lockRelease();
@@ -1364,7 +1393,7 @@ export default function FeedScreen() {
 
   const onPressFeedReview = useCallback(
     (meetingId: string) => {
-      router.push(`/meeting-review/${encodeURIComponent(meetingId)}`);
+      router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId }, '/(tabs)'));
     },
     [router],
   );
@@ -1623,7 +1652,6 @@ export default function FeedScreen() {
       {homeTopNoticeSlides.length > 0 ? (
         <MeetingDetailTopNoticesPager slides={homeTopNoticeSlides} hideTopTrackDivider />
       ) : null}
-      <HomeNoticeBanner items={homeBannerNotices} />
     </View>
   );
 

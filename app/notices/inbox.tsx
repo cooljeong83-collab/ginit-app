@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 
 import { NoticeInboxListRow } from '@/components/notices/NoticeInboxListRow';
+import { NoticeInboxListSeparator } from '@/components/notices/NoticeInboxListSeparator';
 import { SupportScreenChrome } from '@/components/support/SupportScreenChrome';
 import { supportScreenStyles as styles } from '@/components/support/supportScreenStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -52,12 +53,12 @@ export default function NoticeInboxScreen() {
 
   useEffect(() => {
     if (!query.isError) return;
-    const msg = query.error instanceof Error ? query.error.message : '알림함을 불러오지 못했어요.';
+    const msg = query.error instanceof Error ? query.error.message : '공지를 불러오지 못했어요.';
     presentAppDialogAlert({ title: '불러오기 실패', body: msg });
   }, [query.isError, query.error]);
 
   return (
-    <SupportScreenChrome title="알림함" onBack={handleHardwareBack}>
+    <SupportScreenChrome title="공지사항" onBack={handleHardwareBack}>
       {query.isLoading && items.length === 0 ? (
         <View style={styles.centerLoad}>
           <ActivityIndicator color={GinitTheme.colors.primary} />
@@ -66,16 +67,31 @@ export default function NoticeInboxScreen() {
         <FlatList
           data={items}
           keyExtractor={(it) => it.inboxId}
+          style={{ flex: 1 }}
           contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={NoticeInboxListSeparator}
           refreshControl={
-            <RefreshControl refreshing={query.isRefetching} onRefresh={onRefresh} tintColor={GinitTheme.colors.primary} />
+            <RefreshControl
+              refreshing={query.isRefetching}
+              onRefresh={onRefresh}
+              tintColor={GinitTheme.colors.primary}
+              colors={[GinitTheme.colors.primary]}
+            />
           }
           onEndReached={onEndReached}
           onEndReachedThreshold={0.35}
+          showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             !query.isLoading ? (
               <View style={styles.emptyBox}>
-                <Text style={styles.emptyText}>받은 공지 알림이 없어요.</Text>
+                <Text style={styles.emptyText}>등록된 공지가 없어요.</Text>
+              </View>
+            ) : null
+          }
+          ListFooterComponent={
+            query.isFetchingNextPage ? (
+              <View style={styles.centerLoad}>
+                <ActivityIndicator color={GinitTheme.colors.primary} />
               </View>
             ) : null
           }

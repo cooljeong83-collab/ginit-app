@@ -52,6 +52,10 @@ import {
 } from '@/src/lib/meeting-chat-list-rows';
 import { saveRemoteImageUrlToLibrary, shareRemoteImageUrl } from '@/src/lib/chat-image-actions';
 import { setCurrentChatRoomId } from '@/src/lib/current-chat-room';
+import {
+  buildMeetingFlowHref,
+  meetingChatReturnTo,
+} from '@/src/lib/meeting-flow-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { consumePendingDirectSharePayload, peekPendingDirectSharePayload } from '@/src/lib/direct-share-store';
 import { ginitNotifyDbg } from '@/src/lib/ginit-notify-debug';
@@ -176,6 +180,10 @@ export default function MeetingChatRoomScreen() {
     : typeof params.meetingId === 'string'
       ? params.meetingId.trim()
       : '';
+  const chatFlowReturnTo = useMemo(
+    () => (meetingId ? meetingChatReturnTo(meetingId) : '/(tabs)/chat'),
+    [meetingId],
+  );
   const { userId } = useUserSession();
   const { version: appPoliciesVersion } = useAppPolicies();
   const { categories: categoriesRaw } = useMeetingCategories();
@@ -1269,7 +1277,9 @@ export default function MeetingChatRoomScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={noticeTitleLeft}
             ctaSuffix="후기 남기기"
-            onPress={() => router.push(`/meeting-review/${encodeURIComponent(mid)}`)}
+            onPress={() =>
+              router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: mid }, chatFlowReturnTo))
+            }
           />
         ),
       });
@@ -1284,7 +1294,9 @@ export default function MeetingChatRoomScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={noticeTitleLeft}
             ctaSuffix="정산하기"
-            onPress={() => router.push(`/settlement/${encodeURIComponent(mid)}`)}
+            onPress={() =>
+              router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: mid }, chatFlowReturnTo))
+            }
           />
         ),
       });
@@ -1299,7 +1311,9 @@ export default function MeetingChatRoomScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={noticeTitleLeft}
             ctaSuffix="함께 정산하기"
-            onPress={() => router.push(`/settlement/${encodeURIComponent(mid)}`)}
+            onPress={() =>
+              router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: mid }, chatFlowReturnTo))
+            }
           />
         ),
       });
@@ -1388,6 +1402,7 @@ export default function MeetingChatRoomScreen() {
     router,
     goMeetingDetail,
     categories,
+    chatFlowReturnTo,
   ]);
 
   if (!meetingId) {

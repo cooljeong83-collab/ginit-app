@@ -72,6 +72,11 @@ import { runMeetingsListIncrementalReconcile } from '@/src/lib/meetings-feed-inc
 import { insertMeetingPlaceReviewNotifications } from '@/src/lib/meeting-place-review-notifications';
 import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import { dispatchRemotePushToRecipientsWithApproxDelivered } from '@/src/lib/remote-push-hub';
+import {
+  buildMeetingFlowHref,
+  meetingDetailReturnTo,
+  readReturnToFromParams,
+} from '@/src/lib/meeting-flow-navigation';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import {
   computeReceiptBasedSettlementNet,
@@ -477,12 +482,16 @@ export default function SettlementMeetingScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const { userId, authProfile } = useUserSession();
   const { categories } = useMeetingCategories();
-  const params = useLocalSearchParams<{ meetingId: string | string[] }>();
+  const params = useLocalSearchParams<{ meetingId: string | string[]; returnTo?: string | string[] }>();
   const meetingId = Array.isArray(params.meetingId)
     ? (params.meetingId[0] ?? '').trim()
     : typeof params.meetingId === 'string'
       ? params.meetingId.trim()
       : '';
+  const flowReturnTo = useMemo(
+    () => readReturnToFromParams(params, meetingId ? meetingDetailReturnTo(meetingId) : '/(tabs)'),
+    [params, meetingId],
+  );
 
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1491,7 +1500,9 @@ export default function SettlementMeetingScreen() {
       const settledMeeting = fresh ?? meeting;
       const navigateAfterSettlementComplete = () => {
         if (isMeetingPlaceReviewEligible(settledMeeting, userId)) {
-          router.push(`/meeting-review/${encodeURIComponent(meetingId)}`);
+          router.replace(
+            buildMeetingFlowHref({ kind: 'meeting-review', meetingId }, flowReturnTo),
+          );
         } else {
           router.back();
         }
@@ -1531,6 +1542,7 @@ export default function SettlementMeetingScreen() {
     receiptNetDisplayMap,
     router,
     queryClient,
+    flowReturnTo,
   ]);
 
   const onShareSheet = useCallback(async () => {
@@ -2638,7 +2650,9 @@ export default function SettlementMeetingScreen() {
                 <Text style={styles.reviewPromptTitle}>이번 모임 장소는 어땠나요?</Text>
                 <Text style={styles.reviewPromptSub}>한 줄 평가로 추억을 남겨 보세요</Text>
                 <GinitPressable
-                  onPress={() => router.push(`/meeting-review/${encodeURIComponent(meetingId)}`)}
+                  onPress={() =>
+                    router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId }, flowReturnTo))
+                  }
                   style={({ pressed }) => [styles.primaryBtn, styles.reviewPromptBtn, pressed && { opacity: 0.88 }]}>
                   <Text style={styles.primaryBtnText}>후기 남기기</Text>
                 </GinitPressable>

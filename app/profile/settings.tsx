@@ -820,27 +820,16 @@ export default function ProfileAppSettingsScreen() {
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
               accessibilityLabel={
-                noticeInboxUnread > 0 ? `알림함, 읽지 않은 공지 ${noticeInboxUnread}건` : '알림함'
+                noticeInboxUnread > 0
+                  ? `공지사항, 읽지 않은 공지 ${noticeInboxUnread}건`
+                  : '공지사항'
               }>
-              <SettingsRowLeadIcon name="notifications-outline" />
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>알림함</Text>
-                <Text style={styles.rowSub}>운영 공지·이벤트 알림을 모아봐요.</Text>
-              </View>
-              {noticeInboxUnread > 0 ? <View style={styles.noticeInboxUnreadDot} /> : null}
-              <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
-            </GinitPressable>
-            <RowSep />
-            <GinitPressable
-              onPress={() => router.push('/support/announcements')}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="공지사항">
               <SettingsRowLeadIcon name="megaphone-outline" />
               <View style={styles.rowText}>
                 <Text style={styles.rowLabel}>공지사항</Text>
                 <Text style={styles.rowSub}>서비스 소식과 업데이트를 확인해요.</Text>
               </View>
+              {noticeInboxUnread > 0 ? <View style={styles.noticeInboxUnreadDot} /> : null}
               <GinitSymbolicIcon name="chevron-forward" size={18} color={GinitTheme.colors.textMuted} />
             </GinitPressable>
             <RowSep />

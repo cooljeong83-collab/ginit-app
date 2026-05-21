@@ -1,6 +1,14 @@
 import { Image } from 'expo-image';
-import { useCallback, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image as RNImage,
+  Modal,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { GinitPressable } from '@/components/ui/GinitPressable';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
@@ -17,70 +25,217 @@ type Props = {
   onSnoozeToday: () => void;
 };
 
+type ImageLayout = { width: number; height: number };
+
+/** 카드(팝업) 안에서 비율 유지하며 가능한 한 크게 맞춤 — 상한만 적용, 작은 이미지는 확대 */
+function fitImageLayout(iw: number, ih: number, maxW: number, maxH: number): ImageLayout {
+  if (iw <= 0 || ih <= 0) return { width: maxW, height: Math.round(maxW * 0.6) };
+  const scale = Math.min(maxW / iw, maxH / ih);
+  return {
+    width: Math.max(1, Math.round(iw * scale)),
+    height: Math.max(1, Math.round(ih * scale)),
+  };
+}
+
 export function NoticePopupModal({ notice, visible, onClose, onConfirm, onSnoozeToday }: Props) {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [imageFailed, setImageFailed] = useState(false);
-  const showImage = Boolean(notice.imageUrl?.trim()) && !imageFailed;
+  const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
+  const [imageLayoutLoading, setImageLayoutLoading] = useState(false);
+
+  const title = notice.title.trim();
+  const body = notice.content.trim();
+  const hasTitle = title.length > 0;
+  const hasBody = body.length > 0;
+  const hasLink = Boolean(notice.linkUrl?.trim());
+  const imageUri = notice.imageUrl?.trim() ?? '';
+  const showImage = imageUri.length > 0 && !imageFailed;
+  const imageOnly = notice.isImageOnly && showImage;
+
+  const cardMaxWidth = imageOnly ? windowWidth - 48 : Math.min(windowWidth - 48, 400);
+  const imageMaxHeight = Math.max(160, Math.round(windowHeight * (imageOnly ? 0.78 : 0.68)));
+
+  useEffect(() => {
+    setImageFailed(false);
+    setImageLayout(null);
+    setImageLayoutLoading(false);
+    if (!imageUri) return;
+
+    let alive = true;
+    setImageLayoutLoading(true);
+    RNImage.getSize(
+      imageUri,
+      (iw, ih) => {
+        if (!alive) return;
+        setImageLayout(fitImageLayout(iw, ih, cardMaxWidth, imageMaxHeight));
+        setImageLayoutLoading(false);
+      },
+      () => {
+        if (!alive) return;
+        setImageFailed(true);
+        setImageLayout(null);
+        setImageLayoutLoading(false);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [notice.id, imageUri, cardMaxWidth, imageMaxHeight]);
+
+  const resolvedImageLayout = useMemo((): ImageLayout | null => {
+    if (!showImage) return null;
+    if (imageLayout) return imageLayout;
+    if (imageLayoutLoading) return { width: cardMaxWidth, height: Math.round(cardMaxWidth * 0.5) };
+    return { width: cardMaxWidth, height: Math.round(cardMaxWidth * 0.5) };
+  }, [showImage, imageLayout, imageLayoutLoading, cardMaxWidth]);
 
   const onCta = useCallback(() => {
     onConfirm();
   }, [onConfirm]);
 
+  const onPressImage = useCallback(() => {
+    if (hasLink) onConfirm();
+  }, [hasLink, onConfirm]);
+
+  const footerRow = (
+    <View style={[styles.footerRow, imageOnly && styles.footerRowImageOnly]}>
+      <GinitPressable
+        onPress={onClose}
+        style={({ pressed }) => [styles.footerTextBtn, pressed && styles.btnPressed]}
+        accessibilityRole="button"
+        accessibilityLabel="닫기"
+        hitSlop={8}>
+        <Text style={styles.footerTextClose}>닫기</Text>
+      </GinitPressable>
+
+      {hasLink && !imageOnly ? (
+        <GinitPressable
+          onPress={onCta}
+          style={({ pressed }) => [styles.footerTextBtn, pressed && styles.btnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="자세히 보기"
+          hitSlop={8}>
+          <Text style={styles.footerTextLink}>자세히 보기</Text>
+        </GinitPressable>
+      ) : (
+        <View style={styles.footerSpacer} />
+      )}
+
+      <GinitPressable
+        onPress={onSnoozeToday}
+        style={({ pressed }) => [styles.footerTextBtn, pressed && styles.btnPressed]}
+        accessibilityRole="button"
+        accessibilityLabel="오늘 하루 안 보기"
+        hitSlop={8}>
+        <Text style={styles.footerTextSnooze}>오늘 하루 안 보기</Text>
+      </GinitPressable>
+    </View>
+  );
+
+  const imageElement =
+    showImage && resolvedImageLayout ? (
+      <Image
+        source={{ uri: imageUri }}
+        style={styles.imageFill}
+        contentFit="cover"
+        onError={() => setImageFailed(true)}
+      />
+    ) : null;
+
+  const mixedImageBlock =
+    showImage && resolvedImageLayout ? (
+      hasLink ? (
+        <GinitPressable
+          onPress={onPressImage}
+          accessibilityRole="button"
+          accessibilityLabel="공지 이미지, 탭하면 자세히 볼 수 있어요"
+          style={({ pressed }) => [
+            styles.mixedImageFrame,
+            { width: resolvedImageLayout.width, height: resolvedImageLayout.height },
+            pressed && styles.imagePressed,
+          ]}>
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.imageFill}
+            contentFit="contain"
+            onError={() => setImageFailed(true)}
+          />
+        </GinitPressable>
+      ) : (
+        <View
+          style={[
+            styles.mixedImageFrame,
+            { width: resolvedImageLayout.width, height: resolvedImageLayout.height },
+          ]}>
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.imageFill}
+            contentFit="contain"
+            onError={() => setImageFailed(true)}
+          />
+        </View>
+      )
+    ) : !showImage && !hasText ? (
+      <View style={[styles.heroFallback, { width: cardMaxWidth }]}>
+        <GinitSymbolicIcon name="megaphone-outline" size={40} color={ACCENT} />
+      </View>
+    ) : null;
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <GinitPressable
-            onPress={onClose}
-            style={styles.closeBtn}
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
-            hitSlop={12}>
-            <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.textMuted} />
-          </GinitPressable>
-          {showImage ? (
-            <Image
-              source={{ uri: notice.imageUrl! }}
-              style={styles.hero}
-              contentFit="cover"
-              onError={() => setImageFailed(true)}
-            />
-          ) : (
-            <View style={styles.heroFallback}>
-              <GinitSymbolicIcon name="megaphone-outline" size={40} color={ACCENT} />
+        {imageOnly && resolvedImageLayout ? (
+          <View
+            style={[
+              styles.cardImageOnly,
+              { width: resolvedImageLayout.width, height: resolvedImageLayout.height },
+            ]}>
+            <View style={styles.imageOnlyFrame}>
+              {imageLayoutLoading ? (
+                <View style={styles.imageLoadingFill}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              ) : hasLink ? (
+                <GinitPressable
+                  onPress={onPressImage}
+                  accessibilityRole="button"
+                  accessibilityLabel="공지 이미지, 탭하면 자세히 볼 수 있어요"
+                  style={({ pressed }) => [styles.imageOnlyPressable, pressed && styles.imagePressed]}>
+                  {imageElement}
+                </GinitPressable>
+              ) : (
+                imageElement
+              )}
             </View>
-          )}
-          <Text style={styles.title}>{notice.title}</Text>
-          {notice.content.trim() ? (
-            <Text style={styles.body} numberOfLines={4}>
-              {notice.content}
-            </Text>
-          ) : null}
-          <View style={styles.actions}>
-            {notice.linkUrl ? (
-              <GinitPressable
-                onPress={onCta}
-                style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="자세히 보기">
-                <Text style={styles.primaryBtnText}>자세히 보기</Text>
-              </GinitPressable>
-            ) : null}
-            <GinitPressable
-              onPress={onClose}
-              style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="닫기">
-              <Text style={styles.secondaryBtnText}>닫기</Text>
-            </GinitPressable>
+            <View style={styles.footerOverlay}>{footerRow}</View>
           </View>
-          <GinitPressable
-            onPress={onSnoozeToday}
-            style={styles.snoozeBtn}
-            accessibilityRole="button"
-            accessibilityLabel="오늘 하루 안 보기">
-            <Text style={styles.snoozeText}>오늘 하루 안 보기</Text>
-          </GinitPressable>
-        </View>
+        ) : (
+          <View style={[styles.card, { width: cardMaxWidth, maxWidth: cardMaxWidth }]}>
+            {imageLayoutLoading && showImage ? (
+              <View
+                style={[
+                  styles.imageLoading,
+                  resolvedImageLayout
+                    ? { width: resolvedImageLayout.width, height: resolvedImageLayout.height }
+                    : null,
+                  styles.imageAlignCenter,
+                ]}>
+                <ActivityIndicator color={ACCENT} />
+              </View>
+            ) : mixedImageBlock ? (
+              <View style={styles.imageAlignCenter}>{mixedImageBlock}</View>
+            ) : null}
+
+            {hasTitle ? <Text style={styles.title}>{title}</Text> : null}
+            {hasBody ? (
+              <Text style={styles.body} numberOfLines={6}>
+                {body}
+              </Text>
+            ) : null}
+
+            {footerRow}
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -95,29 +250,52 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   card: {
-    width: '100%',
-    maxWidth: 340,
     backgroundColor: '#fff',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: ACCENT,
     overflow: 'hidden',
-    paddingBottom: 16,
+    paddingBottom: 4,
   },
-  closeBtn: {
+  cardImageOnly: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  imageOnlyFrame: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+  },
+  footerOverlay: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    zIndex: 2,
-    padding: 4,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
   },
-  hero: {
+  imageOnlyPressable: {
     width: '100%',
-    height: 200,
+    height: '100%',
+  },
+  imageFill: {
+    width: '100%',
+    height: '100%',
+  },
+  imageLoadingFill: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+  },
+  imageLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: GinitTheme.colors.bgAlt,
   },
+  imagePressed: {
+    opacity: 0.92,
+  },
   heroFallback: {
-    width: '100%',
     height: 160,
     alignItems: 'center',
     justifyContent: 'center',
@@ -130,6 +308,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
   },
+  imageAlignCenter: {
+    alignSelf: 'center',
+    width: '100%',
+    alignItems: 'center',
+  },
+  mixedImageFrame: {
+    overflow: 'hidden',
+    backgroundColor: GinitTheme.colors.bgAlt,
+  },
   body: {
     fontSize: 14,
     fontWeight: '500',
@@ -138,46 +325,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
   },
-  actions: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 8,
-  },
-  primaryBtn: {
-    backgroundColor: ACCENT,
-    borderRadius: 12,
-    paddingVertical: 12,
+  footerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    gap: 4,
   },
-  primaryBtnText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  secondaryBtn: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: GinitTheme.colors.border,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  secondaryBtnText: {
-    color: GinitTheme.colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  btnPressed: {
-    opacity: 0.9,
-  },
-  snoozeBtn: {
-    marginTop: 8,
-    alignSelf: 'center',
-    paddingVertical: 8,
+  footerRowImageOnly: {
+    paddingTop: 8,
+    paddingBottom: 10,
     paddingHorizontal: 12,
   },
-  snoozeText: {
-    fontSize: 13,
+  footerTextBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    flexShrink: 1,
+  },
+  footerSpacer: {
+    flex: 1,
+    minWidth: 8,
+  },
+  footerTextClose: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GinitTheme.colors.text,
+  },
+  footerTextLink: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: ACCENT,
+  },
+  footerTextSnooze: {
+    fontSize: 14,
     fontWeight: '600',
     color: GinitTheme.colors.textMuted,
+    textAlign: 'right',
+  },
+  btnPressed: {
+    opacity: 0.88,
   },
 });

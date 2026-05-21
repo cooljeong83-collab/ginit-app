@@ -444,7 +444,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
 
       {showMeetingFab ? (
         <View
-          pointerEvents="auto"
+          pointerEvents="box-none"
           style={{
             position: 'absolute',
             right: 0,

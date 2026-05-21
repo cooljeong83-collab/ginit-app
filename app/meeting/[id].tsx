@@ -88,6 +88,11 @@ import {
   isHostScheduleUnconfirmHiddenByStartProximity,
   meetingScheduleStartMs,
 } from '@/src/lib/meeting-schedule-times';
+import {
+  buildMeetingFlowHref,
+  meetingDetailReturnTo,
+  readReturnToFromParams,
+} from '@/src/lib/meeting-flow-navigation';
 import { fetchMeetingPlaceReviewSummary } from '@/src/lib/meeting-review/meeting-review-api';
 import { isMeetingPlaceReviewEligible } from '@/src/lib/meeting-place-review-notice';
 import {
@@ -468,8 +473,15 @@ export default function MeetingDetailScreen() {
   const { version: appPoliciesVersion } = useAppPolicies();
   const { syncMeetingAckFromMeeting } = useInAppAlarms();
   const isFocused = useIsFocused();
-  const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
+  const { id: rawId, returnTo: rawReturnTo } = useLocalSearchParams<{
+    id: string | string[];
+    returnTo?: string | string[];
+  }>();
   const id = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] : '';
+  const flowReturnTo = useMemo(
+    () => readReturnToFromParams({ returnTo: rawReturnTo }, id ? meetingDetailReturnTo(id) : '/(tabs)'),
+    [rawReturnTo, id],
+  );
   const queryClient = useQueryClient();
   const navigation = useNavigation();
 
@@ -2065,7 +2077,7 @@ export default function MeetingDetailScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
             ctaSuffix="후기 남기기"
-            onPress={() => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`)}
+            onPress={() => router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: meeting.id }, flowReturnTo))}
           />
         ),
       });
@@ -2080,7 +2092,7 @@ export default function MeetingDetailScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
             ctaSuffix="정산하기"
-            onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
+            onPress={() => router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: meeting.id }, flowReturnTo))}
           />
         ),
       });
@@ -2095,7 +2107,7 @@ export default function MeetingDetailScreen() {
             slideTrackFullBleed
             quotedMeetingTitle={buildMeetingTopNoticeTitleLeft(meeting, categories)}
             ctaSuffix="함께 정산하기"
-            onPress={() => router.push(`/settlement/${encodeURIComponent(meeting.id)}`)}
+            onPress={() => router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: meeting.id }, flowReturnTo))}
           />
         ),
       });
@@ -2699,7 +2711,7 @@ export default function MeetingDetailScreen() {
         labelCompact: '정산',
         a11yLabel: '정산',
         variant: 'purple',
-        onPress: () => router.push(`/settlement/${encodeURIComponent(meeting.id)}`),
+        onPress: () => router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: meeting.id }, flowReturnTo)),
       });
     }
     if (showMeetingReviewWriteCta) {
@@ -2710,7 +2722,7 @@ export default function MeetingDetailScreen() {
         labelCompact: '후기',
         a11yLabel: '후기 남기기',
         variant: 'purple',
-        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
+        onPress: () => router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: meeting.id }, flowReturnTo)),
       });
     }
     if (showMeetingReviewViewCta) {
@@ -2721,7 +2733,7 @@ export default function MeetingDetailScreen() {
         labelCompact: '후기',
         a11yLabel: '후기 결과 보기',
         variant: 'purple',
-        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
+        onPress: () => router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: meeting.id }, flowReturnTo)),
       });
     }
     return actions;
@@ -2750,6 +2762,7 @@ export default function MeetingDetailScreen() {
     handleUnconfirmMeetingSchedule,
     handleConfirmSchedule,
     openArrivalVerifyMap,
+    flowReturnTo,
   ]);
 
   const participantSettlementLabelFull = showSettlementParticipantBanner ? '함께 정산' : '정산';
@@ -2840,7 +2853,7 @@ export default function MeetingDetailScreen() {
         labelCompact: '정산',
         a11yLabel: participantSettlementLabelFull,
         variant: 'purple',
-        onPress: () => router.push(`/settlement/${encodeURIComponent(meeting.id)}`),
+        onPress: () => router.push(buildMeetingFlowHref({ kind: 'settlement', meetingId: meeting.id }, flowReturnTo)),
       });
     }
     if (showMeetingReviewWriteCta) {
@@ -2851,7 +2864,7 @@ export default function MeetingDetailScreen() {
         labelCompact: '후기',
         a11yLabel: '후기 남기기',
         variant: 'purple',
-        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
+        onPress: () => router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: meeting.id }, flowReturnTo)),
       });
     }
     if (showMeetingReviewViewCta) {
@@ -2862,7 +2875,7 @@ export default function MeetingDetailScreen() {
         labelCompact: '후기',
         a11yLabel: '후기 결과 보기',
         variant: 'purple',
-        onPress: () => router.push(`/meeting-review/${encodeURIComponent(meeting.id)}`),
+        onPress: () => router.push(buildMeetingFlowHref({ kind: 'meeting-review', meetingId: meeting.id }, flowReturnTo)),
       });
     }
     return actions;
@@ -2892,6 +2905,7 @@ export default function MeetingDetailScreen() {
     onPressSaveVotes,
     handleLeaveParticipant,
     openArrivalVerifyMap,
+    flowReturnTo,
   ]);
 
   const cancelJoinBottomActions = useMemo((): MeetingDetailBottomAction[] => {

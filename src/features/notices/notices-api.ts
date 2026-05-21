@@ -11,6 +11,7 @@ export type ActiveNoticeItem = {
   imageUrl: string | null;
   isHomeBanner: boolean;
   isPopup: boolean;
+  isImageOnly: boolean;
   startAt: string | null;
   endAt: string | null;
   targetScope: string;
@@ -31,6 +32,7 @@ export type NoticeInboxListItem = {
   isHomeBanner: boolean;
   isPopup: boolean;
   isPushAlarm: boolean;
+  isImageOnly: boolean;
   startAt: string | null;
   endAt: string | null;
   targetScope: string;
@@ -46,6 +48,7 @@ export type NoticeDetail = {
   isHomeBanner: boolean;
   isPopup: boolean;
   isPushAlarm: boolean;
+  isImageOnly: boolean;
   startAt: string | null;
   endAt: string | null;
   targetScope: string;
@@ -78,7 +81,9 @@ function parseActiveNotice(raw: unknown): ActiveNoticeItem | null {
   const title = typeof o.title === 'string' ? o.title.trim() : '';
   const content = typeof o.content === 'string' ? o.content : '';
   const createdAt = typeof o.created_at === 'string' ? o.created_at : '';
-  if (!id || !title) return null;
+  const isImageOnly = o.is_image_only === true;
+  if (!id) return null;
+  if (!isImageOnly && !title) return null;
   return {
     id,
     title,
@@ -87,6 +92,7 @@ function parseActiveNotice(raw: unknown): ActiveNoticeItem | null {
     imageUrl: typeof o.image_url === 'string' && o.image_url.trim() ? o.image_url.trim() : null,
     isHomeBanner: o.is_home_banner === true,
     isPopup: o.is_popup === true,
+    isImageOnly,
     startAt: typeof o.start_at === 'string' ? o.start_at : null,
     endAt: typeof o.end_at === 'string' ? o.end_at : null,
     targetScope: typeof o.target_scope === 'string' ? o.target_scope : 'all',
@@ -103,7 +109,9 @@ function parseInboxItem(raw: unknown): NoticeInboxListItem | null {
   const noticeId = typeof o.notice_id === 'string' ? o.notice_id.trim() : '';
   const title = typeof o.title === 'string' ? o.title.trim() : '';
   const inboxCreatedAt = typeof o.inbox_created_at === 'string' ? o.inbox_created_at : '';
-  if (!inboxId || !noticeId || !title || !inboxCreatedAt) return null;
+  const isImageOnly = o.is_image_only === true;
+  if (!inboxId || !noticeId || !inboxCreatedAt) return null;
+  if (!isImageOnly && !title) return null;
   return {
     inboxId,
     noticeId,
@@ -116,6 +124,7 @@ function parseInboxItem(raw: unknown): NoticeInboxListItem | null {
     isHomeBanner: o.is_home_banner === true,
     isPopup: o.is_popup === true,
     isPushAlarm: o.is_push_alarm === true,
+    isImageOnly,
     startAt: typeof o.start_at === 'string' ? o.start_at : null,
     endAt: typeof o.end_at === 'string' ? o.end_at : null,
     targetScope: typeof o.target_scope === 'string' ? o.target_scope : 'all',
@@ -130,7 +139,9 @@ function parseDetail(raw: unknown, fallbackId: string): NoticeDetail | null {
   const title = typeof o.title === 'string' ? o.title.trim() : '';
   const content = typeof o.content === 'string' ? o.content : '';
   const createdAt = typeof o.created_at === 'string' ? o.created_at : '';
-  if (!id || !title) return null;
+  const isImageOnly = o.is_image_only === true;
+  if (!id) return null;
+  if (!isImageOnly && !title) return null;
   return {
     id,
     title,
@@ -140,6 +151,7 @@ function parseDetail(raw: unknown, fallbackId: string): NoticeDetail | null {
     isHomeBanner: o.is_home_banner === true,
     isPopup: o.is_popup === true,
     isPushAlarm: o.is_push_alarm === true,
+    isImageOnly,
     startAt: typeof o.start_at === 'string' ? o.start_at : null,
     endAt: typeof o.end_at === 'string' ? o.end_at : null,
     targetScope: typeof o.target_scope === 'string' ? o.target_scope : 'all',
