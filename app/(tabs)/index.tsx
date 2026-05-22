@@ -86,20 +86,12 @@ import {
 import { MEETING_TAB_LIST_SCROLL_BOTTOM_EXTRA } from '@/components/create/meetingCreateFabShared';
 import { FeedNativeAdCard } from '@/components/ads/FeedNativeAdCard';
 import { GinitMatchInlineCard } from '@/components/promotions/GinitMatchInlineCard';
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
 import { FEED_NATIVE_AD_INTERVAL, FEED_NATIVE_AD_ROW_HEIGHT } from '@/src/constants/adsConfig';
 import { injectFeedNativeAdRows } from '@/src/lib/ads/inject-feed-native-ad-rows';
 import { injectFeedSponsoredMatchRow } from '@/src/lib/promotions/inject-feed-sponsored-match-row';
-import { buildPresetPlaceCandidateFromSponsoredPlace } from '@/src/lib/promotions/build-preset-from-sponsored-place';
 import { placeDetailPopupStateFromSponsoredPlace } from '@/src/lib/promotions/place-detail-popup-from-sponsored';
 import type { FeedSponsoredPlace } from '@/src/lib/promotions/place-promotion-types';
-import type { PlaceDetailPopupState } from '@/src/lib/places/place-detail-popup-state';
-import { setPendingPresetPlaceCandidate } from '@/src/lib/meeting-place-bridge';
-import { logPresetPlaceMeetingCreateIntent } from '@/src/lib/meeting-preset-place-create-attribution';
-import { generateUuidV4 } from '@/src/lib/generate-uuid-v4';
-import { gatePlaceAgainstRegisteredInterestRegions } from '@/src/lib/meeting-create-place-region';
-import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
-import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { useFeedSponsoredPlace } from '@/src/hooks/use-place-promotions';
 import {
   buildExploreFeedRows,
@@ -548,10 +540,7 @@ export default function FeedScreen() {
 
   const feedSponsoredPlaceQuery = useFeedSponsoredPlace(exploreActiveRegionNorm, feedLocationReady);
 
-  const [sponsoredPlaceForPopup, setSponsoredPlaceForPopup] = useState<FeedSponsoredPlace | null>(null);
-  const [sponsoredPlaceDetailPopup, setSponsoredPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(
-    null,
-  );
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
 
   const exploreFeedRows = useMemo(() => {
     const base = buildExploreFeedRows(exploreFeedMeetings, feedMeetingReviews.reviews);
@@ -1475,79 +1464,9 @@ export default function FeedScreen() {
   );
 
   const onPressSponsoredMatchCard = useCallback((place: FeedSponsoredPlace) => {
-    setSponsoredPlaceForPopup(place);
     const state = placeDetailPopupStateFromSponsoredPlace(place);
-    if (state) setSponsoredPlaceDetailPopup(state);
-  }, []);
-
-  const onCloseSponsoredPlacePopup = useCallback(() => {
-    setSponsoredPlaceDetailPopup(null);
-    setSponsoredPlaceForPopup(null);
-  }, []);
-
-  const onCreateMeetingAtSponsoredPlace = useCallback(() => {
-    void (async () => {
-      const place = sponsoredPlaceForPopup;
-      if (!place) return;
-      const pk = userId?.trim();
-      if (pk) {
-        try {
-          const p = await getUserProfile(pk);
-          if (!isMeetingServiceComplianceComplete(p, pk)) {
-            presentAppDialogAlert({
-              title: '인증 정보 등록',
-              body: '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.',
-              onPrimary: () => pushProfileOpenRegisterInfo(router),
-            });
-            return;
-          }
-        } catch {
-          /* 등록 시 재검증 */
-        }
-      }
-
-      const intentId = generateUuidV4();
-      const preset = buildPresetPlaceCandidateFromSponsoredPlace(place, intentId);
-      if (!preset) {
-        showTransientBottomMessage('이 장소의 위치 정보가 없어 모임을 만들 수 없어요.', 2600);
-        return;
-      }
-
-      const regions = await loadRegisteredFeedRegions();
-      const regionGate = gatePlaceAgainstRegisteredInterestRegions(
-        {
-          placeName: preset.placeName,
-          address: preset.address,
-          latitude: preset.latitude,
-          longitude: preset.longitude,
-        },
-        regions,
-      );
-      if (!regionGate.ok) {
-        presentAppDialogAlert({ title: regionGate.title, body: regionGate.message });
-        return;
-      }
-
-      if (pk) {
-        void logPresetPlaceMeetingCreateIntent({
-          intentId,
-          entrySource: 'store_promo',
-          analyticsPlaceId: preset.attribution.analyticsPlaceId,
-          entryContext: preset.attribution.entryContext,
-          creatorAppUserId: pk,
-        });
-      }
-
-      setPendingPresetPlaceCandidate(preset);
-      onCloseSponsoredPlacePopup();
-      const d = new Date();
-      const scheduleDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      router.push({
-        pathname: '/create/details',
-        params: { scheduleDate, scheduleTime: '15:00' },
-      });
-    })();
-  }, [onCloseSponsoredPlacePopup, router, sponsoredPlaceForPopup, userId]);
+    if (state) openPlaceDetailPopup(state);
+  }, [openPlaceDetailPopup]);
 
   const renderExploreFeedRow = useCallback(
     (row: HomeFeedRow) => {
@@ -2110,19 +2029,6 @@ export default function FeedScreen() {
           onChangeFilters={setDraftFeedSearch}
           onClose={closeFeedSearch}
           onApply={applyFeedSearch}
-        />
-
-        <PlaceDetailPopup
-          state={sponsoredPlaceDetailPopup}
-          onClose={onCloseSponsoredPlacePopup}
-          footerAction={
-            sponsoredPlaceForPopup
-              ? {
-                  label: '이 장소로 번개 모임 만들기',
-                  onPress: onCreateMeetingAtSponsoredPlace,
-                }
-              : null
-          }
         />
 
         <InterestRegionModals controls={interestRegion} safeAreaTop={safeInsets.top} />

@@ -28,6 +28,7 @@ import { LegalDocumentModalProvider } from '@/src/context/LegalDocumentModalCont
 import { MeetingCategoriesProvider } from '@/src/context/MeetingCategoriesContext';
 import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
 import { AppForegroundMeetingsRefreshHost } from '@/src/hooks/use-app-foreground-refresh';
+import { PlaceDetailPopupProvider } from '@/src/context/PlaceDetailPopupContext';
 import { ScreenTransitionProvider } from '@/src/context/ScreenTransitionContext';
 import { UserSessionProvider } from '@/src/context/UserSessionContext';
 import { ensureChatMessageFtsReady } from '@/src/watermelon/fts';
@@ -78,6 +79,7 @@ export default function RootLayout() {
               <MeetingCategoriesProvider>
               <AppForegroundMeetingsRefreshHost />
               <ScreenTransitionProvider>
+                <PlaceDetailPopupProvider>
                 <ShareShortcutsWatermelonBootstrap />
                 <InAppAlarmsProvider>
                   <DevMemoryDebug />
@@ -103,6 +105,7 @@ export default function RootLayout() {
                   <GamificationStatChangeHost />
                 </InAppAlarmsProvider>
                 <ScreenTransitionOverlay />
+                </PlaceDetailPopupProvider>
               </ScreenTransitionProvider>
               </MeetingCategoriesProvider>
             </UserSessionProvider>

@@ -1,5 +1,5 @@
+import { placeSearchRowHybridMergeKey } from '@/src/lib/places/place-key';
 import type { FeedSponsoredPlace } from '@/src/lib/promotions/place-promotion-types';
-import { stableNaverLocalSearchDedupeKey } from '@/src/lib/naver-local-place-search-text';
 import type { PlaceSearchRow } from '@/src/lib/place-search-row';
 
 export function sponsoredPlaceToSearchRow(place: FeedSponsoredPlace): PlaceSearchRow | null {
@@ -42,7 +42,7 @@ export function mergeSponsoredIntoPlaceSearchRows(args: {
   const seen = new Set<string>();
 
   const appendOnce = (row: PlaceSearchRow) => {
-    const key = stableNaverLocalSearchDedupeKey(row);
+    const key = placeSearchRowHybridMergeKey(row);
     if (seen.has(key)) return;
     seen.add(key);
     out.push(row);
@@ -62,8 +62,8 @@ export function mergeSponsoredIntoPlaceSearchRows(args: {
   };
 
   const appendOrMerge = (row: PlaceSearchRow) => {
-    const key = stableNaverLocalSearchDedupeKey(row);
-    const idx = out.findIndex((r) => stableNaverLocalSearchDedupeKey(r) === key);
+    const key = placeSearchRowHybridMergeKey(row);
+    const idx = out.findIndex((r) => placeSearchRowHybridMergeKey(r) === key);
     if (idx >= 0) {
       out[idx] = mergeRowFields(out[idx]!, row);
       return;
@@ -79,9 +79,9 @@ export function mergeSponsoredIntoPlaceSearchRows(args: {
   sponsoredRows.forEach(appendOrMerge);
 
   naverRows.forEach((row) => {
-    const key = stableNaverLocalSearchDedupeKey(row);
+    const key = placeSearchRowHybridMergeKey(row);
     if (seen.has(key)) {
-      const idx = out.findIndex((r) => stableNaverLocalSearchDedupeKey(r) === key);
+      const idx = out.findIndex((r) => placeSearchRowHybridMergeKey(r) === key);
       if (idx >= 0) out[idx] = mergeRowFields(out[idx]!, row);
       return;
     }

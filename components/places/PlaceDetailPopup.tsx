@@ -1,13 +1,12 @@
 import { useRef } from 'react';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
-import type { NaverPlaceWebViewModalFooterAction } from '@/components/NaverPlaceWebViewModal';
+import { usePlaceDetailCreateMeetingFooter } from '@/components/places/usePlaceDetailCreateMeetingFooter';
 import type { PlaceDetailPopupState } from '@/src/lib/places/place-detail-popup-state';
 
 export type PlaceDetailPopupProps = {
   state: PlaceDetailPopupState | null;
   onClose: () => void;
-  footerAction?: NaverPlaceWebViewModalFooterAction | null;
 };
 
 /**
@@ -15,14 +14,16 @@ export type PlaceDetailPopupProps = {
  * - 기본: 네이버·카카오 WebView
  * - 타이틀 우측 💜 평점
  * - 탭: 웹뷰 | 코멘트(지닛 후기)
+ * - 하단: `places` 등록 장소만 「이 장소로 모임 만들기」
  *
  * 화면별로 `NaverPlaceWebViewModal`을 직접 쓰지 말고 이 컴포넌트만 마운트합니다.
  */
-export function PlaceDetailPopup({ state, onClose, footerAction = null }: PlaceDetailPopupProps) {
+export function PlaceDetailPopup({ state, onClose }: PlaceDetailPopupProps) {
   /** 닫은 뒤에도 WebView 풀·세션 캐시 유지(동일 가게 재오픈 시 재로드 방지) */
   const retainedRef = useRef<PlaceDetailPopupState | null>(null);
   if (state) retainedRef.current = state;
   const retained = state ?? retainedRef.current;
+  const footerAction = usePlaceDetailCreateMeetingFooter(retained, onClose);
 
   return (
     <NaverPlaceWebViewModal

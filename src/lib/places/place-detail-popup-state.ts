@@ -16,12 +16,36 @@ import type { PlaceDetailSnapshot } from '@/src/lib/places/place-detail-types';
 import type { PlaceSearchRow } from '@/src/lib/naver-local-place-search-text';
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
 
+/** 마스터 미적재 시 모임 만들기 preset 좌표·메타 폴백 */
+export type PlaceDetailPopupPlaceSnapshotHint = {
+  latitude?: number | null;
+  longitude?: number | null;
+  category?: string | null;
+  preferredPhotoMediaUrl?: string | null;
+};
+
+export type PlaceDetailPopupStateOptions = {
+  /** 장소 후보 목록·선택 플로우 — 「이 장소로 모임 만들기」 CTA 숨김 */
+  suppressCreateMeetingFooter?: boolean;
+};
+
 /** 장소 상세 팝업 단일 상태 — `PlaceDetailPopup` 전용 */
 export type PlaceDetailPopupState = {
   url: string;
   title: string;
   placeReviewLookup: PlaceLookupInput;
+  placeSnapshotHint?: PlaceDetailPopupPlaceSnapshotHint;
+  suppressCreateMeetingFooter?: boolean;
 };
+
+function snapshotToPlaceSnapshotHint(snapshot: PlaceDetailSnapshot): PlaceDetailPopupPlaceSnapshotHint {
+  return {
+    latitude: snapshot.latitude,
+    longitude: snapshot.longitude,
+    category: snapshot.category,
+    preferredPhotoMediaUrl: snapshot.preferredPhotoMediaUrl,
+  };
+}
 
 export function snapshotToPlaceLookup(snapshot: PlaceDetailSnapshot): PlaceLookupInput {
   return {
@@ -64,30 +88,47 @@ export function placeDetailPopupStateFromSnapshot(
   snapshot: PlaceDetailSnapshot,
   url?: string,
   title?: string,
+  options?: PlaceDetailPopupStateOptions,
 ): PlaceDetailPopupState | null {
   const webUrl = url?.trim() || resolvePlaceDetailWebUrl(snapshot);
   if (!webUrl) return null;
-  return placeDetailPopupStateFromUrlAndLookup(
-    webUrl,
-    title ?? snapshot.placeName,
-    snapshotToPlaceLookup(snapshot),
-  );
+  return {
+    ...placeDetailPopupStateFromUrlAndLookup(
+      webUrl,
+      title ?? snapshot.placeName,
+      snapshotToPlaceLookup(snapshot),
+    ),
+    placeSnapshotHint: snapshotToPlaceSnapshotHint(snapshot),
+    ...(options?.suppressCreateMeetingFooter ? { suppressCreateMeetingFooter: true } : {}),
+  };
 }
 
 export function placeDetailPopupStateFromSearchRow(
   item: PlaceSearchRow,
   url: string,
   title: string,
+  options?: PlaceDetailPopupStateOptions,
 ): PlaceDetailPopupState | null {
-  return placeDetailPopupStateFromSnapshot(placeDetailSnapshotFromSearchRow(item), url, title);
+  return placeDetailPopupStateFromSnapshot(
+    placeDetailSnapshotFromSearchRow(item),
+    url,
+    title,
+    options,
+  );
 }
 
 export function placeDetailPopupStateFromCandidate(
   candidate: PlaceCandidate,
   url?: string,
   title?: string,
+  options?: PlaceDetailPopupStateOptions,
 ): PlaceDetailPopupState | null {
-  return placeDetailPopupStateFromSnapshot(placeDetailSnapshotFromCandidate(candidate), url, title);
+  return placeDetailPopupStateFromSnapshot(
+    placeDetailSnapshotFromCandidate(candidate),
+    url,
+    title,
+    options,
+  );
 }
 
 export function placeDetailPopupStateFromMeetingChip(
@@ -116,10 +157,12 @@ export function placeDetailPopupStateFromMeetingChip(
       address: chip.sub ?? meeting.address ?? '',
     }),
   );
-  return (
-    placeDetailPopupStateFromSnapshot(snap, url, title) ??
-    placeDetailPopupStateFromUrlAndLookup(url, title, snapshotToPlaceLookup(snap))
-  );
+  const fromSnap = placeDetailPopupStateFromSnapshot(snap, url, title);
+  if (fromSnap) return fromSnap;
+  return {
+    ...placeDetailPopupStateFromUrlAndLookup(url, title, snapshotToPlaceLookup(snap)),
+    placeSnapshotHint: snapshotToPlaceSnapshotHint(snap),
+  };
 }
 
 export function placeDetailPopupStateFromMeeting(

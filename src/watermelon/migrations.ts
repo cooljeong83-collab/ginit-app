@@ -284,6 +284,28 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      toVersion: 17,
+      steps: [
+        createTable({
+          name: 'places_cache',
+          columns: [
+            { name: 'place_key', type: 'string', isIndexed: true },
+            { name: 'server_place_id', type: 'string', isOptional: true },
+            { name: 'place_name', type: 'string', isIndexed: true },
+            { name: 'road_address', type: 'string', isIndexed: true },
+            { name: 'category', type: 'string', isOptional: true },
+            { name: 'latitude', type: 'number', isOptional: true },
+            { name: 'longitude', type: 'number', isOptional: true },
+            { name: 'preferred_photo_media_url', type: 'string', isOptional: true },
+            { name: 'naver_place_link', type: 'string', isOptional: true },
+            { name: 'average_rating', type: 'number', isOptional: true },
+            { name: 'review_count', type: 'number', isOptional: true },
+            { name: 'synced_at_ms', type: 'number', isIndexed: true },
+          ],
+        }),
+      ],
+    },
   ],
 });
 

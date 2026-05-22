@@ -28,7 +28,7 @@ import type {
   VoteCandidatesFormProps,
   VoteCandidatesGateResult,
 } from '@/components/create/vote-candidates-form.types';
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
 import { GinitTheme } from '@/constants/ginit-theme';
@@ -97,7 +97,6 @@ import {
 import {
   placeDetailPopupStateFromCandidate,
   placeDetailPopupStateFromSearchRow,
-  type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
 import { pickPlacePromotion, usePlacePromotionsByKeys } from '@/src/hooks/use-place-promotions';
@@ -113,6 +112,11 @@ import {
   mergeSponsoredIntoPlaceSearchRows,
   sponsoredPlaceToSearchRow,
 } from '@/src/lib/promotions/sponsored-place-search-merge';
+import {
+  fetchHybridPlaceSearchPrefill,
+  mergeHybridPrefillWithNaverRows,
+  scheduleSyncSearchRowsToPlaceMaster,
+} from '@/src/lib/places/place-search-sync';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
@@ -460,7 +464,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   const [placeResolvingById, setPlaceResolvingById] = useState<Record<string, boolean>>({});
   /** 인라인 검색 한 사이클이 끝난 뒤의 쿼리(로딩 false 직후) — 자동 모드가 결과를 기다릴 때 사용 */
   const [placeSearchLastSettledQueryTrim, setPlaceSearchLastSettledQueryTrim] = useState<string | null>(null);
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
 
   const placeQueryRef = useRef(placeQuery);
   placeQueryRef.current = placeQuery;
@@ -1688,6 +1692,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             return fresh.length ? [...prev, ...fresh] : prev;
           });
           setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
+          scheduleSyncSearchRowsToPlaceMaster(fresh0);
         }
       } catch {
         /* 다음 페이지 실패 시 토큰 유지 — 스크롤 끝에서 재시도 가능 */
@@ -1807,7 +1812,8 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       try {
         const { bias, coords } = await ensureNearbySearchBias();
         if (!alive) return;
-        const [{ places: list, nextPageToken: nxt }, sponsoredPlaces] = await Promise.all([
+        const [prefillRows, { places: list, nextPageToken: nxt }, sponsoredPlaces] = await Promise.all([
+          fetchHybridPlaceSearchPrefill(qTrim),
           searchPlacesText(qTrim, {
             locationBias: bias,
             userCoords: coords,
@@ -1820,16 +1826,17 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const sponsoredRows = sponsoredPlaces
           .map(sponsoredPlaceToSearchRow)
           .filter((row): row is PlaceSearchRow => row != null);
-        setPlaceSearchRows((prev) =>
-          mergeSponsoredIntoPlaceSearchRows({
-            prevRows: prev,
-            naverRows: listWithCoords,
-            sponsoredRows,
-            selectedById: placeSelectedByIdRef.current,
-          }),
-        );
+        const mergedNaver = mergeHybridPrefillWithNaverRows(prefillRows, listWithCoords, []);
+        const mergedForUi = mergeSponsoredIntoPlaceSearchRows({
+          prevRows: placeSearchRowsRef.current,
+          naverRows: mergedNaver,
+          sponsoredRows,
+          selectedById: placeSelectedByIdRef.current,
+        });
+        setPlaceSearchRows(mergedForUi);
         setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
         setPlaceThumbById({});
+        scheduleSyncSearchRowsToPlaceMaster(mergedForUi);
       } catch (e) {
         if (!alive) return;
         setPlaceSearchRows([]);
@@ -2330,8 +2337,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
           place={lockedPlacePreset}
           hintText={lockedPlacePresetHint}
           onOpenPlaceUrl={(url, t) => {
-            const state = placeDetailPopupStateFromCandidate(lockedPlacePreset, url, t);
-            if (state) setPlaceDetailPopup(state);
+            const state = placeDetailPopupStateFromCandidate(lockedPlacePreset, url, t, {
+              suppressCreateMeetingFooter: true,
+            });
+            if (state) openPlaceDetailPopup(state);
           }}
           onChangePlace={onLockedPlacePresetChangePlace}
         />
@@ -2636,8 +2645,10 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             disabled={resolving}
                             containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
                             onOpenUrl={(url, t) => {
-                              const state = placeDetailPopupStateFromSearchRow(item, url, t);
-                              if (state) setPlaceDetailPopup(state);
+                              const state = placeDetailPopupStateFromSearchRow(item, url, t, {
+                                suppressCreateMeetingFooter: true,
+                              });
+                              if (state) openPlaceDetailPopup(state);
                             }}
                           />
                         </View>
@@ -3004,7 +3015,6 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         />
       ) : null}
 
-      <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
     </>
   );
 });

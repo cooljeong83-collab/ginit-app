@@ -1,6 +1,11 @@
-import { supabase } from '@/src/lib/supabase';
+import {
+  buildPlaceSearchSyncPayloads,
+  type PlaceSearchSyncPayloadRow,
+} from '@/src/lib/places/place-search-sync-payload';
 import { buildPlaceLookupKeys, pickBestPlaceMaster } from '@/src/lib/places/place-lookup-keys';
 import type { PlaceLookupInput } from '@/src/lib/places/place-lookup-keys';
+import type { PlaceSearchRow } from '@/src/lib/place-search-row';
+import { supabase } from '@/src/lib/supabase';
 
 export type PlaceKeywordStat = {
   keyword: string;
@@ -103,6 +108,66 @@ function parseTimelineItem(raw: unknown): PlaceReviewTimelineItem | null {
   };
 }
 
+function parsePlacesMapFromRpcRows(rows: unknown[]): Map<string, PlaceMasterSummary> {
+  const out = new Map<string, PlaceMasterSummary>();
+  for (const raw of rows) {
+    const row = parsePlaceRow(raw);
+    if (row) out.set(row.placeKey, row);
+  }
+  return out;
+}
+
+export type SyncSearchPlaceMastersResult = {
+  places: Map<string, PlaceMasterSummary>;
+  insertedCount: number;
+  updatedCount: number;
+};
+
+/** 검색 결과 배치 적재 + 동일 키로 places 조회 (1 RPC) */
+export async function syncSearchPlaceMasters(
+  rows: readonly PlaceSearchRow[] | readonly PlaceSearchSyncPayloadRow[],
+): Promise<SyncSearchPlaceMastersResult> {
+  const payloads: PlaceSearchSyncPayloadRow[] =
+    rows.length > 0 && rows[0] && 'place_key' in rows[0]
+      ? (rows as PlaceSearchSyncPayloadRow[])
+      : buildPlaceSearchSyncPayloads(rows as PlaceSearchRow[]);
+
+  const empty = { places: new Map<string, PlaceMasterSummary>(), insertedCount: 0, updatedCount: 0 };
+  if (payloads.length === 0) return empty;
+
+  const { data, error } = await supabase.rpc('sync_search_place_masters', {
+    p_rows: payloads,
+  });
+  if (error) {
+    if (__DEV__) console.warn('[syncSearchPlaceMasters]', error.message);
+    return empty;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return empty;
+
+  const o = data as Record<string, unknown>;
+  const placesRaw = Array.isArray(o.places) ? o.places : [];
+  const insertedCount =
+    typeof o.inserted_count === 'number' ? o.inserted_count : Number(o.inserted_count) || 0;
+  const updatedCount =
+    typeof o.updated_count === 'number' ? o.updated_count : Number(o.updated_count) || 0;
+
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log('[syncSearchPlaceMasters]', {
+      payloads: payloads.length,
+      insertedCount,
+      updatedCount,
+      returned: placesRaw.length,
+    });
+  }
+
+  return {
+    places: parsePlacesMapFromRpcRows(placesRaw),
+    insertedCount,
+    updatedCount,
+  };
+}
+
 export async function fetchPlacesByKeys(
   placeKeys: string[],
   opts?: { placeName?: string; roadAddress?: string },
@@ -122,11 +187,7 @@ export async function fetchPlacesByKeys(
   }
 
   const rows = Array.isArray(data) ? data : [];
-  for (const raw of rows) {
-    const row = parsePlaceRow(raw);
-    if (row) out.set(row.placeKey, row);
-  }
-  return out;
+  return parsePlacesMapFromRpcRows(rows);
 }
 
 export async function fetchPlaceMasterByLookup(
@@ -185,7 +246,7 @@ export async function fetchPlaceReviewsByPlaceKey(
 
 export async function searchPlacesByKeyword(
   query: string,
-  opts?: { limit?: number },
+  opts?: { limit?: number; includeUnreviewed?: boolean },
 ): Promise<PlaceMasterSummary[]> {
   const q = query.trim();
   if (!q) return [];
@@ -193,6 +254,7 @@ export async function searchPlacesByKeyword(
   const { data, error } = await supabase.rpc('search_places_by_keyword', {
     p_query: q,
     p_limit: opts?.limit ?? 30,
+    p_include_unreviewed: opts?.includeUnreviewed ?? true,
   });
   if (error || !Array.isArray(data)) return [];
 

@@ -8,11 +8,8 @@ import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
-import {
-  placeDetailPopupStateFromSearchRow,
-  type PlaceDetailPopupState,
-} from '@/src/lib/places/place-detail-popup-state';
+import { placeDetailPopupStateFromSearchRow } from '@/src/lib/places/place-detail-popup-state';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
 import { deferSoftInputUntilUserTapProps } from '@/src/lib/defer-soft-input-until-user-tap';
@@ -26,6 +23,11 @@ import {
 } from '@/src/lib/naver-local-place-search-text';
 import { sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import {
+  fetchHybridPlaceSearchPrefill,
+  mergeHybridPrefillWithNaverRows,
+  scheduleSyncSearchRowsToPlaceMaster,
+} from '@/src/lib/places/place-search-sync';
 import { resolvePlaceSearchRowThumbnail } from '@/src/lib/place-search-thumbnail-resolve';
 
 import { INPUT_PLACEHOLDER, wizardSpecialtyStyles as S } from './wizard-specialty-styles';
@@ -175,7 +177,7 @@ export function EarlyPlaceSearch({
   const [userCoords, setUserCoords] = useState<LatLng | null>(null);
   const [nearbyHint, setNearbyHint] = useState<string | null>(null);
   const [locationReady, setLocationReady] = useState(false);
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
   const expandedPickerRef = useRef<View>(null);
   const earlyPlaceQueryInputRef = useRef<TextInput>(null);
   const earlyPlaceQueryDeferKb = useMemo(() => deferSoftInputUntilUserTapProps(earlyPlaceQueryInputRef), []);
@@ -328,14 +330,19 @@ export function EarlyPlaceSearch({
         try {
           const { bias, coords } = await ensureNearbySearchBias();
           if (!alive) return;
-          const { places: list, nextPageToken } = await searchPlacesText(qTrim, {
-            locationBias: bias,
-            userCoords: coords,
-            maxResultCount: PLACE_PAGE,
-          });
+          const [prefillRows, { places: list, nextPageToken }] = await Promise.all([
+            fetchHybridPlaceSearchPrefill(qTrim),
+            searchPlacesText(qTrim, {
+              locationBias: bias,
+              userCoords: coords,
+              maxResultCount: PLACE_PAGE,
+            }),
+          ]);
           if (!alive) return;
-          setRows(list);
+          const merged = mergeHybridPrefillWithNaverRows(prefillRows, list, []);
+          setRows(merged);
           setRowsNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
+          scheduleSyncSearchRowsToPlaceMaster(merged);
         } catch (e) {
           if (!alive) return;
           setRows([]);
@@ -389,6 +396,7 @@ export function EarlyPlaceSearch({
             return fresh.length ? [...prev, ...fresh] : prev;
           });
           setRowsNextPageToken(nextPageToken?.trim() ? nextPageToken.trim() : null);
+          scheduleSyncSearchRowsToPlaceMaster(fresh0);
         }
       } catch (e) {
         if (rowsSearchQueryKeyRef.current === qt) {
@@ -666,8 +674,10 @@ export function EarlyPlaceSearch({
                       disabled={disabled || loading}
                       containerStyle={{ marginTop: 8, alignSelf: 'stretch' }}
                       onOpenUrl={(url, t) => {
-                        const state = placeDetailPopupStateFromSearchRow(item, url, t);
-                        if (state) setPlaceDetailPopup(state);
+                        const state = placeDetailPopupStateFromSearchRow(item, url, t, {
+                          suppressCreateMeetingFooter: true,
+                        });
+                        if (state) openPlaceDetailPopup(state);
                       }}
                     />
                   </View>
@@ -729,7 +739,6 @@ export function EarlyPlaceSearch({
           {cinemaScrollBlock}
           {listScrollOrNull}
         </View>
-        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
       </Fragment>
     );
   }
@@ -791,7 +800,6 @@ export function EarlyPlaceSearch({
         </View>
       ) : null}
     </View>
-    <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
     </Fragment>
   );
 }

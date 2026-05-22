@@ -6,7 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { ReviewForm } from '@/components/meeting-review/ReviewForm';
 import { SummaryBoard } from '@/components/meeting-review/SummaryBoard';
 import { meetingReviewStyles } from '@/components/meeting-review/meeting-review-styles';
@@ -35,7 +35,6 @@ import { getPinnedFormKeywords } from '@/src/lib/meeting-review/meeting-review-k
 import { resolveMeetingReviewPlaceContext } from '@/src/lib/meeting-review/meeting-review-place-context';
 import {
   placeDetailPopupStateFromMeeting,
-  type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { buildPresetPlaceCandidateFromReviewSummary } from '@/src/lib/meeting-review/meeting-review-place-for-create';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
@@ -119,14 +118,14 @@ export default function MeetingReviewScreen() {
   const canViewReview = Boolean(meeting && isSettled && placeContext);
   const canWriteReview = canViewReview && isParticipant;
 
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
   const onOpenPlaceUrl = useCallback(
     (url: string, title: string) => {
       if (!meeting) return;
       const state = placeDetailPopupStateFromMeeting(meeting, url, title);
-      if (state) setPlaceDetailPopup(state);
+      if (state) openPlaceDetailPopup(state);
     },
-    [meeting],
+    [meeting, openPlaceDetailPopup],
   );
 
   const onCreateMeetingAtPlace = useCallback(() => {
@@ -471,7 +470,6 @@ export default function MeetingReviewScreen() {
             </GinitPressable>
           </View>
         ) : null}
-        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
       </SafeAreaView>
     </ScreenShell>
   );

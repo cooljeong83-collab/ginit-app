@@ -19,11 +19,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { SettlementSponsorNoticeBar } from '@/components/promotions/SettlementSponsorNoticeBar';
 import {
   placeDetailPopupStateFromMeeting,
-  type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { preloadSettlementInterstitial, showSettlementInterstitial } from '@/src/lib/ads/settlement-interstitial-service';
 import {
@@ -529,7 +528,7 @@ export default function SettlementMeetingScreen() {
   const [accountPickerAnimationType, setAccountPickerAnimationType] = useState<'none' | 'slide'>('slide');
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<Set<string>>(new Set());
   const [participantProfiles, setParticipantProfiles] = useState<Map<string, UserProfile>>(new Map());
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
   const [settlementAmountTab, setSettlementAmountTab] = useState<SettlementAmountTab>('split_n');
   const [settlementPaymentMethod, setSettlementPaymentMethod] = useState<SettlementPaymentMethod>('bank_transfer');
   const [manualAmountsByParticipant, setManualAmountsByParticipant] = useState<Record<string, string>>({});
@@ -2139,7 +2138,7 @@ export default function SettlementMeetingScreen() {
             onOpenPlaceUrl={(url, title) => {
               if (!meeting) return;
               const state = placeDetailPopupStateFromMeeting(meeting, url, title);
-              if (state) setPlaceDetailPopup(state);
+              if (state) openPlaceDetailPopup(state);
             }}
           />
           {showSettlementSponsorNotice && meetingPlacePromotionQuery.data && userId?.trim() ? (
@@ -2935,7 +2934,6 @@ export default function SettlementMeetingScreen() {
             </View>
           </GestureHandlerRootView>
         </Modal>
-        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
         <Modal
           visible={receiptImageViewerIndex !== null && receiptImageGallery.length > 0}
           transparent

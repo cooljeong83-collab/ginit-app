@@ -21,5 +21,11 @@ export function placeDetailPopupStateFromSponsoredPlace(
       roadAddress: place.roadAddress,
       naverPlaceLink: place.naverPlaceLink,
     },
+    placeSnapshotHint: {
+      latitude: place.latitude,
+      longitude: place.longitude,
+      category: place.category,
+      preferredPhotoMediaUrl: place.preferredPhotoMediaUrl,
+    },
   };
 }

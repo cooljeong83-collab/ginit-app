@@ -6,6 +6,7 @@ import { migrations } from './migrations';
 import { CachedMeetingCategory } from './models/CachedMeetingCategory';
 import { CachedMeetingDetail } from './models/CachedMeetingDetail';
 import { CachedUserProfile } from './models/CachedUserProfile';
+import { PlaceCache } from './models/PlaceCache';
 import { ChatMessage } from './models/ChatMessage';
 import { ChatRoom } from './models/ChatRoom';
 import { ChatSearchIndexChunk } from './models/ChatSearchIndexChunk';
@@ -31,6 +32,7 @@ function createNativeDatabase(): Database {
       CachedMeetingCategory,
       CachedMeetingDetail,
       CachedUserProfile,
+      PlaceCache,
     ],
   });
 }

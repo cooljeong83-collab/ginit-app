@@ -26,6 +26,11 @@ import {
 import { buildPlaceLookupKeys } from '@/src/lib/places/place-lookup-keys';
 import type { PlaceLookupInput } from '@/src/lib/places/place-lookup-keys';
 import { fetchPlaceMasterByLookup } from '@/src/lib/places/place-master-api';
+import {
+  fetchPlacePromotionsByKeys,
+  pickPlacePromotion,
+} from '@/src/lib/promotions/place-promotions-api';
+import type { PlacePromotionSummary } from '@/src/lib/promotions/place-promotion-types';
 
 /** 네이버 모바일 검색·플레이스 페이지가 인앱 UA에서 어긋나지 않도록 쓰는 모바일 Safari UA */
 const NAVER_PLACE_WEBVIEW_USER_AGENT =
@@ -43,7 +48,7 @@ export type NaverPlaceWebViewModalProps = {
   onClose: () => void;
   /** 지닛 후기 탭·타이틀 💜 평점 (모임 상세 장소 팝업 등) */
   placeReviewLookup?: PlaceLookupInput | null;
-  /** 하단 평면 CTA (제휴 장소 → 번개 모임 만들기 등) */
+  /** 하단 평면 CTA (`places` 등록 장소 — 이 장소로 모임 만들기 등) */
   footerAction?: NaverPlaceWebViewModalFooterAction | null;
 };
 
@@ -68,6 +73,7 @@ export function NaverPlaceWebViewModal({
   const [tab, setTab] = useState<PlaceWebModalTab>('web');
   const [ginitAvg, setGinitAvg] = useState(0);
   const [ginitReviewCount, setGinitReviewCount] = useState(0);
+  const [ginitPromo, setGinitPromo] = useState<PlacePromotionSummary | null>(null);
   const initialLoadSettledRef = useRef(false);
 
   const showGinitTabs = placeReviewLookup != null && placeReviewLookup.placeKey.trim().length > 0;
@@ -97,6 +103,7 @@ export function NaverPlaceWebViewModal({
       setTab('web');
       setGinitAvg(0);
       setGinitReviewCount(0);
+      setGinitPromo(null);
       return;
     }
     if (!webViewUri || !cacheKey) return;
@@ -113,12 +120,22 @@ export function NaverPlaceWebViewModal({
 
   useEffect(() => {
     if (!visible || !placeReviewLookup) return;
+    const placeKey = placeReviewLookup.placeKey.trim();
     let alive = true;
     void (async () => {
-      const master = await fetchPlaceMasterByLookup(placeReviewLookup);
-      if (!alive || !master) return;
-      setGinitAvg(master.averageRating);
-      setGinitReviewCount(master.reviewCount);
+      const [master, promoMap] = await Promise.all([
+        fetchPlaceMasterByLookup(placeReviewLookup),
+        fetchPlacePromotionsByKeys(placeKey ? [placeKey] : []),
+      ]);
+      if (!alive) return;
+      if (master) {
+        setGinitAvg(master.averageRating);
+        setGinitReviewCount(master.reviewCount);
+      } else {
+        setGinitAvg(0);
+        setGinitReviewCount(0);
+      }
+      setGinitPromo(pickPlacePromotion(promoMap, placeKey));
     })();
     return () => {
       alive = false;
@@ -149,6 +166,8 @@ export function NaverPlaceWebViewModal({
   }, [cacheKey]);
 
   const showWebTab = !showGinitTabs || tab === 'web';
+  const showHeaderRatingBadge =
+    showGinitTabs && (ginitReviewCount > 0 || ginitPromo?.isSponsored === true);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
@@ -183,10 +202,11 @@ export function NaverPlaceWebViewModal({
                   </Text>
                 </View>
                 <View style={styles.headerRightSlot}>
-                  {showGinitTabs && ginitReviewCount > 0 ? (
+                  {showHeaderRatingBadge ? (
                     <GinitPlaceRatingBadge
                       averageRating={ginitAvg}
                       reviewCount={ginitReviewCount}
+                      promotion={ginitPromo}
                       style={styles.headerRatingBadge}
                     />
                   ) : null}
@@ -336,7 +356,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   headerRightSlot: {
-    minWidth: 48,
+    minWidth: 56,
+    flexShrink: 0,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },

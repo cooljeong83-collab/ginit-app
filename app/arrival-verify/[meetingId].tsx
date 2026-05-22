@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import {
   placeDetailPopupStateFromMeeting,
-  type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { MeetingArrivalVerifyMapBody } from '@/components/meeting/MeetingArrivalVerifyMapBody';
 import { MeetingArrivalVerifyTopSummary } from '@/components/meeting/MeetingArrivalVerifyTopSummary';
@@ -121,7 +120,7 @@ export default function ArrivalVerifyMeetingScreen() {
     void queryClient.invalidateQueries({ queryKey: meetingDetailQueryKey(meetingId) });
   }, [refetch, queryClient, meetingId]);
 
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
 
   const onRpcResult = useCallback(
     (payload: MeetingArrivalVerifyRpcUiPayload) => {
@@ -234,7 +233,7 @@ export default function ArrivalVerifyMeetingScreen() {
             meeting={pinMeeting}
             onOpenPlaceUrl={(url, title) => {
               const state = placeDetailPopupStateFromMeeting(pinMeeting, url, title);
-              if (state) setPlaceDetailPopup(state);
+              if (state) openPlaceDetailPopup(state);
             }}
           />
           <MeetingArrivalVerifyMapBody
@@ -254,7 +253,6 @@ export default function ArrivalVerifyMeetingScreen() {
             onRpcResult={onRpcResult}
           />
         </View>
-        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
       </SafeAreaView>
     </ScreenShell>
   );

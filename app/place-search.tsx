@@ -11,11 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PlaceCandidateDetailLinkRow } from '@/components/create/PlaceCandidateDetailLinkRow';
 import { GooglePlacePreviewMap } from '@/components/GooglePlacePreviewMap';
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
-import {
-  placeDetailPopupStateFromSearchRow,
-  type PlaceDetailPopupState,
-} from '@/src/lib/places/place-detail-popup-state';
+import { placeDetailPopupStateFromSearchRow } from '@/src/lib/places/place-detail-popup-state';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { GinitPlaceholderColor, GinitStyles } from '@/constants/GinitStyles';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { layoutAnimateEaseInEaseOut } from '@/src/lib/android-layout-animation';
@@ -90,7 +87,7 @@ function PlaceSearchScreenInner({
   const [selected, setSelected] = useState<PlaceSearchRow | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [resolving, setResolving] = useState(false);
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
   const [registeredInterestRegions, setRegisteredInterestRegions] = useState<string[]>([]);
   const registeredInterestRegionsRef = useRef<string[]>([]);
   registeredInterestRegionsRef.current = registeredInterestRegions;
@@ -498,8 +495,10 @@ function PlaceSearchScreenInner({
                         disabled={resolving}
                         containerStyle={{ marginTop: 8, marginHorizontal: 12, marginBottom: 10 }}
                         onOpenUrl={(url, t) => {
-                          const state = placeDetailPopupStateFromSearchRow(item, url, t);
-                          if (state) setPlaceDetailPopup(state);
+                          const state = placeDetailPopupStateFromSearchRow(item, url, t, {
+                            suppressCreateMeetingFooter: true,
+                          });
+                          if (state) openPlaceDetailPopup(state);
                         }}
                       />
                     </View>
@@ -535,7 +534,6 @@ function PlaceSearchScreenInner({
             <Text style={GinitStyles.ctaButtonLabel}>확인</Text>
           </GinitPressable>
 
-          <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
         </KeyboardAvoidingView>
         </SafeAreaView>
     </View>

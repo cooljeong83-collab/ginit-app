@@ -16,7 +16,7 @@ import { ActivityIndicator, Animated, Easing, FlatList, KeyboardAvoidingView, Mo
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
-import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { usePlaceDetailPopup } from '@/src/context/PlaceDetailPopupContext';
 import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
@@ -143,7 +143,6 @@ import { derivePlaceKey } from '@/src/lib/places/place-key';
 import { resolvePlaceChipDisplayThumb } from '@/src/lib/place-chip-display-thumb';
 import {
   placeDetailPopupStateFromMeetingChip,
-  type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
 import { pickPlacePromotion, usePlacePromotionsByKeys } from '@/src/hooks/use-place-promotions';
@@ -504,7 +503,7 @@ export default function MeetingDetailScreen() {
   const { categories: categoriesRaw } = useMeetingCategories();
   const categories: Category[] = Array.isArray(categoriesRaw) ? categoriesRaw : [];
   const [naverPlaceWebModal, setNaverPlaceWebModal] = useState<{ url: string; title: string } | null>(null);
-  const [placeDetailPopup, setPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(null);
+  const { open: openPlaceDetailPopup } = usePlaceDetailPopup();
   const [basicInfoEditOpen, setBasicInfoEditOpen] = useState(false);
   const [saveCalendarBusy, setSaveCalendarBusy] = useState(false);
   /** `meeting_arrival_verifications`에 현재 사용자 행이 있으면 true */
@@ -570,11 +569,11 @@ export default function MeetingDetailScreen() {
   const openPlaceWebForChip = useCallback(
     (chip: PlaceChip, url: string, title: string) => {
       if (!meeting) return;
-      setPlaceDetailPopup(
+      openPlaceDetailPopup(
         placeDetailPopupStateFromMeetingChip(meeting, chip, url, title.trim() || chip.title.trim() || '장소'),
       );
     },
-    [meeting],
+    [meeting, openPlaceDetailPopup],
   );
 
   const specialtyKind = useMemo(() => (meeting ? getExtraDataSpecialtyKind(meeting) : null), [meeting]);
@@ -4985,8 +4984,6 @@ export default function MeetingDetailScreen() {
           onRequestClose={closeInviteModal}
           onSubmit={submitInvite}
         />
-
-        <PlaceDetailPopup state={placeDetailPopup} onClose={() => setPlaceDetailPopup(null)} />
 
         <NaverPlaceWebViewModal
           visible={naverPlaceWebModal != null}

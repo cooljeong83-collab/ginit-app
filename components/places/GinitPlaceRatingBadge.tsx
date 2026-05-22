@@ -23,16 +23,20 @@ export function GinitPlaceRatingBadge({
   if (!hasRating && !hasPromo) return null;
 
   const ratingLabel = hasRating ? averageRating.toFixed(1) : null;
+  const labelParts: string[] = [];
+  if (hasPromo) labelParts.push('💜 제휴');
+  if (hasRating && ratingLabel) labelParts.push(`💜 ${ratingLabel}`);
+  const label = labelParts.join(' ');
+
   const a11yParts: string[] = [];
   if (hasPromo) a11yParts.push('제휴 업체');
   if (hasRating) a11yParts.push(`지닛 평점 ${ratingLabel}, 후기 ${reviewCount}건`);
 
   return (
-    <View
-      style={[styles.badge, styles.row, style]}
-      accessibilityLabel={a11yParts.join(', ')}>
-      {hasPromo ? <Text style={styles.text}>💜 제휴</Text> : null}
-      {hasRating ? <Text style={styles.text}>💜 {ratingLabel}</Text> : null}
+    <View style={[styles.badge, style]} accessibilityLabel={a11yParts.join(', ')}>
+      <Text style={styles.text} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -44,13 +48,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: GinitTheme.colors.primarySoft,
     alignSelf: 'flex-start',
-    flexShrink: 1,
-    maxWidth: '92%',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    flexShrink: 0,
   },
   text: {
     fontSize: 12,
