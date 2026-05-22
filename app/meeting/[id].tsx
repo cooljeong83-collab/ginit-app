@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
 import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
+import { PlacePromotionBenefitBadge } from '@/components/promotions/PlacePromotionBenefitBadge';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { MeetingInviteFriendsModal } from '@/components/meeting/MeetingInviteFriendsModal';
@@ -145,6 +146,7 @@ import {
   type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
+import { pickPlacePromotion, usePlacePromotionsByKeys } from '@/src/hooks/use-place-promotions';
 import { invalidateNearbySearchBiasCache } from '@/src/lib/nearby-search-bias';
 import { openNaverMapAt } from '@/src/lib/open-naver-map';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
@@ -563,6 +565,7 @@ export default function MeetingDetailScreen() {
   }, [meeting, sortedPlaceChips]);
 
   const placeRatingsQuery = usePlaceRatingsByKeys(placeRatingKeys);
+  const placePromotionsQuery = usePlacePromotionsByKeys(placeRatingKeys);
 
   const openPlaceWebForChip = useCallback(
     (chip: PlaceChip, url: string, title: string) => {
@@ -3936,6 +3939,7 @@ export default function MeetingDetailScreen() {
                   const thumb = placeThumbByChipId[chip.id] ?? null;
                   const singleKey = meeting ? resolvePlaceChipKey(chip, meeting) : '';
                   const singleRating = pickPlaceRating(placeRatingsQuery.data, singleKey);
+                  const singlePromo = pickPlacePromotion(placePromotionsQuery.data, singleKey);
                   return (
                     <View style={styles.placeDetailBlock}>
                       <View style={styles.placeDetailHeroRow}>
@@ -3952,6 +3956,7 @@ export default function MeetingDetailScreen() {
                               <Text style={[styles.placeVoteTitle, styles.placeVoteTitleFlex]} numberOfLines={3}>
                                 {chip.title}
                               </Text>
+                              {singlePromo ? <PlacePromotionBenefitBadge promotion={singlePromo} compact /> : null}
                               {singleRating && singleRating.reviewCount > 0 ? (
                                 <GinitPlaceRatingBadge
                                   averageRating={singleRating.averageRating}
@@ -4031,6 +4036,7 @@ export default function MeetingDetailScreen() {
                     const thumb = placeThumbByChipId[chip.id] ?? null;
                     const chipPlaceKey = meeting ? resolvePlaceChipKey(chip, meeting) : '';
                     const chipRating = pickPlaceRating(placeRatingsQuery.data, chipPlaceKey);
+                    const chipPromo = pickPlacePromotion(placePromotionsQuery.data, chipPlaceKey);
                     return (
                       <View
                         key={chip.id}
@@ -4066,6 +4072,7 @@ export default function MeetingDetailScreen() {
                               <Text style={[styles.placeVoteTitle, styles.placeVoteTitleFlex]} numberOfLines={2}>
                                 {chip.title}
                               </Text>
+                              {chipPromo ? <PlacePromotionBenefitBadge promotion={chipPromo} compact /> : null}
                               {chipRating && chipRating.reviewCount > 0 ? (
                                 <GinitPlaceRatingBadge
                                   averageRating={chipRating.averageRating}

@@ -85,14 +85,31 @@ import {
 } from '@/src/lib/feed-home-visual';
 import { MEETING_TAB_LIST_SCROLL_BOTTOM_EXTRA } from '@/components/create/meetingCreateFabShared';
 import { FeedNativeAdCard } from '@/components/ads/FeedNativeAdCard';
+import { GinitMatchInlineCard } from '@/components/promotions/GinitMatchInlineCard';
+import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
 import { FEED_NATIVE_AD_INTERVAL, FEED_NATIVE_AD_ROW_HEIGHT } from '@/src/constants/adsConfig';
 import { injectFeedNativeAdRows } from '@/src/lib/ads/inject-feed-native-ad-rows';
+import { injectFeedSponsoredMatchRow } from '@/src/lib/promotions/inject-feed-sponsored-match-row';
+import { buildPresetPlaceCandidateFromSponsoredPlace } from '@/src/lib/promotions/build-preset-from-sponsored-place';
+import { placeDetailPopupStateFromSponsoredPlace } from '@/src/lib/promotions/place-detail-popup-from-sponsored';
+import type { FeedSponsoredPlace } from '@/src/lib/promotions/place-promotion-types';
+import type { PlaceDetailPopupState } from '@/src/lib/places/place-detail-popup-state';
+import { setPendingPresetPlaceCandidate } from '@/src/lib/meeting-place-bridge';
+import { logPresetPlaceMeetingCreateIntent } from '@/src/lib/meeting-preset-place-create-attribution';
+import { generateUuidV4 } from '@/src/lib/generate-uuid-v4';
+import { gatePlaceAgainstRegisteredInterestRegions } from '@/src/lib/meeting-create-place-region';
+import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
+import { showTransientBottomMessage } from '@/components/ui/TransientBottomMessage';
+import { useFeedSponsoredPlace } from '@/src/hooks/use-place-promotions';
 import {
   buildExploreFeedRows,
   homeFeedRowKey,
   type HomeFeedRow,
 } from '@/src/lib/feed-home-list-rows';
-import { REVIEW_SECTION_TOTAL_HEIGHT } from '@/src/lib/feed-meeting-review-carousel-layout';
+import {
+  HOME_MEETING_ROW_ESTIMATED_HEIGHT,
+  REVIEW_SECTION_TOTAL_HEIGHT,
+} from '@/src/lib/feed-meeting-review-carousel-layout';
 import { ledgerWritesToSupabase } from '@/src/lib/hybrid-data-source';
 import { runMeetingsUserActionDeltaSync } from '@/src/lib/meeting-sync-service';
 import { isUserJoinedMeeting } from '@/src/lib/joined-meetings';
@@ -529,11 +546,28 @@ export default function FeedScreen() {
     enabled: feedLocationReady && Boolean(exploreActiveRegionNorm.trim()),
   });
 
+  const feedSponsoredPlaceQuery = useFeedSponsoredPlace(exploreActiveRegionNorm, feedLocationReady);
+
+  const [sponsoredPlaceForPopup, setSponsoredPlaceForPopup] = useState<FeedSponsoredPlace | null>(null);
+  const [sponsoredPlaceDetailPopup, setSponsoredPlaceDetailPopup] = useState<PlaceDetailPopupState | null>(
+    null,
+  );
+
   const exploreFeedRows = useMemo(() => {
     const base = buildExploreFeedRows(exploreFeedMeetings, feedMeetingReviews.reviews);
-    if (!shouldShowAds) return base;
-    return injectFeedNativeAdRows(base, FEED_NATIVE_AD_INTERVAL);
-  }, [exploreFeedMeetings, feedMeetingReviews.reviews, shouldShowAds]);
+    const withPromo = injectFeedSponsoredMatchRow(
+      base,
+      feedSponsoredPlaceQuery.data ?? null,
+      5,
+    );
+    if (!shouldShowAds) return withPromo;
+    return injectFeedNativeAdRows(withPromo, FEED_NATIVE_AD_INTERVAL);
+  }, [
+    exploreFeedMeetings,
+    feedMeetingReviews.reviews,
+    feedSponsoredPlaceQuery.data,
+    shouldShowAds,
+  ]);
 
   const myTabsMeetings = useMemo(() => {
     if (myMeetings.length === 0) return meetings;
@@ -1440,6 +1474,81 @@ export default function FeedScreen() {
     ],
   );
 
+  const onPressSponsoredMatchCard = useCallback((place: FeedSponsoredPlace) => {
+    setSponsoredPlaceForPopup(place);
+    const state = placeDetailPopupStateFromSponsoredPlace(place);
+    if (state) setSponsoredPlaceDetailPopup(state);
+  }, []);
+
+  const onCloseSponsoredPlacePopup = useCallback(() => {
+    setSponsoredPlaceDetailPopup(null);
+    setSponsoredPlaceForPopup(null);
+  }, []);
+
+  const onCreateMeetingAtSponsoredPlace = useCallback(() => {
+    void (async () => {
+      const place = sponsoredPlaceForPopup;
+      if (!place) return;
+      const pk = userId?.trim();
+      if (pk) {
+        try {
+          const p = await getUserProfile(pk);
+          if (!isMeetingServiceComplianceComplete(p, pk)) {
+            presentAppDialogAlert({
+              title: '인증 정보 등록',
+              body: '모임을 이용하시려면 약관 동의와 필요한 프로필 정보를 입력해 주세요.',
+              onPrimary: () => pushProfileOpenRegisterInfo(router),
+            });
+            return;
+          }
+        } catch {
+          /* 등록 시 재검증 */
+        }
+      }
+
+      const intentId = generateUuidV4();
+      const preset = buildPresetPlaceCandidateFromSponsoredPlace(place, intentId);
+      if (!preset) {
+        showTransientBottomMessage('이 장소의 위치 정보가 없어 모임을 만들 수 없어요.', 2600);
+        return;
+      }
+
+      const regions = await loadRegisteredFeedRegions();
+      const regionGate = gatePlaceAgainstRegisteredInterestRegions(
+        {
+          placeName: preset.placeName,
+          address: preset.address,
+          latitude: preset.latitude,
+          longitude: preset.longitude,
+        },
+        regions,
+      );
+      if (!regionGate.ok) {
+        presentAppDialogAlert({ title: regionGate.title, body: regionGate.message });
+        return;
+      }
+
+      if (pk) {
+        void logPresetPlaceMeetingCreateIntent({
+          intentId,
+          entrySource: 'store_promo',
+          analyticsPlaceId: preset.attribution.analyticsPlaceId,
+          entryContext: preset.attribution.entryContext,
+          creatorAppUserId: pk,
+        });
+      }
+
+      setPendingPresetPlaceCandidate(preset);
+      onCloseSponsoredPlacePopup();
+      const d = new Date();
+      const scheduleDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      router.push({
+        pathname: '/create/details',
+        params: { scheduleDate, scheduleTime: '15:00' },
+      });
+    })();
+  }, [onCloseSponsoredPlacePopup, router, sponsoredPlaceForPopup, userId]);
+
   const renderExploreFeedRow = useCallback(
     (row: HomeFeedRow) => {
       if (row.type === 'REVIEW_SECTION') {
@@ -1448,14 +1557,20 @@ export default function FeedScreen() {
       if (row.type === 'NATIVE_AD') {
         return shouldShowAds ? <FeedNativeAdCard /> : null;
       }
+      if (row.type === 'SPONSORED_MATCH') {
+        return (
+          <GinitMatchInlineCard place={row.promotion} onPress={() => onPressSponsoredMatchCard(row.promotion)} />
+        );
+      }
       return renderHomeItemForList(row.meeting, 'explore');
     },
-    [onPressFeedReview, renderHomeItemForList, shouldShowAds],
+    [onPressFeedReview, onPressSponsoredMatchCard, renderHomeItemForList, shouldShowAds],
   );
 
   const exploreFeedItemType = useCallback((row: HomeFeedRow) => {
     if (row.type === 'NATIVE_AD') return 'ad';
     if (row.type === 'REVIEW_SECTION') return 'review';
+    if (row.type === 'SPONSORED_MATCH') return 'sponsored';
     return 'item';
   }, []);
 
@@ -1463,6 +1578,10 @@ export default function FeedScreen() {
     (layout: { size?: number; span?: number }, row: HomeFeedRow) => {
       if (row.type === 'NATIVE_AD') {
         layout.size = FEED_NATIVE_AD_ROW_HEIGHT;
+        return;
+      }
+      if (row.type === 'SPONSORED_MATCH') {
+        layout.size = HOME_MEETING_ROW_ESTIMATED_HEIGHT;
         return;
       }
       if (row.type === 'REVIEW_SECTION') {
@@ -1989,6 +2108,19 @@ export default function FeedScreen() {
           onChangeFilters={setDraftFeedSearch}
           onClose={closeFeedSearch}
           onApply={applyFeedSearch}
+        />
+
+        <PlaceDetailPopup
+          state={sponsoredPlaceDetailPopup}
+          onClose={onCloseSponsoredPlacePopup}
+          footerAction={
+            sponsoredPlaceForPopup
+              ? {
+                  label: '이 장소로 번개 모임 만들기',
+                  onPress: onCreateMeetingAtSponsoredPlace,
+                }
+              : null
+          }
         />
 
         <InterestRegionModals controls={interestRegion} safeAreaTop={safeInsets.top} />

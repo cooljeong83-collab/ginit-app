@@ -1,10 +1,12 @@
 import type { FeedMeetingReviewCarouselItem } from '@/src/lib/feed-meeting-reviews-api';
+import type { FeedSponsoredPlace } from '@/src/lib/promotions/place-promotion-types';
 import type { Meeting } from '@/src/lib/meetings';
 
 export type HomeFeedRow =
   | { type: 'MEETING_CARD'; meeting: Meeting }
   | { type: 'REVIEW_SECTION'; reviews: FeedMeetingReviewCarouselItem[] }
-  | { type: 'NATIVE_AD'; adKey: string };
+  | { type: 'NATIVE_AD'; adKey: string }
+  | { type: 'SPONSORED_MATCH'; promotion: FeedSponsoredPlace; rowKey: string };
 
 export const HOME_FEED_REVIEW_SECTION_ROW_KEY = 'feed-review-section';
 
@@ -29,5 +31,6 @@ export function buildExploreFeedRows(
 export function homeFeedRowKey(row: HomeFeedRow): string {
   if (row.type === 'MEETING_CARD') return row.meeting.id;
   if (row.type === 'NATIVE_AD') return row.adKey;
+  if (row.type === 'SPONSORED_MATCH') return row.rowKey;
   return HOME_FEED_REVIEW_SECTION_ROW_KEY;
 }

@@ -1,7 +1,8 @@
 import { Tabs } from 'expo-router';
 import { useEffect, useRef } from 'react';
+import { View } from 'react-native';
 
-import { GinitTabBar } from '@/components/ginit';
+import { GinitTabBar, MeetingTabCreateFabTouchShield } from '@/components/ginit';
 import { ScreenTransitionSkeleton } from '@/components/ui';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { readAppIntroComplete } from '@/src/lib/onboarding-storage';
@@ -81,16 +82,19 @@ export default function TabsLayout() {
   }
 
   return (
-    <Tabs
-      tabBar={(props) => <GinitTabBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-      }}>
-      <Tabs.Screen name="index" options={{ title: '모임' }} />
-      <Tabs.Screen name="map" options={{ title: '탐색' }} />
-      <Tabs.Screen name="friends" options={{ title: '친구' }} />
-      <Tabs.Screen name="chat" options={{ title: '채팅' }} />
-      <Tabs.Screen name="profile" options={{ title: '프로필' }} />
-    </Tabs>
+    <View style={{ flex: 1 }}>
+      <Tabs
+        tabBar={(props) => <GinitTabBar {...props} />}
+        screenOptions={{
+          headerShown: false,
+        }}>
+        <Tabs.Screen name="index" options={{ title: '모임' }} />
+        <Tabs.Screen name="map" options={{ title: '탐색' }} />
+        <Tabs.Screen name="friends" options={{ title: '친구' }} />
+        <Tabs.Screen name="chat" options={{ title: '채팅' }} />
+        <Tabs.Screen name="profile" options={{ title: '프로필' }} />
+      </Tabs>
+      <MeetingTabCreateFabTouchShield />
+    </View>
   );
 }

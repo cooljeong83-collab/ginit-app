@@ -31,6 +31,11 @@ import { fetchPlaceMasterByLookup } from '@/src/lib/places/place-master-api';
 const NAVER_PLACE_WEBVIEW_USER_AGENT =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1';
 
+export type NaverPlaceWebViewModalFooterAction = {
+  label: string;
+  onPress: () => void;
+};
+
 export type NaverPlaceWebViewModalProps = {
   visible: boolean;
   url: string | null | undefined;
@@ -38,6 +43,8 @@ export type NaverPlaceWebViewModalProps = {
   onClose: () => void;
   /** 지닛 후기 탭·타이틀 💜 평점 (모임 상세 장소 팝업 등) */
   placeReviewLookup?: PlaceLookupInput | null;
+  /** 하단 평면 CTA (제휴 장소 → 번개 모임 만들기 등) */
+  footerAction?: NaverPlaceWebViewModalFooterAction | null;
 };
 
 type PlaceWebModalTab = 'web' | 'comments';
@@ -52,6 +59,7 @@ export function NaverPlaceWebViewModal({
   pageTitle = '상세 정보',
   onClose,
   placeReviewLookup = null,
+  footerAction = null,
 }: NaverPlaceWebViewModalProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -271,6 +279,17 @@ export function NaverPlaceWebViewModal({
                   </GinitPressable>
                 </View>
               )}
+              {footerAction?.label?.trim() ? (
+                <View style={styles.footerActionWrap}>
+                  <GinitPressable
+                    onPress={footerAction.onPress}
+                    style={({ pressed }) => [styles.footerActionBtn, pressed && { opacity: 0.88 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={footerAction.label}>
+                    <Text style={styles.footerActionText}>{footerAction.label}</Text>
+                  </GinitPressable>
+                </View>
+              ) : null}
             </View>
           </View>
         </GestureHandlerRootView>
@@ -405,4 +424,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptyClose: { paddingVertical: 8, paddingHorizontal: 12 },
+  footerActionWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GinitTheme.colors.border,
+  },
+  footerActionBtn: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: GinitTheme.colors.primary,
+    borderRadius: 4,
+  },
+  footerActionText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 });

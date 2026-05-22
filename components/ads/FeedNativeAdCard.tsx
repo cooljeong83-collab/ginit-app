@@ -8,6 +8,7 @@ import {
   NativeMediaView,
 } from 'react-native-google-mobile-ads';
 
+import { MEETING_TAB_FEED_NATIVE_AD_CLICK_RESERVE_RIGHT } from '@/components/create/meetingCreateFabShared';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { useShouldShowAds } from '@/src/hooks/use-should-show-ads';
 import { AD_UNIT_IDS } from '@/src/constants/adsConfig';
@@ -56,16 +57,21 @@ export function FeedNativeAdCard({ unitId = AD_UNIT_IDS.nativeFeed }: FeedNative
 
   if (!nativeAd) {
     return (
-      <View style={s.pressableRow} accessibilityLabel="광고 로딩 중">
-        <View style={s.row}>
-          <View style={[s.symbolRing, s.thumbPlaceholder]} />
-          <View style={s.main}>
-            <View style={s.headRow}>
-              <View style={s.titleCol} />
-              <Text style={[s.status, s.statusDefault]}>광고</Text>
+      <View style={s.rowShell}>
+        <View style={s.adBounds} accessibilityLabel="광고 로딩 중">
+          <View style={s.pressableRow}>
+            <View style={s.row}>
+              <View style={[s.symbolRing, s.thumbPlaceholder]} />
+              <View style={s.main}>
+                <View style={s.headRow}>
+                  <View style={s.titleCol} />
+                  <Text style={[s.status, s.statusDefault]}>광고</Text>
+                </View>
+              </View>
             </View>
           </View>
         </View>
+        <View style={s.fabClickReserve} pointerEvents="none" />
       </View>
     );
   }
@@ -76,48 +82,67 @@ export function FeedNativeAdCard({ unitId = AD_UNIT_IDS.nativeFeed }: FeedNative
   const cta = nativeAd.callToAction?.trim() || '자세히 보기';
 
   return (
-    <NativeAdView nativeAd={nativeAd} style={s.pressableRow}>
-      <View style={s.row}>
-        <View style={s.lead}>
-          <View style={s.symbolRing} accessibilityLabel="광고 이미지">
-            <NativeMediaView resizeMode="cover" style={s.symbolPhoto} />
-          </View>
-        </View>
+    <View style={s.rowShell}>
+      <View style={s.adBounds}>
+        <NativeAdView nativeAd={nativeAd} style={s.pressableRow}>
+          <View style={s.row}>
+            <View style={s.lead}>
+              <View style={s.symbolRing} accessibilityLabel="광고 이미지">
+                <NativeMediaView resizeMode="cover" style={s.symbolPhoto} />
+              </View>
+            </View>
 
-        <View style={s.main}>
-          <View style={s.headRow}>
-            <View style={s.titleCol}>
-              <NativeAsset assetType={NativeAssetType.HEADLINE}>
-                <Text style={s.title} numberOfLines={2}>
-                  {headline}
+            <View style={s.main}>
+              <View style={s.headRow}>
+                <View style={s.titleCol}>
+                  <NativeAsset assetType={NativeAssetType.HEADLINE}>
+                    <Text style={s.title} numberOfLines={2}>
+                      {headline}
+                    </Text>
+                  </NativeAsset>
+                </View>
+                <Text style={[s.status, s.statusDefault]} accessibilityLabel="광고">
+                  광고
+                </Text>
+              </View>
+
+              {body.length > 0 ? (
+                <NativeAsset assetType={NativeAssetType.BODY}>
+                  <Text style={s.moduleWhen} numberOfLines={1}>
+                    {body}
+                  </Text>
+                </NativeAsset>
+              ) : null}
+
+              <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
+                <Text style={s.moduleCta} numberOfLines={1}>
+                  {cta}
                 </Text>
               </NativeAsset>
             </View>
-            <Text style={[s.status, s.statusDefault]} accessibilityLabel="광고">
-              광고
-            </Text>
           </View>
-
-          {body.length > 0 ? (
-            <NativeAsset assetType={NativeAssetType.BODY}>
-              <Text style={s.moduleWhen} numberOfLines={1}>
-                {body}
-              </Text>
-            </NativeAsset>
-          ) : null}
-
-          <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
-            <Text style={s.moduleCta} numberOfLines={1}>
-              {cta}
-            </Text>
-          </NativeAsset>
-        </View>
+        </NativeAdView>
       </View>
-    </NativeAdView>
+      <View style={s.fabClickReserve} pointerEvents="none" />
+    </View>
   );
 }
 
 const s = StyleSheet.create({
+  rowShell: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  adBounds: {
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  /** `NativeAdView` 밖 — FAB 버튼 좌측까지 AdMob 네이티브 클릭 레이어가 닿지 않도록 */
+  fabClickReserve: {
+    width: MEETING_TAB_FEED_NATIVE_AD_CLICK_RESERVE_RIGHT,
+    flexShrink: 0,
+  },
   pressableRow: {
     paddingVertical: 10,
   },

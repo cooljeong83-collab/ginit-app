@@ -37,6 +37,10 @@ import {
   MEETING_CREATE_FAB_IDLE_FLOAT_Y_PHASE_MUL,
   MEETING_CREATE_FAB_LOGO,
   MEETING_CREATE_FAB_RISE_FROM,
+  MEETING_TAB_CREATE_FAB_DROP_PX,
+  MEETING_TAB_CREATE_FAB_PADDING_RIGHT,
+  MEETING_TAB_FAB_TOUCH_ZONE_H,
+  MEETING_TAB_FAB_TOUCH_ZONE_W,
   MEETING_CREATE_FAB_RISE_SPRING,
   MEETING_CREATE_FAB_SHADOW_BLOB,
   MEETING_CREATE_FAB_SHADOW_FADE_IN_FROM_TY,
@@ -51,20 +55,12 @@ import { useInAppAlarms } from '@/src/context/InAppAlarmsContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
+import { registerMeetingTabCreateFabPressHandler } from '@/src/lib/meeting-tab-create-fab-press-bridge';
 import { subscribeTabBarFabDocked } from '@/src/lib/tabbar-fab-scroll';
 import { getUserProfile, isMeetingServiceComplianceComplete } from '@/src/lib/user-profile';
 
 const ORDER = ['index', 'map', 'friends', 'chat', 'profile'] as const;
 
-/** 모임 탭 생성 FAB — 탭바 기준 settled 위치를 아래로 내리는 거리(px) */
-const MEETING_TAB_CREATE_FAB_DROP_PX = 16;
-/** FAB가 탭바 밖으로 올라가는 영역 — 리스트(네이티브 광고) 터치가 FAB를 가리지 않도록 */
-const MEETING_TAB_FAB_TOUCH_ZONE_W = 132;
-const MEETING_TAB_FAB_TOUCH_ZONE_H =
-  MEETING_CREATE_FAB_BTN_SIZE +
-  MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT +
-  MEETING_CREATE_FAB_RISE_FROM +
-  28;
 /** 상승 스프링이 끝나기 전에 알약 펼침을 시작해 동그라미 정착~확장 사이 공백을 줄임 */
 const MEETING_TAB_CREATE_FAB_INTRO_START_DELAY_MS = 1300;
 /** 상승 완료 후 원 → 알약 펼침(스크롤 도킹 중에는 intro=1이어도 원 유지). overshootClamping으로 1 초과 진동 시 라벨 opacity·레이아웃 미세 깜빡임 방지 */
@@ -170,7 +166,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
     wasOnCreateFlowRef.current = onCreateFlow;
   }, [meetingTabSelected, onCreateFlow, fabExitCollapse, fabExitDrop]);
 
-  const onFabPress = () => {
+  const onFabPress = useCallback(() => {
     void (async () => {
       if (fabExitInFlightRef.current) {
         return;
@@ -213,7 +209,24 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
         });
       });
     })();
-  };
+  }, [
+    clearFabExitInFlight,
+    fabExitCollapse,
+    fabExitDrop,
+    pushCreateDetails,
+    router,
+    userId,
+  ]);
+
+  const onFabPressRef = useRef(onFabPress);
+  onFabPressRef.current = onFabPress;
+
+  useEffect(() => {
+    if (!showMeetingFab) {
+      return registerMeetingTabCreateFabPressHandler(null);
+    }
+    return registerMeetingTabCreateFabPressHandler(() => onFabPressRef.current());
+  }, [showMeetingFab]);
 
   /** 모임 FAB가 보일 때만 둥둥 루프(생성 플로우·다른 탭에서는 cancel로 정지). */
   useEffect(() => {
@@ -453,16 +466,16 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             zIndex: 100,
             elevation: 100,
             alignItems: 'flex-end',
-            paddingRight: 18,
+            paddingRight: MEETING_TAB_CREATE_FAB_PADDING_RIGHT,
           }}>
-        <Animated.View
-          pointerEvents="box-none"
-          style={[
-            {
-              overflow: 'visible',
-            },
-            fabShellOuterStyle,
-          ]}>
+          <Animated.View
+            pointerEvents="box-none"
+            style={[
+              {
+                overflow: 'visible',
+              },
+              fabShellOuterStyle,
+            ]}>
           <View style={styles.fabMeetingShadowFloor} pointerEvents="none">
             <Animated.View style={[styles.fabMeetingFloorBlob, fabFloorShadowStyle]} />
           </View>
@@ -477,6 +490,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
               accessibilityLabel="모임 만들기"
               onPress={onFabPress}
               hitSlop={MEETING_CREATE_FAB_HIT_SLOP}
+              pointerEvents={Platform.OS === 'android' ? 'none' : 'auto'}
               style={StyleSheet.absoluteFillObject}>
               {({ pressed }) => (
                 <View style={[styles.fabMeetingPressFill, pressed && { opacity: 0.86 }]}>
@@ -590,7 +604,7 @@ const styles = StyleSheet.create({
     height: MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT + 8,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    zIndex: 0,
+    zIndex: 1,
   },
   fabMeetingFloorBlob: {
     width: MEETING_CREATE_FAB_SHADOW_BLOB,
@@ -601,7 +615,7 @@ const styles = StyleSheet.create({
   },
   fabMeetingInnerClip: {
     overflow: 'hidden',
-    zIndex: 1,
+    zIndex: 2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: GinitTheme.colors.deepPurple,
   },

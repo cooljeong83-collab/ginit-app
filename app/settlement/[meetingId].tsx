@@ -20,6 +20,7 @@ import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTim
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
+import { SettlementSponsorNoticeBar } from '@/components/promotions/SettlementSponsorNoticeBar';
 import {
   placeDetailPopupStateFromMeeting,
   type PlaceDetailPopupState,
@@ -43,6 +44,11 @@ import { useMeetingCategories } from '@/src/context/MeetingCategoriesContext';
 import { useUserSession } from '@/src/context/UserSessionContext';
 import { useAndroidOverlayHardwareBack } from '@/src/hooks/use-android-overlay-hardware-back';
 import { useMeetingPlaceReviewSummary } from '@/src/hooks/use-meeting-place-review-summary';
+import { useMeetingPlacePromotion } from '@/src/hooks/use-place-promotions';
+import {
+  dismissPromotionMatchVerify,
+  isPromotionMatchVerifyDismissed,
+} from '@/src/lib/promotions/promotion-match-verify-dismiss';
 import { useSyncOnScreenFocus } from '@/src/hooks/use-sync-on-screen-focus';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { normalizeParticipantId } from '@/src/lib/app-user-id';
@@ -901,6 +907,33 @@ export default function SettlementMeetingScreen() {
     () => placeReviewEligible && myPlaceReviewSubmitted === false,
     [placeReviewEligible, myPlaceReviewSubmitted],
   );
+
+  const meetingPlacePromotionQuery = useMeetingPlacePromotion(meetingId, canViewSettledSettlement);
+  const [promoVerifyDismissed, setPromoVerifyDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!meetingId.trim() || !canViewSettledSettlement) return;
+    let alive = true;
+    void isPromotionMatchVerifyDismissed(meetingId).then((dismissed) => {
+      if (alive) setPromoVerifyDismissed(dismissed);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [canViewSettledSettlement, meetingId]);
+
+  const showSettlementSponsorNotice = useMemo(
+    () =>
+      canViewSettledSettlement &&
+      !promoVerifyDismissed &&
+      Boolean(meetingPlacePromotionQuery.data?.isSponsored),
+    [canViewSettledSettlement, promoVerifyDismissed, meetingPlacePromotionQuery.data],
+  );
+
+  const onPromotionMatchVerifySubmitted = useCallback(() => {
+    setPromoVerifyDismissed(true);
+    void dismissPromotionMatchVerify(meetingId);
+  }, [meetingId]);
 
   useEffect(() => {
     preloadSettlementInterstitial();
@@ -2109,6 +2142,16 @@ export default function SettlementMeetingScreen() {
               if (state) setPlaceDetailPopup(state);
             }}
           />
+          {showSettlementSponsorNotice && meetingPlacePromotionQuery.data && userId?.trim() ? (
+            <SettlementSponsorNoticeBar
+              meetingId={meetingId}
+              verifierAppUserId={userId.trim()}
+              promotion={meetingPlacePromotionQuery.data}
+              headcount={selectedCount}
+              totalAmountWon={effectiveTotalWonParsed ?? 0}
+              onSubmitted={onPromotionMatchVerifySubmitted}
+            />
+          ) : null}
           <View style={styles.settlementFormBlock}>
             {settlementReadOnly ? (
               <View style={styles.readonlyTotalBlock}>
