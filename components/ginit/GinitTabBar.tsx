@@ -29,7 +29,7 @@ import {
   MEETING_CREATE_FAB_BTN_SIZE,
   MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT,
   MEETING_CREATE_FAB_GRADIENT_COLORS,
-  MEETING_CREATE_FAB_HIT_SLOP,
+  MEETING_TAB_CREATE_FAB_HIT_SLOP,
   MEETING_CREATE_FAB_IDLE_BOB_DELAY_MS,
   MEETING_CREATE_FAB_IDLE_BOB_DURATION_MS,
   MEETING_CREATE_FAB_IDLE_BREATHE_MUL,
@@ -39,8 +39,9 @@ import {
   MEETING_CREATE_FAB_RISE_FROM,
   MEETING_TAB_CREATE_FAB_DROP_PX,
   MEETING_TAB_CREATE_FAB_PADDING_RIGHT,
-  MEETING_TAB_FAB_TOUCH_ZONE_H,
-  MEETING_TAB_FAB_TOUCH_ZONE_W,
+  MEETING_TAB_FAB_LAYOUT_ZONE_H,
+  MEETING_TAB_FAB_LAYOUT_ZONE_W,
+  getMeetingTabFabTouchTargetInLayoutStyle,
   MEETING_CREATE_FAB_RISE_SPRING,
   MEETING_CREATE_FAB_SHADOW_BLOB,
   MEETING_CREATE_FAB_SHADOW_FADE_IN_FROM_TY,
@@ -110,6 +111,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
   const fabExitInFlightRef = useRef(false);
   const wasOnCreateFlowRef = useRef(false);
   const [, setFabDockedUi] = useState(false);
+  const [meetingFabPressed, setMeetingFabPressed] = useState(false);
   const activeRouteName = state.routes[state.index]?.name ?? '';
   const meetingTabSelected = activeRouteName === 'index';
   const onCreateFlow = useMemo(() => pathname.includes('/create'), [pathname]);
@@ -259,6 +261,7 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
 
   useEffect(() => {
     if (!showMeetingFab) {
+      setMeetingFabPressed(false);
       cancelAnimation(fabFloat);
       cancelAnimation(fabRiseTy);
       cancelAnimation(fabRiseScale);
@@ -461,8 +464,8 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             position: 'absolute',
             right: 0,
             bottom: fabSafeBottom - MEETING_CREATE_FAB_RISE_FROM - MEETING_TAB_CREATE_FAB_DROP_PX,
-            width: MEETING_TAB_FAB_TOUCH_ZONE_W,
-            height: MEETING_TAB_FAB_TOUCH_ZONE_H,
+            width: MEETING_TAB_FAB_LAYOUT_ZONE_W,
+            height: MEETING_TAB_FAB_LAYOUT_ZONE_H,
             zIndex: 100,
             elevation: 100,
             alignItems: 'flex-end',
@@ -480,45 +483,46 @@ export function GinitTabBar({ state, descriptors, navigation }: BottomTabBarProp
             <Animated.View style={[styles.fabMeetingFloorBlob, fabFloorShadowStyle]} />
           </View>
           <Animated.View
+            pointerEvents="none"
             style={[
               styles.fabMeetingInnerClip,
               { position: 'absolute', bottom: MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT, left: 0 },
               fabMeetingFaceStyle,
             ]}>
-            <GinitPressable
-              accessibilityRole="button"
-              accessibilityLabel="모임 만들기"
-              onPress={onFabPress}
-              hitSlop={MEETING_CREATE_FAB_HIT_SLOP}
-              pointerEvents={Platform.OS === 'android' ? 'none' : 'auto'}
-              style={StyleSheet.absoluteFillObject}>
-              {({ pressed }) => (
-                <View style={[styles.fabMeetingPressFill, pressed && { opacity: 0.86 }]}>
-                  <LinearGradient
-                    colors={MEETING_CREATE_FAB_GRADIENT_COLORS}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={StyleSheet.absoluteFillObject}
-                    pointerEvents="none"
-                  />
-                  <Animated.View style={[styles.fabMeetingContent, fabContentPadStyle]}>
-                    <Image
-                      source={MEETING_CREATE_FAB_LOGO}
-                      style={styles.fabMeetingLogo}
-                      contentFit="contain"
-                      accessibilityIgnoresInvertColors
-                    />
-                    <Animated.View style={[styles.fabLabelWrap, fabLabelStyle]}>
-                      <Text style={styles.fabLabelText} numberOfLines={1}>
-                        모임 생성
-                      </Text>
-                    </Animated.View>
-                  </Animated.View>
-                </View>
-              )}
-            </GinitPressable>
+            <View style={[styles.fabMeetingPressFill, meetingFabPressed && { opacity: 0.86 }]}>
+              <LinearGradient
+                colors={MEETING_CREATE_FAB_GRADIENT_COLORS}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFillObject}
+                pointerEvents="none"
+              />
+              <Animated.View style={[styles.fabMeetingContent, fabContentPadStyle]} pointerEvents="none">
+                <Image
+                  source={MEETING_CREATE_FAB_LOGO}
+                  style={styles.fabMeetingLogo}
+                  contentFit="contain"
+                  accessibilityIgnoresInvertColors
+                />
+                <Animated.View style={[styles.fabLabelWrap, fabLabelStyle]}>
+                  <Text style={styles.fabLabelText} numberOfLines={1}>
+                    모임 생성
+                  </Text>
+                </Animated.View>
+              </Animated.View>
+            </View>
           </Animated.View>
         </Animated.View>
+          <GinitPressable
+            accessibilityRole="button"
+            accessibilityLabel="모임 만들기"
+            onPress={onFabPress}
+            onPressIn={() => setMeetingFabPressed(true)}
+            onPressOut={() => setMeetingFabPressed(false)}
+            hitSlop={MEETING_TAB_CREATE_FAB_HIT_SLOP}
+            pointerEvents={Platform.OS === 'android' ? 'none' : 'auto'}
+            style={getMeetingTabFabTouchTargetInLayoutStyle()}
+          />
         </View>
       ) : null}
     </View>

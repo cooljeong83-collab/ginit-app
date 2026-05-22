@@ -168,6 +168,9 @@ export function NaverPlaceWebViewModal({
   const showWebTab = !showGinitTabs || tab === 'web';
   const showHeaderRatingBadge =
     showGinitTabs && (ginitReviewCount > 0 || ginitPromo?.isSponsored === true);
+  const hasFooterAction = Boolean(footerAction?.label?.trim());
+  /** 하단 CTA 있을 때는 좌우(16)와 동일 — 시트 safe-area padding과 중복하지 않음 */
+  const sheetBottomPad = hasFooterAction ? 0 : Math.max(12, insets.bottom + 6);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
@@ -186,7 +189,7 @@ export function NaverPlaceWebViewModal({
                 {
                   height: sheetHeight,
                   maxHeight: sheetHeight,
-                  paddingBottom: Math.max(12, insets.bottom + 6),
+                  paddingBottom: sheetBottomPad,
                   paddingHorizontal: 0,
                 },
               ]}>
@@ -448,7 +451,7 @@ const styles = StyleSheet.create({
   footerActionWrap: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 4,
+    paddingBottom: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: GinitTheme.colors.border,
   },

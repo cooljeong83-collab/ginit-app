@@ -6,6 +6,8 @@ import { GinitTheme } from '@/constants/ginit-theme';
 export const MEETING_CREATE_FAB_BTN_SIZE = 56;
 /** 시각·레이아웃은 그대로 두고 터치만 넓힘(모임 목록 행 오탭 완화) */
 export const MEETING_CREATE_FAB_HIT_SLOP = { top: 16, bottom: 24, left: 18, right: 18 } as const;
+/** 모임 탭바 FAB — 좌·하단 확장 없음(채팅·프로필 탭과 겹침 방지) */
+export const MEETING_TAB_CREATE_FAB_HIT_SLOP = { top: 12, bottom: 8, left: 0, right: 12 } as const;
 /** 버튼 아래 타원 그림자 슬롯 높이 */
 export const MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT = 14;
 /** 모임 탭 FlashList — FAB·탭바와 겹치지 않도록 `contentContainerStyle.paddingBottom`에 더함 */
@@ -16,36 +18,60 @@ export const MEETING_CREATE_FAB_RISE_FROM = 52;
 
 /** 모임 탭 생성 FAB — 탭바 기준 settled 위치를 아래로 내리는 거리(px) */
 export const MEETING_TAB_CREATE_FAB_DROP_PX = 16;
-/** FAB 터치·Android 네이티브 광고 차단 쉴드 — `GinitTabBar` 터치 존과 동일 */
-export const MEETING_TAB_FAB_TOUCH_ZONE_W = 132;
-export const MEETING_TAB_FAB_TOUCH_ZONE_H =
+/** `GinitTabBar` 모임 생성 FAB — `paddingRight` */
+export const MEETING_TAB_CREATE_FAB_PADDING_RIGHT = 18;
+/** 알약 펼침 시 버튼 면 최대 너비 (`GinitTabBar` `fabMeetingFaceStyle`) */
+export const MEETING_TAB_CREATE_FAB_MAX_FACE_WIDTH = 112;
+/** FAB 애니·그림자용 레이아웃 슬롯(터치와 분리 — `pointerEvents: box-none`) */
+export const MEETING_TAB_FAB_LAYOUT_ZONE_W = 132;
+export const MEETING_TAB_FAB_LAYOUT_ZONE_H =
   MEETING_CREATE_FAB_BTN_SIZE +
   MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT +
   MEETING_CREATE_FAB_RISE_FROM +
   28;
 
+/** 실제 FAB 터치·Android 쉴드 — 탭바 행 아래로 내려가지 않음 */
+export const MEETING_TAB_FAB_TOUCH_TARGET_W =
+  MEETING_TAB_CREATE_FAB_MAX_FACE_WIDTH + MEETING_TAB_CREATE_FAB_PADDING_RIGHT;
+export const MEETING_TAB_FAB_TOUCH_TARGET_H =
+  MEETING_CREATE_FAB_BTN_SIZE + MEETING_CREATE_FAB_FLOOR_SHADOW_SLOT + 16;
+
+/** @deprecated `MEETING_TAB_FAB_LAYOUT_ZONE_*` 또는 `MEETING_TAB_FAB_TOUCH_TARGET_*` 사용 */
+export const MEETING_TAB_FAB_TOUCH_ZONE_W = MEETING_TAB_FAB_LAYOUT_ZONE_W;
+/** @deprecated */
+export const MEETING_TAB_FAB_TOUCH_ZONE_H = MEETING_TAB_FAB_LAYOUT_ZONE_H;
+
 const MEETING_TAB_FAB_ROW_MIN_HEIGHT = 52 + 8;
+
+/** 탭바 행 상단 — 터치 타깃·쉴드 하단(탭 아이콘과 겹치지 않음) */
+function meetingTabFabTouchTargetBottom(insetsBottom: number): number {
+  const wrapPad = Math.max(insetsBottom, 10);
+  return wrapPad + MEETING_TAB_FAB_ROW_MIN_HEIGHT;
+}
+
+/** `GinitTabBar` FAB 컨테이너 안 — 탭 행 위, 버튼 면과 정렬 */
+export function getMeetingTabFabTouchTargetInLayoutStyle(): ViewStyle {
+  return {
+    position: 'absolute',
+    right: MEETING_TAB_CREATE_FAB_PADDING_RIGHT,
+    bottom: MEETING_CREATE_FAB_RISE_FROM + MEETING_TAB_CREATE_FAB_DROP_PX,
+    width: MEETING_TAB_FAB_TOUCH_TARGET_W,
+    height: MEETING_TAB_FAB_TOUCH_TARGET_H,
+  };
+}
 
 /** Android: 탭·리스트·AdMob 네이티브 레이어 위 투명 FAB 터치 쉴드(화면 기준) */
 export function getMeetingTabFabTouchShieldScreenStyle(insetsBottom: number): ViewStyle {
-  const wrapPad = Math.max(insetsBottom, 10);
-  const fabSafeBottom = wrapPad + MEETING_TAB_FAB_ROW_MIN_HEIGHT;
-  const bottom = fabSafeBottom - MEETING_CREATE_FAB_RISE_FROM - MEETING_TAB_CREATE_FAB_DROP_PX;
   return {
     position: 'absolute',
     right: 0,
-    bottom,
-    width: MEETING_TAB_FAB_TOUCH_ZONE_W,
-    height: MEETING_TAB_FAB_TOUCH_ZONE_H,
+    bottom: meetingTabFabTouchTargetBottom(insetsBottom),
+    width: MEETING_TAB_FAB_TOUCH_TARGET_W,
+    height: MEETING_TAB_FAB_TOUCH_TARGET_H,
     zIndex: 10000,
     elevation: 10000,
   };
 }
-
-/** `GinitTabBar` 모임 생성 FAB — `paddingRight` */
-export const MEETING_TAB_CREATE_FAB_PADDING_RIGHT = 18;
-/** 알약 펼침 시 버튼 면 최대 너비 (`GinitTabBar` `fabMeetingFaceStyle`) */
-export const MEETING_TAB_CREATE_FAB_MAX_FACE_WIDTH = 112;
 /** 화면 우측에서 FAB 버튼 면 왼쪽까지(px) */
 export const MEETING_TAB_CREATE_FAB_FACE_RESERVE_FROM_SCREEN_RIGHT =
   MEETING_TAB_CREATE_FAB_PADDING_RIGHT + MEETING_TAB_CREATE_FAB_MAX_FACE_WIDTH;
