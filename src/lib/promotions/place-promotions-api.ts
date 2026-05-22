@@ -101,17 +101,19 @@ function parseMeetingPlacePromotion(raw: unknown): MeetingPlacePromotion | null 
   };
 }
 
-export async function fetchFeedSponsoredPlaces(
+async function fetchSponsoredPlacesFromRpc(
+  rpcName: 'list_feed_sponsored_places' | 'list_sponsored_places_for_search',
   regionNorm: string | null | undefined,
-  limit = 1,
+  limit: number,
+  logTag: string,
 ): Promise<FeedSponsoredPlace[]> {
   const region = regionNorm?.trim() || null;
-  const { data, error } = await supabase.rpc('list_feed_sponsored_places', {
+  const { data, error } = await supabase.rpc(rpcName, {
     p_region_norm: region,
     p_limit: limit,
   });
   if (error) {
-    if (__DEV__) console.warn('[fetchFeedSponsoredPlaces]', error.message);
+    if (__DEV__) console.warn(`[${logTag}]`, error.message);
     return [];
   }
   const rows = Array.isArray(data) ? data : [];
@@ -121,6 +123,32 @@ export async function fetchFeedSponsoredPlaces(
     if (row) out.push(row);
   }
   return out;
+}
+
+/** 탐색 피드 인라인 카드 — `expose_in_feed` 제휴만 */
+export async function fetchFeedSponsoredPlaces(
+  regionNorm: string | null | undefined,
+  limit = 1,
+): Promise<FeedSponsoredPlace[]> {
+  return fetchSponsoredPlacesFromRpc(
+    'list_feed_sponsored_places',
+    regionNorm,
+    limit,
+    'fetchFeedSponsoredPlaces',
+  );
+}
+
+/** 장소 후보 검색 상단 부스트 — `boost_in_place_search` 제휴만 */
+export async function fetchSponsoredPlacesForSearch(
+  regionNorm: string | null | undefined,
+  limit = 3,
+): Promise<FeedSponsoredPlace[]> {
+  return fetchSponsoredPlacesFromRpc(
+    'list_sponsored_places_for_search',
+    regionNorm,
+    limit,
+    'fetchSponsoredPlacesForSearch',
+  );
 }
 
 export async function fetchPlacePromotionsByKeys(

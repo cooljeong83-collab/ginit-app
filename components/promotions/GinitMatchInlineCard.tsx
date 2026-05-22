@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { GinitMatchBenefitBadge } from '@/components/promotions/GinitMatchBenefitBadge';
@@ -7,6 +8,7 @@ import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import { MEETING_LIST_IMAGE_BLURHASH } from '@/src/lib/expo-image-meeting-placeholder';
 import type { FeedSponsoredPlace } from '@/src/lib/promotions/place-promotion-types';
+import { resolveHttpImageDisplayUri } from '@/src/lib/supabase-public-image-thumbnail';
 
 const THUMB_SIZE = 70;
 const THUMB_RADIUS = 10;
@@ -20,7 +22,10 @@ type Props = {
  * 탐색 피드 인라인 제휴 매치 카드 — HomeMeetingListItem과 동일 행 높이·구조, 플랫 스타일.
  */
 export function GinitMatchInlineCard({ place, onPress }: Props) {
-  const thumbUri = place.preferredPhotoMediaUrl?.trim() || null;
+  const thumbUri = useMemo(
+    () => resolveHttpImageDisplayUri(place.preferredPhotoMediaUrl, THUMB_SIZE * 2),
+    [place.preferredPhotoMediaUrl],
+  );
   const badgeLabel = place.benefitLabel.trim() || place.badgeLabel.trim() || '지닛 매치 추천';
   const subLine = [place.category, place.roadAddress].filter(Boolean).join(' · ');
 

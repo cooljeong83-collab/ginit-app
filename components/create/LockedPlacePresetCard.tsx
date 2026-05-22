@@ -12,6 +12,7 @@ import { arrivalVerifyPlaceChipToNaverImageFields } from '@/src/lib/meeting-arri
 import type { PlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import { enrichPlaceCandidateWithKey } from '@/src/lib/places/place-key';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
+import { resolveHttpImageDisplayUri } from '@/src/lib/supabase-public-image-thumbnail';
 
 type LockedPlacePresetCardProps = {
   place: PlaceCandidate;
@@ -73,7 +74,11 @@ export function LockedPlacePresetCard({
     };
   }, [preferred, naverFields]);
 
-  const thumb = preferred ?? (fallbackThumb && fallbackThumb !== undefined ? fallbackThumb : null);
+  const thumb = useMemo(() => {
+    const raw =
+      preferred ?? (fallbackThumb && fallbackThumb !== undefined ? fallbackThumb : null);
+    return raw ? resolveHttpImageDisplayUri(raw, 192) : null;
+  }, [preferred, fallbackThumb]);
   const cat = enriched.category?.trim();
 
   return (

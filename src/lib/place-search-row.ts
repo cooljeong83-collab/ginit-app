@@ -14,5 +14,8 @@ export type PlaceSearchRow = {
   latitude: number | null;
   longitude: number | null;
   thumbnailUrl?: string | null;
+  /** 제휴 검색 부스트 행 — `get_place_promotions_by_keys` 배지와 연동 */
+  isSponsoredPromotion?: boolean;
+  promotionId?: string;
 };
 

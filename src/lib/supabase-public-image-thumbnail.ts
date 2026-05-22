@@ -25,3 +25,24 @@ export function withSupabaseStorageListThumbnail(
     .join('/');
   return `${origin}/storage/v1/render/image/public/${encodeURIComponent(bucket)}/${encPath}?width=${w}&height=${w}&resize=cover`;
 }
+
+export function isHttpRemoteImageUrl(raw: string | null | undefined): raw is string {
+  const t = raw?.trim();
+  if (!t) return false;
+  try {
+    const u = new URL(t);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** http(s) 원본 → Supabase Storage는 `render/image` 썸네일, 그 외 URL은 그대로 */
+export function resolveHttpImageDisplayUri(
+  url: string | null | undefined,
+  width = 320,
+): string | null {
+  if (!isHttpRemoteImageUrl(url)) return null;
+  const trimmed = url.trim();
+  return withSupabaseStorageListThumbnail(trimmed, width) ?? trimmed;
+}

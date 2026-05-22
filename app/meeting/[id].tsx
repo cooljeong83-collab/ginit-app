@@ -18,7 +18,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { NaverPlaceWebViewModal } from '@/components/NaverPlaceWebViewModal';
 import { PlaceDetailPopup } from '@/components/places/PlaceDetailPopup';
 import { GinitPlaceRatingBadge } from '@/components/places/GinitPlaceRatingBadge';
-import { PlacePromotionBenefitBadge } from '@/components/promotions/PlacePromotionBenefitBadge';
 import { MeetingArrivalVerifyTopBanner } from '@/components/meeting/MeetingArrivalVerifyTopBanner';
 import { MeetingBasicInfoEditModal } from '@/components/meeting/MeetingBasicInfoEditModal';
 import { MeetingInviteFriendsModal } from '@/components/meeting/MeetingInviteFriendsModal';
@@ -141,6 +140,7 @@ import { isLedgerMeetingId } from '@/src/lib/meetings-ledger';
 import { searchNaverPlaceImageThumbnail, type NaverPlaceImageSearchFields } from '@/src/lib/naver-image-search';
 import { resolveNaverMovieSearchWebUrl, sanitizeNaverLocalPlaceLink } from '@/src/lib/naver-local-search';
 import { derivePlaceKey } from '@/src/lib/places/place-key';
+import { resolvePlaceChipDisplayThumb } from '@/src/lib/place-chip-display-thumb';
 import {
   placeDetailPopupStateFromMeetingChip,
   type PlaceDetailPopupState,
@@ -3389,7 +3389,12 @@ export default function MeetingDetailScreen() {
                 {confirmedPlaceChipResolved ? (
                   <>
                     {(() => {
-                      const thumb = placeThumbByChipId[confirmedPlaceChipResolved.id] ?? null;
+                      const thumb = resolvePlaceChipDisplayThumb(
+                        confirmedPlaceChipResolved,
+                        placeThumbByChipId,
+                        confirmedPlaceChipResolved.id,
+                        300,
+                      );
                       return (
                         <View style={styles.placeDetailBlock}>
                           <View style={styles.placeDetailHeroRow}>
@@ -3936,7 +3941,7 @@ export default function MeetingDetailScreen() {
               <>
                 {(() => {
                   const chip = placeChips[0];
-                  const thumb = placeThumbByChipId[chip.id] ?? null;
+                  const thumb = resolvePlaceChipDisplayThumb(chip, placeThumbByChipId, chip.id, 300);
                   const singleKey = meeting ? resolvePlaceChipKey(chip, meeting) : '';
                   const singleRating = pickPlaceRating(placeRatingsQuery.data, singleKey);
                   const singlePromo = pickPlacePromotion(placePromotionsQuery.data, singleKey);
@@ -3950,9 +3955,12 @@ export default function MeetingDetailScreen() {
                             <View style={styles.placeVoteImageFallback} />
                           )}
                           {singlePromo ? (
-                            <View style={styles.placeVotePromoThumbOverlay} pointerEvents="none">
-                              <PlacePromotionBenefitBadge promotion={singlePromo} overlay />
-                            </View>
+                            <GinitPlaceRatingBadge
+                              averageRating={0}
+                              reviewCount={0}
+                              promotion={singlePromo}
+                              style={styles.placeVoteGinitPartnerBadgeOnThumb}
+                            />
                           ) : null}
                         </View>
                         <View style={styles.placeDetailRightCol}>
@@ -4037,7 +4045,7 @@ export default function MeetingDetailScreen() {
                       ? hostTiePlaceId === chip.id
                       : selectedPlaceIds.includes(chip.id);
                     const tally = meeting.voteTallies?.places?.[chip.id] ?? 0;
-                    const thumb = placeThumbByChipId[chip.id] ?? null;
+                    const thumb = resolvePlaceChipDisplayThumb(chip, placeThumbByChipId, chip.id, 224);
                     const chipPlaceKey = meeting ? resolvePlaceChipKey(chip, meeting) : '';
                     const chipRating = pickPlaceRating(placeRatingsQuery.data, chipPlaceKey);
                     const chipPromo = pickPlacePromotion(placePromotionsQuery.data, chipPlaceKey);
@@ -4077,9 +4085,12 @@ export default function MeetingDetailScreen() {
                                 </View>
                               ) : null}
                               {chipPromo ? (
-                                <View style={styles.placeVotePromoThumbOverlay} pointerEvents="none">
-                                  <PlacePromotionBenefitBadge promotion={chipPromo} overlay />
-                                </View>
+                                <GinitPlaceRatingBadge
+                                  averageRating={0}
+                                  reviewCount={0}
+                                  promotion={chipPromo}
+                                  style={styles.placeVoteGinitPartnerBadgeOnThumb}
+                                />
                               ) : null}
                             </View>
                             <View style={styles.placeVoteTitleRow}>
@@ -5728,12 +5739,16 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  placeVotePromoThumbOverlay: {
+  /** 장소 검색 카드 `placeResultGinitRatingBadge`와 동일 톤 — 제휴만(`💜 제휴`) */
+  placeVoteGinitPartnerBadgeOnThumb: {
     position: 'absolute',
     top: 6,
     left: 6,
     zIndex: 5,
-    maxWidth: '72%',
+    backgroundColor: 'rgba(255, 255, 255, 0.78)',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15, 23, 42, 0.1)',
   },
   placeVoteTallyBadgeWhenPromo: {
     left: undefined,

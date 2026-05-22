@@ -12,6 +12,7 @@ import {
 import { formatDateTimeWithKoWeekday, formatYmdHmWithKoWeekday, formatYmdWithKoWeekday } from '@/src/lib/date-display';
 import type { Meeting } from '@/src/lib/meetings';
 import { meetingPrimaryStartMs } from '@/src/lib/meetings';
+import { resolvePlaceChipDisplayThumb } from '@/src/lib/place-chip-display-thumb';
 import { searchNaverPlaceImageThumbnail } from '@/src/lib/naver-image-search';
 
 export type MeetingArrivalVerifyTopSummaryProps = {
@@ -88,7 +89,7 @@ export function MeetingArrivalVerifyTopSummary({
     };
   }, [chip, placeThumbByChipId, showPlaceDetails]);
 
-  const thumb = chip ? placeThumbByChipId[chip.id] ?? null : null;
+  const thumb = chip ? resolvePlaceChipDisplayThumb(chip, placeThumbByChipId, chip.id, 300) : null;
 
   return (
     <ScrollView

@@ -3,12 +3,19 @@ import { useQuery } from '@tanstack/react-query';
 import {
   fetchFeedSponsoredPlaces,
   fetchPlacePromotionsByKeys,
+  fetchSponsoredPlacesForSearch,
   pickPlacePromotion,
   resolveMeetingPlacePromotion,
 } from '@/src/lib/promotions/place-promotions-api';
 
 export function feedSponsoredPlaceQueryKey(regionNorm: string): readonly ['promotions', 'feed', string] {
   return ['promotions', 'feed', regionNorm.trim()] as const;
+}
+
+export function sponsoredPlacesForSearchQueryKey(
+  regionNorm: string,
+): readonly ['promotions', 'search-boost', string] {
+  return ['promotions', 'search-boost', regionNorm.trim()] as const;
 }
 
 export function placePromotionsByKeysQueryKey(
@@ -33,6 +40,16 @@ export function useFeedSponsoredPlace(regionNorm: string | null | undefined, ena
       return rows[0] ?? null;
     },
     enabled,
+    staleTime: 120_000,
+  });
+}
+
+export function useSponsoredPlacesForSearch(regionNorm: string | null | undefined, enabled = true) {
+  const region = regionNorm?.trim() ?? '';
+  return useQuery({
+    queryKey: sponsoredPlacesForSearchQueryKey(region),
+    queryFn: () => fetchSponsoredPlacesForSearch(region || null, 3),
+    enabled: enabled && region.length > 0,
     staleTime: 120_000,
   });
 }

@@ -13,7 +13,8 @@ export function useShouldShowAds() {
 
   const shouldShowAds = useMemo(() => {
     if (!id) return true;
-    if (!profileReady) return false;
+    // 프로필 로딩 중에 false면 피드에 광고 행 자체가 안 들어감 — 로드 완료 후 재계산 전까지 빈 목록처럼 보임
+    if (!profileReady) return true;
     return !isAdFree;
   }, [id, profileReady, isAdFree]);
 

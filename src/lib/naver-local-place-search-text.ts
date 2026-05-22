@@ -13,6 +13,7 @@ import { getInterestRegionDisplayLabel } from '@/src/lib/korea-interest-district
 import {
   buildPlaceSearchQueryCacheKey,
   getCachedPlaceSearchPage,
+  type PlaceSearchScrapeSession,
   setCachedPlaceSearchPage,
 } from '@/src/lib/place-search-query-cache';
 import {
@@ -149,14 +150,140 @@ function scheduleAndroidThumbnailEnrich(rows: PlaceSearchRow[]): void {
     });
 }
 
+function applyScrapeSessionToBusinessBuffer(session: {
+  scrapeSessionNorm?: string;
+  scrapeSessionRows?: PlaceSearchRow[];
+}): void {
+  const norm = session.scrapeSessionNorm?.trim();
+  const rows = session.scrapeSessionRows;
+  if (norm && rows && rows.length > 0) {
+    scrapeBusinessInfiniteBuffer = { norm, rows };
+  }
+}
+
 function finalizeSearchResult(
   places: PlaceSearchRow[],
   nextPageToken: string | null,
   cacheKey: string,
+  scrapeSession?: PlaceSearchScrapeSession | null,
 ): { places: PlaceSearchRow[]; nextPageToken: string | null } {
   const merged = mergeCachedThumbnailsIntoRows(places);
-  void setCachedPlaceSearchPage(cacheKey, { places: merged, nextPageToken });
+  void setCachedPlaceSearchPage(cacheKey, {
+    places: merged,
+    nextPageToken,
+    scrapeSession: scrapeSession ?? undefined,
+  });
   return { places: merged, nextPageToken };
+}
+
+function sliceBusinessScrapeChunk(
+  buf: { norm: string; rows: PlaceSearchRow[] },
+  virtOffBiz: number,
+  pageSize: number,
+  textQuery: string,
+  bias: string | undefined,
+  coords: SearchPlacesTextOptions['userCoords'],
+  queryCacheKey: string,
+): { places: PlaceSearchRow[]; nextPageToken: string | null } {
+  const slice = buf.rows.slice(virtOffBiz, virtOffBiz + pageSize);
+  scheduleAndroidThumbnailEnrich(slice);
+  const nextOff = virtOffBiz + slice.length;
+  const nextTok = nextOff < buf.rows.length ? encodeBusinessScrapeVirtualPageToken(nextOff) : null;
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log('[NaverMobileBusinessScrape]', {
+      source: 'scrape_chunk',
+      query: textQuery,
+      offset: virtOffBiz,
+      chunkCount: slice.length,
+      totalParsed: buf.rows.length,
+      nextPageToken: nextTok,
+      locationBias: bias ?? null,
+      userCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
+    });
+  }
+  return finalizeSearchResult(slice, nextTok, queryCacheKey);
+}
+
+/** 캐시 히트·앱 재시작 후 `sb:` 더보기 — 1페이지 캐시·재스크랩으로 버퍼 복원 */
+async function ensureBusinessScrapeBuffer(
+  textQuery: string,
+  bias: string | undefined,
+  qNorm: string,
+  pageSize: number,
+): Promise<boolean> {
+  const buf = scrapeBusinessInfiniteBuffer;
+  if (buf && buf.norm === qNorm && buf.rows.length > 0) return true;
+
+  const page1Key = buildPlaceSearchQueryCacheKey(textQuery, bias, '1');
+  const page1Cached = await getCachedPlaceSearchPage(page1Key);
+  if (page1Cached) {
+    applyScrapeSessionToBusinessBuffer(page1Cached);
+    if (scrapeBusinessInfiniteBuffer?.norm === qNorm && scrapeBusinessInfiniteBuffer.rows.length > 0) {
+      return true;
+    }
+  }
+
+  if (!ScrapingBusinessSearchService.isAvailable()) return false;
+
+  const bizScrapeQuery = buildBizScrapeQuery(textQuery, bias);
+  try {
+    const scraped = await ScrapingBusinessSearchService.fetchMappedMobilePlacesNoDetail(bizScrapeQuery);
+    if (!scraped || scraped.length === 0) {
+      scrapeBusinessInfiniteBuffer = null;
+      return false;
+    }
+    scrapeBusinessInfiniteBuffer = { norm: qNorm, rows: scraped };
+    const slice = scraped.slice(0, pageSize);
+    const nextTok = scraped.length > pageSize ? encodeBusinessScrapeVirtualPageToken(pageSize) : null;
+    void setCachedPlaceSearchPage(page1Key, {
+      places: page1Cached?.places?.length ? page1Cached.places : slice,
+      nextPageToken: page1Cached?.nextPageToken ?? nextTok,
+      scrapeSession: { norm: qNorm, rows: scraped },
+    });
+    return true;
+  } catch {
+    scrapeBusinessInfiniteBuffer = null;
+    return false;
+  }
+}
+
+async function openApiSearchChunk(
+  textQuery: string,
+  options: SearchPlacesTextOptions | undefined,
+  virtOffBiz: number | null,
+  pageSize: number,
+  queryCacheKey: string,
+): Promise<{ places: PlaceSearchRow[]; nextPageToken: string | null }> {
+  let q = textQuery.trim();
+  const bias = options?.locationBias?.trim();
+  const coords = options?.userCoords;
+  if (bias && !coords && q && !q.includes(bias)) {
+    q = `${q} ${bias}`.replace(/\s+/g, ' ').trim();
+  }
+
+  const page =
+    virtOffBiz != null && virtOffBiz > 0 ? Math.floor(virtOffBiz / pageSize) + 1 : parseNumericPageToken(options?.pageToken);
+  const { places: naverPlaces, nextPageToken } = await searchNaverLocalKeywordPlacesPaginated(q, {
+    locationBias: options?.locationBias,
+    page,
+    pageSize,
+    excludeStablePlaceKeys: page >= 2 ? options?.excludeStablePlaceKeys : undefined,
+  });
+
+  const places = naverPlaces.map(naverLocalToPlaceSearchRow);
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log('[NaverLocalKeywordSearch]', {
+      source: virtOffBiz != null ? 'openapi_scrape_fallback' : 'openapi',
+      query: q,
+      page,
+      pageSize,
+      count: places.length,
+      nextPageToken,
+    });
+  }
+  return finalizeSearchResult(places, nextPageToken, queryCacheKey);
 }
 
 function naverLocalToPlaceSearchRow(p: NaverLocalPlace): PlaceSearchRow {
@@ -191,6 +318,7 @@ export async function searchPlacesText(
   const queryCacheKey = buildPlaceSearchQueryCacheKey(query, bias, rawTok || '1');
   const queryCached = await getCachedPlaceSearchPage(queryCacheKey);
   if (queryCached) {
+    applyScrapeSessionToBusinessBuffer(queryCached);
     return { places: queryCached.places, nextPageToken: queryCached.nextPageToken };
   }
 
@@ -202,7 +330,7 @@ export async function searchPlacesText(
     const qNorm = scrapeQueryNormForBuffer(bizScrapeQuery);
 
     if (virtOffBiz != null) {
-      const buf = scrapeBusinessInfiniteBuffer;
+      let buf = scrapeBusinessInfiniteBuffer;
       if (!buf || buf.norm !== qNorm) {
         if (__DEV__) {
           // eslint-disable-next-line no-console
@@ -212,35 +340,24 @@ export async function searchPlacesText(
             token: rawTok,
           });
         }
-        return { places: [], nextPageToken: null };
+        const restored = await ensureBusinessScrapeBuffer(textQuery, bias, qNorm, pageSize);
+        buf = scrapeBusinessInfiniteBuffer;
+        if (!restored || !buf || buf.norm !== qNorm) {
+          return openApiSearchChunk(textQuery, options, virtOffBiz, pageSize, queryCacheKey);
+        }
       }
-      const slice = buf.rows.slice(virtOffBiz, virtOffBiz + pageSize);
-      scheduleAndroidThumbnailEnrich(slice);
       if (__DEV__) {
         // eslint-disable-next-line no-console
         console.log('[NaverMobileBusinessScrape]', {
           source: 'thumb_enriched_chunk',
           query: textQuery,
-          sampleThumbs: slice.slice(0, 3).map((r) => ({ id: r.id, thumb: r.thumbnailUrl ?? null })),
+          sampleThumbs: buf.rows
+            .slice(virtOffBiz, virtOffBiz + pageSize)
+            .slice(0, 3)
+            .map((r) => ({ id: r.id, thumb: r.thumbnailUrl ?? null })),
         });
       }
-      const nextOff = virtOffBiz + slice.length;
-      const nextTok =
-        nextOff < buf.rows.length ? encodeBusinessScrapeVirtualPageToken(nextOff) : null;
-      if (__DEV__) {
-        // eslint-disable-next-line no-console
-        console.log('[NaverMobileBusinessScrape]', {
-          source: 'scrape_chunk',
-          query: textQuery,
-          offset: virtOffBiz,
-          chunkCount: slice.length,
-          totalParsed: buf.rows.length,
-          nextPageToken: nextTok,
-          locationBias: bias ?? null,
-          userCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
-        });
-      }
-      return finalizeSearchResult(slice, nextTok, queryCacheKey);
+      return sliceBusinessScrapeChunk(buf, virtOffBiz, pageSize, textQuery, bias, coords, queryCacheKey);
     }
   }
 
@@ -279,7 +396,10 @@ export async function searchPlacesText(
               totalMs: Date.now() - scrapeT0,
             });
           }
-          return finalizeSearchResult(slice, nextTok, queryCacheKey);
+          return finalizeSearchResult(slice, nextTok, queryCacheKey, {
+            norm: qNorm,
+            rows: scraped,
+          });
         }
         scrapeBusinessInfiniteBuffer = null;
         if (__DEV__) {
@@ -301,35 +421,7 @@ export async function searchPlacesText(
     }
   }
 
-  // Open API 폴백에서는 지역 힌트(bias)를 추가해 검색 정합도를 높입니다.
-  if (bias && !coords && textQuery && !textQuery.includes(bias)) {
-    textQuery = `${textQuery} ${bias}`.replace(/\s+/g, ' ').trim();
-  }
-
-  const page = parseNumericPageToken(options?.pageToken);
-  const { places: naverPlaces, nextPageToken } = await searchNaverLocalKeywordPlacesPaginated(textQuery, {
-    locationBias: options?.locationBias,
-    page,
-    pageSize,
-    excludeStablePlaceKeys: page >= 2 ? options?.excludeStablePlaceKeys : undefined,
-  });
-
-  const places = naverPlaces.map(naverLocalToPlaceSearchRow);
-
-  if (__DEV__) {
-    // eslint-disable-next-line no-console
-    console.log('[NaverLocalKeywordSearch]', {
-      query: textQuery,
-      page,
-      pageSize,
-      locationBias: bias ?? null,
-      userCoords: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
-      count: places.length,
-      nextPageToken,
-    });
-  }
-
-  return finalizeSearchResult(places, nextPageToken, queryCacheKey);
+  return openApiSearchChunk(textQuery, options, null, pageSize, queryCacheKey);
 }
 
 function hasPlaceSearchRowCoordinates(row: PlaceSearchRow): boolean {

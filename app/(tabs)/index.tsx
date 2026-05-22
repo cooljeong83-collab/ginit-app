@@ -1912,7 +1912,9 @@ export default function FeedScreen() {
                         registeredRegionsLen: registeredRegions.length,
                         exploreActiveRegionNorm,
                       }}
-                      renderItem={({ item }) => renderExploreFeedRow(item)}
+                      renderItem={({ item }) => (
+                        <View style={styles.exploreFeedListRow}>{renderExploreFeedRow(item)}</View>
+                      )}
                       ItemSeparatorComponent={renderHomeMeetingListSeparator}
                       ListHeaderComponent={tabListAlerts(tab)}
                       ListFooterComponent={homeTab === tab ? listFooter : null}
@@ -2224,6 +2226,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 28 + MEETING_TAB_LIST_SCROLL_BOTTOM_EXTRA,
     flexGrow: 1,
+  },
+  exploreFeedListRow: {
+    width: '100%',
+    alignSelf: 'stretch',
+    maxWidth: '100%',
   },
   tabCategoryBar: {
     flexDirection: 'row',

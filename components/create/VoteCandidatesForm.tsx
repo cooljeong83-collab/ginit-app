@@ -100,12 +100,19 @@ import {
   type PlaceDetailPopupState,
 } from '@/src/lib/places/place-detail-popup-state';
 import { pickPlaceRating, usePlaceRatingsByKeys } from '@/src/hooks/use-place-ratings-by-keys';
+import { pickPlacePromotion, usePlacePromotionsByKeys } from '@/src/hooks/use-place-promotions';
 import { loadRegisteredFeedRegions } from '@/src/lib/feed-registered-regions';
 import {
   gatePlaceAgainstRegisteredInterestRegions,
   type PlaceRegionCheckInput,
 } from '@/src/lib/meeting-create-place-region';
 import { ensureNearbySearchBias } from '@/src/lib/nearby-search-bias';
+import { resolveHttpImageDisplayUri } from '@/src/lib/supabase-public-image-thumbnail';
+import { fetchSponsoredPlacesForSearch } from '@/src/lib/promotions/place-promotions-api';
+import {
+  mergeSponsoredIntoPlaceSearchRows,
+  sponsoredPlaceToSearchRow,
+} from '@/src/lib/promotions/sponsored-place-search-merge';
 import { computeNlpApply, dateCandidateDupKey } from '@/src/lib/nlp-schedule-candidates';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
@@ -154,28 +161,6 @@ function isUsableRemoteImageUrl(raw: string | null | undefined): raw is string {
   } catch {
     return false;
   }
-}
-
-function mergePinnedSelectedPlaceSearchRows(
-  prevRows: PlaceSearchRow[],
-  nextRows: PlaceSearchRow[],
-  selectedById: Record<string, { placeName: string; address: string }>,
-): PlaceSearchRow[] {
-  const out: PlaceSearchRow[] = [];
-  const seen = new Set<string>();
-  const appendOnce = (row: PlaceSearchRow) => {
-    const key = stableNaverLocalSearchDedupeKey(row);
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(row);
-  };
-
-  prevRows.forEach((row) => {
-    if (selectedById[row.id]) appendOnce(row);
-  });
-  nextRows.forEach(appendOnce);
-
-  return out;
 }
 
 function animate() {
@@ -1615,6 +1600,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
   }, [showPlaces, placeSearchRows, placeCandidates, lockedPlacePreset]);
 
   const placeRatingsQuery = usePlaceRatingsByKeys(placeRatingKeys);
+  const placePromotionsQuery = usePlacePromotionsByKeys(placeRatingKeys);
 
   useEffect(() => {
     let alive = true;
@@ -1694,7 +1680,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
         const seen0 = new Set(prevRows.map((r) => r.id));
         const fresh0 = listWithCoords.filter((r) => !seen0.has(r.id));
         if (fresh0.length === 0) {
-          setPlaceSearchNextPageToken(null);
+          setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
         } else {
           setPlaceSearchRows((prev) => {
             const seen = new Set(prev.map((r) => r.id));
@@ -1821,15 +1807,26 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
       try {
         const { bias, coords } = await ensureNearbySearchBias();
         if (!alive) return;
-        const { places: list, nextPageToken: nxt } = await searchPlacesText(qTrim, {
-          locationBias: bias,
-          userCoords: coords,
-          maxResultCount: PLACE_SEARCH_PAGE_SIZE,
-        });
+        const [{ places: list, nextPageToken: nxt }, sponsoredPlaces] = await Promise.all([
+          searchPlacesText(qTrim, {
+            locationBias: bias,
+            userCoords: coords,
+            maxResultCount: PLACE_SEARCH_PAGE_SIZE,
+          }),
+          fetchSponsoredPlacesForSearch(bias, 3),
+        ]);
         const listWithCoords = await preloadPlaceSearchRowsCoordinates(list);
         if (!alive) return;
+        const sponsoredRows = sponsoredPlaces
+          .map(sponsoredPlaceToSearchRow)
+          .filter((row): row is PlaceSearchRow => row != null);
         setPlaceSearchRows((prev) =>
-          mergePinnedSelectedPlaceSearchRows(prev, listWithCoords, placeSelectedByIdRef.current),
+          mergeSponsoredIntoPlaceSearchRows({
+            prevRows: prev,
+            naverRows: listWithCoords,
+            sponsoredRows,
+            selectedById: placeSelectedByIdRef.current,
+          }),
         );
         setPlaceSearchNextPageToken(nxt?.trim() ? nxt.trim() : null);
         setPlaceThumbById({});
@@ -2463,11 +2460,12 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                       const selected = Boolean(placeSelectedById[item.id]);
                       const resolving = Boolean(placeResolvingById[item.id]);
                       const thumbFromState = placeThumbById[item.id];
-                      const thumb = isUsableRemoteImageUrl(thumbFromState)
+                      const rawThumb = isUsableRemoteImageUrl(thumbFromState)
                         ? thumbFromState.trim()
                         : isUsableRemoteImageUrl(item.thumbnailUrl)
                           ? item.thumbnailUrl!.trim()
                           : null;
+                      const thumb = rawThumb ? resolveHttpImageDisplayUri(rawThumb, 224) : null;
                       const rowPlaceKey = derivePlaceKeyFromSearchRow({
                         title: item.title,
                         link: item.link,
@@ -2475,6 +2473,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                         address: item.address,
                       });
                       const rowRating = pickPlaceRating(placeRatingsQuery.data, rowPlaceKey);
+                      const rowPromo = pickPlacePromotion(placePromotionsQuery.data, rowPlaceKey);
                       return (
                         <View
                           key={item.id}
@@ -2586,10 +2585,11 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
                             accessibilityLabel={title}>
                             <View style={styles.placeResultProposalPressInner}>
                               <View style={styles.placeResultImageWrap}>
-                                {rowRating && rowRating.reviewCount > 0 ? (
+                                {rowPromo || (rowRating && rowRating.reviewCount > 0) ? (
                                   <GinitPlaceRatingBadge
-                                    averageRating={rowRating.averageRating}
-                                    reviewCount={rowRating.reviewCount}
+                                    averageRating={rowRating?.averageRating ?? 0}
+                                    reviewCount={rowRating?.reviewCount ?? 0}
+                                    promotion={rowPromo}
                                     style={styles.placeResultGinitRatingBadge}
                                   />
                                 ) : null}
