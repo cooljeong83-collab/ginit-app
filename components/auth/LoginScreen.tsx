@@ -25,6 +25,7 @@ import { isPhoneRegisteredLocally, registerSignupLocalKeys } from '@/src/lib/pho
 import { normalizePhoneUserId } from '@/src/lib/phone-user-id';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { writeSecureAuthSession } from '@/src/lib/secure-auth-session';
+import { openLegalDocument } from '@/src/lib/open-legal-document';
 import { setPendingConsentAction } from '@/src/lib/terms-consent-flow';
 import { enforceAccountGate } from '@/src/features/account-suspension/enforce-account-gate';
 import {
@@ -748,7 +749,23 @@ export default function LoginScreen() {
                   ) : null}
 
                   <Text style={loginScreenStyles.legalLine}>
-                    계속하면 서비스 이용약관 및 개인정보 처리방침에 동의한 것으로 간주됩니다.
+                    계속하면{' '}
+                    <Text
+                      style={loginScreenStyles.legalLink}
+                      onPress={() => void openLegalDocument('tos')}
+                      accessibilityRole="link"
+                      accessibilityLabel="서비스 이용약관 보기">
+                      서비스 이용약관
+                    </Text>
+                    {' '}및{' '}
+                    <Text
+                      style={loginScreenStyles.legalLink}
+                      onPress={() => void openLegalDocument('privacy')}
+                      accessibilityRole="link"
+                      accessibilityLabel="개인정보 처리방침 보기">
+                      개인정보 처리방침
+                    </Text>
+                    에 동의한 것으로 간주됩니다.
                   </Text>
                   </View>
                 </View>
@@ -929,5 +946,9 @@ const loginScreenStyles = StyleSheet.create({
     opacity: 0.85,
     lineHeight: 16,
     textAlign: 'center',
+  },
+  legalLink: {
+    color: GinitTheme.colors.primary,
+    textDecorationLine: 'underline',
   },
 });

@@ -2,7 +2,7 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScreenShell } from '@/components/ui';
@@ -11,26 +11,15 @@ import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { consumePendingConsentAction } from '@/src/lib/terms-consent-flow';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
+import { openLegalDocument } from '@/src/lib/open-legal-document';
+import type { LegalDocumentKey } from '@/src/constants/legal-documents';
 
-type TermKey = 'tos' | 'privacy';
+type TermKey = LegalDocumentKey;
 
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
   tos: { title: '서비스 이용약관', required: true },
   privacy: { title: '개인정보 처리방침', required: true },
 };
-
-function termBody(key: TermKey): string {
-  if (key === 'tos') {
-    return (
-      '서비스 이용약관(필수)\n\n' +
-      '- (여기에 실제 약관 전문 또는 링크를 연결하세요.)\n'
-    );
-  }
-  return (
-    '개인정보 처리방침(필수)\n\n' +
-    '- (여기에 실제 처리방침 전문 또는 링크를 연결하세요.)\n'
-  );
-}
 
 export default function TermsAgreementScreen() {
   const router = useTransitionRouter();
@@ -43,7 +32,6 @@ export default function TermsAgreementScreen() {
     return t || null;
   }, [params.next]);
   const [checked, setChecked] = useState<Record<TermKey, boolean>>({ tos: false, privacy: false });
-  const [detailKey, setDetailKey] = useState<TermKey | null>(null);
   const [busy, setBusy] = useState(false);
   const submitLockRef = useRef(false);
 
@@ -60,16 +48,12 @@ export default function TermsAgreementScreen() {
   }, []);
 
   const close = useCallback(() => {
-    if (detailKey) {
-      setDetailKey(null);
-      return;
-    }
     try {
       router.back();
     } catch {
       expoRouter.replace('/login');
     }
-  }, [detailKey, router, expoRouter]);
+  }, [router, expoRouter]);
 
   const onNext = useCallback(async () => {
     if (!allRequiredChecked || busy) return;
@@ -106,8 +90,9 @@ export default function TermsAgreementScreen() {
     }
   }, [allRequiredChecked, busy, close, next, expoRouter]);
 
-  const detailTitle = useMemo(() => (detailKey ? TERM_LABELS[detailKey].title : ''), [detailKey]);
-  const detailText = useMemo(() => (detailKey ? termBody(detailKey) : ''), [detailKey]);
+  const openTermDocument = useCallback((key: TermKey) => {
+    void openLegalDocument(key);
+  }, []);
 
   return (
     <ScreenShell padded={false} style={styles.root}>
@@ -159,7 +144,7 @@ export default function TermsAgreementScreen() {
                     </Text>
                   </GinitPressable>
                   <GinitPressable
-                    onPress={() => setDetailKey(key)}
+                    onPress={() => openTermDocument(key)}
                     hitSlop={10}
                     style={({ pressed }) => [styles.viewBtn, pressed && styles.pressed]}
                     accessibilityRole="button"
@@ -187,19 +172,6 @@ export default function TermsAgreementScreen() {
           </GinitPressable>
         </View>
 
-        <Modal visible={detailKey != null} animationType="slide" onRequestClose={() => setDetailKey(null)}>
-          <SafeAreaView style={styles.detailSafe} edges={['top', 'bottom']}>
-            <View style={styles.detailHeader}>
-              <Text style={styles.detailTitle}>{detailTitle}</Text>
-              <GinitPressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-                <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
-              </GinitPressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.detailBody}>
-              <Text style={styles.detailText}>{detailText}</Text>
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
       </SafeAreaView>
     </ScreenShell>
   );
@@ -271,18 +243,5 @@ const styles = StyleSheet.create({
   },
   nextBtnDisabled: { opacity: 0.45 },
   nextBtnText: { fontSize: 15, fontWeight: '600', color: '#fff' },
-  detailSafe: { flex: 1, backgroundColor: '#fff' },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.10)',
-  },
-  detailTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a' },
-  detailBody: { paddingHorizontal: 16, paddingVertical: 14 },
-  detailText: { fontSize: 13, lineHeight: 20, color: '#0f172a' },
 });
 

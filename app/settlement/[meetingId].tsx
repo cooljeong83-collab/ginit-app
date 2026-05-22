@@ -1510,11 +1510,11 @@ export default function SettlementMeetingScreen() {
       showSettlementInterstitial(() => {
         presentAppDialogConfirm({
           title: '완료',
-          body: '참석자에게 알림을 보냈고, 모임을 정산 완료로 표시했어요.',
-          cancelLabel: '확인',
-          confirmLabel: '확인',
+          body: '정산이 완료됐어요.\n후기를 남기면 경험치와 신뢰도가 회복돼요.',
+          cancelLabel: '취소',
+          confirmLabel: '후기 작성',
           onConfirm: navigateAfterSettlementComplete,
-          onCancel: navigateAfterSettlementComplete,
+          onCancel: () => router.back(),
         });
       });
     } catch (e) {

@@ -22,9 +22,11 @@ import { AuthService } from '@/src/services/AuthService';
 import { supabase } from '@/src/lib/supabase';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { presentAppDialogAlert } from '@/src/lib/app-dialog-present';
+import { openLegalDocument } from '@/src/lib/open-legal-document';
 import { toUserFacingErrorMessage } from '@/src/lib/user-facing-error-message';
+import type { LegalDocumentKey } from '@/src/constants/legal-documents';
 
-type TermKey = 'tos' | 'privacy' | 'safety';
+type TermKey = LegalDocumentKey | 'safety';
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
   tos: { title: '서비스 이용약관', required: true },
   privacy: { title: '개인정보 처리방침', required: true },
@@ -203,21 +205,34 @@ export default function OtpVerifyScreen() {
               {(Object.keys(TERM_LABELS) as TermKey[]).map((k) => {
                 const label = TERM_LABELS[k];
                 const isChecked = checked[k];
+                const legalKey = k === 'tos' || k === 'privacy' ? k : null;
                 return (
                   <View key={k} style={styles.termBlock}>
-                    <GinitPressable
-                      onPress={() => toggleOne(k)}
-                      style={({ pressed }) => [styles.termRow, pressed && styles.pressed]}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: isChecked }}
-                      accessibilityLabel={`${label.title} 동의`}>
-                      <GinitSymbolicIcon
-                        name={isChecked ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={20}
-                        color={isChecked ? GinitTheme.colors.primary : '#94a3b8'}
-                      />
-                      <Text style={styles.termText}>{label.required ? `[필수] ${label.title}` : label.title}</Text>
-                    </GinitPressable>
+                    <View style={styles.termRowWrap}>
+                      <GinitPressable
+                        onPress={() => toggleOne(k)}
+                        style={({ pressed }) => [styles.termRow, pressed && styles.pressed]}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: isChecked }}
+                        accessibilityLabel={`${label.title} 동의`}>
+                        <GinitSymbolicIcon
+                          name={isChecked ? 'checkmark-circle' : 'ellipse-outline'}
+                          size={20}
+                          color={isChecked ? GinitTheme.colors.primary : '#94a3b8'}
+                        />
+                        <Text style={styles.termText}>{label.required ? `[필수] ${label.title}` : label.title}</Text>
+                      </GinitPressable>
+                      {legalKey ? (
+                        <GinitPressable
+                          onPress={() => void openLegalDocument(legalKey)}
+                          hitSlop={10}
+                          style={({ pressed }) => [styles.viewBtn, pressed && styles.pressed]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${label.title} 보기`}>
+                          <Text style={styles.viewBtnText}>보기</Text>
+                        </GinitPressable>
+                      ) : null}
+                    </View>
                     {k === 'safety' ? <Text style={styles.safetyBody}>{SAFETY_DISCLAIMER_TEXT}</Text> : null}
                   </View>
                 );
@@ -296,8 +311,11 @@ const styles = StyleSheet.create({
   termsSub: { fontSize: 12, fontWeight: '600', color: '#64748b' },
   allRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   allText: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
-  termRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  termText: { fontSize: 13, fontWeight: '600', color: '#0f172a' },
+  termRowWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  termRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, minWidth: 0 },
+  termText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#0f172a' },
+  viewBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  viewBtnText: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.primary },
   termBlock: { gap: 6 },
   safetyBody: {
     paddingLeft: 30,

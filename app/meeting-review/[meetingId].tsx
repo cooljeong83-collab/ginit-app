@@ -45,12 +45,7 @@ import { setPendingPresetPlaceCandidate } from '@/src/lib/meeting-place-bridge';
 import { generateUuidV4 } from '@/src/lib/generate-uuid-v4';
 import { logPresetPlaceMeetingCreateIntent } from '@/src/lib/meeting-preset-place-create-attribution';
 import { pushProfileOpenRegisterInfo } from '@/src/lib/profile-register-info';
-import {
-  exitMeetingReviewFlow,
-  MEETING_REVIEW_ENTRY_FEED_LIST,
-  readMeetingReviewEntryFromParams,
-  readReturnToFromParams,
-} from '@/src/lib/meeting-flow-navigation';
+import { exitMeetingReviewFlow, readReturnToFromParams } from '@/src/lib/meeting-flow-navigation';
 import { useTransitionRouter } from '@/src/lib/screen-transition-navigation';
 import { safeRouterBack } from '@/src/lib/router-safe';
 import {
@@ -110,8 +105,6 @@ export default function MeetingReviewScreen() {
       ? params.meetingId.trim()
       : '';
   const flowReturnTo = readReturnToFromParams(params);
-  const showNextMeetingSection =
-    readMeetingReviewEntryFromParams(params) === MEETING_REVIEW_ENTRY_FEED_LIST;
 
   const { categories } = useMeetingCategories();
   const { meeting, loading, loadError, refetch } = useMeetingDetailQuery(meetingId);
@@ -456,8 +449,7 @@ export default function MeetingReviewScreen() {
               receiptPlaceVerified={receiptPlaceVerified}
               summary={summaryQuery.data}
               loading={summaryQuery.isLoading && !summaryQuery.data}
-              showNextMeetingSection={showNextMeetingSection}
-              onCreateMeetingAtPlace={showNextMeetingSection ? onCreateMeetingAtPlace : undefined}
+              onCreateMeetingAtPlace={onCreateMeetingAtPlace}
             />
           )}
         </View>

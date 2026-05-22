@@ -1,31 +1,20 @@
 import { GinitPressable } from '@/components/ui/GinitPressable';
 
-import {useCallback, useMemo, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, View} from 'react-native';
+import { useCallback, useState } from 'react';
+import { Modal, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GinitTheme } from '@/constants/ginit-theme';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
+import { openLegalDocument } from '@/src/lib/open-legal-document';
+import type { LegalDocumentKey } from '@/src/constants/legal-documents';
 
-type TermKey = 'tos' | 'privacy';
+type TermKey = LegalDocumentKey;
 
 const TERM_LABELS: Record<TermKey, { title: string; required: boolean }> = {
   tos: { title: '서비스 이용약관', required: true },
   privacy: { title: '개인정보 처리방침', required: true },
 };
-
-function termBody(key: TermKey): string {
-  if (key === 'tos') {
-    return (
-      '서비스 이용약관(필수)\n\n' +
-      '- (여기에 실제 약관 전문 또는 링크를 연결하세요.)\n'
-    );
-  }
-  return (
-    '개인정보 처리방침(필수)\n\n' +
-    '- (여기에 실제 처리방침 전문 또는 링크를 연결하세요.)\n'
-  );
-}
 
 export type TermsBottomSheetProps = {
   visible: boolean;
@@ -35,7 +24,6 @@ export type TermsBottomSheetProps = {
 
 export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottomSheetProps) {
   const [checked, setChecked] = useState<Record<TermKey, boolean>>({ tos: false, privacy: false });
-  const [detailKey, setDetailKey] = useState<TermKey | null>(null);
   const [busy, setBusy] = useState(false);
 
   const allRequiredChecked = checked.tos && checked.privacy;
@@ -62,32 +50,17 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
     }
   }, [allRequiredChecked, busy, onAgreeStart]);
 
-  const detailTitle = useMemo(() => (detailKey ? TERM_LABELS[detailKey].title : ''), [detailKey]);
-  const detailText = useMemo(() => (detailKey ? termBody(detailKey) : ''), [detailKey]);
+  const openTermDocument = useCallback((key: TermKey) => {
+    void openLegalDocument(key);
+  }, []);
 
   return (
     <>
-      <Modal
-        visible={visible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
-          if (detailKey) {
-            setDetailKey(null);
-            return;
-          }
-          onClose();
-        }}>
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
         <View style={styles.dim}>
           <GinitPressable
             style={StyleSheet.absoluteFillObject}
-            onPress={() => {
-              if (detailKey) {
-                setDetailKey(null);
-                return;
-              }
-              onClose();
-            }}
+            onPress={onClose}
             accessibilityRole="button"
             accessibilityLabel="약관 닫기"
           />
@@ -137,7 +110,7 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
                       </Text>
                     </GinitPressable>
                     <GinitPressable
-                      onPress={() => setDetailKey(key)}
+                      onPress={() => openTermDocument(key)}
                       hitSlop={10}
                       style={({ pressed }) => [styles.viewBtn, pressed && styles.pressed]}
                       accessibilityRole="button"
@@ -163,20 +136,6 @@ export function TermsBottomSheet({ visible, onClose, onAgreeStart }: TermsBottom
             </GinitPressable>
           </SafeAreaView>
         </View>
-      </Modal>
-
-      <Modal visible={detailKey != null} animationType="slide" onRequestClose={() => setDetailKey(null)}>
-        <SafeAreaView style={styles.detailSafe} edges={['top', 'bottom']}>
-          <View style={styles.detailHeader}>
-            <Text style={styles.detailTitle}>{detailTitle}</Text>
-            <GinitPressable onPress={() => setDetailKey(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="닫기">
-              <GinitSymbolicIcon name="close" size={22} color={GinitTheme.colors.text} />
-            </GinitPressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.detailBody}>
-            <Text style={styles.detailText}>{detailText}</Text>
-          </ScrollView>
-        </SafeAreaView>
       </Modal>
     </>
   );
@@ -239,18 +198,5 @@ const styles = StyleSheet.create({
   },
   agreeBtnDisabled: { opacity: 0.45 },
   agreeBtnText: { fontSize: 15, fontWeight: '600', color: '#fff' },
-  detailSafe: { flex: 1, backgroundColor: '#fff' },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.10)',
-  },
-  detailTitle: { fontSize: 16, fontWeight: '600', color: '#0f172a' },
-  detailBody: { paddingHorizontal: 16, paddingVertical: 14 },
-  detailText: { fontSize: 13, lineHeight: 20, color: '#0f172a' },
 });
 

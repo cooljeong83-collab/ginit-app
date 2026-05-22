@@ -24,6 +24,7 @@ import { GamificationStatChangeHost } from '@/components/gamification/Gamificati
 import { TransientBottomMessageHost } from '@/components/ui/TransientBottomMessage';
 import { AppPoliciesProvider } from '@/src/context/AppPoliciesContext';
 import { InAppAlarmsProvider } from '@/src/context/InAppAlarmsContext';
+import { LegalDocumentModalProvider } from '@/src/context/LegalDocumentModalContext';
 import { MeetingCategoriesProvider } from '@/src/context/MeetingCategoriesContext';
 import { QueryClientPersistProvider } from '@/src/context/QueryClientPersistProvider';
 import { AppForegroundMeetingsRefreshHost } from '@/src/hooks/use-app-foreground-refresh';
@@ -68,6 +69,7 @@ export default function RootLayout() {
     <>
       <StatusBar style="dark" translucent backgroundColor="transparent" />
       <AppPoliciesProvider>
+        <LegalDocumentModalProvider>
         <AdMobBootstrap />
         <AppOpenAdHost />
         <QueryClientPersistProvider>
@@ -105,6 +107,7 @@ export default function RootLayout() {
               </MeetingCategoriesProvider>
             </UserSessionProvider>
         </QueryClientPersistProvider>
+        </LegalDocumentModalProvider>
       </AppPoliciesProvider>
     </>
   );

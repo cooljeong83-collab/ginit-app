@@ -156,7 +156,6 @@ export function GinitPlaceReviewTimeline({
       data={items}
       keyExtractor={(it) => it.id}
       renderItem={({ item }) => <TimelineRow item={item} />}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
       onEndReached={() => {
         if (cursor && !loadingMore) void loadMore();
       }}
@@ -200,10 +199,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 14,
     paddingHorizontal: 4,
-  },
-  separator: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(15, 23, 42, 0.1)',
   },
   avatar: {
     width: 40,

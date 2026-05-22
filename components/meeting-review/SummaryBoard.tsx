@@ -22,8 +22,6 @@ type SummaryBoardProps = {
   receiptPlaceVerified?: boolean;
   summary: MeetingReviewSummary | undefined;
   loading?: boolean;
-  /** 탐색 피드 모임 후기 목록에서 진입한 경우에만 true */
-  showNextMeetingSection?: boolean;
   onCreateMeetingAtPlace?: () => void;
 };
 
@@ -35,7 +33,6 @@ export function SummaryBoard({
   receiptPlaceVerified,
   summary,
   loading,
-  showNextMeetingSection = false,
   onCreateMeetingAtPlace,
 }: SummaryBoardProps) {
   const insets = useSafeAreaInsets();
@@ -119,7 +116,7 @@ export function SummaryBoard({
           </View>
         )}
 
-        {showNextMeetingSection && onCreateMeetingAtPlace ? (
+        {onCreateMeetingAtPlace ? (
           <>
             <View style={styles.nextMeetingDivider} />
             <View style={styles.nextMeetingSection}>
