@@ -3949,6 +3949,11 @@ export default function MeetingDetailScreen() {
                           ) : (
                             <View style={styles.placeVoteImageFallback} />
                           )}
+                          {singlePromo ? (
+                            <View style={styles.placeVotePromoThumbOverlay} pointerEvents="none">
+                              <PlacePromotionBenefitBadge promotion={singlePromo} overlay />
+                            </View>
+                          ) : null}
                         </View>
                         <View style={styles.placeDetailRightCol}>
                           <View style={styles.placeDetailRightColTop}>
@@ -3956,7 +3961,6 @@ export default function MeetingDetailScreen() {
                               <Text style={[styles.placeVoteTitle, styles.placeVoteTitleFlex]} numberOfLines={3}>
                                 {chip.title}
                               </Text>
-                              {singlePromo ? <PlacePromotionBenefitBadge promotion={singlePromo} compact /> : null}
                               {singleRating && singleRating.reviewCount > 0 ? (
                                 <GinitPlaceRatingBadge
                                   averageRating={singleRating.averageRating}
@@ -4059,7 +4063,12 @@ export default function MeetingDetailScreen() {
                               ) : (
                                 <View style={styles.placeVoteImageFallback} />
                               )}
-                              <View style={styles.placeVoteTallyBadge} pointerEvents="none">
+                              <View
+                                style={[
+                                  styles.placeVoteTallyBadge,
+                                  chipPromo ? styles.placeVoteTallyBadgeWhenPromo : null,
+                                ]}
+                                pointerEvents="none">
                                 <Text style={styles.voteTallyBadgeText}>{tally}</Text>
                               </View>
                               {chipSelected ? (
@@ -4067,12 +4076,16 @@ export default function MeetingDetailScreen() {
                                   <GinitSymbolicIcon name="checkmark-circle" size={22} color={GinitTheme.colors.primary} />
                                 </View>
                               ) : null}
+                              {chipPromo ? (
+                                <View style={styles.placeVotePromoThumbOverlay} pointerEvents="none">
+                                  <PlacePromotionBenefitBadge promotion={chipPromo} overlay />
+                                </View>
+                              ) : null}
                             </View>
                             <View style={styles.placeVoteTitleRow}>
                               <Text style={[styles.placeVoteTitle, styles.placeVoteTitleFlex]} numberOfLines={2}>
                                 {chip.title}
                               </Text>
-                              {chipPromo ? <PlacePromotionBenefitBadge promotion={chipPromo} compact /> : null}
                               {chipRating && chipRating.reviewCount > 0 ? (
                                 <GinitPlaceRatingBadge
                                   averageRating={chipRating.averageRating}
@@ -5715,6 +5728,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  placeVotePromoThumbOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    zIndex: 5,
+    maxWidth: '72%',
+  },
+  placeVoteTallyBadgeWhenPromo: {
+    left: undefined,
+    right: 8,
+  },
   placeVoteTitle: { fontSize: 13, fontWeight: '600', color: GinitTheme.colors.text, lineHeight: 18, marginBottom: 6 },
   placeVoteSub: { fontSize: 11, fontWeight: '700', color: GinitTheme.colors.textMuted, lineHeight: 15 },
   placeDetailBlock: { marginTop: 0 },
@@ -5732,6 +5756,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.55)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(15, 23, 42, 0.12)',
+    position: 'relative',
   },
   placeDetailRightCol: {
     flex: 1,

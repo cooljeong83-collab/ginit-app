@@ -29,7 +29,7 @@ export function GinitMatchInlineCard({ place, onPress }: Props) {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${place.placeName} 제휴 장소 상세`}
-      style={({ pressed }) => [s.pressableRow, s.cardBorder, pressed && s.pressablePressed]}>
+      style={({ pressed }) => [s.pressableRow, pressed && s.pressablePressed]}>
       <View style={s.row}>
         <View style={s.lead}>
           <View style={s.symbolRing}>
@@ -49,11 +49,11 @@ export function GinitMatchInlineCard({ place, onPress }: Props) {
         </View>
         <View style={s.body}>
           <View style={s.titleRow}>
-            <Text style={s.title} numberOfLines={2}>
+            <Text style={[s.title, s.titleFlex]} numberOfLines={2}>
               {place.placeName}
             </Text>
             <View style={s.badgeSlot}>
-              <GinitMatchBenefitBadge label={badgeLabel} compact />
+              <GinitMatchBenefitBadge label={badgeLabel} compact plain />
             </View>
           </View>
           {subLine ? (
@@ -73,12 +73,6 @@ export function GinitMatchInlineCard({ place, onPress }: Props) {
 const s = StyleSheet.create({
   pressableRow: {
     paddingVertical: 10,
-  },
-  cardBorder: {
-    borderWidth: 1.5,
-    borderColor: GinitTheme.colors.primary,
-    borderRadius: 0,
-    marginHorizontal: 0,
   },
   pressablePressed: {
     opacity: 0.86,
@@ -122,12 +116,14 @@ const s = StyleSheet.create({
     gap: 6,
   },
   title: {
-    flex: 1,
-    minWidth: 0,
     fontSize: 16,
     fontWeight: '700',
     color: GinitTheme.colors.text,
     letterSpacing: -0.2,
+  },
+  titleFlex: {
+    flex: 1,
+    minWidth: 0,
   },
   badgeSlot: {
     flexShrink: 0,
