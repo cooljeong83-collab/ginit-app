@@ -50,7 +50,6 @@ export async function buildPresetPlaceCandidateFromPlaceDetailPopup(
     master?.category?.trim() || snapshotHint?.category?.trim() || undefined;
 
   const attribution = buildPlaceDetailPopupAttribution(intentId, placeKey, promo);
-  if (!attribution) return null;
 
   return {
     id: newId('place'),
@@ -62,7 +61,7 @@ export async function buildPresetPlaceCandidateFromPlaceDetailPopup(
     ...(nl ? { naverPlaceLink: nl } : {}),
     ...(pref ? { preferredPhotoMediaUrl: pref } : {}),
     placeKey: placeKey || master?.placeKey || '',
-    attribution,
+    ...(attribution ? { attribution } : {}),
   };
 }
 
@@ -71,8 +70,12 @@ function buildPlaceDetailPopupAttribution(
   placeKey: string,
   promo: PlacePromotionSummary | null,
 ) {
+  if (promo?.isSponsored !== true) return null;
+
   const pk = placeKey.trim();
-  const campaignId = promo?.isSponsored === true ? promo.campaignId.trim() : '';
+  const campaignId = promo.campaignId.trim();
+  if (!campaignId) return null;
+
   const analyticsPlaceId = buildAnalyticsPlaceIdForStorePromo({
     campaignId,
     placeKey: pk,

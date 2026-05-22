@@ -24,6 +24,8 @@ export type VoteCandidatesFormProps = {
   placeThemeLabel?: string;
   /** `major_code` 기반 특화 — 장소 시드가 라벨 정규식과 어긋나지 않게 전달 */
   placeThemeSpecialtyKind?: SpecialtyKind | null;
+  /** `meeting_categories.id` — 제휴 검색 부스트 소분류 매칭 */
+  placeThemeCategoryId?: string | null;
   /** `major_code` Eat & Drink 등 — Step2 메뉴 성향이 장소 추천어에 반영되도록 전달 */
   placeMenuPreferenceLabels?: readonly string[] | null;
   /** 장소 시드·추천어에서 Eat & Drink 전용(카테고리명·시각·인원·브런치 제외 규칙) 분기 */

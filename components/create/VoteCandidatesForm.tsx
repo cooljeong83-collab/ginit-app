@@ -306,6 +306,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     seedScheduleTime,
     placeThemeLabel = '',
     placeThemeSpecialtyKind = null,
+    placeThemeCategoryId = undefined,
     placeMenuPreferenceLabels = undefined,
     placeThemeMajorCode = undefined,
     placeActivityKindLabels = undefined,
@@ -1573,6 +1574,21 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     placeFocusKnowledgePreferenceLabels,
   ]);
 
+  const sponsoredSearchMeetingCtx = useMemo(
+    () => ({
+      categoryId: placeThemeCategoryId ?? null,
+      majorCode: placeThemeMajorCode ?? null,
+      specialtyKind: placeThemeSpecialtyKind ?? null,
+      categoryLabel: (placeThemeLabel || '').trim() || null,
+    }),
+    [
+      placeThemeCategoryId,
+      placeThemeMajorCode,
+      placeThemeSpecialtyKind,
+      placeThemeLabel,
+    ],
+  );
+
   const placeRatingKeys = useMemo(() => {
     if (!showPlaces) return [] as string[];
     const keys: string[] = [];
@@ -1819,7 +1835,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
             userCoords: coords,
             maxResultCount: PLACE_SEARCH_PAGE_SIZE,
           }),
-          fetchSponsoredPlacesForSearch(bias, 3),
+          fetchSponsoredPlacesForSearch(bias, 3, sponsoredSearchMeetingCtx),
         ]);
         const listWithCoords = await preloadPlaceSearchRowsCoordinates(list);
         if (!alive) return;
@@ -1852,7 +1868,7 @@ export const VoteCandidatesForm = forwardRef<VoteCandidatesFormHandle, VoteCandi
     return () => {
       alive = false;
     };
-  }, [placeSearchTriggerSeq, placesListOnly, showPlaces]);
+  }, [placeSearchTriggerSeq, placesListOnly, showPlaces, sponsoredSearchMeetingCtx]);
 
   useEffect(() => {
     if (!onPlacesAutoAssistSnapshot) return undefined;

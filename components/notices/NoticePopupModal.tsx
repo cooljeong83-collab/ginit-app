@@ -19,7 +19,6 @@ import { GinitPressable } from '@/components/ui/GinitPressable';
 import { GinitSymbolicIcon } from '@/components/ui/GinitSymbolicIcon';
 import { GinitTheme } from '@/constants/ginit-theme';
 import type { ActiveNoticeItem } from '@/src/features/notices/notices-api';
-import { resolveHttpImageDisplayUri } from '@/src/lib/supabase-public-image-thumbnail';
 
 const ACCENT = '#673AB7';
 const AUTO_ADVANCE_MS = 4500;
@@ -119,10 +118,7 @@ function NoticePopupSlideBody({ notice, cardMaxWidth, imageMaxHeight, onImagePre
   const hasTitle = title.length > 0;
   const hasBody = body.length > 0;
   const hasLink = Boolean(notice.linkUrl?.trim());
-  const imageUri = useMemo(
-    () => resolveHttpImageDisplayUri(notice.imageUrl, cardMaxWidth) ?? '',
-    [notice.imageUrl, cardMaxWidth],
-  );
+  const imageUri = notice.imageUrl?.trim() ?? '';
   const showImage = imageUri.length > 0 && !imageFailed;
   const imageOnly = notice.isImageOnly && showImage;
 

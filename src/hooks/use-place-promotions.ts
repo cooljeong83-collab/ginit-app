@@ -6,6 +6,7 @@ import {
   fetchSponsoredPlacesForSearch,
   pickPlacePromotion,
   resolveMeetingPlacePromotion,
+  type SponsoredPlaceSearchMeetingContext,
 } from '@/src/lib/promotions/place-promotions-api';
 
 export function feedSponsoredPlaceQueryKey(regionNorm: string): readonly ['promotions', 'feed', string] {
@@ -14,8 +15,17 @@ export function feedSponsoredPlaceQueryKey(regionNorm: string): readonly ['promo
 
 export function sponsoredPlacesForSearchQueryKey(
   regionNorm: string,
-): readonly ['promotions', 'search-boost', string] {
-  return ['promotions', 'search-boost', regionNorm.trim()] as const;
+  meetingCtx?: SponsoredPlaceSearchMeetingContext | null,
+): readonly ['promotions', 'search-boost', string, string, string, string] {
+  const ctx = meetingCtx ?? {};
+  return [
+    'promotions',
+    'search-boost',
+    regionNorm.trim(),
+    (ctx.categoryId ?? '').trim(),
+    (ctx.majorCode ?? '').trim(),
+    (ctx.specialtyKind ?? '').trim(),
+  ] as const;
 }
 
 export function placePromotionsByKeysQueryKey(
@@ -44,11 +54,15 @@ export function useFeedSponsoredPlace(regionNorm: string | null | undefined, ena
   });
 }
 
-export function useSponsoredPlacesForSearch(regionNorm: string | null | undefined, enabled = true) {
+export function useSponsoredPlacesForSearch(
+  regionNorm: string | null | undefined,
+  meetingCtx?: SponsoredPlaceSearchMeetingContext | null,
+  enabled = true,
+) {
   const region = regionNorm?.trim() ?? '';
   return useQuery({
-    queryKey: sponsoredPlacesForSearchQueryKey(region),
-    queryFn: () => fetchSponsoredPlacesForSearch(region || null, 3),
+    queryKey: sponsoredPlacesForSearchQueryKey(region, meetingCtx),
+    queryFn: () => fetchSponsoredPlacesForSearch(region || null, 3, meetingCtx),
     enabled: enabled && region.length > 0,
     staleTime: 120_000,
   });

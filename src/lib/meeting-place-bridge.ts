@@ -122,9 +122,9 @@ export type PresetPlaceCreateAttribution = {
   entryContext: MeetingPlaceReviewSummaryEntryContext | StorePromoEntryContext;
 };
 
-/** 인메모리 브리지: 선택장소 preset + 집계 어트리뷰션 */
+/** 인메모리 브리지: 선택장소 preset + 집계 어트리뷰션 (제휴·후기 유입 등 집계 대상일 때만) */
 export type PresetPlaceCandidateForCreate = PlaceCandidate & {
-  attribution: PresetPlaceCreateAttribution;
+  attribution?: PresetPlaceCreateAttribution;
 };
 
 let pendingPresetPlace: PresetPlaceCandidateForCreate | null = null;

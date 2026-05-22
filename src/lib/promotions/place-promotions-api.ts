@@ -4,7 +4,14 @@ import type {
   PlacePromotionSummary,
   PromotionMatchVerifyPayload,
 } from '@/src/lib/promotions/place-promotion-types';
+import {
+  filterSponsoredPlacesForMeetingContext,
+  resolveMajorCodeForSponsoredPlaceSearch,
+  type SponsoredPlaceSearchMeetingContext,
+} from '@/src/lib/promotions/sponsored-place-category-match';
 import { supabase } from '@/src/lib/supabase';
+
+export type { SponsoredPlaceSearchMeetingContext };
 
 function parseFeedSponsoredPlace(raw: unknown): FeedSponsoredPlace | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -106,12 +113,22 @@ async function fetchSponsoredPlacesFromRpc(
   regionNorm: string | null | undefined,
   limit: number,
   logTag: string,
+  meetingCtx?: SponsoredPlaceSearchMeetingContext | null,
 ): Promise<FeedSponsoredPlace[]> {
   const region = regionNorm?.trim() || null;
-  const { data, error } = await supabase.rpc(rpcName, {
-    p_region_norm: region,
-    p_limit: limit,
-  });
+  const rpcArgs =
+    rpcName === 'list_sponsored_places_for_search'
+      ? {
+          p_region_norm: region,
+          p_limit: limit,
+          p_category_id: meetingCtx?.categoryId?.trim() || null,
+          p_major_code: meetingCtx ? resolveMajorCodeForSponsoredPlaceSearch(meetingCtx) : null,
+        }
+      : {
+          p_region_norm: region,
+          p_limit: limit,
+        };
+  const { data, error } = await supabase.rpc(rpcName, rpcArgs);
   if (error) {
     if (__DEV__) console.warn(`[${logTag}]`, error.message);
     return [];
@@ -142,13 +159,17 @@ export async function fetchFeedSponsoredPlaces(
 export async function fetchSponsoredPlacesForSearch(
   regionNorm: string | null | undefined,
   limit = 3,
+  meetingCtx?: SponsoredPlaceSearchMeetingContext | null,
 ): Promise<FeedSponsoredPlace[]> {
-  return fetchSponsoredPlacesFromRpc(
+  const rows = await fetchSponsoredPlacesFromRpc(
     'list_sponsored_places_for_search',
     regionNorm,
     limit,
     'fetchSponsoredPlacesForSearch',
+    meetingCtx,
   );
+  if (!meetingCtx) return rows;
+  return filterSponsoredPlacesForMeetingContext(rows, meetingCtx);
 }
 
 export async function fetchPlacePromotionsByKeys(

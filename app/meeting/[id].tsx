@@ -4629,6 +4629,7 @@ export default function MeetingDetailScreen() {
                     placeThemeLabel={placeProposePlaceThemeLabel}
                     placeThemeSpecialtyKind={specialtyKind}
                     placeThemeMajorCode={placeThemeMajorForProposeForm}
+                    placeThemeCategoryId={meeting?.categoryId ?? null}
                     placeGameKindLabels={placeGameKindLabelsForProposeForm}
                     placeFocusKnowledgePreferenceLabels={
                       specialtyKind === 'knowledge' && extraFocusKnowledge.length > 0

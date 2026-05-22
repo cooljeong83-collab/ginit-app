@@ -72,12 +72,13 @@ export async function runCreateMeetingFromPlaceDetailPopup(
     return;
   }
 
-  if (pk) {
+  const attr = preset.attribution;
+  if (pk && attr) {
     void logPresetPlaceMeetingCreateIntent({
-      intentId,
-      entrySource: preset.attribution.entrySource,
-      analyticsPlaceId: preset.attribution.analyticsPlaceId,
-      entryContext: preset.attribution.entryContext,
+      intentId: attr.intentId,
+      entrySource: attr.entrySource,
+      analyticsPlaceId: attr.analyticsPlaceId,
+      entryContext: attr.entryContext,
       creatorAppUserId: pk,
     });
   }

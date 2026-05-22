@@ -807,7 +807,7 @@ export default function CreateDetailsScreen() {
       const preset = consumePendingPresetPlaceCandidate();
       if (preset) {
         const { attribution, ...placeOnly } = preset;
-        presetPlaceAttributionRef.current = attribution;
+        presetPlaceAttributionRef.current = attribution ?? null;
         setLockedPlacePreset(placeOnly);
         setVotePayload({ placeCandidates: [placeOnly], dateCandidates: [] });
         setVoteHydrateKey((k) => k + 1);
@@ -2966,6 +2966,7 @@ export default function CreateDetailsScreen() {
                               placeThemeSpecialtyKind={specialtyKind}
                               placeMenuPreferenceLabels={placeMenuPreferenceLabelsForPlaceQuery}
                               placeThemeMajorCode={selectedCategory?.majorCode ?? null}
+                              placeThemeCategoryId={selectedCategory?.id ?? null}
                               placeActivityKindLabels={placeActivityKindLabelsForPlaceQuery}
                               placeGameKindLabels={placeGameKindLabelsForPlaceQuery}
                               placeFocusKnowledgePreferenceLabels={placeFocusKnowledgePreferenceLabelsForPlaceQuery}
@@ -3014,6 +3015,7 @@ export default function CreateDetailsScreen() {
                             placeThemeSpecialtyKind={specialtyKind}
                             placeMenuPreferenceLabels={placeMenuPreferenceLabelsForPlaceQuery}
                             placeThemeMajorCode={selectedCategory?.majorCode ?? null}
+                            placeThemeCategoryId={selectedCategory?.id ?? null}
                             placeActivityKindLabels={placeActivityKindLabelsForPlaceQuery}
                             placeGameKindLabels={placeGameKindLabelsForPlaceQuery}
                             placeFocusKnowledgePreferenceLabels={placeFocusKnowledgePreferenceLabelsForPlaceQuery}
@@ -3053,6 +3055,7 @@ export default function CreateDetailsScreen() {
                           placeThemeSpecialtyKind={specialtyKind}
                           placeMenuPreferenceLabels={placeMenuPreferenceLabelsForPlaceQuery}
                           placeThemeMajorCode={selectedCategory?.majorCode ?? null}
+                          placeThemeCategoryId={selectedCategory?.id ?? null}
                           placeActivityKindLabels={placeActivityKindLabelsForPlaceQuery}
                           placeGameKindLabels={placeGameKindLabelsForPlaceQuery}
                           placeFocusKnowledgePreferenceLabels={placeFocusKnowledgePreferenceLabelsForPlaceQuery}
